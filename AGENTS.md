@@ -31,6 +31,8 @@ Keep all repository documentation, code comments, diagnostics, and commit messag
 - Use Go only as the temporary Stage 0 bootstrap implementation.
 - Prefer Go standard-library packages and stable numeric IDs for compiler graphs.
 - Never depend on Go map iteration order in diagnostics or generated output.
+- Use compile-time `type` parameters and `Name(...)` application in generic language examples; do not introduce angle-bracket or square-bracket generic syntax.
+- Keep generic inference and monomorphization ahead of backend MIR and C lowering.
 - Target portable C11 for handwritten runtime and generated code.
 - Preserve explicit sequencing and avoid C undefined behavior.
 - Do not add speculative abstractions, optimizations, or configuration.

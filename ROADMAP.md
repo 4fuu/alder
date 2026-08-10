@@ -20,6 +20,7 @@ Status: **in progress**
 Deliverables:
 
 - document language goals, non-goals, and unresolved semantics;
+- document compile-time `type` values, type application, inference, and the monomorphization boundary;
 - define the first versioned Aster MIR vocabulary;
 - define the C11 lowering contract and undefined-behavior policy;
 - establish repository, contribution, and orb lifecycle standards;
@@ -113,7 +114,8 @@ Candidate subset:
 - modules and functions;
 - primitive values, structs, enums, and pattern matching;
 - arrays, slices, strings, maps, `Option`, and `Result`;
-- basic generics or a deliberately small set of compiler containers;
+- compile-time `type` parameters and parenthesized type constructors;
+- generic inference and monomorphization before backend MIR;
 - storage domains and scoped cleanup;
 - C FFI;
 - enough diagnostics to build the compiler itself.
@@ -162,6 +164,6 @@ The memory model should eventually be exercised by:
 
 1. a parser with many phase-local allocations;
 2. a request-style workload with one bounded top-level domain;
-3. an entity graph using `Table[T]` and generational IDs;
+3. an entity graph using `Table(T)` and generational IDs;
 4. a structured concurrent file scanner;
 5. a small C library wrapper that tests pointer, length, error, and cleanup contracts.

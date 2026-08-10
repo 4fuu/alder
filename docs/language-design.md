@@ -57,12 +57,100 @@ The surface language does not invalidate a variable merely because its value was
 
 Cross-domain copies must be measurable by compiler diagnostics or profiling. The implementation must not silently introduce unbounded graph copies as a general escape strategy.
 
+## Compile-Time Type Values and Generics
+
+`type` is the compile-time metatype of Aster types. A concrete type is a compile-time value whose type is `type`:
+
+```aster
+Int: type
+String: type
+```
+
+A generic type declaration is a type constructor. It accepts leading `type` parameters and produces a concrete type:
+
+```aster
+type Pair(A: type, B: type) {
+    first: A
+    second: B
+}
+
+Pair: fn(type, type) -> type
+Pair(Int, String): type
+```
+
+Type application uses the same parenthesized application syntax as function calls:
+
+```aster
+let pair: Pair(Int, String)
+let users: Table(User)
+let result: Result(User, IoError)
+```
+
+Aster does not use angle brackets or square brackets for generic application. Built-in sequence syntax such as `[User]` remains dedicated syntax rather than generic application.
+
+Generic functions declare compile-time type parameters in the ordinary parameter list, before runtime parameters:
+
+```aster
+fn identity(T: type, value: T) -> T {
+    return value
+}
+
+fn map(
+    A: type,
+    B: type,
+    values: [A],
+    transform: fn(A) -> B,
+) -> [B] {
+    var result: [B]
+
+    for value in values {
+        result.push(transform(value))
+    }
+
+    return result
+}
+```
+
+A call may omit the complete leading sequence of type arguments when all of them can be inferred from runtime arguments and the expected result type:
+
+```aster
+let number = identity(42)
+let names = map(users, fn(user) => user.name)
+```
+
+When inference is insufficient or the caller wants an explicit specialization, type values are passed as ordinary leading compile-time arguments:
+
+```aster
+let number = identity(Int, 42)
+let names = map(User, String, users, fn(user) => user.name)
+```
+
+The initial language does not support partially supplying an inferred type-argument prefix. A later placeholder syntax may be considered only if real programs demonstrate the need.
+
+Traits are intended to refine `type` rather than introduce a separate generic parameter grammar. If `Ordered` is a trait, `T: Ordered` means that `T` is a compile-time type value satisfying that constraint:
+
+```aster
+fn max(T: Ordered, a: T, b: T) -> T {
+    if a.compare(b) == .greater {
+        return a
+    }
+
+    return b
+}
+```
+
+Trait semantics are not required for the initial bootstrap subset, but this constraint model is reserved by the generic syntax.
+
+Type values are erased before executable MIR. Type inference and monomorphization produce concrete `TypeId` values, concrete functions, and concrete layouts before the C backend runs. `type` does not imply runtime reflection or a runtime type descriptor; explicit runtime reflection, if added later, uses a separate `TypeInfo` value.
+
+The initial language also does not allow arbitrary user functions to synthesize and return `type`. Generic declarations are sufficient for the first type-construction model and avoid requiring a general compile-time interpreter or dependent type system.
+
 ## Hierarchical Storage Domains
 
 Functions, loops, task groups, requests, and selected containers establish hierarchical storage domains. The compiler places an allocation in the smallest domain proven to outlive all of its uses.
 
 ```aster
-fn summarize(data: Bytes) -> Result[Summary, Error] {
+fn summarize(data: Bytes) -> Result(Summary, Error) {
     let document = try Json.parse(data)
     let words = document["content"].as_string().words()
 
@@ -90,7 +178,7 @@ Segmentation mitigates the traditional arena problem where one small surviving o
 
 ## Objects with Identity
 
-Long-lived objects that require stable identity and independent insertion or removal live in `Table[T]`:
+Long-lived objects that require stable identity and independent insertion or removal live in `Table(T)`:
 
 ```aster
 type Player {
@@ -99,7 +187,7 @@ type Player {
     target: Player.Id?
 }
 
-let players = Table[Player]()
+let players = Table(Player)()
 let alice = players.insert(Player(name: "Alice", health: 100))
 let bob = players.insert(Player(name: "Bob", health: 80, target: alice))
 ```
@@ -132,7 +220,7 @@ Cycles do not affect reclamation because IDs do not count references. The table 
 External resources use deterministic lexical cleanup:
 
 ```aster
-fn copy(from: Path, to: Path) -> Result[Unit, IoError] {
+fn copy(from: Path, to: Path) -> Result(Unit, IoError) {
     using input = try File.open(from)
     using output = try File.create(to)
 
@@ -152,7 +240,7 @@ enum LoadError {
     InvalidFormat(line: Int)
 }
 
-fn load(path: Path) -> Result[Config, LoadError] {
+fn load(path: Path) -> Result(Config, LoadError) {
     let text = try File.read_text(path)
     return try Config.parse(text)
 }
@@ -192,7 +280,7 @@ C headers are intended to be importable with C ABI layout and calling convention
 ```aster
 import c "fastwords.h" as fastwords
 
-fn count_words(bytes: Bytes) -> Result[Int, WordError] {
+fn count_words(bytes: Bytes) -> Result(Int, WordError) {
     let result = unsafe c {
         fastwords.fastwords_count(bytes.ptr, bytes.len)
     }
@@ -219,11 +307,11 @@ type Document {
 }
 
 type Index {
-    documents: Table[Document]
-    by_path: Map[Path, Document.Id]
+    documents: Table(Document)
+    by_path: Map(Path, Document.Id)
 }
 
-async fn build_index(paths: [Path]) -> Result[Index, Error] {
+async fn build_index(paths: [Path]) -> Result(Index, Error) {
     let scanned = try taskgroup scans {
         for path in paths {
             scans.spawn {
@@ -237,8 +325,8 @@ async fn build_index(paths: [Path]) -> Result[Index, Error] {
     }
 
     var index = Index(
-        documents: Table[Document](),
-        by_path: Map[Path, Document.Id](),
+        documents: Table(Document)(),
+        by_path: Map(Path, Document.Id)(),
     )
 
     for item in scanned {

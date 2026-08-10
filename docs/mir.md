@@ -40,6 +40,19 @@ A function contains:
 
 Mutable language variables lower to explicit places and stores. Pure computed temporaries are single-assignment values. Aster has no MIR `move` operation that invalidates a source value.
 
+## Generic Boundary
+
+Surface and HIR generic declarations use compile-time `type` values and parenthesized type application such as `Table(User)` and `Result(User, Error)`. Type inference and monomorphization occur before backend MIR is produced.
+
+Executable MIR contains:
+
+- no `type` values or type-valued parameters;
+- no unresolved generic function bodies;
+- no runtime type arguments introduced solely for generics;
+- only canonical concrete `TypeId` values, concrete layouts, and concrete function instances.
+
+Parameterized MIR type notation also uses parentheses. Angle brackets and square brackets are not generic application syntax in either surface examples or textual MIR.
+
 ## Identity and Ordering
 
 Compiler objects use stable numeric IDs:
@@ -67,26 +80,26 @@ bool
 i8 i16 i32 i64
 u8 u16 u32 u64
 f32 f64
-aggregate<TypeId>
-enum<TypeId>
-option<T>
-result<T, E>
-slice<T>
-safe_ref<T>
-safe_mut<T>
-raw_ptr<T>
-function<Signature>
+aggregate(TypeId)
+enum(TypeId)
+option(TypeId)
+result(TypeId, TypeId)
+slice(TypeId)
+safe_ref(TypeId)
+safe_mut(TypeId)
+raw_ptr(TypeId)
+function(Signature)
 domain_handle
 domain_mark
 cleanup_scope
 cleanup_id
-table<T>
-id<T>
-table_view<T>
-table_mut_view<T>
+table(TypeId)
+id(TypeId)
+table_view(TypeId)
+table_mut_view(TypeId)
 ```
 
-`safe_ref<T>` and `safe_mut<T>` are checked references associated with a valid storage or table access scope. `raw_ptr<T>` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics.
+`safe_ref(TypeId)` and `safe_mut(TypeId)` are checked references associated with a valid storage or table access scope. `raw_ptr(TypeId)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics.
 
 The exact string and dynamic-array representations belong to the runtime ABI, not the semantic type system.
 
@@ -96,9 +109,9 @@ A place identifies mutable storage:
 
 ```text
 local %name
-field <place>, <field-index>
-index <place>, <checked-index>
-deref <safe-reference>
+field place, field_index
+index place, checked_index
+deref safe_reference
 ```
 
 A value is an immutable result of an instruction. Loading a place produces a value; storing consumes a value as an operand but does not invalidate other source-level names.
@@ -110,11 +123,11 @@ Unsafe raw-pointer dereference is never represented as an ordinary safe place.
 Initial terminators:
 
 ```text
-jump <block>(<arguments...>)
-branch <condition>, <then-block>, <else-block>
-switch <value>, <cases...>, <default-block>
-return <value>
-fail <error-value>
+jump block(arguments...)
+branch condition, then_block, else_block
+switch value, cases..., default_block
+return value
+fail error_value
 unreachable
 ```
 
@@ -125,13 +138,13 @@ Block arguments must exactly match target block parameter types. Every reachable
 Initial operations:
 
 ```text
-domain.create <parent> -> domain_handle
-domain.mark <domain> -> domain_mark
-domain.reset <domain>, <domain_mark>
-domain.destroy <domain>
-alloc <domain>, <type>, <count> -> safe_mut<T>
-construct <destination>, <aggregate-operands...>
-copy_to_domain <destination-domain>, <value> -> value
+domain.create parent -> domain_handle
+domain.mark domain -> domain_mark
+domain.reset domain, domain_mark
+domain.destroy domain
+alloc domain, element_type, count -> safe_mut(element_type)
+construct destination, aggregate_operands...
+copy_to_domain destination_domain, value -> value
 ```
 
 Required invariants:
@@ -151,10 +164,10 @@ Initial cleanup model:
 
 ```text
 cleanup.scope.begin -> cleanup_scope
-cleanup.push <scope>, <function>, <arguments...> -> cleanup_id
-cleanup.disarm <cleanup_id>
-cleanup.scope.run <scope>
-cleanup.scope.end <scope>
+cleanup.push scope, function(arguments...) -> cleanup_id
+cleanup.disarm cleanup_id
+cleanup.scope.run scope
+cleanup.scope.end scope
 ```
 
 Properties:
@@ -187,12 +200,12 @@ The failure edge or result is explicit. A later MIR optimization may replace a c
 Initial operations:
 
 ```text
-table.create<T> <domain> -> table<T>
-table.insert<T> <table>, <value> -> id<T>
-table.lookup<T> <table>, <id> -> option<table_view<T>>
-table.lookup_mut<T> <table>, <id> -> option<table_mut_view<T>>
-table.remove<T> <table>, <id> -> bool
-table.view.end <view>
+table.create element_type, domain -> table(element_type)
+table.insert table, value -> id(element_type)
+table.lookup table, id -> option(table_view(element_type))
+table.lookup_mut table, id -> option(table_mut_view(element_type))
+table.remove table, id -> bool
+table.view.end view
 ```
 
 Required invariants:
@@ -209,13 +222,13 @@ Required invariants:
 Ordinary calls use typed MIR signatures:
 
 ```text
-call <function>, <arguments...> -> <result>
+call function(arguments...) -> result
 ```
 
 Foreign calls are explicit:
 
 ```text
-ffi.call.unsafe <c-declaration>, <arguments...> -> <result>
+ffi.call.unsafe c_declaration(arguments...) -> result
 ```
 
 Imported declarations record:
@@ -234,8 +247,8 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 The syntax below is illustrative and will be revised when the parser is implemented:
 
 ```text
-fn @summarize(%result_domain: domain_handle, %data: slice<u8>)
-    -> result<@Summary, @Error> {
+fn @summarize(%result_domain: domain_handle, %data: slice(u8))
+    -> result(@Summary, @Error) {
   local %cleanup: cleanup_scope
   local %temp: domain_handle
 

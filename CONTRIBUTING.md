@@ -42,6 +42,8 @@ source frontend -> typed HIR -> Aster MIR -> MIR verifier -> C11 backend
 Rules:
 
 - MIR must not depend on C syntax, LLVM concepts, or source AST node shapes.
+- Surface generic examples use compile-time `type` parameters and `Name(...)` type application; angle-bracket and square-bracket generic application are not Aster syntax.
+- Generic source constructs must be inferred and monomorphized before backend MIR and C lowering.
 - The C backend must consume only verified MIR.
 - Runtime helpers must have explicit contracts and remain usable from ordinary C11.
 - Source locations may be attached for diagnostics, but they must not change semantics or deterministic output.

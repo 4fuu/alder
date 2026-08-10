@@ -25,6 +25,12 @@ Clang or GCC
 
 Only verified MIR may reach code generation. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
+## Monomorphized Input
+
+The C backend never implements source generics directly. Compile-time `type` parameters are inferred and monomorphized before backend MIR, so every input function, aggregate, table element, and calling convention has a concrete `TypeId` and layout.
+
+Generated C does not receive hidden runtime type arguments merely because the source used generics. Runtime metadata is emitted only for a separate, explicit reflection feature if one is introduced later. Specialized declaration names and ordering must derive from canonical type and function IDs so repeated builds remain deterministic.
+
 ## Priorities
 
 In order:

@@ -30,9 +30,10 @@ LLVM must not be added as an optional dependency or parallel backend during the 
 Aster does not expose Rust-style per-object ownership, moves, borrow chains, or routine lifetime annotations. Instead, it combines:
 
 - **value semantics** for ordinary data;
+- **compile-time `type` values and `Name(...)` type constructors** for generics;
 - **inferred hierarchical storage domains** for temporary and result data;
 - **segmented regions** to reduce avoidable retention;
-- **generational `T.Id` values and `Table[T]`** for long-lived objects with identity;
+- **generational `T.Id` values and `Table(T)`** for long-lived objects with identity;
 - **scoped cleanup** for files, sockets, locks, and transactions;
 - **structured concurrency** to bound task lifetimes;
 - **explicit `unsafe c` boundaries** for operations the language cannot prove safe.
