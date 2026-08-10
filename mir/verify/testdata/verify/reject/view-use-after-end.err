@@ -1,0 +1,1 @@
+fn @f: block bb1: op load: table view %view is used after table.view.end

@@ -1,0 +1,12 @@
+mir 1
+
+import @c_malloc: fn(u64) -> raw_ptr(u8)
+
+fn @f(%n: u64) {
+  local %l: raw_ptr(u8)
+
+bb0:
+  %p = ffi.call.unsafe @c_malloc(%n)
+  store local %l, %p
+  return
+}

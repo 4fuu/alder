@@ -1,0 +1,1 @@
+fn @f: block bb0: op table.create #0: table element type may not contain table_view

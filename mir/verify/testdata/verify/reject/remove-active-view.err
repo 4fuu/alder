@@ -1,0 +1,1 @@
+fn @f: block bb1: op table.remove #0: table.remove runs while a view of the table is active (%view)

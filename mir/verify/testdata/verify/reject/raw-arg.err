@@ -1,0 +1,1 @@
+fn @f: block bb0: op call: raw pointer %p may only cross explicit unsafe boundaries

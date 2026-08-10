@@ -1,0 +1,2 @@
+fn @f: block bb2: op table.view.end: use of %view is not dominated by its definition
+fn @f: block bb2: op table.view.end: table view %view used outside its access region

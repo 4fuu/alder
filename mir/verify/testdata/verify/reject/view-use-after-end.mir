@@ -1,0 +1,22 @@
+mir 1
+
+type @P {
+  x: i64
+}
+
+fn @f(%t: table(@P), %id: id(@P)) {
+bb0:
+  %opt = table.lookup %t, %id
+  switch %opt {
+    some(%view) -> bb1
+    none -> bb2
+  }
+
+bb1:
+  table.view.end %view
+  %p = load field(deref %view, x)
+  return
+
+bb2:
+  return
+}

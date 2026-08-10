@@ -1,0 +1,11 @@
+mir 1
+
+type @P {
+  x: i64
+}
+
+fn @f(%d: domain_handle) {
+bb0:
+  %t = table.create table_view(@P), %d
+  return
+}

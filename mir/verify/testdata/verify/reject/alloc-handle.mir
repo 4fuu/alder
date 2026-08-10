@@ -1,0 +1,10 @@
+mir 1
+
+const @zero_u64: u64 = 0
+
+fn @f(%d: domain_handle) {
+bb0:
+  %n = const.get @zero_u64
+  %buf = alloc %d, domain_handle, %n
+  return
+}
