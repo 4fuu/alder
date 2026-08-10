@@ -1,0 +1,12 @@
+mir 1
+
+fn @f() {
+bb0:
+  %s = cleanup.scope.begin
+  jump bb1
+
+bb1:
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  jump bb1
+}

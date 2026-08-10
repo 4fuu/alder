@@ -151,6 +151,80 @@ func dominatesSite(dom [][]bool, defBlock mir.BlockId, defInstr int, useBlock mi
 	return int(defBlock) < len(dom) && dom[useBlock][defBlock]
 }
 
+// dominatesWithEdges is dominatesSite plus the failure-edge positional rule:
+// a definition in block B dominates a use in another block U only when some
+// edge from B positioned after the definition can reach U. Checked-operation
+// failure edges exit their block mid-way, so instructions after the edge do
+// not dominate the failure target.
+func dominatesWithEdges(f *mir.Function, dom [][]bool, defBlk mir.BlockId, defIn int, useBlk mir.BlockId, useIn int) bool {
+	if defBlk == useBlk {
+		return defIn < 0 || defIn < useIn
+	}
+	if int(defBlk) >= len(dom) || !dom[useBlk][defBlk] {
+		return false
+	}
+	return edgeAfterCanReach(f, defBlk, defIn, useBlk)
+}
+
+// edgeAfterCanReach reports whether an edge from block b at a position after
+// pos leads transitively to block target. The terminator sits after every
+// instruction, so terminator edges always qualify.
+func edgeAfterCanReach(f *mir.Function, b mir.BlockId, pos int, target mir.BlockId) bool {
+	blk := f.Blocks[b]
+	for i := range blk.Instrs {
+		t := blk.Instrs[i].FailTarget
+		if t == mir.NoBlock || i <= pos {
+			continue
+		}
+		if t == target || canReachBlock(f, t, target) {
+			return true
+		}
+	}
+	switch blk.Term.Kind {
+	case mir.TermJump:
+		return blk.Term.Target == target || canReachBlock(f, blk.Term.Target, target)
+	case mir.TermBranch:
+		return (blk.Term.Then == target || canReachBlock(f, blk.Term.Then, target)) ||
+			(blk.Term.Else == target || canReachBlock(f, blk.Term.Else, target))
+	case mir.TermSwitch:
+		for i := range blk.Term.Cases {
+			t := blk.Term.Cases[i].Target
+			if t == target || canReachBlock(f, t, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// canReachBlock reports whether block from can reach block target through
+// CFG edges (including itself).
+func canReachBlock(f *mir.Function, from, target mir.BlockId) bool {
+	if from == target {
+		return true
+	}
+	n := len(f.Blocks)
+	seen := make([]bool, n)
+	queue := []mir.BlockId{from}
+	for len(queue) > 0 {
+		b := queue[0]
+		queue = queue[1:]
+		if int(b) >= n || seen[b] {
+			continue
+		}
+		seen[b] = true
+		for _, s := range successors(f, f.Blocks[b]) {
+			if s == target {
+				return true
+			}
+			if int(s) < n && !seen[s] {
+				queue = append(queue, s)
+			}
+		}
+	}
+	return false
+}
+
 // useSite is one value use within a function.
 type useSite struct {
 	value  mir.ValueId
@@ -234,6 +308,16 @@ func useSiteLoc(f *mir.Function, u useSite) string {
 		loc += ": terminator " + f.Blocks[u.block].Term.Kind.String()
 	}
 	return loc
+}
+
+// blockIndexOf returns the ID of a block within its function.
+func blockIndexOf(f *mir.Function, want *mir.Block) mir.BlockId {
+	for i, b := range f.Blocks {
+		if b == want {
+			return mir.BlockId(i)
+		}
+	}
+	return mir.NoBlock
 }
 
 // edgeArgsTo returns the argument list of the edge from block b to target,

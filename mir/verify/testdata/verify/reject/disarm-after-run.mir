@@ -1,0 +1,18 @@
+mir 1
+
+fn @destroy(%d: domain_handle) {
+bb0:
+  return
+}
+
+fn @f(%d: domain_handle) {
+  local %s: cleanup_scope
+
+bb0:
+  %s = cleanup.scope.begin
+  %c = cleanup.push %s, @destroy, (%d)
+  cleanup.scope.run %s
+  cleanup.disarm %c
+  cleanup.scope.end %s
+  return
+}

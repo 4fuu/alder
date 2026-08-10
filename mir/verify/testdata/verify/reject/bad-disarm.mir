@@ -1,0 +1,7 @@
+mir 1
+
+fn @f(%x: i64) {
+bb0:
+  cleanup.disarm %x
+  return
+}

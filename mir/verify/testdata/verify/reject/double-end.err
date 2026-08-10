@@ -1,0 +1,3 @@
+fn @f: block bb0: op cleanup.scope.end #4: cleanup.scope.end of %s runs more than once on one path
+fn @f: block bb0: op cleanup.scope.run: use of %s after cleanup.scope.end
+fn @f: block bb0: op cleanup.scope.end: use of %s after cleanup.scope.end

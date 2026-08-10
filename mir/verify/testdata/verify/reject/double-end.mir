@@ -1,0 +1,11 @@
+mir 1
+
+fn @f() {
+bb0:
+  %s = cleanup.scope.begin
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  return
+}

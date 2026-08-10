@@ -1,1 +1,2 @@
 fn @f: block bb0: op cleanup.push #1: cleanup function @bad must return unit
+fn @f: block bb0: terminator return: exit leaves cleanup scope %s open

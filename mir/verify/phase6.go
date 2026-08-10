@@ -73,7 +73,7 @@ func phase6Domains(m *mir.Module) []Error {
 				usePos = len(f.Blocks[u.block].Instrs)
 			}
 			for _, iv := range invals {
-				if !dominatesSite(dom, iv.blk, iv.in, u.block, usePos) {
+				if !dominatesWithEdges(f, dom, iv.blk, iv.in, u.block, usePos) {
 					continue
 				}
 				if iv.destroy {
@@ -136,7 +136,7 @@ func resetInvalidates(m *mir.Module, f *mir.Function, dom [][]bool, info []domai
 		if !depsIntersect(info, iv.handle, r.handle) {
 			continue
 		}
-		if dominatesSite(dom, markDef.Block, markDef.Instr, r.allocBlk, r.allocIn) {
+		if dominatesWithEdges(f, dom, markDef.Block, markDef.Instr, r.allocBlk, r.allocIn) {
 			return true
 		}
 	}
