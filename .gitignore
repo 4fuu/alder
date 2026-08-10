@@ -1,0 +1,9 @@
+/build/
+/.aster-cache/
+*.a
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
