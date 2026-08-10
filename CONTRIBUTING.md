@@ -60,6 +60,16 @@ Rules:
 - Include source spans in user-facing errors, but keep verifier errors usable for source-free MIR fixtures.
 - Stage 0 exists to bootstrap Aster. Do not turn it into a permanent feature-complete compiler.
 
+## Canonical Checks
+
+Before submitting Go changes, run:
+
+- `gofmt -l .` must print nothing;
+- `go vet ./...` must pass;
+- `go test ./...` must pass.
+
+These are the canonical build, format, and test commands; keep them synchronized with `AGENTS.md`.
+
 ## C Runtime and Backend Standards
 
 - Generated and handwritten C must target portable C11.

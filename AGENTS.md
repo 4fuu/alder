@@ -43,4 +43,10 @@ Keep all repository documentation, code comments, diagnostics, and commit messag
 
 Before executable code exists, validate documentation links and lifecycle scripts manually. Once the Go module and C runtime are introduced, keep the canonical build, format, and test commands in this file and `CONTRIBUTING.md` synchronized.
 
+Canonical Go checks (run before committing MIR toolkit changes):
+
+- `gofmt -l .` must print nothing;
+- `go vet ./...` must pass;
+- `go test ./...` must pass.
+
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.
