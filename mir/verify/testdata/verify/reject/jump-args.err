@@ -1,0 +1,1 @@
+fn @f: block bb0: jump: expected 1 edge arguments, got 2

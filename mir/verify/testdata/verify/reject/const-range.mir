@@ -1,0 +1,8 @@
+mir 1
+
+const @k: i8 = 300
+
+fn @f() {
+bb0:
+  return
+}

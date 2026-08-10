@@ -1,0 +1,1 @@
+fn @f: block bb0: switch does not cover variant "B" and has no default

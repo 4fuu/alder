@@ -1,0 +1,18 @@
+mir 1
+
+const @k: i64 = 1
+
+fn @f(%c: bool) -> i64 {
+bb0:
+  branch %c, bb1, bb2
+
+bb1:
+  %x = const.get @k
+  jump bb3
+
+bb2:
+  jump bb3
+
+bb3:
+  return %x
+}

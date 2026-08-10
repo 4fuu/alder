@@ -1,5 +1,7 @@
 package mir
 
+import "strconv"
+
 // Module is a complete MIR unit: type declarations, imported C declarations,
 // constants, and functions. Optional source-span tables are reserved for the
 // future frontend and do not yet appear in the textual format.
@@ -222,6 +224,25 @@ const (
 	TermFail
 	TermUnreachable
 )
+
+// String returns the canonical textual name of the terminator kind.
+func (k TermKind) String() string {
+	switch k {
+	case TermJump:
+		return "jump"
+	case TermBranch:
+		return "branch"
+	case TermSwitch:
+		return "switch"
+	case TermReturn:
+		return "return"
+	case TermFail:
+		return "fail"
+	case TermUnreachable:
+		return "unreachable"
+	}
+	return "terminator(" + strconv.Itoa(int(k)) + ")"
+}
 
 // SwitchCase is one case of a switch terminator. Binding is the payload value
 // defined by the case (NoValue when the case binds no payload). A case with an

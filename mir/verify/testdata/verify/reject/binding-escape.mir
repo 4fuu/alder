@@ -1,0 +1,23 @@
+mir 1
+
+enum @E {
+  A(i64)
+  B
+}
+
+fn @f(%e: @E) -> i64 {
+bb0:
+  switch %e {
+    A(%v) -> bb1
+    B -> bb2
+  }
+
+bb1:
+  jump bb3
+
+bb2:
+  jump bb3
+
+bb3:
+  return %v
+}

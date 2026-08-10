@@ -1,0 +1,24 @@
+mir 1
+
+enum @E {
+  A
+  B
+}
+
+fn @f(%e: @E) {
+bb0:
+  switch %e {
+    A -> bb1
+    A -> bb2
+    default -> bb3
+  }
+
+bb1:
+  return
+
+bb2:
+  return
+
+bb3:
+  return
+}

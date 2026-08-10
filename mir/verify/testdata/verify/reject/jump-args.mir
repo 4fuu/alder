@@ -1,0 +1,9 @@
+mir 1
+
+fn @f(%a: i64) {
+bb0:
+  jump bb1(%a, %a)
+
+bb1(%x: i64):
+  return
+}

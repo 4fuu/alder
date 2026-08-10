@@ -1,0 +1,8 @@
+mir 1
+
+const @k: i64 = true
+
+fn @f() {
+bb0:
+  return
+}

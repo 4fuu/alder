@@ -1,0 +1,11 @@
+mir 1
+
+type @T {
+  a: i64
+  a: i64
+}
+
+fn @f() {
+bb0:
+  return
+}

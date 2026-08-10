@@ -1,0 +1,10 @@
+mir 1
+
+type @P {
+  x: i64
+}
+
+fn @f() -> table_view(@P) {
+bb0:
+  return
+}

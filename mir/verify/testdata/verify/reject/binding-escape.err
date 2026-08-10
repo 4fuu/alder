@@ -1,0 +1,1 @@
+fn @f: block bb3: terminator return: use of %v is not dominated by its definition

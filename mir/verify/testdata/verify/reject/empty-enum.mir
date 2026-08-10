@@ -1,0 +1,9 @@
+mir 1
+
+enum @E {
+}
+
+fn @f() {
+bb0:
+  return
+}

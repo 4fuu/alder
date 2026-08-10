@@ -1,0 +1,6 @@
+mir 1
+
+fn @f() {
+bb0:
+  unreachable
+}
