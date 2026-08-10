@@ -1,0 +1,1429 @@
+package mir
+
+import (
+	"fmt"
+	"strconv"
+)
+
+// parser builds a Module from the textual MIR format. Names resolve to stable
+// numeric IDs as they are parsed; declarations must precede uses.
+type parser struct {
+	m    *Module
+	toks []token
+	pos  int
+
+	fn       *Function
+	curBlock *Block
+	values   map[string]ValueId
+	locals   map[string]LocalId
+	blocks   map[string]BlockId
+}
+
+// Parse parses the versioned textual MIR format. Errors are deterministic and
+// carry line and column numbers.
+func Parse(text string) (*Module, error) {
+	toks, err := lex(text)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{m: NewModule(), toks: toks}
+	if err := p.parseModule(); err != nil {
+		return nil, err
+	}
+	return p.m, nil
+}
+
+// --- token helpers ---
+
+func (p *parser) peek() *token {
+	return &p.toks[p.pos]
+}
+
+func (p *parser) peekAt(n int) *token {
+	i := p.pos + n
+	if i >= len(p.toks) {
+		return &p.toks[len(p.toks)-1]
+	}
+	return &p.toks[i]
+}
+
+func (p *parser) next() *token {
+	t := &p.toks[p.pos]
+	if t.kind != tokEOF {
+		p.pos++
+	}
+	return t
+}
+
+func (p *parser) errf(t *token, format string, args ...any) error {
+	return fmt.Errorf("line %d, column %d: %s", t.line, t.col, fmt.Sprintf(format, args...))
+}
+
+func (p *parser) expectPunct(text string) error {
+	t := p.next()
+	if t.kind != tokPunct || t.text != text {
+		return p.errf(t, "expected %q, got %s", text, t.describe())
+	}
+	return nil
+}
+
+func (p *parser) expectComma() error {
+	return p.expectPunct(",")
+}
+
+func (p *parser) expectIdent(what string) (*token, error) {
+	t := p.next()
+	if t.kind != tokIdent {
+		return nil, p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	return t, nil
+}
+
+func (p *parser) expectAtName(what string) (*token, error) {
+	t := p.next()
+	if t.kind != tokAtName {
+		return nil, p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	return t, nil
+}
+
+func (p *parser) peekIdent(text string) bool {
+	t := p.peek()
+	return t.kind == tokIdent && t.text == text
+}
+
+// --- module-level declarations ---
+
+func (p *parser) parseModule() error {
+	t := p.next()
+	if t.kind != tokIdent || t.text != "mir" {
+		return p.errf(t, "expected 'mir <version>'")
+	}
+	vt := p.next()
+	if vt.kind != tokInt {
+		return p.errf(vt, "expected a format version number")
+	}
+	n, err := strconv.Atoi(vt.text)
+	if err != nil {
+		return p.errf(vt, "invalid format version %q", vt.text)
+	}
+	if n != 1 {
+		return p.errf(vt, "unsupported format version %d (expected 1)", n)
+	}
+	p.m.FormatVersion = n
+
+	for {
+		t := p.peek()
+		if t.kind == tokEOF {
+			return nil
+		}
+		if t.kind != tokIdent {
+			return p.errf(t, "expected a declaration, got %s", t.describe())
+		}
+		switch t.text {
+		case "type":
+			p.next()
+			if err := p.parseTypeDecl(); err != nil {
+				return err
+			}
+		case "enum":
+			p.next()
+			if err := p.parseEnumDecl(); err != nil {
+				return err
+			}
+		case "const":
+			p.next()
+			if err := p.parseConstDecl(); err != nil {
+				return err
+			}
+		case "import":
+			p.next()
+			if err := p.parseImportDecl(); err != nil {
+				return err
+			}
+		case "fn":
+			p.next()
+			if err := p.parseFunction(); err != nil {
+				return err
+			}
+		default:
+			return p.errf(t, "expected a declaration, got %q", t.text)
+		}
+	}
+}
+
+func (p *parser) parseTypeDecl() error {
+	nameTok, err := p.expectAtName("a type name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.NamedType(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate type @%s", nameTok.text)
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return err
+	}
+	var fields []Field
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == "}" {
+			p.next()
+			break
+		}
+		nameTok, err := p.expectIdent("a field name")
+		if err != nil {
+			return err
+		}
+		if err := p.expectPunct(":"); err != nil {
+			return err
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return err
+		}
+		fields = append(fields, Field{Name: nameTok.text, Type: typ})
+	}
+	p.m.AddAggregate(nameTok.text, fields)
+	return nil
+}
+
+func (p *parser) parseEnumDecl() error {
+	nameTok, err := p.expectAtName("an enum name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.NamedType(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate type @%s", nameTok.text)
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return err
+	}
+	var variants []Variant
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == "}" {
+			p.next()
+			break
+		}
+		nameTok, err := p.expectIdent("a variant name")
+		if err != nil {
+			return err
+		}
+		if nameTok.text == "default" {
+			return p.errf(nameTok, "variant name %q is reserved", nameTok.text)
+		}
+		payload := TypeUnit
+		if p.peek().kind == tokPunct && p.peek().text == "(" {
+			p.next()
+			payload, err = p.parseType()
+			if err != nil {
+				return err
+			}
+			if err := p.expectPunct(")"); err != nil {
+				return err
+			}
+		}
+		variants = append(variants, Variant{Name: nameTok.text, Payload: payload})
+	}
+	p.m.AddEnum(nameTok.text, variants)
+	return nil
+}
+
+func (p *parser) parseConstDecl() error {
+	nameTok, err := p.expectAtName("a constant name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.ConstDecl(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate constant @%s", nameTok.text)
+	}
+	if err := p.expectPunct(":"); err != nil {
+		return err
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	if err := p.expectPunct("="); err != nil {
+		return err
+	}
+	val, err := p.parseConstValue()
+	if err != nil {
+		return err
+	}
+	p.m.AddConst(nameTok.text, typ, val)
+	return nil
+}
+
+func (p *parser) parseConstValue() (ConstValue, error) {
+	t := p.next()
+	switch t.kind {
+	case tokInt:
+		n, err := strconv.ParseInt(t.text, 10, 64)
+		if err != nil {
+			return ConstValue{}, p.errf(t, "integer literal %q out of range", t.text)
+		}
+		return ConstValue{Kind: ConstInt, Int: n}, nil
+	case tokFloat:
+		f, err := strconv.ParseFloat(t.text, 64)
+		if err != nil {
+			return ConstValue{}, p.errf(t, "float literal %q out of range", t.text)
+		}
+		return ConstValue{Kind: ConstFloat, Float: f}, nil
+	case tokString:
+		return ConstValue{Kind: ConstString, String: t.text}, nil
+	case tokIdent:
+		switch t.text {
+		case "true":
+			return ConstValue{Kind: ConstBool, Bool: true}, nil
+		case "false":
+			return ConstValue{Kind: ConstBool, Bool: false}, nil
+		}
+	case tokPunct:
+		if t.text == "(" && p.peek().kind == tokPunct && p.peek().text == ")" {
+			p.next()
+			return ConstValue{Kind: ConstUnit}, nil
+		}
+	}
+	return ConstValue{}, p.errf(t, "expected a constant value, got %s", t.describe())
+}
+
+func (p *parser) parseImportDecl() error {
+	nameTok, err := p.expectAtName("an import name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.Import(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate import @%s", nameTok.text)
+	}
+	if err := p.expectPunct(":"); err != nil {
+		return err
+	}
+	sig, err := p.parseFuncSig()
+	if err != nil {
+		return err
+	}
+	p.m.AddImport(nameTok.text, sig)
+	return nil
+}
+
+// parseFuncSig parses "fn(params) -> result".
+func (p *parser) parseFuncSig() (FuncSig, error) {
+	t, err := p.expectIdent("'fn'")
+	if err != nil {
+		return FuncSig{}, err
+	}
+	if t.text != "fn" {
+		return FuncSig{}, p.errf(t, "expected 'fn', got %q", t.text)
+	}
+	if err := p.expectPunct("("); err != nil {
+		return FuncSig{}, err
+	}
+	var sig FuncSig
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			p.next()
+			break
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return FuncSig{}, err
+		}
+		sig.Params = append(sig.Params, typ)
+		if p.peek().kind == tokPunct && p.peek().text == "," {
+			p.next()
+			continue
+		}
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			p.next()
+			break
+		}
+		return FuncSig{}, p.errf(p.peek(), "expected ',' or ')' in function signature")
+	}
+	if err := p.expectPunct("->"); err != nil {
+		return FuncSig{}, err
+	}
+	sig.Result, err = p.parseType()
+	if err != nil {
+		return FuncSig{}, err
+	}
+	return sig, nil
+}
+
+// --- functions ---
+
+func (p *parser) parseFunction() error {
+	nameTok, err := p.expectAtName("a function name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.Function(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate function @%s", nameTok.text)
+	}
+	if err := p.expectPunct("("); err != nil {
+		return err
+	}
+	params, err := p.parseParams()
+	if err != nil {
+		return err
+	}
+	if err := p.expectPunct(")"); err != nil {
+		return err
+	}
+	result := TypeUnit
+	if p.peek().kind == tokPunct && p.peek().text == "->" {
+		p.next()
+		result, err = p.parseType()
+		if err != nil {
+			return err
+		}
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return err
+	}
+
+	f := p.m.AddFunction(nameTok.text, params, result)
+	p.fn = f
+	p.values = make(map[string]ValueId)
+	p.locals = make(map[string]LocalId)
+	p.blocks = make(map[string]BlockId)
+	p.curBlock = nil
+	for i, prm := range params {
+		p.values[prm.Name] = ValueId(i)
+	}
+
+	// Register all block headers up front so forward block references resolve.
+	if err := p.prescanBlocks(); err != nil {
+		return err
+	}
+
+	for p.peekIdent("local") {
+		if !p.peek().bol {
+			return p.errf(p.peek(), "local declaration must start on a new line")
+		}
+		p.next()
+		nameTok, err := p.expectPercent("a local name")
+		if err != nil {
+			return err
+		}
+		if _, ok := p.locals[nameTok.text]; ok {
+			return p.errf(nameTok, "duplicate local %%%s", nameTok.text)
+		}
+		if err := p.expectPunct(":"); err != nil {
+			return err
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return err
+		}
+		p.locals[nameTok.text] = f.AddLocal(nameTok.text, typ)
+	}
+
+	for {
+		t := p.peek()
+		if t.kind == tokEOF {
+			return p.errf(t, "unterminated function body")
+		}
+		if t.kind == tokPunct && t.text == "}" {
+			p.next()
+			break
+		}
+		switch {
+		case t.kind == tokPercent:
+			if err := p.parseInstrBound(); err != nil {
+				return err
+			}
+		case t.kind == tokIdent:
+			n := p.peekAt(1)
+			if n.kind == tokPunct && (n.text == "(" || n.text == ":") {
+				if !t.bol {
+					return p.errf(t, "block header must start on a new line")
+				}
+				if err := p.parseBlockHeader(); err != nil {
+					return err
+				}
+			} else if err := p.parseInstrUnbound(); err != nil {
+				return err
+			}
+		default:
+			return p.errf(t, "expected an instruction, block header, or '}', got %s", t.describe())
+		}
+	}
+
+	if p.curBlock != nil {
+		return p.errf(p.peek(), "block %q has no terminator", p.curBlock.Name)
+	}
+	p.fn = nil
+	p.curBlock = nil
+	return nil
+}
+
+func (p *parser) expectPercent(what string) (*token, error) {
+	t := p.next()
+	if t.kind != tokPercent {
+		return nil, p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	return t, nil
+}
+
+// prescanBlocks registers every block header of the function body before any
+// body is parsed, so forward block references resolve immediately. Braced
+// regions (switch bodies, aggregate.construct field lists) are skipped.
+func (p *parser) prescanBlocks() error {
+	depth := 0
+	i := p.pos
+	for i < len(p.toks) {
+		t := &p.toks[i]
+		if t.kind == tokPunct {
+			switch t.text {
+			case "{":
+				depth++
+			case "}":
+				if depth == 0 {
+					return nil // end of function body
+				}
+				depth--
+			}
+			i++
+			continue
+		}
+		if t.kind == tokIdent && depth == 0 && t.bol {
+			n := &p.toks[i+1]
+			if n.kind == tokPunct && (n.text == "(" || n.text == ":") {
+				if t.text == "else" {
+					return p.errf(t, "block name %q is reserved", t.text)
+				}
+				if _, dup := p.blocks[t.text]; dup {
+					return p.errf(t, "duplicate block %q", t.text)
+				}
+				i++
+				if n.text == "(" {
+					// Skip the parameter list to its matching ')'.
+					d := 0
+					for i < len(p.toks) {
+						tk := &p.toks[i]
+						if tk.kind == tokPunct {
+							if tk.text == "(" {
+								d++
+							}
+							if tk.text == ")" {
+								d--
+								if d == 0 {
+									i++
+									break
+								}
+							}
+						}
+						i++
+					}
+					if i >= len(p.toks) {
+						return p.errf(t, "unterminated block header for %q", t.text)
+					}
+				}
+				p.fn.AddBlock(t.text, nil)
+				p.blocks[t.text] = BlockId(len(p.fn.Blocks) - 1)
+				continue
+			}
+		}
+		i++
+	}
+	return p.errf(p.peek(), "unterminated function body")
+}
+
+func (p *parser) parseBlockHeader() error {
+	nameTok := p.next() // block name ident
+	id, ok := p.blocks[nameTok.text]
+	if !ok {
+		return p.errf(nameTok, "internal error: unregistered block %q", nameTok.text)
+	}
+	var params []Param
+	if p.peek().kind == tokPunct && p.peek().text == "(" {
+		p.next()
+		var err error
+		params, err = p.parseParams()
+		if err != nil {
+			return err
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return err
+		}
+	}
+	if err := p.expectPunct(":"); err != nil {
+		return err
+	}
+	b := p.fn.Blocks[id]
+	b.Params = params
+	for i, prm := range params {
+		if _, dup := p.values[prm.Name]; dup {
+			return p.errf(nameTok, "duplicate value %%%s", prm.Name)
+		}
+		vid := p.fn.AddValue(prm.Name, prm.Type, ValueDef{Kind: ValueDefBlockParam, Block: id, Param: i})
+		p.values[prm.Name] = vid
+	}
+	p.curBlock = b
+	return nil
+}
+
+// parseParams parses "%name: type" pairs separated by commas, stopping at
+// (but not consuming) the closing ')'.
+func (p *parser) parseParams() ([]Param, error) {
+	var params []Param
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			return params, nil
+		}
+		nameTok, err := p.expectPercent("a parameter name")
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expectPunct(":"); err != nil {
+			return nil, err
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, Param{Name: nameTok.text, Type: typ})
+		if p.peek().kind == tokPunct && p.peek().text == "," {
+			p.next()
+			continue
+		}
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			return params, nil
+		}
+		return nil, p.errf(p.peek(), "expected ',' or ')' in parameter list")
+	}
+}
+
+// --- instructions ---
+
+func (p *parser) parseInstrBound() error {
+	if !p.peek().bol {
+		return p.errf(p.peek(), "instruction must start on a new line")
+	}
+	if p.curBlock == nil {
+		return p.errf(p.peek(), "instruction outside a block or after a terminator")
+	}
+	nameTok := p.next() // %name
+	if err := p.expectPunct("="); err != nil {
+		return err
+	}
+	in, err := p.parseOp()
+	if err != nil {
+		return err
+	}
+	if !in.Op.ProducesResult() {
+		return p.errf(nameTok, "operation %s produces no value", in.Op)
+	}
+	if _, dup := p.values[nameTok.text]; dup {
+		return p.errf(nameTok, "duplicate value %%%s", nameTok.text)
+	}
+	typ, _ := p.m.InferResultType(p.fn, &in)
+	vid := p.fn.AddValue(nameTok.text, typ, ValueDef{
+		Kind:  ValueDefInstr,
+		Block: p.blockID(p.curBlock),
+		Instr: len(p.curBlock.Instrs),
+	})
+	p.values[nameTok.text] = vid
+	in.Result = vid
+	p.curBlock.AddInstr(in)
+	return nil
+}
+
+func (p *parser) parseInstrUnbound() error {
+	if !p.peek().bol {
+		return p.errf(p.peek(), "instruction must start on a new line")
+	}
+	if p.curBlock == nil {
+		return p.errf(p.peek(), "instruction outside a block or after a terminator")
+	}
+	t := p.peek()
+	switch t.text {
+	case "jump", "branch", "switch", "return", "fail", "unreachable":
+		return p.parseTerminator()
+	}
+	in, err := p.parseOp()
+	if err != nil {
+		return err
+	}
+	if in.Op.ProducesResult() && !p.mayDropResult(&in) {
+		return p.errf(t, "operation %s produces a value; bind it with '%%name = %s ...'", in.Op, in.Op)
+	}
+	p.curBlock.AddInstr(in)
+	return nil
+}
+
+// mayDropResult reports whether a producing operation may be left unbound:
+// calls and FFI calls whose callee or import result type is unit.
+func (p *parser) mayDropResult(in *Instr) bool {
+	switch in.Op {
+	case OpCall:
+		if int(in.Callee) < len(p.m.Functions) {
+			return p.m.Functions[in.Callee].Result == TypeUnit
+		}
+	case OpFFICallUnsafe:
+		if int(in.FFIImport) < len(p.m.Imports) {
+			return p.m.Imports[in.FFIImport].Sig.Result == TypeUnit
+		}
+	}
+	return false
+}
+
+func (p *parser) blockID(b *Block) BlockId {
+	for i, blk := range p.fn.Blocks {
+		if blk == b {
+			return BlockId(i)
+		}
+	}
+	return NoBlock
+}
+
+// parseOp parses an operation name and its operands. The optional 'else'
+// failure edge is required for checked operations.
+func (p *parser) parseOp() (Instr, error) {
+	t := p.next() // operation name
+	in := Instr{Result: NoValue, FailTarget: NoBlock}
+	var err error
+
+	// Binary operations over two values with an optional required else edge.
+	parseBinary := func(op OpKind) error {
+		in.Op = op
+		if in.A, err = p.parseValueRef(); err != nil {
+			return err
+		}
+		if err = p.expectComma(); err != nil {
+			return err
+		}
+		if in.B, err = p.parseValueRef(); err != nil {
+			return err
+		}
+		if op.HasFailEdge() {
+			return p.parseOptionalElse(t, &in)
+		}
+		return nil
+	}
+	// Operations with one value operand and an explicit result type operand.
+	parseConv := func(op OpKind) error {
+		in.Op = op
+		if in.A, err = p.parseValueRef(); err != nil {
+			return err
+		}
+		if err = p.expectComma(); err != nil {
+			return err
+		}
+		if in.TypeOp, err = p.parseType(); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	switch t.text {
+	case "load":
+		in.Op = OpLoad
+		in.Place, err = p.parsePlace()
+
+	case "store":
+		in.Op = OpStore
+		if in.Place, err = p.parsePlace(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.StoreVal, err = p.parseValueRef()
+
+	case "aggregate.construct":
+		in.Op = OpAggregateConstruct
+		if in.AggType, err = p.parseType(); err != nil {
+			return in, err
+		}
+		if err = p.expectPunct("{"); err != nil {
+			return in, err
+		}
+		for {
+			if p.peek().kind == tokPunct && p.peek().text == "}" {
+				p.next()
+				break
+			}
+			nameTok, err := p.expectIdent("a field name")
+			if err != nil {
+				return in, err
+			}
+			if err = p.expectPunct(":"); err != nil {
+				return in, err
+			}
+			val, err := p.parseValueRef()
+			if err != nil {
+				return in, err
+			}
+			in.AggFields = append(in.AggFields, AggField{Name: nameTok.text, Value: val})
+			if p.peek().kind == tokPunct && p.peek().text == "," {
+				p.next()
+			}
+		}
+
+	case "domain.create", "domain.mark", "domain.destroy":
+		switch t.text {
+		case "domain.create":
+			in.Op = OpDomainCreate
+		case "domain.mark":
+			in.Op = OpDomainMark
+		default:
+			in.Op = OpDomainDestroy
+		}
+		in.Domain, err = p.parseValueRef()
+
+	case "domain.reset":
+		in.Op = OpDomainReset
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.Mark, err = p.parseValueRef()
+
+	case "alloc":
+		in.Op = OpAlloc
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.TypeOp, err = p.parseType(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.Count, err = p.parseValueRef()
+
+	case "copy_to_domain":
+		in.Op = OpCopyToDomain
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.CopyVal, err = p.parseValueRef()
+
+	case "cleanup.scope.begin":
+		in.Op = OpCleanupScopeBegin
+
+	case "cleanup.push":
+		in.Op = OpCleanupPush
+		if in.Scope, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		fnTok := p.next()
+		if fnTok.kind != tokAtName {
+			return in, p.errf(fnTok, "expected a cleanup function, got %s", fnTok.describe())
+		}
+		id, ok := p.m.Function(fnTok.text)
+		if !ok {
+			return in, p.errf(fnTok, "unknown function @%s", fnTok.text)
+		}
+		in.CleanupFn = id
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if err = p.expectPunct("("); err != nil {
+			return in, err
+		}
+		if in.CleanupArgs, err = p.parseArgs(); err != nil {
+			return in, err
+		}
+		if err = p.expectPunct(")"); err != nil {
+			return in, err
+		}
+
+	case "cleanup.disarm":
+		in.Op = OpCleanupDisarm
+		in.CleanupID, err = p.parseValueRef()
+
+	case "cleanup.scope.run", "cleanup.scope.end":
+		if t.text == "cleanup.scope.run" {
+			in.Op = OpCleanupScopeRun
+		} else {
+			in.Op = OpCleanupScopeEnd
+		}
+		in.Scope, err = p.parseValueRef()
+
+	case "int.add.checked", "int.sub.checked", "int.mul.checked", "int.div.checked", "int.shift.checked":
+		var op OpKind
+		switch t.text {
+		case "int.add.checked":
+			op = OpIntAddChecked
+		case "int.sub.checked":
+			op = OpIntSubChecked
+		case "int.mul.checked":
+			op = OpIntMulChecked
+		case "int.div.checked":
+			op = OpIntDivChecked
+		default:
+			op = OpIntShiftChecked
+		}
+		err = parseBinary(op)
+
+	case "slice.len":
+		in.Op = OpSliceLen
+		in.Slice, err = p.parseValueRef()
+
+	case "slice.index.checked":
+		in.Op = OpSliceIndexChecked
+		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Index, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+
+	case "slice.range.checked":
+		in.Op = OpSliceRangeChecked
+		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Lo, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Hi, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+
+	case "enum.payload.checked":
+		in.Op = OpEnumPayloadChecked
+		if in.EnumValue, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		variantTok, err := p.expectIdent("a variant name")
+		if err != nil {
+			return in, err
+		}
+		in.Variant = variantTok.text
+		err = p.parseOptionalElse(t, &in)
+
+	case "enum.construct":
+		in.Op = OpEnumConstruct
+		if in.TypeOp, err = p.parseType(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		variantTok, err := p.expectIdent("a variant name")
+		if err != nil {
+			return in, err
+		}
+		in.Variant = variantTok.text
+		if p.peek().kind == tokPunct && p.peek().text == "," {
+			p.next()
+			in.Payload, err = p.parseValueRef()
+			if err != nil {
+				return in, err
+			}
+		} else {
+			in.Payload = NoValue
+		}
+
+	case "table.create":
+		in.Op = OpTableCreate
+		if in.TypeOp, err = p.parseType(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.Domain, err = p.parseValueRef()
+
+	case "table.insert":
+		in.Op = OpTableInsert
+		if in.Table, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.TableVal, err = p.parseValueRef()
+
+	case "table.lookup", "table.lookup_mut", "table.remove":
+		if t.text == "table.lookup" {
+			in.Op = OpTableLookup
+		} else if t.text == "table.lookup_mut" {
+			in.Op = OpTableLookupMut
+		} else {
+			in.Op = OpTableRemove
+		}
+		if in.Table, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.ID, err = p.parseValueRef()
+
+	case "table.view.end":
+		in.Op = OpTableViewEnd
+		in.View, err = p.parseValueRef()
+
+	case "int.eq", "int.ne", "int.lt", "int.le", "int.gt", "int.ge",
+		"float.eq", "float.ne", "float.lt", "float.le", "float.gt", "float.ge":
+		op, ok := cmpOpByName[t.text]
+		if !ok {
+			return in, p.errf(t, "internal error: unknown comparison %q", t.text)
+		}
+		err = parseBinary(op)
+
+	case "int.trunc", "int.zext", "int.sext", "float.convert", "int.from_float", "float.from_int":
+		op, ok := convOpByName[t.text]
+		if !ok {
+			return in, p.errf(t, "internal error: unknown conversion %q", t.text)
+		}
+		err = parseConv(op)
+
+	case "const.get":
+		in.Op = OpConstGet
+		nameTok, err := p.expectAtName("a constant name")
+		if err != nil {
+			return in, err
+		}
+		if _, ok := p.m.ConstDecl(nameTok.text); !ok {
+			return in, p.errf(nameTok, "unknown constant @%s", nameTok.text)
+		}
+		in.Const = nameTok.text
+
+	case "call":
+		in.Op = OpCall
+		fnTok, err := p.expectAtName("a function name")
+		if err != nil {
+			return in, err
+		}
+		id, ok := p.m.Function(fnTok.text)
+		if !ok {
+			return in, p.errf(fnTok, "unknown function @%s", fnTok.text)
+		}
+		in.Callee = id
+		if err = p.expectPunct("("); err != nil {
+			return in, err
+		}
+		if in.Args, err = p.parseArgs(); err != nil {
+			return in, err
+		}
+		err = p.expectPunct(")")
+
+	case "ffi.call.unsafe":
+		in.Op = OpFFICallUnsafe
+		impTok, err := p.expectAtName("an import name")
+		if err != nil {
+			return in, err
+		}
+		id, ok := p.m.Import(impTok.text)
+		if !ok {
+			return in, p.errf(impTok, "unknown import @%s", impTok.text)
+		}
+		in.FFIImport = id
+		if err = p.expectPunct("("); err != nil {
+			return in, err
+		}
+		if in.Args, err = p.parseArgs(); err != nil {
+			return in, err
+		}
+		err = p.expectPunct(")")
+
+	default:
+		return in, p.errf(t, "unknown operation %q", t.text)
+	}
+	return in, err
+}
+
+// parseOptionalElse parses the mandatory 'else' failure edge of a checked
+// operation. The edge must stay on the operation's line so that a block named
+// 'else' on the next line is not consumed.
+func (p *parser) parseOptionalElse(opTok *token, in *Instr) error {
+	if p.peekIdent("else") && !p.peek().bol {
+		p.next()
+		args, err := p.parseBlockRef(&in.FailTarget)
+		in.FailArgs = args
+		return err
+	}
+	return p.errf(p.peek(), "operation %s requires an 'else' failure edge", opTok.text)
+}
+
+// parseBlockRef parses a block reference with optional edge arguments.
+func (p *parser) parseBlockRef(dst *BlockId) ([]ValueId, error) {
+	t := p.next()
+	if t.kind != tokIdent {
+		return nil, p.errf(t, "expected a block reference, got %s", t.describe())
+	}
+	id, ok := p.blocks[t.text]
+	if !ok {
+		return nil, p.errf(t, "unknown block %q", t.text)
+	}
+	*dst = id
+	var args []ValueId
+	if p.peek().kind == tokPunct && p.peek().text == "(" {
+		p.next()
+		var err error
+		args, err = p.parseArgs()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return nil, err
+		}
+	}
+	return args, nil
+}
+
+// parseArgs parses a comma-separated value list, stopping at (but not
+// consuming) the closing ')'.
+func (p *parser) parseArgs() ([]ValueId, error) {
+	var args []ValueId
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			return args, nil
+		}
+		v, err := p.parseValueRef()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, v)
+		if p.peek().kind == tokPunct && p.peek().text == "," {
+			p.next()
+			continue
+		}
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			return args, nil
+		}
+		return nil, p.errf(p.peek(), "expected ',' or ')' in argument list")
+	}
+}
+
+func (p *parser) parseValueRef() (ValueId, error) {
+	t := p.next()
+	if t.kind != tokPercent {
+		return NoValue, p.errf(t, "expected a value reference, got %s", t.describe())
+	}
+	id, ok := p.values[t.text]
+	if !ok {
+		return NoValue, p.errf(t, "unknown value %%%s", t.text)
+	}
+	return id, nil
+}
+
+func (p *parser) parsePlace() (Place, error) {
+	t := p.next()
+	if t.kind != tokIdent {
+		return Place{}, p.errf(t, "expected a place, got %s", t.describe())
+	}
+	switch t.text {
+	case "local":
+		nameTok, err := p.expectPercent("a local reference")
+		if err != nil {
+			return Place{}, err
+		}
+		id, ok := p.locals[nameTok.text]
+		if !ok {
+			return Place{}, p.errf(nameTok, "unknown local %%%s", nameTok.text)
+		}
+		return Place{Kind: PlaceLocal, Local: id}, nil
+	case "field":
+		if err := p.expectPunct("("); err != nil {
+			return Place{}, err
+		}
+		base, err := p.parsePlace()
+		if err != nil {
+			return Place{}, err
+		}
+		if err := p.expectComma(); err != nil {
+			return Place{}, err
+		}
+		nameTok, err := p.expectIdent("a field name")
+		if err != nil {
+			return Place{}, err
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return Place{}, err
+		}
+		return Place{Kind: PlaceField, Base: &base, Field: nameTok.text}, nil
+	case "deref":
+		v, err := p.parseValueRef()
+		if err != nil {
+			return Place{}, err
+		}
+		return Place{Kind: PlaceDeref, Deref: v}, nil
+	}
+	return Place{}, p.errf(t, "expected a place, got %q", t.text)
+}
+
+// --- terminators ---
+
+func (p *parser) parseTerminator() error {
+	b := p.curBlock
+	if b == nil {
+		return p.errf(p.peek(), "terminator outside a block")
+	}
+	t := p.next() // terminator keyword
+	switch t.text {
+	case "jump":
+		b.Term.Kind = TermJump
+		args, err := p.parseBlockRef(&b.Term.Target)
+		b.Term.Args = args
+		if err != nil {
+			return err
+		}
+	case "branch":
+		b.Term.Kind = TermBranch
+		cond, err := p.parseValueRef()
+		if err != nil {
+			return err
+		}
+		b.Term.Cond = cond
+		if err := p.expectComma(); err != nil {
+			return err
+		}
+		args, err := p.parseBlockRef(&b.Term.Then)
+		b.Term.ThenArgs = args
+		if err != nil {
+			return err
+		}
+		if err := p.expectComma(); err != nil {
+			return err
+		}
+		args, err = p.parseBlockRef(&b.Term.Else)
+		b.Term.ElseArgs = args
+		if err != nil {
+			return err
+		}
+	case "switch":
+		b.Term.Kind = TermSwitch
+		v, err := p.parseValueRef()
+		if err != nil {
+			return err
+		}
+		b.Term.Value = v
+		if err := p.expectPunct("{"); err != nil {
+			return err
+		}
+		for {
+			if p.peek().kind == tokPunct && p.peek().text == "}" {
+				p.next()
+				break
+			}
+			caseTok, err := p.expectIdent("a variant name or 'default'")
+			if err != nil {
+				return err
+			}
+			if !caseTok.bol {
+				return p.errf(caseTok, "switch case must start on a new line")
+			}
+			c := SwitchCase{Binding: NoValue}
+			if caseTok.text == "default" {
+				c.Variant = ""
+			} else {
+				c.Variant = caseTok.text
+				if p.peek().kind == tokPunct && p.peek().text == "(" {
+					p.next()
+					bindingTok, err := p.expectPercent("a payload binding name")
+					if err != nil {
+						return err
+					}
+					if _, dup := p.values[bindingTok.text]; dup {
+						return p.errf(bindingTok, "duplicate value %%%s", bindingTok.text)
+					}
+					payloadType := NoType
+					if ot, ok := p.fn.ValueType(b.Term.Value); ok {
+						if idx, ok := p.m.VariantIndex(ot, c.Variant); ok {
+							if pt, ok := p.m.VariantPayload(ot, idx); ok {
+								payloadType = pt
+							}
+						}
+					}
+					vid := p.fn.AddValue(bindingTok.text, payloadType, ValueDef{
+						Kind:  ValueDefSwitchCase,
+						Block: p.blockID(b),
+						Case:  len(b.Term.Cases),
+					})
+					p.values[bindingTok.text] = vid
+					c.Binding = vid
+					if err := p.expectPunct(")"); err != nil {
+						return err
+					}
+				}
+			}
+			if err := p.expectPunct("->"); err != nil {
+				return err
+			}
+			args, err := p.parseBlockRef(&c.Target)
+			c.Args = args
+			if err != nil {
+				return err
+			}
+			b.Term.Cases = append(b.Term.Cases, c)
+		}
+	case "return":
+		b.Term.Kind = TermReturn
+		b.Term.Result = NoValue
+		if p.peek().kind == tokPercent && !p.peek().bol {
+			v, err := p.parseValueRef()
+			if err != nil {
+				return err
+			}
+			b.Term.Result = v
+		}
+	case "fail":
+		b.Term.Kind = TermFail
+		v, err := p.parseValueRef()
+		if err != nil {
+			return err
+		}
+		b.Term.Result = v
+	case "unreachable":
+		b.Term.Kind = TermUnreachable
+	}
+	p.curBlock = nil
+	return nil
+}
+
+// --- types ---
+
+func (p *parser) parseType() (TypeId, error) {
+	t := p.next()
+	switch {
+	case t.kind == tokAtName:
+		id, ok := p.m.NamedType(t.text)
+		if !ok {
+			return NoType, p.errf(t, "unknown type @%s", t.text)
+		}
+		return id, nil
+	case t.kind == tokIdent:
+		switch t.text {
+		case "unit":
+			return TypeUnit, nil
+		case "bool":
+			return TypeBool, nil
+		case "i8":
+			return TypeI8, nil
+		case "i16":
+			return TypeI16, nil
+		case "i32":
+			return TypeI32, nil
+		case "i64":
+			return TypeI64, nil
+		case "u8":
+			return TypeU8, nil
+		case "u16":
+			return TypeU16, nil
+		case "u32":
+			return TypeU32, nil
+		case "u64":
+			return TypeU64, nil
+		case "f32":
+			return TypeF32, nil
+		case "f64":
+			return TypeF64, nil
+		case "domain_handle":
+			return p.m.DomainHandle(), nil
+		case "domain_mark":
+			return p.m.DomainMark(), nil
+		case "cleanup_scope":
+			return p.m.CleanupScope(), nil
+		case "cleanup_id":
+			return p.m.CleanupID(), nil
+		case "option", "result", "slice", "safe_ref", "safe_mut", "raw_ptr",
+			"table", "id", "table_view", "table_mut_view":
+			return p.parseStructuralType(t)
+		case "function":
+			if err := p.expectPunct("("); err != nil {
+				return NoType, err
+			}
+			sig, err := p.parseFuncSig()
+			if err != nil {
+				return NoType, err
+			}
+			if err := p.expectPunct(")"); err != nil {
+				return NoType, err
+			}
+			return p.m.FunctionType(sig), nil
+		}
+	}
+	return NoType, p.errf(t, "expected a type, got %s", t.describe())
+}
+
+func (p *parser) parseStructuralType(nameTok *token) (TypeId, error) {
+	if err := p.expectPunct("("); err != nil {
+		return NoType, err
+	}
+	first, err := p.parseType()
+	if err != nil {
+		return NoType, err
+	}
+	if nameTok.text == "result" {
+		if err := p.expectComma(); err != nil {
+			return NoType, err
+		}
+		second, err := p.parseType()
+		if err != nil {
+			return NoType, err
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return NoType, err
+		}
+		return p.m.Result(first, second), nil
+	}
+	if err := p.expectPunct(")"); err != nil {
+		return NoType, err
+	}
+	switch nameTok.text {
+	case "option":
+		return p.m.Option(first), nil
+	case "slice":
+		return p.m.Slice(first), nil
+	case "safe_ref":
+		return p.m.SafeRef(first), nil
+	case "safe_mut":
+		return p.m.SafeMut(first), nil
+	case "raw_ptr":
+		return p.m.RawPtr(first), nil
+	case "table":
+		return p.m.Table(first), nil
+	case "id":
+		return p.m.ID(first), nil
+	case "table_view":
+		return p.m.TableView(first), nil
+	case "table_mut_view":
+		return p.m.TableMutView(first), nil
+	}
+	return NoType, p.errf(nameTok, "unknown structural type %q", nameTok.text)
+}
+
+// cmpOpByName maps comparison names to operations.
+var cmpOpByName = map[string]OpKind{
+	"int.eq": OpIntEq, "int.ne": OpIntNe, "int.lt": OpIntLt, "int.le": OpIntLe,
+	"int.gt": OpIntGt, "int.ge": OpIntGe,
+	"float.eq": OpFloatEq, "float.ne": OpFloatNe, "float.lt": OpFloatLt,
+	"float.le": OpFloatLe, "float.gt": OpFloatGt, "float.ge": OpFloatGe,
+}
+
+// convOpByName maps conversion names to operations.
+var convOpByName = map[string]OpKind{
+	"int.trunc": OpIntTrunc, "int.zext": OpIntZext, "int.sext": OpIntSext,
+	"float.convert": OpFloatConvert, "int.from_float": OpIntFromFloat,
+	"float.from_int": OpFloatFromInt,
+}

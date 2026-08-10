@@ -65,8 +65,11 @@ func Print(m *Module) string {
 		if len(f.Locals) > 0 {
 			b.WriteString("\n")
 		}
-		for _, blk := range f.Blocks {
+		for i, blk := range f.Blocks {
 			if blk != nil {
+				if i > 0 {
+					b.WriteString("\n")
+				}
 				printBlock(&b, m, f, blk)
 			}
 		}

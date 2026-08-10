@@ -141,7 +141,7 @@ func TestPrintTerminators(t *testing.T) {
 	bb2.SetTerm(Terminator{Kind: TermUnreachable})
 
 	got := Print(m)
-	want := "mir 1\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\nbb1(%p: i64):\n  return\nbb2:\n  unreachable\n}\n"
+	want := "mir 1\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
 	if got != want {
 		t.Errorf("terminator printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}

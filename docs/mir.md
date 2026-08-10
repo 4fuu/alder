@@ -1,8 +1,8 @@
 # Aster MIR
 
-Status: initial design contract
+Status: versioned contract with a working Go toolkit
 
-Aster MIR is the typed, source-independent contract between semantic analysis and code generation. The current project exists primarily to make this contract precise and executable.
+Aster MIR is the typed, source-independent contract between semantic analysis and code generation. The `mir` Go package implements the in-memory representation, the deterministic textual printer and parser, and the type inference shared by the parser and the verifier. The verifier lives in `mir/verify`.
 
 MIR must express Aster semantics without depending on C syntax or a future native backend. The C11 backend is a consumer, not the definition, of MIR.
 
@@ -27,11 +27,11 @@ A module contains:
 - imported C declarations;
 - constants;
 - functions;
-- optional source-span tables used only for diagnostics.
+- optional source-span tables (reserved; attachment arrives with the frontend).
 
 A function contains:
 
-- typed parameters;
+- typed parameters (registered as the leading function values);
 - local slots;
 - basic blocks;
 - SSA-like temporary values;
@@ -39,6 +39,8 @@ A function contains:
 - exactly one terminator per block.
 
 Mutable language variables lower to explicit places and stores. Pure computed temporaries are single-assignment values. Aster has no MIR `move` operation that invalidates a source value.
+
+Values are defined by function parameters, block parameters, instruction results, and switch case payload bindings. A value may be used only where its definition dominates the use (see Verifier Phases). Calls and FFI calls whose result type is `unit` may be left unbound; every other producing operation must bind its result.
 
 ## Generic Boundary
 
@@ -60,19 +62,18 @@ Compiler objects use stable numeric IDs:
 ```text
 TypeId
 FunctionId
+ImportId
 BlockId
 ValueId
 LocalId
-DomainId
-CleanupId
-SpanId
+DomainId      (reserved)
+CleanupId     (reserved)
+SpanId        (reserved)
 ```
 
-Printed ordering must not depend on host-language map iteration, pointer values, allocation addresses, or traversal races.
+`DomainId`, `CleanupId`, and `SpanId` are reserved parts of the identity vocabulary and are not yet used by operations. Printed ordering must not depend on host-language map iteration, pointer values, allocation addresses, or traversal races. Within a function, value IDs are assigned in textual or construction order: function parameters, then per block in order its parameters, instruction results, and switch case bindings.
 
 ## Initial Type Vocabulary
-
-The first MIR subset should include:
 
 ```text
 unit
@@ -99,7 +100,9 @@ table_view(TypeId)
 table_mut_view(TypeId)
 ```
 
-`safe_ref(TypeId)` and `safe_mut(TypeId)` are checked references associated with a valid storage or table access scope. `raw_ptr(TypeId)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics.
+The canonical primitives occupy fixed `TypeId` slots 0 through 11 in every module. Named aggregates and enums are table entries; anonymous structural types are interned by shape, so identical textual types share one `TypeId`. The singleton types (`domain_handle`, `domain_mark`, `cleanup_scope`, `cleanup_id`) each intern to one entry.
+
+`safe_ref(T)` and `safe_mut(T)` are checked references associated with a valid storage or table access scope. `raw_ptr(T)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics. Strings are `slice(u8)` at the MIR level.
 
 The exact string and dynamic-array representations belong to the runtime ABI, not the semantic type system.
 
@@ -109,33 +112,36 @@ A place identifies mutable storage:
 
 ```text
 local %name
-field place, field_index
-index place, checked_index
-deref safe_reference
+field place, field_name
+deref checked_reference_value
 ```
 
-A value is an immutable result of an instruction. Loading a place produces a value; storing consumes a value as an operand but does not invalidate other source-level names.
+`deref` accepts `safe_ref`, `safe_mut`, `table_view`, and `table_mut_view` values. A place is mutable when it is a local, a field of a mutable place, or a deref of a `safe_mut` or `table_mut_view`; derefs of `safe_ref` and `table_view` are read-only.
 
-Unsafe raw-pointer dereference is never represented as an ordinary safe place.
+The initial vocabulary has no unchecked index place. Checked element access uses `slice.index.checked`, which yields a checked reference that `deref` places consume.
+
+A value is an immutable result of an instruction. `load` reads a place and produces a value; `store` writes a value into a place and does not invalidate other source-level names. Unsafe raw-pointer dereference is never represented as an ordinary safe place.
 
 ## Control Flow
 
-Initial terminators:
+Terminators:
 
 ```text
 jump block(arguments...)
 branch condition, then_block, else_block
-switch value, cases..., default_block
-return value
-fail error_value
+switch value { cases..., default? }
+return [value]
+fail value
 unreachable
 ```
 
-Block arguments must exactly match target block parameter types. Every reachable block must terminate. `unreachable` is valid only when the verifier can identify a semantic reason or when it is inside an explicit unsafe boundary.
+- Block arguments must exactly match target block parameter types.
+- A switch dispatches on an enum-like value: a declared enum, an option (`none`, `some`), or a result (`ok`, `err`). A case may bind the variant payload as a new value; the case `default` (represented as a case with an empty variant name) is allowed at most once. A switch must cover every variant of its operand type or contain a default case.
+- `return` and `fail` both exit with a value of the function's result type; `fail` marks the failure path. A `return` without an operand returns `unit`.
+- `unreachable` is valid only in blocks that are unreachable from the entry block. Reachable blocks must not terminate with `unreachable`.
+- Every statement starts a new line; the parser rejects statements that do not.
 
 ## Storage-Domain Operations
-
-Initial operations:
 
 ```text
 domain.create parent -> domain_handle
@@ -143,9 +149,10 @@ domain.mark domain -> domain_mark
 domain.reset domain, domain_mark
 domain.destroy domain
 alloc domain, element_type, count -> safe_mut(element_type)
-construct destination, aggregate_operands...
 copy_to_domain destination_domain, value -> value
 ```
+
+`alloc` counts are `u64`. Aggregate values are built with `aggregate.construct` and written into places with `store`; the earlier `construct destination, operands` form was folded into these two operations during the format revision.
 
 Required invariants:
 
@@ -156,11 +163,9 @@ Required invariants:
 - destruction occurs at most once on each reachable path;
 - raw pointers derived from domain storage cannot be retained across reset or destruction under a safe foreign-call contract.
 
-The initial verifier may conservatively reject or retain storage when precise placement is unavailable. It must never accept a dangling safe reference.
+The initial verifier correlates invalidation by SSA handle derivation (see Verifier Phases). It must never accept a dangling safe reference.
 
 ## Cleanup Operations
-
-Initial cleanup model:
 
 ```text
 cleanup.scope.begin -> cleanup_scope
@@ -178,26 +183,50 @@ Properties:
 - cleanup effects are visible to the verifier and backend;
 - backend-specific C `goto` structure does not leak into MIR.
 
+The cleanup function of `cleanup.push` must have result type `unit`.
+
 ## Checked Operations
 
-Safe MIR distinguishes operations with defined failure behavior:
+Safe MIR distinguishes operations with defined failure behavior. Every checked operation carries an explicit `else` failure edge with optional edge arguments; a checked operation without an `else` edge is rejected.
 
 ```text
-int.add.checked
-int.sub.checked
-int.mul.checked
-int.div.checked
-int.shift.checked
-slice.index.checked
-slice.range.checked
-enum.payload.checked
+int.add.checked a, b else edge
+int.sub.checked a, b else edge
+int.mul.checked a, b else edge
+int.div.checked a, b else edge
+int.shift.checked a, b else edge
+slice.index.checked slice_or_ref, index else edge -> safe_mut(elem)
+slice.range.checked slice_or_ref, lo, hi else edge -> slice(elem)
+enum.payload.checked value, variant else edge -> payload
 ```
 
-The failure edge or result is explicit. A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
+Checked integer operations require both operands to have the same integer type. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. `enum.payload.checked` requires a variant with a non-unit payload.
+
+A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
+
+## Comparisons and Conversions
+
+Comparisons require operands of the same type and produce `bool`:
+
+```text
+int.eq int.ne int.lt int.le int.gt int.ge
+float.eq float.ne float.lt float.le float.gt float.ge
+```
+
+Conversions take a value and an explicit result type operand:
+
+```text
+int.trunc value, T   (same signedness, narrower)
+int.zext value, T    (unsigned, wider)
+int.sext value, T    (signed, wider)
+float.convert value, T
+int.from_float value, T
+float.from_int value, T
+```
+
+`slice.len slice_or_ref -> u64` reports an element count.
 
 ## Generational Table Operations
-
-Initial operations:
 
 ```text
 table.create element_type, domain -> table(element_type)
@@ -217,88 +246,85 @@ Required invariants:
 - compaction may relocate values without changing valid IDs;
 - mutation that could invalidate a view is rejected or sequenced after the view ends.
 
-## Calls and C FFI
+## Constants
 
-Ordinary calls use typed MIR signatures:
+Modules declare named constants; instructions materialize them with `const.get`. The initial vocabulary has no immediate operands.
+
+```text
+const @name: type = literal
+```
+
+Constant types are `unit`, `bool`, integer and float primitives, and `slice(u8)` string literals. Integer literals are decimal `i64`-range values; floats print with shortest-round-trip formatting.
+
+## Calls and C FFI
 
 ```text
 call function(arguments...) -> result
+ffi.call.unsafe import(arguments...) -> result
 ```
 
-Foreign calls are explicit:
-
-```text
-ffi.call.unsafe c_declaration(arguments...) -> result
-```
-
-Imported declarations record:
-
-- C spelling or generated shim symbol;
-- calling convention;
-- parameter and result layout;
-- const and mutability information available from the header;
-- whether a wrapper asserts that pointers are retained or not retained;
-- required cleanup function when known.
+Imported declarations currently record the import name (also the C symbol) and a concrete signature. Retention, const, and cleanup claims for foreign pointers are deferred to a later MIR version; until then, safe wrappers carry that responsibility.
 
 MIR verification cannot prove arbitrary foreign behavior. It verifies only that unsafe entry is explicit and that safe wrapper claims are internally consistent.
 
-## Textual MIR Sketch
+## Textual MIR
 
-The syntax below is illustrative and will be revised when the parser is implemented:
+The textual format is versioned (`mir 1`) and is the canonical fixture format. The parser requires declarations before uses, one statement per line, and deterministic name resolution; the printer reproduces the format byte for byte, so parse-print-parse is stable. `#` starts a line comment.
 
 ```text
-fn @summarize(%result_domain: domain_handle, %data: slice(u8))
-    -> result(@Summary, @Error) {
-  local %cleanup: cleanup_scope
-  local %temp: domain_handle
-
-bb0:
-  %cleanup = cleanup.scope.begin
-  %temp = domain.create %result_domain
-  %temp_cleanup = cleanup.push %cleanup, @domain.destroy, (%temp)
-
-  %parsed = call @json.parse(%temp, %data)
-  switch %parsed {
-    ok(%document) -> bb1(%document)
-    err(%error) -> bb_error(%error)
-  }
-
-bb1(%document: @DocumentView):
-  %title_view = call @document.title(%document)
-  %title = call @string.copy_to_domain(%result_domain, %title_view)
-  %words = call @document.word_count(%document)
-  %summary = aggregate @Summary { title: %title, words: %words }
-  cleanup.scope.run %cleanup
-  cleanup.scope.end %cleanup
-  return ok(%summary)
-
-bb_error(%error: @Error):
-  cleanup.scope.run %cleanup
-  cleanup.scope.end %cleanup
-  return err(%error)
-}
+module   := "mir" version (typeDecl | enumDecl | constDecl | importDecl | fnDecl)*
+typeDecl := "type" "@" name "{" (ident ":" type)* "}"
+enumDecl := "enum" "@" name "{" (ident ["(" type ")"])* "}"
+constDecl:= "const" "@" name ":" type "=" literal
+importDecl:= "import" "@" name ":" "fn" "(" type* ")" "->" type
+fnDecl   := "fn" "@" name "(" params ")" ["->" type] "{" localDecl* block+ "}"
+localDecl:= "local" "%" name ":" type
+block    := ident ["(" params ")"] ":" (instr | terminator)*
+instr    := ["%" name "="] op operands
+terminator:= "jump" blockref
+           | "branch" value "," blockref "," blockref
+           | "switch" value "{" (variant ["(" "%" name ")"] "->" blockref)* ["default" "->" blockref] "}"
+           | "return" [value]
+           | "fail" value
+           | "unreachable"
+blockref := ident ["(" value* ")"]
+place    := "local" "%" name | "field" "(" place "," ident ")" | "deref" value
+type     := primitive | "@" name | structural type | singleton
 ```
+
+Checked operations append `else blockref` on the same line. Types print and parse in the canonical forms shown throughout this document (`slice(u8)`, `result(@Summary, @LoadError)`, `function(fn(i64) -> bool)`, and so on).
+
+The `summarize` fixture in `mir/testdata/golden/summarize.mir` is the canonical worked example; the remaining golden fixtures cover tables, arithmetic, domains, FFI, and enum extraction.
 
 ## Verifier Phases
 
-The verifier should run explicit, independently testable phases:
+The verifier (`mir/verify`) runs explicit, independently testable phases:
 
 1. declaration and ID integrity;
 2. type and layout well-formedness;
 3. CFG target and block-argument validation;
 4. dominance and value availability;
-5. place and mutability rules;
+5. place, mutability, and instruction typing;
 6. domain nesting and escape validation;
 7. cleanup balance and exit validation;
 8. table view and invalidation validation;
 9. safe/raw pointer boundary validation;
 10. backend precondition validation.
 
-Diagnostics must be stable and must identify the relevant function, block, operation, and source span when one exists.
+Initial conservative rules:
+
+- reference-containing values may flow through SSA values and `deref` places; the verifier tracks storage derivation through allocations, copies, table operations, aggregate and enum construction, loads, block parameters, and switch bindings, and rejects uses after a dominating reset or destruction of the derived domain;
+- returned values must not contain references derived from function-local domains;
+- `unreachable` terminators are accepted only in blocks unreachable from the entry block;
+- table views are ephemeral: every use of a view must stay in its defining block, and a `table.view.end` must follow all other uses;
+- `raw_ptr` values may only cross explicit unsafe boundaries: FFI calls, function boundaries, and returns;
+- `alloc` and `table.create` element types must be plain value types without handles, cleanup identifiers, views, or raw pointers, recursively.
+
+Diagnostics must be stable and must identify the relevant function, block, operation, and source span when one exists. The current verifier reports function, block, and operation; spans arrive with the frontend.
 
 ## Versioning
 
-Textual MIR will gain an explicit format version before external fixtures are treated as stable. During bootstrap, incompatible changes are allowed but must update:
+Textual MIR carries an explicit format version (`mir 1`); external fixtures are stable from this version on. Incompatible changes must update:
 
 - this document;
 - parser/printer golden files;
@@ -311,6 +337,9 @@ MIR must not acquire LLVM-specific types, attributes, exception models, or point
 
 - Whether domain placement is complete before MIR or represented as constraints within early MIR.
 - Whether cleanup should remain explicit instructions or lower into canonical CFG before backend consumption.
-- Whether table views require lexical MIR scopes or can be proven solely through dataflow.
+- Whether table views require lexical MIR scopes or can be proven solely through dataflow (the initial verifier restricts views to their defining block).
 - Which aggregate copies are semantic and which can be represented as destination construction.
 - Whether a small MIR interpreter materially improves differential backend testing.
+- Whether checked-index places return, and how mutable slice element access should be typed (the initial vocabulary uses `slice.index.checked` plus `deref`).
+- How import retention, const, and cleanup claims should be recorded.
+- How `unreachable` should be justified when failure edges are provably impossible.
