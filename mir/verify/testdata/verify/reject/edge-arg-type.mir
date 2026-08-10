@@ -1,0 +1,9 @@
+mir 1
+
+fn @f(%x: i64) {
+bb0:
+  jump bb1(%x)
+
+bb1(%s: slice(u8)):
+  return
+}

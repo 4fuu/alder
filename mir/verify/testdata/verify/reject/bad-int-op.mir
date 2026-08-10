@@ -1,0 +1,10 @@
+mir 1
+
+fn @f(%s: slice(u8), %b: i64) -> i64 {
+bb0:
+  %sum = int.add.checked %s, %b else bb1
+  return %sum
+
+bb1:
+  return %b
+}

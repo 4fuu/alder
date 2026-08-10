@@ -1,0 +1,17 @@
+mir 1
+
+const @k: i64 = 1
+
+enum @E {
+  A(i64)
+}
+
+fn @f(%e: @E) -> i64 {
+bb0:
+  %v = enum.payload.checked %e, Nope else bb1
+  return %v
+
+bb1:
+  %z = const.get @k
+  return %z
+}

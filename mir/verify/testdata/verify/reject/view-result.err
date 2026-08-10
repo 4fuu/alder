@@ -1,1 +1,2 @@
 fn @f: result type: table views are ephemeral and may not appear in declarations
+fn @f: block bb0: terminator return: return without a value requires result type unit, got table_view(@P)

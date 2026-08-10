@@ -1,0 +1,1 @@
+fn @f: block bb0: op store #1: store target is read-only

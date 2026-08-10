@@ -1,0 +1,10 @@
+mir 1
+
+fn @f(%a: i64, %b: u8) -> i64 {
+bb0:
+  %s = int.shift.checked %a, %b else bb1
+  return %s
+
+bb1:
+  return %a
+}

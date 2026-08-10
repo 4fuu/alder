@@ -1,0 +1,1 @@
+fn @f: block bb0: op int.add.checked #0: integer operand: expected an integer, got slice(u8)

@@ -1,0 +1,11 @@
+mir 1
+
+type @T {
+  a: i64
+}
+
+fn @f(%r: safe_ref(@T)) {
+bb0:
+  %v = load field(deref %r, nope)
+  return
+}

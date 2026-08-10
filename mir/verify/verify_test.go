@@ -127,6 +127,19 @@ func TestAPIRejections(t *testing.T) {
 	if !containsMsg(errs, "type contains itself") {
 		t.Errorf("type cycle not reported:\n%s", Errors(errs).String())
 	}
+
+	// A stored result type that contradicts the inferred type.
+	m5 := mir.NewModule()
+	m5.AddConst("k", mir.TypeI64, mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	f5 := m5.AddFunction("rm", nil, mir.TypeUnit)
+	b5 := f5.AddBlock("bb0", nil)
+	v5 := f5.AddValue("x", m5.Slice(mir.TypeU8), mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+	b5.AddInstr(mir.Instr{Op: mir.OpConstGet, Const: "k", Result: v5})
+	b5.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	errs = Module(m5)
+	if !containsMsg(errs, "result type mismatch: stored slice(u8), expected i64") {
+		t.Errorf("result type mismatch not reported:\n%s", Errors(errs).String())
+	}
 }
 
 func containsMsg(errs []Error, substr string) bool {

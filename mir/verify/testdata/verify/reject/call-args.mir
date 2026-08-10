@@ -1,0 +1,12 @@
+mir 1
+
+fn @g(%s: slice(u8)) {
+bb0:
+  return
+}
+
+fn @f(%x: i64) {
+bb0:
+  call @g(%x)
+  return
+}

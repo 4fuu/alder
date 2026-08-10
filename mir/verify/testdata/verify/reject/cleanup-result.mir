@@ -1,0 +1,18 @@
+mir 1
+
+const @k: i64 = 1
+
+fn @bad(%d: domain_handle) -> i64 {
+bb0:
+  %z = const.get @k
+  return %z
+}
+
+fn @f(%d: domain_handle) {
+  local %s: cleanup_scope
+
+bb0:
+  %s = cleanup.scope.begin
+  %c = cleanup.push %s, @bad, (%d)
+  return
+}

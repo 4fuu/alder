@@ -1,0 +1,9 @@
+mir 1
+
+fn @f(%x: i64) {
+bb0:
+  branch %x, bb1, bb1
+
+bb1:
+  return
+}

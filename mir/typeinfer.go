@@ -259,14 +259,14 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 	case OpIntZext:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) ||
-			intSigned(ta) || intSigned(in.TypeOp) || intWidth(in.TypeOp) <= intWidth(ta) {
+			intSigned(ta) || intWidth(in.TypeOp) <= intWidth(ta) {
 			return NoType, false
 		}
 		return in.TypeOp, true
 	case OpIntSext:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) ||
-			!intSigned(ta) || !intSigned(in.TypeOp) || intWidth(in.TypeOp) <= intWidth(ta) {
+			!intSigned(ta) || intWidth(in.TypeOp) <= intWidth(ta) {
 			return NoType, false
 		}
 		return in.TypeOp, true

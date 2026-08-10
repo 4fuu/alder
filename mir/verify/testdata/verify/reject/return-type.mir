@@ -1,0 +1,9 @@
+mir 1
+
+const @k: slice(u8) = "hi"
+
+fn @f(%x: i64) -> i64 {
+bb0:
+  %z = const.get @k
+  return %z
+}

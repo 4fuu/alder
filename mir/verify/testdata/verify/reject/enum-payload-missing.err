@@ -1,0 +1,1 @@
+fn @f: block bb0: op enum.construct #0: variant "A" requires a payload

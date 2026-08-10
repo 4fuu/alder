@@ -1,0 +1,18 @@
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: op const.get: use of %z is not dominated by its definition
+fn @f: block bb0: terminator return: return operand: expected unit, got i64

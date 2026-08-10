@@ -1,0 +1,1 @@
+fn @f: block bb0: op call #0: call argument 0: expected slice(u8), got i64

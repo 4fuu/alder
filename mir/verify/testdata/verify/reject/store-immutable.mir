@@ -1,0 +1,10 @@
+mir 1
+
+const @k: i64 = 1
+
+fn @f(%r: safe_ref(i64)) {
+bb0:
+  %z = const.get @k
+  store deref %r, %z
+  return
+}

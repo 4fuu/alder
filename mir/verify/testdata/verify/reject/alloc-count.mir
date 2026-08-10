@@ -1,0 +1,7 @@
+mir 1
+
+fn @f(%d: domain_handle, %n: i64) {
+bb0:
+  %buf = alloc %d, u8, %n
+  return
+}
