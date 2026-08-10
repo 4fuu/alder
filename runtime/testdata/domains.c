@@ -17,7 +17,7 @@ static int failures = 0;
     } while (0)
 
 static void test_lifecycle(void) {
-    AsterDomain d;
+    AsterDomain d = {0};
     CHECK(aster_domain_init(&d, NULL));
     CHECK(!aster_domain_init(&d, NULL)); /* double init rejected */
 
@@ -44,7 +44,7 @@ static void test_lifecycle(void) {
 }
 
 static void test_marks(void) {
-    AsterDomain d;
+    AsterDomain d = {0};
     CHECK(aster_domain_init(&d, NULL));
 
     /* An empty domain marks {NULL, 0} and resets to it successfully. */
@@ -68,7 +68,7 @@ static void test_marks(void) {
     CHECK(!aster_domain_reset(&d, m3)); /* stale mark */
 
     /* A mark of another domain is rejected. */
-    AsterDomain other;
+    AsterDomain other = {0};
     CHECK(aster_domain_init(&other, NULL));
     CHECK(aster_domain_alloc(&other, 16, 8) != NULL);
     AsterDomainMark foreign = aster_domain_mark(&other);
@@ -86,18 +86,18 @@ static void test_marks(void) {
 }
 
 static void test_parent_child(void) {
-    AsterDomain root;
-    AsterDomain child;
-    AsterDomain grandchild;
+    AsterDomain root = {0};
+    AsterDomain child = {0};
+    AsterDomain grandchild = {0};
     CHECK(aster_domain_init(&root, NULL));
     CHECK(aster_domain_init(&child, &root));
     CHECK(aster_domain_init(&grandchild, &child));
 
     /* init against a destroyed parent fails. */
-    AsterDomain dead;
+    AsterDomain dead = {0};
     CHECK(aster_domain_init(&dead, NULL));
     aster_domain_destroy(&dead);
-    AsterDomain orphan;
+    AsterDomain orphan = {0};
     CHECK(!aster_domain_init(&orphan, &dead));
 
     /* Destroying the root destroys children with it; later destroys are
@@ -115,7 +115,7 @@ static void test_parent_child(void) {
 }
 
 static void test_invalid(void) {
-    AsterDomain d;
+    AsterDomain d = {0};
     CHECK(aster_domain_init(&d, NULL));
 
     /* Bad alignments. */
@@ -139,7 +139,7 @@ static void test_invalid(void) {
 }
 
 static void test_segmentation(void) {
-    AsterDomain d;
+    AsterDomain d = {0};
     CHECK(aster_domain_init(&d, NULL));
 
     /* Many small allocations must span multiple regular segments. */
@@ -163,7 +163,7 @@ static void test_segmentation(void) {
 
 static void test_cycles(void) {
     for (int i = 0; i < 1000; i++) {
-        AsterDomain d;
+        AsterDomain d = {0};
         CHECK(aster_domain_init(&d, NULL));
         for (int j = 0; j < 50; j++) {
             CHECK(aster_domain_alloc(&d, (size_t)(j * 37 + 1), 16) != NULL);
@@ -199,3 +199,4 @@ int main(void) {
     }
     return 0;
 }
+

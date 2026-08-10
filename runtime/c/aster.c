@@ -47,6 +47,7 @@ struct AsterCleanupEntry {
 
 /* Single-threaded by design (structured concurrency is out of scope). */
 static size_t g_live_allocations = 0;
+static uint64_t g_next_table_serial = 1; /* 0 is never a valid serial */
 
 static void *rt_malloc(size_t size) {
     void *p = malloc(size);
@@ -495,4 +496,145 @@ bool aster_cleanup_end(AsterCleanupScope *scope) {
     scope->spent_head = NULL;
     scope->active = false;
     return ok;
+}
+
+/* ------------------------------------------------------------------ */
+/* Generational tables                                                 */
+/* ------------------------------------------------------------------ */
+
+static const uint64_t TABLE_INITIAL_CAPACITY = 8;
+
+bool aster_table_init(AsterTable *table, AsterDomain *domain,
+                      uint64_t elem_size, uint64_t elem_align) {
+    if (table == NULL || table->serial != 0 || domain == NULL ||
+        domain->magic != ASTER_MAGIC || elem_size == 0 ||
+        !align_is_valid((size_t)elem_align)) {
+        return false;
+    }
+    *table = (AsterTable){0};
+    table->serial = g_next_table_serial;
+    g_next_table_serial += 1; /* wraps after 2^64 tables: documented */
+    table->domain = domain;
+    table->elem_size = elem_size;
+    table->elem_align = elem_align;
+    table->slots = (AsterTableSlot *)aster_domain_alloc(
+        domain, (size_t)(TABLE_INITIAL_CAPACITY * sizeof(AsterTableSlot)),
+        (size_t)_Alignof(AsterTableSlot));
+    if (table->slots == NULL) {
+        return false;
+    }
+    memset(table->slots, 0,
+           (size_t)(TABLE_INITIAL_CAPACITY * sizeof(AsterTableSlot)));
+    table->capacity = TABLE_INITIAL_CAPACITY;
+    return true;
+}
+
+static bool table_grow(AsterTable *table) {
+    if (table->capacity > UINT64_MAX / 2) {
+        return false;
+    }
+    uint64_t new_capacity = table->capacity * 2;
+    size_t slot_bytes = (size_t)new_capacity * sizeof(AsterTableSlot);
+    if ((uint64_t)(slot_bytes / sizeof(AsterTableSlot)) != new_capacity) {
+        return false; /* overflow */
+    }
+    AsterTableSlot *fresh = (AsterTableSlot *)aster_domain_alloc(
+        table->domain, slot_bytes, (size_t)_Alignof(AsterTableSlot));
+    if (fresh == NULL) {
+        return false; /* out of memory; table unchanged */
+    }
+    memcpy(fresh, table->slots,
+           (size_t)table->capacity * sizeof(AsterTableSlot));
+    memset(fresh + table->capacity, 0,
+           (size_t)(new_capacity - table->capacity) *
+               sizeof(AsterTableSlot));
+    table->slots = fresh;
+    table->capacity = new_capacity;
+    return true;
+}
+
+bool aster_table_insert(AsterTable *table, const void *elem,
+                        AsterTableId *out_id) {
+    if (table == NULL || table->serial == 0 || elem == NULL ||
+        out_id == NULL || table->domain->magic != ASTER_MAGIC) {
+        return false;
+    }
+    if (table->count == table->capacity && !table_grow(table)) {
+        return false;
+    }
+    /* A free slot exists because capacity > count. */
+    uint64_t slot_index = UINT64_MAX;
+    for (uint64_t i = 0; i < table->capacity; i++) {
+        if (table->slots[i].generation == 0) {
+            slot_index = i;
+            break;
+        }
+    }
+    if (slot_index == UINT64_MAX) {
+        return false; /* invariant broken: cannot happen */
+    }
+    uint8_t *storage = (uint8_t *)aster_domain_alloc(
+        table->domain, (size_t)table->elem_size, (size_t)table->elem_align);
+    if (storage == NULL) {
+        return false;
+    }
+    memcpy(storage, elem, (size_t)table->elem_size);
+    table->generation_counter += 1;
+    table->slots[slot_index].generation = table->generation_counter;
+    table->slots[slot_index].elem = storage;
+    table->count += 1;
+    out_id->table_serial = table->serial;
+    out_id->slot = slot_index;
+    out_id->generation = table->generation_counter;
+    return true;
+}
+
+/* Shared validation: table identity (serial and live domain), slot bounds,
+ * occupancy, and generation. The element storage of a stale id is never
+ * touched. */
+static bool table_validate(const AsterTable *table, AsterTableId id,
+                           AsterTableSlot **out_slot) {
+    if (table == NULL || table->serial == 0 ||
+        table->domain->magic != ASTER_MAGIC) {
+        return false;
+    }
+    if (id.table_serial != table->serial) {
+        return false;
+    }
+    if (id.slot >= table->capacity) {
+        return false;
+    }
+    AsterTableSlot *slot = &table->slots[id.slot];
+    if (slot->generation == 0 || slot->generation != id.generation) {
+        return false;
+    }
+    *out_slot = slot;
+    return true;
+}
+
+bool aster_table_lookup(AsterTable *table, AsterTableId id, void **out_elem) {
+    AsterTableSlot *slot = NULL;
+    if (out_elem == NULL || !table_validate(table, id, &slot)) {
+        return false;
+    }
+    *out_elem = slot->elem;
+    return true;
+}
+
+bool aster_table_lookup_mut(AsterTable *table, AsterTableId id,
+                            void **out_elem) {
+    return aster_table_lookup(table, id, out_elem);
+}
+
+bool aster_table_remove(AsterTable *table, AsterTableId id) {
+    AsterTableSlot *slot = NULL;
+    if (!table_validate(table, id, &slot)) {
+        return false;
+    }
+    /* The slot becomes reusable with a fresh generation; the element
+     * storage stays in the domain until reset or destroy. */
+    slot->generation = 0;
+    slot->elem = NULL;
+    table->count -= 1;
+    return true;
 }
