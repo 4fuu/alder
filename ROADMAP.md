@@ -62,23 +62,23 @@ exists; it is not required for this milestone.
 
 ### Milestone 2: Minimal Runtime
 
-Status: **planned**
+Status: **complete**
 
-Deliverables:
+Deliverables (implemented in `runtime/c/aster.h` and `runtime/c/aster.c`):
 
-- portable C11 storage-domain primitives;
-- marks, resets, segmented allocation, and large-allocation handling;
-- scoped cleanup registration and reverse-order execution;
-- checked arithmetic and bounds helpers;
-- a minimal generational table implementation;
-- ASan and UBSan validation where supported.
+- portable C11 storage-domain primitives: init/alloc/mark/reset/destroy with parent-child tracking;
+- marks, resets, segmented bump allocation (doubling regular segments up to 1 MiB, dedicated exact-size large segments), alignment and overflow/OOM handling;
+- scoped cleanup: begin/push/disarm/run/end with reverse-order, at-most-once execution;
+- checked arithmetic, shift, division, and bounds helpers for the 64-bit MIR operations, plus defined float-to-integer conversions;
+- a minimal generational table: globally unique serial identity, slot generations, growth, and stale-id rejection;
+- strict-warning compile-and-run tests for every area, with ASan/UBSan reruns when the host toolchain supports them.
 
-Exit criteria:
+Exit-criteria evidence:
 
-- all runtime APIs have explicit failure and lifetime contracts;
-- repeated domain create/reset/destroy tests are leak-free under supported sanitizers;
-- stale generational IDs never resolve to reused objects;
-- cleanup runs exactly once across success and failure paths.
+- every runtime API carries an explicit failure and lifetime contract in `runtime/c/aster.h` and `docs/c-backend.md`;
+- repeated domain create/reset/destroy cycles are leak-free: a live-allocation counter proves zero retained heap blocks on every tested host, and the same suites rerun under ASan/UBSan where the toolchain supports them (the current mingw-w64 host lacks libasan/libubsan, so those runs skip);
+- stale generational IDs never resolve to reused objects: slot reuse always assigns a fresh generation and ids carry a globally unique table serial;
+- cleanup runs exactly once across success and failure paths: reverse-order execution, disarmed skipping, and contract-violation handling are pinned by tests.
 
 ### Milestone 3: C11 Backend
 

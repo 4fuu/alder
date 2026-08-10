@@ -6,7 +6,7 @@ The project is currently in the **design and bootstrap phase**. There is no usab
 
 ## Repository Status
 
-Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages provide a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. Parse/print fixed-point, malformed public-API input, cross-process determinism, and race-tested verifier behavior are covered by executable tests. `docs/mir.md` is the contract; `ROADMAP.md` records status, evidence, and the deliberately conservative MIR 1 restrictions.
+Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages provide a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. Parse/print fixed-point, malformed public-API input, cross-process determinism, and race-tested verifier behavior are covered by executable tests. Milestone 2 (minimal runtime) is complete: the portable C11 runtime in `runtime/c` provides storage domains with marks and resets, scoped cleanup, checked arithmetic and bounds helpers, and a generational table, all covered by strict-warning compile-and-run tests. `docs/mir.md` and `docs/c-backend.md` are the contracts; `ROADMAP.md` records status, evidence, and the deliberately conservative MIR 1 restrictions.
 
 ## Current Scope
 
