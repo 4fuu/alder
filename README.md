@@ -4,6 +4,10 @@ Aster is an experimental systems programming language designed around predictabl
 
 The project is currently in the **design and bootstrap phase**. There is no usable compiler or stable language specification yet.
 
+## Repository Status
+
+Milestone 1 (MIR toolkit) is implemented in the `mir` and `mir/verify` Go packages: a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. `docs/mir.md` is the contract; `ROADMAP.md` records status and exit-criteria evidence.
+
 ## Current Scope
 
 The active implementation scope is deliberately narrow:

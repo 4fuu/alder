@@ -35,32 +35,27 @@ Exit criteria:
 
 ### Milestone 1: MIR Toolkit
 
-Status: **planned**
+Status: **substantially complete**
 
 Deliverables:
 
-- a small Go module with no unnecessary third-party dependencies;
+- a small Go module with no unnecessary third-party dependencies (`mir` and `mir/verify`);
 - in-memory MIR types using stable integer IDs rather than pointer-linked compiler graphs;
-- deterministic textual MIR parser and printer;
-- MIR verifier with source-independent diagnostics;
-- golden tests and invalid-MIR tests.
+- deterministic textual MIR parser and printer (format version 1, pinned by golden fixtures);
+- MIR verifier with source-independent diagnostics covering all ten documented phases;
+- golden tests and invalid-MIR tests with pinned diagnostics.
 
-Initial verifier responsibilities:
+Exit-criteria evidence:
 
-- type consistency;
-- valid control-flow targets and block arguments;
-- dominance and value availability;
-- storage-domain nesting and reference escape rules;
-- balanced cleanup and domain termination;
-- separation of safe references from raw C pointers;
-- valid generational table operations.
+- parse-print-parse is stable (round-trip tests over every golden fixture);
+- malformed fixtures fail with deterministic diagnostics (parser and verifier rejection fixtures);
+- map iteration, process addresses, and temporary paths cannot affect output (no map iteration in printing; pipeline determinism tests);
+- the MIR package is usable without the future source frontend (fixtures built through the public API).
 
-Exit criteria:
+Remaining before milestone close:
 
-- parse-print-parse is stable;
-- malformed fixtures fail with deterministic diagnostics;
-- map iteration, process addresses, and temporary paths cannot affect output;
-- the MIR package can be used without the future source frontend.
+- a separate cross-process determinism harness (repeated in-process runs cover the property today);
+- a MIR interpreter for differential backend testing stays an open question until the C backend exists.
 
 ### Milestone 2: Minimal Runtime
 
