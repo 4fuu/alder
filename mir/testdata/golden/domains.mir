@@ -1,0 +1,44 @@
+mir 1
+
+enum @LoadError {
+  InvalidFormat(i64)
+}
+
+const @zero_u64: u64 = 0
+const @zero_i64: i64 = 0
+const @zero_u8: u8 = 0
+
+fn @domain.destroy(%d: domain_handle) {
+bb0:
+  return
+}
+
+fn @scoped(%root: domain_handle) -> i64 {
+  local %s: cleanup_scope
+
+bb0:
+  %s = cleanup.scope.begin
+  %d = domain.create %root
+  %m = domain.mark %d
+  %z = const.get @zero_i64
+  %n = const.get @zero_u64
+  %b8 = const.get @zero_u8
+  %c1 = cleanup.push %s, @domain.destroy, (%d)
+  cleanup.disarm %c1
+  %buf = alloc %d, u8, %n
+  %r = slice.index.checked %buf, %n else bb_oob
+  store deref %r, %b8
+  domain.reset %d, %m
+  %c2 = cleanup.push %s, @domain.destroy, (%d)
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  return %z
+
+bb_oob:
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  fail %z
+
+bb_dead:
+  unreachable
+}

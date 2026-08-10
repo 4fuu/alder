@@ -224,7 +224,10 @@ const (
 )
 
 // SwitchCase is one case of a switch terminator. Binding is the payload value
-// defined by the case (NoValue when the case binds no payload).
+// defined by the case (NoValue when the case binds no payload). A case with an
+// empty Variant is the default case; the verifier allows at most one.
+// Exhaustiveness: a switch must cover every variant of its operand type or
+// contain a default case.
 type SwitchCase struct {
 	Variant string
 	Binding ValueId
@@ -249,10 +252,8 @@ type Terminator struct {
 	ElseArgs []ValueId
 
 	// switch
-	Value       ValueId
-	Cases       []SwitchCase
-	Default     BlockId // NoBlock when absent
-	DefaultArgs []ValueId
+	Value ValueId
+	Cases []SwitchCase
 
 	// return / fail
 	Result ValueId // NoValue for a unit return without an operand

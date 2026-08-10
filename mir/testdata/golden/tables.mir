@@ -1,0 +1,54 @@
+mir 1
+
+type @Pair {
+  first: i64
+  second: slice(u8)
+}
+
+enum @LoadError {
+  NotFound(slice(u8))
+  InvalidFormat(i64)
+}
+
+const @zero: i64 = 0
+
+fn @players(%domain: domain_handle, %p: @Pair) -> result(@Pair, @LoadError) {
+bb0:
+  %t = table.create @Pair, %domain
+  %id = table.insert %t, %p
+  %zero = const.get @zero
+  %opt = table.lookup %t, %id
+  switch %opt {
+    some(%view) -> bb1
+    none -> bb_fail
+  }
+
+bb1:
+  %first = load field(deref %view, first)
+  table.view.end %view
+  %neg = int.lt %first, %zero
+  branch %neg, bb_neg, bb_ok
+
+bb_ok:
+  %mopt = table.lookup_mut %t, %id
+  switch %mopt {
+    some(%mview) -> bb2
+    none -> bb_fail
+  }
+
+bb2:
+  store field(deref %mview, first), %first
+  table.view.end %mview
+  %ok = enum.construct result(@Pair, @LoadError), ok, %p
+  return %ok
+
+bb_neg:
+  %removed = table.remove %t, %id
+  %ok2 = enum.construct result(@Pair, @LoadError), ok, %p
+  return %ok2
+
+bb_fail:
+  %err = enum.construct @LoadError, InvalidFormat, %zero
+  %fail_res = enum.construct result(@Pair, @LoadError), err, %err
+  fail %fail_res
+}

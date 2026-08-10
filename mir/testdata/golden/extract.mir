@@ -1,0 +1,39 @@
+mir 1
+
+type @Pair {
+  first: i64
+  second: slice(u8)
+}
+
+enum @LoadError {
+  InvalidFormat(i64)
+}
+
+const @zero: i64 = 0
+
+fn @extract(%maybe: option(@Pair), %p: @Pair) -> result(@Pair, @LoadError) {
+  local %tmp: @Pair
+
+bb0:
+  %v = enum.payload.checked %maybe, some else bb_none
+  store local %tmp, %v
+  %first = load field(local %tmp, first)
+  switch %maybe {
+    some -> bb_have
+    default -> bb_missing
+  }
+
+bb_have:
+  %ok = enum.construct result(@Pair, @LoadError), ok, %p
+  return %ok
+
+bb_missing:
+  %z = const.get @zero
+  %err = enum.construct @LoadError, InvalidFormat, %z
+  %fail_res = enum.construct result(@Pair, @LoadError), err, %err
+  fail %fail_res
+
+bb_none:
+  %ok2 = enum.construct result(@Pair, @LoadError), ok, %p
+  return %ok2
+}

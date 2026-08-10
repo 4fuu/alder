@@ -1,0 +1,40 @@
+mir 1
+
+const @zero: i64 = 0
+
+fn @arithmetic(%a: i64, %b: i64, %sh: i64, %c8: u8, %s: slice(u8), %idx: u64) -> i64 {
+  local %cleanup: cleanup_scope
+
+bb0:
+  %cleanup = cleanup.scope.begin
+  %sum = int.add.checked %a, %b else bb_fail
+  %diff = int.sub.checked %sum, %b else bb_fail
+  %prod = int.mul.checked %diff, %a else bb_fail
+  %quot = int.div.checked %prod, %b else bb_fail
+  %shft = int.shift.checked %quot, %sh else bb_fail
+  %len = slice.len %s
+  %elem = slice.index.checked %s, %idx else bb_fail
+  store deref %elem, %c8
+  %u8v = load deref %elem
+  %w = int.zext %u8v, i64
+  %f = float.from_int %w, f64
+  %g = float.convert %f, f32
+  %h = int.from_float %g, i32
+  %i64b = int.sext %h, i64
+  %t32 = int.trunc %shft, i32
+  %sub = slice.range.checked %s, %idx, %len else bb_fail
+  %l2 = slice.len %sub
+  %eq = int.eq %i64b, %shft
+  branch %eq, bb_ok, bb_fail
+
+bb_ok:
+  cleanup.scope.run %cleanup
+  cleanup.scope.end %cleanup
+  return %shft
+
+bb_fail:
+  cleanup.scope.run %cleanup
+  cleanup.scope.end %cleanup
+  %zero = const.get @zero
+  fail %zero
+}

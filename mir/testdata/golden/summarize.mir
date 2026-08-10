@@ -1,0 +1,37 @@
+mir 1
+
+type @Summary {
+  title: slice(u8)
+  words: i64
+}
+
+enum @LoadError {
+  NotFound(slice(u8))
+  InvalidFormat(i64)
+}
+
+const @max_words: i64 = 1000
+
+import @c_fastwords: fn(slice(u8)) -> i64
+
+fn @domain.destroy(%d: domain_handle) {
+bb0:
+  return
+}
+
+fn @summarize(%result_domain: domain_handle, %data: slice(u8)) -> result(@Summary, @LoadError) {
+  local %cleanup: cleanup_scope
+  local %temp: domain_handle
+
+bb0:
+  %cleanup = cleanup.scope.begin
+  %temp = domain.create %result_domain
+  %temp_cleanup = cleanup.push %cleanup, @domain.destroy, (%temp)
+  %title = copy_to_domain %result_domain, %data
+  %words = ffi.call.unsafe @c_fastwords(%data)
+  %summary = aggregate.construct @Summary { title: %title, words: %words }
+  %ok_result = enum.construct result(@Summary, @LoadError), ok, %summary
+  cleanup.scope.run %cleanup
+  cleanup.scope.end %cleanup
+  return %ok_result
+}
