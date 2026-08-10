@@ -1,0 +1,11 @@
+mir 1
+
+const @zero_u64: u64 = 0
+
+fn @f(%root: domain_handle) -> safe_mut(u8) {
+bb0:
+  %d = domain.create %root
+  %n = const.get @zero_u64
+  %buf = alloc %d, u8, %n
+  return %buf
+}

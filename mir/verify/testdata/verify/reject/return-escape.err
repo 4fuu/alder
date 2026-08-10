@@ -1,0 +1,1 @@
+fn @f: block bb0: terminator return: return of %buf escapes storage from a function-local domain

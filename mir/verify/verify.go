@@ -55,8 +55,9 @@ func Module(m *mir.Module) []Error {
 	errs = append(errs, phase3CFG(m)...)
 	errs = append(errs, phase4Dominance(m)...)
 	errs = append(errs, phase5Typing(m)...)
-	// Phases 6 through 10 (domains, cleanup, tables, pointer boundaries,
-	// backend preconditions) are added as they land.
+	errs = append(errs, phase6Domains(m)...)
+	// Phases 7 through 10 (cleanup, tables, pointer boundaries, backend
+	// preconditions) are added as they land.
 	return errs
 }
 

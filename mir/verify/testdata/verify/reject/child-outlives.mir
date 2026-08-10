@@ -1,0 +1,10 @@
+mir 1
+
+fn @f(%root: domain_handle) {
+bb0:
+  %p = domain.create %root
+  %c = domain.create %p
+  domain.destroy %p
+  domain.destroy %c
+  return
+}

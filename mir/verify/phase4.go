@@ -62,11 +62,5 @@ func phase4Dominance(m *mir.Module) []Error {
 }
 
 func availabilityError(f *mir.Function, u useSite, v *mir.Value) Error {
-	loc := locFunc(f) + ": block " + f.Blocks[u.block].Name
-	if u.instr >= 0 {
-		loc += ": op " + f.Blocks[u.block].Instrs[u.instr].Op.String()
-	} else {
-		loc += ": terminator " + f.Blocks[u.block].Term.Kind.String()
-	}
-	return Error{Loc: loc, Msg: fmt.Sprintf("use of %%%s is not dominated by its definition", v.Name)}
+	return Error{Loc: useSiteLoc(f, u), Msg: fmt.Sprintf("use of %%%s is not dominated by its definition", v.Name)}
 }

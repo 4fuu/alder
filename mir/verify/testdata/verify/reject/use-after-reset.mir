@@ -1,0 +1,20 @@
+mir 1
+
+const @zero_u64: u64 = 0
+const @zero_u8: u8 = 0
+
+fn @f(%root: domain_handle) {
+bb0:
+  %d = domain.create %root
+  %m = domain.mark %d
+  %n = const.get @zero_u64
+  %buf = alloc %d, u8, %n
+  %r = slice.index.checked %buf, %n else bb1
+  domain.reset %d, %m
+  %z = const.get @zero_u8
+  store deref %r, %z
+  return
+
+bb1:
+  return
+}

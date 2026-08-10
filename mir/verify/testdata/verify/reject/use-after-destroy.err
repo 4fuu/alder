@@ -1,0 +1,2 @@
+fn @f: block bb0: op store: use of %r after destruction of its domain
+fn @f: block bb0: op store: use of %r after destruction of its domain

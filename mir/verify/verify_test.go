@@ -10,14 +10,22 @@ import (
 )
 
 // TestGoldenAcceptance verifies that every golden fixture is accepted. The
-// golden files exercise the full documented vocabulary.
+// golden files exercise the full documented vocabulary; testdata/verify/accept
+// holds additional targeted acceptance fixtures.
 func TestGoldenAcceptance(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "testdata", "golden", "*.mir"))
-	if err != nil {
-		t.Fatal(err)
+	var files []string
+	for _, dir := range []string{
+		filepath.Join("..", "testdata", "golden"),
+		filepath.Join("testdata", "verify", "accept"),
+	} {
+		got, err := filepath.Glob(filepath.Join(dir, "*.mir"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, got...)
 	}
 	if len(files) == 0 {
-		t.Fatal("no golden fixtures found")
+		t.Fatal("no acceptance fixtures found")
 	}
 	for _, path := range files {
 		name := filepath.Base(path)

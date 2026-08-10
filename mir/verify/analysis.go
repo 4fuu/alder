@@ -172,24 +172,13 @@ func collectUses(f *mir.Function) []useSite {
 		for ii := range b.Instrs {
 			in := &b.Instrs[ii]
 			addPlace(&out, f, in, bi, ii)
-			for _, v := range []mir.ValueId{
-				in.StoreVal, in.Mark, in.Count, in.CopyVal, in.Scope, in.CleanupID,
-				in.A, in.B, in.Index, in.Lo, in.Hi, in.EnumValue, in.Payload,
-				in.Table, in.ID, in.TableVal, in.View,
-			} {
+			for _, v := range instrValueOperands(in) {
 				add(v, mir.BlockId(bi), ii, -1)
 			}
-			for _, v := range in.CleanupArgs {
-				add(v, mir.BlockId(bi), ii, -1)
-			}
-			for _, v := range in.Args {
-				add(v, mir.BlockId(bi), ii, -1)
-			}
-			for _, v := range in.FailArgs {
-				add(v, mir.BlockId(bi), ii, -1)
-			}
-			for _, af := range in.AggFields {
-				add(af.Value, mir.BlockId(bi), ii, -1)
+			if in.FailTarget != mir.NoBlock {
+				for _, v := range in.FailArgs {
+					add(v, mir.BlockId(bi), ii, -1)
+				}
 			}
 		}
 		b := mir.BlockId(bi)
@@ -234,6 +223,61 @@ func addPlace(out *[]useSite, f *mir.Function, in *mir.Instr, bi, ii int) {
 		}
 	}
 	walk(&in.Place)
+}
+
+// useSiteLoc renders the location of a value use for diagnostics.
+func useSiteLoc(f *mir.Function, u useSite) string {
+	loc := locFunc(f) + ": block " + f.Blocks[u.block].Name
+	if u.instr >= 0 {
+		loc += ": op " + f.Blocks[u.block].Instrs[u.instr].Op.String()
+	} else {
+		loc += ": terminator " + f.Blocks[u.block].Term.Kind.String()
+	}
+	return loc
+}
+
+// edgeArgsTo returns the argument list of the edge from block b to target,
+// or nil when no such edge exists.
+func edgeArgsTo(f *mir.Function, b *mir.Block, target mir.BlockId) []mir.ValueId {
+	for i := range b.Instrs {
+		if b.Instrs[i].FailTarget == target {
+			return b.Instrs[i].FailArgs
+		}
+	}
+	switch b.Term.Kind {
+	case mir.TermJump:
+		if b.Term.Target == target {
+			return b.Term.Args
+		}
+	case mir.TermBranch:
+		if b.Term.Then == target {
+			return b.Term.ThenArgs
+		}
+		if b.Term.Else == target {
+			return b.Term.ElseArgs
+		}
+	case mir.TermSwitch:
+		for i := range b.Term.Cases {
+			if b.Term.Cases[i].Target == target {
+				return b.Term.Cases[i].Args
+			}
+		}
+	}
+	return nil
+}
+
+// placeRootLocal returns the local slot a place ultimately reads or writes,
+// or false when the place is deref-based.
+func placeRootLocal(p *mir.Place) (mir.LocalId, bool) {
+	switch p.Kind {
+	case mir.PlaceLocal:
+		return p.Local, true
+	case mir.PlaceField:
+		if p.Base != nil {
+			return placeRootLocal(p.Base)
+		}
+	}
+	return mir.NoLocal, false
 }
 
 // valueName returns the printable name of a value for diagnostics.
