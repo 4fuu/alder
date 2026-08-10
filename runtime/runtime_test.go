@@ -20,7 +20,7 @@ var strictFlags = []string{
 
 // testPrograms are the runtime behavior test programs, one per runtime area.
 // Each program is added to this list as its runtime section lands.
-var testPrograms = []string{"domains", "arithmetic", "bounds"}
+var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup"}
 
 func findCompiler(t *testing.T) string {
 	t.Helper()

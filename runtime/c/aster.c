@@ -395,3 +395,104 @@ bool aster_u64_from_f64(double v, uint64_t *out) {
     *out = (uint64_t)v; /* in-range conversion is defined */
     return true;
 }
+
+/* ------------------------------------------------------------------ */
+/* Scoped cleanup                                                      */
+/* ------------------------------------------------------------------ */
+
+bool aster_cleanup_scope_begin(AsterCleanupScope *scope) {
+    if (scope == NULL || scope->active) {
+        return false;
+    }
+    scope->armed_head = NULL;
+    scope->spent_head = NULL;
+    scope->ran = false;
+    scope->active = true;
+    return true;
+}
+
+bool aster_cleanup_push(AsterCleanupScope *scope, AsterCleanupFn fn,
+                        void *context, AsterCleanupId *out_id) {
+    if (scope == NULL || !scope->active || fn == NULL || out_id == NULL) {
+        return false;
+    }
+    AsterCleanupEntry *entry = (AsterCleanupEntry *)rt_malloc(sizeof *entry);
+    if (entry == NULL) {
+        return false;
+    }
+    entry->fn = fn;
+    entry->context = context;
+    entry->armed = true;
+    entry->next = scope->armed_head; /* newest first: reverse registration
+                                        order at run time */
+    scope->armed_head = entry;
+    *out_id = entry;
+    return true;
+}
+
+bool aster_cleanup_disarm(AsterCleanupId id) {
+    if (id == NULL || !id->armed) {
+        return false;
+    }
+    id->armed = false;
+    return true;
+}
+
+bool aster_cleanup_run(AsterCleanupScope *scope) {
+    if (scope == NULL || !scope->active) {
+        return false;
+    }
+    AsterCleanupEntry *entry = scope->armed_head;
+    while (entry != NULL) {
+        AsterCleanupEntry *next = entry->next;
+        if (entry->armed) {
+            entry->armed = false;
+            entry->fn(entry->context);
+        }
+        entry = next;
+    }
+    /* Everything executed or skipped becomes spent; a later run has nothing
+     * to execute, so every entry runs at most once. The spent list must be
+     * preserved across runs so entries of earlier runs are still freed. */
+    if (scope->armed_head != NULL) {
+        AsterCleanupEntry *tail = scope->armed_head;
+        while (tail->next != NULL) {
+            tail = tail->next;
+        }
+        tail->next = scope->spent_head;
+        scope->spent_head = scope->armed_head;
+        scope->armed_head = NULL;
+    }
+    scope->ran = true;
+    return true;
+}
+
+bool aster_cleanup_end(AsterCleanupScope *scope) {
+    if (scope == NULL || !scope->active) {
+        return false;
+    }
+    bool ok = scope->ran && scope->armed_head == NULL;
+    if (!ok) {
+        /* Contract violation: run must precede end. Move leftovers to spent
+         * and free everything so nothing leaks. */
+        AsterCleanupEntry *head = scope->armed_head;
+        if (head != NULL) {
+            AsterCleanupEntry *tail = head;
+            while (tail->next != NULL) {
+                tail = tail->next;
+            }
+            tail->next = scope->spent_head;
+            scope->spent_head = head;
+            scope->armed_head = NULL;
+        }
+    }
+    AsterCleanupEntry *entry = scope->spent_head;
+    while (entry != NULL) {
+        AsterCleanupEntry *next = entry->next;
+        rt_free(entry);
+        entry = next;
+    }
+    scope->spent_head = NULL;
+    scope->active = false;
+    return ok;
+}
