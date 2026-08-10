@@ -76,17 +76,6 @@ The repository will move toward self-hosting after the MIR and C backend are coh
 
 Documents and code comments in this repository are written in English. Surface syntax shown in design documents is illustrative until the grammar is versioned.
 
-## Orb Setup
-
-Amp orbs use the committed lifecycle scripts:
-
-```sh
-.agents/setup
-.agents/resume
-```
-
-`setup` installs missing Go and C toolchains on a fresh Debian-based orb. `resume` performs a fast toolchain check when an existing orb wakes. Neither script starts a long-running service.
-
 ## One-Sentence Summary
 
 > Reclaim local data in batches, keep long-lived identity in containers, make safety a semantic guarantee, and leave memory tuning to the compiler and profiler rather than the everyday type system.
