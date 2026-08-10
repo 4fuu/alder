@@ -75,11 +75,13 @@ It must not combine these into a C expression whose evaluation order differs fro
 
 ## Integer Semantics
 
-Generated C must not use undefined signed overflow to implement Aster arithmetic.
+Generated C must not use undefined signed overflow to implement Aster arithmetic. The Milestone 2 runtime provides checked 64-bit helpers (`aster_i64_*` and `aster_u64_*` in `runtime/c/aster.h`) for add, sub, mul, div, and shifts, plus defined float-to-integer conversions. Narrower MIR integer types lower by promoting operands to 64 bits, computing with the checked helpers, and range-checking the result against the narrow type; the narrow operation fails exactly when the promoted computation or the range check fails.
+
+Shift semantics are defined on the two's-complement bit pattern: left shifts wrap, right shifts are arithmetic for signed values and logical for unsigned. All helpers fail on shift counts below zero or at or above the bit width. Division fails on division by zero and on `INT64_MIN / -1`.
 
 Depending on the final language rule, checked operations lower to:
 
-- compiler builtins behind a portable runtime wrapper;
+- the runtime helpers above;
 - explicit range checks;
 - carefully specified unsigned arithmetic followed by conversion.
 
@@ -127,13 +129,15 @@ The backend must avoid performing invalid pointer arithmetic before the check. A
 
 ## Storage Domains
 
-Initial runtime operations should have a small C ABI, conceptually:
+The Milestone 2 runtime ABI is pinned in `runtime/c/aster.h`; the detailed
+contracts below are the canonical reference.
 
 ```c
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
-typedef struct AsterDomain AsterDomain;
+typedef struct AsterDomain AsterDomain;   /* layout is ABI, fields internal */
 typedef struct {
     void *segment;
     size_t offset;
@@ -142,52 +146,82 @@ typedef struct {
 bool aster_domain_init(AsterDomain *domain, AsterDomain *parent);
 void *aster_domain_alloc(AsterDomain *domain, size_t size, size_t align);
 AsterDomainMark aster_domain_mark(AsterDomain *domain);
-void aster_domain_reset(AsterDomain *domain, AsterDomainMark mark);
+bool aster_domain_reset(AsterDomain *domain, AsterDomainMark mark);
 void aster_domain_destroy(AsterDomain *domain);
+size_t aster_runtime_live_allocations(void);
 ```
 
-The exact ABI is not yet fixed. All size and alignment calculations must be checked for overflow. Reset and destroy behavior must be testable under ASan and UBSan.
+Failure contracts:
 
-Result values should be constructed directly in caller-provided storage when MIR represents destination construction. The C backend should not introduce temporary aggregate copies merely for convenience.
+- `aster_domain_init` returns false for a double init or an uninitialized or
+destroyed parent; the struct must be zero-initialized or freshly destroyed;
+- `aster_domain_alloc` returns NULL when the domain is not initialized, the
+alignment is not a power of two (or zero), size plus alignment slack
+overflows `size_t`, or memory is exhausted. A zero size allocates one byte;
+- `aster_domain_reset` returns false for a destroyed domain, a `{NULL, 0}`
+mark on a non-empty domain, a mark whose segment is no longer active, or a
+mark whose offset exceeds the segment frontier;
+- `aster_domain_destroy` is a no-op on uninitialized or already-destroyed
+domains; destroying a parent recursively destroys its children.
+
+Lifetime contracts:
+
+- domain structs are caller-owned; the runtime never frees them;
+- a child domain cannot outlive its parent: destroying the parent destroys
+children first, so any later child destroy is a no-op;
+- allocations stay valid until the domain is reset past them or destroyed;
+- reset releases every segment after the marked one; pointers into released
+storage become invalid, and the MIR verifier prevents their use;
+- marks are validated by segment-list membership before any dereference, so
+a stale mark into memory the heap already returned to the operating system
+is rejected instead of crashing.
+
+Implementation policy: segments are single heap blocks (header plus a
+16-aligned data area); allocations bump with per-allocation alignment;
+regular segments double up to 1 MiB; larger requests receive a dedicated
+exact-size segment. The runtime tracks its live heap blocks in one counter
+so tests can prove leak-free create/reset/destroy cycles without a leak
+sanitizer.
 
 ## Cleanup Lowering
 
-MIR cleanup scopes lower to explicit, visible control flow. An initial implementation may use one cleanup label per canonical scope:
+MIR cleanup scopes lower to explicit, visible control flow. The runtime side
+(`AsterCleanupScope`, `aster_cleanup_scope_begin/push/disarm/run/end` in
+`runtime/c/aster.h`) owns the entry list: pushes register a function pointer
+and context, `run` executes armed entries in reverse registration order,
+each exactly once, and `end` frees every entry. `end` returns false (and
+still releases entries) when the scope was not run or still has armed
+entries; the MIR verifier requires run before end on every exit path, so
+that state is a contract violation.
 
-```c
-AsterResult result = ASTER_OK;
-AsterFile file = {0};
-bool file_active = false;
-
-result = aster_file_open(path, &file);
-if (result.failed) goto cleanup;
-file_active = true;
-
-/* body */
-
-cleanup:
-if (file_active) {
-    aster_file_close(&file);
-    file_active = false;
-}
-return result;
-```
-
-Generated control flow must guarantee reverse order and at-most-once cleanup. C `goto` is a backend mechanism and does not appear in MIR semantics.
+Generated C must guarantee reverse order and at-most-once cleanup. C `goto`
+is a backend mechanism and does not appear in MIR semantics.
 
 ## Generational Tables
 
-The runtime representation must include enough identity to prevent a typed ID from resolving against an unrelated table or reused generation.
+The Milestone 2 ABI is `AsterTable` plus `AsterTableId { table_serial, slot,
+generation }` and `aster_table_init/insert/lookup/lookup_mut/remove` in
+`runtime/c/aster.h`. The table serial comes from a global counter, so an id
+never resolves against an unrelated table even when a fresh table reuses the
+same address; slot generations are unique within a table's lifetime, so a
+removed slot never reuses a generation and stale ids cannot resolve to a
+replacement object.
 
 Lookup performs, in order:
 
-1. table/type identity validation where represented at runtime;
+1. table identity validation (serial match, live domain);
 2. slot bounds validation;
 3. occupancy validation;
 4. generation comparison;
-5. creation of a scoped view.
+5. creation of a scoped view (a pointer to the element storage).
 
-Compaction may update slot-to-storage mappings while preserving IDs. It must not run while an incompatible view is active.
+Element storage and the slot array are allocated from the table's domain;
+removal marks the slot empty but leaves element storage in the domain until
+reset or destroy. M2 tables never compact, so a view stays valid memory
+until the domain releases it. `table.view.end` lowers to nothing in M2; the
+verifier enforces view discipline. Compaction may update slot-to-storage
+mappings while preserving IDs; it must not run while an incompatible view
+is active, and it is deferred.
 
 ## C Interoperability
 

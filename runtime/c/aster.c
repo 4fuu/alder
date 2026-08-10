@@ -1,0 +1,397 @@
+/*
+ * Aster minimal C runtime implementation.
+ *
+ * Portable C11, compiled with the project's strict warning set. The runtime
+ * never relies on signed overflow, unspecified evaluation order,
+ * strict-aliasing violations, unaligned typed access, or compiler
+ * extensions. Representation-preserving transfers use memcpy.
+ *
+ * Storage layout:
+ *  - a domain owns a singly linked list of segments; each segment is one
+ *    heap block holding a header followed by a 16-aligned data area;
+ *  - allocations bump through the data area with per-allocation alignment;
+ *  - segments double up to ASTER_MAX_SEGMENT; larger requests get a
+ *    dedicated segment of exactly the needed size;
+ *  - reset truncates the marked segment and frees every later segment;
+ *  - destroy frees all segments, recursively destroys children, and
+ *    unregisters the domain from its parent.
+ */
+#include "aster.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#define ASTER_MAGIC ((uint32_t)0x41535452u) /* "ASTR" */
+
+#define ASTER_MIN_SEGMENT ((size_t)8192)
+#define ASTER_MAX_SEGMENT ((size_t)(1u << 20)) /* 1 MiB */
+#define ASTER_SEGMENT_ALIGN ((size_t)16)
+
+typedef struct AsterSegment {
+    struct AsterSegment *next;
+    size_t capacity; /* usable bytes in the data area */
+    size_t used;     /* bytes consumed from the data area */
+} AsterSegment;
+
+struct AsterTableSlot {
+    uint64_t generation; /* 0 means empty */
+    uint8_t *elem;
+};
+
+struct AsterCleanupEntry {
+    AsterCleanupEntry *next;
+    AsterCleanupFn fn;
+    void *context;
+    bool armed;
+};
+
+/* Single-threaded by design (structured concurrency is out of scope). */
+static size_t g_live_allocations = 0;
+
+static void *rt_malloc(size_t size) {
+    void *p = malloc(size);
+    if (p != NULL) {
+        g_live_allocations += 1;
+    }
+    return p;
+}
+
+static void rt_free(void *p) {
+    if (p != NULL) {
+        g_live_allocations -= 1;
+        free(p);
+    }
+}
+
+size_t aster_runtime_live_allocations(void) {
+    return g_live_allocations;
+}
+
+static bool align_is_valid(size_t align) {
+    return align != 0 && (align & (align - 1)) == 0;
+}
+
+static uintptr_t align_up(uintptr_t addr, size_t align) {
+    uintptr_t a = (uintptr_t)align;
+    return (addr + (a - 1)) & ~(a - 1);
+}
+
+static uint8_t *segment_data(AsterSegment *seg) {
+    return (uint8_t *)align_up((uintptr_t)(seg + 1), ASTER_SEGMENT_ALIGN);
+}
+
+/* ------------------------------------------------------------------ */
+/* Storage domains                                                     */
+/* ------------------------------------------------------------------ */
+
+bool aster_domain_init(AsterDomain *domain, AsterDomain *parent) {
+    if (domain == NULL || domain->magic == ASTER_MAGIC) {
+        return false; /* NULL or double init */
+    }
+    if (parent != NULL && parent->magic != ASTER_MAGIC) {
+        return false;
+    }
+    *domain = (AsterDomain){0};
+    domain->magic = ASTER_MAGIC;
+    domain->parent = parent;
+    if (parent != NULL) {
+        domain->next_sibling = parent->children_head;
+        parent->children_head = domain;
+    }
+    return true;
+}
+
+static AsterSegment *new_segment(size_t capacity) {
+    size_t slack = ASTER_SEGMENT_ALIGN - 1;
+    size_t alloc_size = capacity + sizeof(AsterSegment) + slack;
+    if (alloc_size < capacity) {
+        return NULL; /* overflow */
+    }
+    AsterSegment *seg = (AsterSegment *)rt_malloc(alloc_size);
+    if (seg == NULL) {
+        return NULL;
+    }
+    seg->next = NULL;
+    seg->capacity = capacity;
+    seg->used = 0;
+    return seg;
+}
+
+void *aster_domain_alloc(AsterDomain *domain, size_t size, size_t align) {
+    if (domain == NULL || domain->magic != ASTER_MAGIC) {
+        return NULL;
+    }
+    if (!align_is_valid(align)) {
+        return NULL;
+    }
+    if (size == 0) {
+        size = 1;
+    }
+    if (size > (size_t)-1 - (align - 1)) {
+        return NULL; /* alignment slack overflows */
+    }
+    AsterSegment *seg = domain->segments_tail;
+    for (;;) {
+        if (seg != NULL) {
+            uint8_t *data = segment_data(seg);
+            uintptr_t ptr = align_up((uintptr_t)(data + seg->used), align);
+            size_t start = (size_t)(ptr - (uintptr_t)data);
+            if (start <= seg->capacity && size <= seg->capacity - start) {
+                seg->used = start + size;
+                return (void *)ptr;
+            }
+        }
+        /* Grow: dedicated large segment or a doubling regular segment. */
+        size_t needed = size + (align - 1);
+        size_t capacity;
+        if (needed > ASTER_MAX_SEGMENT) {
+            capacity = needed; /* large allocation: exact-size segment */
+        } else {
+            size_t prev = (seg != NULL) ? seg->capacity : 0;
+            size_t grown = prev > ASTER_MAX_SEGMENT / 2 ? ASTER_MAX_SEGMENT
+                                                        : prev * 2;
+            capacity = grown < ASTER_MIN_SEGMENT ? ASTER_MIN_SEGMENT : grown;
+            if (capacity < needed) {
+                capacity = needed;
+            }
+        }
+        AsterSegment *fresh = new_segment(capacity);
+        if (fresh == NULL) {
+            return NULL; /* out of memory; domain unchanged */
+        }
+        if (seg == NULL) {
+            domain->segments_head = fresh;
+        } else {
+            seg->next = fresh;
+        }
+        domain->segments_tail = fresh;
+        domain->segment_count += 1;
+        seg = fresh;
+        /* Retry the allocation in the fresh segment. */
+    }
+}
+
+AsterDomainMark aster_domain_mark(AsterDomain *domain) {
+    AsterDomainMark mark = {NULL, 0};
+    if (domain != NULL && domain->magic == ASTER_MAGIC &&
+        domain->segments_tail != NULL) {
+        mark.segment = (void *)domain->segments_tail;
+        mark.offset = domain->segments_tail->used;
+    }
+    return mark;
+}
+
+bool aster_domain_reset(AsterDomain *domain, AsterDomainMark mark) {
+    if (domain == NULL || domain->magic != ASTER_MAGIC) {
+        return false;
+    }
+    if (mark.segment == NULL) {
+        /* Only an empty domain resets to a {NULL, 0} mark. */
+        return domain->segments_head == NULL && mark.offset == 0;
+    }
+    AsterSegment *seg = (AsterSegment *)mark.segment;
+    /* Validate membership by pointer comparison only: a stale mark may
+     * point into memory the heap already returned to the operating system,
+     * so the segment must not be dereferenced before it is proven live. */
+    AsterSegment *cur = domain->segments_head;
+    while (cur != NULL && cur != seg) {
+        cur = cur->next;
+    }
+    if (cur == NULL) {
+        return false; /* mark of another domain or a released segment */
+    }
+    if (mark.offset > seg->used) {
+        return false;
+    }
+    while (seg->next != NULL) {
+        AsterSegment *victim = seg->next;
+        seg->next = victim->next;
+        rt_free(victim);
+        domain->segment_count -= 1;
+    }
+    seg->used = mark.offset;
+    domain->segments_tail = seg;
+    return true;
+}
+
+void aster_domain_destroy(AsterDomain *domain) {
+    if (domain == NULL || domain->magic != ASTER_MAGIC) {
+        return; /* no-op: uninitialized or already destroyed */
+    }
+    /* Children cannot outlive their parent. */
+    AsterDomain *child = domain->children_head;
+    while (child != NULL) {
+        AsterDomain *next = child->next_sibling;
+        aster_domain_destroy(child);
+        child = next;
+    }
+    AsterSegment *seg = domain->segments_head;
+    while (seg != NULL) {
+        AsterSegment *next = seg->next;
+        rt_free(seg);
+        seg = next;
+    }
+    /* Unregister from the parent. */
+    if (domain->parent != NULL) {
+        AsterDomain **link = &domain->parent->children_head;
+        while (*link != NULL && *link != domain) {
+            link = &(*link)->next_sibling;
+        }
+        if (*link == domain) {
+            *link = domain->next_sibling;
+        }
+    }
+    *domain = (AsterDomain){0};
+}
+
+/* ------------------------------------------------------------------ */
+/* Slices and bounds                                                   */
+/* ------------------------------------------------------------------ */
+
+bool aster_slice_index_checked(AsterSlice slice, uint64_t index) {
+    return index < slice.len;
+}
+
+bool aster_slice_range_checked(AsterSlice slice, uint64_t lo, uint64_t hi) {
+    return lo <= hi && hi <= slice.len;
+}
+
+/* ------------------------------------------------------------------ */
+/* Checked integer arithmetic                                          */
+/* ------------------------------------------------------------------ */
+
+bool aster_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
+    if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) {
+        return false;
+    }
+    *out = a + b;
+    return true;
+}
+
+bool aster_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
+    if ((b > 0 && a < INT64_MIN + b) || (b < 0 && a > INT64_MAX + b)) {
+        return false;
+    }
+    *out = a - b;
+    return true;
+}
+
+bool aster_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
+    if (a == 0 || b == 0) {
+        *out = 0;
+        return true;
+    }
+    if ((a == INT64_MIN && b == -1) || (a == -1 && b == INT64_MIN)) {
+        return false;
+    }
+    bool neg = (a < 0) != (b < 0);
+    uint64_t ua = a < 0 ? (uint64_t)0 - (uint64_t)a : (uint64_t)a;
+    uint64_t ub = b < 0 ? (uint64_t)0 - (uint64_t)b : (uint64_t)b;
+    uint64_t limit = neg ? ((uint64_t)INT64_MAX + (uint64_t)1)
+                         : (uint64_t)INT64_MAX;
+    if (ua > limit / ub) {
+        return false;
+    }
+    uint64_t prod = ua * ub;
+    if (neg) {
+        prod = (uint64_t)0 - prod; /* two's complement negation, defined in
+                                      unsigned arithmetic */
+    }
+    memcpy(out, &prod, sizeof(prod)); /* representation transfer */
+    return true;
+}
+
+bool aster_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
+    if (b == 0 || (a == INT64_MIN && b == -1)) {
+        return false;
+    }
+    *out = a / b;
+    return true;
+}
+
+bool aster_i64_shl_checked(int64_t a, int64_t b, int64_t *out) {
+    if (b < 0 || b >= 64) {
+        return false;
+    }
+    uint64_t r = (uint64_t)a << (unsigned)b; /* unsigned shift is defined */
+    memcpy(out, &r, sizeof(r));
+    return true;
+}
+
+bool aster_i64_shr_checked(int64_t a, int64_t b, int64_t *out) {
+    if (b < 0 || b >= 64) {
+        return false;
+    }
+    uint64_t u = (uint64_t)a >> (unsigned)b;
+    if (a < 0 && b > 0) {
+        /* Arithmetic shift: sign-extend the shifted-out bits. */
+        u |= ~(UINT64_MAX >> (unsigned)b);
+    }
+    memcpy(out, &u, sizeof(u));
+    return true;
+}
+
+bool aster_u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (a > UINT64_MAX - b) {
+        return false;
+    }
+    *out = a + b;
+    return true;
+}
+
+bool aster_u64_sub_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (a < b) {
+        return false;
+    }
+    *out = a - b;
+    return true;
+}
+
+bool aster_u64_mul_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (a != 0 && b > UINT64_MAX / a) {
+        return false;
+    }
+    *out = a * b;
+    return true;
+}
+
+bool aster_u64_div_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    (void)a;
+    if (b == 0) {
+        return false;
+    }
+    *out = a / b;
+    return true;
+}
+
+bool aster_u64_shl_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (b >= 64) {
+        return false;
+    }
+    *out = a << (unsigned)b;
+    return true;
+}
+
+bool aster_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (b >= 64) {
+        return false;
+    }
+    *out = a >> (unsigned)b;
+    return true;
+}
+
+bool aster_i64_from_f64(double v, int64_t *out) {
+    if (v != v || v < -9223372036854775808.0 || v >= 9223372036854775808.0) {
+        return false;
+    }
+    *out = (int64_t)v; /* in-range conversion is defined */
+    return true;
+}
+
+bool aster_u64_from_f64(double v, uint64_t *out) {
+    if (v != v || v < 0.0 || v >= 18446744073709551616.0) {
+        return false;
+    }
+    *out = (uint64_t)v; /* in-range conversion is defined */
+    return true;
+}

@@ -68,6 +68,11 @@ Before submitting Go changes, run:
 - `go vet ./...` must pass;
 - `go test ./...` must pass.
 
+Before submitting C runtime changes, additionally run:
+
+- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/aster.c` must pass;
+- `go test ./runtime -count=1` must pass (strict-warning compile-and-run tests, plus ASan/UBSan runs when the host toolchain supports them).
+
 These are the canonical build, format, and test commands; keep them synchronized with `AGENTS.md`.
 
 ## C Runtime and Backend Standards
