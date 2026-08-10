@@ -56,14 +56,28 @@ func phase3CFG(m *mir.Module) []Error {
 				}
 				seen := make(map[string]bool)
 				hasDefault := false
+				operandType, hasOperandType := f.ValueType(b.Term.Value)
 				for _, c := range b.Term.Cases {
 					if c.Variant == "" {
+						if c.Binding != mir.NoValue {
+							errs = append(errs, Error{Loc: loc, Msg: "default switch case may not bind a payload"})
+						}
 						if hasDefault {
 							errs = append(errs, Error{Loc: loc, Msg: "switch has more than one default case"})
 						}
 						hasDefault = true
-					} else if seen[c.Variant] {
-						errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate switch case %q", c.Variant)})
+					} else {
+						if seen[c.Variant] {
+							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate switch case %q", c.Variant)})
+						}
+						if hasOperandType {
+							idx, ok := m.VariantIndex(operandType, c.Variant)
+							if !ok {
+								errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("unknown switch case %q for %s", c.Variant, m.TypeString(operandType))})
+							} else if payload, ok := m.VariantPayload(operandType, idx); ok && payload == mir.TypeUnit && c.Binding != mir.NoValue {
+								errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("switch case %q binds a unit payload", c.Variant)})
+							}
+						}
 					}
 					seen[c.Variant] = true
 					checkTarget("switch case", c.Target, c.Args)

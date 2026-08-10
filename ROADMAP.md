@@ -35,7 +35,7 @@ Exit criteria:
 
 ### Milestone 1: MIR Toolkit
 
-Status: **substantially complete**
+Status: **complete**
 
 Deliverables:
 
@@ -47,15 +47,18 @@ Deliverables:
 
 Exit-criteria evidence:
 
-- parse-print-parse is stable (round-trip tests over every golden fixture);
-- malformed fixtures fail with deterministic diagnostics (parser and verifier rejection fixtures);
-- map iteration, process addresses, and temporary paths cannot affect output (no map iteration in printing; pipeline determinism tests);
-- the MIR package is usable without the future source frontend (fixtures built through the public API).
+- parse-print-parse reaches a stable canonical form across all golden, verifier-acceptance, and verifier-rejection fixtures;
+- malformed textual and public-API-built modules fail without panics and with deterministic diagnostics;
+- the verifier covers all ten documented phases, including instruction-boundary failure edges, interprocedural domain and table effects, path-sensitive cleanup, and unsafe-boundary checks;
+- a cross-process pipeline harness compares byte-for-byte output from isolated processes with different working and temporary directories;
+- golden, acceptance, rejection, determinism, race, and vet checks pass without a future source frontend.
 
-Remaining before milestone close:
-
-- a separate cross-process determinism harness (repeated in-process runs cover the property today);
-- a MIR interpreter for differential backend testing stays an open question until the C backend exists.
+MIR 1 intentionally retains documented conservative restrictions where exact
+provenance is not representable, including direct SSA identity for cleanup
+handles, possible aliasing between external table or domain parameters, and no
+lifetime-bearing stores through dereference places. A MIR interpreter for
+differential backend testing remains an open question until the C backend
+exists; it is not required for this milestone.
 
 ### Milestone 2: Minimal Runtime
 

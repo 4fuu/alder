@@ -16,7 +16,7 @@ func phase4Dominance(m *mir.Module) []Error {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
-		dom := dominators(f)
+		g := buildPointCFG(f)
 		reach := reachable(f)
 		uses := collectUses(f)
 		for _, u := range uses {
@@ -27,16 +27,18 @@ func phase4Dominance(m *mir.Module) []Error {
 			if usePos < 0 {
 				usePos = len(f.Blocks[u.block].Instrs)
 			}
+			useNode := g.boundary[u.block][usePos]
 			v := &f.Values[u.value]
 			switch v.Def.Kind {
 			case mir.ValueDefFuncParam:
 				// Always available.
 			case mir.ValueDefBlockParam:
-				if !dominatesSite(dom, v.Def.Block, -1, u.block, usePos) {
+				if !g.dom[useNode][g.boundary[v.Def.Block][0]] {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefInstr:
-				if !dominatesSite(dom, v.Def.Block, v.Def.Instr, u.block, usePos) {
+				// A checked result exists only at the success boundary after it.
+				if !g.dom[useNode][g.boundary[v.Def.Block][v.Def.Instr+1]] {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefSwitchCase:
@@ -51,8 +53,8 @@ func phase4Dominance(m *mir.Module) []Error {
 				if v.Def.Case < 0 || v.Def.Case >= len(cases) {
 					continue
 				}
-				target := cases[v.Def.Case].Target
-				if int(target) >= len(f.Blocks) || !dom[target][u.block] {
+				defNode := g.edge[pointEdge{v.Def.Block, edgeSwitch, v.Def.Case}]
+				if !g.dom[useNode][defNode] {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			}

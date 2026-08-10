@@ -2,6 +2,103 @@ package verify
 
 import "github.com/4fuu/aster/mir"
 
+// pointCFG is a control-flow graph over instruction boundaries. boundary[b][i]
+// is the point before instruction i (and boundary[b][len(Instrs)] is before
+// the terminator). Every control-flow edge has its own node, preserving the
+// identity of parallel edges.
+type pointCFG struct {
+	boundary [][]int
+	edge     map[pointEdge]int
+	preds    [][]int
+	dom      [][]bool
+}
+
+type pointEdge struct {
+	block       mir.BlockId
+	kind, index int
+}
+
+const (
+	edgeFailure = iota
+	edgeJump
+	edgeThen
+	edgeElse
+	edgeSwitch
+)
+
+func buildPointCFG(f *mir.Function) *pointCFG {
+	g := &pointCFG{boundary: make([][]int, len(f.Blocks)), edge: make(map[pointEdge]int)}
+	addNode := func() int { g.preds = append(g.preds, nil); return len(g.preds) - 1 }
+	for bi, b := range f.Blocks {
+		g.boundary[bi] = make([]int, len(b.Instrs)+1)
+		for i := range g.boundary[bi] {
+			g.boundary[bi][i] = addNode()
+		}
+	}
+	addEdgeNode := func(k pointEdge, from int, target mir.BlockId) {
+		n := addNode()
+		g.edge[k] = n
+		g.preds[n] = append(g.preds[n], from)
+		g.preds[g.boundary[target][0]] = append(g.preds[g.boundary[target][0]], n)
+	}
+	for bi, b := range f.Blocks {
+		for i := range b.Instrs {
+			g.preds[g.boundary[bi][i+1]] = append(g.preds[g.boundary[bi][i+1]], g.boundary[bi][i])
+			if b.Instrs[i].FailTarget != mir.NoBlock {
+				addEdgeNode(pointEdge{mir.BlockId(bi), edgeFailure, i}, g.boundary[bi][i], b.Instrs[i].FailTarget)
+			}
+		}
+		end := g.boundary[bi][len(b.Instrs)]
+		switch b.Term.Kind {
+		case mir.TermJump:
+			addEdgeNode(pointEdge{mir.BlockId(bi), edgeJump, 0}, end, b.Term.Target)
+		case mir.TermBranch:
+			addEdgeNode(pointEdge{mir.BlockId(bi), edgeThen, 0}, end, b.Term.Then)
+			addEdgeNode(pointEdge{mir.BlockId(bi), edgeElse, 0}, end, b.Term.Else)
+		case mir.TermSwitch:
+			for i, c := range b.Term.Cases {
+				addEdgeNode(pointEdge{mir.BlockId(bi), edgeSwitch, i}, end, c.Target)
+			}
+		}
+	}
+	n := len(g.preds)
+	g.dom = make([][]bool, n)
+	entry := g.boundary[0][0]
+	for i := 0; i < n; i++ {
+		g.dom[i] = make([]bool, n)
+		if i == entry {
+			g.dom[i][i] = true
+		} else {
+			for j := 0; j < n; j++ {
+				g.dom[i][j] = true
+			}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for v := 0; v < n; v++ {
+			if v == entry {
+				continue
+			}
+			next := make([]bool, n)
+			if len(g.preds[v]) > 0 {
+				copy(next, g.dom[g.preds[v][0]])
+				for _, p := range g.preds[v][1:] {
+					for j := range next {
+						next[j] = next[j] && g.dom[p][j]
+					}
+				}
+			}
+			next[v] = true
+			if !equalBools(next, g.dom[v]) {
+				g.dom[v] = next
+				changed = true
+			}
+		}
+	}
+	return g
+}
+
 // successors returns every block that can follow b: terminator targets and
 // checked-operation failure edges, in declaration order.
 func successors(f *mir.Function, b *mir.Block) []mir.BlockId {
@@ -284,19 +381,36 @@ func collectUses(f *mir.Function) []useSite {
 }
 
 func addPlace(out *[]useSite, f *mir.Function, in *mir.Instr, bi, ii int) {
-	var walk func(p *mir.Place)
-	walk = func(p *mir.Place) {
-		if p == nil {
-			return
-		}
+	seen := make(map[*mir.Place]bool)
+	for p := &in.Place; p != nil && !seen[p]; {
+		seen[p] = true
 		switch p.Kind {
 		case mir.PlaceField:
-			walk(p.Base)
+			p = p.Base
+			continue
 		case mir.PlaceDeref:
 			*out = append(*out, useSite{value: p.Deref, block: mir.BlockId(bi), instr: ii, swCase: -1})
 		}
+		return
 	}
-	walk(&in.Place)
+}
+
+// placeDerefRoot returns the checked reference at the root of a dereference-
+// based place. It is iterative so malformed API input cannot recurse forever.
+func placeDerefRoot(p *mir.Place) (mir.ValueId, bool) {
+	seen := make(map[*mir.Place]bool)
+	for p != nil && !seen[p] {
+		seen[p] = true
+		switch p.Kind {
+		case mir.PlaceField:
+			p = p.Base
+		case mir.PlaceDeref:
+			return p.Deref, true
+		default:
+			return mir.NoValue, false
+		}
+	}
+	return mir.NoValue, false
 }
 
 // useSiteLoc renders the location of a value use for diagnostics.

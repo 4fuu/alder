@@ -2,12 +2,11 @@ mir 1
 
 fn @destroy(%d: domain_handle) {
 bb0:
+  domain.destroy %d
   return
 }
 
 fn @f(%root: domain_handle, %c: bool) {
-  local %s: cleanup_scope
-
 bb0:
   %s = cleanup.scope.begin
   %d = domain.create %root

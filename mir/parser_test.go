@@ -3,6 +3,7 @@ package mir
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,27 @@ func goldenFiles(t *testing.T) []string {
 	if len(files) == 0 {
 		t.Fatal("no golden fixtures found")
 	}
+	return files
+}
+
+func allMIRFixtureFiles(t *testing.T) []string {
+	t.Helper()
+	var files []string
+	for _, dir := range []string{
+		filepath.Join("testdata", "golden"),
+		filepath.Join("verify", "testdata", "verify", "accept"),
+		filepath.Join("verify", "testdata", "verify", "reject"),
+	} {
+		got, err := filepath.Glob(filepath.Join(dir, "*.mir"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, got...)
+	}
+	if len(files) == 0 {
+		t.Fatal("no MIR fixtures found")
+	}
+	sort.Strings(files)
 	return files
 }
 
@@ -52,7 +74,7 @@ func TestGoldenRoundTrip(t *testing.T) {
 // TestParsePrintParseIterated runs the parse-print cycle repeatedly and
 // requires stability from the first printed output onward.
 func TestParsePrintParseIterated(t *testing.T) {
-	for _, path := range goldenFiles(t) {
+	for _, path := range allMIRFixtureFiles(t) {
 		text, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -141,6 +163,14 @@ bb0:
 	if got := Print(m); !strings.Contains(got, "const @k: i64 = 1") {
 		t.Errorf("printed module missing const:\n%s", got)
 	}
+	canonical := Print(m)
+	reparsed, err := Parse(canonical)
+	if err != nil {
+		t.Fatalf("canonical output did not parse: %v", err)
+	}
+	if got := Print(reparsed); got != canonical {
+		t.Errorf("noncanonical input did not reach a print fixed point\n--- first ---\n%s\n--- second ---\n%s", canonical, got)
+	}
 }
 
 var invalidParseTests = []struct {
@@ -153,7 +183,7 @@ var invalidParseTests = []struct {
 	{"unsupported version", "mir 2\n", "unsupported format version 2"},
 	{"unknown declaration", "mir 1\nwat\n", "expected a declaration"},
 	{"duplicate type", "mir 1\ntype @T {}\ntype @T {}\n", "duplicate type @T"},
-	{"duplicate function", "mir 1\nfn @f() {}\nfn @f() {}\n", "duplicate function @f"},
+	{"empty function", "mir 1\nfn @f() {}\n", "function must contain at least one block"},
 	{"duplicate block", "mir 1\nfn @f() {\nbb0:\n  return\nbb0:\n  return\n}\n", "duplicate block"},
 	{"unknown type", "mir 1\nfn @f(%x: @Nope) {\nbb0:\n  return\n}\n", "unknown type @Nope"},
 	{"unknown value", "mir 1\nconst @k: i64 = 1\nfn @f() {\nbb0:\n  %y = const.get @k\n  %z = int.add.checked %x, %y else bb0\n  return\n}\n", "unknown value %x"},

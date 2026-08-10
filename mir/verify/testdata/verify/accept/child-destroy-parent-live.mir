@@ -1,0 +1,11 @@
+mir 1
+
+fn @child_does_not_kill_parent(%parent: domain_handle) {
+entry:
+  %child = domain.create %parent
+  domain.destroy %child
+  %mark = domain.mark %parent
+  domain.reset %parent, %mark
+  domain.destroy %parent
+  return
+}

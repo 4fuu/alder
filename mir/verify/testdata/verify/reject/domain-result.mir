@@ -1,0 +1,6 @@
+mir 1
+
+fn @unsupported(%parent: domain_handle) -> domain_handle {
+entry:
+  return %parent
+}

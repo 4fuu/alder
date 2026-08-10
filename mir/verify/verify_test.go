@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,12 +143,292 @@ func TestAPIRejections(t *testing.T) {
 	f5 := m5.AddFunction("rm", nil, mir.TypeUnit)
 	b5 := f5.AddBlock("bb0", nil)
 	v5 := f5.AddValue("x", m5.Slice(mir.TypeU8), mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
-	b5.AddInstr(mir.Instr{Op: mir.OpConstGet, Const: "k", Result: v5})
+	b5.AddInstr(mir.Instr{Op: mir.OpConstGet, Const: "k", Result: v5, FailTarget: mir.NoBlock})
 	b5.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
 	errs = Module(m5)
 	if !containsMsg(errs, "result type mismatch: stored slice(u8), expected i64") {
 		t.Errorf("result type mismatch not reported:\n%s", Errors(errs).String())
 	}
+}
+
+func TestMalformedTypeAndPlaceAPIRejections(t *testing.T) {
+	t.Run("missing primitive type table", func(t *testing.T) {
+		errs := Module(&mir.Module{FormatVersion: 1})
+		if !containsMsg(errs, "canonical primitive slots") {
+			t.Fatalf("missing primitive table not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("unknown type kind", func(t *testing.T) {
+		m := mir.NewModule()
+		m.Types = append(m.Types, mir.Type{Kind: mir.TypeKind(255)})
+		errs := Module(m)
+		if !containsMsg(errs, "unknown type kind 255") {
+			t.Fatalf("unknown type kind not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("primitive outside canonical slots", func(t *testing.T) {
+		m := mir.NewModule()
+		m.Types = append(m.Types, mir.Type{Kind: mir.TypePrimitive})
+		errs := Module(m)
+		if !containsMsg(errs, "primitive type appears outside") {
+			t.Fatalf("extra primitive not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("invalid function type signature", func(t *testing.T) {
+		m := mir.NewModule()
+		m.FunctionType(mir.FuncSig{Params: []mir.TypeId{mir.NoType}, Result: mir.TypeUnit})
+		errs := Module(m)
+		if !containsMsg(errs, "parameter type out of range") {
+			t.Fatalf("invalid function type signature not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("invalid local type", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", nil, mir.TypeUnit)
+		f.AddLocal("bad", mir.TypeId(999))
+		f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "local %bad type out of range") {
+			t.Fatalf("invalid local type not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("invalid block parameter type", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", nil, mir.TypeUnit)
+		f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		f.AddBlock("dead", []mir.Param{{Name: "bad", Type: mir.TypeId(999)}}).
+			SetTerm(mir.Terminator{Kind: mir.TermUnreachable, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "block parameter %bad type out of range") {
+			t.Fatalf("invalid block parameter type not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("cycle through structural type", func(t *testing.T) {
+		m := mir.NewModule()
+		a := m.AddAggregate("A", nil)
+		wrapped := m.Option(a)
+		m.Types[a].Fields = []mir.Field{{Name: "next", Type: wrapped}}
+		errs := Module(m)
+		if !containsMsg(errs, "type contains itself") {
+			t.Fatalf("structural type cycle not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("cyclic place", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		b := f.AddBlock("entry", nil)
+		p := &mir.Place{Kind: mir.PlaceField, Field: "x"}
+		p.Base = p
+		b.AddInstr(mir.Instr{Op: mir.OpStore, Place: *p, StoreVal: 0, Result: mir.NoValue})
+		b.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "cyclic place") {
+			t.Fatalf("cyclic place not reported:\n%s", Errors(errs).String())
+		}
+		if _, ok := m.PlaceType(f, p); ok {
+			t.Fatal("PlaceType accepted a cyclic place")
+		}
+	})
+
+	t.Run("unknown place kind", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		b := f.AddBlock("entry", nil)
+		b.AddInstr(mir.Instr{
+			Op:       mir.OpStore,
+			Place:    mir.Place{Kind: mir.PlaceKind(255)},
+			StoreVal: 0,
+			Result:   mir.NoValue,
+		})
+		b.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "unknown place kind 255") {
+			t.Fatalf("unknown place kind not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("missing branch condition", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", nil, mir.TypeUnit)
+		entry := f.AddBlock("entry", nil)
+		f.AddBlock("done", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		entry.SetTerm(mir.Terminator{Kind: mir.TermBranch, Cond: mir.NoValue, Then: 1, Else: 1})
+		errs := Module(m)
+		if !containsMsg(errs, "branch condition is missing") {
+			t.Fatalf("missing branch condition not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("missing call and failure arguments", func(t *testing.T) {
+		m := mir.NewModule()
+		callee := m.AddFunction("callee", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		callee.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		entry := f.AddBlock("entry", nil)
+		failed := f.AddBlock("failed", []mir.Param{{Name: "x", Type: mir.TypeI64}})
+		failed.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		entry.AddInstr(mir.Instr{Op: mir.OpCall, Result: mir.NoValue, Callee: 0, Args: []mir.ValueId{mir.NoValue}, FailTarget: mir.NoBlock})
+		entry.AddInstr(mir.Instr{
+			Op:         mir.OpIntAddChecked,
+			Result:     mir.NoValue,
+			A:          0,
+			B:          0,
+			FailTarget: 1,
+			FailArgs:   []mir.ValueId{mir.NoValue},
+		})
+		entry.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "call argument 0 is missing") || !containsMsg(errs, "failure argument is missing") {
+			t.Fatalf("missing call/failure arguments not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("forged block parameter value type", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		entry := f.AddBlock("entry", nil)
+		f.AddBlock("next", []mir.Param{{Name: "x", Type: mir.TypeI64}}).
+			SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		f.Values[1].Type = m.SafeMut(mir.TypeU8)
+		entry.SetTerm(mir.Terminator{Kind: mir.TermJump, Target: 1, Args: []mir.ValueId{0}})
+		errs := Module(m)
+		if !containsMsg(errs, "value type does not match its block parameter") {
+			t.Fatalf("forged block parameter type not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("uninferable producing instruction", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		b := f.AddBlock("entry", nil)
+		result := f.AddValue("id", m.ID(mir.TypeI64), mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+		b.AddInstr(mir.Instr{Op: mir.OpTableInsert, Result: result, Table: 0, TableVal: 0, FailTarget: mir.NoBlock})
+		b.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "cannot infer result type") {
+			t.Fatalf("uninferable producing instruction not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("default switch binding", func(t *testing.T) {
+		m := mir.NewModule()
+		option := m.Option(mir.TypeI64)
+		f := m.AddFunction("f", []mir.Param{{Name: "value", Type: option}}, mir.TypeUnit)
+		entry := f.AddBlock("entry", nil)
+		f.AddBlock("done", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		binding := f.AddValue("binding", mir.TypeI64, mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: 0, Case: 0})
+		entry.SetTerm(mir.Terminator{
+			Kind:  mir.TermSwitch,
+			Value: 0,
+			Cases: []mir.SwitchCase{{Variant: "", Binding: binding, Target: 1}},
+		})
+		errs := Module(m)
+		if !containsMsg(errs, "default switch case may not bind") {
+			t.Fatalf("default switch binding not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("invalid public API name", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("not a name", nil, mir.TypeUnit)
+		f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "invalid function name") {
+			t.Fatalf("invalid function name not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("non-finite float constant", func(t *testing.T) {
+		m := mir.NewModule()
+		m.AddConst("bad", mir.TypeF64, mir.ConstValue{Kind: mir.ConstFloat, Float: math.Inf(1)})
+		errs := Module(m)
+		if !containsMsg(errs, "float constant must be finite") {
+			t.Fatalf("non-finite float not reported:\n%s", Errors(errs).String())
+		}
+	})
+}
+
+func TestPhase9NestedRawPointers(t *testing.T) {
+	const header = `mir 1
+
+type @Box {
+  ptr: raw_ptr(u8)
+}
+
+`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "store",
+			body: `fn @f(%box: @Box) {
+  local %saved: @Box
+
+entry:
+  store local %saved, %box
+  return
+}
+`,
+		},
+		{
+			name: "ordinary call",
+			body: `fn @sink(%box: @Box) {
+entry:
+  return
+}
+
+fn @f(%box: @Box) {
+entry:
+  call @sink(%box)
+  return
+}
+`,
+		},
+		{
+			name: "block argument",
+			body: `fn @f(%box: @Box) {
+entry:
+  jump next(%box)
+next(%forwarded: @Box):
+  return
+}
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := mir.Parse(header + tc.body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			errs := Module(m)
+			if !containsMsg(errs, "may only cross explicit unsafe boundaries") {
+				t.Fatalf("nested raw pointer use accepted:\n%s", Errors(errs).String())
+			}
+		})
+	}
+
+	t.Run("return boundary", func(t *testing.T) {
+		m, err := mir.Parse(header + `fn @identity(%box: @Box) -> @Box {
+entry:
+  return %box
+}
+`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if errs := Module(m); len(errs) != 0 {
+			t.Fatalf("explicit return boundary rejected:\n%s", Errors(errs).String())
+		}
+	})
 }
 
 func containsMsg(errs []Error, substr string) bool {

@@ -20,7 +20,7 @@ func phase9Pointers(m *mir.Module) []Error {
 			if int(u.value) >= len(f.Values) {
 				continue
 			}
-			if !isRawPtrType(m, f.Values[u.value].Type) {
+			if !containsKind(m, f.Values[u.value].Type, mir.TypeRawPtr) {
 				continue
 			}
 			if rawUseAllowed(m, f, u) {
@@ -30,10 +30,6 @@ func phase9Pointers(m *mir.Module) []Error {
 		}
 	}
 	return errs
-}
-
-func isRawPtrType(m *mir.Module, t mir.TypeId) bool {
-	return m.ValidType(t) && m.Types[t].Kind == mir.TypeRawPtr
 }
 
 // rawUseAllowed reports whether a use site of a raw pointer is an explicit

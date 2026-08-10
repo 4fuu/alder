@@ -6,8 +6,6 @@ bb0:
 }
 
 fn @f(%d: domain_handle) {
-  local %s: cleanup_scope
-
 bb0:
   %s = cleanup.scope.begin
   %c1 = cleanup.push %s, @destroy, (%d)

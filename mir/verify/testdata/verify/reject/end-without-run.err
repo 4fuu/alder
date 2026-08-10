@@ -1,1 +1,1 @@
-fn @f: block bb0: op cleanup.scope.end #1: cleanup.scope.end of %s is not preceded by cleanup.scope.run
+fn @f: block bb0: op cleanup.scope.end #1: cleanup.scope.end requires run cleanup scope %s on every path

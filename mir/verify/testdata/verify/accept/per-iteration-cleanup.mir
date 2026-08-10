@@ -1,0 +1,15 @@
+mir 1
+
+fn @f(%again: bool) {
+entry:
+  jump loop
+
+loop:
+  %s = cleanup.scope.begin
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  branch %again, loop, done
+
+done:
+  return
+}

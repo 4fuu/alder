@@ -1,1 +1,1 @@
-fn @f: block bb0: op cleanup.push #2: cleanup.push after cleanup.scope.run may never execute (%s)
+fn @f: block bb0: op cleanup.push #2: cleanup.push requires open cleanup scope %s on every path

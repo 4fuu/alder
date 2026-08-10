@@ -451,6 +451,9 @@ func (p *parser) parseFunction() error {
 	if p.curBlock != nil {
 		return p.errf(p.peek(), "block %q has no terminator", p.curBlock.Name)
 	}
+	if len(f.Blocks) == 0 {
+		return p.errf(p.peek(), "function must contain at least one block")
+	}
 	p.fn = nil
 	p.curBlock = nil
 	return nil

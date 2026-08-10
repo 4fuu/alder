@@ -1,2 +1,1 @@
-fn @f: block bb0: op store: use of %r after reset of its domain
-fn @f: block bb0: op store: use of %r after reset of its domain
+fn @f: block bb0: op store #7: use of %r after reset or destruction of its domain

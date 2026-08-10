@@ -1,1 +1,1 @@
-fn @f: block bb0: op cleanup.disarm #3: cleanup.disarm after cleanup.scope.run of %s
+fn @f: block bb0: op cleanup.disarm #3: cleanup.disarm requires an entry that is active on every path

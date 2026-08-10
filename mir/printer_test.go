@@ -23,14 +23,15 @@ func buildSummarizeModule(t *testing.T) *Module {
 	m.AddImport("c_fastwords", FuncSig{Params: []TypeId{m.Slice(TypeU8)}, Result: TypeI64})
 
 	destroy := m.AddFunction("domain.destroy", []Param{{Name: "d", Type: m.DomainHandle()}}, TypeUnit)
-	destroy.AddBlock("bb0", nil).SetTerm(Terminator{Kind: TermReturn, Result: NoValue})
+	destroyBlock := destroy.AddBlock("bb0", nil)
+	destroyBlock.AddInstr(Instr{Op: OpDomainDestroy, Domain: 0, Result: NoValue})
+	destroyBlock.SetTerm(Terminator{Kind: TermReturn, Result: NoValue})
 
 	res := m.Result(summary, loadErr)
 	f := m.AddFunction("summarize", []Param{
 		{Name: "result_domain", Type: m.DomainHandle()},
 		{Name: "data", Type: m.Slice(TypeU8)},
 	}, res)
-	f.AddLocal("cleanup", m.CleanupScope())
 	f.AddLocal("temp", m.DomainHandle())
 	bb0 := f.AddBlock("bb0", nil)
 

@@ -50,9 +50,15 @@ func Module(m *mir.Module) []Error {
 		return []Error{{Msg: "nil module"}}
 	}
 	var errs []Error
-	errs = append(errs, phase1Integrity(m)...)
-	errs = append(errs, phase2Types(m)...)
-	errs = append(errs, phase3CFG(m)...)
+	if errs = phase1Integrity(m); len(errs) != 0 {
+		return errs
+	}
+	if errs = phase2Types(m); len(errs) != 0 {
+		return errs
+	}
+	if errs = phase3CFG(m); len(errs) != 0 {
+		return errs
+	}
 	errs = append(errs, phase4Dominance(m)...)
 	errs = append(errs, phase5Typing(m)...)
 	errs = append(errs, phase6Domains(m)...)

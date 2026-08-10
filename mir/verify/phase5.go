@@ -16,6 +16,11 @@ func phase5Typing(m *mir.Module) []Error {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
+		for vi, value := range f.Values {
+			if (value.Def.Kind == mir.ValueDefBlockParam || value.Def.Kind == mir.ValueDefSwitchCase) && !m.ValidType(value.Type) {
+				errs = append(errs, Error{Loc: locFunc(f), Msg: fmt.Sprintf("value %s has no valid type", valueName(f, mir.ValueId(vi)))})
+			}
+		}
 		for _, b := range f.Blocks {
 			if b == nil {
 				continue
@@ -312,13 +317,17 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	if in.Result != mir.NoValue {
 		expected, ok := m.InferResultType(f, in)
 		stored, found := f.ValueType(in.Result)
-		if found && stored == mir.NoType {
+		if !ok {
+			if len(c.errs) == errBaseline {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: "cannot infer result type from instruction operands"})
+			}
+		} else if found && stored == mir.NoType {
 			// Only report the missing type when this instruction produced no
 			// other errors; otherwise the operand checks explain the cause.
 			if len(c.errs) == errBaseline {
 				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("result value %s has no stored type", valueName(f, in.Result))})
 			}
-		} else if ok && found && stored != expected {
+		} else if found && stored != expected {
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("result type mismatch: stored %s, expected %s", m.TypeString(stored), m.TypeString(expected))})
 		}
 	}
@@ -392,8 +401,23 @@ func checkTermTypes(m *mir.Module, f *mir.Function, b *mir.Block) []Error {
 		checkEdgeArgTypes(c, targetBlock(f, b.Term.Target), b.Term.Args)
 
 	case mir.TermSwitch:
-		if t, ok := f.ValueType(b.Term.Value); ok && t != mir.NoType && !m.IsEnumLike(t) {
-			c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("switch operand: expected an enum, option, or result, got %s", m.TypeString(t))})
+		if t, ok := f.ValueType(b.Term.Value); ok && t != mir.NoType {
+			if !m.IsEnumLike(t) {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("switch operand: expected an enum, option, or result, got %s", m.TypeString(t))})
+			} else {
+				for i := range b.Term.Cases {
+					cs := &b.Term.Cases[i]
+					if cs.Variant == "" || cs.Binding == mir.NoValue {
+						continue
+					}
+					idx, exists := m.VariantIndex(t, cs.Variant)
+					if !exists {
+						continue // reported in Phase 3
+					}
+					payload, _ := m.VariantPayload(t, idx)
+					c.expectExact(cs.Binding, fmt.Sprintf("switch case %q payload binding", cs.Variant), payload)
+				}
+			}
 		}
 		for i := range b.Term.Cases {
 			checkEdgeArgTypes(c, targetBlock(f, b.Term.Cases[i].Target), b.Term.Cases[i].Args)

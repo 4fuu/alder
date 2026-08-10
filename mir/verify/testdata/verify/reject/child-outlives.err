@@ -1,1 +1,1 @@
-fn @f: block bb0: op domain.destroy: use of %c after destruction of its domain
+fn @f: block bb0: op domain.destroy #3: use of %c after reset or destruction of its domain

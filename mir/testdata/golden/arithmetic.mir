@@ -3,8 +3,6 @@ mir 1
 const @zero: i64 = 0
 
 fn @arithmetic(%a: i64, %b: i64, %sh: i64, %c8: u8, %s: slice(u8), %idx: u64) -> i64 {
-  local %cleanup: cleanup_scope
-
 bb0:
   %cleanup = cleanup.scope.begin
   %sum = int.add.checked %a, %b else bb_fail

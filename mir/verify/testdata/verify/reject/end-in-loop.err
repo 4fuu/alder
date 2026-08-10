@@ -1,3 +1,1 @@
-fn @f: block bb1: op cleanup.scope.run: use of %s is not dominated by its definition
-fn @f: block bb1: op cleanup.scope.end: use of %s is not dominated by its definition
-fn @f: block bb1: op cleanup.scope.end #1: cleanup.scope.end of %s inside a loop
+fn @f: block bb1: op cleanup.scope.run #0: cleanup.scope.run requires open cleanup scope %s on every path

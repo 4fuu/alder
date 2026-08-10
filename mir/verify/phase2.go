@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/4fuu/aster/mir"
 )
@@ -30,7 +31,13 @@ func phase2Types(m *mir.Module) []Error {
 		}
 		loc := locFunc(f)
 		errs = append(errs, checkSigDecl(m, loc, FuncSigOf(f))...)
+		if containsKind(m, f.Result, mir.TypeDomainHandle) || containsKind(m, f.Result, mir.TypeDomainMark) {
+			errs = append(errs, Error{Loc: loc, Msg: "domain_handle and domain_mark function results are not supported until result-domain identity can be summarized"})
+		}
 		for _, l := range f.Locals {
+			if !m.ValidType(l.Type) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("local %%%s type out of range", l.Name)})
+			}
 			errs = append(errs, checkDeclType(m, loc, "local %"+l.Name, l.Type)...)
 		}
 		for _, b := range f.Blocks {
@@ -38,6 +45,9 @@ func phase2Types(m *mir.Module) []Error {
 				continue
 			}
 			for _, p := range b.Params {
+				if !m.ValidType(p.Type) {
+					errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %%%s type out of range", p.Name)})
+				}
 				errs = append(errs, checkDeclType(m, locBlock(f, b), "block parameter %"+p.Name, p.Type)...)
 			}
 		}
@@ -69,9 +79,13 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 	case mir.TypeAggregate:
 		seen := make(map[string]bool, len(t.Fields))
 		for _, fld := range t.Fields {
+			errs = append(errs, checkDeclType(m, loc, "aggregate field "+fmt.Sprintf("%q", fld.Name), fld.Type)...)
 			if fld.Name == "" {
 				errs = append(errs, Error{Loc: loc, Msg: "aggregate field has an empty name"})
 				continue
+			}
+			if !validMIRName(fld.Name, true) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid field name %q", fld.Name)})
 			}
 			if seen[fld.Name] {
 				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate field name %q", fld.Name)})
@@ -85,9 +99,13 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 		}
 		seen := make(map[string]bool, len(t.Variants))
 		for _, v := range t.Variants {
+			errs = append(errs, checkDeclType(m, loc, "enum variant "+fmt.Sprintf("%q", v.Name), v.Payload)...)
 			if v.Name == "" {
 				errs = append(errs, Error{Loc: loc, Msg: "variant has an empty name"})
 				continue
+			}
+			if !validMIRName(v.Name, true) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid variant name %q", v.Name)})
 			}
 			if v.Name == "default" {
 				errs = append(errs, Error{Loc: loc, Msg: "variant name \"default\" is reserved"})
@@ -105,7 +123,7 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 		checkChild(t.OK, "ok payload")
 		checkChild(t.Err, "err payload")
 	case mir.TypeFunction:
-		checkSigTypes(m, loc, t.Sig)
+		errs = append(errs, checkSigTypes(m, loc, t.Sig)...)
 	}
 	return errs
 }
@@ -144,15 +162,26 @@ func checkDeclType(m *mir.Module, loc, what string, t mir.TypeId) []Error {
 	if containsKind(m, t, mir.TypeTableView) || containsKind(m, t, mir.TypeTableMutView) {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("%s: table views are ephemeral and may not appear in declarations", what)}}
 	}
+	if containsKind(m, t, mir.TypeCleanupScope) || containsKind(m, t, mir.TypeCleanupID) {
+		return []Error{{Loc: loc, Msg: fmt.Sprintf("%s: cleanup handles require direct instruction-result SSA identity and may not appear in declarations", what)}}
+	}
 	return nil
 }
 
 // containsKind reports whether the type tree contains the given kind. Type
 // cycles are rejected by the cycle check, which runs before any walk.
 func containsKind(m *mir.Module, t mir.TypeId, kind mir.TypeKind) bool {
+	return containsKindSeen(m, t, kind, make(map[mir.TypeId]bool))
+}
+
+func containsKindSeen(m *mir.Module, t mir.TypeId, kind mir.TypeKind, seen map[mir.TypeId]bool) bool {
 	if !m.ValidType(t) {
 		return false
 	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
 	ty := &m.Types[t]
 	if ty.Kind == kind {
 		return true
@@ -160,74 +189,84 @@ func containsKind(m *mir.Module, t mir.TypeId, kind mir.TypeKind) bool {
 	switch ty.Kind {
 	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
-		return containsKind(m, ty.Elem, kind)
+		return containsKindSeen(m, ty.Elem, kind, seen)
 	case mir.TypeResult:
-		return containsKind(m, ty.OK, kind) || containsKind(m, ty.Err, kind)
+		return containsKindSeen(m, ty.OK, kind, seen) || containsKindSeen(m, ty.Err, kind, seen)
 	case mir.TypeAggregate:
 		for _, fld := range ty.Fields {
-			if containsKind(m, fld.Type, kind) {
+			if containsKindSeen(m, fld.Type, kind, seen) {
 				return true
 			}
 		}
 	case mir.TypeEnum:
 		for _, v := range ty.Variants {
-			if containsKind(m, v.Payload, kind) {
+			if containsKindSeen(m, v.Payload, kind, seen) {
 				return true
 			}
 		}
 	case mir.TypeFunction:
 		for _, p := range ty.Sig.Params {
-			if containsKind(m, p, kind) {
+			if containsKindSeen(m, p, kind, seen) {
 				return true
 			}
 		}
-		return containsKind(m, ty.Sig.Result, kind)
+		return containsKindSeen(m, ty.Sig.Result, kind, seen)
 	}
 	return false
 }
 
-// checkTypeCycle rejects named types that contain themselves transitively.
+// checkTypeCycle rejects any type that contains itself transitively, including
+// cycles that pass through anonymous structural types created through the API.
 func checkTypeCycle(m *mir.Module, root mir.TypeId, t *mir.Type) []Error {
-	if t.Name == "" {
-		return nil
-	}
-	// DFS over named children; a cycle returns to root.
-	var walk func(id mir.TypeId, path []string) bool
-	walk = func(id mir.TypeId, path []string) bool {
+	seen := map[mir.TypeId]bool{root: true}
+	var walk func(id mir.TypeId) bool
+	walk = func(id mir.TypeId) bool {
 		if !m.ValidType(id) {
 			return false
 		}
-		ty := &m.Types[id]
-		if ty.Kind == mir.TypeAggregate {
-			for _, fld := range ty.Fields {
-				if m.ValidType(fld.Type) && m.Types[fld.Type].Name != "" {
-					if fld.Type == root {
-						return true
-					}
-					if walk(fld.Type, path) {
-						return true
-					}
-				}
-			}
+		if id == root {
+			return true
 		}
-		if ty.Kind == mir.TypeEnum {
-			for _, v := range ty.Variants {
-				if m.ValidType(v.Payload) && m.Types[v.Payload].Name != "" {
-					if v.Payload == root {
-						return true
-					}
-					if walk(v.Payload, path) {
-						return true
-					}
-				}
+		if seen[id] {
+			return false
+		}
+		seen[id] = true
+		for _, child := range typeChildren(&m.Types[id]) {
+			if walk(child) {
+				return true
 			}
 		}
 		return false
 	}
-	if walk(root, nil) {
-		return []Error{{Loc: typeLoc(m, root), Msg: "type contains itself"}}
+	for _, child := range typeChildren(t) {
+		if walk(child) {
+			return []Error{{Loc: typeLoc(m, root), Msg: "type contains itself"}}
+		}
 	}
 	return nil
+}
+
+func typeChildren(t *mir.Type) []mir.TypeId {
+	var children []mir.TypeId
+	switch t.Kind {
+	case mir.TypeAggregate:
+		for _, fld := range t.Fields {
+			children = append(children, fld.Type)
+		}
+	case mir.TypeEnum:
+		for _, v := range t.Variants {
+			children = append(children, v.Payload)
+		}
+	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut,
+		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
+		children = append(children, t.Elem)
+	case mir.TypeResult:
+		children = append(children, t.OK, t.Err)
+	case mir.TypeFunction:
+		children = append(children, t.Sig.Params...)
+		children = append(children, t.Sig.Result)
+	}
+	return children
 }
 
 func checkConst(m *mir.Module, c *mir.ConstDecl) []Error {
@@ -254,6 +293,9 @@ func checkConst(m *mir.Module, c *mir.ConstDecl) []Error {
 	case mir.ConstFloat:
 		if !mir.IsFloatType(c.Type) {
 			return []Error{{Loc: loc, Msg: "float constant must have type f32 or f64"}}
+		}
+		if math.IsNaN(c.Value.Float) || math.IsInf(c.Value.Float, 0) {
+			return []Error{{Loc: loc, Msg: "float constant must be finite"}}
 		}
 		if c.Type == mir.TypeF32 {
 			f := float64(float32(c.Value.Float))

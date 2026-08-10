@@ -4,38 +4,60 @@ package mir
 // well-formed: an unknown local, a field of a non-aggregate, an unknown field
 // name, or a deref of a value that is not a checked reference.
 func (m *Module) PlaceType(f *Function, p *Place) (TypeId, bool) {
-	switch p.Kind {
-	case PlaceLocal:
-		if int(p.Local) >= len(f.Locals) {
-			return NoType, false
-		}
-		return f.Locals[p.Local].Type, true
-	case PlaceField:
-		if p.Base == nil {
-			return NoType, false
-		}
-		base, ok := m.PlaceType(f, p.Base)
-		if !ok || !m.ValidType(base) || m.Types[base].Kind != TypeAggregate {
-			return NoType, false
-		}
-		for _, fld := range m.Types[base].Fields {
-			if fld.Name == p.Field {
-				return fld.Type, true
-			}
-		}
-		return NoType, false
-	case PlaceDeref:
-		t, ok := f.ValueType(p.Deref)
-		if !ok || !m.ValidType(t) {
-			return NoType, false
-		}
-		switch m.Types[t].Kind {
-		case TypeSafeRef, TypeSafeMut, TypeTableView, TypeTableMutView:
-			return m.Types[t].Elem, true
-		}
+	if m == nil || f == nil || p == nil {
 		return NoType, false
 	}
-	return NoType, false
+	var fields []string
+	seen := make(map[*Place]bool)
+	for {
+		if p == nil || seen[p] {
+			return NoType, false
+		}
+		seen[p] = true
+		switch p.Kind {
+		case PlaceField:
+			fields = append(fields, p.Field)
+			p = p.Base
+			continue
+		case PlaceLocal:
+			if int(p.Local) >= len(f.Locals) {
+				return NoType, false
+			}
+			return m.fieldPathType(f.Locals[p.Local].Type, fields)
+		case PlaceDeref:
+			t, ok := f.ValueType(p.Deref)
+			if !ok || !m.ValidType(t) {
+				return NoType, false
+			}
+			switch m.Types[t].Kind {
+			case TypeSafeRef, TypeSafeMut, TypeTableView, TypeTableMutView:
+				return m.fieldPathType(m.Types[t].Elem, fields)
+			}
+			return NoType, false
+		default:
+			return NoType, false
+		}
+	}
+}
+
+func (m *Module) fieldPathType(t TypeId, fields []string) (TypeId, bool) {
+	for i := len(fields) - 1; i >= 0; i-- {
+		if !m.ValidType(t) || m.Types[t].Kind != TypeAggregate {
+			return NoType, false
+		}
+		found := false
+		for _, fld := range m.Types[t].Fields {
+			if fld.Name == fields[i] {
+				t = fld.Type
+				found = true
+				break
+			}
+		}
+		if !found {
+			return NoType, false
+		}
+	}
+	return t, true
 }
 
 // IsIntType reports whether t is one of the integer primitive types.
@@ -124,6 +146,9 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		callee := m.Functions[in.CleanupFn]
+		if callee == nil {
+			return NoType, false
+		}
 		if callee.Result != TypeUnit || len(in.CleanupArgs) != len(callee.Params) {
 			return NoType, false
 		}
@@ -301,6 +326,9 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		callee := m.Functions[in.Callee]
+		if callee == nil {
+			return NoType, false
+		}
 		if len(in.Args) != len(callee.Params) {
 			return NoType, false
 		}

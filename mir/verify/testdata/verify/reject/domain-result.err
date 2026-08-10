@@ -1,0 +1,1 @@
+fn @unsupported: domain_handle and domain_mark function results are not supported until result-domain identity can be summarized

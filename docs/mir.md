@@ -269,7 +269,7 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 
 ## Textual MIR
 
-The textual format is versioned (`mir 1`) and is the canonical fixture format. The parser requires declarations before uses, one statement per line, and deterministic name resolution; the printer reproduces the format byte for byte, so parse-print-parse is stable. `#` starts a line comment.
+The textual format is versioned (`mir 1`) and is the canonical fixture format. The parser requires declarations before uses, one statement per line, and deterministic name resolution. The printer emits canonical text; printing a canonical golden fixture reproduces it byte for byte, while comments and noncanonical layout are intentionally normalized. Parse-print-parse reaches a stable fixed point for every MIR fixture. `#` starts a line comment.
 
 ```text
 module   := "mir" version (typeDecl | enumDecl | constDecl | importDecl | fnDecl)*
@@ -313,10 +313,21 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 
 Initial conservative rules:
 
-- reference-containing values may flow through SSA values and `deref` places; the verifier tracks storage derivation through allocations, copies, table operations, aggregate and enum construction, loads, block parameters, and switch bindings, and rejects uses after a dominating reset or destruction of the derived domain;
+- `cleanup_scope` and `cleanup_id` handles keep direct SSA identity: they may only be cleanup instruction results and direct operands, and may not appear in function signatures, aggregate or enum fields/payloads, block parameters, locals, or load/store propagation;
+- cleanup analysis preserves path-specific registration alternatives and runtime registration order. A static `cleanup.push` site may execute again only after its preceding dynamic registration has been disarmed or its scope has run and ended; this keeps one SSA cleanup ID unambiguous while allowing a complete begin/push/run/end lifecycle to repeat in a loop;
+- reference-containing values may flow through SSA values and `deref` places; the verifier tracks storage derivation through allocations, copies, table operations, aggregate and enum construction, loads, block parameters, and switch bindings, and rejects a use when the value may have been reset or destroyed on any reachable incoming path;
+- domain and reference lifetime effects are propagated through ordinary calls and active cleanup callbacks by deterministic whole-module fixed-point summaries; recursive call graphs are supported;
+- at a function boundary, a reference-containing parameter is conservatively allowed to depend on any `domain_handle` parameter. A caller's more precise provenance is retained when mapping call results and effects;
+- externally supplied domain handles and tables may alias other compatible parameters unless local provenance proves distinct identities. To avoid unsummarized interprocedural memory writes, MIR 1 rejects storing values that recursively contain safe references, slices, tables, domain handles, or domain marks through a dereference-based place; local-place stores remain supported and field-sensitive;
+- Phase 6 resource state is path-sensitive and joins with a conservative union. Checked-operation failure edges observe the state before the checked instruction's effect;
+- Domain identity and parent ancestry are tracked separately: destroying a child does not destroy its parent, while destroying a parent invalidates descendant handles and allocations. MIR 1 permits create/allocate/destroy wholly within each loop iteration, but conservatively rejects function-local domain handles and references carried through block arguments or stored from a cyclic block across a backedge; this avoids conflating dynamic instances of one static allocation site or reviving an older alias.
+- Ordinary functions may not return `domain_handle` or `domain_mark` in MIR 1. Their result identity and parent relation cannot yet be represented by function-effect summaries, so Phase 2 rejects such signatures rather than losing provenance at a call.
+- local-place provenance distinguishes field paths. Dereference-based memory has no general alias declaration in MIR 1, so Phase 6 conservatively treats dereference stores as possible sources for dereference loads;
 - returned values must not contain references derived from function-local domains;
 - `unreachable` terminators are accepted only in blocks unreachable from the entry block;
-- table views are ephemeral: every use of a view must stay in its defining block, and a `table.view.end` must follow all other uses;
+- table identities originate at function table parameters and `table.create` sites and are preserved through block parameters, memory, aggregate/enum values, and ordinary calls. A call returning a newly-created table receives a stable call-site identity;
+- a table lookup result is consumed exactly once, in its defining block, by a `some` switch binding or checked `some` payload extraction. From lookup until extraction, and from successful extraction through `table.view.end`, insert, remove, and ordinary-call or active-cleanup effects that may mutate the same table are forbidden. The checked extraction failure edge observes the pre-extraction state and a switch `none` path has no view to end;
+- table views are ephemeral: every use of a view must stay in its access block, exactly one `table.view.end` follows all other uses, and neither insert nor remove of the same table may occur while any related view remains active;
 - `raw_ptr` values may only cross explicit unsafe boundaries: FFI calls, function boundaries, and returns;
 - `alloc` and `table.create` element types must be plain value types without handles, cleanup identifiers, views, or raw pointers, recursively.
 

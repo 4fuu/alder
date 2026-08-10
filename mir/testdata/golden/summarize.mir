@@ -16,11 +16,11 @@ import @c_fastwords: fn(slice(u8)) -> i64
 
 fn @domain.destroy(%d: domain_handle) {
 bb0:
+  domain.destroy %d
   return
 }
 
 fn @summarize(%result_domain: domain_handle, %data: slice(u8)) -> result(@Summary, @LoadError) {
-  local %cleanup: cleanup_scope
   local %temp: domain_handle
 
 bb0:

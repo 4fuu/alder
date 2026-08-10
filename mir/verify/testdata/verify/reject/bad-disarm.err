@@ -1,2 +1,1 @@
 fn @f: block bb0: op cleanup.disarm #0: cleanup id operand: expected cleanup_id, got i64
-fn @f: block bb0: op cleanup.disarm #0: cleanup.disarm operand is not a cleanup entry
