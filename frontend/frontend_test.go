@@ -20,6 +20,20 @@ func compileStr(t *testing.T, src string) *mir.Module {
 	return m
 }
 
+func TestSplitSourceErrorClassifiesInternalASTErrors(t *testing.T) {
+	source := &astError{msg: "ordinary source failure"}
+	_, gotSource, gotInternal := splitSourceError(source)
+	if gotSource != source || gotInternal != nil {
+		t.Fatalf("source error classified as source=%v internal=%v", gotSource, gotInternal)
+	}
+
+	internal := &astError{msg: "internal: broken invariant"}
+	_, gotSource, gotInternal = splitSourceError(internal)
+	if gotSource != nil || gotInternal != internal {
+		t.Fatalf("internal error classified as source=%v internal=%v", gotSource, gotInternal)
+	}
+}
+
 func TestGenericBodyTypesAndExpectedResultInference(t *testing.T) {
 	src := `
 fn identity(T: type, x: T) -> T {

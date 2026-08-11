@@ -49,10 +49,7 @@ func compileSource(source Source) (*mir.Module, *astError, error) {
 	}
 	m, err := lowerModule(decls, cm)
 	if err != nil {
-		if ae, ok := err.(*astError); ok && !strings.HasPrefix(ae.msg, "internal:") {
-			return nil, ae, nil
-		}
-		return nil, nil, err
+		return splitSourceError(err)
 	}
 	if errs := verify.Module(m); len(errs) != 0 {
 		return nil, nil, fmt.Errorf("internal frontend error: emitted invalid MIR: %s", verify.Errors(errs).String())
@@ -62,7 +59,7 @@ func compileSource(source Source) (*mir.Module, *astError, error) {
 
 func splitSourceError(err error) (*mir.Module, *astError, error) {
 	ae, ok := err.(*astError)
-	if !ok {
+	if !ok || strings.HasPrefix(ae.msg, "internal:") {
 		return nil, nil, err
 	}
 	return nil, ae, nil
