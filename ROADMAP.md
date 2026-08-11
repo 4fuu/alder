@@ -292,9 +292,14 @@ without terminating or mutating prior state. Deterministic initial/growth OOM,
 runtime segment-identity exhaustion, successful retry, and prior-buffer
 validity are pinned at the buffer gate. Narrow-target `SIZE_MAX` behavior still
 requires a supported target environment. The declaration spike justifies the
-storage, growable byte/vector, symbol, diagnostic, recursive iteration, safe
-argument/file/output, and host-wrapper capabilities actually required by the
-compiler. Every temporary bridge has an owner and removal condition.
+storage, growable byte/vector, symbol, diagnostic, safe argument/file/output,
+and host-wrapper capabilities actually required by the compiler. The first
+production lexer slice additionally demonstrated the need for non-recursive
+Buffer growth in byte loops: Phase 6 now permits cyclic local descriptors whose
+dynamic roots are owned only by parameter domains that the function cannot
+invalidate, while retaining the local-domain, block-argument, dereference-store,
+and parameter-invalidation-through-call, cleanup, and aliasing rejection gates.
+Every temporary bridge has an owner and removal condition.
 
 Exit requires compiler-scale tests with multiple files, more than sixteen
 declarations, retained source/range data, nested syntax, recursion, malformed
@@ -304,6 +309,14 @@ verified MIR and C.
 ### Milestone 5.4: Self-Hosted Compiler Core
 
 Status: **planned**
+
+`compiler/src/*.al` is the fixed, explicit production compiler source root. Its
+current source model and lossless lexer are only a preparatory M5.4 slice: they
+pin Go-compatible token kinds, keywords, trivia and byte ranges, literal escapes,
+lexical failures, host-snapshot order, deterministic verified MIR/C, and strict
+C execution through a private token-manifest conformance protocol. This does not
+open a second frontend, replace the M5.3 declaration spike yet, or satisfy any
+self-hosting claim.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
