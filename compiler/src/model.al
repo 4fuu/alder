@@ -35,10 +35,14 @@ type LexDiagRec {
 // 7 type parameter, 8 field, 9 variant, 10 imported function signature, and
 // 11 enum payload label. Top-level declaration IDs are recorded separately in
 // ParseStore.roots in canonical source order; they are never inferred by kind.
-// IDs into nodes and links are 1-based; zero means absent. Links are stored in
-// reverse source order so records remain append-only and copy-trivial.
+// Token IDs preserve the lossless lexical identity needed by later checking;
+// numeric literal conversion and range checking are deliberately not parser
+// responsibilities. IDs into tokens, nodes, and links are 1-based; zero means
+// absent. Links are stored in reverse source order so records remain
+// append-only and copy-trivial.
 type SyntaxRec {
     kind: U64
+    token: U64
     source: U64
     start: U64
     end: U64

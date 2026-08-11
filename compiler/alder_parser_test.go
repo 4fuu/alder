@@ -91,6 +91,7 @@ const wantParserManifest = `ALDER-PARSER-MANIFEST 1
 S 0 a.al 108
 S 1 b.al 137
 S 2 z-empty.al 0
+T 96
 R 0 3
 R 1 6
 R 2 9
@@ -100,42 +101,42 @@ R 5 18
 R 6 23
 R 7 28
 R 8 36
-N 1 4 a.al 12 15 12 15 0
-N 2 8 a.al 9 15 9 10 1
-N 3 2 a.al 0 17 5 6 2
-N 4 4 a.al 30 33 30 33 0
-N 5 8 a.al 27 33 27 28 3
-N 6 2 a.al 18 35 23 24 4
-N 7 4 a.al 48 51 48 51 0
-N 8 8 a.al 45 51 45 46 5
-N 9 2 a.al 36 53 41 42 6
-N 10 4 a.al 66 69 66 69 0
-N 11 8 a.al 63 69 63 64 7
-N 12 2 a.al 54 71 59 60 8
-N 13 4 a.al 84 87 84 87 0
-N 14 8 a.al 81 87 81 82 9
-N 15 2 a.al 72 89 77 78 10
-N 16 4 a.al 102 105 102 105 0
-N 17 8 a.al 99 105 99 100 11
-N 18 2 a.al 90 107 95 96 12
-N 19 4 b.al 19 21 19 21 0
-N 20 5 b.al 18 22 0 0 13
-N 21 4 b.al 28 31 28 31 0
-N 22 10 b.al 15 31 0 0 15
-N 23 1 b.al 0 31 9 13 16
-N 24 7 b.al 48 49 48 49 0
-N 25 4 b.al 70 71 70 71 0
-N 26 5 b.al 69 72 0 0 18
-N 27 8 b.al 62 72 62 67 19
-N 28 2 b.al 39 75 44 47 20
-N 29 7 b.al 89 90 89 90 0
-N 30 11 b.al 108 113 108 113 0
-N 31 4 b.al 120 121 120 121 0
-N 32 5 b.al 119 122 0 0 23
-N 33 6 b.al 115 124 115 118 24
-N 34 9 b.al 103 125 103 107 25
-N 35 9 b.al 128 132 128 132 0
-N 36 3 b.al 77 135 82 88 27
+N 1 4 6 0 12 15 a.al 12 15 12 15 0
+N 2 8 4 0 9 10 a.al 9 15 9 10 1
+N 3 2 1 0 0 4 a.al 0 17 5 6 2
+N 4 4 13 0 30 33 a.al 30 33 30 33 0
+N 5 8 11 0 27 28 a.al 27 33 27 28 3
+N 6 2 8 0 18 22 a.al 18 35 23 24 4
+N 7 4 20 0 48 51 a.al 48 51 48 51 0
+N 8 8 18 0 45 46 a.al 45 51 45 46 5
+N 9 2 15 0 36 40 a.al 36 53 41 42 6
+N 10 4 27 0 66 69 a.al 66 69 66 69 0
+N 11 8 25 0 63 64 a.al 63 69 63 64 7
+N 12 2 22 0 54 58 a.al 54 71 59 60 8
+N 13 4 34 0 84 87 a.al 84 87 84 87 0
+N 14 8 32 0 81 82 a.al 81 87 81 82 9
+N 15 2 29 0 72 76 a.al 72 89 77 78 10
+N 16 4 41 0 102 105 a.al 102 105 102 105 0
+N 17 8 39 0 99 100 a.al 99 105 99 100 11
+N 18 2 36 0 90 94 a.al 90 107 95 96 12
+N 19 4 51 1 19 21 b.al 19 21 19 21 0
+N 20 5 50 1 18 19 b.al 18 22 0 0 13
+N 21 4 56 1 28 31 b.al 28 31 28 31 0
+N 22 10 48 1 15 17 b.al 15 31 0 0 15
+N 23 1 44 1 0 6 b.al 0 31 9 13 16
+N 24 7 60 1 48 49 b.al 48 49 48 49 0
+N 25 4 69 1 70 71 b.al 70 71 70 71 0
+N 26 5 68 1 69 70 b.al 69 72 0 0 18
+N 27 8 66 1 62 67 b.al 62 72 62 67 19
+N 28 2 57 1 39 43 b.al 39 75 44 47 20
+N 29 7 75 1 89 90 b.al 89 90 89 90 0
+N 30 11 83 1 108 113 b.al 108 113 108 113 0
+N 31 4 88 1 120 121 b.al 120 121 120 121 0
+N 32 5 87 1 119 120 b.al 119 122 0 0 23
+N 33 6 85 1 115 118 b.al 115 124 115 118 24
+N 34 9 81 1 103 107 b.al 103 125 103 107 25
+N 35 9 93 1 128 132 b.al 128 132 128 132 0
+N 36 3 72 1 77 81 b.al 77 135 82 88 27
 L 1 1 0
 L 2 2 0
 L 3 4 0
@@ -364,6 +365,8 @@ func parserDiagnosticLine(t *testing.T, manifest string) string {
 type parserManifestNode struct {
 	path                           string
 	start, end, nameStart, nameEnd int
+	token, tokenSource             int
+	tokenStart, tokenEnd           int
 	children                       int
 }
 
@@ -375,19 +378,30 @@ type parserManifestLink struct {
 func validateParserManifest(t *testing.T, manifest string) {
 	t.Helper()
 	sourceLengths := make(map[string]int)
+	var sourcePaths []string
 	var roots []int
 	var nodes []parserManifestNode
 	var links []parserManifestLink
+	tokenCount := -1
 	for _, line := range strings.Split(strings.TrimSuffix(manifest, "\n"), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
 		switch fields[0] {
+		case "T":
+			if len(fields) != 2 || tokenCount != -1 {
+				t.Fatalf("invalid token count record %q", line)
+			}
+			tokenCount = manifestInt(t, fields[1])
 		case "S":
-			if len(fields) != 4 || manifestInt(t, fields[1]) != len(sourceLengths) {
+			if len(fields) != 4 || manifestInt(t, fields[1]) != len(sourcePaths) {
 				t.Fatalf("invalid source record %q", line)
 			}
+			if _, exists := sourceLengths[fields[2]]; exists {
+				t.Fatalf("duplicate source path in record %q", line)
+			}
+			sourcePaths = append(sourcePaths, fields[2])
 			sourceLengths[fields[2]] = manifestInt(t, fields[3])
 		case "R":
 			if len(fields) != 3 || manifestInt(t, fields[1]) != len(roots) {
@@ -395,16 +409,20 @@ func validateParserManifest(t *testing.T, manifest string) {
 			}
 			roots = append(roots, manifestInt(t, fields[2]))
 		case "N":
-			if len(fields) != 9 || manifestInt(t, fields[1]) != len(nodes)+1 {
+			if len(fields) != 13 || manifestInt(t, fields[1]) != len(nodes)+1 {
 				t.Fatalf("invalid node record %q", line)
 			}
 			nodes = append(nodes, parserManifestNode{
-				path:      fields[3],
-				start:     manifestInt(t, fields[4]),
-				end:       manifestInt(t, fields[5]),
-				nameStart: manifestInt(t, fields[6]),
-				nameEnd:   manifestInt(t, fields[7]),
-				children:  manifestInt(t, fields[8]),
+				token:       manifestInt(t, fields[3]),
+				tokenSource: manifestInt(t, fields[4]),
+				tokenStart:  manifestInt(t, fields[5]),
+				tokenEnd:    manifestInt(t, fields[6]),
+				path:        fields[7],
+				start:       manifestInt(t, fields[8]),
+				end:         manifestInt(t, fields[9]),
+				nameStart:   manifestInt(t, fields[10]),
+				nameEnd:     manifestInt(t, fields[11]),
+				children:    manifestInt(t, fields[12]),
 			})
 		case "L":
 			if len(fields) != 4 || manifestInt(t, fields[1]) != len(links)+1 {
@@ -414,12 +432,21 @@ func validateParserManifest(t *testing.T, manifest string) {
 		}
 	}
 	for id, node := range nodes {
+		if tokenCount < 0 || node.token < 1 || node.token > tokenCount {
+			t.Fatalf("node %d has invalid token ID %d (count %d)", id+1, node.token, tokenCount)
+		}
 		length, ok := sourceLengths[node.path]
 		if !ok || node.start < 0 || node.start > node.end || node.end > length {
 			t.Fatalf("node %d has invalid source span %+v", id+1, node)
 		}
+		if node.tokenSource < 0 || node.tokenSource >= len(sourcePaths) || sourcePaths[node.tokenSource] != node.path || node.tokenStart < node.start || node.tokenStart >= node.tokenEnd || node.tokenEnd > node.end {
+			t.Fatalf("node %d has invalid token source/span %+v", id+1, node)
+		}
 		if (node.nameStart != 0 || node.nameEnd != 0) && (node.nameStart < node.start || node.nameStart > node.nameEnd || node.nameEnd > node.end) {
 			t.Fatalf("node %d has invalid name span %+v", id+1, node)
+		}
+		if node.tokenStart != node.start && (node.tokenStart != node.nameStart || node.tokenEnd != node.nameEnd) {
+			t.Fatalf("node %d token is neither its leading nor named token: %+v", id+1, node)
 		}
 		if node.children < 0 || node.children > len(links) {
 			t.Fatalf("node %d has invalid child head %d", id+1, node.children)
