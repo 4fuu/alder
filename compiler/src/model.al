@@ -90,6 +90,62 @@ type ParseDiagRec {
     end: U64
 }
 
+// The checker records below are the private M5.4 declaration-resolution
+// model, not a public diagnostic or serialization schema. Symbol, syntax,
+// type-parameter, checked-type, and type-argument references are stable
+// 1-based IDs; zero means absent. Source indices and byte ranges are zero-based.
+// Checked type arguments occupy one flat buffer and are selected by
+// first_arg/arg_count.
+type SymbolRec {
+    kind: U64
+    node: U64
+    source: U64
+    name_start: U64
+    name_end: U64
+    type_arity: U64
+}
+
+type TypeParamRec {
+    owner: U64
+    node: U64
+    source: U64
+    name_start: U64
+    name_end: U64
+}
+
+// Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
+// 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
+// 10 Result, 11 Map, 12 Ptr, and 13 __s0_Buffer.
+type CheckedTypeRec {
+    kind: U64
+    syntax: U64
+    target: U64
+    first_arg: U64
+    arg_count: U64
+}
+
+// Declaration type-use roles: 1 struct field, 2 enum payload, 3 import
+// parameter, 4 import result, 5 function parameter, and 6 function result.
+type DeclTypeUseRec {
+    owner: U64
+    role: U64
+    ordinal: U64
+    syntax: U64
+    checked_type: U64
+}
+
+// Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
+// 3 duplicate type parameter, 4 unknown type, and 5 wrong type arity.
+type CheckDiagRec {
+    kind: U64
+    source: U64
+    start: U64
+    end: U64
+    related_source: U64
+    related_start: U64
+    related_end: U64
+}
+
 type State {
     paths: __s0_Buffer(U8)
     texts: __s0_Buffer(U8)

@@ -178,10 +178,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sources []frontend.Source
-	for _, name := range compilerSourceManifest {
-		if name == "main.al" {
-			continue
-		}
+	for _, name := range parserSourceManifest {
 		text, err := os.ReadFile(filepath.Join(root, "compiler", "src", name))
 		if err != nil {
 			t.Fatal(err)
@@ -219,18 +216,13 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
-	// MIR equality proves source-order independence. Exercise the public EmitC
-	// service path once at compiler scale and require it to agree with C generated
-	// from the verified textual MIR round trip, without repeating both request
-	// orders through the identical frontend.
-	serviceC, serviceCErr := Compile(Request{Sources: sources, Emit: EmitC})
-	if serviceCErr != nil || serviceC.Artifact == nil || len(serviceC.Diagnostics) != 0 {
-		t.Fatalf("compile parser C: result=%+v error=%v", serviceC, serviceCErr)
-	}
-	if _, err := cgen.GenerateProgram(module); err != nil {
+	// Generate from the verified textual round trip: MIR equality already proves
+	// source-order independence without compiling this compiler-sized unit twice
+	// more through the identical frontend for EmitC.
+	generated, err := cgen.GenerateProgram(module)
+	if err != nil {
 		t.Fatalf("generate parser C from round-tripped MIR: %v", err)
 	}
-	generated := serviceC.Artifact.Text
 	for _, leaked := range []string{root, filepath.ToSlash(root), strings.ReplaceAll(root, `\`, `\\`)} {
 		if leaked != "" && strings.Contains(generated, leaked) {
 			t.Fatalf("generated C contains checkout path %q", leaked)

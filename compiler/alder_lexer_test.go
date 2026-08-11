@@ -19,9 +19,30 @@ import (
 // compilerSourceManifest is deliberately fixed: Alder compiler inputs are
 // never discovered by walking the checkout.
 var compilerSourceManifest = []string{
+	"checker.al",
 	"host.al",
 	"lexer.al",
 	"main.al",
+	"model.al",
+	"output.al",
+	"parser.al",
+}
+
+// Slice conformance harnesses compile their exact fixed dependency closures;
+// the complete production root above is compiled by the latest checker slice.
+// Keeping earlier harnesses narrow prevents every new compiler layer from being
+// recompiled by all preceding layer tests.
+var lexerSourceManifest = []string{
+	"host.al",
+	"lexer.al",
+	"main.al",
+	"model.al",
+	"output.al",
+}
+
+var parserSourceManifest = []string{
+	"host.al",
+	"lexer.al",
 	"model.al",
 	"output.al",
 	"parser.al",
@@ -37,7 +58,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sources []frontend.Source
-	for i, name := range compilerSourceManifest {
+	for i, name := range lexerSourceManifest {
 		text, err := os.ReadFile(filepath.Join(root, "compiler", "src", name))
 		if err != nil {
 			t.Fatal(err)

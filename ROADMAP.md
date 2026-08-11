@@ -334,16 +334,21 @@ Exit-criteria evidence:
 Status: **active**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
-current source model, lossless lexer, and syntactically complete current S0
-parser are only preparatory M5.4 slices. They pin Go-compatible token kinds,
-keywords, trivia, byte ranges, literal escapes, lexical failures, host-snapshot
-order, imports, generic struct/enum declarations, recursive type expressions,
-function declarations, core bindings/returns/assignments, blocks, ordinary
-expressions, control flow, match and unsafe expressions, deterministic
-first-failure order, verified MIR/C, and strict C execution. Literal conversion,
-checking, lowering, and the complete frontend remain incomplete. The token and
-parser manifests are private conformance protocols; these slices do not open a
-second frontend, replace the M5.3 declaration spike yet, constitute a complete
+current source model, lossless lexer, syntactically complete current S0 parser,
+and declaration-resolution checker slice are preparatory M5.4 work. They pin
+Go-compatible token kinds, keywords, trivia, byte ranges, literal escapes,
+lexical failures, host-snapshot order, imports, generic struct/enum declarations,
+recursive type expressions, function declarations, core bindings, returns,
+assignments, blocks, ordinary expressions, control flow, match and unsafe
+expressions, deterministic
+first-failure order, verified MIR/C, and strict C execution. The checker slice
+collects stable top-level symbols and local type parameters and resolves only
+declaration-level type names and arities. Bodies, expressions, literal conversion,
+the full checker, lowering, and the complete frontend remain incomplete. Its
+current reverse-link replay is recursive and is not yet an arbitrary-size stack
+contract. The token, parser, and checker manifests are private conformance
+protocols; these slices do not open a second frontend, replace the M5.3
+declaration spike yet, constitute a complete
 frontend, or satisfy any self-hosting claim. Grouping nodes follow the Go
 semantic AST and are erased; the lossless token stream retains their delimiters.
 
