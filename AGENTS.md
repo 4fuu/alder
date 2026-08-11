@@ -52,6 +52,7 @@ Canonical Go checks (run before committing MIR toolkit changes):
 Canonical C checks (run before committing runtime changes; keep the flag set synchronized with `CONTRIBUTING.md`):
 
 - `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/aster.c` must pass;
-- `go test ./runtime -count=1` compiles and runs every runtime behavior test under the strict warning set and reruns them under ASan/UBSan when the host toolchain supports it.
+- `go test ./runtime -count=1` compiles and runs every runtime behavior test under the strict warning set and reruns them under ASan/UBSan when the host toolchain supports it;
+- `go test ./cgen -count=1` pins the generated-C goldens, compiles every golden under the strict warning set, runs the compile-and-run behavior fixtures, and checks generation determinism across processes.
 
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.
