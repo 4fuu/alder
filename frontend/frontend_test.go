@@ -37,6 +37,39 @@ fn main() -> I32 {
 	compileStr(t, src)
 }
 
+func TestGenericInferenceThroughUnaryEnumConstructors(t *testing.T) {
+	compileStr(t, `
+enum Box(T: type) {
+    Boxed(value: T)
+}
+fn optionID(T: type, x: Option(T)) -> Option(T) { return x
+}
+fn okID(T: type, x: Result(T, I32)) -> Result(T, I32) { return x
+}
+fn errID(T: type, x: Result(I32, T)) -> Result(I32, T) { return x
+}
+fn boxID(T: type, x: Box(T)) -> Box(T) { return x
+}
+fn main() -> I32 {
+    let a = optionID(Some(1))
+    let b = okID(Ok(2))
+    let c = errID(Err(3))
+    let d = boxID(Boxed(4))
+    return 0
+}
+`)
+}
+
+func TestCompileTimeTypeParametersMustComeFirst(t *testing.T) {
+	_, err := Compile(`
+fn bad(x: I64, T: type) -> T { return x
+}
+`)
+	if err == nil || !strings.Contains(err.Error(), "compile-time type parameters must precede runtime parameters") {
+		t.Fatalf("expected parameter-order diagnostic, got %v", err)
+	}
+}
+
 func TestGenericCallsRejectPartialExplicitArguments(t *testing.T) {
 	src := `
 fn choose(A: type, B: type, a: A, b: B) -> A { return a

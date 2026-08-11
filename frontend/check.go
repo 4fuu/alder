@@ -1548,6 +1548,13 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl, expected *Type) (*Type,
 			}
 			continue
 		}
+		inferred, err := k.inferUnaryVariant(pattern, arg, bindings)
+		if err != nil {
+			return nil, err
+		}
+		if inferred {
+			continue
+		}
 		at, err := k.checkExpr(arg, nil)
 		if err != nil {
 			if len(bindings) < tpCount {
@@ -1585,6 +1592,36 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl, expected *Type) (*Type,
 	}
 	k.noteCall(x, cf.result, &callAnn{kind: callUser, fn: cf, explicitArgs: len(typeArgs)})
 	return cf.result, nil
+}
+
+// inferUnaryVariant infers through a unary enum constructor before its
+// enclosing generic type is concrete enough for normal expression checking.
+// It applies uniformly to declared enums and the builtin enum-like types.
+func (k *bodyChecker) inferUnaryVariant(pattern *Type, arg Expr, bindings map[string]*Type) (bool, error) {
+	call, ok := arg.(*Call)
+	if !ok || !pattern.enumLike() || len(call.Args) != 1 {
+		return false, nil
+	}
+	callee, ok := call.Callee.(*Ident)
+	if !ok {
+		return false, nil
+	}
+	variant := pattern.variantByName(callee.Name)
+	if variant == nil || variant.payload == nil {
+		return false, nil
+	}
+	payload := substType(variant.payload, structBindings(pattern))
+	if inferred, err := k.inferUnaryVariant(payload, call.Args[0], bindings); inferred || err != nil {
+		return inferred, err
+	}
+	at, err := k.checkExpr(call.Args[0], nil)
+	if err != nil {
+		return false, err
+	}
+	if !unify(payload, at, bindings) {
+		return false, k.mismatch(call.Args[0].exprPos(), "variant payload", payload, at)
+	}
+	return true, nil
 }
 
 // patternBound reports whether every type parameter in a pattern is bound.

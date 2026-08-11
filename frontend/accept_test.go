@@ -52,6 +52,7 @@ var rejectFixtures = []string{
 	"shadowing",
 	"unreachable-statement",
 	"function-value",
+	"type-parameter-after-runtime",
 }
 
 func acceptSource(t *testing.T, name string) string {

@@ -281,6 +281,7 @@ func (p *parser) parseFnDecl() (Decl, error) {
 	if p.cur().kind == tokPunct && p.cur().text == ")" {
 		p.advance()
 	} else {
+		seenRuntimeParam := false
 		for {
 			pn, err := p.expectIdent("a parameter name")
 			if err != nil {
@@ -290,6 +291,9 @@ func (p *parser) parseFnDecl() (Decl, error) {
 				return nil, err
 			}
 			if p.cur().kw == kwType {
+				if seenRuntimeParam {
+					return nil, p.errf(pn, "compile-time type parameters must precede runtime parameters")
+				}
 				p.advance()
 				d.Params = append(d.Params, ParamDecl{Name: pn.text, Kind: paramType})
 			} else {
@@ -298,6 +302,7 @@ func (p *parser) parseFnDecl() (Decl, error) {
 					return nil, err
 				}
 				d.Params = append(d.Params, ParamDecl{Name: pn.text, Kind: paramRuntime, Type: pt})
+				seenRuntimeParam = true
 			}
 			if p.cur().kind == tokPunct && p.cur().text == "," {
 				p.advance()
