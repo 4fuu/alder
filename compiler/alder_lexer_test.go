@@ -24,6 +24,7 @@ var compilerSourceManifest = []string{
 	"main.al",
 	"model.al",
 	"output.al",
+	"parser.al",
 }
 
 func TestAlderLexerConformanceEndToEnd(t *testing.T) {
@@ -55,7 +56,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 			t.Fatalf("compile %s: first=%+v/%v second=%+v/%v", emit, first, firstErr, second, secondErr)
 		}
 		if first.Artifact.Text != second.Artifact.Text {
-			t.Fatalf("self-hosted lexer %s changed with implementation source order", emit)
+			t.Fatalf("Alder lexer %s changed with implementation source order", emit)
 		}
 		artifacts[emit] = first.Artifact.Text
 	}
@@ -144,12 +145,12 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		order = append(order, fixtures[i].path)
 	}
 	want := expectedLexerManifest(t, fixtures)
-	first := runSelfHostedLexer(t, exe, dir, files, order, false)
-	second := runSelfHostedLexer(t, exe, dir, files, []string{"a-empty.al", "b-keywords.al", "c-values.al", "d-boundaries.al"}, false)
+	first := runAlderLexer(t, exe, dir, files, order, false)
+	second := runAlderLexer(t, exe, dir, files, []string{"a-empty.al", "b-keywords.al", "c-values.al", "d-boundaries.al"}, false)
 	if first != want || second != want || first != second {
 		t.Fatalf("valid token manifest mismatch\nwant:\n%s\ngot:\n%s", want, first)
 	}
-	if again := runSelfHostedLexer(t, exe, dir, files, order, false); again != first {
+	if again := runAlderLexer(t, exe, dir, files, order, false); again != first {
 		t.Fatal("repeat lexer process output changed")
 	}
 
@@ -173,7 +174,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
-			got := runSelfHostedLexer(t, exe, t.TempDir(), map[string][]byte{tc.name: tc.text}, []string{tc.name}, true)
+			got := runAlderLexer(t, exe, t.TempDir(), map[string][]byte{tc.name: tc.text}, []string{tc.name}, true)
 			want := fmt.Sprintf("ALDER-TOKEN-MANIFEST 1\nS 0 %s %d\nD LEX0001 %d %s 0 %d\nEND\n", tc.name, len(tc.text), tc.kind, tc.name, tc.end)
 			if got != want {
 				t.Fatalf("rejection manifest mismatch\nwant:\n%s\ngot:\n%s", want, got)
@@ -182,18 +183,18 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 	}
 	shiftedText := []byte("ok /* trivia */ ;")
 	shiftedWant := "ALDER-TOKEN-MANIFEST 1\nS 0 shifted.al 17\nT 0 1 0 0 2 0 0 6f6b\nD LEX0001 1 shifted.al 16 17\nEND\n"
-	if got := runSelfHostedLexer(t, exe, t.TempDir(), map[string][]byte{"shifted.al": shiftedText}, []string{"shifted.al"}, true); got != shiftedWant {
+	if got := runAlderLexer(t, exe, t.TempDir(), map[string][]byte{"shifted.al": shiftedText}, []string{"shifted.al"}, true); got != shiftedWant {
 		t.Fatalf("shifted rejection manifest mismatch\nwant:\n%s\ngot:\n%s", shiftedWant, got)
 	}
 	partialText := []byte(`ok "` + strings.Repeat("a", 32) + `\q"`)
 	partialWant := fmt.Sprintf("ALDER-TOKEN-MANIFEST 1\nS 0 partial-string.al %d\nT 0 1 0 0 2 0 0 6f6b\nD LEX0001 4 partial-string.al 3 4\nEND\n", len(partialText))
-	if got := runSelfHostedLexer(t, exe, t.TempDir(), map[string][]byte{"partial-string.al": partialText}, []string{"partial-string.al"}, true); got != partialWant {
+	if got := runAlderLexer(t, exe, t.TempDir(), map[string][]byte{"partial-string.al": partialText}, []string{"partial-string.al"}, true); got != partialWant {
 		t.Fatalf("partial string rejection manifest mismatch\nwant:\n%s\ngot:\n%s", partialWant, got)
 	}
 	canonicalBad := map[string][]byte{"z-bad.al": {'@'}, "a-bad.al": {';'}}
 	wantBad := "ALDER-TOKEN-MANIFEST 1\nS 0 a-bad.al 1\nS 1 z-bad.al 1\nD LEX0001 1 a-bad.al 0 1\nEND\n"
 	for _, badOrder := range [][]string{{"z-bad.al", "a-bad.al"}, {"a-bad.al", "z-bad.al"}} {
-		if got := runSelfHostedLexer(t, exe, t.TempDir(), canonicalBad, badOrder, true); got != wantBad {
+		if got := runAlderLexer(t, exe, t.TempDir(), canonicalBad, badOrder, true); got != wantBad {
 			t.Fatalf("canonical first diagnostic mismatch for %v\nwant:\n%s\ngot:\n%s", badOrder, wantBad, got)
 		}
 	}
@@ -241,7 +242,7 @@ func expectedLexerManifest(t *testing.T, fixtures []lexerFixture) string {
 	return out.String()
 }
 
-func runSelfHostedLexer(t *testing.T, exe, dir string, files map[string][]byte, order []string, wantFailure bool) string {
+func runAlderLexer(t *testing.T, exe, dir string, files map[string][]byte, order []string, wantFailure bool) string {
 	t.Helper()
 	for name, text := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), text, 0o644); err != nil {

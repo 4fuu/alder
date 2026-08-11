@@ -334,12 +334,15 @@ Exit-criteria evidence:
 Status: **active**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
-current source model and lossless lexer are only a preparatory M5.4 slice: they
-pin Go-compatible token kinds, keywords, trivia and byte ranges, literal escapes,
-lexical failures, host-snapshot order, deterministic verified MIR/C, and strict
-C execution through a private token-manifest conformance protocol. This does not
-open a second frontend, replace the M5.3 declaration spike yet, or satisfy any
-self-hosting claim.
+current source model, lossless lexer, and declaration/type parser are only
+preparatory M5.4 slices. They pin Go-compatible token kinds, keywords, trivia,
+byte ranges, literal escapes, lexical failures, host-snapshot order, imports,
+generic struct/enum declarations, recursive type expressions, deterministic
+first-failure order, verified MIR/C, and strict C execution. Top-level function
+declarations and bodies are deliberately not parsed yet. The token and parser
+manifests are private conformance protocols; these slices do not open a second
+frontend, replace the M5.3 declaration spike yet, constitute a complete
+frontend, or satisfy any self-hosting claim.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
