@@ -359,31 +359,46 @@ The scan tasks release file contents and parser data when each task domain ends.
 
 Status: normative for the implemented Go Stage 0 frontend
 
-M4 defines the smallest source surface that can still exercise every backend
-mechanism end to end. Everything below is implemented by the `frontend` Go
-package: deterministic source text -> fully typed and monomorphized program
--> verified MIR 1 -> C11. Everything not listed here is rejected with a
-diagnostic, never silently ignored.
+M4 implements a deliberately small source surface that exercises a
+representative subset of the MIR and C backend end to end. The `frontend` Go
+package deterministically transforms source text into a fully typed and
+monomorphized program, verified MIR 1, and C11. This is a bootstrap bridge,
+not a complete frontend or the final surface language.
+
+S0 does not implement storage inference, the `Table(T)` and `T.Id` surface,
+structured concurrency, traits, closures, methods, or routine ownership and
+lifetime annotations. It has slices and `String`, but no fixed-array type.
 
 ### Modules and compilation units
 
-A module is one source file containing, in any order:
+A compilation accepts exactly one source file containing, in any order:
 
-- `import c <name>: fn(<params>) -> <result>` declarations (one per line);
-- `type` and `enum` declarations;
-- `fn` declarations.
+- direct concrete C symbol declarations of the form
+  `import c <name>: fn(<params>) -> <result>`
+- `type` and `enum` declarations
+- `fn` declarations
 
-All names are module-global; there are no namespaces, packages, or separate
-compilation units. Source identifiers use `[a-zA-Z_][a-zA-Z0-9_]*`; dots and
-other punctuation are reserved for the grammar. The frontend reserves nothing
-else: generated MIR entities use dotted names such as `map.get.I64.I64`,
-which source identifiers cannot spell.
+All names are file-global. S0 has no source modules, namespaces, packages,
+separate compilation, or C header importing. Source identifiers use
+`[a-zA-Z_][a-zA-Z0-9_]*`. Names beginning with `__s0_` are reserved for
+bootstrap intrinsics.
 
 The compilation pipeline is: lex -> parse (AST) -> typecheck with inference
 and monomorphization (typed AST) -> deterministic MIR emission -> the
 `mir/verify` gate -> the `cgen` C11 backend. Type inference and
 monomorphization complete before any backend MIR exists. MIR is never
 repaired: a program whose lowered MIR fails verification is a frontend bug.
+
+### Layout and separators
+
+S0 is semicolon-free. Top-level declarations require physical-line
+separation; a physical line break or `}` terminates a statement or braced
+list item. Outside delimiters an expression cannot
+continue across a physical line break. Inside `()`, `[]`, or braces belonging
+to an expression, it may continue across line breaks. Parenthesized lists
+require commas between items and allow one trailing comma. Struct fields,
+enum variants, and `match` arms are separated by line breaks, never commas or
+semicolons.
 
 ### Types
 
@@ -396,19 +411,29 @@ Composite types:
 - `[T]` is a slice of `T`; `String` is sugar for `[U8]`;
 - `Option(T)` and `Result(T, E)` are the built-in enum-like types with
   implicit variants `None`/`Some(T)` and `Ok(T)`/`Err(E)`;
-- `Map(K, V)` is the built-in open-addressed hash map (fixed capacity 16);
-- `Domain` is a storage-domain handle; `Ptr(T)` is a raw C pointer usable
-  only at FFI boundaries;
-- `type Name(A: type, B: type) { f: A; g: B }` declares a generic struct;
-  `enum Name(T: type) { V, W(T) }` declares a generic enum. Non-generic
-  declarations omit the parameter list.
+- `Map(K, V)` is a fixed-capacity bootstrap helper using open addressing and
+  capacity 16, not the long-term `Table(T)` and `T.Id` identity model;
+- `Domain` and `DomainMark` are bootstrap bridge types, not user-facing parts
+  of the intended compiler-inferred storage model;
+- `Ptr(T)` is a raw C pointer usable only at FFI boundaries;
+- generic structs use leading compile-time parameters such as
+  `type Pair(A: type, B: type)`, and unary enum payloads require labels:
+
+```aster
+enum Maybe(T: type) {
+    Some(value: T)
+    None
+}
+```
 
 Type application uses parenthesized syntax like calls: `Pair(I64, String)`
 is a type. The checker resolves `Name(...)` by the callee's kind: a type
 constructor application, a function call, a struct construction, or an enum
-variant construction. Struct construction is positional and must cover every
-field in declaration order. Enum variants carry at most one payload; a
-variant with several payloads is rejected.
+variant construction. Record construction names every field, for example
+`Point(x: 1, y: 2)`, and source field order is arbitrary. Enum variants carry
+at most one payload. Its declaration label documents the payload, while
+construction and patterns remain `Some(value)` and `Some(binding)` because
+there is exactly one payload.
 
 Restrictions (each with a diagnostic):
 
@@ -421,19 +446,19 @@ Restrictions (each with a diagnostic):
 - `Map` keys must be unsigned integers, `Bool`, or structs/enums composed of
   those, so hashing and equality are defined structurally; signed and float
   keys are rejected;
-- `Map` values must be copy-trivial (no nested slices, strings, or
-  references);
-- `Alloc(T, d, n)` results are mutable references: they support `len`,
+- `Map` values must be copy-trivial (no nested slices, strings, references,
+  maps, or domain handles);
+- `__s0_alloc(T, d, n)` results are mutable references: they support `len`,
   indexing, ranges, and iteration, and their elements may be assigned, but
   they may not be passed where a `[T]` parameter is required;
 - `Ptr(T)` values may only be FFI results, FFI arguments, and function
   results;
 - a full map has no growth: `Set` on a full map fails the function;
-- domains always have a parent: `Domain(p)` creates a child of `p`, and a
-  root domain comes from the environment (the C driver in tests);
-- domain marks may not be bound to `let`/`var`; `Reset(d, Mark(d))` uses the
-  mark directly, because MIR 1 requires the reset mark to be the direct
-  `domain.mark` result;
+- domains always have a parent: `__s0_domain_create(p)` creates a child of
+  `p`, and a root `Domain` comes from the environment (the C driver in tests);
+- domain marks may not be bound to `let` or `var`;
+  `__s0_domain_reset(d, __s0_domain_mark(d))` uses the mark directly because
+  MIR 1 requires the reset mark to be the direct `domain.mark` result;
 - function-typed values are not part of the subset (no higher-order
   functions);
 - strings compare by length and bytes only; `==` on strings is rejected
@@ -454,21 +479,32 @@ Restrictions (each with a diagnostic):
 - `len(x)` (slice length, `U64`), `x[i]` (checked index, `U64`; out of
   bounds fails the function with a zero result value, the MIR 1 fail-edge
   convention), `range(x, lo, hi)` (checked bounds, same failure semantics);
-- calls: user functions, builtins, and imports; generic calls may supply the
-  leading compile-time type arguments explicitly (`identity(I64, 3)`) or
-  omit them when the remaining runtime arguments infer them
-  (`identity(3)`);
+- calls: user functions, builtins, and C imports only through the `unsafe c`
+  form described below; generic calls may supply the
+  complete leading sequence of compile-time type arguments explicitly
+  (`identity(I64, 3)`) or omit all of them when runtime arguments and the
+  expected result type infer them (`identity(3)`); supplying only some type
+  arguments is rejected, as is polymorphic recursion that would expand the
+  set of specializations;
 - field access `e.f` and indexing `e[i]` on any expression;
 - struct construction `Name(args)`; variant construction `Variant` or
   `Variant(arg)` where the variant name resolves against the expected enum
   type (`Some(3)`, `None`, `Ok(v)`, `Err(e)`, `Circle(5)`);
-- `match e { V(x) => expr, V => expr, _ => expr }` is an expression; arms
+- `match e { V(x) => expr` followed by line-separated arms and `}` is an
+  expression; arms
   must cover every variant or include `_`; every arm has one type;
 - `try expr` inside a function returning `Result(A, E)`: on `Err(e)` the
   function fails with `Err(e)`; the error type must match `E` exactly;
-- builtins: `Domain(p)`, `Mark(d)`, `Reset(d, m)`, `Destroy(d)`,
-  `Alloc(T, d, n)`, `Map(K, V)(d)`, `Get(m, k)`, `Set(m, k, v)`,
-  `Remove(m, k)`.
+- bootstrap intrinsics: `__s0_domain_create(p)`, `__s0_alloc(T, d, n)`,
+  `__s0_domain_mark(d)`, `__s0_domain_reset(d, m)`,
+  `__s0_domain_destroy(d)`, and `__s0_map_create(Map(K, V), d)`;
+- map operations: `Get(m, k)`, `Set(m, k, v)`, and `Remove(m, k)`.
+
+The `__s0_` names are reserved bootstrap-only intrinsics. Together with the
+`Domain` and `DomainMark` bridge types, they expose enough machinery to reach
+MIR 1 tests; they are not the intended source memory model. The long-term
+model remains compiler-inferred hierarchical storage domains for ordinary
+values and `Table(T)` with generational `T.Id` for long-lived identity.
 
 `if` / `else`, `while`, and `for x in xs` (over slices, `x` is an element
 copy) are statements; `for` and `while` have no `break` or `continue`.
@@ -486,7 +522,7 @@ contain checked operations.
   initializer's type is inferable); `var x: T = e` declares a mutable one;
 - `x = e` reassigns a `var` (also `x.f = e`, `x[i] = e`, `x[i].f = e`);
   `let`-bound names and enum payload bindings are immutable;
-- every block of a function must return on all paths (the final statement
+- every non-`Unit` function body must return on all paths (the final statement
   must be `return`, an `if`/`else` whose branches both return, a `match`
   whose arms all return, or a block ending in one); a `Unit` function may
   fall off the end.
@@ -496,19 +532,27 @@ contain checked operations.
 `using x = expr with CleanupFn` registers cleanup on a value: the
 `CleanupFn` must take exactly one parameter of the expression's type and
 return `Unit`. The frontend opens a scope at the `using` statement and
-emits `Run` + `End` before every subsequent exit (return or failed `try`),
-in reverse registration order, on exactly the paths that opened the scope.
+emits `Run` + `End` on normal lexical-scope fallthrough, return, failed `try`,
+and checked-operation failure, in reverse registration order and on exactly
+the paths that opened the scope.
 This is the only cleanup surface in the subset: MIR 1 requires cleanup
 handles to have direct instruction-result SSA identity, so they cannot
 cross source-level bindings, and the low-level scope API is not exposed.
 `using` inside a loop is rejected (a scope cannot re-begin while active).
+The callback-bearing `with` form is an S0 bridge required by MIR 1, not the
+intended resource model. The long-term syntax remains `using x = expr`, with
+cleanup selected by the resource's contract.
 
 ### C FFI
 
 `import c strlen: fn(Ptr(U8)) -> U64` declares a C symbol with a concrete
 signature; the name is the C symbol. FFI parameter and result types are
-restricted to primitives and `Ptr(T)`. Calls lower to `ffi.call.unsafe`
-with the backend's symbol-safety checks.
+restricted to primitives and `Ptr(T)`. An import can be called only as exactly
+one direct import call within `unsafe c { symbol(args) }`. Calls outside that
+boundary are rejected, as are user-function calls in the block and nested
+calls in unsafe call arguments. Accepted calls lower to `ffi.call.unsafe`
+with the backend's symbol-safety checks. S0 declares symbols directly; it
+does not import C headers or provide C modules.
 
 ### Diagnostics and acceptance boundary
 
@@ -524,7 +568,10 @@ that type-check lower to MIR that must pass `mir/verify` unchanged.
 Acceptance evidence for M4: accept fixtures with pinned printed-MIR goldens,
 rejection fixtures with pinned diagnostics, end-to-end source-to-C11
 compile-and-run programs under the strict warning set, and in-process and
-cross-process determinism checks.
+cross-process determinism checks for this documented subset. This demonstrates
+the tested representative path, not every backend mechanism or a complete
+language frontend. ASan/UBSan coverage is skipped on the current Windows
+mingw-w64 host because libasan and libubsan are unavailable.
 
 ## Open Design Questions
 

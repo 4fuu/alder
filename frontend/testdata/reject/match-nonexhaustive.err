@@ -1,1 +1,1 @@
-line 3, column 13: unknown name "A"
+line 7, column 8: match is not exhaustive: variant "B" of E is not covered

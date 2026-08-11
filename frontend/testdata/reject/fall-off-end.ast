@@ -1,8 +1,8 @@
 fn f(x: Bool) -> I64 {
     if x {
-        return 1;
+        return 1
     }
 }
 fn main() -> I32 {
-    return 0;
+    return 0
 }

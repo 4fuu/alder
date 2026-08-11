@@ -76,6 +76,31 @@ func typeParam(name string) *Type { return &Type{kind: tTypeParam, name: name} }
 
 func (t *Type) isTypeParam() bool { return t != nil && t.kind == tTypeParam }
 
+// concrete reports recursively whether a type is safe to pass to lowering.
+func (t *Type) concrete() bool {
+	if t == nil || t.kind == tTypeParam {
+		return false
+	}
+	switch t.kind {
+	case tSlice, tAlloc, tPtr, tOption:
+		return t.elem.concrete()
+	case tResult:
+		return t.ok.concrete() && t.err.concrete()
+	case tMap:
+		return t.key.concrete() && t.val.concrete()
+	case tStruct, tEnum:
+		if t.decl == nil || len(t.args) != len(t.decl.params) {
+			return false
+		}
+		for _, arg := range t.args {
+			if !arg.concrete() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // isInt reports whether the type is an integer type.
 func (t *Type) isInt() bool {
 	if t == nil || t.kind != tPrim {
@@ -247,24 +272,24 @@ func (t *Type) containsSlice() bool {
 		return false
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tPtr:
+	case tSlice, tAlloc, tMap, tDomain, tDomainMark, tCleanupScope, tCleanupID, tPtr:
 		return true
 	case tOption:
 		return t.elem.containsSlice()
 	case tResult:
 		return t.ok.containsSlice() || t.err.containsSlice()
-	case tMap:
-		return t.key.containsSlice() || t.val.containsSlice()
 	case tStruct:
+		bindings := structBindings(t)
 		for _, f := range t.decl.fields {
-			if f.containsSlice() {
+			if substType(f, bindings).containsSlice() {
 				return true
 			}
 		}
 		return false
 	case tEnum:
+		bindings := structBindings(t)
 		for _, v := range t.decl.variants {
-			if v.payload != nil && v.payload.containsSlice() {
+			if v.payload != nil && substType(v.payload, bindings).containsSlice() {
 				return true
 			}
 		}
@@ -290,15 +315,17 @@ func (t *Type) mapKeyOK() bool {
 	case tPrim:
 		return t.prim == pBool || t.isUnsigned()
 	case tStruct:
+		bindings := structBindings(t)
 		for _, f := range t.decl.fields {
-			if !f.mapKeyOK() {
+			if !substType(f, bindings).mapKeyOK() {
 				return false
 			}
 		}
 		return true
 	case tEnum:
+		bindings := structBindings(t)
 		for _, v := range t.decl.variants {
-			if v.payload != nil && !v.payload.mapKeyOK() {
+			if v.payload != nil && !substType(v.payload, bindings).mapKeyOK() {
 				return false
 			}
 		}
@@ -417,4 +444,17 @@ func substType(t *Type, bindings map[string]*Type) *Type {
 		return &Type{kind: t.kind, decl: t.decl, args: args}
 	}
 	return t
+}
+
+func structBindings(t *Type) map[string]*Type {
+	bindings := make(map[string]*Type)
+	if t == nil || t.decl == nil {
+		return bindings
+	}
+	for i, p := range t.decl.params {
+		if i < len(t.args) {
+			bindings[p] = t.args[i]
+		}
+	}
+	return bindings
 }

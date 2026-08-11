@@ -7,8 +7,9 @@ import (
 
 // parser is a recursive-descent parser over the token stream.
 type parser struct {
-	toks []token
-	i    int
+	toks      []token
+	i         int
+	exprDepth int
 }
 
 // parseModule parses a complete source module.
@@ -25,6 +26,9 @@ func parseModule(src string) ([]Decl, error) {
 			return nil, err
 		}
 		decls = append(decls, d)
+		if p.cur().kind != tokEOF && !p.lineBreakBeforeCurrent() {
+			return nil, p.errf(p.cur(), "declarations must be separated by a physical line break")
+		}
 	}
 	return decls, nil
 }
@@ -54,6 +58,21 @@ func (p *parser) expectPunct(text string) error {
 		return p.errf(t, "expected %q, got %s", text, t.describe())
 	}
 	p.advance()
+	return nil
+}
+
+func (p *parser) trailingClose(close string) bool {
+	return p.cur().kind == tokPunct && p.cur().text == close
+}
+
+func (p *parser) lineBreakBeforeCurrent() bool {
+	return p.i > 0 && p.cur().line > p.toks[p.i-1].line
+}
+
+func (p *parser) requireSameLineAfterPrevious(what string) error {
+	if p.lineBreakBeforeCurrent() && p.exprDepth == 0 {
+		return p.errf(p.cur(), "%s may continue across a line break only inside delimiters", what)
+	}
 	return nil
 }
 
@@ -130,6 +149,9 @@ func (p *parser) parseFnSig() (FuncSigExpr, error) {
 			params = append(params, ty)
 			if p.cur().kind == tokPunct && p.cur().text == "," {
 				p.advance()
+				if p.trailingClose(")") {
+					break
+				}
 				continue
 			}
 			break
@@ -174,6 +196,9 @@ func (p *parser) parseTypeDecl(isEnum bool) (Decl, error) {
 			d.Params = append(d.Params, pn.text)
 			if p.cur().kind == tokPunct && p.cur().text == "," {
 				p.advance()
+				if p.trailingClose(")") {
+					break
+				}
 				continue
 			}
 			break
@@ -191,21 +216,29 @@ func (p *parser) parseTypeDecl(isEnum bool) (Decl, error) {
 			v := VariantDecl{Name: vn.text}
 			if p.cur().kind == tokPunct && p.cur().text == "(" {
 				p.advance()
+				label, err := p.expectIdent("a payload label")
+				if err != nil {
+					return nil, err
+				}
+				if err := p.expectPunct(":"); err != nil {
+					return nil, p.errf(p.cur(), "enum payload requires a label before its type")
+				}
 				payload, err := p.parseType()
 				if err != nil {
 					return nil, err
 				}
-				v.Payload = payload
+				v.PayloadLabel, v.Payload = label.text, payload
 				if err := p.expectPunct(")"); err != nil {
 					return nil, err
 				}
 			}
 			d.Variants = append(d.Variants, v)
-			if p.cur().kind == tokPunct && p.cur().text == "," {
-				p.advance()
-				continue
+			if p.cur().kind == tokPunct && (p.cur().text == "," || p.cur().text == ";") {
+				return nil, p.errf(p.cur(), "enum variants are separated by line breaks, not %q", p.cur().text)
 			}
-			break
+			if !p.trailingClose("}") && !p.lineBreakBeforeCurrent() {
+				return nil, p.errf(p.cur(), "enum variants must be separated by a line break")
+			}
 		}
 	} else {
 		for p.cur().kind == tokIdent && p.cur().kw == kwNone {
@@ -221,11 +254,12 @@ func (p *parser) parseTypeDecl(isEnum bool) (Decl, error) {
 				return nil, err
 			}
 			d.Fields = append(d.Fields, FieldDecl{Name: fn.text, Type: ft})
-			if p.cur().kind == tokPunct && p.cur().text == "," {
-				p.advance()
-				continue
+			if p.cur().kind == tokPunct && (p.cur().text == "," || p.cur().text == ";") {
+				return nil, p.errf(p.cur(), "type fields are separated by line breaks, not %q", p.cur().text)
 			}
-			break
+			if !p.trailingClose("}") && !p.lineBreakBeforeCurrent() {
+				return nil, p.errf(p.cur(), "type fields must be separated by a line break")
+			}
 		}
 	}
 	if err := p.expectPunct("}"); err != nil {
@@ -267,6 +301,9 @@ func (p *parser) parseFnDecl() (Decl, error) {
 			}
 			if p.cur().kind == tokPunct && p.cur().text == "," {
 				p.advance()
+				if p.trailingClose(")") {
+					break
+				}
 				continue
 			}
 			break
@@ -306,6 +343,9 @@ func (p *parser) parseBlock() (*Block, error) {
 			return nil, err
 		}
 		b.Stmts = append(b.Stmts, s)
+		if !p.trailingClose("}") && !p.lineBreakBeforeCurrent() {
+			return nil, p.errf(p.cur(), "statements must be separated by a physical line break")
+		}
 	}
 	p.advance() // }
 	return b, nil
@@ -332,9 +372,6 @@ func (p *parser) parseStmt() (Stmt, error) {
 			if err != nil {
 				return nil, err
 			}
-			if err := p.expectPunct(";"); err != nil {
-				return nil, err
-			}
 			return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
 		}
 	}
@@ -352,17 +389,14 @@ func (p *parser) parseStmt() (Stmt, error) {
 			return nil, err
 		}
 		p.advance()
+		if err := p.requireSameLineAfterPrevious("an assignment"); err != nil {
+			return nil, err
+		}
 		value, err := p.parseExpr()
 		if err != nil {
 			return nil, err
 		}
-		if err := p.expectPunct(";"); err != nil {
-			return nil, err
-		}
 		return &Assign{P: pos{t.line, t.col}, Target: target, Value: value}, nil
-	}
-	if err := p.expectPunct(";"); err != nil {
-		return nil, err
 	}
 	return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
 }
@@ -414,19 +448,22 @@ func (p *parser) parseLet() (Stmt, error) {
 	if err := p.expectPunct("="); err != nil {
 		return nil, err
 	}
+	if err := p.requireSameLineAfterPrevious("an initializer"); err != nil {
+		return nil, err
+	}
 	value, err := p.parseExpr()
 	if err != nil {
 		return nil, err
 	}
 	s.Value = value
-	if err := p.expectPunct(";"); err != nil {
-		return nil, err
-	}
 	return s, nil
 }
 
 func (p *parser) parseIf() (Stmt, error) {
 	t := p.advance() // if
+	if err := p.requireSameLineAfterPrevious("an if condition"); err != nil {
+		return nil, err
+	}
 	cond, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -449,6 +486,9 @@ func (p *parser) parseIf() (Stmt, error) {
 
 func (p *parser) parseWhile() (Stmt, error) {
 	t := p.advance() // while
+	if err := p.requireSameLineAfterPrevious("a while condition"); err != nil {
+		return nil, err
+	}
 	cond, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -467,6 +507,9 @@ func (p *parser) parseFor() (Stmt, error) {
 		return nil, err
 	}
 	if err := p.expectKeyword(kwIn, "\"in\""); err != nil {
+		return nil, err
+	}
+	if err := p.requireSameLineAfterPrevious("a for expression"); err != nil {
 		return nil, err
 	}
 	seq, err := p.parseExpr()
@@ -489,6 +532,9 @@ func (p *parser) parseUsing() (Stmt, error) {
 	if err := p.expectPunct("="); err != nil {
 		return nil, err
 	}
+	if err := p.requireSameLineAfterPrevious("a using initializer"); err != nil {
+		return nil, err
+	}
 	value, err := p.parseExpr()
 	if err != nil {
 		return nil, err
@@ -496,11 +542,11 @@ func (p *parser) parseUsing() (Stmt, error) {
 	if err := p.expectKeyword(kwWith, "\"with\""); err != nil {
 		return nil, err
 	}
-	cleanup, err := p.expectIdent("a cleanup function name")
-	if err != nil {
+	if err := p.requireSameLineAfterPrevious("a using statement"); err != nil {
 		return nil, err
 	}
-	if err := p.expectPunct(";"); err != nil {
+	cleanup, err := p.expectIdent("a cleanup function name")
+	if err != nil {
 		return nil, err
 	}
 	return &UsingStmt{P: pos{t.line, t.col}, Name: name.text, Value: value, Cleanup: cleanup.text}, nil
@@ -509,8 +555,7 @@ func (p *parser) parseUsing() (Stmt, error) {
 func (p *parser) parseReturn() (Stmt, error) {
 	t := p.advance() // return
 	s := &ReturnStmt{P: pos{t.line, t.col}}
-	if p.cur().kind == tokPunct && p.cur().text == ";" {
-		p.advance()
+	if p.trailingClose("}") || p.cur().line > t.line {
 		return s, nil
 	}
 	x, err := p.parseExpr()
@@ -518,9 +563,6 @@ func (p *parser) parseReturn() (Stmt, error) {
 		return nil, err
 	}
 	s.Value = x
-	if err := p.expectPunct(";"); err != nil {
-		return nil, err
-	}
 	return s, nil
 }
 
@@ -555,6 +597,9 @@ func (p *parser) parseType() (TypeExpr, error) {
 				args = append(args, arg)
 				if p.cur().kind == tokPunct && p.cur().text == "," {
 					p.advance()
+					if p.trailingClose(")") {
+						break
+					}
 					continue
 				}
 				break
@@ -598,7 +643,13 @@ func (p *parser) parseBinary(minPrec int) (Expr, error) {
 		if !ok || prec < minPrec {
 			return left, nil
 		}
+		if err := p.requireSameLineAfterPrevious("an expression"); err != nil {
+			return nil, err
+		}
 		op := p.advance()
+		if err := p.requireSameLineAfterPrevious("an expression"); err != nil {
+			return nil, err
+		}
 		right, err := p.parseBinary(prec + 1)
 		if err != nil {
 			return nil, err
@@ -611,6 +662,9 @@ func (p *parser) parseUnary() (Expr, error) {
 	t := p.cur()
 	if t.kind == tokPunct && (t.text == "-" || t.text == "!") {
 		p.advance()
+		if err := p.requireSameLineAfterPrevious("a unary expression"); err != nil {
+			return nil, err
+		}
 		x, err := p.parseUnary()
 		if err != nil {
 			return nil, err
@@ -628,19 +682,37 @@ func (p *parser) parsePostfix() (Expr, error) {
 	for {
 		t := p.cur()
 		if t.kind == tokPunct && t.text == "(" {
+			if err := p.requireSameLineAfterPrevious("a call"); err != nil {
+				return nil, err
+			}
 			p.advance()
+			p.exprDepth++
 			var args []Expr
 			if p.cur().kind == tokPunct && p.cur().text == ")" {
 				p.advance()
+				p.exprDepth--
 			} else {
 				for {
-					arg, err := p.parseExpr()
+					var arg Expr
+					var err error
+					if p.cur().kind == tokIdent && p.cur().kw == kwNone && p.peek().text == ":" {
+						n := p.advance()
+						p.advance()
+						v, e := p.parseExpr()
+						err = e
+						arg = &NamedArg{P: pos{n.line, n.col}, Name: n.text, Value: v}
+					} else {
+						arg, err = p.parseExpr()
+					}
 					if err != nil {
 						return nil, err
 					}
 					args = append(args, arg)
 					if p.cur().kind == tokPunct && p.cur().text == "," {
 						p.advance()
+						if p.trailingClose(")") {
+							break
+						}
 						continue
 					}
 					break
@@ -648,11 +720,15 @@ func (p *parser) parsePostfix() (Expr, error) {
 				if err := p.expectPunct(")"); err != nil {
 					return nil, err
 				}
+				p.exprDepth--
 			}
 			x = &Call{P: pos{t.line, t.col}, Callee: x, Args: args}
 			continue
 		}
 		if t.kind == tokPunct && t.text == "." {
+			if err := p.requireSameLineAfterPrevious("field access"); err != nil {
+				return nil, err
+			}
 			p.advance()
 			name, err := p.expectIdent("a field name")
 			if err != nil {
@@ -662,7 +738,11 @@ func (p *parser) parsePostfix() (Expr, error) {
 			continue
 		}
 		if t.kind == tokPunct && t.text == "[" {
+			if err := p.requireSameLineAfterPrevious("indexing"); err != nil {
+				return nil, err
+			}
 			p.advance()
+			p.exprDepth++
 			idx, err := p.parseExpr()
 			if err != nil {
 				return nil, err
@@ -670,6 +750,7 @@ func (p *parser) parsePostfix() (Expr, error) {
 			if err := p.expectPunct("]"); err != nil {
 				return nil, err
 			}
+			p.exprDepth--
 			x = &Index{P: pos{t.line, t.col}, Base: x, Index: idx}
 			continue
 		}
@@ -704,6 +785,9 @@ func (p *parser) parsePrimary() (Expr, error) {
 			return &BoolLit{P: pos{t.line, t.col}, Value: t.kw == kwTrue}, nil
 		case kwTry:
 			p.advance()
+			if err := p.requireSameLineAfterPrevious("a try expression"); err != nil {
+				return nil, err
+			}
 			x, err := p.parseUnary()
 			if err != nil {
 				return nil, err
@@ -711,6 +795,8 @@ func (p *parser) parsePrimary() (Expr, error) {
 			return &Try{P: pos{t.line, t.col}, X: x}, nil
 		case kwMatch:
 			return p.parseMatch()
+		case kwUnsafe:
+			return p.parseUnsafeC()
 		case kwNone:
 			p.advance()
 			return &Ident{P: pos{t.line, t.col}, Name: t.text}, nil
@@ -718,6 +804,7 @@ func (p *parser) parsePrimary() (Expr, error) {
 		return nil, p.errf(t, "expected an expression, got %q", t.text)
 	case t.kind == tokPunct && t.text == "(":
 		p.advance()
+		p.exprDepth++
 		x, err := p.parseExpr()
 		if err != nil {
 			return nil, err
@@ -725,13 +812,45 @@ func (p *parser) parsePrimary() (Expr, error) {
 		if err := p.expectPunct(")"); err != nil {
 			return nil, err
 		}
+		p.exprDepth--
 		return x, nil
 	}
 	return nil, p.errf(t, "expected an expression, got %s", t.describe())
 }
 
+func (p *parser) parseUnsafeC() (Expr, error) {
+	t := p.advance()
+	c, err := p.expectIdent("\"c\"")
+	if err != nil {
+		return nil, err
+	}
+	if c.text != "c" {
+		return nil, p.errf(c, "expected \"c\" after unsafe")
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return nil, err
+	}
+	p.exprDepth++
+	x, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	call, ok := x.(*Call)
+	if !ok {
+		return nil, p.errf(t, "unsafe c block must contain exactly one direct call")
+	}
+	if err := p.expectPunct("}"); err != nil {
+		return nil, p.errf(p.cur(), "unsafe c block must contain exactly one direct call")
+	}
+	p.exprDepth--
+	return &UnsafeC{P: pos{t.line, t.col}, Call: call}, nil
+}
+
 func (p *parser) parseMatch() (Expr, error) {
 	t := p.advance() // match
+	if err := p.requireSameLineAfterPrevious("a match expression"); err != nil {
+		return nil, err
+	}
 	value, err := p.parseUnary()
 	if err != nil {
 		return nil, err
@@ -739,10 +858,12 @@ func (p *parser) parseMatch() (Expr, error) {
 	if err := p.expectPunct("{"); err != nil {
 		return nil, err
 	}
+	p.exprDepth++
 	m := &Match{P: pos{t.line, t.col}, Value: value}
 	for {
 		if p.cur().kind == tokPunct && p.cur().text == "}" {
 			p.advance()
+			p.exprDepth--
 			return m, nil
 		}
 		arm, err := p.parseMatchArm()
@@ -750,9 +871,11 @@ func (p *parser) parseMatch() (Expr, error) {
 			return nil, err
 		}
 		m.Arms = append(m.Arms, arm)
-		if p.cur().kind == tokPunct && p.cur().text == "," {
-			p.advance()
-			continue
+		if p.cur().kind == tokPunct && (p.cur().text == "," || p.cur().text == ";") {
+			return nil, p.errf(p.cur(), "match arms are separated by line breaks, not %q", p.cur().text)
+		}
+		if !p.trailingClose("}") && !p.lineBreakBeforeCurrent() {
+			return nil, p.errf(p.cur(), "match arms must be separated by a line break")
 		}
 	}
 }

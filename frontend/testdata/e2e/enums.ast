@@ -1,62 +1,62 @@
 enum Shape {
-    Circle(I64),
-    Square(I64),
-    Dot,
+    Circle(value: I64)
+    Square(value: I64)
+    Dot
 }
 
 fn area(s: Shape) -> I64 {
     return match s {
-        Circle(r) => r * r,
-        Square(w) => w * w,
-        Dot => 0,
-    };
+        Circle(r) => r * r
+        Square(w) => w * w
+        Dot => 0
+    }
 }
 
 fn classify(n: I64) -> Shape {
     if n == 0 {
-        return Dot;
+        return Dot
     }
     if n < 0 {
-        return Circle(n);
+        return Circle(n)
     }
-    return Square(n);
+    return Square(n)
 }
 
 enum Maybe2(T: type) {
-    Just(T),
-    Nothing,
+    Just(value: T)
+    Nothing
 }
 
 fn unwrap(m: Maybe2(I64), fallback: I64) -> I64 {
     return match m {
-        Just(v) => v,
-        Nothing => fallback,
-        _ => 0,
-    };
+        Just(v) => v
+        Nothing => fallback
+        _ => 0
+    }
 }
 
 fn main() -> I32 {
     if area(Circle(5)) != 25 {
-        return 1;
+        return 1
     }
     if area(Square(6)) != 36 {
-        return 2;
+        return 2
     }
     if area(Dot) != 0 {
-        return 3;
+        return 3
     }
     if match classify(-3) {
-        Circle(r) => r,
-        Square(w) => w,
-        Dot => 0,
+        Circle(r) => r
+        Square(w) => w
+        Dot => 0
     } != -3 {
-        return 4;
+        return 4
     }
     if unwrap(Just(9), 1) != 9 {
-        return 5;
+        return 5
     }
     if unwrap(Nothing, 1) != 1 {
-        return 6;
+        return 6
     }
-    return 0;
+    return 0
 }

@@ -274,7 +274,7 @@ func (l *lowerer) mapType(t *Type) mir.TypeId {
 	}
 	entryKey := "MapEntry." + strings.TrimPrefix(key, "Map.c2.")
 	entry := l.m.AddAggregate(entryKey, []mir.Field{
-		{Name: "occupied", Type: mir.TypeBool},
+		{Name: "state", Type: mir.TypeU8},
 		{Name: "hash", Type: mir.TypeU64},
 		{Name: "key", Type: l.ty(t.key)},
 		{Name: "value", Type: l.ty(t.val)},
@@ -329,7 +329,7 @@ func (l *lowerer) mapHelpersFor(t *Type) *mapHelpers {
 	sfx := mapFnSuffix(t)
 	h.makeID = l.addMapFn("map.make."+sfx, []mir.Param{{Name: "d", Type: l.m.DomainHandle()}}, mapTy)
 	h.getID = l.addMapFn("map.get."+sfx, []mir.Param{{Name: "m", Type: mapTy}, {Name: "k", Type: kt}}, optV)
-	h.setID = l.addMapFn("map.set."+sfx, []mir.Param{{Name: "m", Type: mapTy}, {Name: "k", Type: kt}, {Name: "v", Type: vt}}, mir.TypeUnit)
+	h.setID = l.addMapFn("map.set."+sfx, []mir.Param{{Name: "m", Type: mapTy}, {Name: "k", Type: kt}, {Name: "v", Type: vt}}, mir.TypeBool)
 	h.removeID = l.addMapFn("map.remove."+sfx, []mir.Param{{Name: "m", Type: mapTy}, {Name: "k", Type: kt}}, mir.TypeBool)
 	l.mapCache[key] = h
 
@@ -337,7 +337,7 @@ func (l *lowerer) mapHelpersFor(t *Type) *mapHelpers {
 		l.lowerMapHash(h, t, kt)
 		l.lowerMapEq(h, t, kt)
 	}
-	l.lowerMapMake(h, mapTy, slotsTy)
+	l.lowerMapMake(h, t, mapTy, slotsTy)
 	l.lowerMapGet(h, t, mapTy, slotsTy, optV, kt, vt)
 	l.lowerMapSet(h, mapTy, slotsTy, kt, vt)
 	l.lowerMapRemove(h, mapTy, slotsTy, kt)
@@ -371,10 +371,11 @@ func (l *lowerer) mapConst(b *fb, name string, v int64) mir.ValueId {
 	return id
 }
 
-// lowerMapMake: fn map.make.K.V(d) -> Map { slots = alloc d, Entry, 16 }.
-func (l *lowerer) lowerMapMake(h *mapHelpers, mapTy, slotsTy mir.TypeId) {
+// lowerMapMake allocates and explicitly marks every slot empty. Domain
+// allocation is uninitialized, so no other entry field may be read first.
+func (l *lowerer) lowerMapMake(h *mapHelpers, t *Type, mapTy, slotsTy mir.TypeId) {
 	b := l.newFB(l.m.Functions[h.makeID])
-	b.result = &Type{kind: tMap, key: prim(pU64), val: prim(pU64)}
+	b.result = t
 	b.start("bb0")
 	cap := l.mapConst(b, "cap", mapCap)
 	entryTy := l.m.Types[slotsTy].Elem
@@ -382,6 +383,30 @@ func (l *lowerer) lowerMapMake(h *mapHelpers, mapTy, slotsTy mir.TypeId) {
 	b.emit(mir.Instr{Op: mir.OpAlloc, Result: slots, Domain: 0, Count: cap, TypeOp: entryTy})
 	id := b.res(mapTy)
 	b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: mapTy, AggFields: []mir.AggField{{Name: "slots", Value: slots}}})
+	// The checked initialization index is bounded by the loop condition. Give
+	// its unreachable failure edge a correctly typed map result.
+	fail := b.f.AddBlock(b.blockName("bb_fail"), nil)
+	fail.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: id})
+	b.panicBlk = blkID(b.f, fail)
+	zero := l.mapConst(b, "zero", 0)
+	one := l.mapConst(b, "one", 1)
+	loop, params := b.addBlock("bb_init", []mir.Param{{Name: "i", Type: mir.TypeU64}})
+	body, _ := b.addBlock("bb_init_slot", nil)
+	done, _ := b.addBlock("bb_done", nil)
+	b.jump(blkID(b.f, loop), []mir.ValueId{zero})
+	b.setCur(loop)
+	finished := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntGe, Result: finished, A: params[0], B: cap})
+	b.branch(finished, blkID(b.f, done), blkID(b.f, body))
+	b.setCur(body)
+	ref := b.res(slotsTy)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: slots, Index: params[0], FailTarget: b.panicBlock()})
+	empty := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "state"}, empty)
+	next := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: next, A: params[0], B: one, FailTarget: b.panicBlock()})
+	b.jump(blkID(b.f, loop), []mir.ValueId{next})
+	b.setCur(done)
 	b.ret(id)
 }
 
@@ -450,14 +475,21 @@ func (l *lowerer) lowerMapGet(h *mapHelpers, t *Type, mapTy, slotsTy, optV, kt, 
 	slots := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: ml}, Field: "slots"}, slotsTy)
 	ref := b.res(slotsTy)
 	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: slots, Index: loopParams[0], FailTarget: b.panicBlock()})
-	entryTy := l.m.Types[slotsTy].Elem
-	entry := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, entryTy)
-	el := b.f.AddLocal(b.localName("e"), entryTy)
-	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: el}, entry)
-	occ := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "occupied"}, mir.TypeBool)
+	state := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "state"}, mir.TypeU8)
+	occupied := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	occ := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: occ, A: state, B: occupied})
 	occBlk, _ := b.addBlock("bb_occ", nil)
+	nonOcc, _ := b.addBlock("bb_non_occ", nil)
+	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, nonOcc))
+
+	b.setCur(nonOcc)
+	emptyState := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
+	isEmpty := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: isEmpty, A: state, B: emptyState})
 	empty, _ := b.addBlock("bb_empty", nil)
-	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, empty))
+	next, _ := b.addBlock("bb_next", nil)
+	b.branch(isEmpty, blkID(b.f, empty), blkID(b.f, next))
 
 	b.setCur(empty)
 	noneVal := b.res(optV)
@@ -465,22 +497,21 @@ func (l *lowerer) lowerMapGet(h *mapHelpers, t *Type, mapTy, slotsTy, optV, kt, 
 	b.ret(noneVal)
 
 	b.setCur(occBlk)
-	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "hash"}, mir.TypeU64)
+	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "hash"}, mir.TypeU64)
 	heq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpIntEq, Result: heq, A: eh, B: hash})
 	check, _ := b.addBlock("bb_check", nil)
-	next, _ := b.addBlock("bb_next", nil)
 	b.branch(heq, blkID(b.f, check), blkID(b.f, next))
 
 	b.setCur(check)
-	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "key"}, kt)
+	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "key"}, kt)
 	keq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpCall, Result: keq, Callee: h.eqID, Args: []mir.ValueId{1, ek}})
 	found, _ := b.addBlock("bb_found", nil)
 	b.branch(keq, blkID(b.f, found), blkID(b.f, next))
 
 	b.setCur(found)
-	val := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "value"}, vt)
+	val := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "value"}, vt)
 	someVal := b.res(optV)
 	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: someVal, TypeOp: optV, Variant: "some", Payload: val})
 	b.ret(someVal)
@@ -511,7 +542,7 @@ func (l *lowerer) lowerMapGet(h *mapHelpers, t *Type, mapTy, slotsTy, optV, kt, 
 // lowerMapSet implements insertion with linear probing.
 func (l *lowerer) lowerMapSet(h *mapHelpers, mapTy, slotsTy, kt, vt mir.TypeId) {
 	b := l.newFB(l.m.Functions[h.setID])
-	b.result = prim(pUnit)
+	b.result = prim(pBool)
 	b.start("bb0")
 	ml := b.f.AddLocal(b.localName("m"), mapTy)
 	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: ml}, 0)
@@ -527,7 +558,7 @@ func (l *lowerer) lowerMapSet(h *mapHelpers, mapTy, slotsTy, kt, vt mir.TypeId) 
 	idx := b.res(mir.TypeU64)
 	b.emit(mir.Instr{Op: mir.OpIntSubChecked, Result: idx, A: hash, B: p, FailTarget: b.panicBlock()})
 
-	loop, loopParams := b.addBlock("bb_loop", []mir.Param{{Name: "idx", Type: mir.TypeU64}, {Name: "probes", Type: mir.TypeU64}})
+	loop, loopParams := b.addBlock("bb_loop", []mir.Param{{Name: "idx", Type: mir.TypeU64}, {Name: "probes", Type: mir.TypeU64}, {Name: "first_deleted", Type: mir.TypeU64}})
 	probe, _ := b.addBlock("bb_probe", nil)
 	full, _ := b.addBlock("bb_full", nil)
 	b.setCur(loop)
@@ -539,27 +570,48 @@ func (l *lowerer) lowerMapSet(h *mapHelpers, mapTy, slotsTy, kt, vt mir.TypeId) 
 	slots := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: ml}, Field: "slots"}, slotsTy)
 	ref := b.res(slotsTy)
 	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: slots, Index: loopParams[0], FailTarget: b.panicBlock()})
-	entryTy := l.m.Types[slotsTy].Elem
-	entry := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, entryTy)
-	el := b.f.AddLocal(b.localName("e"), entryTy)
-	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: el}, entry)
-	occ := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "occupied"}, mir.TypeBool)
+	state := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "state"}, mir.TypeU8)
+	occupied := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	occ := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: occ, A: state, B: occupied})
 	occBlk, _ := b.addBlock("bb_occ", nil)
-	empty, _ := b.addBlock("bb_empty", nil)
-	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, empty))
+	nonOcc, _ := b.addBlock("bb_non_occ", nil)
+	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, nonOcc))
 
-	// Fresh slot: write occupied, hash, key, value.
+	b.setCur(nonOcc)
+	emptyState := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
+	isEmpty := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: isEmpty, A: state, B: emptyState})
+	empty, _ := b.addBlock("bb_empty", nil)
+	deleted, _ := b.addBlock("bb_deleted", nil)
+	b.branch(isEmpty, blkID(b.f, empty), blkID(b.f, deleted))
+
+	// Use an earlier tombstone, if any, after proving the key is absent.
 	b.setCur(empty)
-	trueVal := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: true})
-	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "occupied"}, trueVal)
-	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "hash"}, hash)
-	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "key"}, 1)
-	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "value"}, 2)
+	hasDeleted := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: hasDeleted, A: loopParams[2], B: cap})
+	useCurrent, _ := b.addBlock("bb_use_current", nil)
+	useDeleted, _ := b.addBlock("bb_use_deleted", nil)
+	insert, insertParams := b.addBlock("bb_insert", []mir.Param{{Name: "idx", Type: mir.TypeU64}})
+	b.branch(hasDeleted, blkID(b.f, useCurrent), blkID(b.f, useDeleted))
+	b.setCur(useCurrent)
+	b.jump(blkID(b.f, insert), []mir.ValueId{loopParams[0]})
+	b.setCur(useDeleted)
+	b.jump(blkID(b.f, insert), []mir.ValueId{loopParams[2]})
+	b.setCur(insert)
+	insertSlots := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: ml}, Field: "slots"}, slotsTy)
+	insertRef := b.res(slotsTy)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: insertRef, Slice: insertSlots, Index: insertParams[0], FailTarget: b.panicBlock()})
+	insertOccupied := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: insertRef}, Field: "state"}, insertOccupied)
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: insertRef}, Field: "hash"}, hash)
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: insertRef}, Field: "key"}, 1)
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: insertRef}, Field: "value"}, 2)
 	done, _ := b.addBlock("bb_done", nil)
 	b.jump(blkID(b.f, done), nil)
 
 	b.setCur(occBlk)
-	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "hash"}, mir.TypeU64)
+	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "hash"}, mir.TypeU64)
 	heq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpIntEq, Result: heq, A: eh, B: hash})
 	check, _ := b.addBlock("bb_check", nil)
@@ -567,7 +619,7 @@ func (l *lowerer) lowerMapSet(h *mapHelpers, mapTy, slotsTy, kt, vt mir.TypeId) 
 	b.branch(heq, blkID(b.f, check), blkID(b.f, next))
 
 	b.setCur(check)
-	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "key"}, kt)
+	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "key"}, kt)
 	keq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpCall, Result: keq, Callee: h.eqID, Args: []mir.ValueId{1, ek}})
 	write, _ := b.addBlock("bb_write", nil)
@@ -588,16 +640,42 @@ func (l *lowerer) lowerMapSet(h *mapHelpers, mapTy, slotsTy, kt, vt mir.TypeId) 
 	b.emit(mir.Instr{Op: mir.OpIntSubChecked, Result: ni2, A: ni, B: np, FailTarget: b.panicBlock()})
 	np2 := b.res(mir.TypeU64)
 	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: np2, A: loopParams[1], B: one, FailTarget: b.panicBlock()})
-	b.jump(blkID(b.f, loop), []mir.ValueId{ni2, np2})
+	b.jump(blkID(b.f, loop), []mir.ValueId{ni2, np2, loopParams[2]})
+
+	b.setCur(deleted)
+	firstUnset := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: firstUnset, A: loopParams[2], B: cap})
+	record, _ := b.addBlock("bb_record_deleted", nil)
+	b.branch(firstUnset, blkID(b.f, record), blkID(b.f, next))
+	b.setCur(record)
+	// Advance while recording this first deleted slot.
+	dni := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: dni, A: loopParams[0], B: one, FailTarget: b.panicBlock()})
+	dnq := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntDivChecked, Result: dnq, A: dni, B: cap, FailTarget: b.panicBlock()})
+	dnp := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntMulChecked, Result: dnp, A: dnq, B: cap, FailTarget: b.panicBlock()})
+	dni2 := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntSubChecked, Result: dni2, A: dni, B: dnp, FailTarget: b.panicBlock()})
+	dprobes := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: dprobes, A: loopParams[1], B: one, FailTarget: b.panicBlock()})
+	b.jump(blkID(b.f, loop), []mir.ValueId{dni2, dprobes, loopParams[0]})
 
 	b.setCur(done)
-	b.ret(mir.NoValue)
+	inserted := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: true})
+	b.ret(inserted)
 
 	b.setCur(full)
-	b.jump(b.panicBlock(), nil)
+	noDeleted := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: noDeleted, A: loopParams[2], B: cap})
+	failed, _ := b.addBlock("bb_failed", nil)
+	b.branch(noDeleted, blkID(b.f, failed), blkID(b.f, useDeleted))
+	b.setCur(failed)
+	notInserted := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: false})
+	b.ret(notInserted)
 
 	b.setCur(b.f.Blocks[0])
-	b.jump(blkID(b.f, loop), []mir.ValueId{idx, zero})
+	b.jump(blkID(b.f, loop), []mir.ValueId{idx, zero, cap})
 }
 
 // lowerMapRemove implements deletion with linear probing.
@@ -631,37 +709,43 @@ func (l *lowerer) lowerMapRemove(h *mapHelpers, mapTy, slotsTy, kt mir.TypeId) {
 	slots := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: ml}, Field: "slots"}, slotsTy)
 	ref := b.res(slotsTy)
 	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: slots, Index: loopParams[0], FailTarget: b.panicBlock()})
-	entryTy := l.m.Types[slotsTy].Elem
-	entry := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, entryTy)
-	el := b.f.AddLocal(b.localName("e"), entryTy)
-	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: el}, entry)
-	occ := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "occupied"}, mir.TypeBool)
+	state := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "state"}, mir.TypeU8)
+	occupied := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	occ := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: occ, A: state, B: occupied})
 	occBlk, _ := b.addBlock("bb_occ", nil)
+	nonOcc, _ := b.addBlock("bb_non_occ", nil)
+	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, nonOcc))
+
+	b.setCur(nonOcc)
+	emptyState := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
+	isEmpty := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: isEmpty, A: state, B: emptyState})
 	empty, _ := b.addBlock("bb_empty", nil)
-	b.branch(occ, blkID(b.f, occBlk), blkID(b.f, empty))
+	next, _ := b.addBlock("bb_next", nil)
+	b.branch(isEmpty, blkID(b.f, empty), blkID(b.f, next))
 
 	b.setCur(empty)
 	falseVal := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: false})
 	b.ret(falseVal)
 
 	b.setCur(occBlk)
-	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "hash"}, mir.TypeU64)
+	eh := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "hash"}, mir.TypeU64)
 	heq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpIntEq, Result: heq, A: eh, B: hash})
 	check, _ := b.addBlock("bb_check", nil)
-	next, _ := b.addBlock("bb_next", nil)
 	b.branch(heq, blkID(b.f, check), blkID(b.f, next))
 
 	b.setCur(check)
-	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: el}, Field: "key"}, kt)
+	ek := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "key"}, kt)
 	keq := b.res(mir.TypeBool)
 	b.emit(mir.Instr{Op: mir.OpCall, Result: keq, Callee: h.eqID, Args: []mir.ValueId{1, ek}})
 	found, _ := b.addBlock("bb_found", nil)
 	b.branch(keq, blkID(b.f, found), blkID(b.f, next))
 
 	b.setCur(found)
-	falseVal2 := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: false})
-	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "occupied"}, falseVal2)
+	deletedState := b.constGet(prim(pU8), mir.ConstValue{Kind: mir.ConstInt, Int: 2})
+	b.storePlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: "state"}, deletedState)
 	trueVal := b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: true})
 	b.ret(trueVal)
 
@@ -703,6 +787,7 @@ type fb struct {
 	usedBlocks map[string]bool
 	scopes     []mir.ValueId
 	panicBlk   mir.BlockId
+	panicBlks  map[string]mir.BlockId
 }
 
 func (l *lowerer) newFB(f *mir.Function) *fb {
@@ -715,6 +800,7 @@ func (l *lowerer) newFB(f *mir.Function) *fb {
 		usedLocals: make(map[string]bool),
 		usedBlocks: make(map[string]bool),
 		panicBlk:   mir.NoBlock,
+		panicBlks:  make(map[string]mir.BlockId),
 	}
 	for _, v := range f.Values {
 		b.usedVals[v.Name] = true
@@ -843,14 +929,19 @@ func (b *fb) panicBlock() mir.BlockId {
 	if b.panicBlk != mir.NoBlock {
 		return b.panicBlk
 	}
+	key := fmt.Sprint(b.scopes)
+	if id, ok := b.panicBlks[key]; ok {
+		return id
+	}
 	blk := b.f.AddBlock(b.blockName("bb_fail"), nil)
 	saved := b.cur
 	b.setCur(blk)
 	v := b.zeroValue(b.result)
-	blk.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: v})
-	b.panicBlk = blkID(b.f, blk)
+	b.fail(v)
+	id := blkID(b.f, blk)
+	b.panicBlks[key] = id
 	b.setCur(saved)
-	return b.panicBlk
+	return id
 }
 
 // zeroValue materializes a zero value of a type (used by failure blocks).
@@ -1063,6 +1154,47 @@ func (b *fb) stmts(list []Stmt) error {
 	return nil
 }
 
+// scopedStmts lowers a lexical block. Bindings are visible only in the
+// block, and cleanup scopes opened by a normally-falling-through block are
+// closed before control leaves it.
+func (b *fb) scopedStmts(list []Stmt) (err error) {
+	savedLocals, savedValues := b.locals, b.values
+	savedScopes := append([]mir.ValueId(nil), b.scopes...)
+	b.locals = cloneLocalIDs(savedLocals)
+	b.values = cloneValueIDs(savedValues)
+	defer func() {
+		b.locals = savedLocals
+		b.values = savedValues
+		b.scopes = savedScopes
+	}()
+	if err = b.stmts(list); err != nil {
+		return err
+	}
+	if !b.terminated {
+		for i := len(b.scopes) - 1; i >= len(savedScopes); i-- {
+			b.emit(mir.Instr{Op: mir.OpCleanupScopeRun, Scope: b.scopes[i]})
+			b.emit(mir.Instr{Op: mir.OpCleanupScopeEnd, Scope: b.scopes[i]})
+		}
+	}
+	return nil
+}
+
+func cloneLocalIDs(src map[string]mir.LocalId) map[string]mir.LocalId {
+	dst := make(map[string]mir.LocalId, len(src))
+	for name, id := range src {
+		dst[name] = id
+	}
+	return dst
+}
+
+func cloneValueIDs(src map[string]mir.ValueId) map[string]mir.ValueId {
+	dst := make(map[string]mir.ValueId, len(src))
+	for name, id := range src {
+		dst[name] = id
+	}
+	return dst
+}
+
 func (b *fb) stmt(s Stmt) error {
 	switch st := s.(type) {
 	case *Let:
@@ -1089,25 +1221,30 @@ func (b *fb) stmt(s Stmt) error {
 		join, _ := b.addBlock("bb_join", nil)
 		b.branch(cond, blkID(b.f, then), blkID(b.f, els))
 		b.setCur(then)
-		saved := b.scopes
-		if err := b.stmts(st.Then.Stmts); err != nil {
+		if err := b.scopedStmts(st.Then.Stmts); err != nil {
 			return err
 		}
-		if !b.terminated {
+		thenTerminated := b.terminated
+		if !thenTerminated {
 			b.jump(blkID(b.f, join), nil)
 		}
 		b.setCur(els)
-		b.scopes = saved
 		if st.Else != nil {
-			if err := b.stmts(st.Else.Stmts); err != nil {
+			if err := b.scopedStmts(st.Else.Stmts); err != nil {
 				return err
 			}
 		}
-		if !b.terminated {
+		elseTerminated := b.terminated
+		if !elseTerminated {
 			b.jump(blkID(b.f, join), nil)
 		}
+		if thenTerminated && elseTerminated {
+			join.SetTerm(mir.Terminator{Kind: mir.TermUnreachable})
+			b.cur = join
+			b.terminated = true
+			return nil
+		}
 		b.setCur(join)
-		b.scopes = saved
 		return nil
 
 	case *WhileStmt:
@@ -1122,15 +1259,13 @@ func (b *fb) stmt(s Stmt) error {
 		}
 		b.branch(cond, blkID(b.f, body), blkID(b.f, join))
 		b.setCur(body)
-		saved := b.scopes
-		if err := b.stmts(st.Body.Stmts); err != nil {
+		if err := b.scopedStmts(st.Body.Stmts); err != nil {
 			return err
 		}
 		if !b.terminated {
 			b.jump(blkID(b.f, head), nil)
 		}
 		b.setCur(join)
-		b.scopes = saved
 		return nil
 
 	case *ForStmt:
@@ -1155,18 +1290,20 @@ func (b *fb) stmt(s Stmt) error {
 		ref := b.res(b.l.m.SafeMut(b.l.ty(seqTy.elem)))
 		b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: seq, Index: headParams[0], FailTarget: b.panicBlock()})
 		elem := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(seqTy.elem))
+		savedValues := b.values
+		b.values = cloneValueIDs(savedValues)
 		b.values[st.Name] = elem
-		saved := b.scopes
-		if err := b.stmts(st.Body.Stmts); err != nil {
+		if err := b.scopedStmts(st.Body.Stmts); err != nil {
+			b.values = savedValues
 			return err
 		}
+		b.values = savedValues
 		if !b.terminated {
 			ni := b.res(mir.TypeU64)
 			b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: ni, A: headParams[0], B: one, FailTarget: b.panicBlock()})
 			b.jump(blkID(b.f, head), []mir.ValueId{ni})
 		}
 		b.setCur(join)
-		b.scopes = saved
 		return nil
 
 	case *UsingStmt:
@@ -1199,7 +1336,7 @@ func (b *fb) stmt(s Stmt) error {
 		return err
 
 	case *Block:
-		return b.stmts(st.Stmts)
+		return b.scopedStmts(st.Stmts)
 	}
 	return nil
 }
@@ -1237,6 +1374,8 @@ func (b *fb) stmtAssign(st *Assign) error {
 // expr lowers an rvalue expression and returns its value.
 func (b *fb) expr(e Expr) (mir.ValueId, error) {
 	switch x := e.(type) {
+	case *UnsafeC:
+		return b.expr(x.Call)
 	case *IntLit:
 		typ := b.ann[e].typ
 		return b.constGet(typ, mir.ConstValue{Kind: mir.ConstInt, Int: x.Value}), nil
@@ -1558,8 +1697,8 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		return id, nil
 
 	case callStruct:
-		fields := make([]mir.AggField, 0, len(x.Args))
-		for i, a := range x.Args {
+		fields := make([]mir.AggField, 0, len(ai.orderedArgs))
+		for i, a := range ai.orderedArgs {
 			v, err := b.expr(a)
 			if err != nil {
 				return 0, err
@@ -1571,7 +1710,7 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		return id, nil
 
 	case callMap:
-		d, err := b.expr(x.Args[0])
+		d, err := b.expr(ai.orderedArgs[0])
 		if err != nil {
 			return 0, err
 		}
@@ -1606,7 +1745,7 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 // value expressions.
 func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 	var exprArgs []Expr
-	if name == "Alloc" {
+	if name == "__s0_alloc" {
 		exprArgs = []Expr{x.Args[1], x.Args[2]}
 	} else if name == "Push" {
 		exprArgs = append([]Expr{x.Args[0]}, x.Args[2:]...)
@@ -1631,23 +1770,23 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 		id := b.res(b.l.ty(b.ann[x].typ))
 		b.emit(mir.Instr{Op: mir.OpSliceRangeChecked, Result: id, Slice: args[0], Lo: args[1], Hi: args[2], FailTarget: panicBlk})
 		return id, nil
-	case "Alloc":
+	case "__s0_alloc":
 		elemTy := b.ann[x].typ.elem
 		id := b.res(b.l.m.SafeMut(b.l.ty(elemTy)))
 		b.emit(mir.Instr{Op: mir.OpAlloc, Result: id, Domain: args[0], Count: args[1], TypeOp: b.l.ty(elemTy)})
 		return id, nil
-	case "Domain":
+	case "__s0_domain_create":
 		id := b.res(b.l.m.DomainHandle())
 		b.emit(mir.Instr{Op: mir.OpDomainCreate, Result: id, Domain: args[0]})
 		return id, nil
-	case "Mark":
+	case "__s0_domain_mark":
 		id := b.res(b.l.m.DomainMark())
 		b.emit(mir.Instr{Op: mir.OpDomainMark, Result: id, Domain: args[0]})
 		return id, nil
-	case "Reset":
+	case "__s0_domain_reset":
 		b.emit(mir.Instr{Op: mir.OpDomainReset, Domain: args[0], Mark: args[1]})
 		return mir.NoValue, nil
-	case "Destroy":
+	case "__s0_domain_destroy":
 		b.emit(mir.Instr{Op: mir.OpDomainDestroy, Domain: args[0]})
 		return mir.NoValue, nil
 	case "Scope":
@@ -1682,6 +1821,14 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 			callee = h.removeID
 		}
 		resTy := b.l.m.Functions[callee].Result
+		if name == "Set" {
+			inserted := b.res(mir.TypeBool)
+			b.emit(mir.Instr{Op: mir.OpCall, Result: inserted, Callee: callee, Args: args})
+			ok, _ := b.addBlock("bb_map_set_ok", nil)
+			b.branch(inserted, blkID(b.f, ok), panicBlk)
+			b.setCur(ok)
+			return mir.NoValue, nil
+		}
 		if resTy == mir.TypeUnit {
 			b.emit(mir.Instr{Op: mir.OpCall, Result: mir.NoValue, Callee: callee, Args: args})
 			return mir.NoValue, nil
@@ -1723,6 +1870,8 @@ func (b *fb) match(x *Match) (mir.ValueId, error) {
 	for i, arm := range x.Arms {
 		b.setCur(armBlocks[i])
 		saved := b.scopes
+		savedValues := b.values
+		b.values = cloneValueIDs(savedValues)
 		if arm.Variant != "" {
 			if pv := enumTy.variantByName(arm.Variant); pv != nil && pv.payload != nil {
 				b.values[arm.Bind] = cases[i].Binding
@@ -1730,10 +1879,12 @@ func (b *fb) match(x *Match) (mir.ValueId, error) {
 		}
 		av, err := b.expr(arm.Body)
 		if err != nil {
+			b.values = savedValues
 			return 0, err
 		}
 		b.jump(blkID(b.f, join), []mir.ValueId{av})
 		b.scopes = saved
+		b.values = savedValues
 	}
 	b.setCur(join)
 	return joinParams[0], nil
@@ -1781,17 +1932,6 @@ func (b *fb) hashValue(v mir.ValueId, t *Type) mir.ValueId {
 	return v
 }
 
-func structBindings(t *Type) map[string]*Type {
-	bindings := make(map[string]*Type)
-	if t == nil || t.decl == nil {
-		return bindings
-	}
-	for i, p := range t.decl.params {
-		bindings[p] = t.args[i]
-	}
-	return bindings
-}
-
 func (b *fb) boolHash(v mir.ValueId) mir.ValueId {
 	one := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
 	zero := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
@@ -1816,7 +1956,7 @@ func (b *fb) enumHash(v mir.ValueId, t *Type) mir.ValueId {
 	for i, vt := range t.decl.variants {
 		blk, _ := b.addBlock("bb_v"+strconv.Itoa(i), nil)
 		blocks = append(blocks, blk)
-		c := mir.SwitchCase{Variant: vt.name, Target: blkID(b.f, join), Binding: mir.NoValue}
+		c := mir.SwitchCase{Variant: vt.name, Target: blkID(b.f, blk), Binding: mir.NoValue}
 		if vt.payload != nil {
 			bid := b.f.AddValue(b.valueName("p"), b.l.ty(substType(vt.payload, structBindings(t))), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: i})
 			c.Binding = bid
@@ -1916,10 +2056,11 @@ func (b *fb) emitEnumEq(a, bv mir.ValueId, t *Type, trueBlk, falseBlk mir.BlockI
 	switchBlk.SetTerm(mir.Terminator{Kind: mir.TermSwitch, Value: a, Cases: cases})
 	for i, vt := range t.decl.variants {
 		b.setCur(blocks[i])
+		innerSwitchID := blkID(b.f, blocks[i])
 		cmpBlk, _ := b.addBlock("bb_cmp", nil)
 		bc := mir.SwitchCase{Variant: vt.name, Target: blkID(b.f, cmpBlk), Binding: mir.NoValue}
 		if vt.payload != nil {
-			bid := b.f.AddValue(b.valueName("q"), b.l.ty(substType(vt.payload, structBindings(t))), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: 0})
+			bid := b.f.AddValue(b.valueName("q"), b.l.ty(substType(vt.payload, structBindings(t))), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: innerSwitchID, Case: 0})
 			bc.Binding = bid
 		}
 		bs := []mir.SwitchCase{bc, {Target: falseBlk, Binding: mir.NoValue}}

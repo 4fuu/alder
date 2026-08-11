@@ -1,5 +1,5 @@
 fn main() -> I32 {
-    let x: F64 = 1.5;
-    let y = x + 1.0;
-    return 0;
+    let x: F64 = 1.5
+    let y = x + 1.0
+    return 0
 }

@@ -40,8 +40,9 @@ type FieldDecl struct {
 
 // VariantDecl is one enum variant with at most one payload.
 type VariantDecl struct {
-	Name    string
-	Payload TypeExpr // nil when the variant has no payload
+	Name         string
+	PayloadLabel string
+	Payload      TypeExpr // nil when the variant has no payload
 }
 
 // FnDecl is a function declaration. Leading Params of Kind paramType are
@@ -158,6 +159,19 @@ type Call struct {
 	Args   []Expr
 }
 
+// NamedArg is a named record-construction argument.
+type NamedArg struct {
+	P     pos
+	Name  string
+	Value Expr
+}
+
+// UnsafeC is the sole source-level boundary for a direct C import call.
+type UnsafeC struct {
+	P    pos
+	Call *Call
+}
+
 // Field is base.field.
 type Field struct {
 	P    pos
@@ -200,6 +214,8 @@ func (e *Ident) exprPos() pos    { return e.P }
 func (e *Unary) exprPos() pos    { return e.P }
 func (e *Binary) exprPos() pos   { return e.P }
 func (e *Call) exprPos() pos     { return e.P }
+func (e *NamedArg) exprPos() pos { return e.P }
+func (e *UnsafeC) exprPos() pos  { return e.P }
 func (e *Field) exprPos() pos    { return e.P }
 func (e *Index) exprPos() pos    { return e.P }
 func (e *Match) exprPos() pos    { return e.P }

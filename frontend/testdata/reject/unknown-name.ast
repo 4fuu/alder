@@ -1,4 +1,4 @@
 fn main() -> I32 {
-    let x = y;
-    return 0;
+    let x = y
+    return 0
 }

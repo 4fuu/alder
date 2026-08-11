@@ -1,59 +1,59 @@
 fn add(a: I64, b: I64) -> I64 {
-    return a + b;
+    return a + b
 }
 
 fn mul(a: I64, b: I64) -> I64 {
-    return a * b;
+    return a * b
 }
 
 fn rem(a: I64, b: I64) -> I64 {
-    return a % b;
+    return a % b
 }
 
 fn main() -> I32 {
     if add(20, 22) != 42 {
-        return 1;
+        return 1
     }
     if mul(6, 7) != 42 {
-        return 2;
+        return 2
     }
     if rem(-7, 2) != -1 {
-        return 3;
+        return 3
     }
     if rem(7, 2) != 1 {
-        return 4;
+        return 4
     }
     // Short-circuit: the right side must not be evaluated.
-    var x: I64 = 0;
+    var x: I64 = 0
     if false && x / 0 == 0 {
-        return 5;
+        return 5
     }
     if true || x / 0 == 0 {
-        x = x + 1;
+        x = x + 1
     }
     if x != 1 {
-        return 6;
+        return 6
     }
     // Narrow arithmetic with wrapping.
-    var n: U8 = 200;
-    n = n + 100;
+    var n: U8 = 200
+    n = n + 100
     if n != 44 {
-        return 7;
+        return 7
     }
     // Shift semantics at the source width.
-    var s: I8 = 1;
-    s = s << 7;
+    var s: I8 = 1
+    s = s << 7
     if s != -128 {
-        return 8;
+        return 8
     }
-    var u: U8 = 255;
-    u = u >> 4;
+    var u: U8 = 255
+    u = u >> 4
     if u != 15 {
-        return 9;
+        return 9
     }
     // Integer division failure must not happen for these inputs.
     if 10 / 3 != 3 {
-        return 10;
+        return 10
     }
-    return 0;
+    return 0
 }

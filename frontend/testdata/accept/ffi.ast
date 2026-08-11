@@ -1,9 +1,9 @@
 import c magic: fn(U64) -> U64
 
 fn main() -> I32 {
-    let v = magic(40);
+    let v = unsafe c { magic(40) }
     if v != 42 {
-        return 1;
+        return 1
     }
-    return 0;
+    return 0
 }

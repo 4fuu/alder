@@ -19,6 +19,7 @@ type callAnn struct {
 	builtin      string       // callBuiltin
 	importName   string       // callImport
 	ctorType     *Type        // callStruct, callMap (construction target)
+	orderedArgs  []Expr       // record fields normalized to declaration order
 	variant      *variantType // callVariant (resolved variant)
 	enumType     *Type        // callVariant (the variant's enum type)
 	explicitArgs int          // leading type arguments consumed at the call site
@@ -64,7 +65,7 @@ const (
 // direct instruction-result SSA identity, so the low-level scope API cannot
 // cross source-level bindings.
 var builtinFnNames = []string{
-	"len", "range", "Alloc", "Domain", "Mark", "Reset", "Destroy",
+	"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create",
 	"Get", "Set", "Remove",
 }
 
@@ -115,6 +116,7 @@ type checker struct {
 	checked   []*checkedFn
 	fnCache   map[string]*checkedFn
 	typeCache map[string]*Type
+	activeFn  map[*FnDecl]string
 
 	ann map[*checkedFn]map[Expr]*annInfo
 }
@@ -129,6 +131,7 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 		builtins:   make(map[string]bool),
 		fnCache:    make(map[string]*checkedFn),
 		typeCache:  make(map[string]*Type),
+		activeFn:   make(map[*FnDecl]string),
 		ann:        make(map[*checkedFn]map[Expr]*annInfo),
 	}
 	for _, n := range builtinFnNames {
@@ -147,7 +150,7 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 			}
 			c.imports[dd.Name] = dd
 		case *TypeDecl:
-			if _, dup := c.types[dd.Name]; dup || builtinTypeName(dd.Name) {
+			if _, dup := c.types[dd.Name]; dup || builtinTypeName(dd.Name) || strings.HasPrefix(dd.Name, "__s0_") {
 				return nil, diag(dd.P, "duplicate or reserved type name %q", dd.Name)
 			}
 			td := &typeDecl{
@@ -159,7 +162,7 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 			c.types[dd.Name] = td
 			c.typeOrder = append(c.typeOrder, td)
 		case *FnDecl:
-			if _, dup := c.fns[dd.Name]; dup || c.builtins[dd.Name] {
+			if _, dup := c.fns[dd.Name]; dup || c.builtins[dd.Name] || strings.HasPrefix(dd.Name, "__s0_") {
 				return nil, diag(dd.P, "duplicate or reserved function name %q", dd.Name)
 			}
 			for _, n := range variantReserved {
@@ -186,6 +189,25 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 	}
 	if err := c.rejectTypeCycles(); err != nil {
 		return nil, err
+	}
+	// Concrete applications may refer forward to generic declarations whose
+	// fields were not populated when the application was first resolved.
+	// Revalidate after every declaration is complete and cycles are excluded.
+	for _, td := range c.typeOrder {
+		for i, field := range td.fields {
+			if field.concrete() {
+				if err := c.validateConcreteType(field, td.decl.Fields[i].Type.typePos()); err != nil {
+					return nil, err
+				}
+			}
+		}
+		for i, variant := range td.variants {
+			if variant.payload != nil && variant.payload.concrete() {
+				if err := c.validateConcreteType(variant.payload, td.decl.Variants[i].Payload.typePos()); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 
 	// Pass 3: check imports.
@@ -229,6 +251,9 @@ func builtinTypeName(name string) bool {
 // isReservedValueName reports whether a value name collides with a type or
 // builtin name.
 func isReservedValueName(name string, c *checker) bool {
+	if strings.HasPrefix(name, "__s0_") {
+		return true
+	}
 	if c.types[name] != nil || builtinTypeName(name) || c.builtins[name] {
 		return true
 	}
@@ -332,9 +357,12 @@ func (c *checker) rejectTypeCycles() error {
 				addRef(v.payload)
 			}
 		}
-		for ref := range refs {
-			if err := visit(ref); err != nil {
-				return err
+		// Walk references in declaration order, never map iteration order.
+		for _, ref := range c.typeOrder {
+			if refs[ref] {
+				if err := visit(ref); err != nil {
+					return err
+				}
 			}
 		}
 		color[td] = black
@@ -412,6 +440,9 @@ func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 			return tp, nil
 		}
 		if td := c.types[t.Name]; td != nil {
+			if len(td.params) != 0 {
+				return nil, diag(t.P, "%q expects %d type arguments, got 0", t.Name, len(td.params))
+			}
 			return c.structType(td, nil, t.P), nil
 		}
 		return nil, diag(t.P, "unknown type %q", t.Name)
@@ -456,13 +487,13 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 		if len(args) != 2 {
 			return nil, diag(p, "Map expects 2 type arguments, got %d", len(args))
 		}
-		if !args[0].mapKeyOK() {
-			return nil, diag(p, "Map key type %s is not supported (unsigned integers, Bool, and structs/enums of those only)", args[0].display())
+		mt := &Type{kind: tMap, key: args[0], val: args[1]}
+		if mt.concrete() {
+			if err := c.validateConcreteType(mt, p); err != nil {
+				return nil, err
+			}
 		}
-		if !args[1].copyTrivial() {
-			return nil, diag(p, "Map value type %s must be copy-trivial (no slices or references)", args[1].display())
-		}
-		return &Type{kind: tMap, key: args[0], val: args[1]}, nil
+		return mt, nil
 	case "Ptr":
 		if len(args) != 1 {
 			return nil, diag(p, "Ptr expects 1 type argument, got %d", len(args))
@@ -483,14 +514,69 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 	}
 	concrete := true
 	for _, a := range args {
-		if a.isTypeParam() {
+		if !a.concrete() {
 			concrete = false
 		}
 	}
 	if concrete {
-		return c.structType(td, args, p), nil
+		t := c.structType(td, args, p)
+		if err := c.validateConcreteType(t, p); err != nil {
+			return nil, err
+		}
+		return t, nil
 	}
 	return &Type{kind: structKindOf(td), decl: td, args: args}, nil
+}
+
+// validateConcreteType re-checks restrictions that can depend on generic
+// substitution. Pattern types defer these checks until all type parameters
+// are bound.
+func (c *checker) validateConcreteType(t *Type, p pos) error {
+	if t == nil || !t.concrete() {
+		return nil
+	}
+	switch t.kind {
+	case tSlice:
+		if t.elem.containsSlice() {
+			return diag(p, "slice element type %s contains a slice or reference (M4 restriction)", t.elem.display())
+		}
+		return c.validateConcreteType(t.elem, p)
+	case tAlloc, tPtr, tOption:
+		return c.validateConcreteType(t.elem, p)
+	case tResult:
+		if err := c.validateConcreteType(t.ok, p); err != nil {
+			return err
+		}
+		return c.validateConcreteType(t.err, p)
+	case tMap:
+		if !t.key.mapKeyOK() {
+			return diag(p, "Map key type %s is not supported (unsigned integers, Bool, and structs/enums of those only)", t.key.display())
+		}
+		if !t.val.copyTrivial() {
+			return diag(p, "Map value type %s must be copy-trivial (no slices, references, maps, or domain handles)", t.val.display())
+		}
+		if err := c.validateConcreteType(t.key, p); err != nil {
+			return err
+		}
+		return c.validateConcreteType(t.val, p)
+	case tStruct:
+		bindings := structBindings(t)
+		for _, field := range t.decl.fields {
+			if err := c.validateConcreteType(substType(field, bindings), p); err != nil {
+				return err
+			}
+		}
+	case tEnum:
+		bindings := structBindings(t)
+		for _, variant := range t.decl.variants {
+			if variant.payload != nil {
+				if err := c.validateConcreteType(substType(variant.payload, bindings), p); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func structKindOf(td *typeDecl) typeKind {
@@ -529,6 +615,17 @@ func (c *checker) instantiate(fn *FnDecl, typeArgs []*Type) (*checkedFn, error) 
 	if cf, ok := c.fnCache[key]; ok {
 		return cf, nil
 	}
+	if active, ok := c.activeFn[fn]; ok && active != key {
+		return nil, diag(fn.P, "unsupported polymorphic recursion in %q: specialization %s requested while %s is being checked", fn.Name, key, active)
+	}
+	for _, arg := range typeArgs {
+		if !arg.concrete() {
+			return nil, diag(fn.P, "type argument %s of %q is not concrete", arg.display(), fn.Name)
+		}
+		if err := c.validateConcreteType(arg, fn.P); err != nil {
+			return nil, err
+		}
+	}
 	var tpNames []string
 	tps := make(typeEnv)
 	for _, p := range fn.Params {
@@ -552,6 +649,8 @@ func (c *checker) instantiate(fn *FnDecl, typeArgs []*Type) (*checkedFn, error) 
 	// Register before checking the body so recursion resolves.
 	c.fnCache[key] = cf
 	c.checked = append(c.checked, cf)
+	c.activeFn[fn] = key
+	defer delete(c.activeFn, fn)
 
 	for _, p := range fn.Params {
 		if p.Kind == paramType {
@@ -562,8 +661,11 @@ func (c *checker) instantiate(fn *FnDecl, typeArgs []*Type) (*checkedFn, error) 
 			return nil, err
 		}
 		pt = substType(pt, bindings)
-		if pt.isTypeParam() {
+		if !pt.concrete() {
 			return nil, diag(p.Type.typePos(), "type parameter %q is not bound in function %q", pt.name, fn.Name)
+		}
+		if err := c.validateConcreteType(pt, p.Type.typePos()); err != nil {
+			return nil, err
 		}
 		cf.params = append(cf.params, pt)
 	}
@@ -572,8 +674,11 @@ func (c *checker) instantiate(fn *FnDecl, typeArgs []*Type) (*checkedFn, error) 
 		return nil, err
 	}
 	cf.result = substType(result, bindings)
-	if cf.result.isTypeParam() {
+	if !cf.result.concrete() {
 		return nil, diag(fn.Result.typePos(), "type parameter %q is not bound in function %q", cf.result.name, fn.Name)
+	}
+	if err := c.validateConcreteType(cf.result, fn.Result.typePos()); err != nil {
+		return nil, err
 	}
 	if err := c.checkBody(cf, bindings); err != nil {
 		return nil, err
@@ -604,6 +709,7 @@ type bodyChecker struct {
 	inLoop bool
 	ann    map[Expr]*annInfo
 	result *Type
+	types  typeEnv
 }
 
 func (k *bodyChecker) note(e Expr, t *Type) { k.ann[e] = &annInfo{typ: t} }
@@ -632,7 +738,11 @@ func (c *checker) checkBody(cf *checkedFn, bindings map[string]*Type) error {
 	}
 	ann := make(map[Expr]*annInfo)
 	c.ann[cf] = ann
-	k := &bodyChecker{c: c, cf: cf, env: env, ann: ann, result: cf.result}
+	types := make(typeEnv)
+	for name, typ := range bindings {
+		types[name] = typ
+	}
+	k := &bodyChecker{c: c, cf: cf, env: env, ann: ann, result: cf.result, types: types}
 	if err := k.checkBlock(cf.decl.Body); err != nil {
 		return err
 	}
@@ -692,6 +802,9 @@ func exprGuaranteesReturn(e Expr) bool {
 // checkBlock checks a statement list. Statements after a guaranteed return
 // are unreachable.
 func (k *bodyChecker) checkBlock(b *Block) error {
+	saved := k.env
+	k.env = cloneBindings(saved)
+	defer func() { k.env = saved }()
 	for i, s := range b.Stmts {
 		if i > 0 && stmtGuaranteesReturn(b.Stmts[i-1]) {
 			return diag(s.stmtPos(), "unreachable statement")
@@ -703,6 +816,14 @@ func (k *bodyChecker) checkBlock(b *Block) error {
 	return nil
 }
 
+func cloneBindings(src map[string]*binding) map[string]*binding {
+	dst := make(map[string]*binding, len(src))
+	for name, b := range src {
+		dst[name] = b
+	}
+	return dst
+}
+
 func (k *bodyChecker) checkStmt(s Stmt) error {
 	switch st := s.(type) {
 	case *Let:
@@ -711,11 +832,11 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		}
 		var typ *Type
 		if st.Type != nil {
-			t, err := k.c.resolveType(st.Type, nil)
+			t, err := k.c.resolveType(st.Type, k.types)
 			if err != nil {
 				return err
 			}
-			if t.isTypeParam() {
+			if !t.concrete() {
 				return diag(st.Type.typePos(), "type parameter %q cannot appear in an annotation here", t.name)
 			}
 			typ = t
@@ -863,11 +984,14 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if _, dup := k.env[st.Name]; dup {
 			return diag(st.P, "name %q is already bound in this function", st.Name)
 		}
+		savedEnv := k.env
+		k.env = cloneBindings(savedEnv)
 		k.env[st.Name] = &binding{typ: elem}
+		defer func() { k.env = savedEnv }()
 		wasLoop := k.inLoop
 		k.inLoop = true
+		defer func() { k.inLoop = wasLoop }()
 		err = k.checkBlock(st.Body)
-		k.inLoop = wasLoop
 		return err
 
 	case *UsingStmt:
@@ -922,7 +1046,7 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 
 	case *ExprStmt:
 		switch st.X.(type) {
-		case *Call, *Match:
+		case *Call, *Match, *UnsafeC:
 			_, err := k.checkExpr(st.X, nil)
 			return err
 		}
@@ -1070,6 +1194,29 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 	case *Call:
 		return k.checkCall(x, expected)
 
+	case *NamedArg:
+		return nil, diag(x.P, "named arguments are only allowed in record construction")
+
+	case *UnsafeC:
+		head := callHead(x.Call.Callee)
+		if head == nil || k.c.importSigs[head.name] == nil {
+			return nil, diag(x.P, "unsafe c block requires a direct call to an imported C symbol")
+		}
+		if _, ok := x.Call.Callee.(*Ident); !ok {
+			return nil, diag(x.P, "unsafe c block requires a direct call to an imported C symbol")
+		}
+		for _, arg := range x.Call.Args {
+			if exprContainsCall(arg) {
+				return nil, diag(arg.exprPos(), "unsafe c call arguments cannot contain nested calls")
+			}
+		}
+		t, err := k.checkImportCall(x.Call, head.name)
+		if err != nil {
+			return nil, err
+		}
+		k.note(x, t)
+		return t, nil
+
 	case *Match:
 		return k.checkMatch(x, expected)
 
@@ -1091,6 +1238,35 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		return xt.ok, nil
 	}
 	return nil, diag(e.exprPos(), "invalid expression")
+}
+
+func exprContainsCall(e Expr) bool {
+	switch x := e.(type) {
+	case *Call, *UnsafeC:
+		return true
+	case *NamedArg:
+		return exprContainsCall(x.Value)
+	case *Unary:
+		return exprContainsCall(x.X)
+	case *Binary:
+		return exprContainsCall(x.X) || exprContainsCall(x.Y)
+	case *Field:
+		return exprContainsCall(x.Base)
+	case *Index:
+		return exprContainsCall(x.Base) || exprContainsCall(x.Index)
+	case *Match:
+		if exprContainsCall(x.Value) {
+			return true
+		}
+		for _, arm := range x.Arms {
+			if exprContainsCall(arm.Body) {
+				return true
+			}
+		}
+	case *Try:
+		return exprContainsCall(x.X)
+	}
+	return false
 }
 
 func checkIntRange(x *IntLit, t *Type) error {
@@ -1226,9 +1402,19 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 		return nil, diag(x.P, "invalid call target")
 	}
 	name := head.name
+	if _, direct := x.Callee.(*Ident); !direct {
+		inner, appliedType := x.Callee.(*Call)
+		directTypeName := false
+		if appliedType {
+			_, directTypeName = inner.Callee.(*Ident)
+		}
+		if !appliedType || !directTypeName || k.c.types[name] == nil {
+			return nil, diag(x.P, "chained calls are not supported; only an explicitly applied record type may be constructed")
+		}
+	}
 
 	if fn := k.c.fns[name]; fn != nil {
-		return k.checkUserCall(x, fn)
+		return k.checkUserCall(x, fn, expected)
 	}
 	// Builtin functions win over same-named builtin type names (Domain).
 	if k.c.builtins[name] {
@@ -1238,21 +1424,10 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 		return k.checkTypeConstruction(x, name, expected)
 	}
 	if sig, ok := k.c.importSigs[name]; ok {
-		if len(sig.Params) != len(x.Args) {
-			return nil, diag(x.P, "import %q: expected %d arguments, got %d", name, len(sig.Params), len(x.Args))
-		}
-		for i, arg := range x.Args {
-			at, err := k.checkExpr(arg, sig.Params[i])
-			if err != nil {
-				return nil, err
-			}
-			if !typeEqual(sig.Params[i], at) {
-				return nil, k.mismatch(arg.exprPos(), "import argument", sig.Params[i], at)
-			}
-		}
-		k.noteCall(x, sig.Result, &callAnn{kind: callImport, importName: name})
-		return sig.Result, nil
+		_ = sig
+		return nil, diag(x.P, "imported C symbol %q may only be called inside unsafe c { ... }", name)
 	}
+
 	// Variant construction against the expected type.
 	if expected != nil && expected.enumLike() {
 		if v := expected.variantByName(name); v != nil {
@@ -1280,12 +1455,30 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 	return nil, diag(x.P, "unknown function or type %q", name)
 }
 
+func (k *bodyChecker) checkImportCall(x *Call, name string) (*Type, error) {
+	sig := k.c.importSigs[name]
+	if len(sig.Params) != len(x.Args) {
+		return nil, diag(x.P, "import %q: expected %d arguments, got %d", name, len(sig.Params), len(x.Args))
+	}
+	for i, arg := range x.Args {
+		at, err := k.checkExpr(arg, sig.Params[i])
+		if err != nil {
+			return nil, err
+		}
+		if !typeEqual(sig.Params[i], at) {
+			return nil, k.mismatch(arg.exprPos(), "import argument", sig.Params[i], at)
+		}
+	}
+	k.noteCall(x, sig.Result, &callAnn{kind: callImport, importName: name})
+	return sig.Result, nil
+}
+
 // checkUserCall handles calls to declared functions with explicit type
 // arguments and inference. Arguments whose parameter pattern is already
 // bound are checked directly against the concrete type (which resolves
 // constructor expressions such as Some(3)); the rest are self-checked and
 // unified to infer the remaining type parameters.
-func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl) (*Type, error) {
+func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl, expected *Type) (*Type, error) {
 	tpCount := 0
 	var tpNames []string
 	for _, p := range fn.Params {
@@ -1310,6 +1503,9 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl) (*Type, error) {
 		if len(rest) > 0 && k.isTypeArgExpr(rest[0]) {
 			return nil, diag(rest[0].exprPos(), "too many type arguments for %q", fn.Name)
 		}
+		if len(typeArgs) != 0 && len(typeArgs) != tpCount {
+			return nil, diag(x.P, "call %q must supply either zero or all %d type arguments; got %d", fn.Name, tpCount, len(typeArgs))
+		}
 	}
 	patterns := declRuntimePatterns(k.c, fn)
 	if len(patterns) != len(rest) {
@@ -1320,6 +1516,21 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl) (*Type, error) {
 	for i, n := range tpNames {
 		if i < len(typeArgs) {
 			bindings[n] = typeArgs[i]
+		}
+	}
+	// Result context participates in inference, in addition to (not instead
+	// of) the normal argument checks below.
+	if expected != nil {
+		tps := make(typeEnv)
+		for _, n := range tpNames {
+			tps[n] = typeParam(n)
+		}
+		resultPattern, err := k.c.resolveType(fn.Result, tps)
+		if err != nil {
+			return nil, err
+		}
+		if !unify(resultPattern, expected, bindings) {
+			return nil, k.mismatch(x.P, "call result", expected, substType(resultPattern, bindings))
 		}
 	}
 	// Pass 1: bound patterns check their arguments directly; unbound
@@ -1432,13 +1643,16 @@ func declRuntimePatterns(c *checker, fn *FnDecl) []*Type {
 func (k *bodyChecker) isTypeArgExpr(e Expr) bool {
 	switch x := e.(type) {
 	case *Ident:
-		return k.c.types[x.Name] != nil || builtinTypeName(x.Name)
+		return k.types[x.Name] != nil || k.c.types[x.Name] != nil || builtinTypeName(x.Name)
 	case *Call:
+		if _, ok := x.Callee.(*Ident); !ok {
+			return false
+		}
 		head := callHead(x)
 		if head == nil {
 			return false
 		}
-		if !(k.c.types[head.name] != nil || builtinTypeName(head.name)) {
+		if !(k.types[head.name] != nil || k.c.types[head.name] != nil || builtinTypeName(head.name)) {
 			return false
 		}
 		if len(x.Args) == 0 {
@@ -1458,8 +1672,11 @@ func (k *bodyChecker) isTypeArgExpr(e Expr) bool {
 func (k *bodyChecker) typeArgOf(e Expr) (*Type, error) {
 	switch x := e.(type) {
 	case *Ident:
-		return k.c.resolveType(&PrimType{P: x.P, Name: x.Name}, nil)
+		return k.c.resolveType(&PrimType{P: x.P, Name: x.Name}, k.types)
 	case *Call:
+		if _, ok := x.Callee.(*Ident); !ok {
+			return nil, diag(x.P, "invalid type argument: chained type applications are not supported")
+		}
 		head := callHead(x)
 		if head == nil {
 			return nil, diag(x.P, "invalid type argument")
@@ -1481,6 +1698,9 @@ func (k *bodyChecker) typeArgOf(e Expr) (*Type, error) {
 // application used as a construction target, or a construction.
 func (k *bodyChecker) checkTypeConstruction(x *Call, name string, expected *Type) (*Type, error) {
 	if inner, ok := x.Callee.(*Call); ok {
+		if _, ok := inner.Callee.(*Ident); !ok {
+			return nil, diag(x.P, "invalid construction target")
+		}
 		head := callHead(inner.Callee)
 		if head == nil {
 			return nil, diag(x.P, "invalid construction target")
@@ -1506,10 +1726,11 @@ func (k *bodyChecker) checkTypeConstruction(x *Call, name string, expected *Type
 	if len(td.params) > 0 {
 		// Generic construction: infer type arguments from the fields.
 		bindings := make(map[string]*Type)
-		if len(x.Args) != len(td.decl.Fields) {
-			return nil, diag(x.P, "%q expects %d fields, got %d", name, len(td.decl.Fields), len(x.Args))
+		ordered, err := k.namedRecordArgs(x, td)
+		if err != nil {
+			return nil, err
 		}
-		for i, arg := range x.Args {
+		for i, arg := range ordered {
 			at, err := k.checkExpr(arg, nil)
 			if err != nil {
 				return nil, err
@@ -1537,11 +1758,12 @@ func (k *bodyChecker) checkTypeConstruction(x *Call, name string, expected *Type
 func (k *bodyChecker) checkConstruction(x *Call, ty *Type) (*Type, error) {
 	switch ty.kind {
 	case tStruct:
-		if len(x.Args) != len(ty.decl.decl.Fields) {
-			return nil, diag(x.P, "%q expects %d fields, got %d", ty.decl.decl.Name, len(ty.decl.decl.Fields), len(x.Args))
+		ordered, err := k.namedRecordArgs(x, ty.decl)
+		if err != nil {
+			return nil, err
 		}
 		bindings := structBindings(ty)
-		for i, arg := range x.Args {
+		for i, arg := range ordered {
 			ft := substType(ty.decl.fields[i], bindings)
 			at, err := k.checkExpr(arg, ft)
 			if err != nil {
@@ -1551,7 +1773,7 @@ func (k *bodyChecker) checkConstruction(x *Call, ty *Type) (*Type, error) {
 				return nil, k.mismatch(arg.exprPos(), "field", ft, at)
 			}
 		}
-		k.noteCall(x, ty, &callAnn{kind: callStruct, ctorType: ty})
+		k.noteCall(x, ty, &callAnn{kind: callStruct, ctorType: ty, orderedArgs: ordered})
 		return ty, nil
 	case tMap:
 		if len(x.Args) != 1 {
@@ -1568,6 +1790,30 @@ func (k *bodyChecker) checkConstruction(x *Call, ty *Type) (*Type, error) {
 		return ty, nil
 	}
 	return nil, diag(x.P, "cannot construct %s", ty.display())
+}
+
+func (k *bodyChecker) namedRecordArgs(x *Call, td *typeDecl) ([]Expr, error) {
+	ordered := make([]Expr, len(td.decl.Fields))
+	for _, arg := range x.Args {
+		n, ok := arg.(*NamedArg)
+		if !ok {
+			return nil, diag(arg.exprPos(), "record construction requires named fields")
+		}
+		i, ok := td.fieldMap[n.Name]
+		if !ok {
+			return nil, diag(n.P, "unknown field %q of %s", n.Name, td.decl.Name)
+		}
+		if ordered[i] != nil {
+			return nil, diag(n.P, "duplicate field %q in %s construction", n.Name, td.decl.Name)
+		}
+		ordered[i] = n.Value
+	}
+	for i, arg := range ordered {
+		if arg == nil {
+			return nil, diag(x.P, "missing field %q in %s construction", td.decl.Fields[i].Name, td.decl.Name)
+		}
+	}
+	return ordered, nil
 }
 
 // checkMatch checks a match expression.
@@ -1713,10 +1959,10 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, rt, &callAnn{kind: callBuiltin, builtin: name})
 		return rt, nil
 
-	case "Alloc":
-		// Alloc(T, d, n): explicit type argument first.
+	case "__s0_alloc":
+		// __s0_alloc(T, d, n): explicit type argument first.
 		if len(args) != 3 {
-			return nil, diag(x.P, "Alloc expects 3 arguments: Alloc(T, domain, count)")
+			return nil, diag(x.P, "__s0_alloc expects 3 arguments: __s0_alloc(T, domain, count)")
 		}
 		ta, err := k.typeArgOf(args[0])
 		if err != nil {
@@ -1739,7 +1985,7 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, rt, &callAnn{kind: callBuiltin, builtin: name})
 		return rt, nil
 
-	case "Domain":
+	case "__s0_domain_create":
 		if err := expect(1); err != nil {
 			return nil, err
 		}
@@ -1749,7 +1995,7 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, &Type{kind: tDomain}, &callAnn{kind: callBuiltin, builtin: name})
 		return &Type{kind: tDomain}, nil
 
-	case "Mark":
+	case "__s0_domain_mark":
 		if err := expect(1); err != nil {
 			return nil, err
 		}
@@ -1759,7 +2005,7 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, &Type{kind: tDomainMark}, &callAnn{kind: callBuiltin, builtin: name})
 		return &Type{kind: tDomainMark}, nil
 
-	case "Reset":
+	case "__s0_domain_reset":
 		if err := expect(2); err != nil {
 			return nil, err
 		}
@@ -1776,7 +2022,7 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, prim(pUnit), &callAnn{kind: callBuiltin, builtin: name})
 		return prim(pUnit), nil
 
-	case "Destroy":
+	case "__s0_domain_destroy":
 		if err := expect(1); err != nil {
 			return nil, err
 		}
@@ -1785,6 +2031,23 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		}
 		k.noteCall(x, prim(pUnit), &callAnn{kind: callBuiltin, builtin: name})
 		return prim(pUnit), nil
+
+	case "__s0_map_create":
+		if err := expect(2); err != nil {
+			return nil, err
+		}
+		mt, err := k.typeArgOf(args[0])
+		if err != nil {
+			return nil, err
+		}
+		if mt.kind != tMap {
+			return nil, diag(args[0].exprPos(), "__s0_map_create first argument must be a Map(K, V) type")
+		}
+		if _, err := checkDomain(1); err != nil {
+			return nil, err
+		}
+		k.noteCall(x, mt, &callAnn{kind: callMap, ctorType: mt, orderedArgs: []Expr{args[1]}})
+		return mt, nil
 
 	case "Get", "Set", "Remove":
 		return k.checkMapCall(x, name)
@@ -1830,6 +2093,9 @@ func (k *bodyChecker) checkMapCall(x *Call, name string) (*Type, error) {
 	}
 	if len(rest) > 0 && k.isTypeArgExpr(rest[0]) {
 		return nil, diag(rest[0].exprPos(), "too many type arguments for %q", name)
+	}
+	if len(explicit) == 1 {
+		return nil, diag(x.P, "%q must supply either zero or all 2 type arguments; got 1", name)
 	}
 	bindings := make(map[string]*Type)
 	if len(explicit) > 0 {

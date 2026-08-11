@@ -1,95 +1,135 @@
-type Key { a: U64, b: Bool }
+type Key {
+    a: U64
+    b: Bool
+}
+
+enum Flag {
+    Empty
+    Tagged(value: U64)
+}
+
+fn fill_full(d: Domain) -> I64 {
+    var m = __s0_map_create(Map(U64, U64), d)
+    var i: U64 = 0
+    while i < 17 {
+        Set(m, i, i)
+        i = i + 1
+    }
+    return 7
+}
 
 fn main(d: Domain) -> I32 {
-    var m = Map(U64, I64)(d);
-    Set(m, 1, 100);
-    Set(m, 2, 200);
-    Set(m, 3, 300);
+    var m = __s0_map_create(Map(U64, I64), d)
+    Set(m, 1, 100)
+    Set(m, 17, 200)
+    Set(m, 33, 300)
     if match Get(m, 1) {
-        Some(v) => v,
-        None => 0,
+        Some(v) => v
+        None => 0
     } != 100 {
-        return 1;
+        return 1
     }
-    if match Get(m, 3) {
-        Some(v) => v,
-        None => 0,
+    if match Get(m, 33) {
+        Some(v) => v
+        None => 0
     } != 300 {
-        return 2;
+        return 2
     }
     if match Get(m, 9) {
-        Some(v) => v,
-        None => 1,
+        Some(v) => v
+        None => 1
     } != 1 {
-        return 3;
+        return 3
     }
     // Overwrite an existing key.
-    Set(m, 2, 250);
-    if match Get(m, 2) {
-        Some(v) => v,
-        None => 0,
+    Set(m, 17, 250)
+    if match Get(m, 17) {
+        Some(v) => v
+        None => 0
     } != 250 {
-        return 4;
+        return 4
     }
     // Remove and re-insert.
     if !Remove(m, 1) {
-        return 5;
+        return 5
     }
     if match Get(m, 1) {
-        Some(v) => v,
-        None => 1,
+        Some(v) => v
+        None => 1
     } != 1 {
-        return 6;
+        return 6
     }
     if Remove(m, 1) {
-        return 7;
+        return 7
     }
-    Set(m, 1, 111);
+    if match Get(m, 33) {
+        Some(v) => v
+        None => 0
+    } != 300 {
+        return 8
+    }
+    Set(m, 1, 111)
     if match Get(m, 1) {
-        Some(v) => v,
-        None => 0,
+        Some(v) => v
+        None => 0
     } != 111 {
-        return 8;
+        return 9
     }
     // Struct keys with a Bool field.
-    var mk = Map(Key, I64)(d);
-    let k1 = Key(7, true);
-    let k2 = Key(7, false);
-    let k3 = Key(8, true);
-    Set(mk, k1, 1);
-    Set(mk, k2, 2);
-    Set(mk, k3, 3);
+    var mk = __s0_map_create(Map(Key, I64), d)
+    let k1 = Key(a: 7, b: true)
+    let k2 = Key(a: 7, b: false)
+    let k3 = Key(a: 8, b: true)
+    Set(mk, k1, 1)
+    Set(mk, k2, 2)
+    Set(mk, k3, 3)
     if match Get(mk, k2) {
-        Some(v) => v,
-        None => 0,
+        Some(v) => v
+        None => 0
     } != 2 {
-        return 9;
+        return 10
     }
     if match Get(mk, k3) {
-        Some(v) => v,
-        None => 0,
+        Some(v) => v
+        None => 0
     } != 3 {
-        return 10;
+        return 11
     }
-    if match Get(mk, Key(9, true)) {
-        Some(v) => v,
-        None => 1,
+    if match Get(mk, Key(a: 9, b: true)) {
+        Some(v) => v
+        None => 1
     } != 1 {
-        return 11;
+        return 12
     }
-    // Collision-heavy insertions exercise the probe loop within the fixed
-    // capacity of 16.
-    var mc = Map(U64, U64)(d);
-    var i: U64 = 0;
+    // Enum keys exercise tag and payload hashing and equality.
+    var me = __s0_map_create(Map(Flag, I64), d)
+    let empty: Flag = Empty
+    let tagged: Flag = Tagged(7)
+    Set(me, empty, 40)
+    Set(me, tagged, 41)
+    if match Get(me, tagged) {
+        Some(v) => v
+        None => 0
+    } != 41 {
+        return 13
+    }
+    // Near-capacity insertions exercise the complete probe loop.
+    var mc = __s0_map_create(Map(U64, U64), d)
+    var i: U64 = 0
     while i < 14 {
-        Set(mc, i, i);
-        i = i + 1;
+        Set(mc, i, i)
+        i = i + 1
     }
     if match Get(mc, 13) {
-        Some(v) => v,
-        None => 0,
+        Some(v) => v
+        None => 0
     } != 13 {
-        return 12;
+        return 14
     }
-    return 0;
+    // A full map fails the source function rather than only its generated
+    // Unit-returning helper.
+    if fill_full(d) != 0 {
+        return 15
+    }
+    return 0
 }

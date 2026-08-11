@@ -47,13 +47,14 @@ const (
 	kwTry
 	kwTrue
 	kwFalse
+	kwUnsafe
 )
 
 // keywordText mirrors the keyword list in order.
 var keywordText = [...]string{
 	"", "import", "type", "enum", "fn", "let", "var", "if", "else",
 	"while", "for", "in", "return", "match", "using", "with", "try",
-	"true", "false",
+	"true", "false", "unsafe",
 }
 
 // token is one source token with its position.
@@ -226,6 +227,9 @@ func (l *lexer) lexToken() (token, error) {
 		return l.lexString(line, col)
 
 	case strings.ContainsRune("(){}[],:;=.<>!&|+-*/%", rune(c)):
+		if c == ';' {
+			return token{}, l.errf(line, col, "semicolons are not allowed; end the statement with a line break or \"}\"")
+		}
 		// Multi-character operators: -> << >> == != <= >= && ||.
 		two := ""
 		if l.pos+1 < len(l.src) {

@@ -78,6 +78,7 @@ func TestCompileHelper(t *testing.T) {
 			os.Exit(2)
 		}
 		b = append(b, []byte(path+"\n")...)
+		b = append(b, []byte(mir.Print(m))...)
 		b = append(b, []byte(c)...)
 	}
 	sum := sha256.Sum256(b)

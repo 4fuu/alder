@@ -1,1 +1,1 @@
-line 2, column 16: Map key type I64 is not supported (unsigned integers, Bool, and structs/enums of those only)
+line 2, column 32: Map key type I64 is not supported (unsigned integers, Bool, and structs/enums of those only)

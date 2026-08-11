@@ -1,7 +1,10 @@
 package frontend
 
 import (
+	"fmt"
+
 	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/aster/mir/verify"
 )
 
 // Compile compiles a source module to a MIR module. Type inference and
@@ -17,5 +20,12 @@ func Compile(src string) (*mir.Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lowerModule(decls, cm)
+	m, err := lowerModule(decls, cm)
+	if err != nil {
+		return nil, err
+	}
+	if errs := verify.Module(m); len(errs) != 0 {
+		return nil, fmt.Errorf("internal frontend error: emitted invalid MIR: %s", verify.Errors(errs).String())
+	}
+	return m, nil
 }

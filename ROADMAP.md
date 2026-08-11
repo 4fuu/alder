@@ -114,18 +114,29 @@ Status: **complete**
 Deliverables (implemented in the `frontend` Go package):
 
 - a deterministic lexer, parser, type checker, and MIR emitter for the
-  source subset defined in `docs/language-design.md` (Aster S0): modules and
-  functions, primitives, structs, enums with `match`, arrays/slices/strings,
-  `Option`/`Result` with `try`, `Map` with generated hash/eq/probe helpers,
-  storage domains, `using`-based scoped cleanup, and C FFI;
+  single-file source subset defined in `docs/language-design.md` (Aster S0):
+  functions, primitives, structs, enums with `match`, slices and `String`,
+  `Option`/`Result` with `try`, a fixed-capacity `Map` helper, bootstrap
+  domain intrinsics, callback-bearing `using` cleanup, and direct concrete C
+  symbol declarations called through `unsafe c`;
 - compile-time `type` parameters with parenthesized application syntax,
-  first-order inference from runtime arguments, and complete
-  monomorphization before any backend MIR exists;
+  inference from runtime arguments and expected results, all-or-none explicit
+  type arguments, rejection of specialization-expanding polymorphic
+  recursion, and complete monomorphization before any backend MIR exists;
 - deterministic diagnostics with line and column, pinned by rejection
   fixtures;
 - a reorder pass emitting callees before callers so the printed MIR round
   trips through the single-pass MIR 1 text parser (call cycles are left in
   instantiation order and documented as unrepresentable in the text format).
+
+The `__s0_domain_create`, `__s0_alloc`, `__s0_domain_mark`,
+`__s0_domain_reset`, `__s0_domain_destroy`, and `__s0_map_create` names, the
+`Domain`/`DomainMark` types, and `using x = expr with CleanupFn` are temporary
+MIR 1 bootstrap bridges. They do not implement or replace the intended
+compiler-inferred storage, `Table(T)`/generational `T.Id`, and resource-owned
+cleanup model. S0 has no fixed arrays, source modules, header importing,
+storage inference, table surface, structured concurrency, traits, closures,
+or methods, and is not a complete language frontend.
 
 Exit-criteria evidence:
 
@@ -145,6 +156,9 @@ Exit-criteria evidence:
   the generated C;
 - ASan/UBSan reruns are not available on the current mingw-w64 host
   (missing libasan/libubsan), so sanitizer coverage is reported as skipped.
+
+This evidence covers the documented representative S0-to-MIR-to-C11 path; it
+does not claim that S0 exercises every backend mechanism.
 
 ## Milestone 5: Self-Hosted Compiler
 
