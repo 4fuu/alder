@@ -90,7 +90,7 @@ type checkerTypeArg struct {
 }
 
 type checkerTypeUse struct {
-	id, owner, role, ordinal, syntax, checkedType int
+	id, owner, role, ordinal, node, source, nameStart, nameEnd, syntax, checkedType int
 }
 
 type checkerManifest struct {
@@ -147,6 +147,19 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify checker MIR: %s", verify.Errors(diagnostics).String())
 	}
+	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles"} {
+		id, ok := module.Function(name)
+		if !ok {
+			t.Fatalf("checker MIR has no %s function", name)
+		}
+		for _, block := range module.Functions[id].Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op == mir.OpCall && instruction.Callee == id {
+					t.Fatalf("%s recursively calls itself", name)
+				}
+			}
+		}
+	}
 	generated, err := cgen.GenerateProgram(module)
 	if err != nil {
 		t.Fatalf("generate checker C: %v", err)
@@ -172,7 +185,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			"fn deferred() -> U64 {\n let local: Missing = nope\n return wrong\n}\n",
 		"b.al": "type Forward { x: Later }\n" +
 			"type Later { x: U64 }\n" +
-			"type Recursive { next: Recursive }\n",
+			"type Recursive { slice: [Recursive]\n pointer: Ptr(Recursive)\n buffer: __s0_Buffer(Recursive) }\n",
 	}
 	for i := 0; i < 64; i++ {
 		good["b.al"] += fmt.Sprintf("type X%02d(T: type) { x: Option(T) }\n", i)
@@ -184,6 +197,19 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 	manifest := parseCheckerManifest(t, one, good)
 	assertCheckerSuccessManifest(t, manifest, good)
+	var deep strings.Builder
+	for i := 0; i < 40; i++ {
+		field := "U64"
+		if i+1 < 40 {
+			field = fmt.Sprintf("Chain%02d", i+1)
+		}
+		fmt.Fprintf(&deep, "type Chain%02d { next: %s }\n", i, field)
+	}
+	deep.WriteString("type Diamond { left: Left\n right: Right }\ntype Left { value: Leaf }\ntype Right { value: Leaf }\ntype Leaf { value: U64 }\n")
+	deep.WriteString("type Phantom(T: type) { value: U64 }\ntype ThroughArg { value: Phantom(ThroughArg) }\n")
+	deep.WriteString("type Cut { option: Option(Ptr(Cut))\n result: Result([Cut], U64)\n map: Map(U64, __s0_Buffer(Cut)) }\n")
+	deepFiles := map[string]string{"deep.al": deep.String()}
+	parseCheckerManifest(t, runAlderChecker(t, exe, deepFiles, []string{"deep.al"}, false), deepFiles)
 
 	rejects := []struct {
 		name, text, marker, relatedMarker string
@@ -204,7 +230,31 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "buffer-arity.al", text: "type A { x: __s0_Buffer() }\n", kind: 5, marker: "__s0_Buffer"},
 		{name: "generic-arity.al", text: "type Box(T: type) {}\ntype A { x: Box() }\n", kind: 5, marker: "Box", last: true},
 		{name: "applied-t.al", text: "type A(T: type) { x: T(U64) }\n", kind: 4, marker: "T", last: true},
+		{name: "duplicate-field.al", text: "type A { x: U64\n x: U8 }\n", kind: 6, marker: "type"},
+		{name: "duplicate-variant.al", text: "enum A { X\n X(value: U64) }\n", kind: 7, marker: "enum"},
+		{name: "empty-enum.al", text: "enum A {}\n", kind: 8, marker: "enum"},
+		{name: "interleaved-type-order.al", text: "enum First { X\n X }\ntype Later { x: U64\n x: U8 }\n", kind: 7, marker: "enum"},
+		{name: "shape-before-cycle.al", text: "type Cyclic { x: Cyclic }\nenum Empty {}\n", kind: 8, marker: "enum"},
+		{name: "cycle-before-import.al", text: "import c bad: fn(Missing) -> U64\ntype Cyclic { x: Cyclic }\n", kind: 9, marker: "type"},
+		{name: "import-before-function.al", text: "fn earlier() -> Missing {}\nimport c bad: fn(Nope) -> U64\n", kind: 4, marker: "Nope", last: true},
+		{name: "self-cycle.al", text: "type A { x: A }\n", kind: 9, marker: "type"},
+		{name: "enum-payload-cycle.al", text: "enum A { Wrap(value: A) }\n", kind: 9, marker: "enum"},
+		{name: "option-cycle.al", text: "type A { x: Option(A) }\n", kind: 9, marker: "type"},
+		{name: "result-ok-cycle.al", text: "type A { x: Result(A, U64) }\n", kind: 9, marker: "type"},
+		{name: "result-err-cycle.al", text: "type A { x: Result(U64, A) }\n", kind: 9, marker: "type"},
+		{name: "map-key-cycle.al", text: "type A { x: Map(A, U64) }\n", kind: 9, marker: "type"},
+		{name: "map-value-cycle.al", text: "type A { x: Map(U64, A) }\n", kind: 9, marker: "type"},
+		{name: "two-cycle.al", text: "type A { x: B }\ntype B { x: A }\n", kind: 9, marker: "type"},
+		{name: "generic-target-cycle.al", text: "type Box(T: type) { x: A }\ntype A { x: Box(U64) }\n", kind: 9, marker: "type"},
 	}
+	cycleFiles := map[string]string{"z.al": "type B { x: A }\n", "a.al": "type A { x: B }\n"}
+	cycleOne := runAlderChecker(t, exe, cycleFiles, []string{"z.al", "a.al"}, true)
+	cycleTwo := runAlderChecker(t, exe, cycleFiles, []string{"a.al", "z.al"}, true)
+	if cycleOne != cycleTwo {
+		t.Fatal("cross-file cycle changed with argv order")
+	}
+	cycleManifest := parseCheckerManifest(t, cycleOne, cycleFiles)
+	assertCheckerDiagnostic(t, cycleManifest, 9, "a.al", 0, len("type"), "", -1, -1)
 	for _, tc := range rejects {
 		t.Run(tc.name, func(t *testing.T) {
 			out := runAlderChecker(t, exe, map[string]string{tc.name: tc.text}, []string{tc.name}, true)
@@ -311,7 +361,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		return m, errors.New("manifest has no final line break")
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 1" || lines[len(lines)-1] != "END" {
+	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 2" || lines[len(lines)-1] != "END" {
 		return m, errors.New("invalid checker manifest envelope")
 	}
 	phase := 0
@@ -342,7 +392,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 				return m, fmt.Errorf("line %d: %w", lineNumber+2, err)
 			}
 			pathBytes, err := hex.DecodeString(fields[2])
-			if err != nil || len(pathBytes) == 0 {
+			if err != nil || len(pathBytes) == 0 || hex.EncodeToString(pathBytes) != fields[2] {
 				return m, fmt.Errorf("line %d has invalid hex path", lineNumber+2)
 			}
 			length, err := checkerManifestInt(fields[3])
@@ -380,10 +430,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.args = append(m.args, checkerTypeArg{id: numbers[0], checkedType: numbers[1]})
 		case "U":
-			if err != nil || len(numbers) != 6 {
+			if err != nil || len(numbers) != 10 {
 				return m, fmt.Errorf("line %d has invalid U record", lineNumber+2)
 			}
-			m.uses = append(m.uses, checkerTypeUse{id: numbers[0], owner: numbers[1], role: numbers[2], ordinal: numbers[3], syntax: numbers[4], checkedType: numbers[5]})
+			m.uses = append(m.uses, checkerTypeUse{id: numbers[0], owner: numbers[1], role: numbers[2], ordinal: numbers[3], node: numbers[4], source: numbers[5], nameStart: numbers[6], nameEnd: numbers[7], syntax: numbers[8], checkedType: numbers[9]})
 		case "D":
 			if err != nil || len(numbers) != 5 && len(numbers) != 8 || numbers[4] > 1 || numbers[4] == 0 && len(numbers) != 5 || numbers[4] == 1 && len(numbers) != 8 {
 				return m, fmt.Errorf("line %d has invalid D record", lineNumber+2)
@@ -411,7 +461,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 
 func checkerManifestInt(field string) (int, error) {
 	value, err := strconv.Atoi(field)
-	if err != nil || value < 0 {
+	if err != nil || value < 0 || strconv.Itoa(value) != field {
 		return 0, fmt.Errorf("invalid nonnegative integer %q", field)
 	}
 	return value, nil
@@ -452,10 +502,13 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 	}
 	argOwners := make([]int, len(m.args))
+	typeOwners := make([]int, len(m.types))
+	typeSyntax := make(map[int]bool)
 	for i, checked := range m.types {
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 13 || checked.syntax < 1 || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 13 || checked.syntax < 1 || typeSyntax[checked.syntax] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
+		typeSyntax[checked.syntax] = true
 		if checked.target != 0 && checked.kind != 6 && checked.kind != 7 {
 			return fmt.Errorf("checked type %+v has an unexpected target", checked)
 		}
@@ -482,17 +535,18 @@ func validateCheckerManifest(m checkerManifest) error {
 				return fmt.Errorf("checked type %+v does not follow its argument %+v", checked, arg)
 			}
 			argOwners[arg.id-1]++
+			typeOwners[arg.checkedType-1]++
 			if argOwners[arg.id-1] != 1 {
 				return fmt.Errorf("type argument %+v has overlapping owners", arg)
 			}
 		}
 	}
-	if len(m.diagnostics) == 0 {
-		for i, owners := range argOwners {
-			if owners != 1 {
-				return fmt.Errorf("type argument %d has %d owners", i+1, owners)
-			}
+	for i, owners := range argOwners {
+		if owners != 1 {
+			return fmt.Errorf("type argument %d has %d owners", i+1, owners)
 		}
+	}
+	if len(m.diagnostics) == 0 {
 		paramCounts := make([]int, len(m.symbols))
 		for _, param := range m.params {
 			paramCounts[param.owner-1]++
@@ -506,13 +560,29 @@ func validateCheckerManifest(m checkerManifest) error {
 	ordinals := make(map[[2]int]int)
 	for i, use := range m.uses {
 		key := [2]int{use.owner, use.role}
-		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 6 || use.ordinal != ordinals[key] || use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || m.types[use.checkedType-1].syntax != use.syntax {
+		valueless := use.role == 2 && use.syntax == 0 && use.checkedType == 0
+		named := use.role == 1 || use.role == 2 || use.role == 5
+		ownerKind := 0
+		if use.owner >= 1 && use.owner <= len(m.symbols) {
+			ownerKind = m.symbols[use.owner-1].kind
+		}
+		roleMatchesOwner := use.role == 1 && ownerKind == 2 || use.role == 2 && ownerKind == 3 || (use.role == 3 || use.role == 4) && ownerKind == 1 || (use.role == 5 || use.role == 6) && ownerKind == 12
+		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 6 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || m.types[use.checkedType-1].syntax != use.syntax) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
 			return fmt.Errorf("invalid declaration type use %+v", use)
+		}
+		nodes[use.node] = true
+		if !valueless {
+			typeOwners[use.checkedType-1]++
 		}
 		ordinals[key]++
 	}
+	for i, owners := range typeOwners {
+		if owners > 1 || len(m.diagnostics) == 0 && owners != 1 {
+			return fmt.Errorf("checked type %d has %d owners", i+1, owners)
+		}
+	}
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind < 1 || diagnostic.kind > 5 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
+		if diagnostic.kind < 1 || diagnostic.kind > 9 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {
@@ -599,19 +669,21 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	if len(m.params) != 67 || len(m.args) <= 16 || len(m.types) <= 16 || len(m.uses) <= 16 {
 		t.Fatalf("growth coverage: params=%d args=%d types=%d uses=%d", len(m.params), len(m.args), len(m.types), len(m.uses))
 	}
-	parameterOwners := []int{2, 5, 6}
+	parameterOwners := []int{2, 6}
 	for owner := 11; owner <= 74; owner++ {
 		parameterOwners = append(parameterOwners, owner)
 	}
-	for id, owner := range parameterOwners {
+	parameterOwners = append(parameterOwners, 5)
+	for _, owner := range parameterOwners {
 		param := checkerTypeParamForOwner(t, m, owner)
-		if param.id != id+1 || checkerSourceText(m, inputs, param.source, param.start, param.end) != "T" {
-			t.Fatalf("type parameter %d = %+v", id+1, param)
+		if checkerSourceText(m, inputs, param.source, param.start, param.end) != "T" {
+			t.Fatalf("type parameter for owner %d = %+v", owner, param)
 		}
 	}
 
 	foreign := checkerSymbolByName(t, m, inputs, "foreign")
-	if m.types[checkerUse(t, m, foreign.id, 3, 0).checkedType-1].kind != 1 || m.types[checkerUse(t, m, foreign.id, 3, 1).checkedType-1].kind != 2 || m.types[checkerUse(t, m, foreign.id, 4, 0).checkedType-1].kind != 1 {
+	foreign0, foreign1, foreignResult := checkerUse(t, m, foreign.id, 3, 0), checkerUse(t, m, foreign.id, 3, 1), checkerUse(t, m, foreign.id, 4, 0)
+	if foreign0.nameStart != 0 || foreign0.nameEnd != 0 || foreign1.nameStart != 0 || foreign1.nameEnd != 0 || foreignResult.nameStart != 0 || foreignResult.nameEnd != 0 || m.types[foreign0.checkedType-1].kind != 1 || m.types[foreign1.checkedType-1].kind != 2 || m.types[foreignResult.checkedType-1].kind != 1 {
 		t.Fatal("import type-use order or kinds changed")
 	}
 	box := checkerSymbolByName(t, m, inputs, "Box")
@@ -621,6 +693,12 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatal("Box.T did not resolve to its owner-local parameter")
 	}
 	nest := checkerSymbolByName(t, m, inputs, "Nest")
+	for ordinal, name := range []string{"x", "a", "b", "c", "d"} {
+		item := checkerUse(t, m, nest.id, 1, ordinal)
+		if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
+			t.Fatalf("Nest field %d metadata changed: %+v", ordinal, item)
+		}
+	}
 	mapType := m.types[checkerUse(t, m, nest.id, 1, 0).checkedType-1]
 	mapArgs := checkerDirectArgs(m, mapType)
 	if mapType.kind != 11 || len(mapArgs) != 2 || m.types[mapArgs[0].checkedType-1].kind != 1 || m.types[mapArgs[1].checkedType-1].kind != 9 {
@@ -643,9 +721,11 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 			enumUses++
 		}
 	}
-	payload := m.types[checkerUse(t, m, enum.id, 2, 0).checkedType-1]
-	if enumUses != 1 || payload.kind != 7 || payload.target != box.id {
-		t.Fatal("valueless enum variant produced a use or payload target changed")
+	empty := checkerUse(t, m, enum.id, 2, 0)
+	full := checkerUse(t, m, enum.id, 2, 1)
+	payload := m.types[full.checkedType-1]
+	if enumUses != 2 || empty.syntax != 0 || empty.checkedType != 0 || checkerSourceText(m, inputs, empty.source, empty.nameStart, empty.nameEnd) != "Empty" || checkerSourceText(m, inputs, full.source, full.nameStart, full.nameEnd) != "Full" || payload.kind != 7 || payload.target != box.id {
+		t.Fatal("enum declaration items or payload target changed")
 	}
 	function := checkerSymbolByName(t, m, inputs, "f")
 	functionParam := checkerTypeParamForOwner(t, m, function.id)
@@ -655,6 +735,9 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	if xType.kind != 6 || xType.target != functionParam.id || yType.kind != 7 || yType.target != box.id || m.types[checkerDirectArgs(m, yType)[0].checkedType-1].target != functionParam.id || resultType.kind != 9 {
 		t.Fatal("function owner-local parameter or signature resolution changed")
 	}
+	if xItem, yItem, resultItem := checkerUse(t, m, function.id, 5, 0), checkerUse(t, m, function.id, 5, 1), checkerUse(t, m, function.id, 6, 0); checkerSourceText(m, inputs, xItem.source, xItem.nameStart, xItem.nameEnd) != "x" || checkerSourceText(m, inputs, yItem.source, yItem.nameStart, yItem.nameEnd) != "y" || resultItem.nameStart != 0 || resultItem.nameEnd != 0 {
+		t.Fatal("function declaration-item names changed or compile-time T became an item")
+	}
 	other := checkerSymbolByName(t, m, inputs, "Other")
 	if checkerTypeParamForOwner(t, m, other.id).id == boxParam.id {
 		t.Fatal("same-spelled type parameters share an ID across owners")
@@ -662,14 +745,31 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	forward := checkerSymbolByName(t, m, inputs, "Forward")
 	later := checkerSymbolByName(t, m, inputs, "Later")
 	recursive := checkerSymbolByName(t, m, inputs, "Recursive")
+	for _, pair := range []struct {
+		owner checkerSymbol
+		names []string
+	}{{forward, []string{"x"}}, {later, []string{"x"}}, {recursive, []string{"slice", "pointer", "buffer"}}} {
+		for ordinal, name := range pair.names {
+			item := checkerUse(t, m, pair.owner.id, 1, ordinal)
+			if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
+				t.Fatalf("field item metadata changed for owner %d ordinal %d", pair.owner.id, ordinal)
+			}
+		}
+	}
 	if target := m.types[checkerUse(t, m, forward.id, 1, 0).checkedType-1].target; target != later.id {
 		t.Fatalf("forward type target=%d, want %d", target, later.id)
 	}
-	if target := m.types[checkerUse(t, m, recursive.id, 1, 0).checkedType-1].target; target != recursive.id {
-		t.Fatalf("recursive type target=%d, want %d", target, recursive.id)
+	if kind := m.types[checkerUse(t, m, recursive.id, 1, 0).checkedType-1].kind; kind != 8 {
+		t.Fatalf("slice-cut recursive field kind=%d, want 8", kind)
+	}
+	if kind := m.types[checkerUse(t, m, recursive.id, 1, 1).checkedType-1].kind; kind != 12 {
+		t.Fatalf("pointer-cut recursive field kind=%d, want 12", kind)
+	}
+	if kind := m.types[checkerUse(t, m, recursive.id, 1, 2).checkedType-1].kind; kind != 13 {
+		t.Fatalf("buffer-cut recursive field kind=%d, want 13", kind)
 	}
 	deferred := checkerSymbolByName(t, m, inputs, "deferred")
-	if len(m.uses) != 82 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
+	if len(m.uses) != 85 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
 		t.Fatalf("deferred body was checked or declaration-use count changed: %d", len(m.uses))
 	}
 	for owner := 11; owner <= 74; owner++ {
@@ -714,23 +814,33 @@ func assertCheckerDiagnostic(t *testing.T, m checkerManifest, kind int, path str
 }
 
 func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
-	inputs := map[string]string{"a.al": ""}
-	valid := "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nEND\n"
+	inputs := map[string]string{"a.al": "x"}
+	valid := "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nEND\n"
 	if _, err := decodeCheckerManifest(valid, inputs); err != nil {
 		t.Fatalf("valid minimal manifest: %v", err)
 	}
+	partial := "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 0\nD 4 0 0 1 0\nEND\n"
+	if _, err := decodeCheckerManifest(partial, inputs); err != nil {
+		t.Fatalf("valid partial failure manifest: %v", err)
+	}
 	malformed := map[string]string{
-		"missing final line break": strings.TrimSuffix(valid, "\n"),
-		"blank record":             "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\n\nEND\n",
-		"unknown record":           "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nQ 1\nEND\n",
-		"invalid path hex":         "ALDER-CHECKER-MANIFEST 1\nS 0 zz 0\nEND\n",
-		"unknown source":           "ALDER-CHECKER-MANIFEST 1\nS 0 67686f73742e616c 0\nEND\n",
-		"duplicate source":         "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nS 1 612e616c 0\nEND\n",
-		"negative integer":         "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nY 1 2 1 0 -1 0 0\nEND\n",
-		"nonsequential ID":         "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nY 2 2 1 0 0 1 0\nEND\n",
-		"truncated diagnostic":     "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nD 1\nEND\n",
-		"invalid related flag":     "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nD 1 0 0 1 2\nEND\n",
-		"invalid argument range":   "ALDER-CHECKER-MANIFEST 1\nS 0 612e616c 0\nC 1 1 1 0 0 1\nEND\n",
+		"missing final line break":   strings.TrimSuffix(valid, "\n"),
+		"blank record":               "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\n\nEND\n",
+		"unknown record":             "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nQ 1\nEND\n",
+		"invalid path hex":           "ALDER-CHECKER-MANIFEST 2\nS 0 zz 1\nEND\n",
+		"noncanonical path hex":      "ALDER-CHECKER-MANIFEST 2\nS 0 612E616C 1\nEND\n",
+		"unknown source":             "ALDER-CHECKER-MANIFEST 2\nS 0 67686f73742e616c 1\nEND\n",
+		"duplicate source":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nS 1 612e616c 1\nEND\n",
+		"negative integer":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 -1 0 0\nEND\n",
+		"noncanonical integer":       "ALDER-CHECKER-MANIFEST 2\nS 00 612e616c 1\nEND\n",
+		"nonsequential ID":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
+		"truncated diagnostic":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1\nEND\n",
+		"invalid related flag":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
+		"invalid argument range":     "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
+		"malformed declaration item": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
+		"ownerless failed argument":  "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 0\nA 1 1\nD 4 0 0 1 0\nEND\n",
+		"multiply-owned failed type": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nC 1 1 1 0 0 0\nU 1 1 1 0 2 0 0 1 1 1\nU 2 1 1 1 3 0 0 1 1 1\nD 6 0 0 1 0\nEND\n",
+		"unreachable success type":   "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 0\nEND\n",
 	}
 	for name, text := range malformed {
 		t.Run(name, func(t *testing.T) {

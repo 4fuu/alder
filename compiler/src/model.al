@@ -124,18 +124,27 @@ type CheckedTypeRec {
     arg_count: U64
 }
 
-// Declaration type-use roles: 1 struct field, 2 enum payload, 3 import
-// parameter, 4 import result, 5 function parameter, and 6 function result.
+// Semantic declaration-item roles: 1 struct field, 2 enum variant (including
+// valueless variants), 3 import parameter, 4 import result, 5 function runtime
+// parameter, and 6 function result. The item ID is its 1-based buffer index.
+// node is the owning wrapper syntax node; source and name ranges identify the
+// semantic item name. Unnamed signature items use a zero name range. syntax and
+// checked_type are both zero only for valueless enum variants.
 type DeclTypeUseRec {
     owner: U64
     role: U64
     ordinal: U64
+    node: U64
+    source: U64
+    name_start: U64
+    name_end: U64
     syntax: U64
     checked_type: U64
 }
 
 // Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
-// 3 duplicate type parameter, 4 unknown type, and 5 wrong type arity.
+// 3 duplicate type parameter, 4 unknown type, 5 wrong type arity, 6 duplicate
+// struct field, 7 duplicate enum variant, 8 empty enum, and 9 value-type cycle.
 type CheckDiagRec {
     kind: U64
     source: U64

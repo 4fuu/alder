@@ -273,6 +273,9 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		"  Some(payload) => match payload {\n" +
 		"   _ => payload +\n    1\n" +
 		"  }\n  _ => 0\n }\n}\n"
+	flowSource += "fn grouped_arms(x: U64, f: U64, i: U64) -> U64 {\n" +
+		" return match x {\n" +
+		"  A => (x)\n  B => ((x))\n  C => (f)()\n  D => (x).field\n  E => (x)[i]\n  F => (f())\n }\n}\n"
 	flowFiles := map[string]string{"flow.al": flowSource}
 	flowManifest := runAlderParser(t, exe, flowFiles, []string{"flow.al"}, false)
 	flowTree := validateParserManifest(t, flowManifest, flowFiles)
@@ -750,6 +753,12 @@ func (m parserManifest) name(t *testing.T, nodeID int) string {
 	return m.sourceTexts[node.path][node.nameStart:node.nameEnd]
 }
 
+func (m parserManifest) spanText(t *testing.T, nodeID int) string {
+	t.Helper()
+	node := m.nodes[nodeID-1]
+	return m.sourceTexts[node.path][node.start:node.end]
+}
+
 func (m parserManifest) rootNamed(t *testing.T, name string) int {
 	t.Helper()
 	for _, root := range m.roots {
@@ -953,6 +962,21 @@ func assertControlParserTree(t *testing.T, tree parserManifest) {
 	assertNodeKinds(t, tree, []int{innerBody}, 26)
 	if tree.tokenText(t, outerChildren[0]) != "+" || tree.tokenText(t, innerBody) != "+" {
 		t.Fatal("grouped scrutinee or multiline nested match body lost binary shape")
+	}
+
+	groupedChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "grouped_arms"))
+	groupedReturn := tree.childrenInSourceOrder(t, groupedChildren[len(groupedChildren)-1])[0]
+	groupedMatch := tree.childrenInSourceOrder(t, groupedReturn)[0]
+	groupedMatchChildren := tree.childrenInSourceOrder(t, groupedMatch)
+	wantArms := []string{"A => (x)", "B => ((x))", "C => (f)()", "D => (x).field", "E => (x)[i]", "F => (f())"}
+	if len(groupedMatchChildren) != len(wantArms)+1 {
+		t.Fatalf("grouped match children = %d, want %d", len(groupedMatchChildren), len(wantArms)+1)
+	}
+	for i, want := range wantArms {
+		arm := groupedMatchChildren[i+1]
+		if tree.nodes[arm-1].kind != 38 || tree.spanText(t, arm) != want {
+			t.Fatalf("grouped arm %d span = %q, want %q", i, tree.spanText(t, arm), want)
+		}
 	}
 }
 

@@ -12,6 +12,30 @@ enum CheckResult {
     CheckBad(value: CheckStore)
 }
 
+type CycleColorRec {
+    owner: U64
+    color: U64
+}
+
+type CycleWorkRec {
+    owner: U64
+    checked_type: U64
+}
+
+type CycleEdgeRec {
+    owner: U64
+    target: U64
+}
+
+// Cycle frames form a persistent stack. Replacing the top appends a new frame
+// that points at the old parent, so cycle checking never depends on the C call
+// stack or mutable Buffer elements.
+type CycleFrameRec {
+    owner: U64
+    next_target: U64
+    parent: U64
+}
+
 fn same_name(state: State, a_source: U64, a_start: U64, a_end: U64, b_source: U64, b_start: U64, b_end: U64) -> Bool {
     if a_end - a_start != b_end - b_start { return false }
     let a = __s0_buffer_get(SourceRec, state.sources, a_source)
@@ -37,6 +61,15 @@ fn reserved_symbol(state: State, node: SyntaxRec) -> Bool {
 
 fn check_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec, related_source: U64, related_start: U64, related_end: U64) -> Result(CheckResult, __s0_Error) {
     let item = CheckDiagRec(kind: kind, source: node.source, start: node.name_start, end: node.name_end, related_source: related_source, related_start: related_start, related_end: related_end)
+    let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, diagnostics: diagnostics)))
+}
+
+fn check_decl_fail(d: Domain, state: State, parse: ParseStore, store: CheckStore, kind: U64, owner: U64) -> Result(CheckResult, __s0_Error) {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+    let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
+    let item = CheckDiagRec(kind: kind, source: token.source, start: token.start, end: token.end, related_source: 0, related_start: 0, related_end: 0)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
     return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, diagnostics: diagnostics)))
 }
@@ -182,6 +215,17 @@ fn record_arg_links(d: Domain, parse: ParseStore, store: CheckStore, link_id: U6
     return Ok(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, uses: current.uses, diagnostics: current.diagnostics))
 }
 
+fn type_arg_count(parse: ParseStore, link_id: U64) -> U64 {
+    var count: U64 = 0
+    var at = link_id
+    while at != 0 {
+        let link = __s0_buffer_get(SyntaxLinkRec, parse.links, at - 1)
+        count = count + 1
+        at = link.next
+    }
+    return count
+}
+
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     if node.kind == 5 {
@@ -217,11 +261,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(args) }
-    let start = __s0_buffer_len(U64, current.type_args)
-    let recorded = try record_arg_links(d, parse, current, node.children)
-    let count = __s0_buffer_len(U64, recorded.type_args) - start
-    var first: U64 = 0
-    if count != 0 { first = start + 1 }
+    let count = type_arg_count(parse, node.children)
     var kind: U64 = 0
     var arity: U64 = 0
     if node_word(state, node, "Option") { kind = 9
@@ -236,19 +276,26 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         arity = 1 }
     var target: U64 = 0
     if kind == 0 {
-        target = find_declared_type(state, recorded, node)
+        target = find_declared_type(state, current, node)
         if target != 0 { kind = 7
-            arity = __s0_buffer_get(SymbolRec, recorded.symbols, target - 1).type_arity }
+            arity = __s0_buffer_get(SymbolRec, current.symbols, target - 1).type_arity }
     }
-    if kind == 0 { return check_fail(d, recorded, 4, node, 0, 0, 0) }
-    if count != arity { return check_fail(d, recorded, 5, node, 0, 0, 0) }
+    // Do not commit a direct-argument range until the application itself is
+    // valid. Failed heads and arities retain resolved child types but never
+    // leave ownerless type-argument records in a CheckBad store.
+    if kind == 0 { return check_fail(d, current, 4, node, 0, 0, 0) }
+    if count != arity { return check_fail(d, current, 5, node, 0, 0, 0) }
+    let start = __s0_buffer_len(U64, current.type_args)
+    let recorded = try record_arg_links(d, parse, current, node.children)
+    var first: U64 = 0
+    if count != 0 { first = start + 1 }
     return Ok(CheckGood(try append_checked_type(d, recorded, kind, node_id, target, first, count)))
 }
 
-fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64, role: U64, ordinal: U64, skip_kind: U64) -> Result(CheckResult, __s0_Error) {
+fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64, role: U64, skip_kind: U64) -> Result(CheckResult, __s0_Error) {
     if link_id == 0 { return Ok(CheckGood(store)) }
     let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
-    let before = try check_type_links(d, state, parse, store, owner, link.next, role, ordinal, skip_kind)
+    let before = try check_type_links(d, state, parse, store, owner, link.next, role, skip_kind)
     let current = match before {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -259,7 +306,26 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     } { return Ok(before) }
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
     if child.kind == 7 || child.kind == 14 || child.kind == skip_kind { return Ok(CheckGood(current)) }
-    if child.kind == 9 && child.children == 0 { return Ok(CheckGood(current)) }
+    var actual_role = role
+    if role == 5 && child.kind != 13 { actual_role = 6 }
+    var actual_ordinal: U64 = 0
+    var use_at: U64 = 0
+    while use_at < __s0_buffer_len(DeclTypeUseRec, current.uses) {
+        let prior = __s0_buffer_get(DeclTypeUseRec, current.uses, use_at)
+        if prior.owner == owner && prior.role == actual_role {
+            if (actual_role == 1 || actual_role == 2) && same_name(state, child.source, child.name_start, child.name_end, prior.source, prior.name_start, prior.name_end) {
+                var duplicate_kind: U64 = 6
+                if actual_role == 2 { duplicate_kind = 7 }
+                return check_decl_fail(d, state, parse, current, duplicate_kind, owner)
+            }
+            actual_ordinal = actual_ordinal + 1
+        }
+        use_at = use_at + 1
+    }
+    if child.kind == 9 && child.children == 0 {
+        let uses = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: owner, role: 2, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: child.name_start, name_end: child.name_end, syntax: 0, checked_type: 0))
+        return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, uses: uses, diagnostics: current.diagnostics)))
+    }
     var syntax = link.node
     if child.kind == 8 || child.kind == 9 || child.kind == 10 || child.kind == 13 {
         let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
@@ -274,22 +340,17 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(resolved) }
-    var actual_role = role
-    if role == 5 && child.kind != 13 { actual_role = 6 }
-    var actual_ordinal: U64 = 0
-    var use_at: U64 = 0
-    while use_at < __s0_buffer_len(DeclTypeUseRec, next.uses) {
-        let prior = __s0_buffer_get(DeclTypeUseRec, next.uses, use_at)
-        if prior.owner == owner && prior.role == actual_role { actual_ordinal = actual_ordinal + 1 }
-        use_at = use_at + 1
-    }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, syntax: syntax, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
+    var name_start = child.name_start
+    var name_end = child.name_end
+    if actual_role == 3 || actual_role == 4 || actual_role == 6 { name_start = 0
+        name_end = 0 }
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
     return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, uses: uses, diagnostics: next.diagnostics)))
 }
 
 fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, signature: SyntaxRec) -> Result(CheckResult, __s0_Error) {
     let result_link = __s0_buffer_get(SyntaxLinkRec, parse.links, signature.children - 1)
-    let params = try check_type_links(d, state, parse, store, owner, result_link.next, 3, 0, 0)
+    let params = try check_type_links(d, state, parse, store, owner, result_link.next, 3, 0)
     let current = match params {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -307,45 +368,191 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(resolved) }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, syntax: result_link.node, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
     return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, uses: uses, diagnostics: next.diagnostics)))
 }
 
-fn check_declaration_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
+// Materialize aggregate value edges without recursion. A declared application
+// contributes only its declaration target; Option, Result, and Map expose their
+// direct arguments; every other checked type cuts the value-layout walk.
+fn collect_cycle_edges(d: Domain, store: CheckStore) -> Result(__s0_Buffer(CycleEdgeRec), __s0_Error) {
+    let initial_work = try __s0_buffer_new(CycleWorkRec, d)
+    var work = initial_work
+    let initial_edges = try __s0_buffer_new(CycleEdgeRec, d)
+    var edges = initial_edges
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let item = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if (item.role == 1 || item.role == 2) && item.checked_type != 0 {
+            work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: item.checked_type))
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CycleWorkRec, work) {
+        let item = __s0_buffer_get(CycleWorkRec, work, at)
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+        if checked.kind == 7 {
+            edges = try __s0_buffer_append(CycleEdgeRec, d, edges, CycleEdgeRec(owner: item.owner, target: checked.target))
+        }
+        if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 {
+            var arg_at: U64 = 0
+            while arg_at < checked.arg_count {
+                let arg = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + arg_at)
+                work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: arg))
+                arg_at = arg_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return Ok(edges)
+}
+
+fn owner_has_edge(edges: __s0_Buffer(CycleEdgeRec), owner: U64, target: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CycleEdgeRec, edges) {
+        let item = __s0_buffer_get(CycleEdgeRec, edges, at)
+        if item.owner == owner && item.target == target { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn cycle_color(colors: __s0_Buffer(CycleColorRec), owner: U64) -> U64 {
+    var at = __s0_buffer_len(CycleColorRec, colors)
+    while at != 0 {
+        at = at - 1
+        let item = __s0_buffer_get(CycleColorRec, colors, at)
+        if item.owner == owner { return item.color }
+    }
+    return 0
+}
+
+fn reject_value_cycles(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    let edges = try collect_cycle_edges(d, store)
+    let initial_colors = try __s0_buffer_new(CycleColorRec, d)
+    var colors = initial_colors
+    let initial_frames = try __s0_buffer_new(CycleFrameRec, d)
+    var frames = initial_frames
+    var owner: U64 = 1
+    while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+        if (symbol.kind == 2 || symbol.kind == 3) && cycle_color(colors, owner) == 0 {
+            colors = try __s0_buffer_append(CycleColorRec, d, colors, CycleColorRec(owner: owner, color: 1))
+            frames = try __s0_buffer_append(CycleFrameRec, d, frames, CycleFrameRec(owner: owner, next_target: 1, parent: 0))
+            var frame_id = __s0_buffer_len(CycleFrameRec, frames)
+            while frame_id != 0 {
+                let frame = __s0_buffer_get(CycleFrameRec, frames, frame_id - 1)
+                var target = frame.next_target
+                var found: U64 = 0
+                while target <= __s0_buffer_len(SymbolRec, store.symbols) && found == 0 {
+                    let candidate = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+                    if (candidate.kind == 2 || candidate.kind == 3) && owner_has_edge(edges, frame.owner, target) { found = target }
+                    target = target + 1
+                }
+                if found == 0 {
+                    colors = try __s0_buffer_append(CycleColorRec, d, colors, CycleColorRec(owner: frame.owner, color: 2))
+                    frame_id = frame.parent
+                } else {
+                    frames = try __s0_buffer_append(CycleFrameRec, d, frames, CycleFrameRec(owner: frame.owner, next_target: found + 1, parent: frame.parent))
+                    let continuation = __s0_buffer_len(CycleFrameRec, frames)
+                    let color = cycle_color(colors, found)
+                    if color == 1 { return check_decl_fail(d, state, parse, store, 9, found) }
+                    if color == 2 { frame_id = continuation }
+                    if color == 0 {
+                        colors = try __s0_buffer_append(CycleColorRec, d, colors, CycleColorRec(owner: found, color: 1))
+                        frames = try __s0_buffer_append(CycleFrameRec, d, frames, CycleFrameRec(owner: found, next_target: 1, parent: continuation))
+                        frame_id = __s0_buffer_len(CycleFrameRec, frames)
+                    }
+                }
+            }
+        }
+        owner = owner + 1
+    }
+    return Ok(CheckGood(store))
+}
+
+// wanted 0 selects both aggregate kinds in their shared source order. Imports
+// and functions use their syntax kind after aggregate checking and cycles.
+fn check_declaration_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, wanted: U64) -> Result(CheckResult, __s0_Error) {
     if owner > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(CheckGood(store)) }
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-        let root = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
-        let params = try collect_param_links(d, state, parse, store, owner, root.children)
-        let with_params = match params {
-            CheckGood(value) => value
-            CheckBad(value) => value
+        if symbol.kind == wanted || (wanted == 0 && (symbol.kind == 2 || symbol.kind == 3)) {
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+            let params = try collect_param_links(d, state, parse, store, owner, root.children)
+            let with_params = match params {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }
+            if match params {
+                CheckGood(value) => false
+                CheckBad(value) => true
+            } { return Ok(params) }
+            var checked: CheckResult = CheckGood(with_params)
+            if root.kind == 2 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 1, 0) }
+            if root.kind == 3 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 2, 11) }
+            if root.kind == 12 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 5, 0) }
+            if root.kind == 1 {
+                let signature = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
+                let sig = __s0_buffer_get(SyntaxRec, parse.nodes, signature.node - 1)
+                checked = try check_import_types(d, state, parse, with_params, owner, sig)
+            }
+            let complete = match checked {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }
+            if match checked {
+                CheckGood(value) => false
+                CheckBad(value) => true
+            } { return Ok(checked) }
+            if root.kind == 3 {
+                var variants: U64 = 0
+                var item_at: U64 = 0
+                while item_at < __s0_buffer_len(DeclTypeUseRec, complete.uses) {
+                    let item = __s0_buffer_get(DeclTypeUseRec, complete.uses, item_at)
+                    if item.owner == owner && item.role == 2 { variants = variants + 1 }
+                    item_at = item_at + 1
+                }
+                if variants == 0 { return check_decl_fail(d, state, parse, complete, 8, owner) }
+            }
+            return check_declaration_at(d, state, parse, complete, owner + 1, wanted)
         }
-        if match params {
-            CheckGood(value) => false
-            CheckBad(value) => true
-        } { return Ok(params) }
-        var checked: CheckResult = CheckGood(with_params)
-        if root.kind == 2 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 1, 0, 0) }
-        if root.kind == 3 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 2, 0, 11) }
-        if root.kind == 12 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 5, 0, 0) }
-        if root.kind == 1 {
-            let signature = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
-            let sig = __s0_buffer_get(SyntaxRec, parse.nodes, signature.node - 1)
-            checked = try check_import_types(d, state, parse, with_params, owner, sig)
-        }
-        let complete = match checked {
-            CheckGood(value) => value
-            CheckBad(value) => value
-        }
-        if match checked {
-            CheckGood(value) => false
-            CheckBad(value) => true
-        } { return Ok(checked) }
-    return check_declaration_at(d, state, parse, complete, owner + 1)
+    return check_declaration_at(d, state, parse, store, owner + 1, wanted)
+}
+
+fn check_declaration_kind(d: Domain, state: State, parse: ParseStore, store: CheckStore, wanted: U64) -> Result(CheckResult, __s0_Error) {
+    return check_declaration_at(d, state, parse, store, 1, wanted)
 }
 
 fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
-    return check_declaration_at(d, state, parse, initial, 1)
+    let aggregates = try check_declaration_kind(d, state, parse, initial, 0)
+    let after_aggregates = match aggregates {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match aggregates {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(aggregates) }
+    let cycles = try reject_value_cycles(d, state, parse, after_aggregates)
+    let after_cycles = match cycles {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match cycles {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(cycles) }
+    let imports = try check_declaration_kind(d, state, parse, after_cycles, 1)
+    let after_imports = match imports {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match imports {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(imports) }
+    return check_declaration_kind(d, state, parse, after_imports, 12)
 }
 
 fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
@@ -377,7 +584,7 @@ fn emit_check_sources(state: State) -> Bool {
 fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 1\n") || !emit_check_sources(state) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 2\n") || !emit_check_sources(state) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -404,7 +611,7 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let rec = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
-        if !out_string("U ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.role) || !out(32) || !out_u64(rec.ordinal) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        if !out_string("U ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.role) || !out(32) || !out_u64(rec.ordinal) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
         at = at + 1
     }
     at = 0
