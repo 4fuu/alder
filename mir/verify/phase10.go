@@ -30,7 +30,7 @@ func phase10Backend(m *mir.Module) []Error {
 				in := &b.Instrs[i]
 				loc := locInstr(f, b, i, in)
 				switch in.Op {
-				case mir.OpAlloc:
+				case mir.OpAlloc, mir.OpAllocChecked:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr} {
 						if containsKind(m, in.TypeOp, k) {

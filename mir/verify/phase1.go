@@ -11,8 +11,8 @@ import (
 // consistent value definitions.
 func phase1Integrity(m *mir.Module) []Error {
 	var errs []Error
-	if m.FormatVersion != mir.LegacyFormatVersion && m.FormatVersion != mir.CurrentFormatVersion {
-		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2)", m.FormatVersion)})
+	if m.FormatVersion < mir.LegacyFormatVersion || m.FormatVersion > mir.CurrentFormatVersion {
+		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3)", m.FormatVersion)})
 	}
 	if len(m.Types) < int(mir.NumPrimitiveTypes) {
 		errs = append(errs, Error{Msg: fmt.Sprintf("type table has %d entries; expected at least %d canonical primitive slots", len(m.Types), mir.NumPrimitiveTypes)})
@@ -387,7 +387,10 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	if in.Op == mir.OpAggregateConstruct && !m.ValidType(in.AggType) {
 		errs = append(errs, Error{Loc: loc, Msg: "aggregate type out of range"})
 	}
-	for _, op := range []mir.OpKind{mir.OpAlloc, mir.OpTableCreate, mir.OpEnumConstruct,
+	if in.Op == mir.OpAllocChecked && m.FormatVersion < mir.AllocCheckedFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: "alloc.checked requires MIR format version 3"})
+	}
+	for _, op := range []mir.OpKind{mir.OpAlloc, mir.OpAllocChecked, mir.OpTableCreate, mir.OpEnumConstruct,
 		mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
 		mir.OpIntFromFloat, mir.OpFloatFromInt} {
 		if in.Op == op && !m.ValidType(in.TypeOp) {
@@ -423,7 +426,7 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	case mir.OpDomainReset:
 		require(in.Domain, "domain operand")
 		require(in.Mark, "mark operand")
-	case mir.OpAlloc:
+	case mir.OpAlloc, mir.OpAllocChecked:
 		require(in.Domain, "domain operand")
 		require(in.Count, "count operand")
 	case mir.OpCopyToDomain:
@@ -534,7 +537,7 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpDomainReset:
 		add(in.Domain)
 		add(in.Mark)
-	case mir.OpAlloc:
+	case mir.OpAlloc, mir.OpAllocChecked:
 		add(in.Domain)
 		add(in.Count)
 	case mir.OpCopyToDomain:
@@ -663,7 +666,7 @@ func checkTerm(m *mir.Module, f *mir.Function, b *mir.Block, bi int) []Error {
 	case mir.TermReturn:
 		checkVal(b.Term.Result, "return operand")
 	case mir.TermPanic:
-		if m.FormatVersion < mir.CurrentFormatVersion {
+		if m.FormatVersion < mir.PanicFormatVersion {
 			errs = append(errs, Error{Loc: loc, Msg: "panic requires MIR format version 2"})
 		}
 		if b.Term.Result != mir.NoValue {

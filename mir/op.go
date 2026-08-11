@@ -17,6 +17,7 @@ const (
 	OpDomainReset
 	OpDomainDestroy
 	OpAlloc
+	OpAllocChecked
 	OpCopyToDomain
 
 	// Scoped cleanup.
@@ -94,6 +95,8 @@ func (k OpKind) String() string {
 		return "domain.destroy"
 	case OpAlloc:
 		return "alloc"
+	case OpAllocChecked:
+		return "alloc.checked"
 	case OpCopyToDomain:
 		return "copy_to_domain"
 	case OpCleanupScopeBegin:
@@ -200,7 +203,7 @@ func (k OpKind) ProducesResult() bool {
 // Checked operations require the edge; all other operations forbid it.
 func (k OpKind) HasFailEdge() bool {
 	switch k {
-	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked,
+	case OpAllocChecked, OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked,
 		OpIntShlChecked, OpIntShrChecked, OpSliceIndexChecked, OpSliceRangeChecked,
 		OpEnumPayloadChecked:
 		return true

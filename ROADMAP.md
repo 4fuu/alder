@@ -269,7 +269,12 @@ current-function cleanup; typed `fail` remains ordinary `Result` propagation,
 and no fabricated result or caller-frame unwinding is permitted. This
 incompatible terminator is carried by MIR 2 while legacy MIR 1 fixtures remain
 supported; process-level tests pin division-by-zero cleanup order, narrow
-overflow, and fixed-map capacity failure. Next use a
+overflow, and fixed-map capacity failure. MIR 3 adds `alloc.checked` so
+bootstrap storage can report allocation preparation and runtime failures
+without terminating or mutating prior state. Deterministic OOM and runtime
+identity-exhaustion injection, plus narrow-target `SIZE_MAX` behavior, remain
+required at the buffer gate; this operation alone does not claim that evidence.
+Next use a
 mini-compiler spike to justify only the storage, growable byte/vector, symbol,
 diagnostic, iteration, safe argument/file/output, and host-wrapper capabilities
 actually required by the compiler. Every temporary bridge needs an owner and

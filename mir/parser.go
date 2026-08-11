@@ -121,8 +121,8 @@ func (p *parser) parseModule() error {
 	if err != nil {
 		return p.errf(vt, "invalid format version %q", vt.text)
 	}
-	if n != LegacyFormatVersion && n != CurrentFormatVersion {
-		return p.errf(vt, "unsupported format version %d (supported: 1, 2)", n)
+	if n < LegacyFormatVersion || n > CurrentFormatVersion {
+		return p.errf(vt, "unsupported format version %d (supported: 1, 2, 3)", n)
 	}
 	p.m.FormatVersion = n
 
@@ -835,8 +835,15 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		in.Mark, err = p.parseValueRef()
 
-	case "alloc":
-		in.Op = OpAlloc
+	case "alloc", "alloc.checked":
+		if t.text == "alloc.checked" {
+			if p.m.FormatVersion < AllocCheckedFormatVersion {
+				return in, p.errf(t, "alloc.checked requires MIR format version 3")
+			}
+			in.Op = OpAllocChecked
+		} else {
+			in.Op = OpAlloc
+		}
 		if in.Domain, err = p.parseValueRef(); err != nil {
 			return in, err
 		}
@@ -850,6 +857,9 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		in.Count, err = p.parseValueRef()
+		if err == nil && in.Op == OpAllocChecked {
+			err = p.parseOptionalElse(t, &in)
+		}
 
 	case "copy_to_domain":
 		in.Op = OpCopyToDomain
@@ -1352,7 +1362,7 @@ func (p *parser) parseTerminator() error {
 		}
 		b.Term.Result = v
 	case "panic":
-		if p.m.FormatVersion < CurrentFormatVersion {
+		if p.m.FormatVersion < PanicFormatVersion {
 			return p.errf(t, "panic requires MIR format version 2")
 		}
 		b.Term.Kind = TermPanic

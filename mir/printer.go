@@ -237,8 +237,11 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpDomainReset:
 		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.Mark))
 
-	case OpAlloc:
+	case OpAlloc, OpAllocChecked:
 		b.WriteString(" " + valueName(f, in.Domain) + ", " + m.TypeString(in.TypeOp) + ", " + valueName(f, in.Count))
+		if in.Op == OpAllocChecked {
+			printFailEdge(b, f, in)
+		}
 
 	case OpCopyToDomain:
 		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.CopyVal))

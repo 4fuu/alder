@@ -97,6 +97,23 @@ func TestAPIRejections(t *testing.T) {
 		t.Errorf("missing else edge not reported:\n%s", Errors(errs).String())
 	}
 
+	// Recoverable allocation is also a checked operation and requires an edge.
+	allocModule := mir.NewModule()
+	allocFn := allocModule.AddFunction("alloc", []mir.Param{
+		{Name: "d", Type: allocModule.DomainHandle()},
+		{Name: "n", Type: mir.TypeU64},
+	}, mir.TypeUnit)
+	allocBlock := allocFn.AddBlock("bb0", nil)
+	allocResult := allocFn.AddValue("p", allocModule.SafeMut(mir.TypeU8), mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+	allocBlock.AddInstr(mir.Instr{
+		Op: mir.OpAllocChecked, Result: allocResult, Domain: 0, TypeOp: mir.TypeU8, Count: 1, FailTarget: mir.NoBlock,
+	})
+	allocBlock.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	errs = Module(allocModule)
+	if !containsMsg(errs, "checked operation requires an 'else' failure edge") {
+		t.Errorf("alloc.checked missing else edge not reported:\n%s", Errors(errs).String())
+	}
+
 	// A producing instruction that binds no result.
 	m2 := mir.NewModule()
 	f2 := m2.AddFunction("g", nil, mir.TypeUnit)
@@ -148,6 +165,33 @@ func TestAPIRejections(t *testing.T) {
 	errs = Module(m5)
 	if !containsMsg(errs, "result type mismatch: stored slice(u8), expected i64") {
 		t.Errorf("result type mismatch not reported:\n%s", Errors(errs).String())
+	}
+}
+
+func TestAllocCheckedResultUnavailableOnFailure(t *testing.T) {
+	m := mir.NewModule()
+	f := m.AddFunction("f", []mir.Param{
+		{Name: "d", Type: m.DomainHandle()},
+		{Name: "n", Type: mir.TypeU64},
+	}, mir.TypeUnit)
+	entry := f.AddBlock("entry", nil)
+	failure := f.AddBlock("failure", []mir.Param{{Name: "p", Type: m.SafeMut(mir.TypeU8)}})
+	result := f.AddValue("allocation", m.SafeMut(mir.TypeU8), mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+	entry.AddInstr(mir.Instr{
+		Op:         mir.OpAllocChecked,
+		Result:     result,
+		Domain:     0,
+		TypeOp:     mir.TypeU8,
+		Count:      1,
+		FailTarget: 1,
+		FailArgs:   []mir.ValueId{result},
+	})
+	entry.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	failure.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+
+	errs := Module(m)
+	if !containsMsg(errs, "use of %allocation is not dominated by its definition") {
+		t.Fatalf("alloc.checked result was available on its failure edge:\n%s", Errors(errs).String())
 	}
 }
 

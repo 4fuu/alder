@@ -42,6 +42,8 @@ type checkedModule struct {
 // monomorphization happened before this point.
 func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 	m := mir.NewModule()
+	// Frontend lowering has not adopted format 3's alloc.checked yet.
+	m.FormatVersion = mir.PanicFormatVersion
 	l := &lowerer{
 		m:          m,
 		checked:    cm.fns,

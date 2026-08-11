@@ -115,6 +115,24 @@ func TestPanicParsePrintParse(t *testing.T) {
 	}
 }
 
+func TestAllocCheckedParsePrintParse(t *testing.T) {
+	const text = "mir 3\n\nfn @f(%d: domain_handle, %n: u64, %x: i64, %y: i64) -> i64 {\nbb0:\n  %p = alloc.checked %d, u8, %n else bb1(%y, %x)\n  return %x\n\nbb1(%a: i64, %b: i64):\n  return %a\n}\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("printed alloc.checked differs:\n%s", got)
+	}
+	reparsed, err := Parse(Print(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(reparsed); got != text {
+		t.Fatalf("reprinted alloc.checked differs:\n%s", got)
+	}
+}
+
 // TestParseValueIDs verifies that parsing assigns deterministic IDs: the same
 // text parses to modules whose printed forms and value identities agree.
 func TestParseValueIDs(t *testing.T) {
@@ -198,8 +216,9 @@ var invalidParseTests = []struct {
 }{
 	{"missing version", "type @T {}", "expected 'mir <version>'"},
 	{"bad version", "mir x\n", "expected a format version number"},
-	{"unsupported version", "mir 3\n", "unsupported format version 3"},
+	{"unsupported version", "mir 4\n", "unsupported format version 4"},
 	{"panic in legacy version", "mir 1\nfn @f() {\nbb0:\n  panic\n}\n", "panic requires MIR format version 2"},
+	{"alloc.checked in format 2", "mir 2\nfn @f(%d: domain_handle, %n: u64) {\nbb0:\n  %p = alloc.checked %d, u8, %n else bb1\n  return\nbb1:\n  return\n}\n", "alloc.checked requires MIR format version 3"},
 	{"unknown declaration", "mir 1\nwat\n", "expected a declaration"},
 	{"duplicate type", "mir 1\ntype @T {}\ntype @T {}\n", "duplicate type @T"},
 	{"empty function", "mir 1\nfn @f() {}\n", "function must contain at least one block"},

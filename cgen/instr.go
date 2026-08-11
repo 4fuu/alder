@@ -125,6 +125,18 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ " + g.tmp(in, "p") + ", " +
 			g.valueExpr(in.Count) + " };\n")
 
+	case mir.OpAllocChecked:
+		elem := in.TypeOp
+		b.WriteString("  uint64_t " + g.tmp(in, "") + ";\n")
+		b.WriteString("  if (!alder_u64_mul_checked(" + g.valueExpr(in.Count) + ", " +
+			g.typeSize(elem) + ", &" + g.tmp(in, "") + ")) " + g.failBody(in) + "\n")
+		b.WriteString("  if (" + g.tmp(in, "") + " > (uint64_t)SIZE_MAX) " + g.failBody(in) + "\n")
+		b.WriteString("  void *" + g.tmp(in, "p") + " = alder_domain_alloc(" + g.valueExpr(in.Domain) +
+			", (size_t)" + g.tmp(in, "") + ", (size_t)" + g.typeAlign(elem) + ");\n")
+		b.WriteString("  if (" + g.tmp(in, "p") + " == NULL) " + g.failBody(in) + "\n")
+		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ " + g.tmp(in, "p") + ", " +
+			g.valueExpr(in.Count) + " };\n")
+
 	case mir.OpCopyToDomain:
 		t, ok := g.f.ValueType(in.CopyVal)
 		if t == mir.TypeUnit {

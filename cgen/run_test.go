@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/4fuu/alder/mir"
 )
 
 // runFixtures pairs each behavior fixture with its C driver. The driver
@@ -72,6 +74,95 @@ func TestRunFixtures(t *testing.T) {
 						t.Fatalf("run %s failed: %v\n%s", rf.mir, err, out)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestAllocCheckedBehavior(t *testing.T) {
+	const text = `mir 3
+
+const @success: i32 = 0
+const @failure: i32 = 1
+const @one: u64 = 1
+const @answer: u64 = 42
+
+fn @allocate(%d: domain_handle, %n: u64) -> i32 {
+bb0:
+  %p = alloc.checked %d, u64, %n else bb_fail
+  %ok = const.get @success
+  return %ok
+
+bb_fail:
+  %err = const.get @failure
+  return %err
+}
+
+fn @swap_on_failure(%d: domain_handle, %first: u64, %second: u64) -> u64 {
+bb0:
+  jump bb_try(%first, %second)
+
+bb_try(%x: u64, %y: u64):
+  %p = alloc.checked %d, u64, %x else bb_try(%y, %x)
+  return %y
+}
+
+fn @preserve_old_storage(%d: domain_handle, %n: u64) -> u64 {
+bb0:
+  %one_value = const.get @one
+  %old = alloc %d, u64, %one_value
+  %answer_value = const.get @answer
+  store deref %old, %answer_value
+  %fresh = alloc.checked %d, u64, %n else bb_fail
+  return %answer_value
+
+bb_fail:
+  %got = load deref %old
+  return %got
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := Generate(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			dir := t.TempDir()
+			gen := filepath.Join(dir, "gen.c")
+			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			driver := filepath.Join(dir, "driver.c")
+			const source = `#include "gen.c"
+#include <stdint.h>
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) { return 2; }
+    if (alder_fn_allocate_0(&root, (uint64_t)1) != (int32_t)0) { return 3; }
+    if (alder_fn_allocate_0(NULL, (uint64_t)1) != (int32_t)1) { return 4; }
+    if (alder_fn_allocate_0(&root, UINT64_MAX) != (int32_t)1) { return 5; }
+    if (alder_fn_swap_on_failure_1(&root, UINT64_MAX, (uint64_t)1) != UINT64_MAX) { return 6; }
+    if (alder_fn_preserve_old_storage_2(&root, UINT64_MAX) != (uint64_t)42) { return 7; }
+    alder_domain_destroy(&root);
+    return alder_runtime_live_allocations() == (size_t)0 ? 0 : 8;
+}
+`
+			if err := os.WriteFile(driver, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(dir, "alloc_checked.exe")
+			args := runArgs(gen, driver)
+			args = append(args, "-o", exe)
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("compile alloc.checked fixture: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run alloc.checked fixture: %v\n%s", err, out)
 			}
 		})
 	}

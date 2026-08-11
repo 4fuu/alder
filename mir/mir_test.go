@@ -205,6 +205,7 @@ func TestInferResultType(t *testing.T) {
 	want("domain.create", Instr{Op: OpDomainCreate, Domain: d}, m.DomainHandle())
 	want("domain.mark", Instr{Op: OpDomainMark, Domain: d}, m.DomainMark())
 	want("alloc", Instr{Op: OpAlloc, Domain: d, TypeOp: TypeU8, Count: cnt}, m.SafeMut(TypeU8))
+	want("alloc.checked", Instr{Op: OpAllocChecked, Domain: d, TypeOp: TypeU8, Count: cnt}, m.SafeMut(TypeU8))
 	want("copy_to_domain", Instr{Op: OpCopyToDomain, Domain: d, CopyVal: s}, m.Slice(TypeU8))
 	want("cleanup.scope.begin", Instr{Op: OpCleanupScopeBegin}, m.CleanupScope())
 	want("int.add.checked", Instr{Op: OpIntAddChecked, A: x, B: x}, TypeI64)
@@ -265,7 +266,7 @@ func TestOpTable(t *testing.T) {
 	if OpStore.ProducesResult() || !OpLoad.ProducesResult() {
 		t.Error("ProducesResult misclassified")
 	}
-	if !OpIntAddChecked.HasFailEdge() || OpLoad.HasFailEdge() || OpStore.HasFailEdge() {
+	if !OpAllocChecked.HasFailEdge() || !OpIntAddChecked.HasFailEdge() || OpAlloc.HasFailEdge() || OpLoad.HasFailEdge() || OpStore.HasFailEdge() {
 		t.Error("HasFailEdge misclassified")
 	}
 	if OpStore.String() != "store" || OpFFICallUnsafe.String() != "ffi.call.unsafe" {

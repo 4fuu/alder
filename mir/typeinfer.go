@@ -128,7 +128,7 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return m.DomainMark(), true
-	case OpAlloc:
+	case OpAlloc, OpAllocChecked:
 		if !m.isHandleType(f, in.Domain) || !m.isU64(f, in.Count) || !m.ValidType(in.TypeOp) {
 			return NoType, false
 		}

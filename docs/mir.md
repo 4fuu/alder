@@ -154,10 +154,17 @@ domain.mark domain -> domain_mark
 domain.reset domain, domain_mark
 domain.destroy domain
 alloc domain, element_type, count -> safe_mut(element_type)
+alloc.checked domain, element_type, count else failure_block -> safe_mut(element_type)
 copy_to_domain destination_domain, value -> value
 ```
 
-`alloc` counts are `u64`. Aggregate values are built with `aggregate.construct` and written into places with `store`; the earlier `construct destination, operands` form was folded into these two operations during the format revision.
+Allocation counts are `u64`. `alloc` traps on every preparation or runtime
+failure. `alloc.checked` instead takes the standard explicit failure edge; that
+edge observes the pre-instruction resource state, while success produces a
+slice whose provenance is the supplied domain. Aggregate values are built with
+`aggregate.construct` and written into places with `store`; the earlier
+`construct destination, operands` form was folded into these two operations
+during the format revision.
 
 Required invariants:
 
@@ -282,9 +289,9 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 
 ## Textual MIR
 
-The current textual format is `mir 2`; the parser and verifier retain legacy
-`mir 1` support for existing fixtures. MIR 2 differs from MIR 1 only by adding
-the `panic` terminator, so a `mir 1` module containing `panic` is rejected
+The current textual format is `mir 3`; the parser and verifier retain legacy
+`mir 1` and `mir 2` support. MIR 2 adds the `panic` terminator and MIR 3 adds
+`alloc.checked`, so use of either operation under an older header is rejected
 rather than silently changing the old format. Function headers are predeclared
 in textual order before function bodies are parsed, so calls and cleanup
 callbacks may name the current function or any later function; `FunctionId`
@@ -319,7 +326,7 @@ place    := "local" "%" name | "field" "(" place "," ident ")" | "deref" value
 type     := primitive | "@" name | structural type | singleton
 ```
 
-The `panic` production is available only in MIR 2.
+The `panic` production is available in MIR 2 and later.
 
 Checked operations append `else blockref` on the same line. Types print and parse in the canonical forms shown throughout this document (`slice(u8)`, `result(@Summary, @LoadError)`, `function(fn(i64) -> bool)`, and so on).
 
@@ -368,7 +375,8 @@ Diagnostics must be stable and must identify the relevant function, block, opera
 ## Versioning
 
 Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
-format; `mir 2` is current and adds only the valueless `panic` terminator.
+format; `mir 2` adds only valueless `panic`; and current `mir 3` adds
+`alloc.checked`.
 Incompatible changes must use a new version and update:
 
 - this document;

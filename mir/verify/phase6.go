@@ -149,7 +149,7 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 	case mir.OpDomainMark:
 		ensureResource(st)
 		delete(st.invalidMarks, in.Result)
-	case mir.OpAlloc, mir.OpCopyToDomain, mir.OpTableCreate:
+	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
 		clearProducedRoots(info, in.Result, bi, ii, st)
 	case mir.OpDomainDestroy:
 		kill(in.Domain, false, mir.NoValue)
@@ -425,7 +425,7 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 			}
 		}
 		addDep(&out, defKey{v.Def.Block, v.Def.Instr})
-	case mir.OpAlloc, mir.OpCopyToDomain, mir.OpTableCreate:
+	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
 		merge(in.Domain)
 		if in.Op == mir.OpCopyToDomain {
 			merge(in.CopyVal)

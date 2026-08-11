@@ -6,9 +6,12 @@ const (
 	// LegacyFormatVersion is the original MIR format, retained for existing
 	// fixtures. It does not include the panic terminator.
 	LegacyFormatVersion = 1
+	// PanicFormatVersion introduced the valueless panic terminator.
+	PanicFormatVersion = 2
+	// AllocCheckedFormatVersion introduced recoverably fallible allocation.
+	AllocCheckedFormatVersion = 3
 	// CurrentFormatVersion is the format emitted by newly constructed modules.
-	// It adds the valueless panic terminator.
-	CurrentFormatVersion = 2
+	CurrentFormatVersion = AllocCheckedFormatVersion
 )
 
 // Module is a complete MIR unit: type declarations, imported C declarations,
@@ -174,7 +177,7 @@ type Instr struct {
 	AggType   TypeId
 	AggFields []AggField
 
-	// domain.create / mark / reset / destroy / alloc / copy_to_domain
+	// domain.create / mark / reset / destroy / alloc / alloc.checked / copy_to_domain
 	Domain  ValueId
 	Mark    ValueId
 	TypeOp  TypeId // alloc element type, table.create element type, enum.construct and conversion result type

@@ -123,7 +123,7 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
 		c.expectExact(in.Mark, "mark operand", m.DomainMark())
 
-	case mir.OpAlloc:
+	case mir.OpAlloc, mir.OpAllocChecked:
 		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
 		c.expectExact(in.Count, "count operand", mir.TypeU64)
 		if !m.ValidType(in.TypeOp) {
