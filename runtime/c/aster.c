@@ -290,11 +290,12 @@ void aster_domain_destroy(AsterDomain *domain) {
 /* ------------------------------------------------------------------ */
 
 bool aster_slice_index_checked(AsterSlice slice, uint64_t index) {
-    return index < slice.len;
+    return slice.data != NULL && index < slice.len;
 }
 
 bool aster_slice_range_checked(AsterSlice slice, uint64_t lo, uint64_t hi) {
-    return lo <= hi && hi <= slice.len;
+    return lo <= hi && hi <= slice.len &&
+           (slice.data != NULL || slice.len == 0);
 }
 
 /* ------------------------------------------------------------------ */

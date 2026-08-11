@@ -13,14 +13,14 @@ func (g *gen) place(p *mir.Place) string {
 	case mir.PlaceLocal:
 		return "aster_l" + strconv.Itoa(int(p.Local))
 	case mir.PlaceField:
-		return g.place(p.Base) + ".aster_f_" + sanitize(p.Field)
+		return g.place(p.Base) + "." + g.fieldName(p.Base, p.Field)
 	case mir.PlaceDeref:
 		t, ok := g.f.ValueType(p.Deref)
 		if !ok || !g.m.ValidType(t) {
 			return "<invalid deref>"
 		}
 		elem := g.m.Types[t].Elem
-		base := g.val(p.Deref)
+		base := g.valueExpr(p.Deref)
 		switch g.m.Types[t].Kind {
 		case mir.TypeSafeRef, mir.TypeSafeMut:
 			base += ".data"
@@ -36,81 +36,105 @@ func (g *gen) failBody(in *mir.Instr) string {
 	return g.edgeBody(in.FailTarget, in.FailArgs)
 }
 
-// edgeBody emits block-parameter assignments and the goto for an edge.
+// edgeBody stages edge arguments before assigning block parameters. MIR edge
+// arguments are parallel copies, so direct sequential assignments would
+// clobber sources on swaps and other cycles.
 func (g *gen) edgeBody(target mir.BlockId, args []mir.ValueId) string {
 	var b strings.Builder
-	g.edgeAssigns(&b, target, args)
-	b.WriteString("goto aster_b" + strconv.Itoa(int(target)) + ";")
-	return b.String()
-}
-
-// edgeAssigns writes the parameter assignments of an edge.
-func (g *gen) edgeAssigns(b *strings.Builder, target mir.BlockId, args []mir.ValueId) {
-	if int(target) >= len(g.f.Blocks) {
-		return
+	b.WriteString("{ ")
+	edge := g.edgeUsed
+	g.edgeUsed++
+	type stagedArg struct {
+		dest mir.ValueId
+		temp string
 	}
-	for i, a := range args {
-		vid, ok := g.paramValues[[2]int{int(target), i}]
-		if !ok {
-			continue
+	var staged []stagedArg
+	if int(target) < len(g.f.Blocks) {
+		for i, arg := range args {
+			dest, ok := g.paramValues[[2]int{int(target), i}]
+			if !ok {
+				continue
+			}
+			t, _ := g.f.ValueType(dest)
+			if t == mir.TypeUnit {
+				continue
+			}
+			temp := "aster_edge_" + strconv.Itoa(edge) + "_" + strconv.Itoa(i)
+			b.WriteString(g.cType(t) + " " + temp + " = " + g.valueExpr(arg) + "; ")
+			staged = append(staged, stagedArg{dest: dest, temp: temp})
 		}
-		b.WriteString("aster_v" + strconv.Itoa(int(vid)) + " = " + g.val(a) + "; ")
 	}
+	for _, arg := range staged {
+		b.WriteString(g.val(arg.dest) + " = " + arg.temp + "; ")
+	}
+	b.WriteString("goto aster_b" + strconv.Itoa(int(target)) + "; }")
+	return b.String()
 }
 
 // emitInstr lowers one instruction to explicit, sequenced C statements.
 func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	switch in.Op {
 	case mir.OpLoad:
-		b.WriteString("  " + g.val(in.Result) + " = " + g.place(&in.Place) + ";\n")
+		if t, _ := g.f.ValueType(in.Result); t != mir.TypeUnit {
+			b.WriteString("  " + g.val(in.Result) + " = " + g.place(&in.Place) + ";\n")
+		}
 
 	case mir.OpStore:
-		b.WriteString("  " + g.place(&in.Place) + " = " + g.val(in.StoreVal) + ";\n")
+		b.WriteString("  " + g.place(&in.Place) + " = " + g.valueExpr(in.StoreVal) + ";\n")
 
 	case mir.OpAggregateConstruct:
+		if len(in.AggFields) == 0 {
+			b.WriteString("  " + g.val(in.Result) + " = (AsterTy" + strconv.Itoa(int(in.AggType)) + "){0};\n")
+			break
+		}
 		b.WriteString("  " + g.val(in.Result) + " = (AsterTy" + strconv.Itoa(int(in.AggType)) + "){")
 		for i, af := range in.AggFields {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(".aster_f_" + sanitize(af.Name) + " = " + g.val(af.Value))
+			field, _ := g.aggregateFieldIndex(in.AggType, af.Name)
+			b.WriteString(".aster_f" + strconv.Itoa(field) + " = " + g.valueExpr(af.Value))
 		}
 		b.WriteString("};\n")
 
 	case mir.OpDomainCreate:
 		b.WriteString("  if (!aster_domain_init(&aster_domain_" + strconv.Itoa(g.domainUsed) +
-			", " + g.val(in.Domain) + ")) { aster_runtime_panic(\"domain.create failed\"); }\n")
+			", " + g.valueExpr(in.Domain) + ")) { aster_runtime_panic(\"domain.create failed\"); }\n")
 		b.WriteString("  " + g.val(in.Result) + " = &aster_domain_" + strconv.Itoa(g.domainUsed) + ";\n")
 		g.domainUsed++
 
 	case mir.OpDomainMark:
-		b.WriteString("  " + g.val(in.Result) + " = aster_domain_mark(" + g.val(in.Domain) + ");\n")
+		b.WriteString("  " + g.val(in.Result) + " = aster_domain_mark(" + g.valueExpr(in.Domain) + ");\n")
 
 	case mir.OpDomainReset:
-		b.WriteString("  if (!aster_domain_reset(" + g.val(in.Domain) + ", " + g.val(in.Mark) +
+		b.WriteString("  if (!aster_domain_reset(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.Mark) +
 			")) { aster_runtime_panic(\"domain.reset failed\"); }\n")
 
 	case mir.OpDomainDestroy:
-		b.WriteString("  aster_domain_destroy(" + g.val(in.Domain) + ");\n")
+		b.WriteString("  aster_domain_destroy(" + g.valueExpr(in.Domain) + ");\n")
 
 	case mir.OpAlloc:
 		elem := in.TypeOp
 		b.WriteString("  uint64_t " + g.tmp(in, "") + ";\n")
-		b.WriteString("  if (!aster_u64_mul_checked(" + g.val(in.Count) + ", " +
+		b.WriteString("  if (!aster_u64_mul_checked(" + g.valueExpr(in.Count) + ", " +
 			g.typeSize(elem) + ", &" + g.tmp(in, "") + ")) { aster_runtime_panic(\"alloc: size overflow\"); }\n")
-		b.WriteString("  void *" + g.tmp(in, "p") + " = aster_domain_alloc(" + g.val(in.Domain) +
+		b.WriteString("  if (" + g.tmp(in, "") + " > (uint64_t)SIZE_MAX) { aster_runtime_panic(\"alloc: size exceeds size_t\"); }\n")
+		b.WriteString("  void *" + g.tmp(in, "p") + " = aster_domain_alloc(" + g.valueExpr(in.Domain) +
 			", (size_t)" + g.tmp(in, "") + ", (size_t)" + g.typeAlign(elem) + ");\n")
 		b.WriteString("  if (" + g.tmp(in, "p") + " == NULL) { aster_runtime_panic(\"alloc: out of memory\"); }\n")
 		b.WriteString("  " + g.val(in.Result) + " = (AsterSlice){ " + g.tmp(in, "p") + ", " +
-			g.val(in.Count) + " };\n")
+			g.valueExpr(in.Count) + " };\n")
 
 	case mir.OpCopyToDomain:
 		t, ok := g.f.ValueType(in.CopyVal)
+		if t == mir.TypeUnit {
+			break
+		}
 		if ok && g.copyTrivial(t) {
-			b.WriteString("  " + g.val(in.Result) + " = " + g.val(in.CopyVal) + ";\n")
+			b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.CopyVal) + ";\n")
 		} else {
 			b.WriteString("  " + g.val(in.Result) + " = aster_copy_ty" + strconv.Itoa(int(t)) +
-				"(" + g.val(in.Domain) + ", " + g.val(in.CopyVal) + ");\n")
+				"(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.CopyVal) + ");\n")
 		}
 
 	case mir.OpCleanupScopeBegin:
@@ -128,23 +152,23 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 				continue
 			}
 			b.WriteString("  aster_ctx_" + strconv.Itoa(idx) + ".aster_f" + strconv.Itoa(arg) +
-				" = " + g.val(a) + ";\n")
+				" = " + g.valueExpr(a) + ";\n")
 			arg++
 		}
-		b.WriteString("  if (!aster_cleanup_push(" + g.val(in.Scope) + ", aster_cleanup_" +
+		b.WriteString("  if (!aster_cleanup_push(" + g.valueExpr(in.Scope) + ", aster_cleanup_" +
 			strconv.Itoa(idx) + ", &aster_ctx_" + strconv.Itoa(idx) + ", &" + g.val(in.Result) +
 			")) { aster_runtime_panic(\"cleanup.push failed\"); }\n")
 
 	case mir.OpCleanupDisarm:
-		b.WriteString("  if (!aster_cleanup_disarm(" + g.val(in.CleanupID) +
+		b.WriteString("  if (!aster_cleanup_disarm(" + g.valueExpr(in.CleanupID) +
 			")) { aster_runtime_panic(\"cleanup.disarm failed\"); }\n")
 
 	case mir.OpCleanupScopeRun:
-		b.WriteString("  if (!aster_cleanup_run(" + g.val(in.Scope) +
+		b.WriteString("  if (!aster_cleanup_run(" + g.valueExpr(in.Scope) +
 			")) { aster_runtime_panic(\"cleanup.scope.run failed\"); }\n")
 
 	case mir.OpCleanupScopeEnd:
-		b.WriteString("  if (!aster_cleanup_end(" + g.val(in.Scope) +
+		b.WriteString("  if (!aster_cleanup_end(" + g.valueExpr(in.Scope) +
 			")) { aster_runtime_panic(\"cleanup.scope.end failed\"); }\n")
 
 	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked,
@@ -152,7 +176,7 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		g.emitIntChecked(b, in)
 
 	case mir.OpSliceLen:
-		b.WriteString("  " + g.val(in.Result) + " = " + g.val(in.Slice) + ".len;\n")
+		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
 
 	case mir.OpSliceIndexChecked:
 		g.emitSliceIndex(b, in)
@@ -163,10 +187,13 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpEnumPayloadChecked:
 		t, _ := g.f.ValueType(in.EnumValue)
 		idx, _ := g.m.VariantIndex(t, in.Variant)
-		b.WriteString("  if (" + g.val(in.EnumValue) + ".aster_tag != (uint32_t)" + strconv.Itoa(idx) +
+		b.WriteString("  if (" + g.valueExpr(in.EnumValue) + ".aster_tag != (uint32_t)" + strconv.Itoa(idx) +
 			") { " + g.failBody(in) + " }\n")
-		b.WriteString("  " + g.val(in.Result) + " = " + g.val(in.EnumValue) + ".aster_u.aster_p" +
-			strconv.Itoa(idx) + ";\n")
+		payload, _ := g.m.VariantPayload(t, idx)
+		if payload != mir.TypeUnit {
+			b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.EnumValue) + ".aster_u.aster_p" +
+				strconv.Itoa(idx) + ";\n")
+		}
 
 	case mir.OpEnumConstruct:
 		idx, _ := g.m.VariantIndex(in.TypeOp, in.Variant)
@@ -174,16 +201,26 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		payload, _ := g.m.VariantPayload(in.TypeOp, idx)
 		if payload != mir.TypeUnit {
 			b.WriteString("  " + g.val(in.Result) + ".aster_u.aster_p" + strconv.Itoa(idx) +
-				" = " + g.val(in.Payload) + ";\n")
+				" = " + g.valueExpr(in.Payload) + ";\n")
 		}
 
 	case mir.OpTableCreate:
-		b.WriteString("  if (!aster_table_init(&" + g.val(in.Result) + ", " + g.val(in.Domain) +
+		b.WriteString("  void *" + g.tmp(in, "p") + " = aster_domain_alloc(" + g.valueExpr(in.Domain) +
+			", sizeof(AsterTable), _Alignof(AsterTable));\n")
+		b.WriteString("  if (" + g.tmp(in, "p") + " == NULL) { aster_runtime_panic(\"table.create: out of memory\"); }\n")
+		b.WriteString("  " + g.val(in.Result) + " = (AsterTable *)" + g.tmp(in, "p") + ";\n")
+		b.WriteString("  *" + g.val(in.Result) + " = (AsterTable){0};\n")
+		b.WriteString("  if (!aster_table_init(" + g.val(in.Result) + ", " + g.valueExpr(in.Domain) +
 			", " + g.typeSize(in.TypeOp) + ", " + g.typeAlign(in.TypeOp) +
 			")) { aster_runtime_panic(\"table.create failed\"); }\n")
 
 	case mir.OpTableInsert:
-		b.WriteString("  if (!aster_table_insert(&" + g.val(in.Table) + ", &" + g.val(in.TableVal) +
+		elemAddr := "&" + g.val(in.TableVal)
+		if t, _ := g.f.ValueType(in.TableVal); t == mir.TypeUnit {
+			b.WriteString("  uint8_t " + g.tmp(in, "u") + " = (uint8_t)0;\n")
+			elemAddr = "&" + g.tmp(in, "u")
+		}
+		b.WriteString("  if (!aster_table_insert(" + g.valueExpr(in.Table) + ", " + elemAddr +
 			", &" + g.val(in.Result) + ")) { aster_runtime_panic(\"table.insert failed\"); }\n")
 
 	case mir.OpTableLookup, mir.OpTableLookupMut:
@@ -191,8 +228,8 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		elem := g.m.Types[t].Elem
 		// option(table_view(elem)): tag 0 = none, tag 1 = some(view).
 		b.WriteString("  void *" + g.tmp(in, "") + ";\n")
-		b.WriteString("  if (aster_table_lookup" + lookupSuffix(in.Op) + "(&" + g.val(in.Table) +
-			", " + g.val(in.ID) + ", &" + g.tmp(in, "") + ")) {\n")
+		b.WriteString("  if (aster_table_lookup" + lookupSuffix(in.Op) + "(" + g.valueExpr(in.Table) +
+			", " + g.valueExpr(in.ID) + ", &" + g.tmp(in, "") + ")) {\n")
 		b.WriteString("    " + g.val(in.Result) + ".aster_tag = (uint32_t)1;\n")
 		b.WriteString("    " + g.val(in.Result) + ".aster_u.aster_p1 = " + g.tmp(in, "") + ";\n")
 		b.WriteString("  } else {\n")
@@ -201,22 +238,25 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		_ = elem
 
 	case mir.OpTableRemove:
-		b.WriteString("  " + g.val(in.Result) + " = aster_table_remove(&" + g.val(in.Table) +
-			", " + g.val(in.ID) + ");\n")
+		b.WriteString("  " + g.val(in.Result) + " = aster_table_remove(" + g.valueExpr(in.Table) +
+			", " + g.valueExpr(in.ID) + ");\n")
 
 	case mir.OpTableViewEnd:
-		b.WriteString("  (void)" + g.val(in.View) + ";\n")
+		b.WriteString("  (void)" + g.valueExpr(in.View) + ";\n")
 
 	case mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
-		b.WriteString("  " + g.val(in.Result) + " = (bool)(" + g.val(in.A) + " " +
-			cmpOp(in.Op) + " " + g.val(in.B) + ");\n")
+		b.WriteString("  " + g.val(in.Result) + " = (bool)(" + g.valueExpr(in.A) + " " +
+			cmpOp(in.Op) + " " + g.valueExpr(in.B) + ");\n")
 
 	case mir.OpIntTrunc:
 		g.emitTrunc(b, in)
 
-	case mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert, mir.OpFloatFromInt:
-		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.val(in.A) + ";\n")
+	case mir.OpIntZext, mir.OpIntSext, mir.OpFloatFromInt:
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.valueExpr(in.A) + ";\n")
+
+	case mir.OpFloatConvert:
+		g.emitFloatConvert(b, in)
 
 	case mir.OpIntFromFloat:
 		g.emitFromFloat(b, in)
@@ -240,12 +280,17 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		if imp.Sig.Result != mir.TypeUnit {
 			b.WriteString(g.val(in.Result) + " = ")
 		}
-		b.WriteString(sanitize(imp.Name) + "(")
+		b.WriteString("(" + imp.Name + ")(")
+		first := true
 		for i, a := range in.Args {
-			if i > 0 {
+			if imp.Sig.Params[i] == mir.TypeUnit {
+				continue
+			}
+			if !first {
 				b.WriteString(", ")
 			}
-			b.WriteString(g.val(a))
+			first = false
+			b.WriteString(g.valueExpr(a))
 		}
 		b.WriteString(");\n")
 	}
@@ -256,6 +301,18 @@ func lookupSuffix(op mir.OpKind) string {
 		return "_mut"
 	}
 	return ""
+}
+
+func (g *gen) aggregateFieldIndex(t mir.TypeId, name string) (int, bool) {
+	if !g.m.ValidType(t) || g.m.Types[t].Kind != mir.TypeAggregate {
+		return 0, false
+	}
+	for i, field := range g.m.Types[t].Fields {
+		if field.Name == name {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func instrIndexOf(blk *mir.Block, want *mir.Instr) int {
@@ -297,7 +354,7 @@ func (g *gen) callArgs(b *strings.Builder, callee *mir.Function, args []mir.Valu
 			b.WriteString(", ")
 		}
 		first = false
-		b.WriteString(g.val(a))
+		b.WriteString(g.valueExpr(a))
 	}
 }
 
@@ -353,15 +410,15 @@ func (g *gen) emitIntChecked(b *strings.Builder, in *mir.Instr) {
 	}
 	// 64-bit operations call the runtime helper directly.
 	if width == 64 {
-		b.WriteString("  if (!" + helper + opName + "(" + g.val(in.A) + ", " + g.val(in.B) +
+		b.WriteString("  if (!" + helper + opName + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) +
 			", &" + g.val(in.Result) + ")) { " + g.failBody(in) + " }\n")
 		return
 	}
 	// Narrow: promote to 64 bits, compute with the helper, and range-check.
 	srcCast := g.cType(t)
 	b.WriteString("  " + signed64Name(signed) + " " + g.tmp(in, "") + ";\n")
-	b.WriteString("  if (!" + helper + opName + "((" + srcCast + ")" + g.val(in.A) + ", (" +
-		srcCast + ")" + g.val(in.B) + ", &" + g.tmp(in, "") + ")) { " + g.failBody(in) + " }\n")
+	b.WriteString("  if (!" + helper + opName + "((" + srcCast + ")" + g.valueExpr(in.A) + ", (" +
+		srcCast + ")" + g.valueExpr(in.B) + ", &" + g.tmp(in, "") + ")) { " + g.failBody(in) + " }\n")
 	if signed {
 		limits, limitu := intLimits(width)
 		b.WriteString("  if (" + g.tmp(in, "") + " < (int64_t)" + limits + " || " +
@@ -388,7 +445,7 @@ func (g *gen) emitShiftChecked(b *strings.Builder, in *mir.Instr, width int, sig
 		} else {
 			helper += "r_checked"
 		}
-		b.WriteString("  if (!" + helper + "(" + g.val(in.A) + ", " + g.val(in.B) +
+		b.WriteString("  if (!" + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) +
 			", &" + g.val(in.Result) + ")) { " + fail + " }\n")
 		return
 	}
@@ -396,30 +453,35 @@ func (g *gen) emitShiftChecked(b *strings.Builder, in *mir.Instr, width int, sig
 	// width. Unsigned targets wrap by casting; signed targets transfer the
 	// two's-complement bit pattern with memcpy.
 	if signed {
-		b.WriteString("  if (" + g.val(in.B) + " < 0 || " + g.val(in.B) + " >= " +
+		b.WriteString("  if (" + g.valueExpr(in.B) + " < 0 || " + g.valueExpr(in.B) + " >= " +
 			strconv.Itoa(width) + ") { " + fail + " }\n")
 	} else {
-		b.WriteString("  if (" + g.val(in.B) + " >= " + strconv.Itoa(width) + ") { " + fail + " }\n")
+		b.WriteString("  if (" + g.valueExpr(in.B) + " >= " + strconv.Itoa(width) + ") { " + fail + " }\n")
 	}
 	u := "uint" + strconv.Itoa(width) + "_t"
 	if !signed {
 		if shl {
 			b.WriteString("  " + g.val(in.Result) + " = (" + u + ")(((uint64_t)(" + u + ")" +
-				g.val(in.A) + ") << (unsigned)" + g.val(in.B) + ");\n")
+				g.valueExpr(in.A) + ") << (unsigned)" + g.valueExpr(in.B) + ");\n")
 		} else {
 			b.WriteString("  " + g.val(in.Result) + " = (" + u + ")((uint64_t)(" + u + ")" +
-				g.val(in.A) + " >> (unsigned)" + g.val(in.B) + ");\n")
+				g.valueExpr(in.A) + " >> (unsigned)" + g.valueExpr(in.B) + ");\n")
 		}
 		return
 	}
-	i := "int" + strconv.Itoa(width) + "_t"
 	if shl {
 		b.WriteString("  " + u + " " + g.tmp(in, "") + " = (" + u + ")(((uint64_t)(" + u + ")" +
-			g.val(in.A) + ") << (unsigned)" + g.val(in.B) + ");\n")
+			g.valueExpr(in.A) + ") << (unsigned)" + g.valueExpr(in.B) + ");\n")
 		b.WriteString("  memcpy(&" + g.val(in.Result) + ", &" + g.tmp(in, "") + ", sizeof(" + g.tmp(in, "") + "));\n")
 	} else {
-		b.WriteString("  " + g.val(in.Result) + " = (" + i + ")((int64_t)(" + i + ")" +
-			g.val(in.A) + " >> (unsigned)" + g.val(in.B) + ");\n")
+		b.WriteString("  uint64_t " + g.tmp(in, "") + " = (uint64_t)(" + u + ")" +
+			g.valueExpr(in.A) + " >> (unsigned)" + g.valueExpr(in.B) + ";\n")
+		b.WriteString("  if (" + g.valueExpr(in.A) + " < 0 && " + g.valueExpr(in.B) + " > 0) {\n")
+		b.WriteString("    " + g.tmp(in, "") + " |= (UINT64_MAX << (unsigned)(" + strconv.Itoa(width) +
+			" - " + g.valueExpr(in.B) + ")) & (uint64_t)" + uintLimit(width) + ";\n")
+		b.WriteString("  }\n")
+		b.WriteString("  " + u + " " + g.tmp(in, "u") + " = (" + u + ")" + g.tmp(in, "") + ";\n")
+		b.WriteString("  memcpy(&" + g.val(in.Result) + ", &" + g.tmp(in, "u") + ", sizeof(" + g.tmp(in, "u") + "));\n")
 	}
 }
 
@@ -467,13 +529,18 @@ func typeOfOperand(f *mir.Function, v mir.ValueId) mir.TypeId {
 func (g *gen) emitSliceIndex(b *strings.Builder, in *mir.Instr) {
 	elem := g.sliceElemType(in.Slice)
 	fail := g.failBody(in)
-	b.WriteString("  if (!aster_slice_index_checked(" + g.val(in.Slice) + ", " + g.val(in.Index) +
+	b.WriteString("  if (!aster_slice_index_checked(" + g.valueExpr(in.Slice) + ", " + g.valueExpr(in.Index) +
 		")) { " + fail + " }\n")
 	b.WriteString("  uint64_t " + g.tmp(in, "") + ";\n")
-	b.WriteString("  if (!aster_u64_mul_checked(" + g.val(in.Index) + ", " + g.typeSize(elem) +
+	b.WriteString("  if (!aster_u64_mul_checked(" + g.valueExpr(in.Index) + ", " + g.typeSize(elem) +
 		", &" + g.tmp(in, "") + ")) { " + fail + " }\n")
-	b.WriteString("  " + g.val(in.Result) + " = (AsterSlice){ (void *)((uint8_t *)" +
-		g.val(in.Slice) + ".data + (size_t)" + g.tmp(in, "") + "), (uint64_t)1 };\n")
+	b.WriteString("  if (" + g.tmp(in, "") + " > (uint64_t)SIZE_MAX) { " + fail + " }\n")
+	b.WriteString("  void *" + g.tmp(in, "p") + " = " + g.valueExpr(in.Slice) + ".data;\n")
+	b.WriteString("  if (" + g.tmp(in, "") + " != (uint64_t)0) {\n")
+	b.WriteString("    " + g.tmp(in, "p") + " = (void *)((uint8_t *)" + g.tmp(in, "p") +
+		" + (size_t)" + g.tmp(in, "") + ");\n")
+	b.WriteString("  }\n")
+	b.WriteString("  " + g.val(in.Result) + " = (AsterSlice){ " + g.tmp(in, "p") + ", (uint64_t)1 };\n")
 }
 
 // emitSliceRange lowers slice.range.checked to a bounds check and a
@@ -481,14 +548,19 @@ func (g *gen) emitSliceIndex(b *strings.Builder, in *mir.Instr) {
 func (g *gen) emitSliceRange(b *strings.Builder, in *mir.Instr) {
 	elem := g.sliceElemType(in.Slice)
 	fail := g.failBody(in)
-	b.WriteString("  if (!aster_slice_range_checked(" + g.val(in.Slice) + ", " + g.val(in.Lo) +
-		", " + g.val(in.Hi) + ")) { " + fail + " }\n")
+	b.WriteString("  if (!aster_slice_range_checked(" + g.valueExpr(in.Slice) + ", " + g.valueExpr(in.Lo) +
+		", " + g.valueExpr(in.Hi) + ")) { " + fail + " }\n")
 	b.WriteString("  uint64_t " + g.tmp(in, "") + ";\n")
-	b.WriteString("  if (!aster_u64_mul_checked(" + g.val(in.Lo) + ", " + g.typeSize(elem) +
+	b.WriteString("  if (!aster_u64_mul_checked(" + g.valueExpr(in.Lo) + ", " + g.typeSize(elem) +
 		", &" + g.tmp(in, "") + ")) { " + fail + " }\n")
-	b.WriteString("  " + g.val(in.Result) + " = (AsterSlice){ (void *)((uint8_t *)" +
-		g.val(in.Slice) + ".data + (size_t)" + g.tmp(in, "") + "), (uint64_t)(" +
-		g.val(in.Hi) + " - " + g.val(in.Lo) + ") };\n")
+	b.WriteString("  if (" + g.tmp(in, "") + " > (uint64_t)SIZE_MAX) { " + fail + " }\n")
+	b.WriteString("  void *" + g.tmp(in, "p") + " = " + g.valueExpr(in.Slice) + ".data;\n")
+	b.WriteString("  if (" + g.tmp(in, "") + " != (uint64_t)0) {\n")
+	b.WriteString("    " + g.tmp(in, "p") + " = (void *)((uint8_t *)" + g.tmp(in, "p") +
+		" + (size_t)" + g.tmp(in, "") + ");\n")
+	b.WriteString("  }\n")
+	b.WriteString("  " + g.val(in.Result) + " = (AsterSlice){ " + g.tmp(in, "p") + ", (uint64_t)(" +
+		g.valueExpr(in.Hi) + " - " + g.valueExpr(in.Lo) + ") };\n")
 }
 
 // sliceElemType returns the element type of a slice-like operand.
@@ -506,16 +578,29 @@ func (g *gen) emitTrunc(b *strings.Builder, in *mir.Instr) {
 	_, signed := intInfo(in.TypeOp)
 	u := "uint" + strconv.Itoa(intWidthOf(in.TypeOp)) + "_t"
 	if !signed {
-		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.val(in.A) + ";\n")
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.valueExpr(in.A) + ";\n")
 		return
 	}
-	b.WriteString("  " + u + " " + g.tmp(in, "") + " = (" + u + ")" + g.val(in.A) + ";\n")
+	b.WriteString("  " + u + " " + g.tmp(in, "") + " = (" + u + ")" + g.valueExpr(in.A) + ";\n")
 	b.WriteString("  memcpy(&" + g.val(in.Result) + ", &" + g.tmp(in, "") + ", sizeof(" + g.tmp(in, "") + "));\n")
 }
 
 func intWidthOf(t mir.TypeId) int {
 	w, _ := intInfo(t)
 	return w
+}
+
+// emitFloatConvert avoids C11's undefined out-of-range real conversion. MIR
+// float narrowing is unchecked, so non-finite or out-of-range f64 values use
+// the backend's fixed panic policy rather than reaching a C cast.
+func (g *gen) emitFloatConvert(b *strings.Builder, in *mir.Instr) {
+	source, _ := g.f.ValueType(in.A)
+	if source == mir.TypeF64 && in.TypeOp == mir.TypeF32 {
+		v := g.valueExpr(in.A)
+		b.WriteString("  if (" + v + " != " + v + " || " + v + " > (double)FLT_MAX || " +
+			v + " < -(double)FLT_MAX) { aster_runtime_panic(\"float.convert: out of range\"); }\n")
+	}
+	b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.valueExpr(in.A) + ";\n")
 }
 
 // emitFromFloat lowers int.from_float. The 64-bit target uses the defined
@@ -529,12 +614,12 @@ func (g *gen) emitFromFloat(b *strings.Builder, in *mir.Instr) {
 		helper = "aster_i64_from_f64"
 	}
 	if width == 64 {
-		b.WriteString("  if (!" + helper + "(" + g.val(in.A) + ", &" + g.val(in.Result) +
+		b.WriteString("  if (!" + helper + "(" + g.valueExpr(in.A) + ", &" + g.val(in.Result) +
 			")) { aster_runtime_panic(\"int.from_float: out of range\"); }\n")
 		return
 	}
 	b.WriteString("  " + signed64Name(signed) + " " + g.tmp(in, "") + ";\n")
-	b.WriteString("  if (!" + helper + "(" + g.val(in.A) + ", &" + g.tmp(in, "") +
+	b.WriteString("  if (!" + helper + "(" + g.valueExpr(in.A) + ", &" + g.tmp(in, "") +
 		")) { aster_runtime_panic(\"int.from_float: out of range\"); }\n")
 	if signed {
 		limits, limitu := intLimits(width)
@@ -606,16 +691,11 @@ func (g *gen) emitTerm(b *strings.Builder, blk *mir.Block) {
 		b.WriteString("  " + g.edgeBody(t.Target, t.Args) + "\n")
 
 	case mir.TermBranch:
-		b.WriteString("  if (" + g.val(t.Cond) + ") {\n")
-		g.edgeAssigns(b, t.Then, t.ThenArgs)
-		b.WriteString("    goto aster_b" + strconv.Itoa(int(t.Then)) + ";\n")
-		b.WriteString("  } else {\n")
-		g.edgeAssigns(b, t.Else, t.ElseArgs)
-		b.WriteString("    goto aster_b" + strconv.Itoa(int(t.Else)) + ";\n")
-		b.WriteString("  }\n")
+		b.WriteString("  if (" + g.valueExpr(t.Cond) + ") " + g.edgeBody(t.Then, t.ThenArgs) +
+			" else " + g.edgeBody(t.Else, t.ElseArgs) + "\n")
 
 	case mir.TermSwitch:
-		b.WriteString("  switch (" + g.val(t.Value) + ".aster_tag) {\n")
+		b.WriteString("  switch (" + g.valueExpr(t.Value) + ".aster_tag) {\n")
 		for _, c := range t.Cases {
 			if c.Variant == "" {
 				b.WriteString("  default:\n")
@@ -623,12 +703,13 @@ func (g *gen) emitTerm(b *strings.Builder, blk *mir.Block) {
 				idx, _ := g.m.VariantIndex(typeOfOperand(g.f, t.Value), c.Variant)
 				b.WriteString("  case (uint32_t)" + strconv.Itoa(idx) + ":\n")
 				if c.Binding != mir.NoValue {
-					b.WriteString("    " + g.val(c.Binding) + " = " + g.val(t.Value) +
-						".aster_u.aster_p" + strconv.Itoa(idx) + ";\n")
+					if bindingType, _ := g.f.ValueType(c.Binding); bindingType != mir.TypeUnit {
+						b.WriteString("    " + g.val(c.Binding) + " = " + g.valueExpr(t.Value) +
+							".aster_u.aster_p" + strconv.Itoa(idx) + ";\n")
+					}
 				}
 			}
-			g.edgeAssigns(b, c.Target, c.Args)
-			b.WriteString("    goto aster_b" + strconv.Itoa(int(c.Target)) + ";\n")
+			b.WriteString("    " + g.edgeBody(c.Target, c.Args) + "\n")
 		}
 		b.WriteString("  }\n")
 
@@ -636,7 +717,7 @@ func (g *gen) emitTerm(b *strings.Builder, blk *mir.Block) {
 		if g.f.Result == mir.TypeUnit {
 			b.WriteString("  return;\n")
 		} else {
-			b.WriteString("  return " + g.val(t.Result) + ";\n")
+			b.WriteString("  return " + g.valueExpr(t.Result) + ";\n")
 		}
 
 	case mir.TermUnreachable:

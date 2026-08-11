@@ -31,6 +31,194 @@ func requireAccepted(t *testing.T, text string) {
 	}
 }
 
+func TestDefiniteLocalInitialization(t *testing.T) {
+	const diagnostic = "load from local place that is not definitely initialized"
+
+	t.Run("straight-line load before store", func(t *testing.T) {
+		errs := verifyText(t, `mir 1
+fn @f() -> i64 {
+  local %x: i64
+entry:
+  %v = load local %x
+  return %v
+}
+`)
+		want := "fn @f: block entry: op load #0: " + diagnostic
+		if errs.String() != want {
+			t.Fatalf("diagnostic mismatch\n--- got ---\n%s\n--- want ---\n%s", errs.String(), want)
+		}
+	})
+
+	t.Run("one branch missing store", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%value: i64, %cond: bool) -> i64 {
+  local %x: i64
+entry:
+  branch %cond, set, skip
+set:
+  store local %x, %value
+  jump join
+skip:
+  jump join
+join:
+  %v = load local %x
+  return %v
+}
+`, diagnostic)
+	})
+
+	t.Run("both branches store", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%a: i64, %b: i64, %cond: bool) -> i64 {
+  local %x: i64
+entry:
+  branch %cond, left, right
+left:
+  store local %x, %a
+  jump join
+right:
+  store local %x, %b
+  jump join
+join:
+  %v = load local %x
+  return %v
+}
+`)
+	})
+
+	t.Run("field-sensitive partial and complete", func(t *testing.T) {
+		const header = `mir 1
+type @Pair {
+  first: i64
+  second: i64
+}
+`
+		requireRejectedWith(t, header+`fn @partial(%a: i64) -> @Pair {
+  local %pair: @Pair
+entry:
+  store field(local %pair, first), %a
+  %v = load local %pair
+  return %v
+}
+`, diagnostic)
+		requireAccepted(t, header+`fn @complete(%a: i64, %b: i64) -> @Pair {
+  local %pair: @Pair
+entry:
+  store field(local %pair, first), %a
+  store field(local %pair, second), %b
+  %v = load local %pair
+  return %v
+}
+`)
+	})
+
+	t.Run("whole aggregate and fields merge canonically", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+type @Pair {
+  first: i64
+  second: i64
+}
+fn @f(%whole: @Pair, %a: i64, %b: i64, %cond: bool) -> @Pair {
+  local %pair: @Pair
+entry:
+  branch %cond, whole, fields
+whole:
+  store local %pair, %whole
+  jump join
+fields:
+  store field(local %pair, first), %a
+  store field(local %pair, second), %b
+  jump join
+join:
+  %v = load local %pair
+  return %v
+}
+`)
+	})
+
+	t.Run("nested aggregate subtrees merge canonically", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+type @Inner {
+  x: i64
+  y: i64
+}
+type @Outer {
+  inner: @Inner
+}
+fn @f(%whole: @Inner, %x: i64, %y: i64, %cond: bool) -> @Outer {
+  local %outer: @Outer
+entry:
+  branch %cond, whole, leaves
+whole:
+  store field(local %outer, inner), %whole
+  jump join
+leaves:
+  store field(field(local %outer, inner), x), %x
+  store field(field(local %outer, inner), y), %y
+  jump join
+join:
+  %inner = load field(local %outer, inner)
+  %result = load local %outer
+  return %result
+}
+`)
+	})
+
+	t.Run("empty aggregate requires explicit store", func(t *testing.T) {
+		const header = `mir 1
+type @Empty {
+}
+`
+		requireRejectedWith(t, header+`fn @unset() -> @Empty {
+  local %empty: @Empty
+entry:
+  %value = load local %empty
+  return %value
+}
+`, diagnostic)
+		requireAccepted(t, header+`fn @set(%input: @Empty) -> @Empty {
+  local %empty: @Empty
+entry:
+  store local %empty, %input
+  %value = load local %empty
+  return %value
+}
+`)
+	})
+
+	t.Run("loop backedge only store", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%value: i64, %again: bool) -> i64 {
+  local %x: i64
+entry:
+  jump loop
+loop:
+  %v = load local %x
+  store local %x, %value
+  branch %again, loop, done
+done:
+  return %v
+}
+`, diagnostic)
+	})
+
+	t.Run("store before loop initializes every iteration", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%value: i64, %again: bool) -> i64 {
+  local %x: i64
+entry:
+  store local %x, %value
+  jump loop
+loop:
+  %v = load local %x
+  branch %again, loop, done
+done:
+  return %v
+}
+`)
+	})
+}
+
 func TestDomainPathSensitiveRegressions(t *testing.T) {
 	t.Run("branch reset then join use", func(t *testing.T) {
 		requireRejectedWith(t, `mir 1

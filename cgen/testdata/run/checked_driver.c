@@ -52,13 +52,30 @@ int main(void) {
     /* u8 range: 16 * 16 = 256 overflows. */
     CHECK(aster_fn_u8ops_3(16, 16) == 0);
 
+    /* Intermediate widths use their exact checked ranges. */
+    CHECK(aster_fn_i16add_4(30000, 2767) == 32767);
+    CHECK(aster_fn_i16add_4(32767, 1) == 0);
+    CHECK(aster_fn_u16add_5(65534u, 1u) == 65535u);
+    CHECK(aster_fn_u16add_5(65535u, 1u) == 0u);
+    CHECK(aster_fn_i32add_6(INT32_MAX - 1, 1) == INT32_MAX);
+    CHECK(aster_fn_i32add_6(INT32_MAX, 1) == 0);
+    CHECK(aster_fn_u32add_7(UINT32_MAX - 1u, 1u) == UINT32_MAX);
+    CHECK(aster_fn_u32add_7(UINT32_MAX, 1u) == 0u);
+
+    /* Signed right shift is arithmetic, including the two boundary counts. */
+    CHECK(aster_fn_i16shr_8(-3, 0) == -3);
+    CHECK(aster_fn_i16shr_8(-3, 15) == -1);
+    CHECK(aster_fn_i32shr_9(-3, 0) == -3);
+    CHECK(aster_fn_i32shr_9(-3, 31) == -1);
+
     /* Conversions: trunc to i32 wraps (0x1FFFFFFFF -> -1), sext and the
      * float round trip recover the original small values. */
-    CHECK(aster_fn_convs_4(7, 7) == 7);
-    CHECK(aster_fn_convs_4(-5, 5) == -5);
+    CHECK(aster_fn_convs_10(7, 7) == 7);
+    CHECK(aster_fn_convs_10(-5, 5) == -5);
     /* Values that lose precision through the f32 round trip take the
      * failure edge (16777217 is not representable in f32). */
-    CHECK(aster_fn_convs_4(16777217, 0xFFFFFFFFULL) == 0);
+    CHECK(aster_fn_convs_10(16777217, 0xFFFFFFFFULL) == 0);
+    CHECK(aster_fn_narrow_11(1.25) == 1.25f);
 
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

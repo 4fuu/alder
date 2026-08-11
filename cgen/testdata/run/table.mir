@@ -1,13 +1,50 @@
 mir 1
 
 const @zero: i64 = 0
+const @one: i64 = 1
+
+fn @table_identity(%t: table(i64)) -> table(i64) {
+bb0:
+  return %t
+}
+
+fn @repeat_table_site(%root: domain_handle, %count: i64) -> i64 {
+entry:
+  jump loop(%count)
+loop(%left: i64):
+  %z = const.get @zero
+  %done = int.eq %left, %z
+  branch %done, exit, body
+body:
+  %d = domain.create %root
+  %t = table.create i64, %d
+  %id = table.insert %t, %left
+  domain.destroy %d
+  %one = const.get @one
+  %next = int.sub.checked %left, %one else fail
+  jump loop(%next)
+exit:
+  %result = const.get @zero
+  return %result
+fail:
+  %failure = const.get @zero
+  fail %failure
+}
 
 fn @table_ops(%root: domain_handle, %a: i64, %b: i64) -> i64 {
 bb0:
   %t = table.create i64, %root
-  %id1 = table.insert %t, %a
-  %id2 = table.insert %t, %b
-  %opt = table.lookup %t, %id1
+  %same = call @table_identity(%t)
+  %id1 = table.insert %same, %a
+  %id2 = table.insert %same, %b
+  %id3 = table.insert %same, %a
+  %id4 = table.insert %same, %a
+  %id5 = table.insert %same, %a
+  %id6 = table.insert %same, %a
+  %id7 = table.insert %same, %a
+  %id8 = table.insert %same, %a
+  %id9 = table.insert %same, %b
+  %opt = table.lookup %same, %id1
   switch %opt {
     some(%v1) -> bb1
     none -> bb_fail
@@ -16,7 +53,7 @@ bb0:
 bb1:
   %x = load deref %v1
   table.view.end %v1
-  %mopt = table.lookup_mut %t, %id2
+  %mopt = table.lookup_mut %same, %id2
   switch %mopt {
     some(%v2) -> bb2
     none -> bb_fail
@@ -25,8 +62,8 @@ bb1:
 bb2:
   store deref %v2, %x
   table.view.end %v2
-  %removed = table.remove %t, %id1
-  %gone = table.lookup %t, %id1
+  %removed = table.remove %same, %id1
+  %gone = table.lookup %same, %id1
   switch %gone {
     none -> bb3
     some(%v3) -> bb_gone
@@ -37,7 +74,7 @@ bb_gone:
   jump bb_fail
 
 bb3:
-  %ok = table.lookup %t, %id2
+  %ok = table.lookup %t, %id9
   switch %ok {
     some(%v4) -> bb4
     none -> bb_fail

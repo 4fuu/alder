@@ -1,0 +1,63 @@
+mir 1
+
+const @zero: i64 = 0
+const @one: i64 = 1
+const @two: i64 = 2
+const @zero_u64: u64 = 0
+const @scalar_before_strings: i32 = 7
+const @nul_then_digit: slice(u8) = "a\0007z"
+const @scalar_between_strings: i32 = 8
+const @octal_then_digit: slice(u8) = "b\0018z"
+const @unused_string: slice(u8) = "not referenced"
+
+fn @swap_loop(%n: i64) -> i64 {
+bb0:
+  %one = const.get @one
+  %two = const.get @two
+  jump bb_loop(%one, %two, %n)
+
+bb_loop(%a: i64, %b: i64, %left: i64):
+  %zero = const.get @zero
+  %done = int.eq %left, %zero
+  branch %done, bb_done(%a, %b), bb_step
+
+bb_step:
+  %one2 = const.get @one
+  %next = int.sub.checked %left, %one2 else bb_fail
+  jump bb_loop(%b, %a, %next)
+
+bb_done(%x: i64, %y: i64):
+  %ten = int.add.checked %x, %x else bb_fail
+  %four = int.add.checked %ten, %ten else bb_fail
+  %eight = int.add.checked %four, %four else bb_fail
+  %sum = int.add.checked %eight, %y else bb_fail
+  return %sum
+
+bb_fail:
+  %z = const.get @zero
+  fail %z
+}
+
+fn @range(%s: slice(u8), %end: u64) -> u64 {
+bb0:
+  %z = const.get @zero_u64
+  %part = slice.range.checked %s, %z, %end else bb_fail
+  %len = slice.len %part
+  return %len
+
+bb_fail:
+  %z2 = const.get @zero_u64
+  fail %z2
+}
+
+fn @nul_bytes() -> slice(u8) {
+bb0:
+  %s = const.get @nul_then_digit
+  return %s
+}
+
+fn @octal_bytes() -> slice(u8) {
+bb0:
+  %s = const.get @octal_then_digit
+  return %s
+}

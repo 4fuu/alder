@@ -29,21 +29,21 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 
 ### Naming and layout
 
-- generated identifiers derive from stable numeric IDs: `aster_v<N>` for values, `aster_l<N>` for locals, `aster_b<N>` for block labels, `AsterTy<N>` for struct types, `aster_fn_<name>_<id>` for functions, `aster_copy_ty<N>` for copy helpers, `aster_str_<N>` for string constants, and `aster_domain_<N>`, `aster_scope_<N>`, `AsterCtx_<N>`, `aster_ctx_<N>`, `aster_cleanup_<N>` for hidden slots, contexts, and cleanup adapters;
-- MIR names are sanitized only where they appear in identifiers; ordering always follows declaration and ID order, never map iteration;
+- generated identifiers derive from stable numeric IDs: `aster_v<N>` for values, `aster_l<N>` for locals, `aster_b<N>` for block labels, `AsterTy<N>` for struct types, `AsterFnTy<N>` for function-pointer typedefs, `aster_fn_<name>_<id>` for functions, `aster_copy_ty<N>` for copy helpers, `aster_str_<N>` for string constants, and `aster_domain_<N>`, `aster_scope_<N>`, `AsterCtx_<N>`, `aster_ctx_<N>`, `aster_cleanup_<N>` for hidden slots, contexts, and cleanup adapters;
+- source aggregate field names never become C members: fields use declaration ordinals (`aster_f<N>`), preventing sanitized-name collisions. Types and copy helpers are emitted in stable dependency-first order, with forward typedefs for record-like types;
 - all generated statics carry `ASTER_MAYBE_UNUSED` so drivers and dead MIR code compile under `-Werror`.
 
 ### Type mapping
 
-- `unit` is `uint8_t` as a value type, `void` as a function result; unit parameters are dropped from C signatures and unit call arguments are omitted, which is exact because unit has exactly one value;
+- `unit` is represented by `(uint8_t)0` only where storage or an expression is required; unit SSA declarations and assignments are erased. It is `void` as a function result, while unit parameters and call arguments are omitted, which is exact because unit has exactly one value;
 - `bool` maps to `bool`; integers to the exact-width `intN_t`/`uintN_t` (which C11 requires to be two's complement); floats to `float`/`double`;
-- aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t aster_tag` (variant index) and a union of non-unit payloads named `aster_p<index>`;
-- `slice`, `safe_ref`, and `safe_mut` share the runtime `AsterSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AsterDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is the embedded `AsterTable`; `cleanup_scope` is `AsterCleanupScope *` pointing at a per-create-site slot;
-- `function(Signature)` maps to a C function-pointer type.
+- aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t aster_tag` (variant index) and a union of non-unit payloads named `aster_p<index>`. An empty aggregate has one private byte because portable C11 has no empty structs;
+- `slice`, `safe_ref`, and `safe_mut` share the runtime `AsterSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AsterDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AsterTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AsterCleanupScope *` pointing at a per-create-site slot;
+- `function(Signature)` maps to an `AsterFnTy<N>` function-pointer typedef; an empty C parameter list is written as `(void)`.
 
 ### Values and control flow
 
-- every MIR value becomes one C variable assigned exactly once by its definition; block parameters are C variables assigned at every edge before the `goto`, which is the deterministic phi lowering;
+- every non-unit MIR value becomes one C variable; block parameters are C variables assigned at every edge before the `goto`. Edge arguments are first captured in typed temporaries and then assigned to parameters, preserving MIR's parallel-copy semantics for swaps and cycles;
 - blocks lower to labels (`aster_b<N>`); the entry block needs no label because it has no predecessors; dead blocks keep their code and `unreachable` lowers to `aster_runtime_panic("unreachable")`;
 - `return` and `fail` both lower to `return <result>;` (the distinction is semantic, for diagnostics);
 - switch dispatches on the tag with `case (uint32_t)<variant index>`; case payload bindings are assigned from the union before the edge assignments.
@@ -58,35 +58,35 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 
 - 64-bit checked operations call the runtime helper and branch to the MIR failure edge on false;
 - narrow non-shift operations promote operands to 64 bits, compute with the helper, range-check the result against the narrow limits, and cast; the narrow operation fails exactly when the promoted computation or the range check fails;
-- narrow shifts check the count against the source width first (unsigned counts only against the width), then compute at that width: unsigned targets wrap by casting, signed left shifts transfer the width-bit two's-complement pattern with `memcpy`, and signed right shifts sign-extend before shifting;
-- failure edges assign the target block parameters and `goto` the failure block, mirroring ordinary edges;
-- `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, and a one-element `AsterSlice`; `slice.range.checked` lowers to the bounds check, a checked offset, and `hi - lo` length. No pointer arithmetic runs before the checks;
+- narrow shifts check the count against the source width first (unsigned counts only against the width), then compute at that width: unsigned targets wrap by casting, signed left shifts transfer the width-bit two's-complement pattern with `memcpy`, and signed right shifts use unsigned shifting plus explicit sign-bit fill rather than C's implementation-defined signed `>>`;
+- failure edges use the same parallel-copy temporaries as ordinary edges before the `goto`;
+- `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AsterSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
 - `int.trunc` to an unsigned target wraps by casting; to a signed target it transfers the two's-complement bit pattern with `memcpy`;
-- `int.from_float` uses the defined runtime conversions; out-of-range or NaN values terminate with `aster_runtime_panic` (documented policy: the operation is unchecked in MIR, so failure is unrecoverable).
+- `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
 
 ### Domains, cleanup, and tables
 
 - `domain.create` initializes a hidden per-site `AsterDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because MIR 1 forbids carrying handles across backedges;
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
-- `alloc` lowers to a checked count-times-size multiply, `aster_domain_alloc`, and a slice with the count; overflow and out-of-memory terminate;
-- `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain. A slice whose element type contains references is rejected at generation time (M3 copies bytes, so a nested reference would be shared instead of copied);
+- `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `aster_domain_alloc`, and a slice with the count; overflow and out-of-memory terminate;
+- `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. A slice whose element type contains references is rejected at generation time (M3 copies bytes, so a nested reference would be shared instead of copied);
 - `cleanup.scope.begin` initializes a hidden per-site scope slot; `cleanup.push` fills a per-site context struct and registers a generated adapter; `disarm`, `run`, and `end` call the runtime and terminate on contract violations;
-- `table.create` initializes the value's embedded `AsterTable` (value variables of table type are zero-initialized declarations, which the runtime requires); `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
+- `table.create` allocates a zeroed `AsterTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
 
 ### Calls and C ABI
 
 - ordinary calls lower to direct calls of the generated static functions, with unit arguments omitted;
-- `ffi.call.unsafe` lowers to a call of the sanitized import symbol; the generated file declares every import prototype so calls are never implicit;
-- import names double as C symbols; retention and cleanup claims remain deferred.
+- `ffi.call.unsafe` lowers to the import symbol unchanged and parenthesizes it at declaration and call sites so a function-like macro cannot expand; the generated file declares every import prototype so calls are never implicit;
+- import names double as C symbols and must be backend-safe C identifiers. The verifier rejects C keywords, leading underscores, generated/runtime prefixes, names ending `_t`, macro-style uppercase names, `main`, and identifiers declared by always-included headers; retention and cleanup claims remain deferred.
 
 ### Constants and strings
 
 - scalar constants inline as typed literals (`INT64_MIN` uses the portable `(-9223372036854775807LL - 1)` form; negative zero prints as `-0.0`);
-- string constants reference static byte arrays; escapes use octal form so embedded NUL bytes and hex-digit ambiguity are impossible.
+- string constants reference possibly-unused static byte arrays named by their module constant IDs; non-printable bytes use exactly three octal digits, so an immediately following digit cannot be consumed by the escape.
 
 ### Unchecked failure policy
 
-Unchecked runtime failures (allocation failure, identity exhaustion, out-of-range float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `aster_runtime_panic`. Checked MIR operations never reach it; they always branch to their explicit failure edge.
+Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `aster_runtime_panic`. Checked MIR operations never reach it; they always branch to their explicit failure edge.
 
 ### Documented M3 limitations
 

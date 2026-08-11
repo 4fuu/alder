@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/4fuu/aster/mir"
 )
@@ -12,6 +13,14 @@ import (
 // grow here as the C backend matures.
 func phase10Backend(m *mir.Module) []Error {
 	var errs []Error
+	for i := range m.Imports {
+		if !validCExternalName(m.Imports[i].Name) {
+			errs = append(errs, Error{
+				Loc: "import @" + m.Imports[i].Name,
+				Msg: "C symbol must be a non-reserved C identifier",
+			})
+		}
+	}
 	for _, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
@@ -42,6 +51,74 @@ func phase10Backend(m *mir.Module) []Error {
 		}
 	}
 	return errs
+}
+
+func validCExternalName(name string) bool {
+	if name == "" || name[0] == '_' {
+		return false
+	}
+	if len(name) >= 6 && (name[:6] == "aster_" || name[:6] == "ASTER_") ||
+		len(name) >= 5 && name[:5] == "Aster" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		letter := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		if (i == 0 && !letter) || (i > 0 && !letter && !(c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return !cKeywords[name] && !cHeaderIdentifier(name)
+}
+
+// cHeaderIdentifier rejects names which occupy the ordinary identifier or
+// macro namespace in headers included by every generated translation unit.
+// The *_t suffix is deliberately conservative: it covers the exact-width and
+// implementation-defined typedef families exposed by stddef.h/stdint.h.
+func cHeaderIdentifier(name string) bool {
+	if strings.HasSuffix(name, "_t") {
+		return true
+	}
+	if cHeaderNames[name] {
+		return true
+	}
+	macroStyle := name[0] >= 'A' && name[0] <= 'Z'
+	for i := 1; macroStyle && i < len(name); i++ {
+		c := name[i]
+		macroStyle = c == '_' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+	}
+	if macroStyle {
+		return true
+	}
+	switch name {
+	case "bool", "true", "false", "NULL", "offsetof":
+		return true
+	}
+	return false
+}
+
+var cHeaderNames = map[string]bool{
+	"main": true,
+	// C11 string.h functions. Generated modules include string.h for memcpy.
+	"memchr": true, "memcmp": true, "memcpy": true, "memmove": true,
+	"memset": true, "strcat": true, "strchr": true, "strcmp": true,
+	"strcoll": true, "strcpy": true, "strcspn": true, "strerror": true,
+	"strlen": true, "strncat": true, "strncmp": true, "strncpy": true,
+	"strpbrk": true, "strrchr": true, "strspn": true, "strstr": true,
+	"strtok": true, "strxfrm": true,
+}
+
+var cKeywords = map[string]bool{
+	"_Alignas": true, "_Alignof": true, "_Atomic": true, "_Bool": true,
+	"_Complex": true, "_Generic": true, "_Imaginary": true, "_Noreturn": true,
+	"_Static_assert": true, "_Thread_local": true, "auto": true, "break": true,
+	"case": true, "char": true, "const": true, "continue": true, "default": true,
+	"do": true, "double": true, "else": true, "enum": true, "extern": true,
+	"float": true, "for": true, "goto": true, "if": true, "inline": true,
+	"int": true, "long": true, "register": true, "restrict": true, "return": true,
+	"short": true, "signed": true, "sizeof": true, "static": true, "struct": true,
+	"switch": true, "typedef": true, "union": true, "unsigned": true, "void": true,
+	"volatile": true, "while": true,
 }
 
 func kindName(m *mir.Module, k mir.TypeKind) string {

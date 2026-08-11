@@ -78,14 +78,36 @@ func TestGolden(t *testing.T) {
 // TestStrictCompile compiles every generated golden under the strict warning
 // set (syntax-only: drivers are not part of the module output).
 func TestStrictCompile(t *testing.T) {
-	cc := findCompiler(t)
-	for _, name := range goldenSources {
-		name := name
-		t.Run(name, func(t *testing.T) {
-			gen := writeGenerated(t, name)
-			out, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput()
-			if err != nil {
-				t.Fatalf("strict compile of %s failed: %v\n%s", name, err, out)
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			for _, name := range goldenSources {
+				name := name
+				t.Run(name, func(t *testing.T) {
+					gen := writeGenerated(t, name)
+					out, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput()
+					if err != nil {
+						t.Fatalf("strict compile of %s failed: %v\n%s", name, err, out)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestRegressionStrictCompile covers valid declarations and SSA shapes which
+// intentionally need no emitted C storage.
+func TestRegressionStrictCompile(t *testing.T) {
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			out := generatePath(t, filepath.Join("testdata", "strict.mir"))
+			gen := filepath.Join(t.TempDir(), "strict.c")
+			if err := os.WriteFile(gen, []byte(out), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput(); err != nil {
+				t.Fatalf("strict regression compile failed: %v\n%s", err, got)
 			}
 		})
 	}
@@ -147,14 +169,92 @@ bb0:
 	}
 }
 
-func findCompiler(t *testing.T) string {
+// TestGenerateRejectsUnsafeExternalNames pins the backend-safe subset of MIR
+// import names. API construction is intentional: punctuation is representable
+// in the model even when textual MIR tokenization would reject it earlier.
+func TestGenerateRejectsUnsafeExternalNames(t *testing.T) {
+	for _, name := range []string{
+		"has.dot",    // punctuation
+		"return",     // C keyword
+		"aster_call", // generated/backend prefix
+		"uint64_t",   // token introduced by the runtime header
+		"bool",       // object-like macro introduced by the runtime header
+		"FLT_MAX",    // macro-style token introduced by a generated include
+		"offsetof",   // function-like macro introduced by the runtime header
+		"memcpy",     // function declared by a generated include
+		"strlen",     // function declared by a generated include
+		"main",       // special hosted C entry-point identifier
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			m := mir.NewModule()
+			m.AddImport(name, mir.FuncSig{Result: mir.TypeUnit})
+			if _, err := Generate(m); err == nil || !strings.Contains(err.Error(), "C symbol must be a non-reserved C identifier") {
+				t.Fatalf("unsafe C external name %q accepted: %v", name, err)
+			}
+		})
+	}
+}
+
+// TestAPIAggregateForwardOrderingStrictCompile covers API-built type tables,
+// where an earlier declaration can refer to a later aggregate by stable ID.
+// Function types are included both in aggregate fields and function ABI.
+func TestAPIAggregateForwardOrderingStrictCompile(t *testing.T) {
+	m := mir.NewModule()
+	earlier := m.AddAggregate("Earlier", nil)
+	later := m.AddAggregate("Later", []mir.Field{{Name: "value", Type: mir.TypeI32}})
+	callback := m.FunctionType(mir.FuncSig{Params: []mir.TypeId{later}, Result: mir.TypeI32})
+	m.Types[earlier].Fields = []mir.Field{
+		{Name: "later", Type: later},
+		{Name: "callback", Type: callback},
+	}
+	m.AddImport("external_callback", mir.FuncSig{Params: []mir.TypeId{callback, earlier}, Result: later})
+
+	out, err := Generate(m)
+	if err != nil {
+		t.Fatalf("generate API-built forward type graph: %v", err)
+	}
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			gen := filepath.Join(t.TempDir(), "api_types.c")
+			if err := os.WriteFile(gen, []byte(out), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput(); err != nil {
+				t.Fatalf("strict compile of API-built forward types failed: %v\n%s", err, got)
+			}
+		})
+	}
+}
+
+func findCompilers(t *testing.T) []string {
 	t.Helper()
-	for _, name := range []string{"gcc", "cc", "clang"} {
+	var found []string
+	seen := make(map[string]bool)
+	for _, name := range []string{"gcc", "clang"} {
 		if path, err := exec.LookPath(name); err == nil {
-			t.Logf("C compiler: %s", path)
-			return path
+			key, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				key = path
+			}
+			key = strings.ToLower(filepath.Clean(key))
+			if !seen[key] {
+				seen[key] = true
+				found = append(found, path)
+			}
 		}
 	}
-	t.Skip("no C compiler found (gcc, cc, or clang); backend tests skipped")
-	return ""
+	if len(found) == 0 {
+		if path, err := exec.LookPath("cc"); err == nil {
+			found = append(found, path)
+		}
+	}
+	if len(found) == 0 {
+		t.Skip("no C compiler found (gcc, clang, or fallback cc); backend tests skipped")
+	}
+	for _, path := range found {
+		t.Logf("C compiler: %s", path)
+	}
+	return found
 }

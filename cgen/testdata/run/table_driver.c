@@ -19,10 +19,12 @@ int main(void) {
     AsterDomain root = {0};
     CHECK(aster_domain_init(&root, NULL));
 
-    /* Insert 7 and 3; read 7, write it into 3's slot through the mut view,
-     * remove 7's slot, verify the stale id is gone, and read 3 back. */
-    CHECK(aster_fn_table_ops_0(&root, 7, 3) == 7);
-    CHECK(aster_fn_table_ops_0(&root, -5, 100) == -5);
+    /* Pass the table through an ordinary identity helper, grow it past its
+     * initial eight slots, mutate through the returned identity, and observe
+     * the ninth insertion from the caller's continued table identity. */
+    CHECK(aster_fn_repeat_table_site_1(&root, 3) == 0);
+    CHECK(aster_fn_table_ops_2(&root, 7, 3) == 3);
+    CHECK(aster_fn_table_ops_2(&root, -5, 100) == 100);
 
     aster_domain_destroy(&root);
     CHECK(aster_runtime_live_allocations() == 0u);

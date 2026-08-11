@@ -1,0 +1,42 @@
+mir 1
+
+type @Empty {
+}
+
+type @Units {
+  value: unit
+}
+
+type @Names {
+  foo.bar: i64
+  foo_bar: i64
+  callback: function(fn(i64) -> i64)
+}
+
+const @unit: unit = ()
+const @scalar_before_strings: i32 = 7
+const @nul_then_digit: slice(u8) = "a\0007z"
+const @octal_then_digit: slice(u8) = "b\0018z"
+const @unused_string: slice(u8) = "not referenced"
+
+fn @cleanup_no_args() -> unit {
+bb0:
+  return
+}
+
+fn @strict(%unused: i64, %callback: function(fn(i64) -> i64)) -> unit {
+  local %function_local: function(fn(i64) -> i64)
+
+bb0:
+  %u = const.get @unit
+  %units = aggregate.construct @Units { value: %u }
+  %empty = aggregate.construct @Empty { }
+  %scope = cleanup.scope.begin
+  %cleanup = cleanup.push %scope, @cleanup_no_args, ()
+  cleanup.scope.run %scope
+  cleanup.scope.end %scope
+  jump bb1(%u)
+
+bb1(%edge_unit: unit):
+  return %edge_unit
+}

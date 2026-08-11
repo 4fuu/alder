@@ -120,7 +120,7 @@ deref checked_reference_value
 
 The initial vocabulary has no unchecked index place. Checked element access uses `slice.index.checked`, which yields a checked reference that `deref` places consume.
 
-A value is an immutable result of an instruction. `load` reads a place and produces a value; `store` writes a value into a place and does not invalidate other source-level names. Unsafe raw-pointer dereference is never represented as an ordinary safe place.
+A value is an immutable result of an instruction. `load` reads a place and produces a value; `store` writes a value into a place and does not invalidate other source-level names. Unsafe raw-pointer dereference is never represented as an ordinary safe place. Every reachable load from a local or one of its fields requires that place to be definitely initialized on every incoming path. Storing a whole aggregate initializes all of its fields; storing every field is equivalent at control-flow joins. A store reached only through a loop backedge cannot initialize the first iteration.
 
 ## Control Flow
 
@@ -206,7 +206,7 @@ slice.range.checked slice_or_ref, lo, hi else edge -> slice(elem)
 enum.payload.checked value, variant else edge -> payload
 ```
 
-Checked integer operations require both operands to have the same integer type. `int.shl.checked` is a wrapping left shift on the integer's bit pattern; `int.shr.checked` is arithmetic for signed operands and logical for unsigned operands. Both fail when the shift count is negative or at least the operand width. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. `enum.payload.checked` requires a variant with a non-unit payload.
+Checked integer operations require both operands to have the same integer type. `int.shl.checked` is a wrapping left shift on the integer's bit pattern; `int.shr.checked` is arithmetic for signed operands and logical for unsigned operands. Both fail when the shift count is negative or at least the operand width. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. A null data pointer is valid only for a zero-length slice: `[0, 0)` succeeds without pointer arithmetic, while indexing it and every operation on `{null, len > 0}` fail. `enum.payload.checked` requires a variant with a non-unit payload.
 
 A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
 
@@ -229,6 +229,8 @@ float.convert value, T
 int.from_float value, T
 float.from_int value, T
 ```
+
+`float.convert` from `f64` to `f32` terminates on NaN, infinity, or a finite value outside the `f32` range instead of executing an undefined C conversion. In-range conversion uses the target C11 `double`-to-`float` rounding behavior. `int.from_float` likewise terminates on NaN or a value outside the destination range; otherwise it truncates toward zero.
 
 `slice.len slice_or_ref -> u64` reports an element count.
 
@@ -269,7 +271,7 @@ call function(arguments...) -> result
 ffi.call.unsafe import(arguments...) -> result
 ```
 
-Imported declarations currently record the import name (also the C symbol) and a concrete signature. Retention, const, and cleanup claims for foreign pointers are deferred to a later MIR version; until then, safe wrappers carry that responsibility.
+Imported declarations currently record the import name (also the C symbol) and a concrete signature. The C backend accepts only backend-safe C identifiers: C keywords, generated/runtime prefixes, names beginning with `_`, macro-style uppercase names, header tokens such as `bool` and `offsetof`, functions declared by always-included headers, `main`, and names ending in the reserved typedef suffix `_t` are rejected. The accepted name is emitted unchanged, never sanitized into a potentially colliding symbol. Retention, const, and cleanup claims for foreign pointers are deferred to a later MIR version; until then, safe wrappers carry that responsibility.
 
 MIR verification cannot prove arbitrary foreign behavior. It verifies only that unsafe entry is explicit and that safe wrapper claims are internally consistent.
 
@@ -309,7 +311,7 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 1. declaration and ID integrity;
 2. type and layout well-formedness;
 3. CFG target and block-argument validation;
-4. dominance and value availability;
+4. dominance, value availability, and definite local initialization;
 5. place, mutability, and instruction typing;
 6. domain nesting and escape validation;
 7. cleanup balance and exit validation;
@@ -320,6 +322,7 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 Initial conservative rules:
 
 - `cleanup_scope` and `cleanup_id` handles keep direct SSA identity: they may only be cleanup instruction results and direct operands, and may not appear in function signatures, aggregate or enum fields/payloads, block parameters, locals, or load/store propagation;
+- reachable local loads require path-sensitive definite initialization. Field stores initialize only their aggregate subtree, predecessor states intersect at joins, and checked-operation failure edges observe the pre-operation state;
 - cleanup analysis preserves path-specific registration alternatives and runtime registration order. A static `cleanup.push` site may execute again only after its preceding dynamic registration has been disarmed or its scope has run and ended; this keeps one SSA cleanup ID unambiguous while allowing a complete begin/push/run/end lifecycle to repeat in a loop;
 - reference-containing values may flow through SSA values and `deref` places; the verifier tracks storage derivation through allocations, copies, table operations, aggregate and enum construction, loads, block parameters, and switch bindings, and rejects a use when the value may have been reset or destroyed on any reachable incoming path;
 - domain and reference lifetime effects are propagated through ordinary calls and active cleanup callbacks by deterministic whole-module fixed-point summaries; recursive call graphs are supported;

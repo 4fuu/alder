@@ -59,8 +59,170 @@ func phase4Dominance(m *mir.Module) []Error {
 				}
 			}
 		}
+		errs = append(errs, definiteLocalInitialization(m, f, g)...)
 	}
 	return errs
+}
+
+// definiteLocalInitialization is a forward must analysis over instruction
+// boundaries. Reachable non-entry points start at the optimistic top set and
+// converge downward by predecessor intersection. The empty entry state still
+// prevents a loop backedge from initializing its own first iteration.
+func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []Error {
+	type initSet map[string]bool
+	n := len(g.preds)
+	succ := make([][]int, n)
+	for v, ps := range g.preds {
+		for _, p := range ps {
+			succ[p] = append(succ[p], v)
+		}
+	}
+	reach := make([]bool, n)
+	entry := g.boundary[0][0]
+	reach[entry] = true
+	queue := []int{entry}
+	for len(queue) != 0 {
+		v := queue[0]
+		queue = queue[1:]
+		for _, s := range succ[v] {
+			if !reach[s] {
+				reach[s] = true
+				queue = append(queue, s)
+			}
+		}
+	}
+	afterStore := make(map[int]*mir.Place)
+	for bi, b := range f.Blocks {
+		for i := range b.Instrs {
+			if b.Instrs[i].Op == mir.OpStore {
+				afterStore[g.boundary[bi][i+1]] = &b.Instrs[i].Place
+			}
+		}
+	}
+	universe := make(initSet)
+	for i, local := range f.Locals {
+		addInitializedLeaves(m, local.Type, fmt.Sprintf("%d", i), universe)
+	}
+	state := make([]initSet, n)
+	for v := 0; v < n; v++ {
+		if reach[v] && v != entry {
+			state[v] = cloneInitSet(universe)
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for v := 0; v < n; v++ {
+			if !reach[v] || v == entry {
+				continue
+			}
+			var next initSet
+			for _, p := range g.preds[v] {
+				if !reach[p] {
+					continue
+				}
+				if next == nil {
+					next = cloneInitSet(state[p])
+				} else {
+					for k := range next {
+						if !state[p][k] {
+							delete(next, k)
+						}
+					}
+				}
+			}
+			if place := afterStore[v]; place != nil {
+				if key, ok := localPlaceKey(place); ok {
+					if t, typeOK := m.PlaceType(f, place); typeOK {
+						if next == nil {
+							next = make(initSet)
+						}
+						addInitializedLeaves(m, t, key, next)
+					}
+				}
+			}
+			if !equalInitSet(next, state[v]) {
+				state[v] = next
+				changed = true
+			}
+		}
+	}
+	var errs []Error
+	for bi, b := range f.Blocks {
+		if !reach[g.boundary[bi][0]] {
+			continue
+		}
+		for i := range b.Instrs {
+			in := &b.Instrs[i]
+			if in.Op != mir.OpLoad {
+				continue
+			}
+			key, ok := localPlaceKey(&in.Place)
+			t, typeOK := m.PlaceType(f, &in.Place)
+			if ok && typeOK && !initializedLeaves(m, t, key, state[g.boundary[bi][i]]) {
+				errs = append(errs, Error{Loc: locInstr(f, b, i, in), Msg: "load from local place that is not definitely initialized"})
+			}
+		}
+	}
+	return errs
+}
+
+func cloneInitSet(src map[string]bool) map[string]bool {
+	dst := make(map[string]bool, len(src))
+	for k := range src {
+		dst[k] = true
+	}
+	return dst
+}
+
+func equalInitSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func localPlaceKey(p *mir.Place) (string, bool) {
+	switch p.Kind {
+	case mir.PlaceLocal:
+		return fmt.Sprintf("%d", p.Local), true
+	case mir.PlaceField:
+		if p.Base == nil {
+			return "", false
+		}
+		base, ok := localPlaceKey(p.Base)
+		return base + "\x00" + p.Field, ok
+	default:
+		return "", false
+	}
+}
+
+func addInitializedLeaves(m *mir.Module, t mir.TypeId, key string, set map[string]bool) {
+	ty := &m.Types[t]
+	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
+		set[key] = true
+		return
+	}
+	for _, field := range ty.Fields {
+		addInitializedLeaves(m, field.Type, key+"\x00"+field.Name, set)
+	}
+}
+
+func initializedLeaves(m *mir.Module, t mir.TypeId, key string, set map[string]bool) bool {
+	ty := &m.Types[t]
+	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
+		return set[key]
+	}
+	for _, field := range ty.Fields {
+		if !initializedLeaves(m, field.Type, key+"\x00"+field.Name, set) {
+			return false
+		}
+	}
+	return true
 }
 
 func availabilityError(f *mir.Function, u useSite, v *mir.Value) Error {

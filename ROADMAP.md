@@ -87,23 +87,23 @@ Status: **complete**
 
 Deliverables (implemented in the `cgen` package):
 
-- deterministic MIR-to-C11 lowering with ID-based naming, per-value variables, and block-parameter assignment at every edge;
+- deterministic MIR-to-C11 lowering with ID-based naming, erased unit values, and parallel block-parameter copies at every edge;
 - explicit sequencing of all side effects as statements, with instruction-local temporaries;
-- tagged-union structs for aggregates, enums, options, and results;
-- checked operations with 64-bit runtime helpers, promotion plus range checks for narrow widths, and width-scoped narrow shifts; slice bounds and byte-offset checks;
-- domains, scoped cleanup with generated adapters and per-site contexts, generational tables, and generated per-type `copy_to_domain` helpers;
-- C ABI declarations for imported symbols and generated functions;
+- dependency-ordered aggregate, enum, option, result, and function-pointer types with collision-free ordinal fields and portable empty aggregates;
+- checked operations with 64-bit runtime helpers, promotion plus range checks for narrow widths, portable arithmetic right shifts, and checked slice bounds, nullability, and `size_t` conversion;
+- domains, scoped cleanup with generated adapters and per-site contexts, identity-preserving domain-backed tables, and generated per-type `copy_to_domain` helpers;
+- C ABI declarations for backend-safe imported symbols and generated functions;
 - compile-and-run behavior fixtures with drivers under the strict warning set;
 - deterministic output pinned in-process and across isolated processes.
 
 Exit-criteria evidence:
 
 - every golden fixture compiles without warnings under the strict warning set (`-std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion`);
-- generated programs pass runtime behavior tests (checked-operation boundaries at every width, loops, enum/option/result dispatch, domains with marks and resets, cleanup exactly-once on success and failure paths, table views and stale-id rejection, and failure edges with arguments);
+- generated programs pass runtime behavior tests (all integer widths with operation-specific 8/64-bit boundaries and intermediate-width overflow/shift cases, guarded float narrowing, loops and parallel edges, enum/option/result dispatch, domains with marks and resets, cleanup exactly-once on success and failure paths, table aliasing and growth, stale-id rejection, null-slice ranges, and string-byte preservation);
 - signed overflow, shifts, indexing, aliasing, alignment, and evaluation order have defined lowering rules in `docs/c-backend.md`;
 - generated C is inspectable and independent of host paths, verified by cross-process determinism tests;
 - ASan/UBSan reruns probe the host toolchain and skip when unsupported (the current mingw-w64 host lacks libasan/libubsan);
-- unverified modules and non-copyable `copy_to_domain` targets are rejected with diagnostics.
+- unverified modules, uninitialized local loads, unsafe external names, and non-copyable `copy_to_domain` targets are rejected with diagnostics.
 
 A MIR interpreter for differential testing remains an open question; the compile-and-run fixtures provide the behavioral evidence, so the interpreter is not required for this milestone.
 

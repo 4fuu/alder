@@ -123,7 +123,9 @@ typedef struct {
     uint64_t len;
 } AsterSlice;
 
-/* Bounds checks used by slice.index.checked and slice.range.checked. */
+/* Bounds checks used by slice.index.checked and slice.range.checked. A NULL
+ * data pointer is valid only for a zero-length slice; its sole valid range is
+ * [0, 0), while indexing and every range of {NULL, len>0} fail. */
 bool aster_slice_index_checked(AsterSlice slice, uint64_t index);
 bool aster_slice_range_checked(AsterSlice slice, uint64_t lo, uint64_t hi);
 

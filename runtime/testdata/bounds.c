@@ -42,6 +42,12 @@ static void test_range_checked(void) {
     AsterSlice empty = {NULL, 0};
     CHECK(aster_slice_range_checked(empty, 0, 0));
     CHECK(!aster_slice_range_checked(empty, 0, 1));
+
+    AsterSlice invalid = {NULL, 4};
+    CHECK(!aster_slice_range_checked(invalid, 0, 0));
+    CHECK(!aster_slice_range_checked(invalid, 0, 1));
+    CHECK(!aster_slice_range_checked(invalid, 1, 1));
+    CHECK(!aster_slice_range_checked(invalid, 0, 4));
 }
 
 int main(void) {

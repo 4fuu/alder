@@ -48,7 +48,7 @@ func (g *gen) cType(t mir.TypeId) string {
 	case mir.TypeRawPtr:
 		return "void *"
 	case mir.TypeFunction:
-		return g.fnPtrType(ty.Sig)
+		return "AsterFnTy" + strconv.Itoa(int(t))
 	case mir.TypeDomainHandle:
 		return "AsterDomain *"
 	case mir.TypeDomainMark:
@@ -58,7 +58,7 @@ func (g *gen) cType(t mir.TypeId) string {
 	case mir.TypeCleanupID:
 		return "AsterCleanupId"
 	case mir.TypeTable:
-		return "AsterTable"
+		return "AsterTable *"
 	case mir.TypeID:
 		return "AsterTableId"
 	case mir.TypeTableView, mir.TypeTableMutView:
@@ -67,58 +67,45 @@ func (g *gen) cType(t mir.TypeId) string {
 	return "void"
 }
 
-// fnPtrType returns a C function-pointer type for a MIR function type.
-func (g *gen) fnPtrType(sig mir.FuncSig) string {
-	var params []string
-	for _, p := range sig.Params {
-		if p == mir.TypeUnit {
-			continue
-		}
-		params = append(params, g.cType(p))
-	}
-	ret := "void"
-	if sig.Result != mir.TypeUnit {
-		ret = g.cType(sig.Result)
-	}
-	return ret + " (*)(" + strings.Join(params, ", ") + ")"
-}
-
 // typeSize returns a C constant expression for the byte size of a type.
 // Structural types use sizeof of their C type; the verifier's backend
 // preconditions keep handles, views, and raw pointers out of alloc and table
 // element positions.
 func (g *gen) typeSize(t mir.TypeId) string {
-	switch t {
-	case mir.TypeUnit, mir.TypeBool, mir.TypeI8, mir.TypeU8:
-		return "(uint64_t)1"
-	case mir.TypeI16, mir.TypeU16:
-		return "(uint64_t)2"
-	case mir.TypeI32, mir.TypeU32, mir.TypeF32:
-		return "(uint64_t)4"
-	case mir.TypeI64, mir.TypeU64, mir.TypeF64:
-		return "(uint64_t)8"
-	}
 	return "(uint64_t)sizeof(" + g.cType(t) + ")"
 }
 
 // typeAlign returns a C constant expression for the alignment of a type.
 func (g *gen) typeAlign(t mir.TypeId) string {
-	switch t {
-	case mir.TypeUnit, mir.TypeBool, mir.TypeI8, mir.TypeU8:
-		return "(uint64_t)1"
-	case mir.TypeI16, mir.TypeU16:
-		return "(uint64_t)2"
-	case mir.TypeI32, mir.TypeU32, mir.TypeF32:
-		return "(uint64_t)4"
-	case mir.TypeI64, mir.TypeU64, mir.TypeF64:
-		return "(uint64_t)8"
-	}
 	return "(uint64_t)_Alignof(" + g.cType(t) + ")"
 }
 
 // val returns the C variable of a value.
 func (g *gen) val(v mir.ValueId) string {
 	return "aster_v" + strconv.Itoa(int(v))
+}
+
+// valueExpr returns a C expression for a MIR value. Unit values have no C
+// variable; their single semantic value is materialized as a zero byte where
+// an expression is required.
+func (g *gen) valueExpr(v mir.ValueId) string {
+	if t, ok := g.f.ValueType(v); ok && t == mir.TypeUnit {
+		return "(uint8_t)0"
+	}
+	return g.val(v)
+}
+
+func (g *gen) fieldName(base *mir.Place, sourceName string) string {
+	t, ok := g.m.PlaceType(g.f, base)
+	if !ok || !g.m.ValidType(t) || g.m.Types[t].Kind != mir.TypeAggregate {
+		return "aster_invalid_field"
+	}
+	for i, field := range g.m.Types[t].Fields {
+		if field.Name == sourceName {
+			return "aster_f" + strconv.Itoa(i)
+		}
+	}
+	return "aster_invalid_field"
 }
 
 // tmp returns the name of the instruction-local temporary keyed by the
@@ -142,6 +129,7 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 	g.computeUses(f)
 	g.domainUsed = 0
 	g.scopeUsed = 0
+	g.edgeUsed = 0
 	fi := fnIndexOf(g.m, f)
 
 	b.WriteString("static ASTER_MAYBE_UNUSED " + g.fnResultType(f) + " " +
@@ -154,16 +142,10 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 		if v.Type == mir.TypeUnit {
 			continue // unit values lower to the literal 0
 		}
-		// AsterTable values are initialized in place by table.create, so
-		// their variables must start zeroed.
-		init := ""
-		if g.m.ValidType(v.Type) && g.m.Types[v.Type].Kind == mir.TypeTable {
-			init = " = {0}"
-		}
-		b.WriteString("  " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + init + ";\n")
+		b.WriteString("  ASTER_MAYBE_UNUSED " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + ";\n")
 	}
 	for li, l := range f.Locals {
-		b.WriteString("  " + g.cType(l.Type) + " aster_l" + strconv.Itoa(li) + ";\n")
+		b.WriteString("  ASTER_MAYBE_UNUSED " + g.cType(l.Type) + " aster_l" + strconv.Itoa(li) + ";\n")
 	}
 	for i := 0; i < g.domainTotal[int(fi)]; i++ {
 		b.WriteString("  AsterDomain aster_domain_" + strconv.Itoa(i) + " = {0};\n")
@@ -174,16 +156,11 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 	for _, s := range g.ctxSitesIn(f) {
 		b.WriteString("  AsterCtx_" + strconv.Itoa(s) + " aster_ctx_" + strconv.Itoa(s) + " = {0};\n")
 	}
-	// Silence unused-variable warnings for values and locals that are never
-	// read (dead SSA values, store-only or untouched locals).
-	for vi := range f.Values {
-		if !g.valueRead[vi] && f.Values[vi].Def.Kind != mir.ValueDefFuncParam && f.Values[vi].Type != mir.TypeUnit {
+	// Function parameters cannot carry indeterminate values, so an explicit
+	// void use safely suppresses strict unused-parameter warnings.
+	for vi := range f.Params {
+		if f.Params[vi].Type != mir.TypeUnit && !g.valueRead[vi] {
 			b.WriteString("  (void)" + g.val(mir.ValueId(vi)) + ";\n")
-		}
-	}
-	for li := range f.Locals {
-		if !g.localRead[li] {
-			b.WriteString("  (void)aster_l" + strconv.Itoa(li) + ";\n")
 		}
 	}
 	b.WriteString("\n")

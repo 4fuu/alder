@@ -4,6 +4,10 @@ const @zero: i64 = 0
 const @zero_i8: i8 = 0
 const @zero_u64: u64 = 0
 const @zero_u8: u8 = 0
+const @zero_i16: i16 = 0
+const @zero_i32: i32 = 0
+const @zero_u16: u16 = 0
+const @zero_u32: u32 = 0
 
 fn @i64ops(%a: i64, %b: i64) -> i64 {
 bb0:
@@ -65,6 +69,60 @@ bb_fail:
   fail %z
 }
 
+fn @i16add(%a: i16, %b: i16) -> i16 {
+bb0:
+  %r = int.add.checked %a, %b else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_i16
+  fail %z
+}
+
+fn @u16add(%a: u16, %b: u16) -> u16 {
+bb0:
+  %r = int.add.checked %a, %b else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_u16
+  fail %z
+}
+
+fn @i32add(%a: i32, %b: i32) -> i32 {
+bb0:
+  %r = int.add.checked %a, %b else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_i32
+  fail %z
+}
+
+fn @u32add(%a: u32, %b: u32) -> u32 {
+bb0:
+  %r = int.add.checked %a, %b else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_u32
+  fail %z
+}
+
+fn @i16shr(%a: i16, %count: i16) -> i16 {
+bb0:
+  %r = int.shr.checked %a, %count else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_i16
+  fail %z
+}
+
+fn @i32shr(%a: i32, %count: i32) -> i32 {
+bb0:
+  %r = int.shr.checked %a, %count else bb_fail
+  return %r
+bb_fail:
+  %z = const.get @zero_i32
+  fail %z
+}
+
 fn @convs(%v: i64, %w: u64) -> i64 {
 bb0:
   %t = int.trunc %v, i32
@@ -88,4 +146,10 @@ bb_done(%r: i64):
 bb_fail:
   %z = const.get @zero
   fail %z
+}
+
+fn @narrow(%v: f64) -> f32 {
+bb0:
+  %r = float.convert %v, f32
+  return %r
 }

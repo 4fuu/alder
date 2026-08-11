@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,7 @@ var runFixtures = []struct {
 	{"cleanup", "cleanup_driver.c"},
 	{"table", "table_driver.c"},
 	{"cfg", "cfg_driver.c"},
+	{"regressions", "regressions_driver.c"},
 }
 
 // runArgs builds the strict compile command for a behavior fixture: the
@@ -53,19 +55,58 @@ func generateRun(t *testing.T, name string) string {
 // TestRunFixtures compiles each behavior fixture with its driver under the
 // strict warning set and runs it, requiring exit code 0.
 func TestRunFixtures(t *testing.T) {
-	cc := findCompiler(t)
-	for _, rf := range runFixtures {
-		rf := rf
-		t.Run(rf.mir, func(t *testing.T) {
-			gen := generateRun(t, rf.mir)
-			exe := filepath.Join(t.TempDir(), rf.mir+".exe")
-			args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			for _, rf := range runFixtures {
+				rf := rf
+				t.Run(rf.mir, func(t *testing.T) {
+					gen := generateRun(t, rf.mir)
+					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
+					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
+					args = append(args, "-o", exe)
+					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+						t.Fatalf("compile %s failed: %v\n%s", rf.mir, err, out)
+					}
+					if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+						t.Fatalf("run %s failed: %v\n%s", rf.mir, err, out)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestFloatNarrowingPanics proves the f64-to-f32 guard executes before an
+// out-of-range C cast. The ordinary checked fixture covers the in-range path.
+func TestFloatNarrowingPanics(t *testing.T) {
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			gen := generateRun(t, "checked")
+			driver := filepath.Join(t.TempDir(), "float_narrow_panic.c")
+			const source = `#include "gen.c"
+#include <float.h>
+int main(void) {
+    (void)aster_fn_narrow_11(DBL_MAX);
+    return 0;
+}
+`
+			if err := os.WriteFile(driver, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(t.TempDir(), "float_narrow_panic.exe")
+			args := runArgs(gen, driver)
 			args = append(args, "-o", exe)
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
-				t.Fatalf("compile %s failed: %v\n%s", rf.mir, err, out)
+				t.Fatalf("compile float narrowing panic fixture: %v\n%s", err, out)
 			}
-			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
-				t.Fatalf("run %s failed: %v\n%s", rf.mir, err, out)
+			out, err := exec.Command(exe).CombinedOutput()
+			if err == nil {
+				t.Fatal("out-of-range float narrowing exited successfully")
+			}
+			if !strings.Contains(string(out), "float.convert: out of range") {
+				t.Fatalf("float narrowing panic message missing: %s", out)
 			}
 		})
 	}
@@ -74,24 +115,28 @@ func TestRunFixtures(t *testing.T) {
 // TestRunFixturesSanitizers reruns the behavior fixtures under ASan/UBSan
 // when the host toolchain supports them, and skips otherwise.
 func TestRunFixturesSanitizers(t *testing.T) {
-	cc := findCompiler(t)
-	if !sanitizersSupported(t, cc) {
-		t.Skip("ASan/UBSan not supported by this host toolchain")
-	}
-	for _, rf := range runFixtures {
-		rf := rf
-		t.Run(rf.mir, func(t *testing.T) {
-			gen := generateRun(t, rf.mir)
-			exe := filepath.Join(t.TempDir(), rf.mir+".exe")
-			args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
-			args = append(args,
-				"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer",
-				"-o", exe)
-			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
-				t.Fatalf("sanitizer compile %s failed: %v\n%s", rf.mir, err, out)
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			if !sanitizersSupported(t, cc) {
+				t.Skip("ASan/UBSan not supported by this toolchain")
 			}
-			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
-				t.Fatalf("sanitizer run %s failed: %v\n%s", rf.mir, err, out)
+			for _, rf := range runFixtures {
+				rf := rf
+				t.Run(rf.mir, func(t *testing.T) {
+					gen := generateRun(t, rf.mir)
+					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
+					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
+					args = append(args,
+						"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer",
+						"-o", exe)
+					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+						t.Fatalf("sanitizer compile %s failed: %v\n%s", rf.mir, err, out)
+					}
+					if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+						t.Fatalf("sanitizer run %s failed: %v\n%s", rf.mir, err, out)
+					}
+				})
 			}
 		})
 	}
