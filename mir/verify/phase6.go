@@ -36,12 +36,12 @@ type resourceState struct {
 func phase6Domains(m *mir.Module) []Error {
 	effects := computeFunctionEffects(m)
 	var errs []Error
-	for _, f := range m.Functions {
+	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
 		info := computeDomainInfo(m, f, effects)
-		errs = append(errs, rejectLoopCarriedLocals(f, info)...)
+		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi])...)
 		cleanup, _ := analyzeCleanupFunction(m, f)
 		ins := solveResourceStates(m, f, info, effects, cleanup)
 		reach := reachable(f)
@@ -653,7 +653,7 @@ func allEdgeArgsTo(b *mir.Block, target mir.BlockId) [][]mir.ValueId {
 	return out
 }
 
-func rejectLoopCarriedLocals(f *mir.Function, info []domainInfo) []Error {
+func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect) []Error {
 	var errs []Error
 	for bi, b := range f.Blocks {
 		for vi, v := range f.Values {
@@ -692,6 +692,9 @@ func rejectLoopCarriedLocals(f *mir.Function, info []domainInfo) []Error {
 			if in.Op != mir.OpStore || int(in.StoreVal) >= len(info) || !hasLocalDomainProvenance(info[in.StoreVal]) {
 				continue
 			}
+			if stableParameterDomainLoopStore(m, f, info, effect, in) {
+				continue
+			}
 			errs = append(errs, Error{
 				Loc: locInstr(f, b, ii, in),
 				Msg: fmt.Sprintf("store of %s carries a function-local domain handle or reference across a loop backedge", valueName(f, in.StoreVal)),
@@ -699,6 +702,63 @@ func rejectLoopCarriedLocals(f *mir.Function, info []domainInfo) []Error {
 		}
 	}
 	return errs
+}
+
+// stableParameterDomainLoopStore permits a mutable local descriptor to be
+// updated in a loop when every dynamic allocation it can name belongs to an
+// external domain that this function never resets or destroys through verified
+// MIR effects. Repeated static allocation sites are safe in that case because
+// every produced allocation remains live for the entire call. Local domains
+// remain forbidden: their per-site C slots and dynamic identities must not be
+// conflated across iterations. As elsewhere in the verifier, unsafe foreign
+// code is responsible for honoring the declared safe boundary.
+func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr) bool {
+	if _, ok := localPlaceKey(&in.Place); !ok {
+		return false
+	}
+	for _, yes := range effect.destroys {
+		if yes {
+			return false
+		}
+	}
+	for _, yes := range effect.resets {
+		if yes {
+			return false
+		}
+	}
+	valueInfo := info[in.StoreVal]
+	for d := range valueInfo.deps {
+		if d.blk != mir.NoBlock {
+			return false
+		}
+	}
+	localRoot := false
+	for root := range valueInfo.roots {
+		if root.param >= 0 {
+			continue
+		}
+		localRoot = true
+		if int(root.handle) >= len(info) {
+			return false
+		}
+		handleInfo := info[root.handle]
+		for d := range handleInfo.deps {
+			if d.blk != mir.NoBlock {
+				return false
+			}
+		}
+		ownedByParameterDomain := false
+		for p := range handleInfo.params {
+			if p < 0 || p >= len(f.Params) || !isDomainType(m, f.Params[p].Type) {
+				return false
+			}
+			ownedByParameterDomain = true
+		}
+		if !ownedByParameterDomain {
+			return false
+		}
+	}
+	return localRoot
 }
 
 func hasLocalDomainProvenance(i domainInfo) bool {

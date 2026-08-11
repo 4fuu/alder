@@ -104,7 +104,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
 ### Domains, cleanup, and tables
 
-- `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because the current MIR profile forbids carrying handles across backedges;
+- `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because the current MIR profile forbids carrying local-domain handles across backedges. Loop-carried local descriptors may name allocations in an external parameter domain only when the function cannot reset or destroy any parameter domain through verified MIR effects; those allocations remain live for the call and do not reuse a hidden domain slot. Unsafe foreign code remains responsible for honoring its wrapper's domain-lifetime contract;
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
 - `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `alder_domain_alloc`, and a slice with the count; overflow, non-representability, invalid domains, and out-of-memory terminate;
 - `alloc.checked` performs the same preparation and runtime call, but every failure branches through its explicit failure edge with normal parallel edge copies; success constructs the slice;

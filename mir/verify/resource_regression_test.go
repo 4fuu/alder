@@ -546,6 +546,224 @@ done:
 }
 `, "carries a function-local domain handle or reference across a backedge")
 	})
+
+	t.Run("external-domain allocation stored across backedge", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%d: domain_handle, %n: u64, %again: bool) -> safe_mut(u8) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %d, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %d, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  %result = load local %current
+  return %result
+}
+`)
+	})
+
+	t.Run("external-domain invalidation keeps cyclic store conservative", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%d: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %d, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %d, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  domain.destroy %d
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("possibly aliasing parameter reset keeps cyclic store conservative", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%a: domain_handle, %b: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  %mark = domain.mark %a
+  %initial = alloc %b, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %b, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  domain.reset %a, %mark
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("transitive reset keeps cyclic store conservative", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @reset(%d: domain_handle) {
+entry:
+  %mark = domain.mark %d
+  domain.reset %d, %mark
+  return
+}
+fn @f(%d: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %d, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %d, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  call @reset(%d)
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("cleanup destruction keeps cyclic store conservative", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @destroy(%d: domain_handle) {
+entry:
+  domain.destroy %d
+  return
+}
+fn @f(%d: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  %scope = cleanup.scope.begin
+  %cleanup = cleanup.push %scope, @destroy, (%d)
+  %initial = alloc %d, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %d, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  cleanup.scope.run %scope
+  cleanup.scope.end %scope
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("local child allocation stored across backedge", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%root: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  jump loop
+loop:
+  %child = domain.create %root
+  %next = alloc %child, u8, %n
+  store local %current, %next
+  domain.destroy %child
+  branch %again, loop, done
+done:
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("external allocation remains forbidden as block parameter", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%d: domain_handle, %n: u64, %again: bool) {
+entry:
+  %initial = alloc %d, u8, %n
+  jump loop(%initial)
+loop(%current: safe_mut(u8)):
+  %next = alloc %d, u8, %n
+  branch %again, loop(%next), done
+done:
+  return
+}
+`, "carries a function-local domain handle or reference across a backedge")
+	})
+
+	t.Run("external allocation remains forbidden through dereference", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%out: safe_mut(safe_mut(u8)), %d: domain_handle, %n: u64, %again: bool) {
+entry:
+  jump loop
+loop:
+  %next = alloc %d, u8, %n
+  store deref %out, %next
+  branch %again, loop, done
+done:
+  return
+}
+`, "lifetime-bearing values may not be stored through dereference places")
+	})
+
+	t.Run("possible external parent destruction keeps cyclic store conservative", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%possible_parent: domain_handle, %child: domain_handle, %n: u64, %again: bool) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %child, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %child, u8, %n
+  store local %current, %next
+  branch %again, loop, done
+done:
+  domain.destroy %possible_parent
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
+	t.Run("local child destruction preserves external allocation", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%parent: domain_handle, %n: u64, %again: bool) -> safe_mut(u8) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %parent, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc %parent, u8, %n
+  store local %current, %next
+  %child = domain.create %parent
+  %scratch = alloc %child, u8, %n
+  domain.destroy %child
+  branch %again, loop, done
+done:
+  %result = load local %current
+  return %result
+}
+`)
+	})
+
+	t.Run("checked allocation failure edge retains external descriptor", func(t *testing.T) {
+		requireAccepted(t, `mir 3
+fn @f(%d: domain_handle, %n: u64, %again: bool) -> safe_mut(u8) {
+  local %current: safe_mut(u8)
+entry:
+  %initial = alloc %d, u8, %n
+  store local %current, %initial
+  jump loop
+loop:
+  %next = alloc.checked %d, u8, %n else loop
+  store local %current, %next
+  branch %again, loop, done
+done:
+  %result = load local %current
+  return %result
+}
+`)
+	})
 }
 
 func TestDomainFunctionBoundaryConservatism(t *testing.T) {

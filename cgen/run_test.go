@@ -168,6 +168,91 @@ int main(void) {
 	}
 }
 
+func TestLoopCarriedExternalAllocationsBehavior(t *testing.T) {
+	const text = `mir 1
+
+const @zero: u64 = 0
+const @one: u64 = 1
+const @eleven: u64 = 11
+
+fn @loop_alloc(%d: domain_handle, %count: u64) -> u64 {
+  local %current: safe_mut(u64)
+  local %i: u64
+entry:
+  %one = const.get @one
+  %initial = alloc %d, u64, %one
+  %eleven = const.get @eleven
+  store deref %initial, %eleven
+  store local %current, %initial
+  %zero = const.get @zero
+  store local %i, %zero
+  jump loop
+loop:
+  %at = load local %i
+  %more = int.lt %at, %count
+  branch %more, body, done
+body:
+  %next = alloc %d, u64, %one
+  store deref %next, %at
+  store local %current, %next
+  %after = int.add.checked %at, %one else fail
+  store local %i, %after
+  jump loop
+done:
+  %latest = load local %current
+  %first_value = load deref %initial
+  %latest_value = load deref %latest
+  %result = int.add.checked %first_value, %latest_value else fail
+  return %result
+fail:
+  %failed = const.get @zero
+  return %failed
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := Generate(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			dir := t.TempDir()
+			gen := filepath.Join(dir, "gen.c")
+			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			driver := filepath.Join(dir, "driver.c")
+			const source = `#include "gen.c"
+#include <stdint.h>
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) { return 1; }
+    if (alder_fn_loop_alloc_0(&root, (uint64_t)0) != (uint64_t)22) { return 2; }
+    if (alder_fn_loop_alloc_0(&root, (uint64_t)2) != (uint64_t)12) { return 3; }
+    alder_domain_destroy(&root);
+    return alder_runtime_live_allocations() == (size_t)0 ? 0 : 4;
+}
+`
+			if err := os.WriteFile(driver, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(dir, "loop_carried_allocations.exe")
+			args := runArgs(gen, driver)
+			args = append(args, "-o", exe)
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("compile loop-carried allocation fixture: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run loop-carried allocation fixture: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 // TestFloatNarrowingPanics proves the f64-to-f32 guard executes before an
 // out-of-range C cast. The ordinary checked fixture covers the in-range path.
 func TestFloatNarrowingPanics(t *testing.T) {
