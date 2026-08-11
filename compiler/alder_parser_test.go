@@ -124,12 +124,12 @@ N 20 5 50 1 18 19 b.al 18 22 0 0 13
 N 21 4 56 1 28 31 b.al 28 31 28 31 0
 N 22 10 48 1 15 17 b.al 15 31 0 0 15
 N 23 1 44 1 0 6 b.al 0 31 9 13 16
-N 24 7 60 1 48 49 b.al 48 49 48 49 0
+N 24 7 60 1 48 49 b.al 48 55 48 49 0
 N 25 4 69 1 70 71 b.al 70 71 70 71 0
 N 26 5 68 1 69 70 b.al 69 72 0 0 18
 N 27 8 66 1 62 67 b.al 62 72 62 67 19
 N 28 2 57 1 39 43 b.al 39 75 44 47 20
-N 29 7 75 1 89 90 b.al 89 90 89 90 0
+N 29 7 75 1 89 90 b.al 89 96 89 90 0
 N 30 11 83 1 108 113 b.al 108 113 108 113 0
 N 31 4 88 1 120 121 b.al 120 121 120 121 0
 N 32 5 87 1 119 120 b.al 119 122 0 0 23
@@ -247,7 +247,31 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	if first != wantParserManifest || second != wantParserManifest {
 		t.Fatalf("success manifest mismatch\nwant:\n%s\ngot:\n%s", wantParserManifest, first)
 	}
-	validateParserManifest(t, first)
+	validateParserManifest(t, first, files)
+	functionSource := "fn empty() -> U64 {\r\n return\r\n}\r\n" +
+		"fn core(T: type, x: U64,) -> U64 {\r\n" +
+		" // bindings and delimiter continuation\r\n let a: U64 = (1 +\r\n 2) * 3 / 4 % 5 - 6 << 1 >> 1 < 9 <= 9 > 0 >= 0 == true != false && !false || true\r\n" +
+		" var b = 1.5\r\n let s = \"text\"\r\n let c = empty()\r\n let d = core(\r\n T: x, x,\r\n )\r\n x = try d\r\n x.field = a\r\n x[b] = c\r\n x[b].field = s\r\n {\r\n  return x\r\n }\r\n return\r\n}\r\n"
+	functionSource += "fn assoc(a: U64, b: U64, c: U64, d: U64) -> U64 {\r\n" +
+		" let sub = a - b - c\r\n let mixed = a + b * c\r\n let logic = a || b && c\r\n let product = a / b * c % d\r\n return product\r\n}\r\n" +
+		"fn postfix(factory: U64, x: U64, y: U64) -> U64 {\r\n return factory()(x).field[y]\r\n}\r\n" +
+		"fn named(f: U64, a: U64, b: U64) -> U64 {\r\n (f())\r\n return f(a, label: b,)\r\n}\r\n"
+	functionFiles := map[string]string{"functions.al": functionSource}
+	functionManifest := runAlderParser(t, exe, functionFiles, []string{"functions.al"}, false)
+	functionTree := validateParserManifest(t, functionManifest, functionFiles)
+	assertFunctionParserTree(t, functionTree)
+	if repeat := runAlderParser(t, exe, functionFiles, []string{"functions.al"}, false); repeat != functionManifest {
+		t.Fatal("function/expression manifest changed across processes")
+	}
+	seenKinds := make(map[int]bool)
+	for _, node := range functionTree.nodes {
+		seenKinds[node.kind] = true
+	}
+	for kind := 12; kind <= 31; kind++ {
+		if !seenKinds[kind] {
+			t.Fatalf("function/expression manifest does not exercise syntax kind %d\n%s", kind, functionManifest)
+		}
+	}
 	if again := runAlderParser(t, exe, files, []string{"b.al", "a.al", "z-empty.al"}, false); again != first {
 		t.Fatal("repeat parser process output changed")
 	}
@@ -255,7 +279,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		name, text       string
 		kind, start, end int
 	}{
-		{"fn.al", "fn bad() -> U64 {}", 2, 0, 2},
+		{"if.al", "fn bad() -> U64 { if true {}\n}", 12, 18, 20},
 		{"ident.al", "type {", 3, 5, 6},
 		{"punct.al", "type A x", 4, 7, 8},
 		{"type.al", "type A { x: }", 5, 12, 13},
@@ -274,8 +298,60 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 			}
 		})
 	}
+	syntaxRejects := []struct {
+		name, text       string
+		kind             int
+		marker           string
+		shift, spanWidth int
+	}{
+		{"parameter-order.al", "fn bad(x: U64, T: type) -> U64 {}", 10, "T: type", 0, 1},
+		{"statement-line.al", "fn bad() -> U64 {\n let x = 1 return x\n}\n", 11, "return x", 0, 6},
+		{"operator-before-line.al", "fn bad() -> U64 {\n return a\n + b\n}\n", 13, "+ b", 0, 1},
+		{"operator-after-line.al", "fn bad() -> U64 {\n return a +\n b\n}\n", 13, "\n b", 2, 1},
+		{"postfix-line.al", "fn bad() -> U64 {\n return f\n ()\n}\n", 13, "\n ()", 2, 1},
+		{"field-line.al", "fn bad() -> U64 {\n return x\n .field\n}\n", 13, ".field", 0, 1},
+		{"index-line.al", "fn bad() -> U64 {\n return x\n [index]\n}\n", 13, "[index]", 0, 1},
+		{"unary-line.al", "fn bad() -> U64 {\n return !\n x\n}\n", 13, "\n x", 2, 1},
+		{"try-line.al", "fn bad() -> U64 {\n return try\n x\n}\n", 13, "\n x", 2, 1},
+		{"call-empty-eof.al", "fn bad() -> U64 {\n return f(", 12, "", 0, 0},
+		{"call-value-eof.al", "fn bad() -> U64 {\n return f(x", 4, "", 0, 0},
+		{"call-named-eof.al", "fn bad() -> U64 {\n return f(label:", 12, "", 0, 0},
+		{"call-keyword-label.al", "fn bad() -> U64 {\n return f(return: x)\n}\n", 12, "return: x", 0, 6},
+		{"field-eof.al", "fn bad() -> U64 {\n return x.", 3, "", 0, 0},
+		{"index-empty-eof.al", "fn bad() -> U64 {\n return x[", 12, "", 0, 0},
+		{"index-value-eof.al", "fn bad() -> U64 {\n return x[0", 4, "", 0, 0},
+		{"group-eof.al", "fn bad() -> U64 {\n return (x", 4, "", 0, 0},
+		{"named-value.al", "fn bad() -> U64 {\n return f(label:)\n}\n", 12, ":)", 1, 1},
+		{"result-type.al", "fn bad() -> {}", 5, "{}", 0, 1},
+		{"body-eof.al", "fn bad() -> U64", 4, "", 0, 0},
+		{"block-eof.al", "fn bad() -> U64 {\n return 0\n", 4, "", 0, 0},
+		{"return-eof.al", "fn bad() -> U64 { return", 12, "", 0, 0},
+		{"return-line-eof.al", "fn bad() -> U64 {\n return\n", 4, "", 0, 0},
+		{"assign-call.al", "fn bad() -> U64 {\n f() = value\n}\n", 14, "f() =", 0, 1},
+		{"assign-field-chain.al", "fn bad() -> U64 {\n x.field.other = value\n}\n", 14, "x.field.other", 0, 1},
+		{"assign-field-index.al", "fn bad() -> U64 {\n x.field[index] = value\n}\n", 14, "x.field[index]", 0, 1},
+		{"assign-index-chain.al", "fn bad() -> U64 {\n x[index][other] = value\n}\n", 14, "x[index][other]", 0, 1},
+		{"assign-group.al", "fn bad() -> U64 {\n (x + y) = value\n}\n", 14, "(x + y)", 0, 1},
+	}
+	for _, tc := range syntaxRejects {
+		t.Run(tc.name, func(t *testing.T) {
+			start := len(tc.text)
+			if tc.marker != "" {
+				start = strings.Index(tc.text, tc.marker)
+				if start < 0 {
+					t.Fatalf("marker %q not found", tc.marker)
+				}
+				start += tc.shift
+			}
+			got := runAlderParser(t, exe, map[string]string{tc.name: tc.text}, []string{tc.name}, true)
+			want := fmt.Sprintf("D SYN0001 %d %s %d %d", tc.kind, tc.name, start, start+tc.spanWidth)
+			if diagnostic := parserDiagnosticLine(t, got); diagnostic != want {
+				t.Fatalf("diagnostic mismatch: want %q, got %q\n%s", want, diagnostic, got)
+			}
+		})
+	}
 	canonicalBad := map[string]string{
-		"z-bad.al": "fn bad() -> U64 {}",
+		"z-bad.al": "fn bad() -> U64 { if true {}\n}",
 		"a-bad.al": "type {",
 	}
 	for _, order := range [][]string{{"z-bad.al", "a-bad.al"}, {"a-bad.al", "z-bad.al"}} {
@@ -363,6 +439,7 @@ func parserDiagnosticLine(t *testing.T, manifest string) string {
 }
 
 type parserManifestNode struct {
+	kind                           int
 	path                           string
 	start, end, nameStart, nameEnd int
 	token, tokenSource             int
@@ -375,7 +452,14 @@ type parserManifestLink struct {
 	next int
 }
 
-func validateParserManifest(t *testing.T, manifest string) {
+type parserManifest struct {
+	sourceTexts map[string]string
+	roots       []int
+	nodes       []parserManifestNode
+	links       []parserManifestLink
+}
+
+func validateParserManifest(t *testing.T, manifest string, sourceTexts map[string]string) parserManifest {
 	t.Helper()
 	sourceLengths := make(map[string]int)
 	var sourcePaths []string
@@ -401,8 +485,12 @@ func validateParserManifest(t *testing.T, manifest string) {
 			if _, exists := sourceLengths[fields[2]]; exists {
 				t.Fatalf("duplicate source path in record %q", line)
 			}
+			text, exists := sourceTexts[fields[2]]
+			if !exists || len(text) != manifestInt(t, fields[3]) {
+				t.Fatalf("source record does not match input %q", line)
+			}
 			sourcePaths = append(sourcePaths, fields[2])
-			sourceLengths[fields[2]] = manifestInt(t, fields[3])
+			sourceLengths[fields[2]] = len(text)
 		case "R":
 			if len(fields) != 3 || manifestInt(t, fields[1]) != len(roots) {
 				t.Fatalf("invalid root record %q", line)
@@ -413,6 +501,7 @@ func validateParserManifest(t *testing.T, manifest string) {
 				t.Fatalf("invalid node record %q", line)
 			}
 			nodes = append(nodes, parserManifestNode{
+				kind:        manifestInt(t, fields[2]),
 				token:       manifestInt(t, fields[3]),
 				tokenSource: manifestInt(t, fields[4]),
 				tokenStart:  manifestInt(t, fields[5]),
@@ -445,8 +534,12 @@ func validateParserManifest(t *testing.T, manifest string) {
 		if (node.nameStart != 0 || node.nameEnd != 0) && (node.nameStart < node.start || node.nameStart > node.nameEnd || node.nameEnd > node.end) {
 			t.Fatalf("node %d has invalid name span %+v", id+1, node)
 		}
-		if node.tokenStart != node.start && (node.tokenStart != node.nameStart || node.tokenEnd != node.nameEnd) {
-			t.Fatalf("node %d token is neither its leading nor named token: %+v", id+1, node)
+		if node.tokenStart < node.start || node.tokenStart > node.tokenEnd || node.tokenEnd > node.end {
+			t.Fatalf("node %d has semantic token outside its span: %+v", id+1, node)
+		}
+		tokenText := sourceTexts[node.path][node.tokenStart:node.tokenEnd]
+		if !validParserNodeToken(node, tokenText) {
+			t.Fatalf("node %d has invalid semantic token %q: %+v", id+1, tokenText, node)
 		}
 		if node.children < 0 || node.children > len(links) {
 			t.Fatalf("node %d has invalid child head %d", id+1, node.children)
@@ -479,12 +572,21 @@ func validateParserManifest(t *testing.T, manifest string) {
 			linkID = link.next
 		}
 	}
+	incoming := make(map[int]int)
+	for _, link := range links {
+		incoming[link.node]++
+	}
+	rootSet := make(map[int]bool)
 	lastPath := ""
 	lastStart := -1
 	for _, root := range roots {
 		if root < 1 || root > len(nodes) {
 			t.Fatalf("invalid root node ID %d", root)
 		}
+		if rootSet[root] || incoming[root] != 0 {
+			t.Fatalf("root node %d is duplicated or has a parent", root)
+		}
+		rootSet[root] = true
 		node := nodes[root-1]
 		if node.path < lastPath || node.path == lastPath && node.start <= lastStart {
 			t.Fatalf("roots are not in canonical source order: %d after %s:%d", root, lastPath, lastStart)
@@ -492,8 +594,250 @@ func validateParserManifest(t *testing.T, manifest string) {
 		lastPath, lastStart = node.path, node.start
 		visitNode(root)
 	}
+	for nodeID := range nodes {
+		id := nodeID + 1
+		if !rootSet[id] && incoming[id] != 1 {
+			t.Fatalf("non-root node %d has %d parents", id, incoming[id])
+		}
+	}
 	if len(reachableNodes) != len(nodes) || len(ownedLinks) != len(links) {
 		t.Fatalf("unreachable parser arena records: nodes %d/%d links %d/%d", len(reachableNodes), len(nodes), len(ownedLinks), len(links))
+	}
+	return parserManifest{sourceTexts: sourceTexts, roots: roots, nodes: nodes, links: links}
+}
+
+func validParserNodeToken(node parserManifestNode, tokenText string) bool {
+	nameToken := node.tokenStart == node.nameStart && node.tokenEnd == node.nameEnd
+	switch node.kind {
+	case 1:
+		return node.tokenStart == node.start && tokenText == "import"
+	case 2:
+		return node.tokenStart == node.start && tokenText == "type"
+	case 3:
+		return node.tokenStart == node.start && tokenText == "enum"
+	case 4, 6, 7, 8, 9, 11, 13, 24, 28:
+		return nameToken
+	case 5, 30:
+		return tokenText == "["
+	case 10, 12:
+		return node.tokenStart == node.start && tokenText == "fn"
+	case 14:
+		return node.tokenStart == node.start && tokenText == "{"
+	case 15:
+		return node.tokenStart == node.start && tokenText == "let"
+	case 16:
+		return node.tokenStart == node.start && tokenText == "var"
+	case 17:
+		return nameToken && tokenText == "="
+	case 18:
+		return node.tokenStart == node.start && tokenText == "return"
+	case 19, 20, 21, 22:
+		return node.tokenStart == node.start
+	case 23:
+		return node.tokenStart == node.start && (tokenText == "true" || tokenText == "false")
+	case 25:
+		return nameToken && (tokenText == "-" || tokenText == "!")
+	case 26:
+		return nameToken && binaryOperator(tokenText)
+	case 27:
+		return tokenText == "("
+	case 29:
+		return tokenText == "."
+	case 31:
+		return node.tokenStart == node.start && nameToken && tokenText == "try"
+	default:
+		return false
+	}
+}
+
+func binaryOperator(text string) bool {
+	switch text {
+	case "||", "&&", "==", "!=", "<", "<=", ">", ">=", "<<", ">>", "+", "-", "*", "/", "%":
+		return true
+	default:
+		return false
+	}
+}
+
+func (m parserManifest) childrenInSourceOrder(t *testing.T, nodeID int) []int {
+	t.Helper()
+	if nodeID < 1 || nodeID > len(m.nodes) {
+		t.Fatalf("invalid node ID %d", nodeID)
+	}
+	var children []int
+	for linkID := m.nodes[nodeID-1].children; linkID != 0; linkID = m.links[linkID-1].next {
+		children = append(children, m.links[linkID-1].node)
+	}
+	for left, right := 0, len(children)-1; left < right; left, right = left+1, right-1 {
+		children[left], children[right] = children[right], children[left]
+	}
+	return children
+}
+
+func (m parserManifest) tokenText(t *testing.T, nodeID int) string {
+	t.Helper()
+	node := m.nodes[nodeID-1]
+	return m.sourceTexts[node.path][node.tokenStart:node.tokenEnd]
+}
+
+func (m parserManifest) name(t *testing.T, nodeID int) string {
+	t.Helper()
+	node := m.nodes[nodeID-1]
+	if node.nameStart == 0 && node.nameEnd == 0 {
+		return ""
+	}
+	return m.sourceTexts[node.path][node.nameStart:node.nameEnd]
+}
+
+func (m parserManifest) rootNamed(t *testing.T, name string) int {
+	t.Helper()
+	for _, root := range m.roots {
+		if m.name(t, root) == name {
+			return root
+		}
+	}
+	t.Fatalf("no root named %q", name)
+	return 0
+}
+
+func assertNodeKinds(t *testing.T, tree parserManifest, ids []int, want ...int) {
+	t.Helper()
+	if len(ids) != len(want) {
+		t.Fatalf("child count mismatch: got %v, want kinds %v", ids, want)
+	}
+	for i, id := range ids {
+		if tree.nodes[id-1].kind != want[i] {
+			t.Fatalf("node %d kind = %d, want %d in %v", id, tree.nodes[id-1].kind, want[i], ids)
+		}
+	}
+}
+
+func bindingValue(t *testing.T, tree parserManifest, blockID int, name string) int {
+	t.Helper()
+	for _, statement := range tree.childrenInSourceOrder(t, blockID) {
+		node := tree.nodes[statement-1]
+		if (node.kind == 15 || node.kind == 16) && tree.name(t, statement) == name {
+			children := tree.childrenInSourceOrder(t, statement)
+			return children[len(children)-1]
+		}
+	}
+	t.Fatalf("no binding named %q", name)
+	return 0
+}
+
+func assertFunctionParserTree(t *testing.T, tree parserManifest) {
+	t.Helper()
+	if len(tree.roots) != 5 {
+		t.Fatalf("function manifest roots = %d, want 5", len(tree.roots))
+	}
+	for i, name := range []string{"empty", "core", "assoc", "postfix", "named"} {
+		if tree.name(t, tree.roots[i]) != name {
+			t.Fatalf("root %d name = %q, want %q", i, tree.name(t, tree.roots[i]), name)
+		}
+	}
+
+	emptyChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "empty"))
+	assertNodeKinds(t, tree, emptyChildren, 4, 14)
+	emptyStatements := tree.childrenInSourceOrder(t, emptyChildren[1])
+	assertNodeKinds(t, tree, emptyStatements, 18)
+	if len(tree.childrenInSourceOrder(t, emptyStatements[0])) != 0 {
+		t.Fatal("line-terminated return unexpectedly has a value")
+	}
+
+	coreChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "core"))
+	assertNodeKinds(t, tree, coreChildren, 7, 13, 4, 14)
+	if tree.name(t, coreChildren[0]) != "T" || tree.name(t, coreChildren[1]) != "x" {
+		t.Fatalf("function parameter order changed: %q, %q", tree.name(t, coreChildren[0]), tree.name(t, coreChildren[1]))
+	}
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreChildren[1]), 4)
+	coreStatements := tree.childrenInSourceOrder(t, coreChildren[3])
+	assertNodeKinds(t, tree, coreStatements, 15, 16, 15, 15, 15, 17, 17, 17, 17, 14, 18)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[0]), 4, 26)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[1]), 21)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[2]), 22)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[3]), 27)
+	callWithNamed := bindingValue(t, tree, coreChildren[3], "d")
+	callChildren := tree.childrenInSourceOrder(t, callWithNamed)
+	assertNodeKinds(t, tree, callChildren, 24, 28, 24)
+	if tree.name(t, callChildren[1]) != "T" {
+		t.Fatalf("named argument label = %q, want T", tree.name(t, callChildren[1]))
+	}
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, callChildren[1]), 24)
+	for i, statement := range coreStatements[5:9] {
+		assignmentChildren := tree.childrenInSourceOrder(t, statement)
+		assertNodeKinds(t, tree, assignmentChildren, []int{24, 29, 30, 29}[i], tree.nodes[assignmentChildren[1]-1].kind)
+		if tree.tokenText(t, statement) != "=" {
+			t.Fatalf("assignment token = %q", tree.tokenText(t, statement))
+		}
+	}
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[9]), 18)
+	if len(tree.childrenInSourceOrder(t, coreStatements[10])) != 0 {
+		t.Fatal("block-closing return unexpectedly has a value")
+	}
+
+	assocChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "assoc"))
+	assocBlock := assocChildren[len(assocChildren)-1]
+	sub := bindingValue(t, tree, assocBlock, "sub")
+	if tree.tokenText(t, sub) != "-" {
+		t.Fatalf("subtraction root token = %q", tree.tokenText(t, sub))
+	}
+	subChildren := tree.childrenInSourceOrder(t, sub)
+	assertNodeKinds(t, tree, subChildren, 26, 24)
+	if tree.tokenText(t, subChildren[0]) != "-" {
+		t.Fatal("subtraction is not left-associative")
+	}
+	mixed := bindingValue(t, tree, assocBlock, "mixed")
+	if tree.tokenText(t, mixed) != "+" {
+		t.Fatalf("mixed precedence root = %q, want +", tree.tokenText(t, mixed))
+	}
+	mixedChildren := tree.childrenInSourceOrder(t, mixed)
+	assertNodeKinds(t, tree, mixedChildren, 24, 26)
+	if tree.tokenText(t, mixedChildren[1]) != "*" {
+		t.Fatal("multiplication did not bind tighter than addition")
+	}
+	logic := bindingValue(t, tree, assocBlock, "logic")
+	logicChildren := tree.childrenInSourceOrder(t, logic)
+	if tree.tokenText(t, logic) != "||" || tree.tokenText(t, logicChildren[1]) != "&&" {
+		t.Fatal("logical precedence changed")
+	}
+	product := bindingValue(t, tree, assocBlock, "product")
+	productChildren := tree.childrenInSourceOrder(t, product)
+	if tree.tokenText(t, product) != "%" || tree.tokenText(t, productChildren[0]) != "*" {
+		t.Fatal("multiplicative operators are not left-associative")
+	}
+	productLeft := tree.childrenInSourceOrder(t, productChildren[0])
+	if tree.tokenText(t, productLeft[0]) != "/" {
+		t.Fatal("division did not remain on the left of multiplication")
+	}
+
+	postfixChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "postfix"))
+	postfixBlock := postfixChildren[len(postfixChildren)-1]
+	postfixReturn := tree.childrenInSourceOrder(t, postfixBlock)[0]
+	index := tree.childrenInSourceOrder(t, postfixReturn)[0]
+	assertNodeKinds(t, tree, []int{index}, 30)
+	indexChildren := tree.childrenInSourceOrder(t, index)
+	assertNodeKinds(t, tree, indexChildren, 29, 24)
+	fieldChildren := tree.childrenInSourceOrder(t, indexChildren[0])
+	assertNodeKinds(t, tree, fieldChildren, 27)
+	outerCallChildren := tree.childrenInSourceOrder(t, fieldChildren[0])
+	assertNodeKinds(t, tree, outerCallChildren, 27, 24)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, outerCallChildren[0]), 24)
+	if tree.tokenText(t, index) != "[" || tree.tokenText(t, indexChildren[0]) != "." || tree.name(t, indexChildren[0]) != "field" {
+		t.Fatal("postfix token/name identity changed")
+	}
+
+	namedChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "named"))
+	namedStatements := tree.childrenInSourceOrder(t, namedChildren[len(namedChildren)-1])
+	assertNodeKinds(t, tree, namedStatements, 19, 18)
+	groupedStatement := tree.nodes[namedStatements[0]-1]
+	if tree.tokenText(t, namedStatements[0]) != "(" || groupedStatement.tokenStart != groupedStatement.start || groupedStatement.end <= tree.nodes[tree.childrenInSourceOrder(t, namedStatements[0])[0]-1].end {
+		t.Fatal("grouped expression statement does not retain its consumed delimiters")
+	}
+	namedCall := tree.childrenInSourceOrder(t, namedStatements[1])[0]
+	namedCallChildren := tree.childrenInSourceOrder(t, namedCall)
+	assertNodeKinds(t, tree, namedCallChildren, 24, 24, 28)
+	if tree.name(t, namedCallChildren[2]) != "label" {
+		t.Fatalf("named call label = %q", tree.name(t, namedCallChildren[2]))
 	}
 }
 

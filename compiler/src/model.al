@@ -30,10 +30,18 @@ type LexDiagRec {
     end: U64
 }
 
-// Parser syntax kinds are stable for the M5.4 declaration/type slice:
+// Parser syntax kinds are stable for the current M5.4 parser slices:
 // 1 import, 2 struct, 3 enum, 4 name type, 5 slice type, 6 applied type,
 // 7 type parameter, 8 field, 9 variant, 10 imported function signature, and
-// 11 enum payload label. Top-level declaration IDs are recorded separately in
+// 11 enum payload label, 12 function declaration, 13 runtime parameter,
+// 14 block, 15 let, 16 var, 17 assignment, 18 return, 19 expression
+// statement, 20 integer, 21 float, 22 string, 23 bool, 24 identifier,
+// 25 unary, 26 binary, 27 call, 28 named argument, 29 field, 30 index, and
+// 31 try. Function children are parameters, result, then body; binding children
+// are optional type then initializer; assignment children are target then value.
+// Type-parameter nodes span the complete `Name: type` declaration and retain
+// the name as their semantic token.
+// Top-level declaration IDs are recorded separately in
 // ParseStore.roots in canonical source order; they are never inferred by kind.
 // Token IDs preserve the lossless lexical identity needed by later checking;
 // numeric literal conversion and range checking are deliberately not parser
@@ -56,11 +64,14 @@ type SyntaxLinkRec {
     next: U64
 }
 
-// Parser diagnostic kinds are stable only for this bootstrap slice (they are
-// not the final public diagnostic schema): 1 expected declaration, 2 fn is
-// unsupported at this gate, 3 expected identifier, 4 expected punctuation or
-// keyword, 5 expected type, 6 bad enum payload label, 7 top-level separator,
-// 8 struct-field separator, and 9 enum-variant separator.
+// Parser diagnostic kinds are stable only for these bootstrap slices (they
+// are not the final public diagnostic schema): 1 expected declaration,
+// 2 reserved (formerly unsupported function), 3 expected identifier,
+// 4 expected punctuation or keyword, 5 expected type, 6 bad enum payload
+// label, 7 top-level separator, 8 struct-field separator, 9 enum-variant
+// separator, 10 parameter ordering, 11 block/statement separator,
+// 12 expected expression, 13 line continuation, and 14 invalid assignment
+// target.
 type ParseDiagRec {
     kind: U64
     source: U64
