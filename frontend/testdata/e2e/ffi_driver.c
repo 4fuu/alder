@@ -16,5 +16,5 @@ int64_t load(void) {
 }
 
 int main(void) {
-    return (int)aster_fn_main_IDX();
+    return (int)alder_fn_main_IDX();
 }

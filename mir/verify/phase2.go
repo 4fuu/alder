@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase2Types checks type and layout well-formedness: in-range children,

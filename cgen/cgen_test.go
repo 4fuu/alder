@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // goldenSources are the MIR inputs whose generated C is pinned in
@@ -50,9 +50,9 @@ func generateFixture(t *testing.T, name string) string {
 }
 
 // TestGolden pins the generated C for every golden fixture. Set
-// ASTER_UPDATE_GOLDEN=1 to regenerate the committed files.
+// ALDER_UPDATE_GOLDEN=1 to regenerate the committed files.
 func TestGolden(t *testing.T) {
-	update := os.Getenv("ASTER_UPDATE_GOLDEN") == "1"
+	update := os.Getenv("ALDER_UPDATE_GOLDEN") == "1"
 	for _, name := range goldenSources {
 		name := name
 		t.Run(name, func(t *testing.T) {
@@ -66,7 +66,7 @@ func TestGolden(t *testing.T) {
 			}
 			want, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("missing golden %s (run with ASTER_UPDATE_GOLDEN=1): %v", path, err)
+				t.Fatalf("missing golden %s (run with ALDER_UPDATE_GOLDEN=1): %v", path, err)
 			}
 			if got != string(want) {
 				t.Errorf("generated C differs from %s\n--- got ---\n%s\n--- want ---\n%s", path, got, want)
@@ -176,7 +176,7 @@ func TestGenerateRejectsUnsafeExternalNames(t *testing.T) {
 	for _, name := range []string{
 		"has.dot",    // punctuation
 		"return",     // C keyword
-		"aster_call", // generated/backend prefix
+		"alder_call", // generated/backend prefix
 		"uint64_t",   // token introduced by the runtime header
 		"bool",       // object-like macro introduced by the runtime header
 		"FLT_MAX",    // macro-style token introduced by a generated include

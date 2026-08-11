@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase10Backend checks backend preconditions: alloc and table.create element
@@ -57,8 +57,8 @@ func validCExternalName(name string) bool {
 	if name == "" || name[0] == '_' {
 		return false
 	}
-	if len(name) >= 6 && (name[:6] == "aster_" || name[:6] == "ASTER_") ||
-		len(name) >= 5 && name[:5] == "Aster" {
+	if len(name) >= 6 && (name[:6] == "alder_" || name[:6] == "ALDER_") ||
+		len(name) >= 5 && name[:5] == "Alder" {
 		return false
 	}
 	for i := 0; i < len(name); i++ {

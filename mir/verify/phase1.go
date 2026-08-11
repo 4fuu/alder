@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase1Integrity checks declaration and ID integrity: format version,

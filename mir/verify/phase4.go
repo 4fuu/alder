@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase4Dominance checks dominance and value availability: every use of a

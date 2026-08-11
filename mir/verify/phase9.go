@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase9Pointers checks the safe/raw pointer boundary: raw_ptr values may only

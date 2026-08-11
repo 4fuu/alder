@@ -17,15 +17,15 @@ static int failures = 0;
 
 int main(void) {
     int64_t data[4] = {1, 2, 3, 4};
-    AsterSlice s = {data, 4};
-    CHECK(aster_fn_sum_0(s) == 10);
+    AlderSlice s = {data, 4};
+    CHECK(alder_fn_sum_0(s) == 10);
 
-    AsterSlice empty = {NULL, 0};
-    CHECK(aster_fn_sum_0(empty) == 0);
+    AlderSlice empty = {NULL, 0};
+    CHECK(alder_fn_sum_0(empty) == 0);
 
     int64_t one[1] = {42};
-    AsterSlice single = {one, 1};
-    CHECK(aster_fn_sum_0(single) == 42);
+    AlderSlice single = {one, 1};
+    CHECK(alder_fn_sum_0(single) == 42);
 
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

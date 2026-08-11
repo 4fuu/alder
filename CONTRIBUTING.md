@@ -1,6 +1,6 @@
 # Contributing and Project Standards
 
-Aster is in an early semantic-validation phase. Small, reviewable changes that strengthen the current MIR-to-C path are preferred over broad feature work.
+Alder is in an early semantic-validation phase. Small, reviewable changes that strengthen the current MIR-to-C path are preferred over broad feature work.
 
 ## Language and Communication
 
@@ -14,7 +14,7 @@ Aster is in an early semantic-validation phase. Small, reviewable changes that s
 Changes may advance:
 
 - language-memory-model documentation;
-- Aster MIR representation, verification, and tests;
+- Alder MIR representation, verification, and tests;
 - deterministic C11 generation;
 - the minimal C runtime required by generated programs;
 - bootstrap and self-hosting infrastructure that directly serves those areas.
@@ -34,7 +34,7 @@ Proposals outside the active scope should update the roadmap or be recorded as a
 The intended compiler layering is:
 
 ```text
-source frontend -> typed HIR -> Aster MIR -> MIR verifier -> C11 backend
+source frontend -> typed HIR -> Alder MIR -> MIR verifier -> C11 backend
                                              |
                                              +-> C runtime ABI
 ```
@@ -42,7 +42,7 @@ source frontend -> typed HIR -> Aster MIR -> MIR verifier -> C11 backend
 Rules:
 
 - MIR must not depend on C syntax, LLVM concepts, or source AST node shapes.
-- Surface generic examples use compile-time `type` parameters and `Name(...)` type application; angle-bracket and square-bracket generic application are not Aster syntax.
+- Surface generic examples use compile-time `type` parameters and `Name(...)` type application; angle-bracket and square-bracket generic application are not Alder syntax.
 - Generic source constructs must be inferred and monomorphized before backend MIR and C lowering.
 - The C backend must consume only verified MIR.
 - Runtime helpers must have explicit contracts and remain usable from ordinary C11.
@@ -58,7 +58,7 @@ Rules:
 - Never depend on Go map iteration order; sort keys before emitting diagnostics, MIR, or C.
 - Avoid reflection in semantic code.
 - Include source spans in user-facing errors, but keep verifier errors usable for source-free MIR fixtures.
-- Stage 0 exists to bootstrap Aster. Do not turn it into a permanent feature-complete compiler.
+- Stage 0 exists to bootstrap Alder. Do not turn it into a permanent feature-complete compiler.
 
 ## Canonical Checks
 
@@ -70,7 +70,7 @@ Before submitting Go changes, run:
 
 Before submitting C runtime changes, additionally run:
 
-- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/aster.c` must pass;
+- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/alder.c` must pass;
 - `go test ./runtime -count=1` must pass (strict-warning compile-and-run tests, plus ASan/UBSan runs when the host toolchain supports them);
 - `go test ./cgen -count=1` must pass (golden generated-C fixtures, strict-warning compilation of every golden, compile-and-run behavior fixtures, verified-only gate, and cross-process determinism);
 - `go test ./frontend -count=1` must pass (pinned printed-MIR goldens, pinned rejection diagnostics, end-to-end source-to-C11 compile-and-run programs, and in-process and cross-process determinism).

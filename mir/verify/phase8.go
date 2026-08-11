@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // A table origin is either a formal table parameter or a stable local site.

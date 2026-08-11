@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // lowerer emits a verified-ready MIR module from checked functions.

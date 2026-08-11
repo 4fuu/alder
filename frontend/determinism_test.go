@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // allCompileSources returns every source fixture the frontend consumes.
@@ -16,10 +16,10 @@ func allCompileSources(t *testing.T) []string {
 	t.Helper()
 	var files []string
 	for _, name := range acceptFixtures {
-		files = append(files, filepath.Join("testdata", "accept", name+".ast"))
+		files = append(files, filepath.Join("testdata", "accept", name+".al"))
 	}
 	for _, e2e := range e2eFixtures {
-		files = append(files, filepath.Join("testdata", "e2e", e2e.src+".ast"))
+		files = append(files, filepath.Join("testdata", "e2e", e2e.src+".al"))
 	}
 	return files
 }
@@ -56,7 +56,7 @@ func TestCompilationDeterminism(t *testing.T) {
 	}
 }
 
-const compileHelperEnv = "ASTER_FRONTEND_DETERMINISM_HELPER"
+const compileHelperEnv = "ALDER_FRONTEND_DETERMINISM_HELPER"
 
 // TestCompileHelper is run only by TestCrossProcessCompilationDeterminism.
 func TestCompileHelper(t *testing.T) {

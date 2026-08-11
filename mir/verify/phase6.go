@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 type defKey struct {

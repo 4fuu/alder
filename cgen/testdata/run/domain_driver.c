@@ -17,12 +17,12 @@ static int failures = 0;
     } while (0)
 
 int main(void) {
-    AsterDomain root = {0};
-    CHECK(aster_domain_init(&root, NULL));
+    AlderDomain root = {0};
+    CHECK(alder_domain_init(&root, NULL));
 
     uint8_t data[3] = {7, 8, 9};
-    AsterSlice s = {data, 3};
-    AsterSlice out = aster_fn_build_0(&root, s);
+    AlderSlice s = {data, 3};
+    AlderSlice out = alder_fn_build_0(&root, s);
     CHECK(out.len == 3);
     CHECK(out.data != NULL);
     CHECK(memcmp(out.data, data, 3) == 0);
@@ -33,14 +33,14 @@ int main(void) {
     CHECK(bytes[0] == 7 && bytes[1] == 8 && bytes[2] == 9);
 
     /* Empty input yields an empty result without crashing. */
-    AsterSlice empty = {NULL, 0};
-    AsterSlice out2 = aster_fn_build_0(&root, empty);
+    AlderSlice empty = {NULL, 0};
+    AlderSlice out2 = alder_fn_build_0(&root, empty);
     CHECK(out2.len == 0);
 
     /* The function destroyed its internal domain; the root and all copied
      * storage are released with it. */
-    aster_domain_destroy(&root);
-    CHECK(aster_runtime_live_allocations() == 0u);
+    alder_domain_destroy(&root);
+    CHECK(alder_runtime_live_allocations() == 0u);
 
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

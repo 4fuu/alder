@@ -1,6 +1,6 @@
 /* Boundary tests for every checked arithmetic helper and the defined
  * float-to-integer conversions. */
-#include "aster.h"
+#include "alder.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -19,28 +19,28 @@ static int failures = 0;
 #define CHECK_OK(op, a, b, want)                                         \
     do {                                                                   \
         int64_t got = 0;                                                   \
-        CHECK(aster_i64_##op((a), (b), &got));                             \
+        CHECK(alder_i64_##op((a), (b), &got));                             \
         CHECK(got == (want));                                              \
     } while (0)
 
 #define CHECK_FAIL(op, a, b)                                               \
     do {                                                                   \
         int64_t got = 12345;                                               \
-        CHECK(!aster_i64_##op((a), (b), &got));                            \
+        CHECK(!alder_i64_##op((a), (b), &got));                            \
         CHECK(got == 12345); /* output untouched on failure */             \
     } while (0)
 
 #define CHECK_OK_U(op, a, b, want)                                         \
     do {                                                                   \
         uint64_t got = 0;                                                  \
-        CHECK(aster_u64_##op((a), (b), &got));                             \
+        CHECK(alder_u64_##op((a), (b), &got));                             \
         CHECK(got == (want));                                              \
     } while (0)
 
 #define CHECK_FAIL_U(op, a, b)                                             \
     do {                                                                   \
         uint64_t got = 12345;                                              \
-        CHECK(!aster_u64_##op((a), (b), &got));                            \
+        CHECK(!alder_u64_##op((a), (b), &got));                            \
         CHECK(got == 12345);                                               \
     } while (0)
 
@@ -135,46 +135,46 @@ static void test_u64_ops(void) {
 static void test_float_conversions(void) {
     int64_t i64 = 0;
     uint64_t u64 = 0;
-    CHECK(aster_i64_from_f64(0.0, &i64) && i64 == 0);
-    CHECK(aster_i64_from_f64(-2.5, &i64) && i64 == -2); /* truncation */
-    CHECK(aster_i64_from_f64(2.9, &i64) && i64 == 2);
-    CHECK(aster_i64_from_f64(-9223372036854775808.0, &i64) && i64 == INT64_MIN);
-    CHECK(aster_i64_from_f64(9223372036854773760.0, &i64)); /* 2^63 - 2048 */
-    CHECK(!aster_i64_from_f64(9223372036854775808.0, &i64));   /* >= 2^63 */
-    CHECK(!aster_i64_from_f64(-9223372036854777856.0, &i64));  /* < -2^63 */
+    CHECK(alder_i64_from_f64(0.0, &i64) && i64 == 0);
+    CHECK(alder_i64_from_f64(-2.5, &i64) && i64 == -2); /* truncation */
+    CHECK(alder_i64_from_f64(2.9, &i64) && i64 == 2);
+    CHECK(alder_i64_from_f64(-9223372036854775808.0, &i64) && i64 == INT64_MIN);
+    CHECK(alder_i64_from_f64(9223372036854773760.0, &i64)); /* 2^63 - 2048 */
+    CHECK(!alder_i64_from_f64(9223372036854775808.0, &i64));   /* >= 2^63 */
+    CHECK(!alder_i64_from_f64(-9223372036854777856.0, &i64));  /* < -2^63 */
 #ifdef INFINITY
-    CHECK(!aster_i64_from_f64(INFINITY, &i64));
-    CHECK(!aster_i64_from_f64(-INFINITY, &i64));
+    CHECK(!alder_i64_from_f64(INFINITY, &i64));
+    CHECK(!alder_i64_from_f64(-INFINITY, &i64));
 #endif
 #ifdef NAN
-    CHECK(!aster_i64_from_f64(NAN, &i64));
+    CHECK(!alder_i64_from_f64(NAN, &i64));
 #endif
 
-    CHECK(aster_u64_from_f64(0.0, &u64) && u64 == 0);
-    CHECK(aster_u64_from_f64(3.9, &u64) && u64 == 3);
-    CHECK(aster_u64_from_f64(18446744073709549568.0, &u64)); /* < 2^64 */
-    CHECK(!aster_u64_from_f64(-1.0, &u64));
-    CHECK(!aster_u64_from_f64(18446744073709551616.0, &u64)); /* >= 2^64 */
+    CHECK(alder_u64_from_f64(0.0, &u64) && u64 == 0);
+    CHECK(alder_u64_from_f64(3.9, &u64) && u64 == 3);
+    CHECK(alder_u64_from_f64(18446744073709549568.0, &u64)); /* < 2^64 */
+    CHECK(!alder_u64_from_f64(-1.0, &u64));
+    CHECK(!alder_u64_from_f64(18446744073709551616.0, &u64)); /* >= 2^64 */
 #ifdef NAN
-    CHECK(!aster_u64_from_f64(NAN, &u64));
+    CHECK(!alder_u64_from_f64(NAN, &u64));
 #endif
-    CHECK(!aster_i64_from_f64(1.0, NULL));
-    CHECK(!aster_u64_from_f64(1.0, NULL));
+    CHECK(!alder_i64_from_f64(1.0, NULL));
+    CHECK(!alder_u64_from_f64(1.0, NULL));
 }
 
 static void test_null_outputs(void) {
-    CHECK(!aster_i64_add_checked(1, 2, NULL));
-    CHECK(!aster_i64_sub_checked(1, 2, NULL));
-    CHECK(!aster_i64_mul_checked(1, 2, NULL));
-    CHECK(!aster_i64_div_checked(1, 2, NULL));
-    CHECK(!aster_i64_shl_checked(1, 2, NULL));
-    CHECK(!aster_i64_shr_checked(1, 2, NULL));
-    CHECK(!aster_u64_add_checked(1, 2, NULL));
-    CHECK(!aster_u64_sub_checked(1, 2, NULL));
-    CHECK(!aster_u64_mul_checked(1, 2, NULL));
-    CHECK(!aster_u64_div_checked(1, 2, NULL));
-    CHECK(!aster_u64_shl_checked(1, 2, NULL));
-    CHECK(!aster_u64_shr_checked(1, 2, NULL));
+    CHECK(!alder_i64_add_checked(1, 2, NULL));
+    CHECK(!alder_i64_sub_checked(1, 2, NULL));
+    CHECK(!alder_i64_mul_checked(1, 2, NULL));
+    CHECK(!alder_i64_div_checked(1, 2, NULL));
+    CHECK(!alder_i64_shl_checked(1, 2, NULL));
+    CHECK(!alder_i64_shr_checked(1, 2, NULL));
+    CHECK(!alder_u64_add_checked(1, 2, NULL));
+    CHECK(!alder_u64_sub_checked(1, 2, NULL));
+    CHECK(!alder_u64_mul_checked(1, 2, NULL));
+    CHECK(!alder_u64_div_checked(1, 2, NULL));
+    CHECK(!alder_u64_shl_checked(1, 2, NULL));
+    CHECK(!alder_u64_shr_checked(1, 2, NULL));
 }
 
 int main(void) {

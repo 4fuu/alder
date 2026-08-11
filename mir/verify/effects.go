@@ -1,6 +1,6 @@
 package verify
 
-import "github.com/4fuu/aster/mir"
+import "github.com/4fuu/alder/mir"
 
 // functionEffect is the finite, caller-visible lifetime contract inferred for
 // a function.  All sets are indexed by formal parameter number.  Keeping the

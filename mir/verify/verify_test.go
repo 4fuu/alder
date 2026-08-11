@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // TestGoldenAcceptance verifies that every golden fixture is accepted. The

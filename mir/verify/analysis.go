@@ -1,6 +1,6 @@
 package verify
 
-import "github.com/4fuu/aster/mir"
+import "github.com/4fuu/alder/mir"
 
 // pointCFG is a control-flow graph over instruction boundaries. boundary[b][i]
 // is the point before instruction i (and boundary[b][len(Instrs)] is before

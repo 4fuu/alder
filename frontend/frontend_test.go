@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
-	"github.com/4fuu/aster/mir/verify"
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 func compileStr(t *testing.T, src string) *mir.Module {

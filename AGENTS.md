@@ -1,14 +1,14 @@
-# Aster Repository Guidance
+# Alder Repository Guidance
 
 ## Project Status
 
-Aster is in the design and bootstrap phase. Do not claim that a compiler, runtime, or language feature is usable unless executable code and tests demonstrate it.
+Alder is in the design and bootstrap phase. Do not claim that a compiler, runtime, or language feature is usable unless executable code and tests demonstrate it.
 
 ## Active Scope
 
 Current implementation work is limited to:
 
-- Aster MIR representation, textual format, verification, and tests;
+- Alder MIR representation, textual format, verification, and tests;
 - deterministic lowering from verified MIR to conservative C11;
 - the minimal C runtime required by that lowering;
 - design and bootstrap infrastructure directly supporting those goals.
@@ -51,7 +51,7 @@ Canonical Go checks (run before committing MIR toolkit changes):
 
 Canonical C checks (run before committing runtime changes; keep the flag set synchronized with `CONTRIBUTING.md`):
 
-- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/aster.c` must pass;
+- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/alder.c` must pass;
 - `go test ./runtime -count=1` compiles and runs every runtime behavior test under the strict warning set and reruns them under ASan/UBSan when the host toolchain supports it;
 - `go test ./cgen -count=1` pins the generated-C goldens, compiles every golden under the strict warning set, runs the compile-and-run behavior fixtures, and checks generation determinism across processes;
 - `go test ./frontend -count=1` pins the printed-MIR goldens and rejection diagnostics, runs the end-to-end source-to-C11 programs, and checks compilation determinism across processes.

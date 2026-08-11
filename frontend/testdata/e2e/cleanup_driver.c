@@ -12,7 +12,7 @@ int64_t read_counter(void) {
 }
 
 int main(void) {
-    int result = (int)aster_fn_main_IDX();
+    int result = (int)alder_fn_main_IDX();
     if (g_count != 10) { return 99; }
     return result;
 }

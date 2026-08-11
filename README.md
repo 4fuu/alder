@@ -1,18 +1,18 @@
-# Aster
+# Alder
 
-Aster is an experimental systems programming language designed around predictable native performance, memory safety without tracing garbage collection, direct C interoperability, and a small user-facing memory model.
+Alder is an experimental systems programming language designed around predictable native performance, memory safety without tracing garbage collection, direct C interoperability, and a small user-facing memory model.
 
 The project is currently in the **design and bootstrap phase**. There is no usable compiler or stable language specification yet.
 
 ## Repository Status
 
-Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages provide a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. Milestone 2 (minimal runtime) and Milestone 3 (C11 backend) are also complete, with strict-warning compile-and-run and determinism tests. Milestone 4 (Aster S0) is complete as a deliberately small, single-file bootstrap frontend: it covers generic type parameters, structs, unary-payload enums, `match`, slices and `String`, `Option`/`Result`, a fixed-capacity map helper, temporary domain and cleanup bridges, and direct C symbol calls inside `unsafe c`. It does not implement inferred storage domains, the `Table(T)`/generational `T.Id` source model, modules, header importing, or the complete language. Pinned MIR, diagnostics, end-to-end programs, and determinism tests evidence the documented representative path. Sanitizer reruns are skipped on the current Windows mingw-w64 host because libasan and libubsan are unavailable. `docs/mir.md`, `docs/c-backend.md`, and `docs/language-design.md` are the contracts; `ROADMAP.md` records status and evidence.
+Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages provide a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. Milestone 2 (minimal runtime) and Milestone 3 (C11 backend) are also complete, with strict-warning compile-and-run and determinism tests. Milestone 4 (Alder S0) is complete as a deliberately small, single-file bootstrap frontend: it covers generic type parameters, structs, unary-payload enums, `match`, slices and `String`, `Option`/`Result`, a fixed-capacity map helper, temporary domain and cleanup bridges, and direct C symbol calls inside `unsafe c`. It does not implement inferred storage domains, the `Table(T)`/generational `T.Id` source model, modules, header importing, or the complete language. Pinned MIR, diagnostics, end-to-end programs, and determinism tests evidence the documented representative path. Sanitizer reruns are skipped on the current Windows mingw-w64 host because libasan and libubsan are unavailable. `docs/mir.md`, `docs/c-backend.md`, and `docs/language-design.md` are the contracts; `ROADMAP.md` records status and evidence.
 
 ## Current Scope
 
 The active implementation scope is deliberately narrow:
 
-- define a typed Aster MIR;
+- define a typed Alder MIR;
 - implement MIR construction, verification, and deterministic printing;
 - lower verified MIR to conservative C11;
 - provide the minimal C runtime required by storage domains, checked operations, cleanup, and generational tables;
@@ -31,7 +31,7 @@ LLVM must not be added as an optional dependency or parallel backend during the 
 
 ## Design Direction
 
-Aster does not expose Rust-style per-object ownership, moves, borrow chains, or routine lifetime annotations. Instead, it combines:
+Alder does not expose Rust-style per-object ownership, moves, borrow chains, or routine lifetime annotations. Instead, it combines:
 
 - **value semantics** for ordinary data;
 - **compile-time `type` values and `Name(...)` type constructors** for generics;
@@ -51,16 +51,16 @@ The design is exploratory. Claims about safety and performance remain hypotheses
 The initial bootstrap tools will be written in Go and emit C11:
 
 ```text
-Aster source or MIR fixture
+Alder source or MIR fixture
         |
         v
 Typed HIR (when the first frontend exists)
         |
         v
-Aster MIR
+Alder MIR
         |
         v
-Verified Aster MIR
+Verified Alder MIR
         |
         v
 Conservative C11 + small C runtime
@@ -74,7 +74,7 @@ The repository will move toward self-hosting after the MIR and C backend are coh
 ## Repository Documents
 
 - [Language Design](docs/language-design.md) describes the current language model.
-- [Aster MIR](docs/mir.md) defines the initial intermediate representation and its invariants.
+- [Alder MIR](docs/mir.md) defines the initial intermediate representation and its invariants.
 - [C11 Backend](docs/c-backend.md) defines lowering rules and C undefined-behavior constraints.
 - [Roadmap](ROADMAP.md) records active milestones, deferred work, and self-hosting criteria.
 - [Contributing](CONTRIBUTING.md) defines project and engineering standards.

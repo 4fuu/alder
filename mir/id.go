@@ -1,4 +1,4 @@
-// Package mir defines the typed, source-independent Aster MIR contract:
+// Package mir defines the typed, source-independent Alder MIR contract:
 // the in-memory representation, the deterministic textual printer and parser,
 // and the shared type inference used by both the parser and the verifier.
 //

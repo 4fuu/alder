@@ -1,4 +1,4 @@
-# Aster Language Design
+# Alder Language Design
 
 Status: exploratory design draft
 
@@ -6,7 +6,7 @@ This document describes the intended user-facing model. It is not yet a normativ
 
 ## Goals
 
-Aster aims to combine:
+Alder aims to combine:
 
 - memory safety without tracing garbage collection;
 - predictable native performance;
@@ -17,7 +17,7 @@ Aster aims to combine:
 
 ## Non-Goals
 
-Aster does not initially attempt to provide:
+Alder does not initially attempt to provide:
 
 - immediate reclamation for every arbitrary object graph;
 - safe, unchecked access to arbitrary C APIs;
@@ -28,7 +28,7 @@ Aster does not initially attempt to provide:
 
 ## Safety Boundary
 
-Safe Aster code should prevent:
+Safe Alder code should prevent:
 
 - null dereferences;
 - out-of-bounds access;
@@ -43,7 +43,7 @@ Operations involving raw C pointers, unverified external lifetime contracts, or 
 
 Ordinary data uses value semantics:
 
-```aster
+```alder
 type User {
     name: String
     age: Int
@@ -59,16 +59,16 @@ Cross-domain copies must be measurable by compiler diagnostics or profiling. The
 
 ## Compile-Time Type Values and Generics
 
-`type` is the compile-time metatype of Aster types. A concrete type is a compile-time value whose type is `type`:
+`type` is the compile-time metatype of Alder types. A concrete type is a compile-time value whose type is `type`:
 
-```aster
+```alder
 Int: type
 String: type
 ```
 
 A generic type declaration is a type constructor. It accepts leading `type` parameters and produces a concrete type:
 
-```aster
+```alder
 type Pair(A: type, B: type) {
     first: A
     second: B
@@ -80,17 +80,17 @@ Pair(Int, String): type
 
 Type application uses the same parenthesized application syntax as function calls:
 
-```aster
+```alder
 let pair: Pair(Int, String)
 let users: Table(User)
 let result: Result(User, IoError)
 ```
 
-Aster does not use angle brackets or square brackets for generic application. Built-in sequence syntax such as `[User]` remains dedicated syntax rather than generic application.
+Alder does not use angle brackets or square brackets for generic application. Built-in sequence syntax such as `[User]` remains dedicated syntax rather than generic application.
 
 Generic functions declare compile-time type parameters in the ordinary parameter list, before runtime parameters:
 
-```aster
+```alder
 fn identity(T: type, value: T) -> T {
     return value
 }
@@ -113,14 +113,14 @@ fn map(
 
 A call may omit the complete leading sequence of type arguments when all of them can be inferred from runtime arguments and the expected result type:
 
-```aster
+```alder
 let number = identity(42)
 let names = map(users, fn(user) => user.name)
 ```
 
 When inference is insufficient or the caller wants an explicit specialization, type values are passed as ordinary leading compile-time arguments:
 
-```aster
+```alder
 let number = identity(Int, 42)
 let names = map(User, String, users, fn(user) => user.name)
 ```
@@ -129,7 +129,7 @@ The initial language does not support partially supplying an inferred type-argum
 
 Traits are intended to refine `type` rather than introduce a separate generic parameter grammar. If `Ordered` is a trait, `T: Ordered` means that `T` is a compile-time type value satisfying that constraint:
 
-```aster
+```alder
 fn max(T: Ordered, a: T, b: T) -> T {
     if a.compare(b) == .greater {
         return a
@@ -149,7 +149,7 @@ The initial language also does not allow arbitrary user functions to synthesize 
 
 Functions, loops, task groups, requests, and selected containers establish hierarchical storage domains. The compiler places an allocation in the smallest domain proven to outlive all of its uses.
 
-```aster
+```alder
 fn summarize(data: Bytes) -> Result(Summary, Error) {
     let document = try Json.parse(data)
     let words = document["content"].as_string().words()
@@ -180,7 +180,7 @@ Segmentation mitigates the traditional arena problem where one small surviving o
 
 Long-lived objects that require stable identity and independent insertion or removal live in `Table(T)`:
 
-```aster
+```alder
 type Player {
     name: String
     health: Int
@@ -194,7 +194,7 @@ let bob = players.insert(Player(name: "Bob", health: 80, target: alice))
 
 `Player.Id` contains a table identity, slot, and generation. Removing an object invalidates existing IDs. Reusing the slot increments its generation, so an old ID cannot resolve to the new value.
 
-```aster
+```alder
 players.remove(alice)
 
 if let player = players[alice] {
@@ -206,7 +206,7 @@ Table access produces a scoped view. A view cannot be stored beyond the operatio
 
 Graphs use IDs rather than persistent interior addresses:
 
-```aster
+```alder
 type Node {
     label: String
     edges: [Node.Id]
@@ -219,7 +219,7 @@ Cycles do not affect reclamation because IDs do not count references. The table 
 
 External resources use deterministic lexical cleanup:
 
-```aster
+```alder
 fn copy(from: Path, to: Path) -> Result(Unit, IoError) {
     using input = try File.open(from)
     using output = try File.create(to)
@@ -232,9 +232,9 @@ Cleanup runs in reverse registration order on normal return, error propagation, 
 
 ## Errors and Optional Values
 
-Aster uses explicit algebraic values rather than hidden exceptions and null:
+Alder uses explicit algebraic values rather than hidden exceptions and null:
 
-```aster
+```alder
 enum LoadError {
     NotFound(path: Path)
     InvalidFormat(line: Int)
@@ -248,7 +248,7 @@ fn load(path: Path) -> Result(Config, LoadError) {
 
 Optional values use `T?` and are handled with `if let`, `match`, or `else`:
 
-```aster
+```alder
 let user = users.find(id)
     else return Err(NotFound(id))
 ```
@@ -257,7 +257,7 @@ let user = users.find(id)
 
 Child tasks normally cannot outlive their lexical task group:
 
-```aster
+```alder
 let reports = try taskgroup scans {
     for path in paths {
         scans.spawn {
@@ -277,7 +277,7 @@ A detached task creates an independent domain. Captured immutable values may req
 
 C headers are intended to be importable with C ABI layout and calling conventions:
 
-```aster
+```alder
 import c "fastwords.h" as fastwords
 
 fn count_words(bytes: Bytes) -> Result(Int, WordError) {
@@ -293,13 +293,13 @@ fn count_words(bytes: Bytes) -> Result(Int, WordError) {
 }
 ```
 
-The initial C backend may delegate difficult target-specific declarations to the system C compiler, but the Aster frontend still needs enough imported type information to type-check safe wrappers.
+The initial C backend may delegate difficult target-specific declarations to the system C compiler, but the Alder frontend still needs enough imported type information to type-check safe wrappers.
 
 Foreign functions that retain pointers require explicit pin, copy, or foreign-owner wrappers. A temporary domain reference must never be passed under a contract that permits retention after the call.
 
 ## Example: Document Index
 
-```aster
+```alder
 type Document {
     path: Path
     title: String
@@ -355,7 +355,7 @@ async fn build_index(paths: [Path]) -> Result(Index, Error) {
 
 The scan tasks release file contents and parser data when each task domain ends. Intermediate scan results live through index construction. Documents are constructed in table storage and linked through stable IDs.
 
-## Milestone 4 Bootstrap Subset (Aster S0)
+## Milestone 4 Bootstrap Subset (Alder S0)
 
 Status: normative for the implemented Go Stage 0 frontend
 
@@ -419,7 +419,7 @@ Composite types:
 - generic structs use leading compile-time parameters such as
   `type Pair(A: type, B: type)`, and unary enum payloads require labels:
 
-```aster
+```alder
 enum Maybe(T: type) {
     Some(value: T)
     None

@@ -1,4 +1,4 @@
-// Package runtime tests the minimal Aster C11 runtime by compiling and
+// Package runtime tests the minimal Alder C11 runtime by compiling and
 // running strict-warning C11 test programs with the system C compiler, and
 // by running them under ASan/UBSan when the host toolchain supports it.
 package runtime
@@ -46,7 +46,7 @@ func compileAndRun(t *testing.T, cc, name string, extra ...string) {
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join("c"),
 		filepath.Join("testdata", name+".c"),
-		filepath.Join("c", "aster.c"), "-o", exe)
+		filepath.Join("c", "alder.c"), "-o", exe)
 	out, err := exec.Command(cc, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("compile %s.c failed: %v\n%s", name, err, out)
@@ -60,7 +60,7 @@ func compileAndRun(t *testing.T, cc, name string, extra ...string) {
 	}
 }
 
-// TestRuntimePanic checks that aster_runtime_panic prints a message and exits
+// TestRuntimePanic checks that alder_runtime_panic prints a message and exits
 // nonzero (the harness normally requires exit code 0).
 func TestRuntimePanic(t *testing.T) {
 	cc := findCompiler(t)
@@ -70,7 +70,7 @@ func TestRuntimePanic(t *testing.T) {
 	args = append(args, strictFlags...)
 	args = append(args, "-I", filepath.Join("c"),
 		filepath.Join("testdata", "panic.c"),
-		filepath.Join("c", "aster.c"), "-o", exe)
+		filepath.Join("c", "alder.c"), "-o", exe)
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile panic.c failed: %v\n%s", err, out)
 	}

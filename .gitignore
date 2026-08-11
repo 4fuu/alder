@@ -1,5 +1,5 @@
 /build/
-/.aster-cache/
+/.alder-cache/
 *.a
 *.o
 *.obj

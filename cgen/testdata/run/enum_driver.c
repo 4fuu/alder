@@ -17,55 +17,55 @@ static int failures = 0;
 
 /* The generated @Shape type: tag 0 = Circle(i64), 1 = Square(i64),
  * 2 = Dot. */
-static AsterTy12 make_circle(int64_t r) {
-    AsterTy12 s = {0};
-    s.aster_tag = (uint32_t)0;
-    s.aster_u.aster_p0 = r;
+static AlderTy12 make_circle(int64_t r) {
+    AlderTy12 s = {0};
+    s.alder_tag = (uint32_t)0;
+    s.alder_u.alder_p0 = r;
     return s;
 }
 
-static AsterTy12 make_square(int64_t t) {
-    AsterTy12 s = {0};
-    s.aster_tag = (uint32_t)1;
-    s.aster_u.aster_p1 = t;
+static AlderTy12 make_square(int64_t t) {
+    AlderTy12 s = {0};
+    s.alder_tag = (uint32_t)1;
+    s.alder_u.alder_p1 = t;
     return s;
 }
 
-static AsterTy12 make_dot(void) {
-    AsterTy12 s = {0};
-    s.aster_tag = (uint32_t)2;
+static AlderTy12 make_dot(void) {
+    AlderTy12 s = {0};
+    s.alder_tag = (uint32_t)2;
     return s;
 }
 
-static int64_t tag_of(AsterTy12 s) { return (int64_t)s.aster_tag; }
+static int64_t tag_of(AlderTy12 s) { return (int64_t)s.alder_tag; }
 
 int main(void) {
     /* classify: 0 -> Dot, negative -> Circle, positive -> Square. */
-    CHECK(tag_of(aster_fn_classify_0(0)) == 2);
-    CHECK(tag_of(aster_fn_classify_0(-3)) == 0);
-    CHECK(tag_of(aster_fn_classify_0(7)) == 1);
+    CHECK(tag_of(alder_fn_classify_0(0)) == 2);
+    CHECK(tag_of(alder_fn_classify_0(-3)) == 0);
+    CHECK(tag_of(alder_fn_classify_0(7)) == 1);
 
     /* area: Circle(3) -> 9, Square(4) -> 16, Dot -> 0. */
-    CHECK(aster_fn_area_1(make_circle(3)) == 9);
-    CHECK(aster_fn_area_1(make_square(4)) == 16);
-    CHECK(aster_fn_area_1(make_dot()) == 0);
+    CHECK(alder_fn_area_1(make_circle(3)) == 9);
+    CHECK(alder_fn_area_1(make_square(4)) == 16);
+    CHECK(alder_fn_area_1(make_dot()) == 0);
 
     /* half: even -> some(n/2), odd -> none. The option layout is the same
-     * tagged union: tag 0 = none, tag 1 = some(payload in aster_p1). */
-    AsterTy13 even = aster_fn_half_2(10);
-    CHECK(even.aster_tag == (uint32_t)1);
-    CHECK(even.aster_u.aster_p1 == 5);
-    AsterTy13 odd = aster_fn_half_2(7);
-    CHECK(odd.aster_tag == (uint32_t)0);
+     * tagged union: tag 0 = none, tag 1 = some(payload in alder_p1). */
+    AlderTy13 even = alder_fn_half_2(10);
+    CHECK(even.alder_tag == (uint32_t)1);
+    CHECK(even.alder_u.alder_p1 == 5);
+    AlderTy13 odd = alder_fn_half_2(7);
+    CHECK(odd.alder_tag == (uint32_t)0);
 
     /* checked_div: 10 / 2 -> ok(5); 1 / 0 -> err(Dot). The result layout:
      * tag 0 = ok, tag 1 = err. */
-    AsterTy14 ok = aster_fn_checked_div_3(10, 2);
-    CHECK(ok.aster_tag == (uint32_t)0);
-    CHECK(ok.aster_u.aster_p0 == 5);
-    AsterTy14 err = aster_fn_checked_div_3(1, 0);
-    CHECK(err.aster_tag == (uint32_t)1);
-    CHECK(err.aster_u.aster_p1.aster_tag == (uint32_t)2); /* Dot */
+    AlderTy14 ok = alder_fn_checked_div_3(10, 2);
+    CHECK(ok.alder_tag == (uint32_t)0);
+    CHECK(ok.alder_u.alder_p0 == 5);
+    AlderTy14 err = alder_fn_checked_div_3(1, 0);
+    CHECK(err.alder_tag == (uint32_t)1);
+    CHECK(err.alder_u.alder_p1.alder_tag == (uint32_t)2); /* Dot */
 
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

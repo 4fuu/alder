@@ -30,4 +30,4 @@ fi
 
 printf 'Go: %s\n' "$(go version)"
 printf 'C compiler: %s\n' "$(cc --version | sed -n '1p')"
-printf '%s\n' 'Aster orb setup complete.'
+printf '%s\n' 'Alder orb setup complete.'

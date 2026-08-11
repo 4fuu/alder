@@ -1,10 +1,10 @@
-# Aster MIR
+# Alder MIR
 
 Status: versioned contract with a working Go toolkit
 
-Aster MIR is the typed, source-independent contract between semantic analysis and code generation. The `mir` Go package implements the in-memory representation, the deterministic textual printer and parser, and the type inference shared by the parser and the verifier. The verifier lives in `mir/verify`.
+Alder MIR is the typed, source-independent contract between semantic analysis and code generation. The `mir` Go package implements the in-memory representation, the deterministic textual printer and parser, and the type inference shared by the parser and the verifier. The verifier lives in `mir/verify`.
 
-MIR must express Aster semantics without depending on C syntax or a future native backend. The C11 backend is a consumer, not the definition, of MIR.
+MIR must express Alder semantics without depending on C syntax or a future native backend. The C11 backend is a consumer, not the definition, of MIR.
 
 ## Design Requirements
 
@@ -38,7 +38,7 @@ A function contains:
 - block parameters rather than implicit phi nodes;
 - exactly one terminator per block.
 
-Mutable language variables lower to explicit places and stores. Pure computed temporaries are single-assignment values. Aster has no MIR `move` operation that invalidates a source value.
+Mutable language variables lower to explicit places and stores. Pure computed temporaries are single-assignment values. Alder has no MIR `move` operation that invalidates a source value.
 
 Values are defined by function parameters, block parameters, instruction results, and switch case payload bindings. A value may be used only where its definition dominates the use (see Verifier Phases). Calls and FFI calls whose result type is `unit` may be left unbound; every other producing operation must bind its result.
 

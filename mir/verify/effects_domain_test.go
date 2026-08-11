@@ -3,7 +3,7 @@ package verify
 import (
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // These tests intentionally use non-leading parameters. AddFunction leaves

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/cgen"
-	"github.com/4fuu/aster/mir"
-	"github.com/4fuu/aster/mir/verify"
+	"github.com/4fuu/alder/cgen"
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 // e2eFixtures are the end-to-end source programs. Each must define main
@@ -61,19 +61,19 @@ func defaultDriver(m *mir.Module) (string, error) {
 	f := m.Functions[id]
 	var call string
 	if len(f.Params) > 0 && f.Params[0].Type == m.DomainHandle() {
-		call = fmt.Sprintf("aster_fn_main_%d(&aster_root)", id)
+		call = fmt.Sprintf("alder_fn_main_%d(&alder_root)", id)
 	} else {
-		call = fmt.Sprintf("aster_fn_main_%d()", id)
+		call = fmt.Sprintf("alder_fn_main_%d()", id)
 	}
 	return fmt.Sprintf(`#include "gen.c"
 #include <stdio.h>
 int main(void) {
     int result = 0;
-    AsterDomain aster_root;
-    if (!aster_domain_init(&aster_root, NULL)) { return 97; }
+    AlderDomain alder_root;
+    if (!alder_domain_init(&alder_root, NULL)) { return 97; }
     result = (int)%s;
-    aster_domain_destroy(&aster_root);
-    if (aster_runtime_live_allocations() != (size_t)0) { return 98; }
+    alder_domain_destroy(&alder_root);
+    if (alder_runtime_live_allocations() != (size_t)0) { return 98; }
     return result;
 }
 `, call), nil
@@ -107,7 +107,7 @@ func TestE2E(t *testing.T) {
 			for _, e2e := range e2eFixtures {
 				e2e := e2e
 				t.Run(e2e.src, func(t *testing.T) {
-					src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".ast"))
+					src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".al"))
 					gen, m := compileAndGenerate(t, src)
 					driver := ""
 					if e2e.driver == "default" {
@@ -124,7 +124,7 @@ func TestE2E(t *testing.T) {
 						if !ok {
 							t.Fatal("fixture has no main function")
 						}
-						driver = strings.ReplaceAll(driver, "aster_fn_main_IDX", fmt.Sprintf("aster_fn_main_%d", id))
+						driver = strings.ReplaceAll(driver, "alder_fn_main_IDX", fmt.Sprintf("alder_fn_main_%d", id))
 					}
 					genPath, driverPath := writeFiles(t, e2e.src, gen, driver)
 					exe := filepath.Join(t.TempDir(), e2e.src+".exe")
@@ -133,7 +133,7 @@ func TestE2E(t *testing.T) {
 						"-Wshadow", "-Wconversion",
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
-						genPath, driverPath, filepath.Join("..", "runtime", "c", "aster.c"),
+						genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
 						"-o", exe,
 					}
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
@@ -154,7 +154,7 @@ func TestE2ERoundTrip(t *testing.T) {
 	for _, e2e := range e2eFixtures {
 		e2e := e2e
 		t.Run(e2e.src, func(t *testing.T) {
-			src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".ast"))
+			src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".al"))
 			m, err := Compile(src)
 			if err != nil {
 				t.Fatal(err)

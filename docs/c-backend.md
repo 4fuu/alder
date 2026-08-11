@@ -2,14 +2,14 @@
 
 Status: Milestone 3 lowering contract with a working Go implementation
 
-The Aster backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Aster MIR. Its purpose is to validate Aster MIR semantics and provide a bootstrap path, not to make C the semantic definition of Aster.
+The Alder backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Alder MIR. Its purpose is to validate Alder MIR semantics and provide a bootstrap path, not to make C the semantic definition of Alder.
 
 LLVM and other native backends are outside the current scope.
 
 ## Pipeline
 
 ```text
-verified Aster MIR
+verified Alder MIR
         |
         v
 backend-specific naming and layout
@@ -17,7 +17,7 @@ backend-specific naming and layout
         v
 deterministic C11 translation unit
         |
-        +---- minimal Aster C runtime
+        +---- minimal Alder C runtime
         |
         v
 Clang or GCC
@@ -29,22 +29,22 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 
 ### Naming and layout
 
-- generated identifiers derive from stable numeric IDs: `aster_v<N>` for values, `aster_l<N>` for locals, `aster_b<N>` for block labels, `AsterTy<N>` for struct types, `AsterFnTy<N>` for function-pointer typedefs, `aster_fn_<name>_<id>` for functions, `aster_copy_ty<N>` for copy helpers, `aster_str_<N>` for string constants, and `aster_domain_<N>`, `aster_scope_<N>`, `AsterCtx_<N>`, `aster_ctx_<N>`, `aster_cleanup_<N>` for hidden slots, contexts, and cleanup adapters;
-- source aggregate field names never become C members: fields use declaration ordinals (`aster_f<N>`), preventing sanitized-name collisions. Types and copy helpers are emitted in stable dependency-first order, with forward typedefs for record-like types;
-- all generated statics carry `ASTER_MAYBE_UNUSED` so drivers and dead MIR code compile under `-Werror`.
+- generated identifiers derive from stable numeric IDs: `alder_v<N>` for values, `alder_l<N>` for locals, `alder_b<N>` for block labels, `AlderTy<N>` for struct types, `AlderFnTy<N>` for function-pointer typedefs, `alder_fn_<name>_<id>` for functions, `alder_copy_ty<N>` for copy helpers, `alder_str_<N>` for string constants, and `alder_domain_<N>`, `alder_scope_<N>`, `AlderCtx_<N>`, `alder_ctx_<N>`, `alder_cleanup_<N>` for hidden slots, contexts, and cleanup adapters;
+- source aggregate field names never become C members: fields use declaration ordinals (`alder_f<N>`), preventing sanitized-name collisions. Types and copy helpers are emitted in stable dependency-first order, with forward typedefs for record-like types;
+- all generated statics carry `ALDER_MAYBE_UNUSED` so drivers and dead MIR code compile under `-Werror`.
 
 ### Type mapping
 
 - `unit` is represented by `(uint8_t)0` only where storage or an expression is required; unit SSA declarations and assignments are erased. It is `void` as a function result, while unit parameters and call arguments are omitted, which is exact because unit has exactly one value;
 - `bool` maps to `bool`; integers to the exact-width `intN_t`/`uintN_t` (which C11 requires to be two's complement); floats to `float`/`double`;
-- aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t aster_tag` (variant index) and a union of non-unit payloads named `aster_p<index>`. An empty aggregate has one private byte because portable C11 has no empty structs;
-- `slice`, `safe_ref`, and `safe_mut` share the runtime `AsterSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AsterDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AsterTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AsterCleanupScope *` pointing at a per-create-site slot;
-- `function(Signature)` maps to an `AsterFnTy<N>` function-pointer typedef; an empty C parameter list is written as `(void)`.
+- aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t alder_tag` (variant index) and a union of non-unit payloads named `alder_p<index>`. An empty aggregate has one private byte because portable C11 has no empty structs;
+- `slice`, `safe_ref`, and `safe_mut` share the runtime `AlderSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AlderDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AlderTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AlderCleanupScope *` pointing at a per-create-site slot;
+- `function(Signature)` maps to an `AlderFnTy<N>` function-pointer typedef; an empty C parameter list is written as `(void)`.
 
 ### Values and control flow
 
 - every non-unit MIR value becomes one C variable; block parameters are C variables assigned at every edge before the `goto`. Edge arguments are first captured in typed temporaries and then assigned to parameters, preserving MIR's parallel-copy semantics for swaps and cycles;
-- blocks lower to labels (`aster_b<N>`); the entry block needs no label because it has no predecessors; dead blocks keep their code and `unreachable` lowers to `aster_runtime_panic("unreachable")`;
+- blocks lower to labels (`alder_b<N>`); the entry block needs no label because it has no predecessors; dead blocks keep their code and `unreachable` lowers to `alder_runtime_panic("unreachable")`;
 - `return` and `fail` both lower to `return <result>;` (the distinction is semantic, for diagnostics);
 - switch dispatches on the tag with `case (uint32_t)<variant index>`; case payload bindings are assigned from the union before the edge assignments.
 
@@ -60,18 +60,18 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 - narrow non-shift operations promote operands to 64 bits, compute with the helper, range-check the result against the narrow limits, and cast; the narrow operation fails exactly when the promoted computation or the range check fails;
 - narrow shifts check the count against the source width first (unsigned counts only against the width), then compute at that width: unsigned targets wrap by casting, signed left shifts transfer the width-bit two's-complement pattern with `memcpy`, and signed right shifts use unsigned shifting plus explicit sign-bit fill rather than C's implementation-defined signed `>>`;
 - failure edges use the same parallel-copy temporaries as ordinary edges before the `goto`;
-- `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AsterSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
+- `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AlderSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
 - `int.trunc` to an unsigned target wraps by casting; to a signed target it transfers the two's-complement bit pattern with `memcpy`;
 - `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
 
 ### Domains, cleanup, and tables
 
-- `domain.create` initializes a hidden per-site `AsterDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because MIR 1 forbids carrying handles across backedges;
+- `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because MIR 1 forbids carrying handles across backedges;
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
-- `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `aster_domain_alloc`, and a slice with the count; overflow and out-of-memory terminate;
+- `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `alder_domain_alloc`, and a slice with the count; overflow and out-of-memory terminate;
 - `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. A slice whose element type contains references is rejected at generation time (M3 copies bytes, so a nested reference would be shared instead of copied);
 - `cleanup.scope.begin` initializes a hidden per-site scope slot; `cleanup.push` fills a per-site context struct and registers a generated adapter; `disarm`, `run`, and `end` call the runtime and terminate on contract violations;
-- `table.create` allocates a zeroed `AsterTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
+- `table.create` allocates a zeroed `AlderTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
 
 ### Calls and C ABI
 
@@ -86,7 +86,7 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 
 ### Unchecked failure policy
 
-Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `aster_runtime_panic`. Checked MIR operations never reach it; they always branch to their explicit failure edge.
+Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `alder_runtime_panic`. Checked MIR operations never reach it; they always branch to their explicit failure edge.
 
 ### Documented M3 limitations
 
@@ -106,7 +106,7 @@ Generated C does not receive hidden runtime type arguments merely because the so
 
 In order:
 
-1. preserve defined Aster behavior;
+1. preserve defined Alder behavior;
 2. avoid C undefined behavior for all safe MIR;
 3. generate deterministic output;
 4. remain inspectable during semantic debugging;
@@ -123,7 +123,7 @@ The initial supported compilers are expected to be recent Clang and GCC. Exact m
 
 C leaves the order of many subexpressions unspecified. MIR operations with side effects must lower through explicit temporaries and statements.
 
-Aster MIR:
+Alder MIR:
 
 ```text
 %a = call @left()
@@ -134,11 +134,11 @@ Aster MIR:
 Generated C must preserve the sequence:
 
 ```c
-int64_t aster_tmp_a = aster_left();
-int64_t aster_tmp_b = aster_right();
-int64_t aster_tmp_sum;
-if (!aster_i64_add_checked(aster_tmp_a, aster_tmp_b, &aster_tmp_sum)) {
-    goto aster_overflow;
+int64_t alder_tmp_a = alder_left();
+int64_t alder_tmp_b = alder_right();
+int64_t alder_tmp_sum;
+if (!alder_i64_add_checked(alder_tmp_a, alder_tmp_b, &alder_tmp_sum)) {
+    goto alder_overflow;
 }
 ```
 
@@ -146,7 +146,7 @@ It must not combine these into a C expression whose evaluation order differs fro
 
 ## Integer Semantics
 
-Generated C must not use undefined signed overflow to implement Aster arithmetic. The Milestone 2 runtime provides checked 64-bit helpers (`aster_i64_*` and `aster_u64_*` in `runtime/c/aster.h`) for add, sub, mul, div, and the distinct `int.shl.checked` and `int.shr.checked` operations, plus defined float-to-integer conversions. Narrow non-shift MIR integer operations lower by promoting operands to 64 bits, computing with the checked helpers, and range-checking the result against the narrow type; the narrow operation fails exactly when the promoted computation or the range check fails.
+Generated C must not use undefined signed overflow to implement Alder arithmetic. The Milestone 2 runtime provides checked 64-bit helpers (`alder_i64_*` and `alder_u64_*` in `runtime/c/alder.h`) for add, sub, mul, div, and the distinct `int.shl.checked` and `int.shr.checked` operations, plus defined float-to-integer conversions. Narrow non-shift MIR integer operations lower by promoting operands to 64 bits, computing with the checked helpers, and range-checking the result against the narrow type; the narrow operation fails exactly when the promoted computation or the range check fails.
 
 Narrow shifts are width-aware and must not be implemented by blindly calling a 64-bit helper followed by a range check. The backend first rejects a count greater than or equal to the source width. Left shift masks the result to that width and reconstructs the signed value from the width-bit two's-complement pattern; unsigned right shift is logical, while signed right shift sign-extends from the source width. For example, `i8(127) shl i8(1)` produces `i8(-2)`, while either `i8` or `u8` shifted by eight takes its checked failure edge.
 
@@ -193,7 +193,7 @@ Slice indexing lowers to an explicit check before address calculation:
 
 ```c
 if (index >= slice.len) {
-    goto aster_bounds_failure;
+    goto alder_bounds_failure;
 }
 value = slice.data[index];
 ```
@@ -202,7 +202,7 @@ The backend must avoid performing invalid pointer arithmetic before the check. A
 
 ## Storage Domains
 
-The Milestone 2 runtime ABI is pinned in `runtime/c/aster.h`; the detailed
+The Milestone 2 runtime ABI is pinned in `runtime/c/alder.h`; the detailed
 contracts below are the canonical reference.
 
 ```c
@@ -210,35 +210,35 @@ contracts below are the canonical reference.
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct AsterDomain AsterDomain;   /* layout is ABI, fields internal */
+typedef struct AlderDomain AlderDomain;   /* layout is ABI, fields internal */
 typedef struct {
     uint64_t domain_serial;
     uint64_t reset_epoch;
     uint64_t segment_serial;
     size_t offset;
-} AsterDomainMark;
+} AlderDomainMark;
 
-bool aster_domain_init(AsterDomain *domain, AsterDomain *parent);
-void *aster_domain_alloc(AsterDomain *domain, size_t size, size_t align);
-AsterDomainMark aster_domain_mark(AsterDomain *domain);
-bool aster_domain_reset(AsterDomain *domain, AsterDomainMark mark);
-void aster_domain_destroy(AsterDomain *domain);
-size_t aster_runtime_live_allocations(void);
+bool alder_domain_init(AlderDomain *domain, AlderDomain *parent);
+void *alder_domain_alloc(AlderDomain *domain, size_t size, size_t align);
+AlderDomainMark alder_domain_mark(AlderDomain *domain);
+bool alder_domain_reset(AlderDomain *domain, AlderDomainMark mark);
+void alder_domain_destroy(AlderDomain *domain);
+size_t alder_runtime_live_allocations(void);
 ```
 
 Failure contracts:
 
-- `aster_domain_init` returns false for a double init, an uninitialized or
+- `alder_domain_init` returns false for a double init, an uninitialized or
 destroyed parent, or exhausted process-wide domain identities; the struct must
 be zero-initialized or freshly destroyed;
-- `aster_domain_alloc` returns NULL when the domain is not initialized, the
+- `alder_domain_alloc` returns NULL when the domain is not initialized, the
 alignment is not a power of two (or zero), size plus alignment slack
 overflows `size_t`, memory is exhausted, or stable segment identities are
 exhausted. A zero size allocates one byte;
-- `aster_domain_reset` returns false for a destroyed domain, an exhausted reset
+- `alder_domain_reset` returns false for a destroyed domain, an exhausted reset
 epoch, a mark from another domain or an earlier reset epoch, a segment identity
 that is no longer active, or an offset past the segment frontier;
-- `aster_domain_destroy` is a no-op on uninitialized or already-destroyed
+- `alder_domain_destroy` is a no-op on uninitialized or already-destroyed
 domains; destroying a parent recursively destroys its children.
 
 Lifetime contracts:
@@ -266,8 +266,8 @@ create/reset/destroy cycles without a leak sanitizer.
 ## Cleanup Lowering
 
 MIR cleanup scopes lower to explicit, visible control flow. The runtime side
-(`AsterCleanupScope`, `aster_cleanup_scope_begin/push/disarm/run/end` in
-`runtime/c/aster.h`) owns the entry list: pushes register a function pointer
+(`AlderCleanupScope`, `alder_cleanup_scope_begin/push/disarm/run/end` in
+`runtime/c/alder.h`) owns the entry list: pushes register a function pointer
 and context, `run` executes armed entries in reverse registration order,
 each exactly once, and `end` frees every entry. `end` returns false (and
 still releases entries) when the scope was not run or still has armed
@@ -279,9 +279,9 @@ is a backend mechanism and does not appear in MIR semantics.
 
 ## Generational Tables
 
-The Milestone 2 ABI is `AsterTable` plus `AsterTableId { table_serial, slot,
-generation }` and `aster_table_init/insert/lookup/lookup_mut/remove` in
-`runtime/c/aster.h`. The table serial comes from a non-wrapping global counter,
+The Milestone 2 ABI is `AlderTable` plus `AlderTableId { table_serial, slot,
+generation }` and `alder_table_init/insert/lookup/lookup_mut/remove` in
+`runtime/c/alder.h`. The table serial comes from a non-wrapping global counter,
 so an id never resolves against an unrelated table even when a fresh table
 reuses the same address; exhaustion permanently fails later initialization.
 Slot generations likewise fail before wraparound, so a removed slot never

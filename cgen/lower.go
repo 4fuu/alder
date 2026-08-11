@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/4fuu/aster/mir"
-	"github.com/4fuu/aster/mir/verify"
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 // cType returns the C type of a MIR type.
@@ -42,25 +42,25 @@ func (g *gen) cType(t mir.TypeId) string {
 	ty := &g.m.Types[t]
 	switch ty.Kind {
 	case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult:
-		return "AsterTy" + strconv.Itoa(int(t))
+		return "AlderTy" + strconv.Itoa(int(t))
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
-		return "AsterSlice"
+		return "AlderSlice"
 	case mir.TypeRawPtr:
 		return "void *"
 	case mir.TypeFunction:
-		return "AsterFnTy" + strconv.Itoa(int(t))
+		return "AlderFnTy" + strconv.Itoa(int(t))
 	case mir.TypeDomainHandle:
-		return "AsterDomain *"
+		return "AlderDomain *"
 	case mir.TypeDomainMark:
-		return "AsterDomainMark"
+		return "AlderDomainMark"
 	case mir.TypeCleanupScope:
-		return "AsterCleanupScope *"
+		return "AlderCleanupScope *"
 	case mir.TypeCleanupID:
-		return "AsterCleanupId"
+		return "AlderCleanupId"
 	case mir.TypeTable:
-		return "AsterTable *"
+		return "AlderTable *"
 	case mir.TypeID:
-		return "AsterTableId"
+		return "AlderTableId"
 	case mir.TypeTableView, mir.TypeTableMutView:
 		return "void *"
 	}
@@ -82,7 +82,7 @@ func (g *gen) typeAlign(t mir.TypeId) string {
 
 // val returns the C variable of a value.
 func (g *gen) val(v mir.ValueId) string {
-	return "aster_v" + strconv.Itoa(int(v))
+	return "alder_v" + strconv.Itoa(int(v))
 }
 
 // valueExpr returns a C expression for a MIR value. Unit values have no C
@@ -98,20 +98,20 @@ func (g *gen) valueExpr(v mir.ValueId) string {
 func (g *gen) fieldName(base *mir.Place, sourceName string) string {
 	t, ok := g.m.PlaceType(g.f, base)
 	if !ok || !g.m.ValidType(t) || g.m.Types[t].Kind != mir.TypeAggregate {
-		return "aster_invalid_field"
+		return "alder_invalid_field"
 	}
 	for i, field := range g.m.Types[t].Fields {
 		if field.Name == sourceName {
-			return "aster_f" + strconv.Itoa(i)
+			return "alder_f" + strconv.Itoa(i)
 		}
 	}
-	return "aster_invalid_field"
+	return "alder_invalid_field"
 }
 
 // tmp returns the name of the instruction-local temporary keyed by the
 // result value, which is unique per function.
 func (g *gen) tmp(in *mir.Instr, suffix string) string {
-	return "aster_t" + strconv.Itoa(int(in.Result)) + suffix
+	return "alder_t" + strconv.Itoa(int(in.Result)) + suffix
 }
 
 // emitFunction lowers one function: declarations, hidden slots, blocks, and
@@ -132,7 +132,7 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 	g.edgeUsed = 0
 	fi := fnIndexOf(g.m, f)
 
-	b.WriteString("static ASTER_MAYBE_UNUSED " + g.fnResultType(f) + " " +
+	b.WriteString("static ALDER_MAYBE_UNUSED " + g.fnResultType(f) + " " +
 		g.fnName(fnIndexOf(g.m, f)) + "(" + g.fnParams(f) + ") {\n")
 	for vi, v := range f.Values {
 		switch v.Def.Kind {
@@ -142,19 +142,19 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 		if v.Type == mir.TypeUnit {
 			continue // unit values lower to the literal 0
 		}
-		b.WriteString("  ASTER_MAYBE_UNUSED " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + ";\n")
+		b.WriteString("  ALDER_MAYBE_UNUSED " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + ";\n")
 	}
 	for li, l := range f.Locals {
-		b.WriteString("  ASTER_MAYBE_UNUSED " + g.cType(l.Type) + " aster_l" + strconv.Itoa(li) + ";\n")
+		b.WriteString("  ALDER_MAYBE_UNUSED " + g.cType(l.Type) + " alder_l" + strconv.Itoa(li) + ";\n")
 	}
 	for i := 0; i < g.domainTotal[int(fi)]; i++ {
-		b.WriteString("  AsterDomain aster_domain_" + strconv.Itoa(i) + " = {0};\n")
+		b.WriteString("  AlderDomain alder_domain_" + strconv.Itoa(i) + " = {0};\n")
 	}
 	for i := 0; i < g.scopeTotal[int(fi)]; i++ {
-		b.WriteString("  AsterCleanupScope aster_scope_" + strconv.Itoa(i) + " = {0};\n")
+		b.WriteString("  AlderCleanupScope alder_scope_" + strconv.Itoa(i) + " = {0};\n")
 	}
 	for _, s := range g.ctxSitesIn(f) {
-		b.WriteString("  AsterCtx_" + strconv.Itoa(s) + " aster_ctx_" + strconv.Itoa(s) + " = {0};\n")
+		b.WriteString("  AlderCtx_" + strconv.Itoa(s) + " alder_ctx_" + strconv.Itoa(s) + " = {0};\n")
 	}
 	// Function parameters cannot carry indeterminate values, so an explicit
 	// void use safely suppresses strict unused-parameter warnings.
@@ -174,7 +174,7 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 		// must precede statements, not declarations. Dead blocks (never
 		// jumped to) mark their label as possibly unused.
 		if i > 0 {
-			b.WriteString("aster_b" + strconv.Itoa(i) + ": ASTER_MAYBE_UNUSED ;\n")
+			b.WriteString("alder_b" + strconv.Itoa(i) + ": ALDER_MAYBE_UNUSED ;\n")
 		}
 		for ii := range blk.Instrs {
 			g.emitInstr(b, blk, &blk.Instrs[ii])

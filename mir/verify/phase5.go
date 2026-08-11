@@ -3,7 +3,7 @@ package verify
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // phase5Typing checks place well-formedness and mutability, instruction

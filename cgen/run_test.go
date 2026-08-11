@@ -33,7 +33,7 @@ func runArgs(gen, driver string) []string {
 		"-Wshadow", "-Wconversion",
 		"-I", filepath.Dir(gen),
 		"-I", filepath.Join("..", "runtime", "c"),
-		gen, driver, filepath.Join("..", "runtime", "c", "aster.c"),
+		gen, driver, filepath.Join("..", "runtime", "c", "alder.c"),
 	}
 }
 
@@ -88,7 +88,7 @@ func TestFloatNarrowingPanics(t *testing.T) {
 			const source = `#include "gen.c"
 #include <float.h>
 int main(void) {
-    (void)aster_fn_narrow_11(DBL_MAX);
+    (void)alder_fn_narrow_11(DBL_MAX);
     return 0;
 }
 `

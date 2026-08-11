@@ -1,4 +1,4 @@
-// Package verify implements the Aster MIR verifier: deterministic,
+// Package verify implements the Alder MIR verifier: deterministic,
 // source-independent diagnostics over the ten documented phases.
 //
 // Diagnostics are stable: they identify the owning function, block, and
@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // Error is one deterministic verifier diagnostic. Loc identifies the owning

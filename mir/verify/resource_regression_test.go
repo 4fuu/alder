@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 func verifyText(t *testing.T, text string) Errors {

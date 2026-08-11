@@ -5,11 +5,11 @@ This roadmap separates committed near-term work from longer-term direction. Date
 ## Project Principles
 
 1. Validate semantics before optimizing them.
-2. Keep one production path during bootstrap: Aster MIR to C11.
+2. Keep one production path during bootstrap: Alder MIR to C11.
 3. Make unsafe behavior explicit and locally auditable.
 4. Prefer deterministic, inspectable compiler output.
 5. Do not expand the user-facing memory model to fix isolated performance cases.
-6. Start self-hosting as soon as a small Aster subset can express the compiler; do not first build a complete compiler in Go.
+6. Start self-hosting as soon as a small Alder subset can express the compiler; do not first build a complete compiler in Go.
 
 ## Active Scope
 
@@ -21,7 +21,7 @@ Deliverables:
 
 - document language goals, non-goals, and unresolved semantics;
 - document compile-time `type` values, type application, inference, and the monomorphization boundary;
-- define the first versioned Aster MIR vocabulary;
+- define the first versioned Alder MIR vocabulary;
 - define the C11 lowering contract and undefined-behavior policy;
 - establish repository, contribution, and orb lifecycle standards;
 - choose representative validation programs.
@@ -64,7 +64,7 @@ exists; it is not required for this milestone.
 
 Status: **complete**
 
-Deliverables (implemented in `runtime/c/aster.h` and `runtime/c/aster.c`):
+Deliverables (implemented in `runtime/c/alder.h` and `runtime/c/alder.c`):
 
 - portable C11 storage-domain primitives: init/alloc/mark/reset/destroy with parent-child tracking;
 - epoch-scoped marks, resets to the empty frontier, segmented bump allocation (doubling regular segments up to 1 MiB, dedicated exact-size large segments), alignment and overflow/OOM handling;
@@ -75,7 +75,7 @@ Deliverables (implemented in `runtime/c/aster.h` and `runtime/c/aster.c`):
 
 Exit-criteria evidence:
 
-- every runtime API carries an explicit failure and lifetime contract in `runtime/c/aster.h` and `docs/c-backend.md`;
+- every runtime API carries an explicit failure and lifetime contract in `runtime/c/alder.h` and `docs/c-backend.md`;
 - repeated domain create/reset/destroy cycles are leak-free: a live-allocation counter proves zero retained heap blocks on every tested host, and the same suites rerun under ASan/UBSan where the toolchain supports them (the current mingw-w64 host lacks libasan/libubsan, so those runs skip);
 - empty-frontier reset, consumed-mark rejection, and stable integer mark identities are pinned by runtime and verifier tests;
 - stale generational IDs never resolve to reused objects: slot reuse always assigns a fresh generation, ids carry a non-wrapping table serial, and reset/destroy/re-init changes the owning domain identity or epoch;
@@ -114,7 +114,7 @@ Status: **complete**
 Deliverables (implemented in the `frontend` Go package):
 
 - a deterministic lexer, parser, type checker, and MIR emitter for the
-  single-file source subset defined in `docs/language-design.md` (Aster S0):
+  single-file source subset defined in `docs/language-design.md` (Alder S0):
   functions, primitives, structs, enums with `match`, slices and `String`,
   `Option`/`Result` with `try`, a fixed-capacity `Map` helper, bootstrap
   domain intrinsics, callback-bearing `using` cleanup, and direct concrete C
@@ -164,11 +164,11 @@ does not claim that S0 exercises every backend mechanism.
 
 Bootstrap stages:
 
-1. `aster0`, written in Go, compiles the Aster compiler to C11.
-2. A system C compiler builds that C as `aster1`.
-3. `aster1` compiles the same Aster compiler sources as `aster2`.
+1. `alder0`, written in Go, compiles the Alder compiler to C11.
+2. A system C compiler builds that C as `alder1`.
+3. `alder1` compiles the same Alder compiler sources as `alder2`.
 4. Stable MIR or C output is compared between stages.
-5. A generated, auditable `bootstrap/aster.c` is committed for source distribution.
+5. A generated, auditable `bootstrap/alder.c` is committed for source distribution.
 
 After repeatable self-hosting, the Go bootstrap compiler is frozen except for correctness and bootstrap maintenance.
 

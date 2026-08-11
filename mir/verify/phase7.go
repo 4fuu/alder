@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 type cleanupSite struct {

@@ -15,4 +15,4 @@ if ((${#missing[@]} > 0)); then
   exit 1
 fi
 
-printf '%s\n' 'Aster orb prerequisites are available.'
+printf '%s\n' 'Alder orb prerequisites are available.'

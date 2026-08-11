@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
+	"github.com/4fuu/alder/mir"
 )
 
 // allFixtures returns every textual MIR fixture used by the test suite.
@@ -66,7 +66,7 @@ func TestPipelineDeterminism(t *testing.T) {
 	}
 }
 
-const determinismHelperEnv = "ASTER_DETERMINISM_HELPER"
+const determinismHelperEnv = "ALDER_DETERMINISM_HELPER"
 
 // TestPipelineDeterminismHelper is run only by TestPipelineCrossProcessDeterminism.
 // The parent supplies the package directory because each helper has a distinct cwd.

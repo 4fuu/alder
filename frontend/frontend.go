@@ -3,8 +3,8 @@ package frontend
 import (
 	"fmt"
 
-	"github.com/4fuu/aster/mir"
-	"github.com/4fuu/aster/mir/verify"
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 // Compile compiles a source module to a MIR module. Type inference and

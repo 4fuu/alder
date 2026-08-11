@@ -1,4 +1,4 @@
-// Package frontend is the Go Stage 0 Aster compiler: deterministic source
+// Package frontend is the Go Stage 0 Alder compiler: deterministic source
 // text -> fully typed and monomorphized program -> verified MIR 1 -> C11.
 //
 // The pipeline is strict: type inference and monomorphization complete

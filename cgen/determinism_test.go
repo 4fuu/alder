@@ -47,7 +47,7 @@ func TestGenerationDeterminism(t *testing.T) {
 	}
 }
 
-const determinismHelperEnv = "ASTER_CGEN_DETERMINISM_HELPER"
+const determinismHelperEnv = "ALDER_CGEN_DETERMINISM_HELPER"
 
 // TestDeterminismHelper is run only by TestCrossProcessDeterminism. The
 // parent supplies the output directory; each helper runs with a distinct

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/aster/mir"
-	"github.com/4fuu/aster/mir/verify"
+	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 // acceptFixtures compile to verified MIR whose printed form is pinned.
@@ -57,13 +57,13 @@ var rejectFixtures = []string{
 
 func acceptSource(t *testing.T, name string) string {
 	t.Helper()
-	return readFixture(t, filepath.Join("testdata", "accept", name+".ast"))
+	return readFixture(t, filepath.Join("testdata", "accept", name+".al"))
 }
 
 // TestAccept pins the printed MIR of every accept fixture. Set
-// ASTER_UPDATE_GOLDEN=1 to regenerate.
+// ALDER_UPDATE_GOLDEN=1 to regenerate.
 func TestAccept(t *testing.T) {
-	update := os.Getenv("ASTER_UPDATE_GOLDEN") == "1"
+	update := os.Getenv("ALDER_UPDATE_GOLDEN") == "1"
 	for _, name := range acceptFixtures {
 		name := name
 		t.Run(name, func(t *testing.T) {
@@ -84,7 +84,7 @@ func TestAccept(t *testing.T) {
 			}
 			want, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("missing golden %s (run with ASTER_UPDATE_GOLDEN=1): %v", path, err)
+				t.Fatalf("missing golden %s (run with ALDER_UPDATE_GOLDEN=1): %v", path, err)
 			}
 			if got != string(want) {
 				t.Errorf("printed MIR differs from %s\n--- got ---\n%s\n--- want ---\n%s", path, got, want)
@@ -98,7 +98,7 @@ func TestReject(t *testing.T) {
 	for _, name := range rejectFixtures {
 		name := name
 		t.Run(name, func(t *testing.T) {
-			src := readFixture(t, filepath.Join("testdata", "reject", name+".ast"))
+			src := readFixture(t, filepath.Join("testdata", "reject", name+".al"))
 			_, err := Compile(src)
 			if err == nil {
 				t.Fatalf("fixture %s compiled unexpectedly", name)
