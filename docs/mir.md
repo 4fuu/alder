@@ -132,12 +132,17 @@ branch condition, then_block, else_block
 switch value { cases..., default? }
 return [value]
 fail value
+panic
 unreachable
 ```
 
 - Block arguments must exactly match target block parameter types.
 - A switch dispatches on an enum-like value: a declared enum, an option (`none`, `some`), or a result (`ok`, `err`). A case may bind the variant payload as a new value; the case `default` (represented as a case with an empty variant name) is allowed at most once. A switch must cover every variant of its operand type or contain a default case.
 - `return` and `fail` both exit with a value of the function's result type; `fail` marks the failure path. A `return` without an operand returns `unit`.
+- `panic` is a MIR 2 valueless, successor-less checked-failure exit. A checked
+  edge may reach it only after explicit cleanup of current-function cleanup
+  scopes; it does not unwind caller frames. MIR 1 modules cannot contain this
+  terminator.
 - `unreachable` is valid only in blocks that are unreachable from the entry block. Reachable blocks must not terminate with `unreachable`.
 - Every statement starts a new line; the parser rejects statements that do not.
 
@@ -160,7 +165,7 @@ Required invariants:
 - reset invalidates storage allocated after the corresponding mark;
 - a mark made before the first allocation resets the domain to empty, and a
   successful reset consumes every outstanding mark for that domain epoch;
-- MIR 1 conservatively invalidates every table owned by a reset domain because
+- the current MIR profile conservatively invalidates every table owned by a reset domain because
   table insertion and growth contain runtime allocations not represented as
   separate MIR values;
 - no safe reference may be used after its domain reset or destruction;
@@ -277,7 +282,20 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 
 ## Textual MIR
 
-The textual format is versioned (`mir 1`) and is the canonical fixture format. Function headers are predeclared in textual order before function bodies are parsed, so calls and cleanup callbacks may name the current function or any later function; `FunctionId` values remain textual declaration order. Named types, constants, and imports still require declaration before use, including from function bodies. The parser otherwise requires declarations before uses, one statement per line, and deterministic name resolution. The printer emits canonical text; printing a canonical golden fixture reproduces it byte for byte, while comments and noncanonical layout are intentionally normalized. Parse-print-parse reaches a stable fixed point for every MIR fixture. `#` starts a line comment.
+The current textual format is `mir 2`; the parser and verifier retain legacy
+`mir 1` support for existing fixtures. MIR 2 differs from MIR 1 only by adding
+the `panic` terminator, so a `mir 1` module containing `panic` is rejected
+rather than silently changing the old format. Function headers are predeclared
+in textual order before function bodies are parsed, so calls and cleanup
+callbacks may name the current function or any later function; `FunctionId`
+values remain textual declaration order. Named types, constants, and imports
+still require declaration before use, including from function bodies. The
+parser otherwise requires declarations before uses, one statement per line,
+and deterministic name resolution. The printer preserves the parsed version
+and emits the current version for newly constructed modules. Printing a
+canonical golden fixture reproduces it byte for byte, while comments and
+noncanonical layout are intentionally normalized. Parse-print-parse reaches a
+stable fixed point for every MIR fixture. `#` starts a line comment.
 
 ```text
 module   := "mir" version (typeDecl | enumDecl | constDecl | importDecl | fnDecl)*
@@ -294,11 +312,14 @@ terminator:= "jump" blockref
            | "switch" value "{" (variant ["(" "%" name ")"] "->" blockref)* ["default" "->" blockref] "}"
            | "return" [value]
            | "fail" value
+           | "panic"
            | "unreachable"
 blockref := ident ["(" value* ")"]
 place    := "local" "%" name | "field" "(" place "," ident ")" | "deref" value
 type     := primitive | "@" name | structural type | singleton
 ```
+
+The `panic` production is available only in MIR 2.
 
 Checked operations append `else blockref` on the same line. Types print and parse in the canonical forms shown throughout this document (`slice(u8)`, `result(@Summary, @LoadError)`, `function(fn(i64) -> bool)`, and so on).
 
@@ -327,12 +348,12 @@ Initial conservative rules:
 - reference-containing values may flow through SSA values and `deref` places; the verifier tracks storage derivation through allocations, copies, table operations, aggregate and enum construction, loads, block parameters, and switch bindings, and rejects a use when the value may have been reset or destroyed on any reachable incoming path;
 - domain and reference lifetime effects are propagated through ordinary calls and active cleanup callbacks by deterministic whole-module fixed-point summaries; recursive call graphs are supported;
 - at a function boundary, a reference-containing parameter is conservatively allowed to depend on any `domain_handle` parameter. A caller's more precise provenance is retained when mapping call results and effects;
-- externally supplied domain handles and tables may alias other compatible parameters unless local provenance proves distinct identities. To avoid unsummarized interprocedural memory writes, MIR 1 rejects storing values that recursively contain safe references, slices, tables, domain handles, or domain marks through a dereference-based place; local-place stores remain supported and field-sensitive;
+- externally supplied domain handles and tables may alias other compatible parameters unless local provenance proves distinct identities. To avoid unsummarized interprocedural memory writes, the current MIR profile rejects storing values that recursively contain safe references, slices, tables, domain handles, or domain marks through a dereference-based place; local-place stores remain supported and field-sensitive;
 - Phase 6 resource state is path-sensitive and joins with a conservative union. Checked-operation failure edges observe the state before the checked instruction's effect;
-- Domain identity and parent ancestry are tracked separately: destroying a child does not destroy its parent, while destroying a parent invalidates descendant handles and allocations. MIR 1 permits create/allocate/destroy wholly within each loop iteration, but conservatively rejects function-local domain handles and references carried through block arguments or stored from a cyclic block across a backedge; this avoids conflating dynamic instances of one static allocation site or reviving an older alias.
+- Domain identity and parent ancestry are tracked separately: destroying a child does not destroy its parent, while destroying a parent invalidates descendant handles and allocations. The current MIR profile permits create/allocate/destroy wholly within each loop iteration, but conservatively rejects function-local domain handles and references carried through block arguments or stored from a cyclic block across a backedge; this avoids conflating dynamic instances of one static allocation site or reviving an older alias.
 - Domain marks keep direct SSA identity. Reset consumes all marks corresponding to the reset domain, and a later `domain.mark` produces a fresh runtime-epoch mark;
-- Ordinary functions may not return `domain_handle` or `domain_mark` in MIR 1. Their result identity and parent relation cannot yet be represented by function-effect summaries, so Phase 2 rejects such signatures rather than losing provenance at a call.
-- local-place provenance distinguishes field paths. Dereference-based memory has no general alias declaration in MIR 1, so Phase 6 conservatively treats dereference stores as possible sources for dereference loads;
+- Ordinary functions may not return `domain_handle` or `domain_mark` in the current MIR profile. Their result identity and parent relation cannot yet be represented by function-effect summaries, so Phase 2 rejects such signatures rather than losing provenance at a call.
+- local-place provenance distinguishes field paths. Dereference-based memory has no general alias declaration in the current MIR profile, so Phase 6 conservatively treats dereference stores as possible sources for dereference loads;
 - returned values must not contain references derived from function-local domains;
 - `unreachable` terminators are accepted only in blocks unreachable from the entry block;
 - table identities originate at function table parameters and `table.create` sites and are preserved through block parameters, memory, aggregate/enum values, and ordinary calls. A call returning a newly-created table receives a stable call-site identity;
@@ -346,7 +367,9 @@ Diagnostics must be stable and must identify the relevant function, block, opera
 
 ## Versioning
 
-Textual MIR carries an explicit format version (`mir 1`); external fixtures are stable from this version on. Incompatible changes must update:
+Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
+format; `mir 2` is current and adds only the valueless `panic` terminator.
+Incompatible changes must use a new version and update:
 
 - this document;
 - parser/printer golden files;

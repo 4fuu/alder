@@ -1,1 +1,1 @@
-line 3, column 15: operator + requires integer operands (float arithmetic is not available in MIR 1)
+line 3, column 15: operator + requires integer operands (float arithmetic is not available in the current MIR profile)

@@ -362,7 +362,7 @@ Status: normative for the implemented Go Stage 0 frontend
 M4 implements a deliberately small source surface that exercises a
 representative subset of the MIR and C backend end to end. The `frontend` Go
 package deterministically transforms source text into a fully typed and
-monomorphized program, verified MIR 1, and C11. This is a bootstrap bridge,
+monomorphized program, verified MIR 2, and C11. This is a bootstrap bridge,
 not a complete frontend or the final surface language.
 
 S0 does not implement storage inference, the `Table(T)` and `T.Id` surface,
@@ -454,7 +454,7 @@ Restrictions (each with a diagnostic):
 
 - struct fields, enum payloads, and slice element types are plain value
   types; slices and references may not be nested in them (`[String]` is
-  rejected) because MIR 1 forbids lifetime-bearing stores through dereference
+  rejected) because the current MIR profile forbids lifetime-bearing stores through dereference
   places;
 - value-type recursion (direct or indirect, including through `Option`) is
   rejected as an infinite layout;
@@ -468,16 +468,17 @@ Restrictions (each with a diagnostic):
   they may not be passed where a `[T]` parameter is required;
 - `Ptr(T)` values may only be FFI results, FFI arguments, and function
   results;
-- a full map has no growth: `Set` on a full map fails the function;
+- a full map has no growth: `Set` on a full map follows the checked-failure
+  panic policy below;
 - domains always have a parent: `__s0_domain_create(p)` creates a child of
   `p`, and a root `Domain` comes from the environment (the C driver in tests);
 - domain marks may not be bound to `let` or `var`;
   `__s0_domain_reset(d, __s0_domain_mark(d))` uses the mark directly because
-  MIR 1 requires the reset mark to be the direct `domain.mark` result;
+  the current MIR profile requires the reset mark to be the direct `domain.mark` result;
 - function-typed values are not part of the subset (no higher-order
   functions);
 - strings compare by length and bytes only; `==` on strings is rejected
-  (MIR 1 has no structural comparison).
+  (the current MIR profile has no structural comparison).
 
 ### Expressions
 
@@ -491,9 +492,9 @@ Restrictions (each with a diagnostic):
   `== != < <= > >=` on same-type integers or same-type floats, and
   short-circuit `&&` / `||` on `Bool`;
 - bitwise operators are absent from the subset (documented MIR gap);
-- `len(x)` (slice length, `U64`), `x[i]` (checked index, `U64`; out of
-  bounds fails the function with a zero result value, the MIR 1 fail-edge
-  convention), `range(x, lo, hi)` (checked bounds, same failure semantics);
+- `len(x)` (slice length, `U64`), `x[i]` (checked index, `U64`), and
+  `range(x, lo, hi)` (checked bounds); checked failure follows the invariant
+  panic policy below;
 - calls: user functions, builtins, and C imports only through the `unsafe c`
   form described below; generic calls may supply the
   complete leading sequence of compile-time type arguments explicitly
@@ -517,7 +518,7 @@ Restrictions (each with a diagnostic):
 
 The `__s0_` names are reserved bootstrap-only intrinsics. Together with the
 `Domain` and `DomainMark` bridge types, they expose enough machinery to reach
-MIR 1 tests; they are not the intended source memory model. The long-term
+the current MIR tests; they are not the intended source memory model. The long-term
 model remains compiler-inferred hierarchical storage domains for ordinary
 values and `Table(T)` with generational `T.Id` for long-lived identity.
 
@@ -525,11 +526,11 @@ values and `Table(T)` with generational `T.Id` for long-lived identity.
 copy) are statements; `for` and `while` have no `break` or `continue`.
 `match` may also appear as an expression statement. Other pure expressions
 as statements are rejected. Checked operations (arithmetic, shifts, indexes,
-ranges) that fail at runtime fail the current function with a zero value of
-its result type; the fail value is a diagnostic convention, and the MIR 1
-text format requires the result type to be materializable as a zero value,
-so functions whose result contains slices, references, or maps cannot
-contain checked operations.
+ranges, and fixed-map insertion) are invariant checks: failure runs and ends
+cleanup scopes opened and still active in the detecting function, in reverse
+lexical order, then terminates the process. It does not fabricate a function
+result, propagate through `Result`, recover, or unwind caller frames. Explicit
+`Result` propagation through `try` remains a typed ordinary failure return.
 
 ### Variables and places
 
@@ -549,12 +550,14 @@ contain checked operations.
 return `Unit`. The frontend opens a scope at the `using` statement and
 emits `Run` + `End` on normal lexical-scope fallthrough, return, failed `try`,
 and checked-operation failure, in reverse registration order and on exactly
-the paths that opened the scope.
-This is the only cleanup surface in the subset: MIR 1 requires cleanup
+the paths that opened the scope. Checked failure cleans only the detecting
+function before terminating; caller scopes are not unwound. If a cleanup
+callback itself terminates, no guarantee is made that later callbacks run.
+This is the only cleanup surface in the subset: the current MIR profile requires cleanup
 handles to have direct instruction-result SSA identity, so they cannot
 cross source-level bindings, and the low-level scope API is not exposed.
 `using` inside a loop is rejected (a scope cannot re-begin while active).
-The callback-bearing `with` form is an S0 bridge required by MIR 1, not the
+The callback-bearing `with` form is an S0 bridge required by the current MIR profile, not the
 intended resource model. The long-term syntax remains `using x = expr`, with
 cleanup selected by the resource's contract.
 

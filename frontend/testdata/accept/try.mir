@@ -1,4 +1,4 @@
-mir 1
+mir 2
 
 const @lit.int.c0: i64 = 0
 
@@ -30,13 +30,11 @@ bb_else:
 
 bb_join:
   %v3 = int.div.checked %n, %d else bb_fail
-  %v6 = enum.construct result(i64, i64), ok, %v3
-  return %v6
+  %v4 = enum.construct result(i64, i64), ok, %v3
+  return %v4
 
 bb_fail:
-  %v4 = const.get @lit.int.c0
-  %v5 = enum.construct result(i64, i64), err, %v4
-  fail %v5
+  panic
 }
 
 fn @propagate(%d: i64) -> result(i64, i64) {

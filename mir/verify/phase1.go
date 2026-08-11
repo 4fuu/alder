@@ -11,8 +11,8 @@ import (
 // consistent value definitions.
 func phase1Integrity(m *mir.Module) []Error {
 	var errs []Error
-	if m.FormatVersion != 1 {
-		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (expected 1)", m.FormatVersion)})
+	if m.FormatVersion != mir.LegacyFormatVersion && m.FormatVersion != mir.CurrentFormatVersion {
+		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2)", m.FormatVersion)})
 	}
 	if len(m.Types) < int(mir.NumPrimitiveTypes) {
 		errs = append(errs, Error{Msg: fmt.Sprintf("type table has %d entries; expected at least %d canonical primitive slots", len(m.Types), mir.NumPrimitiveTypes)})
@@ -614,7 +614,7 @@ func checkTerm(m *mir.Module, f *mir.Function, b *mir.Block, bi int) []Error {
 			errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("%s out of range", what)})
 		}
 	}
-	if b.Term.Kind > mir.TermUnreachable {
+	if b.Term.Kind > mir.TermPanic {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown terminator kind %d", b.Term.Kind)}}
 	}
 	switch b.Term.Kind {
@@ -662,6 +662,13 @@ func checkTerm(m *mir.Module, f *mir.Function, b *mir.Block, bi int) []Error {
 		checkVal(b.Term.Result, "fail operand")
 	case mir.TermReturn:
 		checkVal(b.Term.Result, "return operand")
+	case mir.TermPanic:
+		if m.FormatVersion < mir.CurrentFormatVersion {
+			errs = append(errs, Error{Loc: loc, Msg: "panic requires MIR format version 2"})
+		}
+		if b.Term.Result != mir.NoValue {
+			errs = append(errs, Error{Loc: loc, Msg: "panic may not have an operand"})
+		}
 	}
 	return errs
 }

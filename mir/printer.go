@@ -357,6 +357,9 @@ func printTerm(b *strings.Builder, m *Module, f *Function, t *Terminator) {
 	case TermFail:
 		b.WriteString("fail " + valueName(f, t.Result))
 
+	case TermPanic:
+		b.WriteString("panic")
+
 	case TermUnreachable:
 		b.WriteString("unreachable")
 	}

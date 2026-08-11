@@ -8,16 +8,6 @@ enum Flag {
     Tagged(value: U64)
 }
 
-fn fill_full(d: Domain) -> I64 {
-    var m = __s0_map_create(Map(U64, U64), d)
-    var i: U64 = 0
-    while i < 17 {
-        Set(m, i, i)
-        i = i + 1
-    }
-    return 7
-}
-
 fn main(d: Domain) -> I32 {
     var m = __s0_map_create(Map(U64, I64), d)
     Set(m, 1, 100)
@@ -125,11 +115,6 @@ fn main(d: Domain) -> I32 {
         None => 0
     } != 13 {
         return 14
-    }
-    // A full map fails the source function rather than only its generated
-    // Unit-returning helper.
-    if fill_full(d) != 0 {
-        return 15
     }
     return 0
 }

@@ -148,6 +148,123 @@ func TestE2E(t *testing.T) {
 	}
 }
 
+func TestCheckedFailureRunsCurrentFunctionCleanupThenPanics(t *testing.T) {
+	src := `
+import c note: fn(I64) -> Unit
+fn cleanup(x: I64) -> Unit { unsafe c { note(x) } }
+fn main() -> I32 {
+    using outer = 1 with cleanup
+    using inner = 2 with cleanup
+    let zero: I64 = 0
+    let checked = 1 / zero
+    return 0
+}
+`
+	gen, m := compileAndGenerate(t, src)
+	id, ok := m.Function("main")
+	if !ok {
+		t.Fatal("fixture has no main function")
+	}
+	driver := fmt.Sprintf(`#include "gen.c"
+#include <stdio.h>
+void note(int64_t x) { (void)fprintf(stderr, "cleanup:%%lld\n", (long long)x); }
+int main(void) { return (int)alder_fn_main_%d(); }
+`, id)
+	for _, cc := range findCCompilers(t) {
+		genPath, driverPath := writeFiles(t, "checked_panic", gen, driver)
+		exe := filepath.Join(t.TempDir(), "checked_panic.exe")
+		args := []string{
+			"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+			"-Wshadow", "-Wconversion",
+			"-I", filepath.Dir(genPath),
+			"-I", filepath.Join("..", "runtime", "c"),
+			genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+			"-o", exe,
+		}
+		if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("strict compile failed: %v\n%s", err, out)
+		}
+		out, err := exec.Command(exe).CombinedOutput()
+		if err == nil {
+			t.Fatal("checked failure exited successfully")
+		}
+		text := string(out)
+		inner := strings.Index(text, "cleanup:2")
+		outer := strings.Index(text, "cleanup:1")
+		panicMessage := strings.Index(text, "alder runtime panic: checked operation failed")
+		if inner < 0 || outer <= inner || panicMessage <= outer {
+			t.Fatalf("cleanup/panic order mismatch:\n%s", text)
+		}
+	}
+}
+
+func TestCheckedBoundaryFailuresPanic(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "u8_overflow",
+			src: `
+fn main() -> I32 {
+    var n: U8 = 200
+    n = n + 100
+    return 0
+}
+`,
+		},
+		{
+			name: "map_capacity",
+			src: `
+fn main(d: Domain) -> I32 {
+    var m = __s0_map_create(Map(U64, U64), d)
+    var i: U64 = 0
+    while i < 17 {
+        Set(m, i, i)
+        i = i + 1
+    }
+    return 0
+}
+`,
+		},
+	}
+	for _, cc := range findCCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			for _, tc := range tests {
+				tc := tc
+				t.Run(tc.name, func(t *testing.T) {
+					gen, m := compileAndGenerate(t, tc.src)
+					driver, err := defaultDriver(m)
+					if err != nil {
+						t.Fatal(err)
+					}
+					genPath, driverPath := writeFiles(t, tc.name, gen, driver)
+					exe := filepath.Join(t.TempDir(), tc.name+".exe")
+					args := []string{
+						"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+						"-Wshadow", "-Wconversion",
+						"-I", filepath.Dir(genPath),
+						"-I", filepath.Join("..", "runtime", "c"),
+						genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+						"-o", exe,
+					}
+					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+						t.Fatalf("strict compile failed: %v\n%s", err, out)
+					}
+					out, err := exec.Command(exe).CombinedOutput()
+					if err == nil {
+						t.Fatal("checked boundary failure exited successfully")
+					}
+					if text := string(out); !strings.Contains(text, "alder runtime panic: checked operation failed") {
+						t.Fatalf("missing checked-failure panic message:\n%s", text)
+					}
+				})
+			}
+		})
+	}
+}
+
 // TestE2ERoundTrip prints each fixture's MIR, re-parses it, and verifies the
 // printed form is stable and valid.
 func TestE2ERoundTrip(t *testing.T) {

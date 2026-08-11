@@ -121,8 +121,8 @@ func (p *parser) parseModule() error {
 	if err != nil {
 		return p.errf(vt, "invalid format version %q", vt.text)
 	}
-	if n != 1 {
-		return p.errf(vt, "unsupported format version %d (expected 1)", n)
+	if n != LegacyFormatVersion && n != CurrentFormatVersion {
+		return p.errf(vt, "unsupported format version %d (supported: 1, 2)", n)
 	}
 	p.m.FormatVersion = n
 
@@ -691,7 +691,7 @@ func (p *parser) parseInstrUnbound() error {
 	}
 	t := p.peek()
 	switch t.text {
-	case "jump", "branch", "switch", "return", "fail", "unreachable":
+	case "jump", "branch", "switch", "return", "fail", "panic", "unreachable":
 		return p.parseTerminator()
 	}
 	in, err := p.parseOp()
@@ -1351,6 +1351,12 @@ func (p *parser) parseTerminator() error {
 			return err
 		}
 		b.Term.Result = v
+	case "panic":
+		if p.m.FormatVersion < CurrentFormatVersion {
+			return p.errf(t, "panic requires MIR format version 2")
+		}
+		b.Term.Kind = TermPanic
+		b.Term.Result = NoValue
 	case "unreachable":
 		b.Term.Kind = TermUnreachable
 	}

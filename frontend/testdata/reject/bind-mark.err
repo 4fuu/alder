@@ -1,1 +1,1 @@
-line 2, column 5: domain marks cannot be bound; use them directly (MIR 1 requires the reset mark to be the direct domain.mark result)
+line 2, column 5: domain marks cannot be bound; use them directly (the current MIR profile requires the reset mark to be the direct domain.mark result)

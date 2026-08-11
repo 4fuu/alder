@@ -1,4 +1,4 @@
-mir 1
+mir 2
 
 enum @Shape.c0 {
   Circle(i64)
@@ -34,16 +34,15 @@ bb_arm0:
   jump bb_join(%v)
 
 bb_arm1:
-  %v2 = int.mul.checked %w, %w else bb_fail
-  jump bb_join(%v2)
+  %v1 = int.mul.checked %w, %w else bb_fail
+  jump bb_join(%v1)
 
 bb_arm2:
-  %v3 = const.get @lit.int.c0
-  jump bb_join(%v3)
+  %v2 = const.get @lit.int.c0
+  jump bb_join(%v2)
 
 bb_fail:
-  %v1 = const.get @lit.int.c0
-  fail %v1
+  panic
 }
 
 fn @main() -> i32 {

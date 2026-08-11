@@ -34,10 +34,10 @@ fn main() -> I32 {
     if x != 1 {
         return 6
     }
-    // Narrow arithmetic with wrapping.
+    // Narrow arithmetic remains in range.
     var n: U8 = 200
-    n = n + 100
-    if n != 44 {
+    n = n + 55
+    if n != 255 {
         return 7
     }
     // Shift semantics at the source width.

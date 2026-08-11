@@ -1,22 +1,22 @@
-mir 1
+mir 2
 
-const @lit.int.c0: i64 = 0
+const @lit.int.c0: i64 = 20
 
-const @lit.int.c1: i64 = 20
+const @lit.int.c1: i64 = 22
 
-const @lit.int.c2: i64 = 22
+const @lit.int.c2: i64 = 42
 
-const @lit.int.c3: i64 = 42
+const @lit.int.c3: i32 = 1
 
-const @lit.int.c4: i32 = 1
+const @lit.int.c4: i64 = 0
 
 const @lit.int.c5: i64 = 3
 
 const @lit.int.c6: i64 = 1
 
-const @lit.int.c7: i32 = 0
+const @lit.int.c7: i32 = 2
 
-const @lit.int.c8: i32 = 2
+const @lit.int.c8: i32 = 0
 
 fn @add(%a: i64, %b: i64) -> i64 {
 bb0:
@@ -24,30 +24,29 @@ bb0:
   return %v
 
 bb_fail:
-  %v0 = const.get @lit.int.c0
-  fail %v0
+  panic
 }
 
 fn @main() -> i32 {
   local %x: i64
 
 bb0:
-  %v = const.get @lit.int.c1
-  %v0 = const.get @lit.int.c2
+  %v = const.get @lit.int.c0
+  %v0 = const.get @lit.int.c1
   %v1 = call @add(%v, %v0)
-  %v2 = const.get @lit.int.c3
+  %v2 = const.get @lit.int.c2
   %v3 = int.ne %v1, %v2
   branch %v3, bb_then, bb_else
 
 bb_then:
-  %v4 = const.get @lit.int.c4
+  %v4 = const.get @lit.int.c3
   return %v4
 
 bb_else:
   jump bb_join
 
 bb_join:
-  %v5 = const.get @lit.int.c0
+  %v5 = const.get @lit.int.c4
   store local %x, %v5
   jump bb_head
 
@@ -65,23 +64,22 @@ bb_body:
   jump bb_head
 
 bb_join0:
-  %v13 = load local %x
-  %v14 = const.get @lit.int.c5
-  %v15 = int.ne %v13, %v14
-  branch %v15, bb_then0, bb_else0
+  %v12 = load local %x
+  %v13 = const.get @lit.int.c5
+  %v14 = int.ne %v12, %v13
+  branch %v14, bb_then0, bb_else0
 
 bb_fail:
-  %v12 = const.get @lit.int.c7
-  fail %v12
+  panic
 
 bb_then0:
-  %v16 = const.get @lit.int.c8
-  return %v16
+  %v15 = const.get @lit.int.c7
+  return %v15
 
 bb_else0:
   jump bb_join1
 
 bb_join1:
-  %v17 = const.get @lit.int.c7
-  return %v17
+  %v16 = const.get @lit.int.c8
+  return %v16
 }

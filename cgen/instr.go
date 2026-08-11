@@ -720,6 +720,9 @@ func (g *gen) emitTerm(b *strings.Builder, blk *mir.Block) {
 			b.WriteString("  return " + g.valueExpr(t.Result) + ";\n")
 		}
 
+	case mir.TermPanic:
+		b.WriteString("  alder_runtime_panic(\"checked operation failed\");\n")
+
 	case mir.TermUnreachable:
 		b.WriteString("  alder_runtime_panic(\"unreachable\");\n")
 	}

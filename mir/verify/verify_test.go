@@ -209,6 +209,27 @@ func TestMalformedTypeAndPlaceAPIRejections(t *testing.T) {
 		}
 	})
 
+	t.Run("panic operand", func(t *testing.T) {
+		m := mir.NewModule()
+		f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}}, mir.TypeUnit)
+		f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermPanic, Result: 0})
+		errs := Module(m)
+		if !containsMsg(errs, "panic may not have an operand") {
+			t.Fatalf("panic operand not reported:\n%s", Errors(errs).String())
+		}
+	})
+
+	t.Run("panic in legacy format", func(t *testing.T) {
+		m := mir.NewModule()
+		m.FormatVersion = mir.LegacyFormatVersion
+		f := m.AddFunction("f", nil, mir.TypeUnit)
+		f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermPanic, Result: mir.NoValue})
+		errs := Module(m)
+		if !containsMsg(errs, "panic requires MIR format version 2") {
+			t.Fatalf("legacy panic not reported:\n%s", Errors(errs).String())
+		}
+	})
+
 	t.Run("cycle through structural type", func(t *testing.T) {
 		m := mir.NewModule()
 		a := m.AddAggregate("A", nil)

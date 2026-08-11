@@ -249,7 +249,7 @@ Exit-criteria evidence:
   every tested input permutation without scanning the filesystem in the core;
 - cross-file declarations share one top-level namespace, and duplicate
   diagnostics carry deterministic primary and related source ranges;
-- MIR 1 predeclares function headers in textual order, round-trips self,
+- MIR 1 and MIR 2 predeclare function headers in textual order, round-trip self,
   forward, mutual-recursive, and cleanup-callback references, and retains
   declaration-before-use for named types, constants, and imports;
 - program generation verifies MIR before entry validation, exports only
@@ -264,8 +264,12 @@ Exit-criteria evidence:
 
 Status: **active**
 
-First settle checked-operation failure and cleanup semantics; the current S0
-zero-result failure bridge must not become permanent semantics. Then use a
+Checked-operation failure is a valueless invariant panic after explicit
+current-function cleanup; typed `fail` remains ordinary `Result` propagation,
+and no fabricated result or caller-frame unwinding is permitted. This
+incompatible terminator is carried by MIR 2 while legacy MIR 1 fixtures remain
+supported; process-level tests pin division-by-zero cleanup order, narrow
+overflow, and fixed-map capacity failure. Next use a
 mini-compiler spike to justify only the storage, growable byte/vector, symbol,
 diagnostic, iteration, safe argument/file/output, and host-wrapper capabilities
 actually required by the compiler. Every temporary bridge needs an owner and

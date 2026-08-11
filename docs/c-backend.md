@@ -67,7 +67,7 @@ native host-pointer ABI.
 
 - every non-unit MIR value becomes one C variable; block parameters are C variables assigned at every edge before the `goto`. Edge arguments are first captured in typed temporaries and then assigned to parameters, preserving MIR's parallel-copy semantics for swaps and cycles;
 - blocks lower to labels (`alder_b<N>`); the entry block needs no label because it has no predecessors; dead blocks keep their code and `unreachable` lowers to `alder_runtime_panic("unreachable")`;
-- `return` and `fail` both lower to `return <result>;` (the distinction is semantic, for diagnostics);
+- `return` and typed `fail` both lower to `return <result>;` (the distinction is semantic, for diagnostics); valueless `panic` lowers exactly to `alder_runtime_panic("checked operation failed");`;
 - switch dispatches on the tag with `case (uint32_t)<variant index>`; case payload bindings are assigned from the union before the edge assignments.
 
 ### Sequencing and side effects
@@ -82,13 +82,14 @@ native host-pointer ABI.
 - narrow non-shift operations promote operands to 64 bits, compute with the helper, range-check the result against the narrow limits, and cast; the narrow operation fails exactly when the promoted computation or the range check fails;
 - narrow shifts check the count against the source width first (unsigned counts only against the width), then compute at that width: unsigned targets wrap by casting, signed left shifts transfer the width-bit two's-complement pattern with `memcpy`, and signed right shifts use unsigned shifting plus explicit sign-bit fill rather than C's implementation-defined signed `>>`;
 - failure edges use the same parallel-copy temporaries as ordinary edges before the `goto`;
+- a checked failure edge may reach `panic` after all current-function cleanup scopes on that path have been explicitly run and ended; the runtime call does not unwind caller frames;
 - `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AlderSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
 - `int.trunc` to an unsigned target wraps by casting; to a signed target it transfers the two's-complement bit pattern with `memcpy`;
 - `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
 
 ### Domains, cleanup, and tables
 
-- `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because MIR 1 forbids carrying handles across backedges;
+- `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because the current MIR profile forbids carrying handles across backedges;
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
 - `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `alder_domain_alloc`, and a slice with the count; overflow and out-of-memory terminate;
 - `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. A slice whose element type contains references is rejected at generation time (M3 copies bytes, so a nested reference would be shared instead of copied);
@@ -108,7 +109,7 @@ native host-pointer ABI.
 
 ### Unchecked failure policy
 
-Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `alder_runtime_panic`. Checked MIR operations never reach it; they always branch to their explicit failure edge.
+Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `alder_runtime_panic`. Checked MIR operations always branch to their explicit failure edge; that edge may return, use typed `fail`, or explicitly clean up and use valueless `panic`.
 
 ### Documented M3 limitations
 
@@ -322,7 +323,7 @@ Lookup performs, in order:
 Element storage and the slot array are allocated from the table's domain;
 removal marks the slot empty but leaves element storage in the domain until
 reset or destroy. Every successful domain reset changes the domain epoch and
-invalidates all of its existing tables; MIR 1 enforces this conservatively
+invalidates all of its existing tables; the current MIR profile enforces this conservatively
 because inserts and slot growth contain hidden runtime allocations. M2 tables
 never compact, so a view stays valid memory until the domain releases it.
 `table.view.end` lowers to nothing in M2; the verifier enforces view discipline.

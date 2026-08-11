@@ -1,4 +1,4 @@
-mir 1
+mir 2
 
 type @Pair.c2.I64.Slice.c1.U8 {
   first: i64

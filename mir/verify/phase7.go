@@ -217,7 +217,7 @@ func analyzeOneScope(f *mir.Function, scope mir.ValueId, entries []cleanupEntry,
 			}
 			cur = next
 		}
-		if b.Term.Kind == mir.TermReturn || b.Term.Kind == mir.TermFail {
+		if b.Term.Kind == mir.TermReturn || b.Term.Kind == mir.TermFail || b.Term.Kind == mir.TermPanic {
 			for c := range cur {
 				if c.status == cleanupOpen || c.status == cleanupRun {
 					exitOpen[bi] = true

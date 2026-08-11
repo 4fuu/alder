@@ -301,9 +301,9 @@ func (l *lowerer) lowerMapMake(h *mapHelpers, t *Type, mapTy, slotsTy mir.TypeId
 	id := b.res(mapTy)
 	b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: mapTy, AggFields: []mir.AggField{{Name: "slots", Value: slots}}})
 	// The checked initialization index is bounded by the loop condition. Give
-	// its unreachable failure edge a correctly typed map result.
+	// its impossible-but-explicit failure edge the standard panic policy.
 	fail := b.f.AddBlock(b.blockName("bb_fail"), nil)
-	fail.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: id})
+	fail.SetTerm(mir.Terminator{Kind: mir.TermPanic, Result: mir.NoValue})
 	b.panicBlk = blkID(b.f, fail)
 	zero := l.mapConst(b, "zero", 0)
 	one := l.mapConst(b, "one", 1)
@@ -838,10 +838,9 @@ func (b *fb) emit(in mir.Instr) {
 	b.cur.AddInstr(in)
 }
 
-// panicBlock returns the function's shared failure block, creating it on
-// first use. The fail terminator requires a value of the function result
-// type, so the block materializes a zero value once; the checker rejects
-// checked operations in functions whose result type cannot be materialized.
+// panicBlock returns the cleanup-aware checked-failure block for the current
+// scope stack, creating it on first use. The map helper may install one shared
+// panic block for its statically bounded initialization loop.
 func (b *fb) panicBlock() mir.BlockId {
 	if b.panicBlk != mir.NoBlock {
 		return b.panicBlk
@@ -853,90 +852,11 @@ func (b *fb) panicBlock() mir.BlockId {
 	blk := b.f.AddBlock(b.blockName("bb_fail"), nil)
 	saved := b.cur
 	b.setCur(blk)
-	v := b.zeroValue(b.result)
-	b.fail(v)
+	b.panic()
 	id := blkID(b.f, blk)
 	b.panicBlks[key] = id
 	b.setCur(saved)
 	return id
-}
-
-// zeroValue materializes a zero value of a type (used by failure blocks).
-func (b *fb) zeroValue(t *Type) mir.ValueId {
-	switch t.kind {
-	case tPrim:
-		switch t.prim {
-		case pBool:
-			return b.constGet(t, mir.ConstValue{Kind: mir.ConstBool})
-		case pUnit:
-			return b.constGet(t, mir.ConstValue{Kind: mir.ConstUnit})
-		}
-		return b.constGet(t, mir.ConstValue{Kind: mir.ConstInt, Int: 0})
-	case tStruct:
-		fields := make([]mir.AggField, 0, len(t.decl.fields))
-		for i, f := range t.decl.fields {
-			ft := substType(f, structBindings(t))
-			fields = append(fields, mir.AggField{Name: t.decl.decl.Fields[i].Name, Value: b.zeroValue(ft)})
-		}
-		id := b.res(b.l.ty(t))
-		b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: b.l.ty(t), AggFields: fields})
-		return id
-	case tEnum:
-		v := t.decl.variants[0]
-		in := mir.Instr{Op: mir.OpEnumConstruct, TypeOp: b.l.ty(t), Variant: v.name}
-		if v.payload != nil {
-			in.Payload = b.zeroValue(substType(v.payload, structBindings(t)))
-		}
-		id := b.res(b.l.ty(t))
-		in.Result = id
-		b.emit(in)
-		return id
-	case tOption:
-		id := b.res(b.l.ty(t))
-		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: id, TypeOp: b.l.ty(t), Variant: "none"})
-		return id
-	case tResult:
-		in := mir.Instr{Op: mir.OpEnumConstruct, TypeOp: b.l.ty(t), Variant: "err"}
-		if t.err != nil {
-			in.Payload = b.zeroValue(t.err)
-		}
-		id := b.res(b.l.ty(t))
-		in.Result = id
-		b.emit(in)
-		return id
-	}
-	return b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
-}
-
-// failMaterializable reports whether a zero value of the type can be
-// materialized in MIR 1 (no slices, references, maps, or raw pointers).
-func failMaterializable(t *Type) bool {
-	if t == nil {
-		return true
-	}
-	switch t.kind {
-	case tSlice, tAlloc, tMap, tPtr:
-		return false
-	case tOption:
-		return failMaterializable(t.elem)
-	case tResult:
-		return failMaterializable(t.ok) && failMaterializable(t.err)
-	case tStruct:
-		for _, f := range t.decl.fields {
-			if !failMaterializable(substType(f, structBindings(t))) {
-				return false
-			}
-		}
-		return true
-	case tEnum:
-		for _, v := range t.decl.variants {
-			if v.payload != nil && !failMaterializable(substType(v.payload, structBindings(t))) {
-				return false
-			}
-		}
-		return true
-	}
-	return true
 }
 
 // exits emits Run + End for every open using scope, in reverse order.
@@ -956,6 +876,12 @@ func (b *fb) ret(v mir.ValueId) {
 func (b *fb) fail(v mir.ValueId) {
 	b.exits()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: v})
+	b.terminated = true
+}
+
+func (b *fb) panic() {
+	b.exits()
+	b.cur.SetTerm(mir.Terminator{Kind: mir.TermPanic, Result: mir.NoValue})
 	b.terminated = true
 }
 
@@ -1044,15 +970,6 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 	}
 	if !b.terminated {
 		b.ret(mir.NoValue)
-	}
-	// Checked operations materialize a zero failure value; the result type
-	// must support that in MIR 1.
-	for _, blk := range f.Blocks {
-		for ii := range blk.Instrs {
-			if blk.Instrs[ii].FailTarget != mir.NoBlock && !failMaterializable(cf.result) {
-				return diag(cf.decl.P, "function %q returns %s, whose zero value cannot be materialized in MIR 1; checked operations in this function are not supported", cf.decl.Name, cf.result.display())
-			}
-		}
 	}
 	return nil
 }
@@ -1677,7 +1594,6 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 		}
 		args = append(args, v)
 	}
-	panicBlk := b.panicBlock()
 	switch name {
 	case "len":
 		id := b.res(mir.TypeU64)
@@ -1685,7 +1601,7 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 		return id, nil
 	case "range":
 		id := b.res(b.l.ty(b.ann[x].typ))
-		b.emit(mir.Instr{Op: mir.OpSliceRangeChecked, Result: id, Slice: args[0], Lo: args[1], Hi: args[2], FailTarget: panicBlk})
+		b.emit(mir.Instr{Op: mir.OpSliceRangeChecked, Result: id, Slice: args[0], Lo: args[1], Hi: args[2], FailTarget: b.panicBlock()})
 		return id, nil
 	case "__s0_alloc":
 		elemTy := b.ann[x].typ.elem
@@ -1742,7 +1658,7 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 			inserted := b.res(mir.TypeBool)
 			b.emit(mir.Instr{Op: mir.OpCall, Result: inserted, Callee: callee, Args: args})
 			ok, _ := b.addBlock("bb_map_set_ok", nil)
-			b.branch(inserted, blkID(b.f, ok), panicBlk)
+			b.branch(inserted, blkID(b.f, ok), b.panicBlock())
 			b.setCur(ok)
 			return mir.NoValue, nil
 		}
@@ -1901,7 +1817,7 @@ func (b *fb) enumHash(v mir.ValueId, t *Type) mir.ValueId {
 // emitEq lowers a structural equality comparison by branching to trueBlk on
 // equality and falseBlk otherwise. It returns no value, so the generated
 // code never references a later block's parameter from an earlier block,
-// which the MIR 1 text format cannot express.
+// which the current MIR text format cannot express.
 func (b *fb) emitEq(a, bv mir.ValueId, t *Type, trueBlk, falseBlk mir.BlockId) {
 	switch t.kind {
 	case tPrim:

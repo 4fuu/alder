@@ -61,7 +61,7 @@ const (
 )
 
 // builtinFnNames are reserved in the value namespace. Cleanup is exposed
-// through the using statement only: the MIR 1 cleanup handles require
+// through the using statement only: the current MIR cleanup handles require
 // direct instruction-result SSA identity, so the low-level scope API cannot
 // cross source-level bindings.
 var builtinFnNames = []string{
@@ -902,7 +902,7 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 			return diag(st.P, "Unit values cannot be bound; use a statement")
 		}
 		if typ.kind == tDomainMark {
-			return diag(st.P, "domain marks cannot be bound; use them directly (MIR 1 requires the reset mark to be the direct domain.mark result)")
+			return diag(st.P, "domain marks cannot be bound; use them directly (the current MIR profile requires the reset mark to be the direct domain.mark result)")
 		}
 		if _, dup := k.env[st.Name]; dup {
 			return diag(st.P, "name %q is already bound in this function", st.Name)
@@ -1199,7 +1199,7 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 			k.note(e, xt)
 			return xt, nil
 		}
-		return nil, diag(x.P, "cannot negate %s (float arithmetic is not available in MIR 1)", xt.display())
+		return nil, diag(x.P, "cannot negate %s (float arithmetic is not available in the current MIR profile)", xt.display())
 
 	case *Binary:
 		return k.checkBinary(x)
@@ -1414,7 +1414,7 @@ func (k *bodyChecker) checkBinary(x *Binary) (*Type, error) {
 		return prim(pBool), nil
 	}
 	if !xt.isInt() {
-		return nil, diag(x.P, "operator %s requires integer operands (float arithmetic is not available in MIR 1)", x.Op)
+		return nil, diag(x.P, "operator %s requires integer operands (float arithmetic is not available in the current MIR profile)", x.Op)
 	}
 	yt, err := k.checkExpr(x.Y, xt)
 	if err != nil {

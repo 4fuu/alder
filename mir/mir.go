@@ -2,11 +2,20 @@ package mir
 
 import "strconv"
 
+const (
+	// LegacyFormatVersion is the original MIR format, retained for existing
+	// fixtures. It does not include the panic terminator.
+	LegacyFormatVersion = 1
+	// CurrentFormatVersion is the format emitted by newly constructed modules.
+	// It adds the valueless panic terminator.
+	CurrentFormatVersion = 2
+)
+
 // Module is a complete MIR unit: type declarations, imported C declarations,
 // constants, and functions. Optional source-span tables are reserved for the
 // future frontend and do not yet appear in the textual format.
 type Module struct {
-	// FormatVersion is the textual MIR format version (currently 1).
+	// FormatVersion is the textual MIR format version.
 	FormatVersion int
 	// Types is the module type table; TypeId values index it.
 	Types []Type
@@ -223,6 +232,7 @@ const (
 	TermReturn
 	TermFail
 	TermUnreachable
+	TermPanic
 )
 
 // String returns the canonical textual name of the terminator kind.
@@ -240,6 +250,8 @@ func (k TermKind) String() string {
 		return "fail"
 	case TermUnreachable:
 		return "unreachable"
+	case TermPanic:
+		return "panic"
 	}
 	return "terminator(" + strconv.Itoa(int(k)) + ")"
 }
@@ -276,7 +288,7 @@ type Terminator struct {
 	Value ValueId
 	Cases []SwitchCase
 
-	// return / fail
+	// return / fail (panic and unreachable are valueless)
 	Result ValueId // NoValue for a unit return without an operand
 }
 

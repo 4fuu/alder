@@ -95,6 +95,30 @@ func TestStrictCompile(t *testing.T) {
 	}
 }
 
+func TestPanicTerminatorStrictCompile(t *testing.T) {
+	m, err := mir.Parse("mir 2\nfn @f() {\nentry:\n  panic\n}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Generate(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const call = `alder_runtime_panic("checked operation failed");`
+	if strings.Count(out, call) != 1 {
+		t.Fatalf("generated C contains fixed panic call %d times, want 1:\n%s", strings.Count(out, call), out)
+	}
+	for _, cc := range findCompilers(t) {
+		gen := filepath.Join(t.TempDir(), "panic.c")
+		if err := os.WriteFile(gen, []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput(); err != nil {
+			t.Fatalf("strict compile failed: %v\n%s", err, got)
+		}
+	}
+}
+
 // TestRegressionStrictCompile covers valid declarations and SSA shapes which
 // intentionally need no emitted C storage.
 func TestRegressionStrictCompile(t *testing.T) {

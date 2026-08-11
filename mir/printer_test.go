@@ -11,6 +11,8 @@ import (
 func buildSummarizeModule(t *testing.T) *Module {
 	t.Helper()
 	m := NewModule()
+	// The canonical Milestone 1 fixture remains a stable MIR 1 artifact.
+	m.FormatVersion = LegacyFormatVersion
 	summary := m.AddAggregate("Summary", []Field{
 		{Name: "title", Type: m.Slice(TypeU8)},
 		{Name: "words", Type: TypeI64},
@@ -107,7 +109,7 @@ func TestPrintDeterministic(t *testing.T) {
 
 func TestPrintModuleSections(t *testing.T) {
 	m := NewModule()
-	if got := Print(m); got != "mir 1\n" {
+	if got := Print(m); got != "mir 2\n" {
 		t.Errorf("empty module printed %q", got)
 	}
 	m.AddConst("k", TypeI64, ConstValue{Kind: ConstInt, Int: -5})
@@ -116,7 +118,7 @@ func TestPrintModuleSections(t *testing.T) {
 	m.AddConst("s", m.Slice(TypeU8), ConstValue{Kind: ConstString, String: "he\"llo"})
 	m.AddConst("u", TypeUnit, ConstValue{Kind: ConstUnit})
 	got := Print(m)
-	want := "mir 1\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: slice(u8) = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
+	want := "mir 2\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: slice(u8) = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
 	if got != want {
 		t.Errorf("const printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -142,7 +144,7 @@ func TestPrintTerminators(t *testing.T) {
 	bb2.SetTerm(Terminator{Kind: TermUnreachable})
 
 	got := Print(m)
-	want := "mir 1\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
+	want := "mir 2\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
 	if got != want {
 		t.Errorf("terminator printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}

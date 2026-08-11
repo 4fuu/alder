@@ -56,7 +56,7 @@ func phase6Domains(m *mir.Module) []Error {
 				if in.Op == mir.OpStore {
 					if _, deref := placeDerefRoot(&in.Place); deref {
 						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored) {
-							errs = append(errs, Error{Loc: loc, Msg: "lifetime-bearing values may not be stored through dereference places in MIR 1"})
+							errs = append(errs, Error{Loc: loc, Msg: "lifetime-bearing values may not be stored through dereference places in the current MIR profile"})
 						}
 					}
 				}
@@ -289,7 +289,7 @@ func applyDomainInvalidation(m *mir.Module, f *mir.Function, info []domainInfo, 
 		}
 	}
 	// Runtime table inserts and growth allocate storage that is not represented
-	// by separate MIR values. MIR 1 therefore conservatively invalidates every
+	// by separate MIR values. The current MIR profile therefore conservatively invalidates every
 	// table in the reset domain instead of allowing hidden post-mark storage to
 	// survive through a stale table handle.
 	for vi, value := range f.Values {

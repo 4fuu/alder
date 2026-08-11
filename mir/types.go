@@ -306,9 +306,9 @@ func sigEqual(a, b FuncSig) bool {
 }
 
 // NewModule returns an empty module with the canonical primitive type slots
-// and format version 1.
+// and the current format version.
 func NewModule() *Module {
-	m := &Module{FormatVersion: 1}
+	m := &Module{FormatVersion: CurrentFormatVersion}
 	for i := TypeId(0); i < NumPrimitiveTypes; i++ {
 		m.Types = append(m.Types, Type{Kind: TypePrimitive})
 	}

@@ -116,3 +116,29 @@ run:
 }
 `, "cleanup.push cannot execute again while its previous registration is active")
 }
+
+func TestPanicCleanupScopes(t *testing.T) {
+	t.Run("reachable panic", func(t *testing.T) {
+		requireAccepted(t, "mir 2\nfn @f() {\nentry:\n  panic\n}\n")
+	})
+	t.Run("open scope rejects", func(t *testing.T) {
+		requireRejectedWith(t, `mir 2
+fn @f() {
+entry:
+  %s = cleanup.scope.begin
+  panic
+}
+`, "exit leaves cleanup scope %s open or running")
+	})
+	t.Run("run and end accepts", func(t *testing.T) {
+		requireAccepted(t, `mir 2
+fn @f() {
+entry:
+  %s = cleanup.scope.begin
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  panic
+}
+`)
+	})
+}

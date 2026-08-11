@@ -128,6 +128,20 @@ fn bad(x: I64, T: type) -> T { return x
 	}
 }
 
+func TestCheckedFailureDoesNotRequireFabricatedResult(t *testing.T) {
+	m := compileStr(t, `
+fn retain(s: String, n: U64) -> String {
+    let checked = n + 1
+    return s
+}
+fn main() -> I32 { return 0 }
+`)
+	text := mir.Print(m)
+	if !strings.Contains(text, "panic\n") || strings.Contains(text, "fail ") {
+		t.Fatalf("checked failure did not use valueless panic:\n%s", text)
+	}
+}
+
 func TestGenericCallsRejectPartialExplicitArguments(t *testing.T) {
 	src := `
 fn choose(A: type, B: type, a: A, b: B) -> A { return a
@@ -586,7 +600,7 @@ fn main(n: I64, s: String) -> I64 {
 }
 `)
 	text := mir.Print(m)
-	if strings.Count(text, "cleanup.scope.run") < 3 || strings.Count(text, "fail ") < 2 {
+	if strings.Count(text, "cleanup.scope.run") < 3 || strings.Count(text, "panic\n") < 2 {
 		t.Fatalf("expected scoped normal and failure cleanup paths in MIR:\n%s", text)
 	}
 }

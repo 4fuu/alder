@@ -1,5 +1,5 @@
 // Package frontend is the Go Stage 0 Alder compiler: deterministic source
-// text -> fully typed and monomorphized program -> verified MIR 1 -> C11.
+// text -> fully typed and monomorphized program -> verified MIR 2 -> C11.
 //
 // The pipeline is strict: type inference and monomorphization complete
 // before any backend MIR exists, and lowered MIR is never repaired. A

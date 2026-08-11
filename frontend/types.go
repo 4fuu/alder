@@ -299,7 +299,7 @@ func (t *Type) containsSlice() bool {
 }
 
 // copyTrivial reports whether a value of the type can be stored through a
-// dereference place under the MIR 1 rules: no slices, references, or tables
+// dereference place under the current MIR rules: no slices, references, or tables
 // anywhere inside.
 func (t *Type) copyTrivial() bool {
 	return !t.containsSlice()
