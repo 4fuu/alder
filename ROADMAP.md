@@ -334,18 +334,18 @@ Exit-criteria evidence:
 Status: **active**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
-current source model, lossless lexer, and declaration/type/function parser are
-only preparatory M5.4 slices. They pin Go-compatible token kinds, keywords,
-trivia, byte ranges, literal escapes, lexical failures, host-snapshot order,
-imports, generic struct/enum declarations, recursive type expressions,
+current source model, lossless lexer, and syntactically complete current S0
+parser are only preparatory M5.4 slices. They pin Go-compatible token kinds,
+keywords, trivia, byte ranges, literal escapes, lexical failures, host-snapshot
+order, imports, generic struct/enum declarations, recursive type expressions,
 function declarations, core bindings/returns/assignments, blocks, ordinary
-expressions, deterministic first-failure order, verified MIR/C, and strict C
-execution. Control flow, match, unsafe expressions, and literal conversion are
-deliberately deferred. The token and parser manifests are private conformance
-protocols; these slices do not open a second frontend, replace the M5.3
-declaration spike yet, constitute a complete frontend, or satisfy any
-self-hosting claim. Grouping nodes follow the Go semantic AST and are erased;
-the lossless token stream retains their delimiters.
+expressions, control flow, match and unsafe expressions, deterministic
+first-failure order, verified MIR/C, and strict C execution. Literal conversion,
+checking, lowering, and the complete frontend remain incomplete. The token and
+parser manifests are private conformance protocols; these slices do not open a
+second frontend, replace the M5.3 declaration spike yet, constitute a complete
+frontend, or satisfy any self-hosting claim. Grouping nodes follow the Go
+semantic AST and are erased; the lossless token stream retains their delimiters.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go

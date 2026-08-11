@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
@@ -192,19 +193,15 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
-	arts := map[EmitKind]string{}
-	for _, emit := range []EmitKind{EmitMIR, EmitC} {
-		first, firstErr := Compile(Request{Sources: sources, Emit: emit})
-		second, secondErr := Compile(Request{Sources: rev, Emit: emit})
-		if firstErr != nil || secondErr != nil || first.Artifact == nil || second.Artifact == nil || len(first.Diagnostics) != 0 || len(second.Diagnostics) != 0 {
-			t.Fatalf("compile parser %s: first=%+v/%v second=%+v/%v", emit, first, firstErr, second, secondErr)
-		}
-		if first.Artifact.Text != second.Artifact.Text {
-			t.Fatalf("parser %s changed with compiler source request order", emit)
-		}
-		arts[emit] = first.Artifact.Text
+	forward, forwardErr := Compile(Request{Sources: sources, Emit: EmitMIR})
+	reversed, reversedErr := Compile(Request{Sources: rev, Emit: EmitMIR})
+	if forwardErr != nil || reversedErr != nil || forward.Artifact == nil || reversed.Artifact == nil || len(forward.Diagnostics) != 0 || len(reversed.Diagnostics) != 0 {
+		t.Fatalf("compile parser MIR: forward=%+v/%v reversed=%+v/%v", forward, forwardErr, reversed, reversedErr)
 	}
-	module, err := mir.Parse(arts[EmitMIR])
+	if forward.Artifact.Text != reversed.Artifact.Text {
+		t.Fatal("parser MIR changed with compiler source request order")
+	}
+	module, err := mir.Parse(forward.Artifact.Text)
 	if err != nil {
 		t.Fatalf("parse emitted parser MIR: %v", err)
 	}
@@ -222,15 +219,22 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
+	// Generate from the verified textual round trip: MIR equality already proves
+	// source-order independence without compiling this compiler-sized unit twice
+	// more through the identical frontend for EmitC.
+	generated, err := cgen.GenerateProgram(module)
+	if err != nil {
+		t.Fatalf("generate parser C from round-tripped MIR: %v", err)
+	}
 	for _, leaked := range []string{root, filepath.ToSlash(root), strings.ReplaceAll(root, `\`, `\\`)} {
-		if leaked != "" && strings.Contains(arts[EmitC], leaked) {
+		if leaked != "" && strings.Contains(generated, leaked) {
 			t.Fatalf("generated C contains checkout path %q", leaked)
 		}
 	}
 	dir := t.TempDir()
 	cfile := filepath.Join(dir, "parser.c")
 	exe := filepath.Join(dir, "parser.exe")
-	if err := os.WriteFile(cfile, []byte(arts[EmitC]), 0o644); err != nil {
+	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
@@ -260,6 +264,25 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	functionManifest := runAlderParser(t, exe, functionFiles, []string{"functions.al"}, false)
 	functionTree := validateParserManifest(t, functionManifest, functionFiles)
 	assertFunctionParserTree(t, functionTree)
+	flowSource := "fn flow(xs: U64, value: U64) -> U64 {\n" +
+		" if true {\n  return value\n } else {\n  return 0\n }\n" +
+		" while false {\n  return\n }\n" +
+		" for item in xs {\n  return item\n }\n" +
+		" using resource = make() with CleanupFn\n" +
+		" let selected = match value {\n  Some(payload) => payload\n  None => 0\n  _ => 1\n }\n" +
+		" let called = unsafe c { foreign(value) }\n return selected\n}\n"
+	flowSource += "fn nested(value: U64) -> U64 {\n" +
+		" return match (value + 1) {\n" +
+		"  Some(payload) => match payload {\n" +
+		"   _ => payload +\n    1\n" +
+		"  }\n  _ => 0\n }\n}\n"
+	flowFiles := map[string]string{"flow.al": flowSource}
+	flowManifest := runAlderParser(t, exe, flowFiles, []string{"flow.al"}, false)
+	flowTree := validateParserManifest(t, flowManifest, flowFiles)
+	assertControlParserTree(t, flowTree)
+	if repeat := runAlderParser(t, exe, flowFiles, []string{"flow.al"}, false); repeat != flowManifest {
+		t.Fatal("control/match/unsafe manifest changed across processes")
+	}
 	if repeat := runAlderParser(t, exe, functionFiles, []string{"functions.al"}, false); repeat != functionManifest {
 		t.Fatal("function/expression manifest changed across processes")
 	}
@@ -267,7 +290,10 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	for _, node := range functionTree.nodes {
 		seenKinds[node.kind] = true
 	}
-	for kind := 12; kind <= 31; kind++ {
+	for _, node := range flowTree.nodes {
+		seenKinds[node.kind] = true
+	}
+	for kind := 12; kind <= 39; kind++ {
 		if !seenKinds[kind] {
 			t.Fatalf("function/expression manifest does not exercise syntax kind %d\n%s", kind, functionManifest)
 		}
@@ -279,7 +305,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		name, text       string
 		kind, start, end int
 	}{
-		{"if.al", "fn bad() -> U64 { if true {}\n}", 12, 18, 20},
+		{"if.al", "fn bad() -> U64 { if\n true {}\n}", 13, 22, 26},
 		{"ident.al", "type {", 3, 5, 6},
 		{"punct.al", "type A x", 4, 7, 8},
 		{"type.al", "type A { x: }", 5, 12, 13},
@@ -313,6 +339,28 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"index-line.al", "fn bad() -> U64 {\n return x\n [index]\n}\n", 13, "[index]", 0, 1},
 		{"unary-line.al", "fn bad() -> U64 {\n return !\n x\n}\n", 13, "\n x", 2, 1},
 		{"try-line.al", "fn bad() -> U64 {\n return try\n x\n}\n", 13, "\n x", 2, 1},
+		{"while-condition-line.al", "fn bad() -> U64 {\n while\n true {}\n}\n", 13, "true", 0, 4},
+		{"for-expression-line.al", "fn bad(xs: U64) -> U64 {\n for x in\n xs {}\n}\n", 13, "xs {}", 0, 2},
+		{"using-initializer-line.al", "fn bad() -> U64 {\n using x =\n make() with Cleanup\n}\n", 13, "make()", 0, 4},
+		{"using-cleanup-line.al", "fn bad() -> U64 {\n using x = make() with\n Cleanup\n}\n", 13, "Cleanup", 0, 7},
+		{"match-scrutinee-line.al", "fn bad(x: U64) -> U64 {\n return match\n x {\n  _ => x\n }\n}\n", 13, "x {", 0, 1},
+		{"match-binary-scrutinee.al", "fn bad(x: U64, y: U64) -> U64 {\n return match x + y {\n  _ => x\n }\n}\n", 4, "+ y", 0, 1},
+		{"match-quoted-wildcard.al", "fn bad(x: U64) -> U64 {\n return match x {\n  \"_\" => x\n }\n}\n", 15, "\"_\"", 0, 3},
+		{"match-comma.al", "fn bad(x: U64) -> U64 {\n return match x {\n  _ => x,\n }\n}\n", 16, ",", 0, 1},
+		{"match-same-line-arms.al", "fn bad(x: U64) -> U64 {\n return match x { A => 1 B => 2 }\n}\n", 16, "B =>", 0, 1},
+		{"match-eof.al", "fn bad(x: U64) -> U64 {\n return match x {", 15, "", 0, 0},
+		{"match-variant-eof.al", "fn bad(x: U64) -> U64 {\n return match x { Some", 4, "", 0, 0},
+		{"match-binding-eof.al", "fn bad(x: U64) -> U64 {\n return match x { Some(", 3, "", 0, 0},
+		{"match-body-eof.al", "fn bad(x: U64) -> U64 {\n return match x { Some =>", 12, "", 0, 0},
+		{"unsafe-language.al", "fn bad() -> U64 {\n return unsafe rust { f() }\n}\n", 17, "rust", 0, 4},
+		{"unsafe-not-call.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x }\n}\n", 18, "unsafe", 0, 6},
+		{"unsafe-binary-root.al", "fn bad() -> U64 {\n return unsafe c { f() + g() }\n}\n", 18, "unsafe", 0, 6},
+		{"unsafe-extra-expression.al", "fn bad(x: U64) -> U64 {\n return unsafe c { f() x }\n}\n", 18, "x }", 0, 1},
+		{"unsafe-not-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x", 18, "unsafe", 0, 6},
+		{"unsafe-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { f()", 18, "", 0, 0},
+		{"for-missing-in.al", "fn bad(xs: U64) -> U64 {\n for x xs {}\n}\n", 4, "xs {}", 0, 2},
+		{"using-missing-with.al", "fn bad() -> U64 {\n using x = make() Cleanup\n}\n", 4, "Cleanup", 0, 7},
+		{"if-missing-block.al", "fn bad() -> U64 {\n if true", 4, "", 0, 0},
 		{"call-empty-eof.al", "fn bad() -> U64 {\n return f(", 12, "", 0, 0},
 		{"call-value-eof.al", "fn bad() -> U64 {\n return f(x", 4, "", 0, 0},
 		{"call-named-eof.al", "fn bad() -> U64 {\n return f(label:", 12, "", 0, 0},
@@ -645,6 +693,22 @@ func validParserNodeToken(node parserManifestNode, tokenText string) bool {
 		return tokenText == "."
 	case 31:
 		return node.tokenStart == node.start && nameToken && tokenText == "try"
+	case 32:
+		return node.tokenStart == node.start && tokenText == "if" && node.nameStart == 0 && node.nameEnd == 0
+	case 33:
+		return node.tokenStart == node.start && tokenText == "while" && node.nameStart == 0 && node.nameEnd == 0
+	case 34:
+		return node.tokenStart == node.start && tokenText == "for" && node.nameStart > node.tokenEnd
+	case 35:
+		return node.tokenStart == node.start && tokenText == "using" && node.nameStart > node.tokenEnd
+	case 36:
+		return node.tokenStart == node.start && tokenText == "unsafe" && node.nameStart == 0 && node.nameEnd == 0
+	case 37:
+		return node.tokenStart == node.start && tokenText == "match" && node.nameStart == 0 && node.nameEnd == 0
+	case 38:
+		return node.tokenStart == node.start && ((tokenText == "_" && node.nameStart == 0 && node.nameEnd == 0) || nameToken)
+	case 39:
+		return nameToken
 	default:
 		return false
 	}
@@ -838,6 +902,55 @@ func assertFunctionParserTree(t *testing.T, tree parserManifest) {
 	assertNodeKinds(t, tree, namedCallChildren, 24, 24, 28)
 	if tree.name(t, namedCallChildren[2]) != "label" {
 		t.Fatalf("named call label = %q", tree.name(t, namedCallChildren[2]))
+	}
+}
+
+func assertControlParserTree(t *testing.T, tree parserManifest) {
+	t.Helper()
+	root := tree.rootNamed(t, "flow")
+	rootChildren := tree.childrenInSourceOrder(t, root)
+	block := rootChildren[len(rootChildren)-1]
+	statements := tree.childrenInSourceOrder(t, block)
+	assertNodeKinds(t, tree, statements, 32, 33, 34, 35, 15, 15, 18)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, statements[0]), 23, 14, 14)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, statements[1]), 23, 14)
+	if tree.name(t, statements[2]) != "item" {
+		t.Fatalf("for binding = %q, want item", tree.name(t, statements[2]))
+	}
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, statements[2]), 24, 14)
+	if tree.name(t, statements[3]) != "resource" {
+		t.Fatalf("using binding = %q, want resource", tree.name(t, statements[3]))
+	}
+	usingChildren := tree.childrenInSourceOrder(t, statements[3])
+	assertNodeKinds(t, tree, usingChildren, 27, 24)
+	if tree.name(t, usingChildren[1]) != "CleanupFn" {
+		t.Fatalf("using cleanup = %q, want CleanupFn", tree.name(t, usingChildren[1]))
+	}
+	matchNode := tree.childrenInSourceOrder(t, statements[4])[0]
+	matchChildren := tree.childrenInSourceOrder(t, matchNode)
+	assertNodeKinds(t, tree, matchChildren, 24, 38, 38, 38)
+	if tree.name(t, matchChildren[1]) != "Some" || tree.name(t, matchChildren[2]) != "None" || tree.name(t, matchChildren[3]) != "" {
+		t.Fatal("match arm variant/wildcard shape changed")
+	}
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, matchChildren[1]), 39, 24)
+	unsafeNode := tree.childrenInSourceOrder(t, statements[5])[0]
+	assertNodeKinds(t, tree, []int{unsafeNode}, 36)
+	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, unsafeNode), 27)
+
+	nestedChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "nested"))
+	nestedBlock := nestedChildren[len(nestedChildren)-1]
+	nestedReturn := tree.childrenInSourceOrder(t, nestedBlock)[0]
+	outerMatch := tree.childrenInSourceOrder(t, nestedReturn)[0]
+	outerChildren := tree.childrenInSourceOrder(t, outerMatch)
+	assertNodeKinds(t, tree, outerChildren, 26, 38, 38)
+	firstArmChildren := tree.childrenInSourceOrder(t, outerChildren[1])
+	assertNodeKinds(t, tree, firstArmChildren, 39, 37)
+	innerChildren := tree.childrenInSourceOrder(t, firstArmChildren[1])
+	assertNodeKinds(t, tree, innerChildren, 24, 38)
+	innerBody := tree.childrenInSourceOrder(t, innerChildren[1])[0]
+	assertNodeKinds(t, tree, []int{innerBody}, 26)
+	if tree.tokenText(t, outerChildren[0]) != "+" || tree.tokenText(t, innerBody) != "+" {
+		t.Fatal("grouped scrutinee or multiline nested match body lost binary shape")
 	}
 }
 

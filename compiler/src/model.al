@@ -37,8 +37,18 @@ type LexDiagRec {
 // 14 block, 15 let, 16 var, 17 assignment, 18 return, 19 expression
 // statement, 20 integer, 21 float, 22 string, 23 bool, 24 identifier,
 // 25 unary, 26 binary, 27 call, 28 named argument, 29 field, 30 index, and
-// 31 try. Function children are parameters, result, then body; binding children
-// are optional type then initializer; assignment children are target then value.
+// 31 try, 32 if, 33 while, 34 for, 35 using, 36 unsafe-c, 37 match,
+// 38 match arm, and 39 match binding. Function children are parameters, result,
+// then body; binding children are optional type then initializer; assignment
+// children are target then value. If children are condition, then block, then
+// optional else block; while children are condition then body; for children are
+// sequence then body. A using node names its bound value and has initializer
+// then a kind-24 cleanup identifier child. Unsafe-c has its sole root call as
+// child. Match children are unary scrutinee then arms; arm children are optional
+// kind-39 payload binding then body. Variant arms name and tokenize the variant;
+// wildcard arms tokenize `_` and have no name span. Control nodes tokenize their
+// leading keyword; for/using names retain their binding spans. Match bindings
+// and cleanup identifiers tokenize and name their identifier.
 // Type-parameter nodes span the complete `Name: type` declaration and retain
 // the name as their semantic token.
 // Top-level declaration IDs are recorded separately in
@@ -71,7 +81,8 @@ type SyntaxLinkRec {
 // label, 7 top-level separator, 8 struct-field separator, 9 enum-variant
 // separator, 10 parameter ordering, 11 block/statement separator,
 // 12 expected expression, 13 line continuation, and 14 invalid assignment
-// target.
+// target, 15 expected match pattern, 16 match-arm separator, 17 expected `c`
+// after unsafe, and 18 unsafe-c requires exactly one root call and closing brace.
 type ParseDiagRec {
     kind: U64
     source: U64

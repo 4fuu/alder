@@ -519,6 +519,7 @@ fn main() -> I32 {
 		{"field without separator after multiline type", "type T {\n a: Map(\n  U64,\n  I64\n ) b: I64\n}", "fields must be separated"},
 		{"positional record", "type T { a: I64 }\nfn main() -> I32 {\n let x = T(1)\n return 0\n}", "requires named fields"},
 		{"unlabeled payload", "enum E { Bad(I64) }", "requires a label"},
+		{"quoted match wildcard", "fn main() -> I32 {\n return match 0 {\n  \"_\" => 0\n }\n}", "variant name or \"_\""},
 		{"import outside unsafe", "import c f: fn() -> I64\nfn main() -> I32 {\n let x = f()\n return 0\n}", "only be called inside unsafe c"},
 		{"user call inside unsafe", "fn f() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f() }\n return 0\n}", "direct call to an imported C symbol"},
 		{"nested call inside unsafe", "import c f: fn(I64) -> I64\nfn value() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f(value()) }\n return 0\n}", "cannot contain nested calls"},

@@ -895,7 +895,7 @@ func (p *parser) parseMatch() (Expr, error) {
 
 func (p *parser) parseMatchArm() (MatchArm, error) {
 	t := p.cur()
-	if t.text == "_" {
+	if t.kind == tokIdent && t.kw == kwNone && t.text == "_" {
 		p.advance()
 	} else {
 		name, err := p.expectIdent("a variant name or \"_\"")
