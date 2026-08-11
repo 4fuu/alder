@@ -178,7 +178,7 @@ determinism, and strict C11 checks before the GitHub repository was renamed.
 
 ### Milestone 5.1: Compiler Service and Structured Diagnostics
 
-Status: **active**
+Status: **complete**
 
 Deliverables:
 
@@ -203,6 +203,22 @@ Exit criteria:
   failures remain distinct;
 - the existing single-file corpus still produces verified MIR and deterministic
   C through the compiler service and CLI.
+
+Exit-criteria evidence:
+
+- commit `bea2850` adds the filesystem-independent `compiler` request/result
+  service and the `alder check` / `alder compile` command adapter;
+- all existing end-to-end `.al` sources produce byte-identical MIR and C across
+  repeated service invocations, and CLI human/JSON diagnostics are identical
+  across distinct absolute workspace roots;
+- machine success, source-diagnostic, usage, and I/O paths emit one JSON v1
+  envelope; writer failures, invalid ranges, and unknown source identities fail
+  without appending a second output format;
+- logical input and output names use one canonical slash-relative validator;
+  output replacement is committed by a same-directory rename and retains the
+  previous target on failure;
+- the canonical format, vet, test, and race checks pass, and a separately built
+  `alder` process emitted C that passed the strict GCC C11 warning set.
 
 ### Milestone 5.2: Deterministic Multi-File Compilation
 

@@ -8,6 +8,23 @@ The project is currently in the **design and bootstrap phase**. There is no usab
 
 Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages provide a versioned textual format (`mir 1`), a deterministic parser and printer, and a ten-phase verifier with pinned acceptance and rejection fixtures. Milestone 2 (minimal runtime) and Milestone 3 (C11 backend) are also complete, with strict-warning compile-and-run and determinism tests. Milestone 4 (Alder S0) is complete as a deliberately small, single-file bootstrap frontend: it covers generic type parameters, structs, unary-payload enums, `match`, slices and `String`, `Option`/`Result`, a fixed-capacity map helper, temporary domain and cleanup bridges, and direct C symbol calls inside `unsafe c`. It does not implement inferred storage domains, the `Table(T)`/generational `T.Id` source model, modules, header importing, or the complete language. Pinned MIR, diagnostics, end-to-end programs, and determinism tests evidence the documented representative path. Sanitizer reruns are skipped on the current Windows mingw-w64 host because libasan and libubsan are unavailable. `docs/mir.md`, `docs/c-backend.md`, and `docs/language-design.md` are the contracts; `ROADMAP.md` records status and evidence.
 
+## Bootstrap CLI
+
+The current Go bootstrap exposes the verified single-file S0 pipeline through
+one deliberately narrow executable:
+
+```text
+alder check [--format=human|json] <logical-path.al>
+alder compile [--format=human|json] [--emit=mir|c] [-o logical-output] <logical-path.al>
+```
+
+Logical paths are canonical slash-relative workspace paths. JSON mode writes
+exactly one versioned envelope to stdout and does not mix in human diagnostics
+or raw artifacts. Exit statuses are 0 for success, 1 for source diagnostics,
+2 for usage/request errors, 3 for I/O failures, and 4 for internal/backend
+failures. This is bootstrap infrastructure for the documented S0 subset, not
+a production compiler or claim that the full language is implemented.
+
 ## Current Scope
 
 The active implementation scope is deliberately narrow:
