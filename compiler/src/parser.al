@@ -243,8 +243,8 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     if parse_step_bad(body) { return Ok(body) }
     let value = parse_step_value(body)
     cursor = try add_link(d, value.cursor, value.node, children)
-    let rec = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
-    let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, rec.end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
     return Ok(Parsed(arm))
 }
 

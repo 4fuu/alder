@@ -219,13 +219,18 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
-	// Generate from the verified textual round trip: MIR equality already proves
-	// source-order independence without compiling this compiler-sized unit twice
-	// more through the identical frontend for EmitC.
-	generated, err := cgen.GenerateProgram(module)
-	if err != nil {
+	// MIR equality proves source-order independence. Exercise the public EmitC
+	// service path once at compiler scale and require it to agree with C generated
+	// from the verified textual MIR round trip, without repeating both request
+	// orders through the identical frontend.
+	serviceC, serviceCErr := Compile(Request{Sources: sources, Emit: EmitC})
+	if serviceCErr != nil || serviceC.Artifact == nil || len(serviceC.Diagnostics) != 0 {
+		t.Fatalf("compile parser C: result=%+v error=%v", serviceC, serviceCErr)
+	}
+	if _, err := cgen.GenerateProgram(module); err != nil {
 		t.Fatalf("generate parser C from round-tripped MIR: %v", err)
 	}
+	generated := serviceC.Artifact.Text
 	for _, leaked := range []string{root, filepath.ToSlash(root), strings.ReplaceAll(root, `\`, `\\`)} {
 		if leaked != "" && strings.Contains(generated, leaked) {
 			t.Fatalf("generated C contains checkout path %q", leaked)
@@ -269,7 +274,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		" while false {\n  return\n }\n" +
 		" for item in xs {\n  return item\n }\n" +
 		" using resource = make() with CleanupFn\n" +
-		" let selected = match value {\n  Some(payload) => payload\n  None => 0\n  _ => 1\n }\n" +
+		" let selected = match value {\n  Some(payload) => payload\n  None => 0\n  _ => (1)\n }\n" +
 		" let called = unsafe c { foreign(value) }\n return selected\n}\n"
 	flowSource += "fn nested(value: U64) -> U64 {\n" +
 		" return match (value + 1) {\n" +
@@ -933,6 +938,11 @@ func assertControlParserTree(t *testing.T, tree parserManifest) {
 		t.Fatal("match arm variant/wildcard shape changed")
 	}
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, matchChildren[1]), 39, 24)
+	groupedArm := tree.nodes[matchChildren[3]-1]
+	groupedBody := tree.nodes[tree.childrenInSourceOrder(t, matchChildren[3])[0]-1]
+	if groupedArm.end <= groupedBody.end {
+		t.Fatal("grouped match-arm span does not retain its consumed closing delimiter")
+	}
 	unsafeNode := tree.childrenInSourceOrder(t, statements[5])[0]
 	assertNodeKinds(t, tree, []int{unsafeNode}, 36)
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, unsafeNode), 27)
