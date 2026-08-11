@@ -1,0 +1,45 @@
+mir 1
+
+const @zero: i64 = 0
+const @one: i64 = 1
+const @zero_u64: u64 = 0
+const @one_u64: u64 = 1
+
+fn @sum(%data: slice(i64)) -> i64 {
+  local %i: u64
+  local %acc: i64
+
+bb0:
+  %z = const.get @zero
+  %zu = const.get @zero_u64
+  store local %i, %zu
+  store local %acc, %z
+  %len = slice.len %data
+  jump bb_loop
+
+bb_loop:
+  %cur = load local %i
+  %lt = int.lt %cur, %len
+  branch %lt, bb_body, bb_done
+
+bb_body:
+  %cur2 = load local %i
+  %elem = slice.index.checked %data, %cur2 else bb_fail
+  %v = load deref %elem
+  %a = load local %acc
+  %sum2 = int.add.checked %a, %v else bb_fail
+  store local %acc, %sum2
+  %cur3 = load local %i
+  %ou = const.get @one_u64
+  %next = int.add.checked %cur3, %ou else bb_fail
+  store local %i, %next
+  jump bb_loop
+
+bb_done:
+  %accv = load local %acc
+  return %accv
+
+bb_fail:
+  %z2 = const.get @zero
+  fail %z2
+}

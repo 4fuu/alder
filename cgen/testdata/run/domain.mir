@@ -1,0 +1,46 @@
+mir 1
+
+const @zero_u64: u64 = 0
+const @one_u64: u64 = 1
+
+fn @build(%root: domain_handle, %data: slice(u8)) -> slice(u8) {
+  local %i: u64
+
+bb0:
+  %d = domain.create %root
+  %n = slice.len %data
+  %buf = alloc %d, u8, %n
+  %zu = const.get @zero_u64
+  store local %i, %zu
+  %len = slice.len %data
+  jump bb_loop
+
+bb_loop:
+  %cur = load local %i
+  %lt = int.lt %cur, %len
+  branch %lt, bb_body, bb_done
+
+bb_body:
+  %cur2 = load local %i
+  %src = slice.index.checked %data, %cur2 else bb_fail
+  %b = load deref %src
+  %dst = slice.index.checked %buf, %cur2 else bb_fail
+  store deref %dst, %b
+  %cur3 = load local %i
+  %ou = const.get @one_u64
+  %next = int.add.checked %cur3, %ou else bb_fail
+  store local %i, %next
+  jump bb_loop
+
+bb_done:
+  %m = domain.mark %d
+  %extra = alloc %d, u8, %len
+  domain.reset %d, %m
+  %out = copy_to_domain %root, %data
+  domain.destroy %d
+  return %out
+
+bb_fail:
+  %out2 = copy_to_domain %root, %data
+  fail %out2
+}

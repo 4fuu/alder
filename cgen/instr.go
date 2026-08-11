@@ -395,8 +395,12 @@ func (g *gen) emitShiftChecked(b *strings.Builder, in *mir.Instr, width int, sig
 	// Narrow: check the count against the source width, then compute at that
 	// width. Unsigned targets wrap by casting; signed targets transfer the
 	// two's-complement bit pattern with memcpy.
-	b.WriteString("  if (" + g.val(in.B) + " < 0 || " + g.val(in.B) + " >= " +
-		strconv.Itoa(width) + ") { " + fail + " }\n")
+	if signed {
+		b.WriteString("  if (" + g.val(in.B) + " < 0 || " + g.val(in.B) + " >= " +
+			strconv.Itoa(width) + ") { " + fail + " }\n")
+	} else {
+		b.WriteString("  if (" + g.val(in.B) + " >= " + strconv.Itoa(width) + ") { " + fail + " }\n")
+	}
 	u := "uint" + strconv.Itoa(width) + "_t"
 	if !signed {
 		if shl {

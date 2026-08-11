@@ -1,0 +1,89 @@
+mir 1
+
+enum @Shape {
+  Circle(i64)
+  Square(i64)
+  Dot
+}
+
+const @zero: i64 = 0
+const @two: i64 = 2
+
+fn @classify(%n: i64) -> @Shape {
+bb0:
+  %z = const.get @zero
+  %eq = int.eq %n, %z
+  branch %eq, bb_dot, bb_nonzero
+
+bb_dot:
+  %d = enum.construct @Shape, Dot
+  return %d
+
+bb_nonzero:
+  %neg = int.lt %n, %z
+  branch %neg, bb_circle, bb_square
+
+bb_circle:
+  %c = enum.construct @Shape, Circle, %n
+  return %c
+
+bb_square:
+  %s = enum.construct @Shape, Square, %n
+  return %s
+}
+
+fn @area(%s: @Shape) -> i64 {
+bb0:
+  switch %s {
+    Circle(%cr) -> bb_circle(%cr)
+    Square(%sq) -> bb_square(%sq)
+    Dot -> bb_dot
+  }
+
+bb_circle(%r: i64):
+  %c2 = int.mul.checked %r, %r else bb_fail
+  return %c2
+
+bb_square(%t: i64):
+  %s2 = int.mul.checked %t, %t else bb_fail
+  return %s2
+
+bb_dot:
+  %z = const.get @zero
+  return %z
+
+bb_fail:
+  %z2 = const.get @zero
+  fail %z2
+}
+
+fn @half(%n: i64) -> option(i64) {
+bb0:
+  %z = const.get @zero
+  %two = const.get @two
+  %q = int.div.checked %n, %two else bb_none
+  %m = int.mul.checked %q, %two else bb_none
+  %d = int.sub.checked %n, %m else bb_none
+  %eq = int.eq %d, %z
+  branch %eq, bb_some(%q), bb_none
+
+bb_some(%h: i64):
+  %s = enum.construct option(i64), some, %h
+  return %s
+
+bb_none:
+  %n2 = enum.construct option(i64), none
+  return %n2
+}
+
+fn @checked_div(%a: i64, %b: i64) -> result(i64, @Shape) {
+bb0:
+  %q = int.div.checked %a, %b else bb_err
+  %ok = enum.construct result(i64, @Shape), ok, %q
+  return %ok
+
+bb_err:
+  %e = enum.construct @Shape, Dot
+  %err = enum.construct result(i64, @Shape), err, %e
+  fail %err
+}

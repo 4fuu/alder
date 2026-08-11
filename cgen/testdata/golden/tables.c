@@ -46,7 +46,7 @@ struct AsterTy22 {
 static ASTER_MAYBE_UNUSED AsterTy16 aster_fn_players_0(AsterDomain * aster_v0, AsterTy13 aster_v1);
 
 static ASTER_MAYBE_UNUSED AsterTy16 aster_fn_players_0(AsterDomain * aster_v0, AsterTy13 aster_v1) {
-  AsterTable aster_v2;
+  AsterTable aster_v2 = {0};
   AsterTableId aster_v3;
   int64_t aster_v4;
   AsterTy20 aster_v5;

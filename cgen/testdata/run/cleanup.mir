@@ -1,0 +1,39 @@
+mir 1
+
+import @record_c: fn(i64) -> i64
+
+const @zero: i64 = 0
+const @one: i64 = 1
+const @two: i64 = 2
+const @three: i64 = 3
+
+fn @notify(%x: i64) {
+bb0:
+  %v = ffi.call.unsafe @record_c(%x)
+  return
+}
+
+fn @scoped(%flag: bool) -> i64 {
+bb0:
+  %s = cleanup.scope.begin
+  %one = const.get @one
+  %two = const.get @two
+  %three = const.get @three
+  %e1 = cleanup.push %s, @notify, (%one)
+  %e2 = cleanup.push %s, @notify, (%two)
+  cleanup.disarm %e1
+  %e3 = cleanup.push %s, @notify, (%three)
+  branch %flag, bb_ok, bb_err
+
+bb_ok:
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  %z = const.get @zero
+  return %z
+
+bb_err:
+  cleanup.scope.run %s
+  cleanup.scope.end %s
+  %z2 = const.get @zero
+  fail %z2
+}

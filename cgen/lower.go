@@ -154,7 +154,13 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 		if v.Type == mir.TypeUnit {
 			continue // unit values lower to the literal 0
 		}
-		b.WriteString("  " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + ";\n")
+		// AsterTable values are initialized in place by table.create, so
+		// their variables must start zeroed.
+		init := ""
+		if g.m.ValidType(v.Type) && g.m.Types[v.Type].Kind == mir.TypeTable {
+			init = " = {0}"
+		}
+		b.WriteString("  " + g.cType(v.Type) + " " + g.val(mir.ValueId(vi)) + init + ";\n")
 	}
 	for li, l := range f.Locals {
 		b.WriteString("  " + g.cType(l.Type) + " aster_l" + strconv.Itoa(li) + ";\n")

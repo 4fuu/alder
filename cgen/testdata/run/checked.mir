@@ -1,0 +1,66 @@
+mir 1
+
+const @zero: i64 = 0
+const @zero_i8: i8 = 0
+const @zero_u64: u64 = 0
+const @zero_u8: u8 = 0
+
+fn @i64ops(%a: i64, %b: i64) -> i64 {
+bb0:
+  %sum = int.add.checked %a, %b else bb_fail
+  %diff = int.sub.checked %sum, %b else bb_fail
+  %prod = int.mul.checked %diff, %a else bb_fail
+  %quot = int.div.checked %prod, %b else bb_fail
+  %shl = int.shl.checked %quot, %b else bb_fail
+  %shr = int.shr.checked %shl, %b else bb_fail
+  return %shr
+
+bb_fail:
+  %z = const.get @zero
+  fail %z
+}
+
+fn @i8ops(%a: i8, %b: i8) -> i8 {
+bb0:
+  %sum = int.add.checked %a, %b else bb_fail
+  %diff = int.sub.checked %sum, %b else bb_fail
+  %prod = int.mul.checked %diff, %a else bb_fail
+  %quot = int.div.checked %prod, %b else bb_fail
+  %shl = int.shl.checked %quot, %b else bb_fail
+  %shr = int.shr.checked %shl, %b else bb_fail
+  return %shr
+
+bb_fail:
+  %z = const.get @zero_i8
+  fail %z
+}
+
+fn @u64ops(%a: u64, %b: u64) -> u64 {
+bb0:
+  %sum = int.add.checked %a, %b else bb_fail
+  %diff = int.sub.checked %sum, %b else bb_fail
+  %prod = int.mul.checked %diff, %a else bb_fail
+  %quot = int.div.checked %prod, %b else bb_fail
+  %shl = int.shl.checked %quot, %b else bb_fail
+  %shr = int.shr.checked %shl, %b else bb_fail
+  return %shr
+
+bb_fail:
+  %z = const.get @zero_u64
+  fail %z
+}
+
+fn @u8ops(%a: u8, %b: u8) -> u8 {
+bb0:
+  %sum = int.add.checked %a, %b else bb_fail
+  %diff = int.sub.checked %sum, %b else bb_fail
+  %prod = int.mul.checked %diff, %a else bb_fail
+  %quot = int.div.checked %prod, %b else bb_fail
+  %shl = int.shl.checked %quot, %b else bb_fail
+  %shr = int.shr.checked %shl, %b else bb_fail
+  return %shr
+
+bb_fail:
+  %z = const.get @zero_u8
+  fail %z
+}

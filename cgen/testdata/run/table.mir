@@ -1,0 +1,54 @@
+mir 1
+
+const @zero: i64 = 0
+
+fn @table_ops(%root: domain_handle, %a: i64, %b: i64) -> i64 {
+bb0:
+  %t = table.create i64, %root
+  %id1 = table.insert %t, %a
+  %id2 = table.insert %t, %b
+  %opt = table.lookup %t, %id1
+  switch %opt {
+    some(%v1) -> bb1
+    none -> bb_fail
+  }
+
+bb1:
+  %x = load deref %v1
+  table.view.end %v1
+  %mopt = table.lookup_mut %t, %id2
+  switch %mopt {
+    some(%v2) -> bb2
+    none -> bb_fail
+  }
+
+bb2:
+  store deref %v2, %x
+  table.view.end %v2
+  %removed = table.remove %t, %id1
+  %gone = table.lookup %t, %id1
+  switch %gone {
+    none -> bb3
+    some(%v3) -> bb_gone
+  }
+
+bb_gone:
+  table.view.end %v3
+  jump bb_fail
+
+bb3:
+  %ok = table.lookup %t, %id2
+  switch %ok {
+    some(%v4) -> bb4
+    none -> bb_fail
+  }
+
+bb4:
+  %y = load deref %v4
+  table.view.end %v4
+  return %y
+
+bb_fail:
+  %z = const.get @zero
+  fail %z
+}

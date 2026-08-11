@@ -26,21 +26,27 @@ func goldenMirPath(name string) string {
 	return filepath.Join("..", "mir", "testdata", "golden", name+".mir")
 }
 
-func generateFixture(t *testing.T, name string) string {
+// generatePath parses a MIR file and generates its C.
+func generatePath(t *testing.T, path string) string {
 	t.Helper()
-	text, err := os.ReadFile(goldenMirPath(name))
+	text, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	m, err := mir.Parse(string(text))
 	if err != nil {
-		t.Fatalf("%s: parse: %v", name, err)
+		t.Fatalf("%s: parse: %v", path, err)
 	}
 	out, err := Generate(m)
 	if err != nil {
-		t.Fatalf("%s: generate: %v", name, err)
+		t.Fatalf("%s: generate: %v", path, err)
 	}
 	return out
+}
+
+func generateFixture(t *testing.T, name string) string {
+	t.Helper()
+	return generatePath(t, goldenMirPath(name))
 }
 
 // TestGolden pins the generated C for every golden fixture. Set
