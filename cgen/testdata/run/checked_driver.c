@@ -52,6 +52,14 @@ int main(void) {
     /* u8 range: 16 * 16 = 256 overflows. */
     CHECK(aster_fn_u8ops_3(16, 16) == 0);
 
+    /* Conversions: trunc to i32 wraps (0x1FFFFFFFF -> -1), sext and the
+     * float round trip recover the original small values. */
+    CHECK(aster_fn_convs_4(7, 7) == 7);
+    CHECK(aster_fn_convs_4(-5, 5) == -5);
+    /* Values that lose precision through the f32 round trip take the
+     * failure edge (16777217 is not representable in f32). */
+    CHECK(aster_fn_convs_4(16777217, 0xFFFFFFFFULL) == 0);
+
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

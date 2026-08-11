@@ -64,3 +64,28 @@ bb_fail:
   %z = const.get @zero_u8
   fail %z
 }
+
+fn @convs(%v: i64, %w: u64) -> i64 {
+bb0:
+  %t = int.trunc %v, i32
+  %s = int.sext %t, i64
+  %tu = int.trunc %w, u32
+  %zu = int.zext %tu, u64
+  %eq0 = int.eq %zu, %w
+  branch %eq0, bb_cont, bb_fail
+
+bb_cont:
+  %f = float.from_int %s, f64
+  %g = float.convert %f, f32
+  %h = int.from_float %g, i32
+  %i = int.sext %h, i64
+  %eq = int.eq %i, %s
+  branch %eq, bb_done(%i), bb_fail
+
+bb_done(%r: i64):
+  return %r
+
+bb_fail:
+  %z = const.get @zero
+  fail %z
+}
