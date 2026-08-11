@@ -1,0 +1,49 @@
+mir 1
+
+enum @Shape {
+  Circle(i64)
+  Square(i64)
+  Dot
+}
+
+const @zero: i64 = 0
+
+const @one: i64 = 1
+
+fn @cfg(%c: bool, %x: i64, %s: @Shape) -> i64 {
+bb0:
+  %z = const.get @zero
+  %o = const.get @one
+  branch %c, bb_then(%x), bb_else(%z)
+
+bb_then(%p: i64):
+  %q = int.add.checked %p, %o else bb_fail(%z)
+  switch %s {
+    Circle(%cr) -> bb_circle(%cr)
+    Square(%sq) -> bb_square(%sq)
+    Dot -> bb_dot
+  }
+
+bb_circle(%r: i64):
+  %a = int.mul.checked %q, %r else bb_fail(%z)
+  jump bb_done(%a)
+
+bb_square(%t: i64):
+  %b = int.mul.checked %q, %t else bb_fail(%z)
+  jump bb_done(%b)
+
+bb_dot:
+  jump bb_done(%q)
+
+bb_else(%z2: i64):
+  jump bb_done(%z2)
+
+bb_done(%v: i64):
+  return %v
+
+bb_fail(%e: i64):
+  fail %e
+
+bb_dead:
+  unreachable
+}

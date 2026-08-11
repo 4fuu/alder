@@ -295,6 +295,29 @@ bool aster_table_lookup_mut(AsterTable *table, AsterTableId id,
  */
 bool aster_table_remove(AsterTable *table, AsterTableId id);
 
+/* ------------------------------------------------------------------ */
+/* Diagnostics                                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Terminate the process with a message on stderr. Used by generated code
+ * for unchecked runtime failures (out-of-memory, identity exhaustion,
+ * unreachable execution, out-of-range float-to-int conversion). Checked MIR
+ * operations never reach this function. Never returns.
+ */
+_Noreturn void aster_runtime_panic(const char *message);
+
+/*
+ * Mark declarations that may legitimately go unused in a translation unit:
+ * generated static helpers are only referenced by some drivers. Portable
+ * C11 has no unused attribute, so the marker is a no-op outside GCC/Clang.
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define ASTER_MAYBE_UNUSED __attribute__((unused))
+#else
+#define ASTER_MAYBE_UNUSED
+#endif
+
 #ifdef __cplusplus
 }
 #endif

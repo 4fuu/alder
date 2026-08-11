@@ -499,6 +499,13 @@ func checkPlaceIntegrity(f *mir.Function, p *mir.Place, loc string) []Error {
 	}
 }
 
+// OperandValues returns the value operands of an instruction in a stable
+// order, according to its operation shape. It is the shared view of operand
+// presence used by the verifier and the C backend.
+func OperandValues(in *mir.Instr) []mir.ValueId {
+	return instrValueOperands(in)
+}
+
 // instrValueOperands returns the value operands of an instruction according to
 // its operation shape. Non-producing and zero-valued fields are ignored.
 func instrValueOperands(in *mir.Instr) []mir.ValueId {

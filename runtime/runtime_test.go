@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +57,29 @@ func compileAndRun(t *testing.T, cc, name string, extra ...string) {
 	}
 	if len(run) > 0 {
 		t.Logf("%s output: %s", name, run)
+	}
+}
+
+// TestRuntimePanic checks that aster_runtime_panic prints a message and exits
+// nonzero (the harness normally requires exit code 0).
+func TestRuntimePanic(t *testing.T) {
+	cc := findCompiler(t)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "panic.exe")
+	args := []string{}
+	args = append(args, strictFlags...)
+	args = append(args, "-I", filepath.Join("c"),
+		filepath.Join("testdata", "panic.c"),
+		filepath.Join("c", "aster.c"), "-o", exe)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("compile panic.c failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(exe).CombinedOutput()
+	if err == nil {
+		t.Fatal("panic program exited zero")
+	}
+	if !strings.Contains(string(out), "intentional panic") {
+		t.Fatalf("panic message missing from output: %s", out)
 	}
 }
 

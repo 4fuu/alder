@@ -18,6 +18,7 @@
  */
 #include "aster.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -69,6 +70,13 @@ static void rt_free(void *p) {
 
 size_t aster_runtime_live_allocations(void) {
     return g_live_allocations;
+}
+
+_Noreturn void aster_runtime_panic(const char *message) {
+    fputs("aster runtime panic: ", stderr);
+    fputs(message != NULL ? message : "(null)", stderr);
+    fputc('\n', stderr);
+    abort();
 }
 
 static bool align_is_valid(size_t align) {
