@@ -239,13 +239,14 @@ func (l *lexer) lexToken() (token, error) {
 	case c == '-' && l.pos+1 < len(l.src) && isDigit(l.src[l.pos+1]):
 		return l.lexNumber(line, col)
 
-	case c == '-' || isDigit(c):
-		// A bare '-' is punctuation (unary minus); a '-' followed by a
-		// digit was handled above as part of a negative literal.
-		if c == '-' {
-			break
-		}
+	case isDigit(c):
 		return l.lexNumber(line, col)
+
+	case c == '-':
+		// A '-' followed by a digit was handled above as part of a negative
+		// literal. A bare '-' is the unary or binary punctuation token.
+		l.advance()
+		return token{kind: tokPunct, text: "-", line: line, col: col}, nil
 
 	case c == '"':
 		return l.lexString(line, col)

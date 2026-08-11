@@ -2,8 +2,10 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/4fuu/alder/cgen"
@@ -60,27 +62,47 @@ func (e *ServiceError) Error() string {
 
 func (e *ServiceError) Unwrap() error { return e.Cause }
 
-// Compile compiles exactly one explicitly identified source.
+// Compile compiles an explicitly identified source set as one global unit.
+// The request is copied and ordered by canonical logical path; caller-owned
+// source slices and elements are never mutated.
 func Compile(req Request) (Result, error) {
 	if len(req.Sources) == 0 {
-		return Result{}, requestError("exactly one source is required")
-	}
-	if len(req.Sources) != 1 {
-		return Result{}, requestError("multiple sources are not supported until M5.2")
+		return Result{}, requestError("at least one source is required")
 	}
 	if req.Emit != EmitNone && req.Emit != EmitMIR && req.Emit != EmitC {
 		return Result{}, requestError("invalid emit kind")
 	}
-	source := req.Sources[0]
-	if !ValidLogicalPath(source.Path) {
-		return Result{}, requestError("source path must be a non-empty canonical relative slash path")
+	sources := append([]frontend.Source(nil), req.Sources...)
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].Path != sources[j].Path {
+			return sources[i].Path < sources[j].Path
+		}
+		return sources[i].ID < sources[j].ID
+	})
+	paths := make(map[string]bool, len(sources))
+	ids := make(map[frontend.SourceID]bool, len(sources))
+	for _, source := range sources {
+		if !ValidLogicalPath(source.Path) {
+			return Result{}, requestError("source path must be a non-empty canonical relative slash path")
+		}
+		if paths[source.Path] {
+			return Result{}, requestError(fmt.Sprintf("duplicate source path %q", source.Path))
+		}
+		paths[source.Path] = true
+		if source.ID == 0 {
+			return Result{}, requestError(fmt.Sprintf("source %q must have a nonzero source ID", source.Path))
+		}
+		if ids[source.ID] {
+			return Result{}, requestError(fmt.Sprintf("duplicate source ID %d", source.ID))
+		}
+		ids[source.ID] = true
 	}
-	m, diagnostics, err := frontend.CompileSource(source)
+	m, diagnostics, err := frontend.CompileSources(sources)
 	if err != nil {
 		return Result{}, internalError("frontend failure", err)
 	}
 	if len(diagnostics) != 0 {
-		return Result{Diagnostics: frontend.SortDiagnostics(diagnostics)}, nil
+		return Result{Diagnostics: frontend.SortDiagnosticsBySource(diagnostics, sources)}, nil
 	}
 	if errs := verify.Module(m); len(errs) != 0 {
 		return Result{}, internalError("frontend emitted invalid MIR", fmt.Errorf("%s", verify.Errors(errs).String()))
@@ -92,8 +114,12 @@ func Compile(req Request) (Result, error) {
 	case EmitMIR:
 		result.Artifact = &Artifact{Kind: EmitMIR, Text: mir.Print(m)}
 	case EmitC:
-		text, err := cgen.Generate(m)
+		text, err := cgen.GenerateProgram(m)
 		if err != nil {
+			var entryError *cgen.ProgramEntryError
+			if errors.As(err, &entryError) {
+				return Result{}, requestError(entryError.Error())
+			}
 			return Result{}, internalError("C backend failure", err)
 		}
 		result.Artifact = &Artifact{Kind: EmitC, Text: text}

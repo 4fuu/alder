@@ -312,11 +312,13 @@ func (s *Block) stmtPos() pos      { return s.P }
 
 // astError is a deterministic source diagnostic.
 type astError struct {
-	line int
-	col  int
-	msg  string
-	code DiagnosticCode
-	span Span
+	line    int
+	col     int
+	msg     string
+	code    DiagnosticCode
+	span    Span
+	related []RelatedDiagnostic
+	notes   []string
 }
 
 func (e *astError) Error() string {

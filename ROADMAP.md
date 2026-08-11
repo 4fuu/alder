@@ -129,6 +129,10 @@ Deliverables (implemented in the `frontend` Go package):
   trips through the single-pass MIR 1 text parser (call cycles are left in
   instantiation order and documented as unrepresentable in the text format).
 
+This reorder pass records the M4 implementation at its acceptance point. M5.2
+supersedes it with function-header predeclaration in the MIR 1 parser and uses
+deterministic frontend instantiation order directly.
+
 The `__s0_domain_create`, `__s0_alloc`, `__s0_domain_mark`,
 `__s0_domain_reset`, `__s0_domain_destroy`, and `__s0_map_create` names, the
 `Domain`/`DomainMark` types, and `using x = expr with CleanupFn` are temporary
@@ -222,29 +226,50 @@ Exit-criteria evidence:
 
 ### Milestone 5.2: Deterministic Multi-File Compilation
 
-Status: **planned**
+Status: **complete**
 
 - compile an explicit, deterministically ordered source set as one compilation
   unit before introducing packages or separate compilation;
 - support cross-file declarations and deterministic duplicate diagnostics;
 - make textual MIR round-trip forward and recursive calls through deliberate
   predeclaration or a versioned MIR change;
-- define a stable entry signature and an audited C host shim for compiler I/O;
+- define a stable generated-C entry signature and an audited C host shim;
 - keep filesystem discovery in the driver, never in the compiler core.
 
 Exit requires shuffled source order to produce identical diagnostics, MIR, and
-C; recursive printed MIR must parse and verify; an executable must consume
-multiple `.al` files and emit C without Go at runtime.
+C; recursive printed MIR must parse and verify; and separately linked generated
+C must launch through the audited host shim without Go code or a Go runtime.
+Safe argument, file, and output access is deferred to M5.3; an Alder-written
+executable that consumes `.al` files and emits C is a M5.4 self-hosting gate.
+
+Exit-criteria evidence:
+
+- the compiler service and CLI accept copied, explicit source sets, canonicalize
+  them by logical path, and produce byte-identical diagnostics, MIR, and C for
+  every tested input permutation without scanning the filesystem in the core;
+- cross-file declarations share one top-level namespace, and duplicate
+  diagnostics carry deterministic primary and related source ranges;
+- MIR 1 predeclares function headers in textual order, round-trips self,
+  forward, mutual-recursive, and cleanup-callback references, and retains
+  declaration-before-use for named types, constants, and imports;
+- program generation verifies MIR before entry validation, exports only
+  `alder_program_entry`, and links the separate host shim under strict C11;
+- no-domain, domain-root, null-context, nonzero-status, and recursive-program
+  cases pass compile-and-run tests, and a separately built `alder` executable
+  passed real multi-source permutation, emission, strict-link, and run checks;
+- format, diff, vet, full test, race, focused round-trip/determinism, and strict
+  GCC C11 checks pass.
 
 ### Milestone 5.3: Bootstrap Capability Readiness
 
-Status: **planned**
+Status: **active**
 
 First settle checked-operation failure and cleanup semantics; the current S0
 zero-result failure bridge must not become permanent semantics. Then use a
 mini-compiler spike to justify only the storage, growable byte/vector, symbol,
-diagnostic, iteration, and host-wrapper capabilities actually required by the
-compiler. Every temporary bridge needs an owner and removal condition.
+diagnostic, iteration, safe argument/file/output, and host-wrapper capabilities
+actually required by the compiler. Every temporary bridge needs an owner and
+removal condition.
 
 Exit requires compiler-scale tests with multiple files, more than sixteen
 declarations, retained source/range data, nested syntax, recursion, malformed

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/4fuu/alder/compiler"
@@ -76,7 +77,7 @@ func main() {
 func run(args []string, stdout, stderr io.Writer, cwd string) int {
 	command := commandName(args)
 	if command != "check" && command != "compile" {
-		return fail(command, wantsJSON(args), stdout, stderr, exitUsage, "usage", "usage: alder check|compile [options] <file.al>")
+		return fail(command, wantsJSON(args), stdout, stderr, exitUsage, "usage", "usage: alder check|compile [options] <file.al>...")
 	}
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -93,8 +94,8 @@ func run(args []string, stdout, stderr io.Writer, cwd string) int {
 	if *format != "human" && !jsonMode {
 		return fail(command, jsonMode, stdout, stderr, exitUsage, "usage", "format must be human or json")
 	}
-	if fs.NArg() != 1 {
-		return fail(command, jsonMode, stdout, stderr, exitUsage, "usage", "exactly one input file is required")
+	if fs.NArg() == 0 {
+		return fail(command, jsonMode, stdout, stderr, exitUsage, "usage", "at least one input file is required")
 	}
 	kind := compiler.EmitNone
 	if command == "compile" {
@@ -106,20 +107,34 @@ func run(args []string, stdout, stderr io.Writer, cwd string) int {
 			return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "emit must be mir or c")
 		}
 	}
-	inputArg := fs.Arg(0)
-	if filepath.Ext(inputArg) != ".al" {
-		return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "input must have the case-sensitive .al extension")
+	logicalInputs := append([]string(nil), fs.Args()...)
+	for _, logical := range logicalInputs {
+		if filepath.Ext(logical) != ".al" {
+			return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "inputs must have the case-sensitive .al extension")
+		}
+		if !compiler.ValidLogicalPath(logical) {
+			return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "inputs must be canonical workspace-relative slash paths")
+		}
 	}
-	input, logical, ok := workspacePath(cwd, inputArg)
-	if !ok {
-		return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "input must be a canonical workspace-relative slash path")
+	sort.Strings(logicalInputs)
+	for i := 1; i < len(logicalInputs); i++ {
+		if logicalInputs[i] == logicalInputs[i-1] {
+			return fail(command, jsonMode, stdout, stderr, exitUsage, "request", "duplicate input path")
+		}
 	}
-	text, err := os.ReadFile(input)
-	if err != nil {
-		return fail(command, jsonMode, stdout, stderr, exitIO, "io", "cannot read input file")
+	sources := make([]frontend.Source, 0, len(logicalInputs))
+	sourceByID := make(map[frontend.SourceID]frontend.Source, len(logicalInputs))
+	for i, logical := range logicalInputs {
+		input, _, _ := workspacePath(cwd, logical)
+		text, err := os.ReadFile(input)
+		if err != nil {
+			return fail(command, jsonMode, stdout, stderr, exitIO, "io", "cannot read input file")
+		}
+		source := frontend.Source{ID: frontend.SourceID(i + 1), Path: logical, Text: string(text)}
+		sources = append(sources, source)
+		sourceByID[source.ID] = source
 	}
-	source := frontend.Source{ID: 1, Path: logical, Text: string(text)}
-	result, err := compiler.Compile(compiler.Request{Sources: []frontend.Source{source}, Emit: kind})
+	result, err := compiler.Compile(compiler.Request{Sources: sources, Emit: kind})
 	if err != nil {
 		var service *compiler.ServiceError
 		code := exitInternal
@@ -130,7 +145,7 @@ func run(args []string, stdout, stderr io.Writer, cwd string) int {
 		}
 		return fail(command, jsonMode, stdout, stderr, code, class, message)
 	}
-	diagnostics, err := adaptDiagnostics(map[frontend.SourceID]frontend.Source{source.ID: source}, result.Diagnostics)
+	diagnostics, err := adaptDiagnostics(sourceByID, result.Diagnostics)
 	if err != nil {
 		return fail(command, jsonMode, stdout, stderr, exitInternal, "internal", "internal compiler failure")
 	}

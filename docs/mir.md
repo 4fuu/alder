@@ -277,7 +277,7 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 
 ## Textual MIR
 
-The textual format is versioned (`mir 1`) and is the canonical fixture format. The parser requires declarations before uses, one statement per line, and deterministic name resolution. The printer emits canonical text; printing a canonical golden fixture reproduces it byte for byte, while comments and noncanonical layout are intentionally normalized. Parse-print-parse reaches a stable fixed point for every MIR fixture. `#` starts a line comment.
+The textual format is versioned (`mir 1`) and is the canonical fixture format. Function headers are predeclared in textual order before function bodies are parsed, so calls and cleanup callbacks may name the current function or any later function; `FunctionId` values remain textual declaration order. Named types, constants, and imports still require declaration before use, including from function bodies. The parser otherwise requires declarations before uses, one statement per line, and deterministic name resolution. The printer emits canonical text; printing a canonical golden fixture reproduces it byte for byte, while comments and noncanonical layout are intentionally normalized. Parse-print-parse reaches a stable fixed point for every MIR fixture. `#` starts a line comment.
 
 ```text
 module   := "mir" version (typeDecl | enumDecl | constDecl | importDecl | fnDecl)*

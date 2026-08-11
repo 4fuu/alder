@@ -439,3 +439,24 @@ func containsMsg(errs []Error, substr string) bool {
 	}
 	return false
 }
+
+func TestAPIBuiltRecursivePrintParseVerify(t *testing.T) {
+	m := mir.NewModule()
+	m.FormatVersion = 1
+	a := m.AddFunction("a", nil, mir.TypeUnit)
+	b := m.AddFunction("b", nil, mir.TypeUnit)
+	ab := a.AddBlock("entry", nil)
+	ab.AddInstr(mir.Instr{Op: mir.OpCall, Result: mir.NoValue, Callee: 1, FailTarget: mir.NoBlock})
+	ab.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	bb := b.AddBlock("entry", nil)
+	bb.AddInstr(mir.Instr{Op: mir.OpCall, Result: mir.NoValue, Callee: 0, FailTarget: mir.NoBlock})
+	bb.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+
+	parsed, err := mir.Parse(mir.Print(m))
+	if err != nil {
+		t.Fatalf("parse recursive API module: %v", err)
+	}
+	if errs := Module(parsed); len(errs) != 0 {
+		t.Fatalf("verify recursive API module:\n%s", Errors(errs).String())
+	}
+}

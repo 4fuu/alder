@@ -371,15 +371,24 @@ lifetime annotations. It has slices and `String`, but no fixed-array type.
 
 ### Modules and compilation units
 
-A compilation accepts exactly one source file containing, in any order:
+A compilation accepts one or more explicit source files containing, in any
+order:
 
 - direct concrete C symbol declarations of the form
   `import c <name>: fn(<params>) -> <result>`
 - `type` and `enum` declarations
 - `fn` declarations
 
-All names are file-global. S0 has no source modules, namespaces, packages,
-separate compilation, or C header importing. Source identifiers use
+The driver requires canonical slash-relative logical paths and orders files by
+their UTF-8 path bytes; declarations retain lexical order within each file.
+Every permutation of the same explicit source set therefore forms the same
+global compilation unit. The compiler core never scans directories.
+
+All top-level import, type-constructor, and function names share one
+compilation-global namespace. A duplicate uses the later declaration in
+canonical path/declaration order as its primary diagnostic and the first
+declaration as a related range. S0 still has no source modules, namespaces,
+packages, separate compilation, or C header importing. Source identifiers use
 `[a-zA-Z_][a-zA-Z0-9_]*`. Names beginning with `__s0_` are reserved for
 bootstrap intrinsics.
 
@@ -434,6 +443,12 @@ variant construction. Record construction names every field, for example
 at most one payload. Its declaration label documents the payload, while
 construction and patterns remain `Some(value)` and `Some(binding)` because
 there is exactly one payload.
+
+For hosted programs, M5.2 accepts the temporary entry forms `fn main() -> I32`
+and `fn main(root: Domain) -> I32`. They adapt to the fixed generated C entry
+described in `docs/c-backend.md`; they are bootstrap forms, not the permanent
+source-level program ABI. Safe arguments, files, and output remain deferred to
+the M5.3 capability gate.
 
 Restrictions (each with a diagnostic):
 
@@ -556,8 +571,9 @@ does not import C headers or provide C modules.
 
 ### Diagnostics and acceptance boundary
 
-All diagnostics are deterministic, carry line and column, and are pinned by
-rejection tests. The frontend rejects (non-exhaustive list): syntax errors;
+All diagnostics are deterministic, carry logical source identity and UTF-8
+byte ranges (with adapter-derived line and column), and are pinned by rejection
+tests. The frontend rejects (non-exhaustive list): syntax errors;
 unknown names and variants; type mismatches; non-matching `try` error
 types; wrong `using` callbacks; mutating immutable bindings; out-of-range
 literals; non-exhaustive `match`; fall-through on non-`Unit` functions;

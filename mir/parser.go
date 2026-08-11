@@ -6,7 +6,8 @@ import (
 )
 
 // parser builds a Module from the textual MIR format. Names resolve to stable
-// numeric IDs as they are parsed; declarations must precede uses.
+// numeric IDs as they are parsed. Function headers are predeclared; all other
+// declarations must precede uses.
 type parser struct {
 	m    *Module
 	toks []token
@@ -17,6 +18,19 @@ type parser struct {
 	values   map[string]ValueId
 	locals   map[string]LocalId
 	blocks   map[string]BlockId
+
+	typeLimit   int
+	constLimit  int
+	importLimit int
+	inBody      bool
+}
+
+type functionBody struct {
+	f           *Function
+	start       int
+	typeLimit   int
+	constLimit  int
+	importLimit int
 }
 
 // Parse parses the versioned textual MIR format. Errors are deterministic and
@@ -112,10 +126,11 @@ func (p *parser) parseModule() error {
 	}
 	p.m.FormatVersion = n
 
+	var bodies []functionBody
 	for {
 		t := p.peek()
 		if t.kind == tokEOF {
-			return nil
+			break
 		}
 		if t.kind != tokIdent {
 			return p.errf(t, "expected a declaration, got %s", t.describe())
@@ -143,13 +158,26 @@ func (p *parser) parseModule() error {
 			}
 		case "fn":
 			p.next()
-			if err := p.parseFunction(); err != nil {
+			body, err := p.parseFunctionHeader()
+			if err != nil {
 				return err
 			}
+			bodies = append(bodies, body)
 		default:
 			return p.errf(t, "expected a declaration, got %q", t.text)
 		}
 	}
+	for _, body := range bodies {
+		p.pos = body.start
+		p.typeLimit = body.typeLimit
+		p.constLimit = body.constLimit
+		p.importLimit = body.importLimit
+		p.inBody = true
+		if err := p.parseFunctionBody(body.f); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *parser) parseTypeDecl() error {
@@ -350,43 +378,66 @@ func (p *parser) parseFuncSig() (FuncSig, error) {
 
 // --- functions ---
 
-func (p *parser) parseFunction() error {
+func (p *parser) parseFunctionHeader() (functionBody, error) {
 	nameTok, err := p.expectAtName("a function name")
 	if err != nil {
-		return err
+		return functionBody{}, err
 	}
 	if _, ok := p.m.Function(nameTok.text); ok {
-		return p.errf(nameTok, "duplicate function @%s", nameTok.text)
+		return functionBody{}, p.errf(nameTok, "duplicate function @%s", nameTok.text)
 	}
 	if err := p.expectPunct("("); err != nil {
-		return err
+		return functionBody{}, err
 	}
 	params, err := p.parseParams()
 	if err != nil {
-		return err
+		return functionBody{}, err
 	}
 	if err := p.expectPunct(")"); err != nil {
-		return err
+		return functionBody{}, err
 	}
 	result := TypeUnit
 	if p.peek().kind == tokPunct && p.peek().text == "->" {
 		p.next()
 		result, err = p.parseType()
 		if err != nil {
-			return err
+			return functionBody{}, err
 		}
 	}
 	if err := p.expectPunct("{"); err != nil {
-		return err
+		return functionBody{}, err
 	}
 
 	f := p.m.AddFunction(nameTok.text, params, result)
+	body := functionBody{f: f, start: p.pos, typeLimit: len(p.m.Types), constLimit: len(p.m.Constants), importLimit: len(p.m.Imports)}
+	depth := 0
+	for {
+		t := p.next()
+		if t.kind == tokEOF {
+			return functionBody{}, p.errf(t, "unterminated function body")
+		}
+		if t.kind != tokPunct {
+			continue
+		}
+		switch t.text {
+		case "{":
+			depth++
+		case "}":
+			if depth == 0 {
+				return body, nil
+			}
+			depth--
+		}
+	}
+}
+
+func (p *parser) parseFunctionBody(f *Function) error {
 	p.fn = f
 	p.values = make(map[string]ValueId)
 	p.locals = make(map[string]LocalId)
 	p.blocks = make(map[string]BlockId)
 	p.curBlock = nil
-	for i, prm := range params {
+	for i, prm := range f.Params {
 		p.values[prm.Name] = ValueId(i)
 	}
 
@@ -1008,7 +1059,8 @@ func (p *parser) parseOp() (Instr, error) {
 		if err != nil {
 			return in, err
 		}
-		if _, ok := p.m.ConstDecl(nameTok.text); !ok {
+		decl, ok := p.m.ConstDecl(nameTok.text)
+		if !ok || (p.inBody && !p.constVisible(decl)) {
 			return in, p.errf(nameTok, "unknown constant @%s", nameTok.text)
 		}
 		in.Const = nameTok.text
@@ -1039,7 +1091,7 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		id, ok := p.m.Import(impTok.text)
-		if !ok {
+		if !ok || (p.inBody && int(id) >= p.importLimit) {
 			return in, p.errf(impTok, "unknown import @%s", impTok.text)
 		}
 		in.FFIImport = id
@@ -1313,7 +1365,7 @@ func (p *parser) parseType() (TypeId, error) {
 	switch {
 	case t.kind == tokAtName:
 		id, ok := p.m.NamedType(t.text)
-		if !ok {
+		if !ok || (p.inBody && int(id) >= p.typeLimit) {
 			return NoType, p.errf(t, "unknown type @%s", t.text)
 		}
 		return id, nil
@@ -1369,6 +1421,15 @@ func (p *parser) parseType() (TypeId, error) {
 		}
 	}
 	return NoType, p.errf(t, "expected a type, got %s", t.describe())
+}
+
+func (p *parser) constVisible(decl *ConstDecl) bool {
+	for i := 0; i < p.constLimit; i++ {
+		if &p.m.Constants[i] == decl {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *parser) parseStructuralType(nameTok *token) (TypeId, error) {

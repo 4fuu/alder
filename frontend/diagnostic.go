@@ -56,3 +56,35 @@ func SortDiagnostics(in []Diagnostic) []Diagnostic {
 	})
 	return out
 }
+
+// SortDiagnosticsBySource orders diagnostics by canonical logical source path,
+// then range, code, and message. Source IDs break otherwise identical paths so
+// malformed caller input cannot make the comparison partial.
+func SortDiagnosticsBySource(in []Diagnostic, sources []Source) []Diagnostic {
+	paths := make(map[SourceID]string, len(sources))
+	for _, source := range sources {
+		paths[source.ID] = source.Path
+	}
+	out := append([]Diagnostic(nil), in...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		ap, bp := paths[a.Primary.Source], paths[b.Primary.Source]
+		if ap != bp {
+			return ap < bp
+		}
+		if a.Primary.Source != b.Primary.Source {
+			return a.Primary.Source < b.Primary.Source
+		}
+		if a.Primary.Start != b.Primary.Start {
+			return a.Primary.Start < b.Primary.Start
+		}
+		if a.Primary.End != b.Primary.End {
+			return a.Primary.End < b.Primary.End
+		}
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		return a.Message < b.Message
+	})
+	return out
+}

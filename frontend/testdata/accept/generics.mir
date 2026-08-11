@@ -21,11 +21,6 @@ const @lit.int.c6: i32 = 3
 
 const @lit.int.c7: i32 = 0
 
-fn @identity.I64(%x: i64) -> i64 {
-bb0:
-  return %x
-}
-
 fn @main() -> i32 {
   local %p: @Pair.c2.I64.Slice.c1.U8
 
@@ -77,4 +72,9 @@ bb_else1:
 bb_join1:
   %v16 = const.get @lit.int.c7
   return %v16
+}
+
+fn @identity.I64(%x: i64) -> i64 {
+bb0:
+  return %x
 }

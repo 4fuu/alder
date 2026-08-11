@@ -239,3 +239,79 @@ func TestParseErrorPosition(t *testing.T) {
 		t.Fatalf("error missing position: %v", err)
 	}
 }
+
+func TestParsePredeclaresFunctionHeaders(t *testing.T) {
+	text := `mir 1
+fn @first() {
+bb0:
+  call @first()
+  call @second()
+  return
+}
+fn @second() {
+bb0:
+  call @first()
+  return
+}
+fn @cleanup_user() {
+bb0:
+  %scope = cleanup.scope.begin
+  %id = cleanup.push %scope, @later_cleanup, ()
+  cleanup.scope.run %scope
+  cleanup.scope.end %scope
+  return
+}
+fn @later_cleanup() {
+bb0:
+  return
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"first", "second", "cleanup_user", "later_cleanup"} {
+		id, ok := m.Function(name)
+		if !ok || id != FunctionId(i) {
+			t.Fatalf("function @%s ID = %d, %v; want %d", name, id, ok, i)
+		}
+	}
+	first := m.Functions[0].Blocks[0].Instrs
+	if first[0].Callee != 0 || first[1].Callee != 1 {
+		t.Fatalf("self/forward callees = %d, %d; want 0, 1", first[0].Callee, first[1].Callee)
+	}
+	if got := m.Functions[2].Blocks[0].Instrs[1].CleanupFn; got != 3 {
+		t.Fatalf("forward cleanup callback = %d, want 3", got)
+	}
+	printed := Print(m)
+	reparsed, err := Parse(printed)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if got := Print(reparsed); got != printed {
+		t.Fatalf("printing did not reach a fixed point\nfirst:\n%s\nsecond:\n%s", printed, got)
+	}
+}
+
+func TestFunctionPredeclarationBoundaries(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"unknown call", "mir 1\nfn @f() {\nbb0:\n  call @missing()\n  return\n}\n", "unknown function @missing"},
+		{"unknown cleanup callback", "mir 1\nfn @f() {\nbb0:\n  %s = cleanup.scope.begin\n  %id = cleanup.push %s, @missing, ()\n  return\n}\n", "unknown function @missing"},
+		{"duplicate header", "mir 1\nfn @f() {\nbb0:\n  return\n}\nfn @f() {\nbb0:\n  return\n}\n", "duplicate function @f"},
+		{"forward type", "mir 1\nfn @f() {\n  local %x: @T\nbb0:\n  return\n}\ntype @T {}\n", "unknown type @T"},
+		{"forward constant", "mir 1\nfn @f() -> i64 {\nbb0:\n  %x = const.get @k\n  return %x\n}\nconst @k: i64 = 1\n", "unknown constant @k"},
+		{"forward import", "mir 1\nfn @f() {\nbb0:\n  ffi.call.unsafe @puts()\n  return\n}\nimport @puts: fn() -> unit\n", "unknown import @puts"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(tc.text)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Parse error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}

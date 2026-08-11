@@ -10,20 +10,23 @@ Milestone 1 (MIR toolkit) is complete. The `mir` and `mir/verify` Go packages pr
 
 ## Bootstrap CLI
 
-The current Go bootstrap exposes the verified single-file S0 pipeline through
-one deliberately narrow executable:
+The current Go bootstrap exposes the verified explicit-source-set S0 pipeline
+through one deliberately narrow executable:
 
 ```text
-alder check [--format=human|json] <logical-path.al>
-alder compile [--format=human|json] [--emit=mir|c] [-o logical-output] <logical-path.al>
+alder check [--format=human|json] <logical-path.al>...
+alder compile [--format=human|json] [--emit=mir|c] [-o logical-output] <logical-path.al>...
 ```
 
-Logical paths are canonical slash-relative workspace paths. JSON mode writes
-exactly one versioned envelope to stdout and does not mix in human diagnostics
-or raw artifacts. Exit statuses are 0 for success, 1 for source diagnostics,
-2 for usage/request errors, 3 for I/O failures, and 4 for internal/backend
-failures. This is bootstrap infrastructure for the documented S0 subset, not
-a production compiler or claim that the full language is implemented.
+Logical paths are canonical slash-relative workspace paths. Inputs are explicit
+and sorted; the core does not scan directories or provide packages. JSON mode
+writes exactly one versioned envelope to stdout and does not mix in human
+diagnostics or raw artifacts. Exit statuses are 0 for success, 1 for source
+diagnostics, 2 for usage/request errors, 3 for I/O failures, and 4 for
+internal/backend failures. C program output uses the separately linked
+`bootstrap/alder_host.c` shim and the headers in `bootstrap/` and `runtime/c/`.
+This is bootstrap infrastructure for the documented S0 subset, not a production
+compiler or claim that the full language is implemented.
 
 ## Current Scope
 

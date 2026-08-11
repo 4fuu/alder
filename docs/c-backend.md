@@ -25,6 +25,28 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
+## Generated program entry
+
+`cgen.GenerateProgram` is the explicit hosted-program path; generic
+`cgen.Generate` remains a translation-unit generator and requires no `main`.
+For Stage 0 only, a program has exactly one MIR function named `main`, returning
+`i32`, with either no parameters or one `domain_handle` parameter. These are
+temporary source entry forms, not a frozen source ABI.
+
+Program output exports exactly `int32_t alder_program_entry(void
+*host_context)`; all Alder functions remain static and ID-named. The opaque,
+invocation-scoped context must be non-null. A domain-taking entry receives a
+fresh root domain, which the wrapper destroys exactly once after normal return.
+Null context or failed root initialization returns
+`ALDER_PROGRAM_FAILURE_STATUS` deterministically.
+
+The separate `bootstrap/alder_host.c` hosted shim owns the private context
+layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
+is linked as a separate translation unit and does not depend on the Go runtime.
+Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
+`EXIT_FAILURE`. The context exposes no arguments, files, output, getters, or
+native host-pointer ABI.
+
 ## Milestone 3 Lowering Contract
 
 ### Naming and layout

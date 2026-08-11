@@ -34,6 +34,50 @@ func TestSplitSourceErrorClassifiesInternalASTErrors(t *testing.T) {
 	}
 }
 
+func TestRecursiveSourceRoundTripsWithoutFunctionReordering(t *testing.T) {
+	m := compileStr(t, `
+fn even(n: U64) -> Bool {
+    if n == 0 { return true }
+    return odd(n - 1)
+}
+fn odd(n: U64) -> Bool {
+    if n == 0 { return false }
+    return even(n - 1)
+}
+fn main() -> I32 {
+    if even(10) { return 0 }
+    return 1
+}
+`)
+	for i, name := range []string{"even", "odd", "main"} {
+		id, ok := m.Function(name)
+		if !ok || int(id) != i {
+			t.Fatalf("function %q ID = %d, %v; want %d", name, id, ok, i)
+		}
+	}
+	printed := mir.Print(m)
+	reparsed, err := mir.Parse(printed)
+	if err != nil {
+		t.Fatalf("parse recursive frontend MIR: %v\n%s", err, printed)
+	}
+	if errs := verify.Module(reparsed); len(errs) != 0 {
+		t.Fatalf("verify recursive frontend MIR:\n%s", verify.Errors(errs).String())
+	}
+	if got := mir.Print(reparsed); got != printed {
+		t.Fatalf("recursive MIR did not reach a print fixed point\n--- first ---\n%s\n--- second ---\n%s", printed, got)
+	}
+}
+
+func TestStandaloneMinusLexesAsUnaryAndBinaryOperator(t *testing.T) {
+	compileStr(t, `
+fn negate(x: I32) -> I32 { return -x }
+fn main() -> I32 {
+    let x: I32 = 2
+    return x - x
+}
+`)
+}
+
 func TestGenericBodyTypesAndExpectedResultInference(t *testing.T) {
 	src := `
 fn identity(T: type, x: T) -> T {

@@ -2,6 +2,34 @@ package frontend
 
 import "testing"
 
+func TestDiagnosticsSortByLogicalPathNotSourceID(t *testing.T) {
+	sources := []Source{{ID: 2, Path: "z.al"}, {ID: 99, Path: "a.al"}}
+	diagnostics := []Diagnostic{
+		{Code: CodeSemantic, Primary: Span{Source: 2}},
+		{Code: CodeSemantic, Primary: Span{Source: 99}},
+	}
+	sorted := SortDiagnosticsBySource(diagnostics, sources)
+	if sorted[0].Primary.Source != 99 || diagnostics[0].Primary.Source != 2 {
+		t.Fatalf("sort order=%v, input=%v", sorted, diagnostics)
+	}
+}
+
+func TestRelatedDiagnosticMustReferenceKnownValidSource(t *testing.T) {
+	source := Source{ID: 1, Path: "a.al", Text: "x"}
+	ae := &astError{
+		line: 1,
+		col:  1,
+		msg:  "failure",
+		span: Span{Source: 1, Start: 0, End: 1},
+		related: []RelatedDiagnostic{{
+			Span: Span{Source: 2, Start: 0, End: 1},
+		}},
+	}
+	if _, _, err := sourceFailure([]Source{source}, ae); err == nil {
+		t.Fatal("unknown related source was not treated as an internal error")
+	}
+}
+
 func TestCompileSourceDiagnosticKindsAndLegacyParity(t *testing.T) {
 	tests := []struct {
 		name string

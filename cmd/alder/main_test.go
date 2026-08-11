@@ -31,10 +31,16 @@ func invoke(t *testing.T, root string, args ...string) (int, string, string) {
 
 func sourceFile(t *testing.T, root, text string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Join(root, "src"), 0755); err != nil {
+	writeSource(t, root, "src/main.al", text)
+}
+
+func writeSource(t *testing.T, root, logical, text string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(logical))
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "src", "main.al"), []byte(text), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -136,6 +142,46 @@ func TestDiagnosticsAreIndependentOfWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestMultiSourceCLIIsOrderIndependent(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "a/helper.al", "fn helper() -> I32 { return 0 }\n")
+	writeSource(t, root, "z/main.al", "fn main() -> I32 { return helper() }\n")
+
+	var outputs []string
+	for _, inputs := range [][]string{{"z/main.al", "a/helper.al"}, {"a/helper.al", "z/main.al"}} {
+		args := append([]string{"compile", "--format=json", "--emit=mir"}, inputs...)
+		code, out, errOut := invoke(t, root, args...)
+		got := decodeEnvelope(t, out)
+		if code != exitSuccess || errOut != "" || got.Artifact == nil || got.Artifact.Kind != "mir" {
+			t.Fatalf("inputs=%v code=%d stdout=%q stderr=%q", inputs, code, out, errOut)
+		}
+		outputs = append(outputs, out)
+	}
+	if outputs[0] != outputs[1] {
+		t.Fatalf("multi-source JSON differs by input order:\n%s\n%s", outputs[0], outputs[1])
+	}
+}
+
+func TestMultiSourceDuplicateDiagnosticRendersRelatedPath(t *testing.T) {
+	root := t.TempDir()
+	writeSource(t, root, "a/first.al", "type clash { value: I64 }\n")
+	writeSource(t, root, "z/later.al", "fn clash() -> Unit { }\n")
+
+	code, out, errOut := invoke(t, root, "check", "--format=json", "z/later.al", "a/first.al")
+	got := decodeEnvelope(t, out)
+	if code != exitDiagnostics || errOut != "" || len(got.Diagnostics) != 1 || len(got.Diagnostics[0].Related) != 1 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	diagnostic := got.Diagnostics[0]
+	if diagnostic.Range.Path != "z/later.al" || diagnostic.Related[0].Range.Path != "a/first.al" {
+		t.Fatalf("unexpected primary/related paths: %+v", diagnostic)
+	}
+	code, _, human := invoke(t, root, "check", "a/first.al", "z/later.al")
+	if code != exitDiagnostics || !strings.Contains(human, "z/later.al:") || !strings.Contains(human, "a/first.al:") {
+		t.Fatalf("human duplicate diagnostic missing paths: code=%d stderr=%q", code, human)
+	}
+}
+
 func TestDiagnosticRenderingUsesSourceIdentity(t *testing.T) {
 	source := frontend.Source{ID: 27, Path: "nested/input.al", Text: "éx\n"}
 	diagnostic := frontend.Diagnostic{
@@ -225,7 +271,7 @@ func TestAtomicOutputReplacesFilesAndPreservesOtherTargetsOnFailure(t *testing.T
 
 func TestUsageAndWorkspaceFailures(t *testing.T) {
 	root := t.TempDir()
-	for _, args := range [][]string{{"check"}, {"check", "x.AL"}, {"check", "--emit=c", "x.al"}, {"check", "-o", "out", "x.al"}, {"compile", "--emit=nope", "x.al"}, {"check", "../x.al"}, {"check", `src\main.al`}} {
+	for _, args := range [][]string{{"check"}, {"check", "x.AL"}, {"check", "--emit=c", "x.al"}, {"check", "-o", "out", "x.al"}, {"compile", "--emit=nope", "x.al"}, {"check", "../x.al"}, {"check", `src\main.al`}, {"check", "src"}, {"check", "same.al", "same.al"}} {
 		code, _, _ := invoke(t, root, args...)
 		if code != exitUsage {
 			t.Fatalf("%v: code %d", args, code)

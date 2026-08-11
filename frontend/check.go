@@ -121,6 +121,11 @@ type checker struct {
 	ann map[*checkedFn]map[Expr]*annInfo
 }
 
+type topLevelDecl struct {
+	kind string
+	pos  pos
+}
+
 // checkModule type-checks and monomorphizes all declarations.
 func checkModule(decls []Decl) (*checkedModule, error) {
 	c := &checker{
@@ -138,21 +143,40 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 		c.builtins[n] = true
 	}
 
-	// Pass 1: collect declarations.
+	// Pass 1: collect declarations. Imports, type constructors, and functions
+	// share one global declared-name namespace, so resolution cannot depend on
+	// which declaration kind happened to be collected first.
+	declared := make(map[string]topLevelDecl)
 	for _, d := range decls {
+		var name, kind string
+		var p pos
 		switch dd := d.(type) {
 		case *ImportDecl:
-			if _, dup := c.imports[dd.Name]; dup {
-				return nil, diag(dd.P, "duplicate import name %q", dd.Name)
+			name, kind, p = dd.Name, "import", dd.P
+		case *TypeDecl:
+			name, kind, p = dd.Name, "type", dd.P
+		case *FnDecl:
+			name, kind, p = dd.Name, "function", dd.P
+		}
+		if first, dup := declared[name]; dup {
+			return nil, duplicateTopLevelDiagnostic(p, name, kind, first)
+		}
+		if reservedTopLevelName(name, c) {
+			switch kind {
+			case "import":
+				return nil, diag(p, "import name %q is reserved", name)
+			case "type":
+				return nil, diag(p, "duplicate or reserved type name %q", name)
+			case "function":
+				return nil, diag(p, "duplicate or reserved function name %q", name)
 			}
-			if isReservedValueName(dd.Name, c) {
-				return nil, diag(dd.P, "import name %q is reserved", dd.Name)
-			}
+		}
+		declared[name] = topLevelDecl{kind: kind, pos: p}
+
+		switch dd := d.(type) {
+		case *ImportDecl:
 			c.imports[dd.Name] = dd
 		case *TypeDecl:
-			if _, dup := c.types[dd.Name]; dup || builtinTypeName(dd.Name) || strings.HasPrefix(dd.Name, "__s0_") {
-				return nil, diag(dd.P, "duplicate or reserved type name %q", dd.Name)
-			}
 			td := &typeDecl{
 				decl:       dd,
 				params:     dd.Params,
@@ -162,14 +186,6 @@ func checkModule(decls []Decl) (*checkedModule, error) {
 			c.types[dd.Name] = td
 			c.typeOrder = append(c.typeOrder, td)
 		case *FnDecl:
-			if _, dup := c.fns[dd.Name]; dup || c.builtins[dd.Name] || strings.HasPrefix(dd.Name, "__s0_") {
-				return nil, diag(dd.P, "duplicate or reserved function name %q", dd.Name)
-			}
-			for _, n := range variantReserved {
-				if dd.Name == n {
-					return nil, diag(dd.P, "function name %q is reserved", dd.Name)
-				}
-			}
 			c.fns[dd.Name] = dd
 		}
 	}
@@ -246,6 +262,38 @@ func builtinTypeName(name string) bool {
 		}
 	}
 	return false
+}
+
+func reservedTopLevelName(name string, c *checker) bool {
+	if strings.HasPrefix(name, "__s0_") || builtinTypeName(name) || c.builtins[name] {
+		return true
+	}
+	for _, reserved := range variantReserved {
+		if name == reserved {
+			return true
+		}
+	}
+	return false
+}
+
+func duplicateTopLevelDiagnostic(p pos, name, kind string, first topLevelDecl) error {
+	message := fmt.Sprintf("top-level %s name %q conflicts with earlier %s declaration", kind, name, first.kind)
+	if kind == first.kind {
+		switch kind {
+		case "import":
+			message = fmt.Sprintf("duplicate import name %q", name)
+		case "type":
+			message = fmt.Sprintf("duplicate or reserved type name %q", name)
+		case "function":
+			message = fmt.Sprintf("duplicate or reserved function name %q", name)
+		}
+	}
+	ae := diag(p, "%s", message).(*astError)
+	ae.related = []RelatedDiagnostic{{
+		Span:    first.pos.span,
+		Message: fmt.Sprintf("first %s declaration of %q is here", first.kind, name),
+	}}
+	return ae
 }
 
 // isReservedValueName reports whether a value name collides with a type or

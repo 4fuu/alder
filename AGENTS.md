@@ -11,8 +11,8 @@ Current implementation work is limited to:
 - Alder MIR representation, textual format, verification, and tests;
 - deterministic lowering from verified MIR to conservative C11;
 - the minimal C runtime required by that lowering;
-- source identity, structured diagnostics, compiler-service, and thin CLI work
-  required by active Roadmap Milestone 5.1;
+- bootstrap failure semantics, compiler-scale storage, and safe host capability
+  work required by active Roadmap Milestone 5.3;
 - design and bootstrap infrastructure directly supporting those goals.
 
 LLVM is explicitly out of scope. Do not add LLVM dependencies, bindings, build flags, IR concepts, or a placeholder backend without a new approved project decision.
