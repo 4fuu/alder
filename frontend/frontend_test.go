@@ -632,3 +632,76 @@ fn main() -> I32 {
 `
 	compileStr(t, src)
 }
+
+func TestBootstrapBufferRejectsInvalidSurfaceUses(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "string element",
+			src: `
+fn main(d: Domain) -> I32 {
+    let b = __s0_buffer_new(String, d)
+    return 0
+}
+`,
+			want: "buffer element type [U8] must be copy-trivial",
+		},
+		{
+			name: "nested reference element",
+			src: `
+type Wrapped { text: String }
+fn main(d: Domain) -> I32 {
+    let b = __s0_buffer_new(Wrapped, d)
+    return 0
+}
+`,
+			want: "buffer element type Wrapped must be copy-trivial",
+		},
+		{
+			name: "mismatched explicit type",
+			src:  `fn bad(b: __s0_Buffer(U64)) -> U64 { return __s0_buffer_len(U8, b) }`,
+			want: "expected __s0_Buffer(U8), got __s0_Buffer(U64)",
+		},
+		{
+			name: "mismatched value",
+			src:  `fn bad(d: Domain, b: __s0_Buffer(U64)) -> Result(__s0_Buffer(U64), __s0_Error) { return __s0_buffer_append(U64, d, b, true) }`,
+			want: "expected U64, got Bool",
+		},
+		{
+			name: "non-u64 index",
+			src:  `fn bad(b: __s0_Buffer(U64), i: I64) -> U64 { return __s0_buffer_get(U64, b, i) }`,
+			want: "expected U64, got I64",
+		},
+		{
+			name: "non-domain allocation",
+			src: `
+fn main(d: Bool) -> I32 {
+    let b = __s0_buffer_new(U64, d)
+    return 0
+}
+`,
+			want: "expected Domain, got Bool",
+		},
+		{
+			name: "opaque field",
+			src:  `fn bad(b: __s0_Buffer(U64)) -> U64 { return b.len }`,
+			want: "field access on non-struct type __s0_Buffer(U64)",
+		},
+		{
+			name: "wrong arity",
+			src:  `fn bad(b: __s0_Buffer(U64)) -> U64 { return __s0_buffer_len(U64) }`,
+			want: `"__s0_buffer_len" expects 2 arguments, got 1`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Compile(tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want diagnostic containing %q", err, tc.want)
+			}
+		})
+	}
+}

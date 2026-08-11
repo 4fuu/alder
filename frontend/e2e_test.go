@@ -29,6 +29,7 @@ var e2eFixtures = []struct {
 	{"generic", "default"},
 	{"domains", "default"},
 	{"maps", "default"},
+	{"buffer", "default"},
 	{"cleanup", "cleanup_driver.c"},
 	{"ffi", "ffi_driver.c"},
 }
@@ -227,6 +228,42 @@ fn main(d: Domain) -> I32 {
 }
 `,
 		},
+		{
+			name: "buffer_empty_get",
+			src: `
+fn read_empty(b: __s0_Buffer(U64)) -> I32 {
+    let value = __s0_buffer_get(U64, b, 0)
+    return 0
+}
+fn main(d: Domain) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => 1
+        Ok(empty) => read_empty(empty)
+    }
+}
+`,
+		},
+		{
+			name: "buffer_one_past_get",
+			src: `
+fn read_one_past(b: __s0_Buffer(U64)) -> I32 {
+    let value = __s0_buffer_get(U64, b, 1)
+    return 0
+}
+fn append_one(d: Domain, empty: __s0_Buffer(U64)) -> I32 {
+    return match __s0_buffer_append(U64, d, empty, 7) {
+        Err(error) => 2
+        Ok(one) => read_one_past(one)
+    }
+}
+fn main(d: Domain) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => 1
+        Ok(empty) => append_one(d, empty)
+    }
+}
+`,
+		},
 	}
 	for _, cc := range findCCompilers(t) {
 		cc := cc
@@ -260,6 +297,150 @@ fn main(d: Domain) -> I32 {
 						t.Fatalf("missing checked-failure panic message:\n%s", text)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestBufferRecoverableAllocationFailuresAndLimit(t *testing.T) {
+	src := `
+fn check_old(b: __s0_Buffer(U64), i: U64) -> I32 {
+    if __s0_buffer_len(U64, b) != 8 { return 21 }
+    if i == 8 { return 20 }
+    if __s0_buffer_get(U64, b, i) != i { return 22 }
+    return check_old(b, i + 1)
+}
+fn check_grown(b: __s0_Buffer(U64), i: U64) -> I32 {
+    if __s0_buffer_len(U64, b) != 9 { return 31 }
+    if i == 9 { return 30 }
+    if __s0_buffer_get(U64, b, i) != i { return 32 }
+    return check_grown(b, i + 1)
+}
+fn classify_new(error: __s0_Error) -> I32 {
+    return match error {
+        OutOfMemory => 10
+        Limit => 11
+    }
+}
+fn classify_growth(error: __s0_Error, old: __s0_Buffer(U64)) -> I32 {
+    return match error {
+        OutOfMemory => check_old(old, 0)
+        Limit => 23
+    }
+}
+fn grow_once(d: Domain, full: __s0_Buffer(U64)) -> I32 {
+    return match __s0_buffer_append(U64, d, full, 8) {
+        Err(error) => classify_growth(error, full)
+        Ok(grown) => check_grown(grown, 0)
+    }
+}
+fn fill(d: Domain, b: __s0_Buffer(U64), i: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+    if i == 8 { return Ok(b) }
+    let next = try __s0_buffer_append(U64, d, b, i)
+    return fill(d, next, i + 1)
+}
+fn after_new(d: Domain, empty: __s0_Buffer(U64)) -> I32 {
+    return match fill(d, empty, 0) {
+        Err(error) => 12
+        Ok(full) => grow_once(d, full)
+    }
+}
+fn main(d: Domain) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => classify_new(error)
+        Ok(empty) => after_new(d, empty)
+    }
+}
+`
+	gen, m := compileAndGenerate(t, src)
+	mainID, ok := m.Function("main")
+	if !ok {
+		t.Fatal("fixture has no main function")
+	}
+	newID, ok := m.Function("buffer.new.U64")
+	if !ok {
+		t.Fatal("fixture has no U64 buffer new helper")
+	}
+	appendID, ok := m.Function("buffer.append.U64")
+	if !ok {
+		t.Fatal("fixture has no U64 buffer append helper")
+	}
+	resultType := m.Functions[newID].Result
+	if m.Functions[appendID].Result != resultType {
+		t.Fatal("buffer new and append result types differ")
+	}
+	okVariant, ok := m.VariantIndex(resultType, "ok")
+	if !ok {
+		t.Fatal("buffer result has no ok variant")
+	}
+	errVariant, ok := m.VariantIndex(resultType, "err")
+	if !ok {
+		t.Fatal("buffer result has no err variant")
+	}
+	bufferType, ok := m.VariantPayload(resultType, okVariant)
+	if !ok {
+		t.Fatal("buffer result has no ok payload")
+	}
+	errorType, ok := m.VariantPayload(resultType, errVariant)
+	if !ok {
+		t.Fatal("buffer result has no err payload")
+	}
+	limitVariant, ok := m.VariantIndex(errorType, "Limit")
+	if !ok {
+		t.Fatal("bootstrap error has no Limit variant")
+	}
+	driver := fmt.Sprintf(`#include "gen.c"
+#include <stdint.h>
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) { return 1; }
+
+    alder_runtime_test_fail_domain_alloc_after((uint64_t)0);
+    if (alder_fn_main_%d(&root) != (int32_t)10) { return 2; }
+
+    alder_runtime_test_fail_domain_alloc_after((uint64_t)1);
+    if (alder_fn_main_%d(&root) != (int32_t)20) { return 3; }
+
+    alder_runtime_test_clear_domain_alloc_failure();
+    if (alder_fn_main_%d(&root) != (int32_t)30) { return 4; }
+
+    AlderTy%d initial = alder_fn_buffer_new_U64_%d(&root);
+    if (initial.alder_tag != (uint32_t)%d) { return 5; }
+    AlderTy%d malformed = initial.alder_u.alder_p%d;
+    malformed.alder_f0.len = UINT64_MAX;
+    malformed.alder_f1 = UINT64_MAX;
+    alder_runtime_test_fail_domain_alloc_after((uint64_t)1);
+    AlderTy%d limited = alder_fn_buffer_append_U64_%d(&root, malformed, (uint64_t)1);
+    if (limited.alder_tag != (uint32_t)%d) { return 6; }
+    if (limited.alder_u.alder_p%d.alder_tag != (uint32_t)%d) { return 7; }
+    if (alder_domain_alloc(&root, (size_t)1, (size_t)1) == NULL) { return 8; }
+    if (alder_domain_alloc(&root, (size_t)1, (size_t)1) != NULL) { return 9; }
+
+    alder_runtime_test_clear_domain_alloc_failure();
+    alder_domain_destroy(&root);
+    if (alder_runtime_live_allocations() != (size_t)0) { return 10; }
+    return 0;
+}
+`, mainID, mainID, mainID, resultType, newID, okVariant,
+		bufferType, okVariant, resultType, appendID, errVariant, errVariant, limitVariant)
+	for _, cc := range findCCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			genPath, driverPath := writeFiles(t, "buffer_failures", gen, driver)
+			exe := filepath.Join(t.TempDir(), "buffer_failures.exe")
+			args := []string{
+				"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+				"-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING",
+				"-I", filepath.Dir(genPath),
+				"-I", filepath.Join("..", "runtime", "c"),
+				genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+				"-o", exe,
+			}
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("strict compile failed: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run failed: %v\n%s", err, out)
 			}
 		})
 	}

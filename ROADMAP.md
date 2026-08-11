@@ -142,6 +142,16 @@ cleanup model. S0 has no fixed arrays, source modules, header importing,
 storage inference, table surface, structured concurrency, traits, closures,
 or methods, and is not a complete language frontend.
 
+M5.3 also carries the private `__s0_Buffer(T)`/`__s0_Error` buffer bridge and
+its `__s0_buffer_*` operations. It exists only to unblock Stage 0 plain-value
+buffering; it is not final `Vec` or standard-library semantics. The frontend
+owns this bridge, and source declarations plus the standard collection API
+are the removal trigger. Test-only runtime fault injection pins initial and
+growth-allocation `OutOfMemory`, old-buffer validity after failed growth, and
+successful retry. An out-of-band C driver pins capacity-doubling `Limit`
+without exposing a source capacity escape hatch. Broader identity-exhaustion
+evidence remains part of the active M5.3 readiness gate.
+
 Exit-criteria evidence:
 
 - ten end-to-end source programs (arith, structs, enums, option, strings,

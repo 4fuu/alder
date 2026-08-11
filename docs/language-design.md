@@ -362,7 +362,7 @@ Status: normative for the implemented Go Stage 0 frontend
 M4 implements a deliberately small source surface that exercises a
 representative subset of the MIR and C backend end to end. The `frontend` Go
 package deterministically transforms source text into a fully typed and
-monomorphized program, verified MIR 2, and C11. This is a bootstrap bridge,
+monomorphized program, verified MIR 3, and C11. This is a bootstrap bridge,
 not a complete frontend or the final surface language.
 
 S0 does not implement storage inference, the `Table(T)` and `T.Id` surface,
@@ -422,6 +422,20 @@ Composite types:
   implicit variants `None`/`Some(T)` and `Ok(T)`/`Err(E)`;
 - `Map(K, V)` is a fixed-capacity bootstrap helper using open addressing and
   capacity 16, not the long-term `Table(T)` and `T.Id` identity model;
+- `__s0_Buffer(T)` and `__s0_Error` are private S0 bridge types for a
+  recoverably growable, copy-trivial plain-value buffer. The descriptor is
+  opaque and contains a shared backing reference plus a descriptor-local
+  logical length; the backing length is its capacity. Successful spare-capacity
+  append writes at the input descriptor's logical end, so copied descriptors
+  can observe later writes when append histories fork. Bootstrap compiler code
+  uses one append lineage; this is intentionally not ordinary persistent value
+  semantics. Recoverable failure never mutates the input descriptor or backing.
+  The append destination domain is used only when growth is required; lifetime
+  checking conservatively retains both the original and possible growth-domain
+  provenance. Compiler code should pass the buffer's original domain. This API
+  is not the final `Vec` or standard library collection design. It is owned by
+  the Stage 0 frontend bridge and must be removed when source declarations and
+  the standard collection API can express the same facility;
 - `Domain` and `DomainMark` are bootstrap bridge types, not user-facing parts
   of the intended compiler-inferred storage model;
 - `Ptr(T)` is a raw C pointer usable only at FFI boundaries;
@@ -514,6 +528,15 @@ Restrictions (each with a diagnostic):
 - bootstrap intrinsics: `__s0_domain_create(p)`, `__s0_alloc(T, d, n)`,
   `__s0_domain_mark(d)`, `__s0_domain_reset(d, m)`,
   `__s0_domain_destroy(d)`, and `__s0_map_create(Map(K, V), d)`;
+- private buffer intrinsics:
+  `__s0_buffer_new(T, d) -> Result(__s0_Buffer(T), __s0_Error)`,
+  `__s0_buffer_len(T, b) -> U64`,
+  `__s0_buffer_append(T, d, b, value) -> Result(__s0_Buffer(T), __s0_Error)`,
+  `__s0_buffer_get(T, b, index) -> T`, and
+  `__s0_buffer_slice(T, b) -> [T]`. New buffers allocate capacity 8; append
+  doubles full capacity with checked arithmetic. Doubling overflow is `Limit`;
+  every `alloc.checked` failure is `OutOfMemory`. `get` checks logical length
+  before the backing bound, and `slice` exposes exactly the logical prefix;
 - map operations: `Get(m, k)`, `Set(m, k, v)`, and `Remove(m, k)`.
 
 The `__s0_` names are reserved bootstrap-only intrinsics. Together with the

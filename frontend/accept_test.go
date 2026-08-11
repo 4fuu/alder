@@ -18,6 +18,7 @@ var acceptFixtures = []string{
 	"try",
 	"cleanup",
 	"ffi",
+	"buffer",
 }
 
 // rejectFixtures must fail with the pinned diagnostic.

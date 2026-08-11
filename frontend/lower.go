@@ -15,13 +15,14 @@ type lowerer struct {
 	ann        map[*checkedFn]map[Expr]*annInfo
 	importSigs map[string]*checkSig
 
-	fnID     map[*checkedFn]mir.FunctionId
-	fnByName map[string]*checkedFn
-	tyCache  map[string]mir.TypeId
-	hashEq   map[string]*hashEqIDs
-	consts   map[string]string
-	constSeq int
-	mapCache map[string]*mapHelpers
+	fnID        map[*checkedFn]mir.FunctionId
+	fnByName    map[string]*checkedFn
+	tyCache     map[string]mir.TypeId
+	hashEq      map[string]*hashEqIDs
+	consts      map[string]string
+	constSeq    int
+	mapCache    map[string]*mapHelpers
+	bufferCache map[string]*bufferHelpers
 }
 
 // hashEqIDs are the per-key hash and equality helpers.
@@ -42,19 +43,18 @@ type checkedModule struct {
 // monomorphization happened before this point.
 func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 	m := mir.NewModule()
-	// Frontend lowering has not adopted format 3's alloc.checked yet.
-	m.FormatVersion = mir.PanicFormatVersion
 	l := &lowerer{
-		m:          m,
-		checked:    cm.fns,
-		ann:        cm.ann,
-		importSigs: cm.imports,
-		fnID:       make(map[*checkedFn]mir.FunctionId),
-		fnByName:   make(map[string]*checkedFn),
-		tyCache:    make(map[string]mir.TypeId),
-		hashEq:     make(map[string]*hashEqIDs),
-		consts:     make(map[string]string),
-		mapCache:   make(map[string]*mapHelpers),
+		m:           m,
+		checked:     cm.fns,
+		ann:         cm.ann,
+		importSigs:  cm.imports,
+		fnID:        make(map[*checkedFn]mir.FunctionId),
+		fnByName:    make(map[string]*checkedFn),
+		tyCache:     make(map[string]mir.TypeId),
+		hashEq:      make(map[string]*hashEqIDs),
+		consts:      make(map[string]string),
+		mapCache:    make(map[string]*mapHelpers),
+		bufferCache: make(map[string]*bufferHelpers),
 	}
 	// Imports in source order.
 	for _, d := range decls {
@@ -112,6 +112,10 @@ func (l *lowerer) ty(t *Type) mir.TypeId {
 		return l.m.Result(l.ty(t.ok), l.ty(t.err))
 	case tMap:
 		return l.mapType(t)
+	case tBuffer:
+		return l.bufferType(t)
+	case tS0Error:
+		return l.s0ErrorType()
 	case tStruct, tEnum:
 		return l.structType(t)
 	case tDomain:
@@ -203,6 +207,206 @@ func (l *lowerer) mapType(t *Type) mir.TypeId {
 	})
 	l.tyCache[key] = id
 	return id
+}
+
+type bufferHelpers struct{ newID, lenID, appendID, getID, sliceID mir.FunctionId }
+
+func (l *lowerer) s0ErrorType() mir.TypeId {
+	const key = "__s0_Error"
+	if id, ok := l.tyCache[key]; ok {
+		return id
+	}
+	id := l.m.AddEnum(key, []mir.Variant{{Name: "OutOfMemory", Payload: mir.TypeUnit}, {Name: "Limit", Payload: mir.TypeUnit}})
+	l.tyCache[key] = id
+	return id
+}
+
+func (l *lowerer) bufferType(t *Type) mir.TypeId {
+	key := t.mangledName()
+	if id, ok := l.tyCache[key]; ok {
+		return id
+	}
+	id := l.m.AddAggregate(key, []mir.Field{{Name: "data", Type: l.m.SafeMut(l.ty(t.elem))}, {Name: "len", Type: mir.TypeU64}})
+	l.tyCache[key] = id
+	return id
+}
+
+func (l *lowerer) bufferHelpersFor(t *Type) *bufferHelpers {
+	key := t.elem.mangledName()
+	if h := l.bufferCache[key]; h != nil {
+		return h
+	}
+	bt, et := l.bufferType(t), l.ty(t.elem)
+	errt := l.s0ErrorType()
+	rt := l.m.Result(bt, errt)
+	add := func(n string, p []mir.Param, r mir.TypeId) mir.FunctionId {
+		l.m.AddFunction("buffer."+n+"."+key, p, r)
+		return mir.FunctionId(len(l.m.Functions) - 1)
+	}
+	h := &bufferHelpers{}
+	h.newID = add("new", []mir.Param{{Name: "d", Type: l.m.DomainHandle()}}, rt)
+	h.lenID = add("len", []mir.Param{{Name: "b", Type: bt}}, mir.TypeU64)
+	h.appendID = add("append", []mir.Param{{Name: "d", Type: l.m.DomainHandle()}, {Name: "b", Type: bt}, {Name: "v", Type: et}}, rt)
+	h.getID = add("get", []mir.Param{{Name: "b", Type: bt}, {Name: "i", Type: mir.TypeU64}}, et)
+	h.sliceID = add("slice", []mir.Param{{Name: "b", Type: bt}}, l.m.Slice(et))
+	l.bufferCache[key] = h
+	l.lowerBufferNew(h, t, bt, et, errt, rt)
+	l.lowerBufferLen(h, t, bt)
+	l.lowerBufferAppend(h, t, bt, et, errt, rt)
+	l.lowerBufferGetSlice(h, t, bt, et)
+	return h
+}
+
+func (l *lowerer) bufferConst(b *fb, v int64) mir.ValueId {
+	return b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: v})
+}
+func (l *lowerer) bufferErr(b *fb, errt, rt mir.TypeId, variant string) mir.ValueId {
+	e := b.res(errt)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: e, TypeOp: errt, Variant: variant})
+	r := b.res(rt)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: r, TypeOp: rt, Variant: "err", Payload: e})
+	return r
+}
+func (l *lowerer) bufferOK(b *fb, rt mir.TypeId, v mir.ValueId) mir.ValueId {
+	r := b.res(rt)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: r, TypeOp: rt, Variant: "ok", Payload: v})
+	return r
+}
+func (l *lowerer) bufferAgg(b *fb, bt mir.TypeId, data, len mir.ValueId) mir.ValueId {
+	v := b.res(bt)
+	b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: v, AggType: bt, AggFields: []mir.AggField{{Name: "data", Value: data}, {Name: "len", Value: len}}})
+	return v
+}
+
+func (l *lowerer) lowerBufferNew(h *bufferHelpers, t *Type, bt, et, errt, rt mir.TypeId) {
+	b := l.newFB(l.m.Functions[h.newID])
+	b.result = &Type{kind: tResult, ok: t, err: &Type{kind: tS0Error}}
+	b.start("bb0")
+	cap := l.bufferConst(b, 8)
+	ok, _ := b.addBlock("bb_ok", nil)
+	oom, _ := b.addBlock("bb_oom", nil)
+	data := b.res(l.m.SafeMut(et))
+	b.emit(mir.Instr{Op: mir.OpAllocChecked, Result: data, Domain: 0, Count: cap, TypeOp: et, FailTarget: blkID(b.f, oom)})
+	b.jump(blkID(b.f, ok), nil)
+	b.setCur(oom)
+	b.ret(l.bufferErr(b, errt, rt, "OutOfMemory"))
+	b.setCur(ok)
+	zero := l.bufferConst(b, 0)
+	b.ret(l.bufferOK(b, rt, l.bufferAgg(b, bt, data, zero)))
+}
+func (l *lowerer) lowerBufferLen(h *bufferHelpers, t *Type, bt mir.TypeId) {
+	b := l.newFB(l.m.Functions[h.lenID])
+	b.result = prim(pU64)
+	b.start("bb0")
+	loc := b.f.AddLocal(b.localName("b"), bt)
+	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: loc}, 0)
+	b.ret(b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: loc}, Field: "len"}, mir.TypeU64))
+}
+
+func (l *lowerer) lowerBufferAppend(h *bufferHelpers, t *Type, bt, et, errt, rt mir.TypeId) {
+	b := l.newFB(l.m.Functions[h.appendID])
+	b.result = &Type{kind: tResult, ok: t, err: &Type{kind: tS0Error}}
+	b.start("bb0")
+	loc := b.f.AddLocal(b.localName("b"), bt)
+	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: loc}, 1)
+	fld := func(n string, ty mir.TypeId) mir.ValueId {
+		return b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: loc}, Field: n}, ty)
+	}
+	st := l.m.SafeMut(et)
+	data, lenv := fld("data", st), fld("len", mir.TypeU64)
+	cap := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpSliceLen, Result: cap, Slice: data})
+	spare, _ := b.addBlock("bb_spare", nil)
+	grow, _ := b.addBlock("bb_grow", nil)
+	eq := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntEq, Result: eq, A: lenv, B: cap})
+	b.branch(eq, blkID(b.f, grow), blkID(b.f, spare))
+	panic := b.panicBlock()
+	one := l.bufferConst(b, 1)
+	b.setCur(spare)
+	ref := b.res(st)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: data, Index: lenv, FailTarget: panic})
+	b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, 2)
+	nl := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: nl, A: lenv, B: one, FailTarget: panic})
+	b.ret(l.bufferOK(b, rt, l.bufferAgg(b, bt, data, nl)))
+	b.setCur(grow)
+	limit, _ := b.addBlock("bb_limit", nil)
+	alloc, _ := b.addBlock("bb_alloc", nil)
+	two := l.bufferConst(b, 2)
+	nc := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntMulChecked, Result: nc, A: cap, B: two, FailTarget: blkID(b.f, limit)})
+	b.jump(blkID(b.f, alloc), nil)
+	b.setCur(limit)
+	b.ret(l.bufferErr(b, errt, rt, "Limit"))
+	b.setCur(alloc)
+	oom, _ := b.addBlock("bb_oom", nil)
+	copyHead, cp := b.addBlock("bb_copy", []mir.Param{{Name: "i", Type: mir.TypeU64}})
+	copyBody, _ := b.addBlock("bb_copy_one", nil)
+	finish, _ := b.addBlock("bb_finish", nil)
+	nd := b.res(st)
+	b.emit(mir.Instr{Op: mir.OpAllocChecked, Result: nd, Domain: 0, Count: nc, TypeOp: et, FailTarget: blkID(b.f, oom)})
+	zero := l.bufferConst(b, 0)
+	b.jump(blkID(b.f, copyHead), []mir.ValueId{zero})
+	b.setCur(oom)
+	b.ret(l.bufferErr(b, errt, rt, "OutOfMemory"))
+	b.setCur(copyHead)
+	done := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntGe, Result: done, A: cp[0], B: lenv})
+	b.branch(done, blkID(b.f, finish), blkID(b.f, copyBody))
+	b.setCur(copyBody)
+	or := b.res(st)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: or, Slice: data, Index: cp[0], FailTarget: panic})
+	val := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: or}, et)
+	nr := b.res(st)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: nr, Slice: nd, Index: cp[0], FailTarget: panic})
+	b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: nr}, val)
+	ni := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: ni, A: cp[0], B: one, FailTarget: panic})
+	b.jump(blkID(b.f, copyHead), []mir.ValueId{ni})
+	b.setCur(finish)
+	ar := b.res(st)
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ar, Slice: nd, Index: lenv, FailTarget: panic})
+	b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: ar}, 2)
+	nn := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: nn, A: lenv, B: one, FailTarget: panic})
+	b.ret(l.bufferOK(b, rt, l.bufferAgg(b, bt, nd, nn)))
+}
+
+func (l *lowerer) lowerBufferGetSlice(h *bufferHelpers, t *Type, bt, et mir.TypeId) {
+	for _, spec := range []struct {
+		id    mir.FunctionId
+		slice bool
+	}{{h.getID, false}, {h.sliceID, true}} {
+		b := l.newFB(l.m.Functions[spec.id])
+		if spec.slice {
+			b.result = &Type{kind: tSlice, elem: t.elem}
+		} else {
+			b.result = t.elem
+		}
+		b.start("bb0")
+		loc := b.f.AddLocal(b.localName("b"), bt)
+		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: loc}, 0)
+		base := mir.Place{Kind: mir.PlaceLocal, Local: loc}
+		data := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &base, Field: "data"}, l.m.SafeMut(et))
+		if spec.slice {
+			ln := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &base, Field: "len"}, mir.TypeU64)
+			z := l.bufferConst(b, 0)
+			out := b.res(l.m.Slice(et))
+			b.emit(mir.Instr{Op: mir.OpSliceRangeChecked, Result: out, Slice: data, Lo: z, Hi: ln, FailTarget: b.panicBlock()})
+			b.ret(out)
+		} else {
+			ln := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &base, Field: "len"}, mir.TypeU64)
+			inside := b.res(mir.TypeBool)
+			b.emit(mir.Instr{Op: mir.OpIntLt, Result: inside, A: 1, B: ln})
+			valid, _ := b.addBlock("bb_valid", nil)
+			b.branch(inside, blkID(b.f, valid), b.panicBlock())
+			b.setCur(valid)
+			ref := b.res(l.m.SafeMut(et))
+			b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: data, Index: 1, FailTarget: b.panicBlock()})
+			b.ret(b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, et))
+		}
+	}
 }
 
 // mapHelpers are the generated functions implementing Map(K, V).
@@ -1583,6 +1787,8 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 	var exprArgs []Expr
 	if name == "__s0_alloc" {
 		exprArgs = []Expr{x.Args[1], x.Args[2]}
+	} else if strings.HasPrefix(name, "__s0_buffer_") {
+		exprArgs = x.Args[1:]
 	} else if name == "Push" {
 		exprArgs = append([]Expr{x.Args[0]}, x.Args[2:]...)
 	} else {
@@ -1609,6 +1815,24 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 		elemTy := b.ann[x].typ.elem
 		id := b.res(b.l.m.SafeMut(b.l.ty(elemTy)))
 		b.emit(mir.Instr{Op: mir.OpAlloc, Result: id, Domain: args[0], Count: args[1], TypeOp: b.l.ty(elemTy)})
+		return id, nil
+	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice":
+		var bt *Type
+		switch name {
+		case "__s0_buffer_new":
+			bt = b.ann[x].typ.ok
+		case "__s0_buffer_append":
+			bt = b.ann[x.Args[2]].typ
+		default:
+			bt = b.ann[x.Args[1]].typ
+		}
+		if bt == nil || bt.kind != tBuffer {
+			return mir.NoValue, fmt.Errorf("internal: %s has no concrete buffer type", name)
+		}
+		h := b.l.bufferHelpersFor(bt)
+		callee := map[string]mir.FunctionId{"__s0_buffer_new": h.newID, "__s0_buffer_len": h.lenID, "__s0_buffer_append": h.appendID, "__s0_buffer_get": h.getID, "__s0_buffer_slice": h.sliceID}[name]
+		id := b.res(b.l.m.Functions[callee].Result)
+		b.emit(mir.Instr{Op: mir.OpCall, Result: id, Callee: callee, Args: args})
 		return id, nil
 	case "__s0_domain_create":
 		id := b.res(b.l.m.DomainHandle())

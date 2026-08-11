@@ -112,6 +112,14 @@ void alder_domain_destroy(AlderDomain *domain);
  * cleanup entries). Tests use it to prove leak-free domain lifecycles. */
 size_t alder_runtime_live_allocations(void);
 
+/* Test-only deterministic domain-allocation failure injection. Production
+ * builds expose neither these symbols nor their state. Allow N eligible calls
+ * to alder_domain_alloc, then fail subsequent calls until the hook is cleared. */
+#if defined(ALDER_RUNTIME_TESTING)
+void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls);
+void alder_runtime_test_clear_domain_alloc_failure(void);
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Slices and bounds                                                   */
 /* ------------------------------------------------------------------ */

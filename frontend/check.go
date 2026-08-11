@@ -66,6 +66,7 @@ const (
 // cross source-level bindings.
 var builtinFnNames = []string{
 	"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create",
+	"__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice",
 	"Get", "Set", "Remove",
 }
 
@@ -73,7 +74,7 @@ var builtinFnNames = []string{
 var builtinTypeNames = []string{
 	"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
 	"F32", "F64", "Unit", "String", "Option", "Result", "Map", "Ptr",
-	"Domain", "DomainMark",
+	"Domain", "DomainMark", "__s0_Buffer", "__s0_Error",
 }
 
 // variantReserved are reserved in the value namespace.
@@ -483,6 +484,8 @@ func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 			return &Type{kind: tDomain}, nil
 		case "DomainMark":
 			return &Type{kind: tDomainMark}, nil
+		case "__s0_Error":
+			return &Type{kind: tS0Error}, nil
 		}
 		if tp, ok := tps[t.Name]; ok {
 			return tp, nil
@@ -542,6 +545,15 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 			}
 		}
 		return mt, nil
+	case "__s0_Buffer":
+		if len(args) != 1 {
+			return nil, diag(p, "__s0_Buffer expects 1 type argument, got %d", len(args))
+		}
+		bt := &Type{kind: tBuffer, elem: args[0]}
+		if bt.concrete() && !args[0].copyTrivial() {
+			return nil, diag(p, "buffer element type %s must be copy-trivial", args[0].display())
+		}
+		return bt, nil
 	case "Ptr":
 		if len(args) != 1 {
 			return nil, diag(p, "Ptr expects 1 type argument, got %d", len(args))
@@ -590,6 +602,11 @@ func (c *checker) validateConcreteType(t *Type, p pos) error {
 		}
 		return c.validateConcreteType(t.elem, p)
 	case tAlloc, tPtr, tOption:
+		return c.validateConcreteType(t.elem, p)
+	case tBuffer:
+		if !t.elem.copyTrivial() {
+			return diag(p, "buffer element type %s must be copy-trivial", t.elem.display())
+		}
 		return c.validateConcreteType(t.elem, p)
 	case tResult:
 		if err := c.validateConcreteType(t.ok, p); err != nil {
@@ -1682,7 +1699,7 @@ func patternBound(t *Type, bindings map[string]*Type) bool {
 		return ok
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tPtr, tOption:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer:
 		return patternBound(t.elem, bindings)
 	case tResult:
 		return patternBound(t.ok, bindings) && patternBound(t.err, bindings)
@@ -2067,6 +2084,71 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 			return nil, k.mismatch(args[2].exprPos(), "allocation count", prim(pU64), nt)
 		}
 		rt := &Type{kind: tAlloc, elem: ta}
+		k.noteCall(x, rt, &callAnn{kind: callBuiltin, builtin: name})
+		return rt, nil
+
+	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice":
+		want := map[string]int{"__s0_buffer_new": 2, "__s0_buffer_len": 2, "__s0_buffer_append": 4, "__s0_buffer_get": 3, "__s0_buffer_slice": 2}[name]
+		if err := expect(want); err != nil {
+			return nil, err
+		}
+		ta, err := k.typeArgOf(args[0])
+		if err != nil {
+			return nil, err
+		}
+		if !ta.copyTrivial() {
+			return nil, diag(args[0].exprPos(), "buffer element type %s must be copy-trivial", ta.display())
+		}
+		bt := &Type{kind: tBuffer, elem: ta}
+		if name == "__s0_buffer_new" {
+			if _, err := checkDomain(1); err != nil {
+				return nil, err
+			}
+		} else {
+			off := 1
+			if name == "__s0_buffer_append" {
+				if _, err := checkDomain(1); err != nil {
+					return nil, err
+				}
+				off = 2
+			}
+			got, err := k.checkExpr(args[off], bt)
+			if err != nil {
+				return nil, err
+			}
+			if !typeEqual(got, bt) {
+				return nil, k.mismatch(args[off].exprPos(), "buffer", bt, got)
+			}
+			if name == "__s0_buffer_append" {
+				vt, err := k.checkExpr(args[3], ta)
+				if err != nil {
+					return nil, err
+				}
+				if !typeEqual(vt, ta) {
+					return nil, k.mismatch(args[3].exprPos(), "buffer value", ta, vt)
+				}
+			}
+			if name == "__s0_buffer_get" {
+				it, err := k.checkExpr(args[2], prim(pU64))
+				if err != nil {
+					return nil, err
+				}
+				if !typeEqual(it, prim(pU64)) {
+					return nil, k.mismatch(args[2].exprPos(), "buffer index", prim(pU64), it)
+				}
+			}
+		}
+		var rt *Type
+		switch name {
+		case "__s0_buffer_new", "__s0_buffer_append":
+			rt = &Type{kind: tResult, ok: bt, err: &Type{kind: tS0Error}}
+		case "__s0_buffer_len":
+			rt = prim(pU64)
+		case "__s0_buffer_get":
+			rt = ta
+		default:
+			rt = &Type{kind: tSlice, elem: ta}
+		}
 		k.noteCall(x, rt, &callAnn{kind: callBuiltin, builtin: name})
 		return rt, nil
 

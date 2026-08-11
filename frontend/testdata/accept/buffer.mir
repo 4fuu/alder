@@ -1,0 +1,220 @@
+mir 3
+
+type @__s0_Buffer.c1.U64 {
+  data: safe_mut(u64)
+  len: u64
+}
+
+enum @__s0_Error {
+  OutOfMemory
+  Limit
+}
+
+const @lit.int.c0: u64 = 8
+
+const @lit.int.c1: u64 = 0
+
+const @lit.int.c2: u64 = 1
+
+const @lit.int.c3: u64 = 2
+
+const @lit.int.c4: u64 = 10
+
+const @lit.int.c5: u64 = 20
+
+const @lit.int.c6: i32 = 0
+
+fn @build(%d: domain_handle) -> result(@__s0_Buffer.c1.U64, @__s0_Error) {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  %v = call @buffer.new.U64(%d)
+  switch %v {
+    err(%v0) -> bb_err
+    ok(%v1) -> bb_ok
+  }
+
+bb_err:
+  %v2 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v0
+  fail %v2
+
+bb_ok:
+  store local %b, %v1
+  %v3 = load local %b
+  %v4 = const.get @lit.int.c4
+  %v5 = call @buffer.append.U64(%d, %v3, %v4)
+  switch %v5 {
+    err(%v6) -> bb_err0
+    ok(%v7) -> bb_ok0
+  }
+
+bb_err0:
+  %v8 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v6
+  fail %v8
+
+bb_ok0:
+  store local %b, %v7
+  %v9 = load local %b
+  %v10 = const.get @lit.int.c5
+  %v11 = call @buffer.append.U64(%d, %v9, %v10)
+  switch %v11 {
+    err(%v12) -> bb_err1
+    ok(%v13) -> bb_ok1
+  }
+
+bb_err1:
+  %v14 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v12
+  fail %v14
+
+bb_ok1:
+  store local %b, %v13
+  %v15 = load local %b
+  %v16 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), ok, %v15
+  return %v16
+}
+
+fn @inspect(%b: @__s0_Buffer.c1.U64) -> u64 {
+bb0:
+  %v = call @buffer.len.U64(%b)
+  %v0 = const.get @lit.int.c1
+  %v1 = call @buffer.get.U64(%b, %v0)
+  %v2 = int.add.checked %v, %v1 else bb_fail
+  %v3 = call @buffer.slice.U64(%b)
+  %v4 = slice.len %v3
+  %v5 = int.add.checked %v2, %v4 else bb_fail
+  return %v5
+
+bb_fail:
+  panic
+}
+
+fn @main(%d: domain_handle) -> i32 {
+bb0:
+  %v = const.get @lit.int.c6
+  return %v
+}
+
+fn @buffer.new.U64(%d: domain_handle) -> result(@__s0_Buffer.c1.U64, @__s0_Error) {
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = alloc.checked %d, u64, %v else bb_oom
+  jump bb_ok
+
+bb_ok:
+  %v3 = const.get @lit.int.c1
+  %v4 = aggregate.construct @__s0_Buffer.c1.U64 { data: %v0, len: %v3 }
+  %v5 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), ok, %v4
+  return %v5
+
+bb_oom:
+  %v1 = enum.construct @__s0_Error, OutOfMemory
+  %v2 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v1
+  return %v2
+}
+
+fn @buffer.len.U64(%b: @__s0_Buffer.c1.U64) -> u64 {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  store local %b, %b
+  %v = load field(local %b, len)
+  return %v
+}
+
+fn @buffer.append.U64(%d: domain_handle, %b: @__s0_Buffer.c1.U64, %v: u64) -> result(@__s0_Buffer.c1.U64, @__s0_Error) {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  store local %b, %b
+  %v0 = load field(local %b, data)
+  %v1 = load field(local %b, len)
+  %v2 = slice.len %v0
+  %v3 = int.eq %v1, %v2
+  %v4 = const.get @lit.int.c2
+  branch %v3, bb_grow, bb_spare
+
+bb_spare:
+  %v5 = slice.index.checked %v0, %v1 else bb_fail
+  store deref %v5, %v
+  %v6 = int.add.checked %v1, %v4 else bb_fail
+  %v7 = aggregate.construct @__s0_Buffer.c1.U64 { data: %v0, len: %v6 }
+  %v8 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), ok, %v7
+  return %v8
+
+bb_grow:
+  %v9 = const.get @lit.int.c3
+  %v10 = int.mul.checked %v2, %v9 else bb_limit
+  jump bb_alloc
+
+bb_fail:
+  panic
+
+bb_limit:
+  %v11 = enum.construct @__s0_Error, Limit
+  %v12 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v11
+  return %v12
+
+bb_alloc:
+  %v13 = alloc.checked %d, u64, %v10 else bb_oom
+  %v14 = const.get @lit.int.c1
+  jump bb_copy(%v14)
+
+bb_oom:
+  %v15 = enum.construct @__s0_Error, OutOfMemory
+  %v16 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), err, %v15
+  return %v16
+
+bb_copy(%i: u64):
+  %v17 = int.ge %i, %v1
+  branch %v17, bb_finish, bb_copy_one
+
+bb_copy_one:
+  %v18 = slice.index.checked %v0, %i else bb_fail
+  %v19 = load deref %v18
+  %v20 = slice.index.checked %v13, %i else bb_fail
+  store deref %v20, %v19
+  %v21 = int.add.checked %i, %v4 else bb_fail
+  jump bb_copy(%v21)
+
+bb_finish:
+  %v22 = slice.index.checked %v13, %v1 else bb_fail
+  store deref %v22, %v
+  %v23 = int.add.checked %v1, %v4 else bb_fail
+  %v24 = aggregate.construct @__s0_Buffer.c1.U64 { data: %v13, len: %v23 }
+  %v25 = enum.construct result(@__s0_Buffer.c1.U64, @__s0_Error), ok, %v24
+  return %v25
+}
+
+fn @buffer.get.U64(%b: @__s0_Buffer.c1.U64, %i: u64) -> u64 {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  store local %b, %b
+  %v = load field(local %b, data)
+  %v0 = load field(local %b, len)
+  %v1 = int.lt %i, %v0
+  branch %v1, bb_valid, bb_fail
+
+bb_valid:
+  %v2 = slice.index.checked %v, %i else bb_fail
+  %v3 = load deref %v2
+  return %v3
+
+bb_fail:
+  panic
+}
+
+fn @buffer.slice.U64(%b: @__s0_Buffer.c1.U64) -> slice(u64) {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  store local %b, %b
+  %v = load field(local %b, data)
+  %v0 = load field(local %b, len)
+  %v1 = const.get @lit.int.c1
+  %v2 = slice.range.checked %v, %v1, %v0 else bb_fail
+  return %v2
+
+bb_fail:
+  panic
+}

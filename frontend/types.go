@@ -15,6 +15,8 @@ const (
 	tOption
 	tResult
 	tMap
+	tBuffer
+	tS0Error
 	tStruct
 	tEnum
 	tDomain
@@ -82,7 +84,7 @@ func (t *Type) concrete() bool {
 		return false
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tPtr, tOption:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer:
 		return t.elem.concrete()
 	case tResult:
 		return t.ok.concrete() && t.err.concrete()
@@ -166,6 +168,10 @@ func (t *Type) display() string {
 		return "Result(" + t.ok.display() + ", " + t.err.display() + ")"
 	case tMap:
 		return "Map(" + t.key.display() + ", " + t.val.display() + ")"
+	case tBuffer:
+		return "__s0_Buffer(" + t.elem.display() + ")"
+	case tS0Error:
+		return "__s0_Error"
 	case tStruct:
 		if len(t.args) == 0 {
 			return t.decl.decl.Name
@@ -222,6 +228,10 @@ func (t *Type) mangledName() string {
 		return "Result.c2." + t.ok.mangledName() + "." + t.err.mangledName()
 	case tMap:
 		return "Map.c2." + t.key.mangledName() + "." + t.val.mangledName()
+	case tBuffer:
+		return "__s0_Buffer.c1." + t.elem.mangledName()
+	case tS0Error:
+		return "__s0_Error"
 	case tPtr:
 		return "Ptr.c1." + t.elem.mangledName()
 	case tPrim:
@@ -239,7 +249,7 @@ func (t *Type) mangledName() string {
 // enumLike reports whether the type supports variants: a declared enum,
 // Option, or Result.
 func (t *Type) enumLike() bool {
-	return t != nil && (t.kind == tEnum || t.kind == tOption || t.kind == tResult)
+	return t != nil && (t.kind == tEnum || t.kind == tOption || t.kind == tResult || t.kind == tS0Error)
 }
 
 // variantsOf returns the variants of an enum-like type.
@@ -251,6 +261,8 @@ func (t *Type) variantsOf() []*variantType {
 		return []*variantType{{name: "None"}, {name: "Some", payload: t.elem}}
 	case tResult:
 		return []*variantType{{name: "Ok", payload: t.ok}, {name: "Err", payload: t.err}}
+	case tS0Error:
+		return []*variantType{{name: "OutOfMemory"}, {name: "Limit"}}
 	}
 	return nil
 }
@@ -272,7 +284,7 @@ func (t *Type) containsSlice() bool {
 		return false
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tMap, tDomain, tDomainMark, tCleanupScope, tCleanupID, tPtr:
+	case tSlice, tAlloc, tMap, tBuffer, tDomain, tDomainMark, tCleanupScope, tCleanupID, tPtr:
 		return true
 	case tOption:
 		return t.elem.containsSlice()
@@ -345,7 +357,7 @@ func typeEqual(a, b *Type) bool {
 	switch a.kind {
 	case tPrim:
 		return a.prim == b.prim
-	case tSlice, tAlloc, tPtr, tOption:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer:
 		return typeEqual(a.elem, b.elem)
 	case tResult:
 		return typeEqual(a.ok, b.ok) && typeEqual(a.err, b.err)
@@ -361,7 +373,7 @@ func typeEqual(a, b *Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error:
 		return true
 	case tTypeParam:
 		return a.name == b.name
@@ -388,7 +400,7 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 	switch pattern.kind {
 	case tPrim:
 		return pattern.prim == actual.prim
-	case tSlice, tAlloc, tPtr, tOption:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer:
 		return unify(pattern.elem, actual.elem, out)
 	case tResult:
 		return unify(pattern.ok, actual.ok, out) && unify(pattern.err, actual.err, out)
@@ -404,7 +416,7 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error:
 		return true
 	case tTypeParam:
 		return pattern.name == actual.name
@@ -434,6 +446,8 @@ func substType(t *Type, bindings map[string]*Type) *Type {
 		return &Type{kind: tResult, ok: substType(t.ok, bindings), err: substType(t.err, bindings)}
 	case tMap:
 		return &Type{kind: tMap, key: substType(t.key, bindings), val: substType(t.val, bindings)}
+	case tBuffer:
+		return &Type{kind: tBuffer, elem: substType(t.elem, bindings)}
 	case tPtr:
 		return &Type{kind: tPtr, elem: substType(t.elem, bindings)}
 	case tStruct, tEnum:

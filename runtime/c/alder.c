@@ -53,6 +53,18 @@ static uint64_t g_next_domain_serial = 1; /* 0 denotes exhaustion/invalid */
 static uint64_t g_next_segment_serial = 1;
 static uint64_t g_next_table_serial = 1; /* 0 is never a valid serial */
 
+#if defined(ALDER_RUNTIME_TESTING)
+static uint64_t g_test_domain_allocations_before_failure = UINT64_MAX;
+
+void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls) {
+    g_test_domain_allocations_before_failure = allowed_calls;
+}
+
+void alder_runtime_test_clear_domain_alloc_failure(void) {
+    g_test_domain_allocations_before_failure = UINT64_MAX;
+}
+#endif
+
 static void *rt_malloc(size_t size) {
     void *p = malloc(size);
     if (p != NULL) {
@@ -161,6 +173,14 @@ void *alder_domain_alloc(AlderDomain *domain, size_t size, size_t align) {
     if (size > (size_t)-1 - (align - 1)) {
         return NULL; /* alignment slack overflows */
     }
+#if defined(ALDER_RUNTIME_TESTING)
+    if (g_test_domain_allocations_before_failure == 0) {
+        return NULL;
+    }
+    if (g_test_domain_allocations_before_failure != UINT64_MAX) {
+        g_test_domain_allocations_before_failure -= 1;
+    }
+#endif
     AlderSegment *seg = domain->segments_tail;
     for (;;) {
         if (seg != NULL) {

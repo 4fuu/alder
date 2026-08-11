@@ -287,6 +287,11 @@ up to 1 MiB; larger requests receive a dedicated exact-size segment. The
 runtime tracks its live heap blocks in one counter so tests can prove leak-free
 create/reset/destroy cycles without a leak sanitizer.
 
+Runtime test builds may define `ALDER_RUNTIME_TESTING` to expose deterministic
+domain-allocation failure injection. The hook counts otherwise eligible
+`alder_domain_alloc` calls and fails before mutating domain state. Production
+builds contain neither the hook symbols nor their mutable state.
+
 ## Cleanup Lowering
 
 MIR cleanup scopes lower to explicit, visible control flow. The runtime side
