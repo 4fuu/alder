@@ -355,6 +355,177 @@ async fn build_index(paths: [Path]) -> Result(Index, Error) {
 
 The scan tasks release file contents and parser data when each task domain ends. Intermediate scan results live through index construction. Documents are constructed in table storage and linked through stable IDs.
 
+## Milestone 4 Bootstrap Subset (Aster S0)
+
+Status: normative for the implemented Go Stage 0 frontend
+
+M4 defines the smallest source surface that can still exercise every backend
+mechanism end to end. Everything below is implemented by the `frontend` Go
+package: deterministic source text -> fully typed and monomorphized program
+-> verified MIR 1 -> C11. Everything not listed here is rejected with a
+diagnostic, never silently ignored.
+
+### Modules and compilation units
+
+A module is one source file containing, in any order:
+
+- `import c <name>: fn(<params>) -> <result>` declarations (one per line);
+- `type` and `enum` declarations;
+- `fn` declarations.
+
+All names are module-global; there are no namespaces, packages, or separate
+compilation units. Source identifiers use `[a-zA-Z_][a-zA-Z0-9_]*`; dots and
+other punctuation are reserved for the grammar. The frontend reserves nothing
+else: generated MIR entities use dotted names such as `map.get.I64.I64`,
+which source identifiers cannot spell.
+
+The compilation pipeline is: lex -> parse (AST) -> typecheck with inference
+and monomorphization (typed AST) -> deterministic MIR emission -> the
+`mir/verify` gate -> the `cgen` C11 backend. Type inference and
+monomorphization complete before any backend MIR exists. MIR is never
+repaired: a program whose lowered MIR fails verification is a frontend bug.
+
+### Types
+
+Primitives: `Bool`, `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`,
+`F32`, `F64`, `Unit`. There are no implicit conversions; every adaptation is
+explicit in the type rules below.
+
+Composite types:
+
+- `[T]` is a slice of `T`; `String` is sugar for `[U8]`;
+- `Option(T)` and `Result(T, E)` are the built-in enum-like types with
+  implicit variants `None`/`Some(T)` and `Ok(T)`/`Err(E)`;
+- `Map(K, V)` is the built-in open-addressed hash map (fixed capacity 16);
+- `Domain` is a storage-domain handle; `Ptr(T)` is a raw C pointer usable
+  only at FFI boundaries;
+- `type Name(A: type, B: type) { f: A; g: B }` declares a generic struct;
+  `enum Name(T: type) { V, W(T) }` declares a generic enum. Non-generic
+  declarations omit the parameter list.
+
+Type application uses parenthesized syntax like calls: `Pair(I64, String)`
+is a type. The checker resolves `Name(...)` by the callee's kind: a type
+constructor application, a function call, a struct construction, or an enum
+variant construction. Struct construction is positional and must cover every
+field in declaration order. Enum variants carry at most one payload; a
+variant with several payloads is rejected.
+
+Restrictions (each with a diagnostic):
+
+- struct fields, enum payloads, and slice element types are plain value
+  types; slices and references may not be nested in them (`[String]` is
+  rejected) because MIR 1 forbids lifetime-bearing stores through dereference
+  places;
+- value-type recursion (direct or indirect, including through `Option`) is
+  rejected as an infinite layout;
+- `Map` keys must be unsigned integers, `Bool`, or structs/enums composed of
+  those, so hashing and equality are defined structurally; signed and float
+  keys are rejected;
+- `Map` values must be copy-trivial (no nested slices, strings, or
+  references);
+- `Alloc(T, d, n)` results are mutable references: they support `len`,
+  indexing, ranges, and iteration, and their elements may be assigned, but
+  they may not be passed where a `[T]` parameter is required;
+- `Ptr(T)` values may only be FFI results, FFI arguments, and function
+  results;
+- a full map has no growth: `Set` on a full map fails the function;
+- domains always have a parent: `Domain(p)` creates a child of `p`, and a
+  root domain comes from the environment (the C driver in tests);
+- domain marks may not be bound to `let`/`var`; `Reset(d, Mark(d))` uses the
+  mark directly, because MIR 1 requires the reset mark to be the direct
+  `domain.mark` result;
+- function-typed values are not part of the subset (no higher-order
+  functions);
+- strings compare by length and bytes only; `==` on strings is rejected
+  (MIR 1 has no structural comparison).
+
+### Expressions
+
+- literals: integers (decimal, default `I64`), floats (default `F64`),
+  `true`/`false`, strings (bytes, `\n \t \r \\ \" \0` escapes);
+- integer and float literals adapt to an expected numeric type and are
+  range-checked; `-9223372036854775808` is accepted as `I64` minimum;
+- unary `-` (checked subtraction from zero; not on unsigned), unary `!`;
+- binary `+ - * / % << >>` (checked, same-type operands; `%` is the
+  truncating remainder and fails exactly when division fails), comparisons
+  `== != < <= > >=` on same-type integers or same-type floats, and
+  short-circuit `&&` / `||` on `Bool`;
+- bitwise operators are absent from the subset (documented MIR gap);
+- `len(x)` (slice length, `U64`), `x[i]` (checked index, `U64`; out of
+  bounds fails the function with a zero result value, the MIR 1 fail-edge
+  convention), `range(x, lo, hi)` (checked bounds, same failure semantics);
+- calls: user functions, builtins, and imports; generic calls may supply the
+  leading compile-time type arguments explicitly (`identity(I64, 3)`) or
+  omit them when the remaining runtime arguments infer them
+  (`identity(3)`);
+- field access `e.f` and indexing `e[i]` on any expression;
+- struct construction `Name(args)`; variant construction `Variant` or
+  `Variant(arg)` where the variant name resolves against the expected enum
+  type (`Some(3)`, `None`, `Ok(v)`, `Err(e)`, `Circle(5)`);
+- `match e { V(x) => expr, V => expr, _ => expr }` is an expression; arms
+  must cover every variant or include `_`; every arm has one type;
+- `try expr` inside a function returning `Result(A, E)`: on `Err(e)` the
+  function fails with `Err(e)`; the error type must match `E` exactly;
+- builtins: `Domain(p)`, `Mark(d)`, `Reset(d, m)`, `Destroy(d)`,
+  `Alloc(T, d, n)`, `Map(K, V)(d)`, `Get(m, k)`, `Set(m, k, v)`,
+  `Remove(m, k)`.
+
+`if` / `else`, `while`, and `for x in xs` (over slices, `x` is an element
+copy) are statements; `for` and `while` have no `break` or `continue`.
+`match` may also appear as an expression statement. Other pure expressions
+as statements are rejected. Checked operations (arithmetic, shifts, indexes,
+ranges) that fail at runtime fail the current function with a zero value of
+its result type; the fail value is a diagnostic convention, and the MIR 1
+text format requires the result type to be materializable as a zero value,
+so functions whose result contains slices, references, or maps cannot
+contain checked operations.
+
+### Variables and places
+
+- `let x: T = e` declares an immutable binding (annotation optional when the
+  initializer's type is inferable); `var x: T = e` declares a mutable one;
+- `x = e` reassigns a `var` (also `x.f = e`, `x[i] = e`, `x[i].f = e`);
+  `let`-bound names and enum payload bindings are immutable;
+- every block of a function must return on all paths (the final statement
+  must be `return`, an `if`/`else` whose branches both return, a `match`
+  whose arms all return, or a block ending in one); a `Unit` function may
+  fall off the end.
+
+### Scoped cleanup
+
+`using x = expr with CleanupFn` registers cleanup on a value: the
+`CleanupFn` must take exactly one parameter of the expression's type and
+return `Unit`. The frontend opens a scope at the `using` statement and
+emits `Run` + `End` before every subsequent exit (return or failed `try`),
+in reverse registration order, on exactly the paths that opened the scope.
+This is the only cleanup surface in the subset: MIR 1 requires cleanup
+handles to have direct instruction-result SSA identity, so they cannot
+cross source-level bindings, and the low-level scope API is not exposed.
+`using` inside a loop is rejected (a scope cannot re-begin while active).
+
+### C FFI
+
+`import c strlen: fn(Ptr(U8)) -> U64` declares a C symbol with a concrete
+signature; the name is the C symbol. FFI parameter and result types are
+restricted to primitives and `Ptr(T)`. Calls lower to `ffi.call.unsafe`
+with the backend's symbol-safety checks.
+
+### Diagnostics and acceptance boundary
+
+All diagnostics are deterministic, carry line and column, and are pinned by
+rejection tests. The frontend rejects (non-exhaustive list): syntax errors;
+unknown names and variants; type mismatches; non-matching `try` error
+types; wrong `using` callbacks; mutating immutable bindings; out-of-range
+literals; non-exhaustive `match`; fall-through on non-`Unit` functions;
+`Map` key/value violations; nested-slice types; value-type cycles;
+unsupported FFI signatures; and every restriction listed above. Programs
+that type-check lower to MIR that must pass `mir/verify` unchanged.
+
+Acceptance evidence for M4: accept fixtures with pinned printed-MIR goldens,
+rejection fixtures with pinned diagnostics, end-to-end source-to-C11
+compile-and-run programs under the strict warning set, and in-process and
+cross-process determinism checks.
+
 ## Open Design Questions
 
 1. What is the smallest useful storage-domain inference algorithm for the bootstrap subset?

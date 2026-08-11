@@ -107,26 +107,46 @@ Exit-criteria evidence:
 
 A MIR interpreter for differential testing remains an open question; the compile-and-run fixtures provide the behavioral evidence, so the interpreter is not required for this milestone.
 
-## Next Direction: Minimal Frontend and Self-Hosting
-
-This work begins only after the active MIR and C backend milestones are coherent.
-
 ### Milestone 4: Bootstrap Language Subset
 
-Candidate subset:
+Status: **complete**
 
-- modules and functions;
-- primitive values, structs, enums, and pattern matching;
-- arrays, slices, strings, maps, `Option`, and `Result`;
-- compile-time `type` parameters and parenthesized type constructors;
-- generic inference and monomorphization before backend MIR;
-- storage domains and scoped cleanup;
-- C FFI;
-- enough diagnostics to build the compiler itself.
+Deliverables (implemented in the `frontend` Go package):
 
-Async, advanced traits, macros, and broad standard-library work are not prerequisites for the first self-host.
+- a deterministic lexer, parser, type checker, and MIR emitter for the
+  source subset defined in `docs/language-design.md` (Aster S0): modules and
+  functions, primitives, structs, enums with `match`, arrays/slices/strings,
+  `Option`/`Result` with `try`, `Map` with generated hash/eq/probe helpers,
+  storage domains, `using`-based scoped cleanup, and C FFI;
+- compile-time `type` parameters with parenthesized application syntax,
+  first-order inference from runtime arguments, and complete
+  monomorphization before any backend MIR exists;
+- deterministic diagnostics with line and column, pinned by rejection
+  fixtures;
+- a reorder pass emitting callees before callers so the printed MIR round
+  trips through the single-pass MIR 1 text parser (call cycles are left in
+  instantiation order and documented as unrepresentable in the text format).
 
-### Milestone 5: Self-Hosted Compiler
+Exit-criteria evidence:
+
+- ten end-to-end source programs (arith, structs, enums, option, strings,
+  generic, domains, maps, cleanup, ffi) compile through the full pipeline to
+  verified MIR and then to strict-warning C11, compile with the canonical
+  strict warning set, and pass runtime behavior checks (including a map with
+  struct keys, 14-entry probe stress, and observable FFI-backed cleanup
+  ordering);
+- accept fixtures pin the printed MIR; rejection fixtures pin diagnostics
+  covering syntax, typing, mutability, generics, map restrictions,
+  cycles, match exhaustiveness, `try` error matching, `using` discipline,
+  and the MIR 1 restrictions (direct marks, direct cleanup handles,
+  materializable fail values, callee-before-caller ordering);
+- printed MIR re-parses and re-verifies for every end-to-end fixture;
+- in-process and cross-process determinism checks cover the printed MIR and
+  the generated C;
+- ASan/UBSan reruns are not available on the current mingw-w64 host
+  (missing libasan/libubsan), so sanitizer coverage is reported as skipped.
+
+## Milestone 5: Self-Hosted Compiler
 
 Bootstrap stages:
 

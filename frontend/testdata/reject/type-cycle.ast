@@ -1,0 +1,5 @@
+type A { b: B }
+type B { a: A }
+fn main() -> I32 {
+    return 0;
+}

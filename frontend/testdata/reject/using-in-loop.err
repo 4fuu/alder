@@ -1,0 +1,1 @@
+line 5, column 9: using inside a loop is rejected (a cleanup scope cannot re-begin while active)

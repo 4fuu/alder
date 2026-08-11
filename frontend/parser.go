@@ -1,0 +1,799 @@
+package frontend
+
+import (
+	"fmt"
+	"strconv"
+)
+
+// parser is a recursive-descent parser over the token stream.
+type parser struct {
+	toks []token
+	i    int
+}
+
+// parseModule parses a complete source module.
+func parseModule(src string) ([]Decl, error) {
+	toks, err := lex(src)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{toks: toks}
+	var decls []Decl
+	for p.cur().kind != tokEOF {
+		d, err := p.parseDecl()
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, d)
+	}
+	return decls, nil
+}
+
+func (p *parser) cur() token { return p.toks[p.i] }
+func (p *parser) peek() token {
+	if p.i+1 < len(p.toks) {
+		return p.toks[p.i+1]
+	}
+	return p.toks[len(p.toks)-1]
+}
+func (p *parser) advance() token {
+	t := p.toks[p.i]
+	if p.i < len(p.toks)-1 {
+		p.i++
+	}
+	return t
+}
+
+func (p *parser) errf(t token, format string, args ...any) error {
+	return &astError{line: t.line, col: t.col, msg: fmt.Sprintf(format, args...)}
+}
+
+func (p *parser) expectPunct(text string) error {
+	t := p.cur()
+	if t.kind != tokPunct || t.text != text {
+		return p.errf(t, "expected %q, got %s", text, t.describe())
+	}
+	p.advance()
+	return nil
+}
+
+func (p *parser) expectKeyword(kw keyword, what string) error {
+	t := p.cur()
+	if t.kind != tokIdent || t.kw != kw {
+		return p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	p.advance()
+	return nil
+}
+
+func (p *parser) expectIdent(what string) (token, error) {
+	t := p.cur()
+	if t.kind != tokIdent || t.kw != kwNone {
+		return token{}, p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	p.advance()
+	return t, nil
+}
+
+func (p *parser) parseDecl() (Decl, error) {
+	t := p.cur()
+	switch {
+	case t.kind == tokIdent && t.kw == kwImport:
+		return p.parseImport()
+	case t.kind == tokIdent && t.kw == kwType:
+		return p.parseTypeDecl(false)
+	case t.kind == tokIdent && t.kw == kwEnum:
+		return p.parseTypeDecl(true)
+	case t.kind == tokIdent && t.kw == kwFn:
+		return p.parseFnDecl()
+	}
+	return nil, p.errf(t, "expected a declaration (import c, type, enum, or fn), got %s", t.describe())
+}
+
+func (p *parser) parseImport() (Decl, error) {
+	start := p.advance() // import
+	cur := p.cur()
+	if cur.kind != tokIdent || cur.text != "c" {
+		return nil, p.errf(cur, "expected \"c\" after import, got %s", cur.describe())
+	}
+	p.advance()
+	name, err := p.expectIdent("an import name")
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectPunct(":"); err != nil {
+		return nil, err
+	}
+	sig, err := p.parseFnSig()
+	if err != nil {
+		return nil, err
+	}
+	return &ImportDecl{P: pos{start.line, start.col}, Name: name.text, Sig: sig}, nil
+}
+
+func (p *parser) parseFnSig() (FuncSigExpr, error) {
+	if err := p.expectKeyword(kwFn, "\"fn\""); err != nil {
+		return FuncSigExpr{}, err
+	}
+	if err := p.expectPunct("("); err != nil {
+		return FuncSigExpr{}, err
+	}
+	var params []TypeExpr
+	if p.cur().kind == tokPunct && p.cur().text == ")" {
+		p.advance()
+	} else {
+		for {
+			ty, err := p.parseType()
+			if err != nil {
+				return FuncSigExpr{}, err
+			}
+			params = append(params, ty)
+			if p.cur().kind == tokPunct && p.cur().text == "," {
+				p.advance()
+				continue
+			}
+			break
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return FuncSigExpr{}, err
+		}
+	}
+	if err := p.expectPunct("->"); err != nil {
+		return FuncSigExpr{}, err
+	}
+	result, err := p.parseType()
+	if err != nil {
+		return FuncSigExpr{}, err
+	}
+	return FuncSigExpr{Params: params, Result: result}, nil
+}
+
+func (p *parser) parseTypeDecl(isEnum bool) (Decl, error) {
+	start := p.advance() // type / enum
+	name, err := p.expectIdent("a type name")
+	if err != nil {
+		return nil, err
+	}
+	d := &TypeDecl{P: pos{start.line, start.col}, Name: name.text, IsEnum: isEnum}
+	if p.cur().kind == tokPunct && p.cur().text == "(" {
+		// Type parameters: Name(A: type, B: type)
+		p.advance()
+		for {
+			pn, err := p.expectIdent("a type parameter name")
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectPunct(":"); err != nil {
+				return nil, err
+			}
+			if p.cur().kw == kwType || p.cur().kind == tokIdent && p.cur().text == "type" {
+				p.advance()
+			} else {
+				return nil, p.errf(p.cur(), "expected the keyword \"type\"")
+			}
+			d.Params = append(d.Params, pn.text)
+			if p.cur().kind == tokPunct && p.cur().text == "," {
+				p.advance()
+				continue
+			}
+			break
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return nil, err
+	}
+	if isEnum {
+		for p.cur().kind == tokIdent && p.cur().kw == kwNone {
+			vn := p.advance()
+			v := VariantDecl{Name: vn.text}
+			if p.cur().kind == tokPunct && p.cur().text == "(" {
+				p.advance()
+				payload, err := p.parseType()
+				if err != nil {
+					return nil, err
+				}
+				v.Payload = payload
+				if err := p.expectPunct(")"); err != nil {
+					return nil, err
+				}
+			}
+			d.Variants = append(d.Variants, v)
+			if p.cur().kind == tokPunct && p.cur().text == "," {
+				p.advance()
+				continue
+			}
+			break
+		}
+	} else {
+		for p.cur().kind == tokIdent && p.cur().kw == kwNone {
+			fn, err := p.expectIdent("a field name")
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectPunct(":"); err != nil {
+				return nil, err
+			}
+			ft, err := p.parseType()
+			if err != nil {
+				return nil, err
+			}
+			d.Fields = append(d.Fields, FieldDecl{Name: fn.text, Type: ft})
+			if p.cur().kind == tokPunct && p.cur().text == "," {
+				p.advance()
+				continue
+			}
+			break
+		}
+	}
+	if err := p.expectPunct("}"); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (p *parser) parseFnDecl() (Decl, error) {
+	start := p.advance() // fn
+	name, err := p.expectIdent("a function name")
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectPunct("("); err != nil {
+		return nil, err
+	}
+	d := &FnDecl{P: pos{start.line, start.col}, Name: name.text}
+	if p.cur().kind == tokPunct && p.cur().text == ")" {
+		p.advance()
+	} else {
+		for {
+			pn, err := p.expectIdent("a parameter name")
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectPunct(":"); err != nil {
+				return nil, err
+			}
+			if p.cur().kw == kwType {
+				p.advance()
+				d.Params = append(d.Params, ParamDecl{Name: pn.text, Kind: paramType})
+			} else {
+				pt, err := p.parseType()
+				if err != nil {
+					return nil, err
+				}
+				d.Params = append(d.Params, ParamDecl{Name: pn.text, Kind: paramRuntime, Type: pt})
+			}
+			if p.cur().kind == tokPunct && p.cur().text == "," {
+				p.advance()
+				continue
+			}
+			break
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.expectPunct("->"); err != nil {
+		return nil, err
+	}
+	result, err := p.parseType()
+	if err != nil {
+		return nil, err
+	}
+	d.Result = result
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	d.Body = body
+	return d, nil
+}
+
+func (p *parser) parseBlock() (*Block, error) {
+	start := p.cur()
+	if err := p.expectPunct("{"); err != nil {
+		return nil, err
+	}
+	b := &Block{P: pos{start.line, start.col}}
+	for !(p.cur().kind == tokPunct && p.cur().text == "}") {
+		if p.cur().kind == tokEOF {
+			return nil, p.errf(p.cur(), "expected \"}\", got end of input")
+		}
+		s, err := p.parseStmt()
+		if err != nil {
+			return nil, err
+		}
+		b.Stmts = append(b.Stmts, s)
+	}
+	p.advance() // }
+	return b, nil
+}
+
+func (p *parser) parseStmt() (Stmt, error) {
+	t := p.cur()
+	if t.kind == tokIdent {
+		switch t.kw {
+		case kwLet, kwVar:
+			return p.parseLet()
+		case kwIf:
+			return p.parseIf()
+		case kwWhile:
+			return p.parseWhile()
+		case kwFor:
+			return p.parseFor()
+		case kwReturn:
+			return p.parseReturn()
+		case kwUsing:
+			return p.parseUsing()
+		case kwMatch:
+			x, err := p.parseMatch()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectPunct(";"); err != nil {
+				return nil, err
+			}
+			return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
+		}
+	}
+	if t.kind == tokPunct && t.text == "{" {
+		return p.parseBlock()
+	}
+	// Assignment or expression statement.
+	x, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if p.cur().kind == tokPunct && p.cur().text == "=" {
+		target, err := p.assignmentTarget(x, t)
+		if err != nil {
+			return nil, err
+		}
+		p.advance()
+		value, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expectPunct(";"); err != nil {
+			return nil, err
+		}
+		return &Assign{P: pos{t.line, t.col}, Target: target, Value: value}, nil
+	}
+	if err := p.expectPunct(";"); err != nil {
+		return nil, err
+	}
+	return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
+}
+
+// assignmentTarget converts a parsed expression into an assignment target.
+func (p *parser) assignmentTarget(x Expr, start token) (AssignTarget, error) {
+	if f, ok := x.(*Field); ok {
+		if idx, ok := f.Base.(*Index); ok {
+			id, ok := idx.Base.(*Ident)
+			if !ok {
+				return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
+			}
+			return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Index: idx.Index, Field: f.Name}, nil
+		}
+		id, ok := f.Base.(*Ident)
+		if !ok {
+			return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
+		}
+		return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Field: f.Name}, nil
+	}
+	if e, ok := x.(*Index); ok {
+		id, ok := e.Base.(*Ident)
+		if !ok {
+			return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
+		}
+		return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Index: e.Index}, nil
+	}
+	if e, ok := x.(*Ident); ok {
+		return AssignTarget{P: pos{start.line, start.col}, Name: e.Name}, nil
+	}
+	return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
+}
+
+func (p *parser) parseLet() (Stmt, error) {
+	t := p.advance() // let / var
+	name, err := p.expectIdent("a binding name")
+	if err != nil {
+		return nil, err
+	}
+	s := &Let{P: pos{t.line, t.col}, Var: t.kw == kwVar, Name: name.text}
+	if p.cur().kind == tokPunct && p.cur().text == ":" {
+		p.advance()
+		ty, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		s.Type = ty
+	}
+	if err := p.expectPunct("="); err != nil {
+		return nil, err
+	}
+	value, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	s.Value = value
+	if err := p.expectPunct(";"); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (p *parser) parseIf() (Stmt, error) {
+	t := p.advance() // if
+	cond, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	then, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	s := &IfStmt{P: pos{t.line, t.col}, Cond: cond, Then: then}
+	if p.cur().kind == tokIdent && p.cur().kw == kwElse {
+		p.advance()
+		elseB, err := p.parseBlock()
+		if err != nil {
+			return nil, err
+		}
+		s.Else = elseB
+	}
+	return s, nil
+}
+
+func (p *parser) parseWhile() (Stmt, error) {
+	t := p.advance() // while
+	cond, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	return &WhileStmt{P: pos{t.line, t.col}, Cond: cond, Body: body}, nil
+}
+
+func (p *parser) parseFor() (Stmt, error) {
+	t := p.advance() // for
+	name, err := p.expectIdent("a binding name")
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectKeyword(kwIn, "\"in\""); err != nil {
+		return nil, err
+	}
+	seq, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	body, err := p.parseBlock()
+	if err != nil {
+		return nil, err
+	}
+	return &ForStmt{P: pos{t.line, t.col}, Name: name.text, Seq: seq, Body: body}, nil
+}
+
+func (p *parser) parseUsing() (Stmt, error) {
+	t := p.advance() // using
+	name, err := p.expectIdent("a binding name")
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectPunct("="); err != nil {
+		return nil, err
+	}
+	value, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectKeyword(kwWith, "\"with\""); err != nil {
+		return nil, err
+	}
+	cleanup, err := p.expectIdent("a cleanup function name")
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectPunct(";"); err != nil {
+		return nil, err
+	}
+	return &UsingStmt{P: pos{t.line, t.col}, Name: name.text, Value: value, Cleanup: cleanup.text}, nil
+}
+
+func (p *parser) parseReturn() (Stmt, error) {
+	t := p.advance() // return
+	s := &ReturnStmt{P: pos{t.line, t.col}}
+	if p.cur().kind == tokPunct && p.cur().text == ";" {
+		p.advance()
+		return s, nil
+	}
+	x, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	s.Value = x
+	if err := p.expectPunct(";"); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (p *parser) parseType() (TypeExpr, error) {
+	t := p.cur()
+	if t.kind == tokPunct && t.text == "[" {
+		p.advance()
+		elem, err := p.parseType()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expectPunct("]"); err != nil {
+			return nil, err
+		}
+		return &SliceType{P: pos{t.line, t.col}, Elem: elem}, nil
+	}
+	if t.kind != tokIdent || t.kw != kwNone {
+		return nil, p.errf(t, "expected a type, got %s", t.describe())
+	}
+	name := p.advance()
+	if p.cur().kind == tokPunct && p.cur().text == "(" {
+		p.advance()
+		var args []TypeExpr
+		if p.cur().kind == tokPunct && p.cur().text == ")" {
+			p.advance()
+		} else {
+			for {
+				arg, err := p.parseType()
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, arg)
+				if p.cur().kind == tokPunct && p.cur().text == "," {
+					p.advance()
+					continue
+				}
+				break
+			}
+			if err := p.expectPunct(")"); err != nil {
+				return nil, err
+			}
+		}
+		return &AppType{P: pos{t.line, t.col}, Name: name.text, Args: args}, nil
+	}
+	return &PrimType{P: pos{t.line, t.col}, Name: name.text}, nil
+}
+
+// parseExpr parses an expression with the precedence table:
+// || < && < == != < < <= > >= < << >> < + - < * / % < unary < postfix.
+func (p *parser) parseExpr() (Expr, error) {
+	return p.parseBinary(0)
+}
+
+var binaryPrecedence = map[string]int{
+	"||": 1,
+	"&&": 2,
+	"==": 3, "!=": 3,
+	"<": 4, "<=": 4, ">": 4, ">=": 4,
+	"<<": 5, ">>": 5,
+	"+": 6, "-": 6,
+	"*": 7, "/": 7, "%": 7,
+}
+
+func (p *parser) parseBinary(minPrec int) (Expr, error) {
+	left, err := p.parseUnary()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		t := p.cur()
+		if t.kind != tokPunct {
+			return left, nil
+		}
+		prec, ok := binaryPrecedence[t.text]
+		if !ok || prec < minPrec {
+			return left, nil
+		}
+		op := p.advance()
+		right, err := p.parseBinary(prec + 1)
+		if err != nil {
+			return nil, err
+		}
+		left = &Binary{P: pos{t.line, t.col}, Op: op.text, X: left, Y: right}
+	}
+}
+
+func (p *parser) parseUnary() (Expr, error) {
+	t := p.cur()
+	if t.kind == tokPunct && (t.text == "-" || t.text == "!") {
+		p.advance()
+		x, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		return &Unary{P: pos{t.line, t.col}, Op: t.text, X: x}, nil
+	}
+	return p.parsePostfix()
+}
+
+func (p *parser) parsePostfix() (Expr, error) {
+	x, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		t := p.cur()
+		if t.kind == tokPunct && t.text == "(" {
+			p.advance()
+			var args []Expr
+			if p.cur().kind == tokPunct && p.cur().text == ")" {
+				p.advance()
+			} else {
+				for {
+					arg, err := p.parseExpr()
+					if err != nil {
+						return nil, err
+					}
+					args = append(args, arg)
+					if p.cur().kind == tokPunct && p.cur().text == "," {
+						p.advance()
+						continue
+					}
+					break
+				}
+				if err := p.expectPunct(")"); err != nil {
+					return nil, err
+				}
+			}
+			x = &Call{P: pos{t.line, t.col}, Callee: x, Args: args}
+			continue
+		}
+		if t.kind == tokPunct && t.text == "." {
+			p.advance()
+			name, err := p.expectIdent("a field name")
+			if err != nil {
+				return nil, err
+			}
+			x = &Field{P: pos{t.line, t.col}, Base: x, Name: name.text}
+			continue
+		}
+		if t.kind == tokPunct && t.text == "[" {
+			p.advance()
+			idx, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.expectPunct("]"); err != nil {
+				return nil, err
+			}
+			x = &Index{P: pos{t.line, t.col}, Base: x, Index: idx}
+			continue
+		}
+		return x, nil
+	}
+}
+
+func (p *parser) parsePrimary() (Expr, error) {
+	t := p.cur()
+	switch {
+	case t.kind == tokInt:
+		p.advance()
+		value, overflow := parseIntLiteral(t.text)
+		if overflow {
+			return nil, p.errf(t, "integer literal %s is out of range", t.text)
+		}
+		return &IntLit{P: pos{t.line, t.col}, Text: t.text, Value: value}, nil
+	case t.kind == tokFloat:
+		p.advance()
+		v, err := strconv.ParseFloat(t.text, 64)
+		if err != nil {
+			return nil, p.errf(t, "invalid float literal %s", t.text)
+		}
+		return &FloatLit{P: pos{t.line, t.col}, Value: v}, nil
+	case t.kind == tokStr:
+		p.advance()
+		return &StrLit{P: pos{t.line, t.col}, Value: t.text}, nil
+	case t.kind == tokIdent:
+		switch t.kw {
+		case kwTrue, kwFalse:
+			p.advance()
+			return &BoolLit{P: pos{t.line, t.col}, Value: t.kw == kwTrue}, nil
+		case kwTry:
+			p.advance()
+			x, err := p.parseUnary()
+			if err != nil {
+				return nil, err
+			}
+			return &Try{P: pos{t.line, t.col}, X: x}, nil
+		case kwMatch:
+			return p.parseMatch()
+		case kwNone:
+			p.advance()
+			return &Ident{P: pos{t.line, t.col}, Name: t.text}, nil
+		}
+		return nil, p.errf(t, "expected an expression, got %q", t.text)
+	case t.kind == tokPunct && t.text == "(":
+		p.advance()
+		x, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return nil, err
+		}
+		return x, nil
+	}
+	return nil, p.errf(t, "expected an expression, got %s", t.describe())
+}
+
+func (p *parser) parseMatch() (Expr, error) {
+	t := p.advance() // match
+	value, err := p.parseUnary()
+	if err != nil {
+		return nil, err
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return nil, err
+	}
+	m := &Match{P: pos{t.line, t.col}, Value: value}
+	for {
+		if p.cur().kind == tokPunct && p.cur().text == "}" {
+			p.advance()
+			return m, nil
+		}
+		arm, err := p.parseMatchArm()
+		if err != nil {
+			return nil, err
+		}
+		m.Arms = append(m.Arms, arm)
+		if p.cur().kind == tokPunct && p.cur().text == "," {
+			p.advance()
+			continue
+		}
+	}
+}
+
+func (p *parser) parseMatchArm() (MatchArm, error) {
+	t := p.cur()
+	if t.text == "_" {
+		p.advance()
+	} else {
+		name, err := p.expectIdent("a variant name or \"_\"")
+		if err != nil {
+			return MatchArm{}, err
+		}
+		arm := MatchArm{Variant: name.text}
+		if p.cur().kind == tokPunct && p.cur().text == "(" {
+			p.advance()
+			bind, err := p.expectIdent("a binding name")
+			if err != nil {
+				return MatchArm{}, err
+			}
+			arm.Bind = bind.text
+			if err := p.expectPunct(")"); err != nil {
+				return MatchArm{}, err
+			}
+		}
+		if err := p.expectPunct("=>"); err != nil {
+			return MatchArm{}, err
+		}
+		body, err := p.parseExpr()
+		if err != nil {
+			return MatchArm{}, err
+		}
+		arm.Body = body
+		return arm, nil
+	}
+	if err := p.expectPunct("=>"); err != nil {
+		return MatchArm{}, err
+	}
+	body, err := p.parseExpr()
+	if err != nil {
+		return MatchArm{}, err
+	}
+	return MatchArm{Body: body}, nil
+}

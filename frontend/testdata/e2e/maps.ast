@@ -1,0 +1,95 @@
+type Key { a: U64, b: Bool }
+
+fn main(d: Domain) -> I32 {
+    var m = Map(U64, I64)(d);
+    Set(m, 1, 100);
+    Set(m, 2, 200);
+    Set(m, 3, 300);
+    if match Get(m, 1) {
+        Some(v) => v,
+        None => 0,
+    } != 100 {
+        return 1;
+    }
+    if match Get(m, 3) {
+        Some(v) => v,
+        None => 0,
+    } != 300 {
+        return 2;
+    }
+    if match Get(m, 9) {
+        Some(v) => v,
+        None => 1,
+    } != 1 {
+        return 3;
+    }
+    // Overwrite an existing key.
+    Set(m, 2, 250);
+    if match Get(m, 2) {
+        Some(v) => v,
+        None => 0,
+    } != 250 {
+        return 4;
+    }
+    // Remove and re-insert.
+    if !Remove(m, 1) {
+        return 5;
+    }
+    if match Get(m, 1) {
+        Some(v) => v,
+        None => 1,
+    } != 1 {
+        return 6;
+    }
+    if Remove(m, 1) {
+        return 7;
+    }
+    Set(m, 1, 111);
+    if match Get(m, 1) {
+        Some(v) => v,
+        None => 0,
+    } != 111 {
+        return 8;
+    }
+    // Struct keys with a Bool field.
+    var mk = Map(Key, I64)(d);
+    let k1 = Key(7, true);
+    let k2 = Key(7, false);
+    let k3 = Key(8, true);
+    Set(mk, k1, 1);
+    Set(mk, k2, 2);
+    Set(mk, k3, 3);
+    if match Get(mk, k2) {
+        Some(v) => v,
+        None => 0,
+    } != 2 {
+        return 9;
+    }
+    if match Get(mk, k3) {
+        Some(v) => v,
+        None => 0,
+    } != 3 {
+        return 10;
+    }
+    if match Get(mk, Key(9, true)) {
+        Some(v) => v,
+        None => 1,
+    } != 1 {
+        return 11;
+    }
+    // Collision-heavy insertions exercise the probe loop within the fixed
+    // capacity of 16.
+    var mc = Map(U64, U64)(d);
+    var i: U64 = 0;
+    while i < 14 {
+        Set(mc, i, i);
+        i = i + 1;
+    }
+    if match Get(mc, 13) {
+        Some(v) => v,
+        None => 0,
+    } != 13 {
+        return 12;
+    }
+    return 0;
+}

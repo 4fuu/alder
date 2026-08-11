@@ -1,0 +1,80 @@
+mir 1
+
+type @Pair.c2.I64.Slice.c1.U8 {
+  first: i64
+  second: slice(u8)
+}
+
+const @lit.int.c0: i64 = 1
+
+const @lit.str.c1: slice(u8) = "a"
+
+const @lit.int.c2: i32 = 1
+
+const @lit.int.c3: i64 = 7
+
+const @lit.int.c4: i32 = 2
+
+const @lit.int.c5: i64 = 8
+
+const @lit.int.c6: i32 = 3
+
+const @lit.int.c7: i32 = 0
+
+fn @identity.I64(%x: i64) -> i64 {
+bb0:
+  return %x
+}
+
+fn @main() -> i32 {
+  local %p: @Pair.c2.I64.Slice.c1.U8
+
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = const.get @lit.str.c1
+  %v1 = aggregate.construct @Pair.c2.I64.Slice.c1.U8 { first: %v, second: %v0 }
+  store local %p, %v1
+  %v2 = load field(local %p, first)
+  %v3 = const.get @lit.int.c0
+  %v4 = int.ne %v2, %v3
+  branch %v4, bb_then, bb_else
+
+bb_then:
+  %v5 = const.get @lit.int.c2
+  return %v5
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v6 = const.get @lit.int.c3
+  %v7 = call @identity.I64(%v6)
+  %v8 = const.get @lit.int.c3
+  %v9 = int.ne %v7, %v8
+  branch %v9, bb_then0, bb_else0
+
+bb_then0:
+  %v10 = const.get @lit.int.c4
+  return %v10
+
+bb_else0:
+  jump bb_join0
+
+bb_join0:
+  %v11 = const.get @lit.int.c5
+  %v12 = call @identity.I64(%v11)
+  %v13 = const.get @lit.int.c5
+  %v14 = int.ne %v12, %v13
+  branch %v14, bb_then1, bb_else1
+
+bb_then1:
+  %v15 = const.get @lit.int.c6
+  return %v15
+
+bb_else1:
+  jump bb_join1
+
+bb_join1:
+  %v16 = const.get @lit.int.c7
+  return %v16
+}

@@ -1,0 +1,4 @@
+import c bad: fn(String) -> Unit
+fn main() -> I32 {
+    return 0;
+}

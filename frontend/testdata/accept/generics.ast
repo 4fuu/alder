@@ -1,0 +1,19 @@
+type Pair(A: type, B: type) { first: A, second: B }
+
+fn identity(T: type, x: T) -> T {
+    return x;
+}
+
+fn main() -> I32 {
+    let p = Pair(1, "a");
+    if p.first != 1 {
+        return 1;
+    }
+    if identity(7) != 7 {
+        return 2;
+    }
+    if identity(I64, 8) != 8 {
+        return 3;
+    }
+    return 0;
+}

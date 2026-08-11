@@ -1,0 +1,5 @@
+fn main(d: Domain) -> I32 {
+    let m = Mark(d);
+    Reset(d, m);
+    return 0;
+}

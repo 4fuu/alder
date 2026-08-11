@@ -1,0 +1,22 @@
+fn checked(n: I64, d: I64) -> Result(I64, I64) {
+    if d == 0 {
+        return Err(1);
+    }
+    return Ok(n / d);
+}
+
+fn propagate(d: I64) -> Result(I64, I64) {
+    let q = try checked(10, d);
+    return Ok(q);
+}
+
+fn main() -> I32 {
+    let p = propagate(5);
+    if match p {
+        Ok(v) => v,
+        Err(e) => 0,
+    } != 2 {
+        return 1;
+    }
+    return 0;
+}

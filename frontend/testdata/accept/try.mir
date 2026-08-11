@@ -1,0 +1,99 @@
+mir 1
+
+const @lit.int.c0: i64 = 0
+
+const @lit.int.c1: i64 = 1
+
+const @lit.int.c2: i64 = 10
+
+const @lit.int.c3: i64 = 5
+
+const @lit.int.c4: i64 = 2
+
+const @lit.int.c5: i32 = 1
+
+const @lit.int.c6: i32 = 0
+
+fn @checked(%n: i64, %d: i64) -> result(i64, i64) {
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = int.eq %d, %v
+  branch %v0, bb_then, bb_else
+
+bb_then:
+  %v1 = const.get @lit.int.c1
+  %v2 = enum.construct result(i64, i64), err, %v1
+  return %v2
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v3 = int.div.checked %n, %d else bb_fail
+  %v6 = enum.construct result(i64, i64), ok, %v3
+  return %v6
+
+bb_fail:
+  %v4 = const.get @lit.int.c0
+  %v5 = enum.construct result(i64, i64), err, %v4
+  fail %v5
+}
+
+fn @propagate(%d: i64) -> result(i64, i64) {
+  local %q: i64
+
+bb0:
+  %v = const.get @lit.int.c2
+  %v0 = call @checked(%v, %d)
+  switch %v0 {
+    err(%v1) -> bb_err
+    ok(%v2) -> bb_ok
+  }
+
+bb_err:
+  %v3 = enum.construct result(i64, i64), err, %v1
+  fail %v3
+
+bb_ok:
+  store local %q, %v2
+  %v4 = load local %q
+  %v5 = enum.construct result(i64, i64), ok, %v4
+  return %v5
+}
+
+fn @main() -> i32 {
+  local %p: result(i64, i64)
+
+bb0:
+  %v = const.get @lit.int.c3
+  %v0 = call @propagate(%v)
+  store local %p, %v0
+  %v1 = load local %p
+  switch %v1 {
+    ok(%v2) -> bb_arm0
+    err(%e) -> bb_arm1
+  }
+
+bb_join(%r: i64):
+  %v4 = const.get @lit.int.c4
+  %v5 = int.ne %r, %v4
+  branch %v5, bb_then, bb_else
+
+bb_arm0:
+  jump bb_join(%v2)
+
+bb_arm1:
+  %v3 = const.get @lit.int.c0
+  jump bb_join(%v3)
+
+bb_then:
+  %v6 = const.get @lit.int.c5
+  return %v6
+
+bb_else:
+  jump bb_join0
+
+bb_join0:
+  %v7 = const.get @lit.int.c6
+  return %v7
+}

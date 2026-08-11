@@ -1,0 +1,82 @@
+mir 1
+
+enum @Shape.c0 {
+  Circle(i64)
+  Square(i64)
+  Dot
+}
+
+const @lit.int.c0: i64 = 0
+
+const @lit.int.c1: i64 = 5
+
+const @lit.int.c2: i64 = 25
+
+const @lit.int.c3: i32 = 1
+
+const @lit.int.c4: i32 = 2
+
+const @lit.int.c5: i32 = 0
+
+fn @area(%s: @Shape.c0) -> i64 {
+bb0:
+  switch %s {
+    Circle(%r0) -> bb_arm0
+    Square(%w) -> bb_arm1
+    Dot -> bb_arm2
+  }
+
+bb_join(%r: i64):
+  return %r
+
+bb_arm0:
+  %v = int.mul.checked %r0, %r0 else bb_fail
+  jump bb_join(%v)
+
+bb_arm1:
+  %v2 = int.mul.checked %w, %w else bb_fail
+  jump bb_join(%v2)
+
+bb_arm2:
+  %v3 = const.get @lit.int.c0
+  jump bb_join(%v3)
+
+bb_fail:
+  %v1 = const.get @lit.int.c0
+  fail %v1
+}
+
+fn @main() -> i32 {
+bb0:
+  %v = const.get @lit.int.c1
+  %v0 = enum.construct @Shape.c0, Circle, %v
+  %v1 = call @area(%v0)
+  %v2 = const.get @lit.int.c2
+  %v3 = int.ne %v1, %v2
+  branch %v3, bb_then, bb_else
+
+bb_then:
+  %v4 = const.get @lit.int.c3
+  return %v4
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v5 = enum.construct @Shape.c0, Dot
+  %v6 = call @area(%v5)
+  %v7 = const.get @lit.int.c0
+  %v8 = int.ne %v6, %v7
+  branch %v8, bb_then0, bb_else0
+
+bb_then0:
+  %v9 = const.get @lit.int.c4
+  return %v9
+
+bb_else0:
+  jump bb_join0
+
+bb_join0:
+  %v10 = const.get @lit.int.c5
+  return %v10
+}

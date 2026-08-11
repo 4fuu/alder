@@ -1,0 +1,1 @@
+line 2, column 16: Map value type [U8] must be copy-trivial (no slices or references)

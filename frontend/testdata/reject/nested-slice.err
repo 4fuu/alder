@@ -1,0 +1,1 @@
+line 2, column 12: slice element type [U8] contains a slice or reference (M4 restriction)

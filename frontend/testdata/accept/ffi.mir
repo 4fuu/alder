@@ -1,0 +1,35 @@
+mir 1
+
+const @lit.int.c0: u64 = 40
+
+const @lit.int.c1: u64 = 42
+
+const @lit.int.c2: i32 = 1
+
+const @lit.int.c3: i32 = 0
+
+import @magic: fn(u64) -> u64
+
+fn @main() -> i32 {
+  local %v: u64
+
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = ffi.call.unsafe @magic(%v)
+  store local %v, %v0
+  %v1 = load local %v
+  %v2 = const.get @lit.int.c1
+  %v3 = int.ne %v1, %v2
+  branch %v3, bb_then, bb_else
+
+bb_then:
+  %v4 = const.get @lit.int.c2
+  return %v4
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v5 = const.get @lit.int.c3
+  return %v5
+}

@@ -1,0 +1,37 @@
+fn fill(d: Domain, n: U64) -> I64 {
+    let buf = Alloc(I64, d, n);
+    var i: U64 = 0;
+    while i < n {
+        buf[i] = 3;
+        i = i + 1;
+    }
+    return buf[0];
+}
+
+fn roundtrip(d: Domain, n: U64) -> U64 {
+    let buf = Alloc(U64, d, n);
+    var i: U64 = 0;
+    while i < n {
+        buf[i] = i;
+        i = i + 1;
+    }
+    // Reset releases the storage; a fresh allocation reuses the domain.
+    // The mark must be the direct domain.mark result.
+    Reset(d, Mark(d));
+    let buf2 = Alloc(U64, d, 2);
+    buf2[0] = 42;
+    buf2[1] = 7;
+    return buf2[0] + buf2[1];
+}
+
+fn main(d: Domain) -> I32 {
+    let child = Domain(d);
+    if fill(child, 4) != 3 {
+        return 1;
+    }
+    if roundtrip(child, 5) != 49 {
+        return 2;
+    }
+    Destroy(child);
+    return 0;
+}

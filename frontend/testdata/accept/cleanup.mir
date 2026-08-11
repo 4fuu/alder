@@ -1,0 +1,47 @@
+mir 1
+
+const @lit.int.c0: i64 = 5
+
+const @lit.int.c1: i32 = 7
+
+const @lit.int.c2: i32 = 0
+
+const @lit.bool.c3: bool = false
+
+import @counter: fn(i64) -> unit
+
+fn @close(%x: i64) {
+bb0:
+  ffi.call.unsafe @counter(%x)
+  return
+}
+
+fn @attempt(%bad: bool) -> i32 {
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = cleanup.scope.begin
+  %v1 = cleanup.push %v0, @close, (%v)
+  branch %bad, bb_then, bb_else
+
+bb_then:
+  %v2 = const.get @lit.int.c1
+  cleanup.scope.run %v0
+  cleanup.scope.end %v0
+  return %v2
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v3 = const.get @lit.int.c2
+  cleanup.scope.run %v0
+  cleanup.scope.end %v0
+  return %v3
+}
+
+fn @main() -> i32 {
+bb0:
+  %v = const.get @lit.bool.c3
+  %v0 = call @attempt(%v)
+  return %v0
+}

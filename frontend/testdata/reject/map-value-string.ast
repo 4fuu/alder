@@ -1,0 +1,4 @@
+fn main(d: Domain) -> I32 {
+    var m = Map(U64, String)(d);
+    return 0;
+}

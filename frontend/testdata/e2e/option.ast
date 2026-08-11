@@ -1,0 +1,65 @@
+enum IoError {
+    NotFound(I64),
+    Invalid(I64),
+}
+
+fn half(n: I64) -> Option(I64) {
+    if n % 2 == 0 {
+        return Some(n / 2);
+    }
+    return None;
+}
+
+fn checked(n: I64, d: I64) -> Result(I64, IoError) {
+    if d == 0 {
+        return Err(Invalid(d));
+    }
+    return Ok(n / d);
+}
+
+fn propagate(d: I64) -> Result(I64, IoError) {
+    let q = try checked(10, d);
+    return Ok(q);
+}
+
+fn main() -> I32 {
+    let h = half(8);
+    if match h {
+        Some(v) => v,
+        None => 0,
+    } != 4 {
+        return 1;
+    }
+    let n = half(7);
+    if match n {
+        Some(v) => v,
+        None => 1,
+    } != 1 {
+        return 2;
+    }
+    let p = propagate(5);
+    if match p {
+        Ok(v) => v,
+        Err(e) => -1,
+    } != 2 {
+        return 3;
+    }
+    let q = propagate(0);
+    if match q {
+        Ok(v) => v,
+        Err(e) => match e {
+            NotFound(code) => code,
+            Invalid(code) => 100 + code,
+        },
+    } != 100 {
+        return 4;
+    }
+    let c = checked(10, 2);
+    if match c {
+        Ok(v) => v,
+        Err(e) => 0,
+    } != 5 {
+        return 5;
+    }
+    return 0;
+}
