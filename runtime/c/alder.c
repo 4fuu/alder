@@ -63,6 +63,10 @@ void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls) {
 void alder_runtime_test_clear_domain_alloc_failure(void) {
     g_test_domain_allocations_before_failure = UINT64_MAX;
 }
+
+void alder_runtime_test_exhaust_segment_identities(void) {
+    g_next_segment_serial = 0;
+}
 #endif
 
 static void *rt_malloc(size_t size) {

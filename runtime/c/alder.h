@@ -118,6 +118,8 @@ size_t alder_runtime_live_allocations(void);
 #if defined(ALDER_RUNTIME_TESTING)
 void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls);
 void alder_runtime_test_clear_domain_alloc_failure(void);
+/* Irreversibly force identity exhaustion for the remainder of the test process. */
+void alder_runtime_test_exhaust_segment_identities(void);
 #endif
 
 /* ------------------------------------------------------------------ */

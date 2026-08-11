@@ -274,6 +274,13 @@ Exit-criteria evidence:
 
 Status: **active**
 
+The private declaration spike in `bootstrap/spike/*.al` is owned by M5.3. It
+consumes only an explicit host snapshot and emits `ALDER-DECL-MANIFEST 1`; its
+line grammar, balanced nesting probe, and manifest are capability-test
+protocols, not Alder semantics.
+Remove the spike when the M5.4 compiler core replaces it with the shared
+production frontend and diagnostic representation.
+
 Checked-operation failure is a valueless invariant panic after explicit
 current-function cleanup; typed `fail` remains ordinary `Result` propagation,
 and no fabricated result or caller-frame unwinding is permitted. This
@@ -281,14 +288,13 @@ incompatible terminator is carried by MIR 2 while legacy MIR 1 fixtures remain
 supported; process-level tests pin division-by-zero cleanup order, narrow
 overflow, and fixed-map capacity failure. MIR 3 adds `alloc.checked` so
 bootstrap storage can report allocation preparation and runtime failures
-without terminating or mutating prior state. Deterministic OOM and runtime
-identity-exhaustion injection, plus narrow-target `SIZE_MAX` behavior, remain
-required at the buffer gate; this operation alone does not claim that evidence.
-Next use a
-mini-compiler spike to justify only the storage, growable byte/vector, symbol,
-diagnostic, iteration, safe argument/file/output, and host-wrapper capabilities
-actually required by the compiler. Every temporary bridge needs an owner and
-removal condition.
+without terminating or mutating prior state. Deterministic initial/growth OOM,
+runtime segment-identity exhaustion, successful retry, and prior-buffer
+validity are pinned at the buffer gate. Narrow-target `SIZE_MAX` behavior still
+requires a supported target environment. The declaration spike justifies the
+storage, growable byte/vector, symbol, diagnostic, recursive iteration, safe
+argument/file/output, and host-wrapper capabilities actually required by the
+compiler. Every temporary bridge has an owner and removal condition.
 
 Exit requires compiler-scale tests with multiple files, more than sixteen
 declarations, retained source/range data, nested syntax, recursion, malformed

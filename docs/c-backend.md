@@ -44,8 +44,23 @@ The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.
 Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
-`EXIT_FAILURE`. The context exposes no arguments, files, output, getters, or
-native host-pointer ABI.
+`EXIT_FAILURE`.
+
+The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
+through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and
+`alderhost_source_text_len`/`_byte`. The host sorts exact argument strings with
+`strcmp`, rejects duplicates, and loads every file in binary mode before entry;
+it performs no directory scanning, path normalization, or pointer exposure.
+Source counts, paths, and file contents that are not representable as `U64`
+are rejected before entry.
+Length and byte accessors require an active invocation and valid indices, and a
+contract violation aborts with a fixed host diagnostic. `alderhost_stdout_byte`
+and `alderhost_stderr_byte` write exactly one byte without a newline and return
+false outside an active invocation or on write failure. The invocation context
+layout remains private, is active only during `alder_program_entry`, and is
+valid under the single-threaded Stage 0 runtime contract. Inputs are freed and
+both output streams are flushed after entry. This host ABI is distinct from the
+generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
 ## Milestone 3 Lowering Contract
 
@@ -288,9 +303,11 @@ runtime tracks its live heap blocks in one counter so tests can prove leak-free
 create/reset/destroy cycles without a leak sanitizer.
 
 Runtime test builds may define `ALDER_RUNTIME_TESTING` to expose deterministic
-domain-allocation failure injection. The hook counts otherwise eligible
-`alder_domain_alloc` calls and fails before mutating domain state. Production
-builds contain neither the hook symbols nor their mutable state.
+domain-allocation failure and segment-identity exhaustion injection. The
+allocation hook counts otherwise eligible `alder_domain_alloc` calls and fails
+before mutating domain state; identity exhaustion is irreversible within its
+isolated test process. Production builds contain neither the hook symbols nor
+their mutable state.
 
 ## Cleanup Lowering
 

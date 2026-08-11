@@ -417,12 +417,34 @@ int main(void) {
     if (alder_domain_alloc(&root, (size_t)1, (size_t)1) != NULL) { return 9; }
 
     alder_runtime_test_clear_domain_alloc_failure();
+    AlderDomain identity_root = {0};
+    if (!alder_domain_init(&identity_root, NULL)) { return 10; }
+    AlderDomainMark mark_before_identity_exhaustion = alder_domain_mark(&identity_root);
+    AlderSegment *head_before_identity_exhaustion = identity_root.segments_head;
+    AlderSegment *tail_before_identity_exhaustion = identity_root.segments_tail;
+    size_t segments_before_identity_exhaustion = identity_root.segment_count;
+    size_t live_before_identity_exhaustion = alder_runtime_live_allocations();
+    alder_runtime_test_exhaust_segment_identities();
+    if (alder_fn_main_%d(&identity_root) != (int32_t)10) { return 11; }
+    AlderDomainMark mark_after_identity_exhaustion = alder_domain_mark(&identity_root);
+    if (mark_after_identity_exhaustion.domain_serial != mark_before_identity_exhaustion.domain_serial ||
+        mark_after_identity_exhaustion.reset_epoch != mark_before_identity_exhaustion.reset_epoch ||
+        mark_after_identity_exhaustion.segment_serial != mark_before_identity_exhaustion.segment_serial ||
+        mark_after_identity_exhaustion.offset != mark_before_identity_exhaustion.offset ||
+        identity_root.segments_head != head_before_identity_exhaustion ||
+        identity_root.segments_tail != tail_before_identity_exhaustion ||
+        identity_root.segment_count != segments_before_identity_exhaustion) { return 12; }
+    if (alder_runtime_live_allocations() != live_before_identity_exhaustion) { return 13; }
+    if (alder_domain_alloc(&identity_root, (size_t)1, (size_t)1) != NULL) { return 14; }
+    if (alder_runtime_live_allocations() != live_before_identity_exhaustion) { return 15; }
+
+    alder_domain_destroy(&identity_root);
     alder_domain_destroy(&root);
-    if (alder_runtime_live_allocations() != (size_t)0) { return 10; }
+    if (alder_runtime_live_allocations() != (size_t)0) { return 16; }
     return 0;
 }
 `, mainID, mainID, mainID, resultType, newID, okVariant,
-		bufferType, okVariant, resultType, appendID, errVariant, errVariant, limitVariant)
+		bufferType, okVariant, resultType, appendID, errVariant, errVariant, limitVariant, mainID)
 	for _, cc := range findCCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {

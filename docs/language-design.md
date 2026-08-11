@@ -617,6 +617,16 @@ mingw-w64 host because libasan and libubsan are unavailable.
 
 ## Open Design Questions
 
+### Private M5.3 declaration spike
+
+`bootstrap/spike/*.al` is an executable capability probe, not a language
+feature. Its ASCII, line-oriented `def NAME` / `use NAME` input and
+balanced `begin` / `end` nesting, plus `ALDER-DECL-MANIFEST 1` output, are
+private test protocols. The nesting exists only to prove recursive delimiter
+handling and recovery. The spike is owned by M5.3 and is removed when M5.4
+supplies the Alder-written compiler core; it must not be extended into a second
+frontend or module system.
+
 1. What is the smallest useful storage-domain inference algorithm for the bootstrap subset?
 2. Which cross-domain value operations are semantic copies, and which are implementation optimizations?
 3. How should table views interact with nested mutation and concurrent access?
