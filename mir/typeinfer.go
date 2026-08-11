@@ -159,7 +159,7 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return m.CleanupID(), true
 
-	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked, OpIntShiftChecked:
+	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked, OpIntShlChecked, OpIntShrChecked:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) {
 			return NoType, false

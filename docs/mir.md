@@ -158,6 +158,11 @@ Required invariants:
 
 - a child domain cannot outlive its parent;
 - reset invalidates storage allocated after the corresponding mark;
+- a mark made before the first allocation resets the domain to empty, and a
+  successful reset consumes every outstanding mark for that domain epoch;
+- MIR 1 conservatively invalidates every table owned by a reset domain because
+  table insertion and growth contain runtime allocations not represented as
+  separate MIR values;
 - no safe reference may be used after its domain reset or destruction;
 - a returned reference or aggregate containing references must be valid in the caller-visible result domain;
 - destruction occurs at most once on each reachable path;
@@ -194,13 +199,14 @@ int.add.checked a, b else edge
 int.sub.checked a, b else edge
 int.mul.checked a, b else edge
 int.div.checked a, b else edge
-int.shift.checked a, b else edge
+int.shl.checked a, b else edge
+int.shr.checked a, b else edge
 slice.index.checked slice_or_ref, index else edge -> safe_mut(elem)
 slice.range.checked slice_or_ref, lo, hi else edge -> slice(elem)
 enum.payload.checked value, variant else edge -> payload
 ```
 
-Checked integer operations require both operands to have the same integer type. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. `enum.payload.checked` requires a variant with a non-unit payload.
+Checked integer operations require both operands to have the same integer type. `int.shl.checked` is a wrapping left shift on the integer's bit pattern; `int.shr.checked` is arithmetic for signed operands and logical for unsigned operands. Both fail when the shift count is negative or at least the operand width. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. `enum.payload.checked` requires a variant with a non-unit payload.
 
 A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
 
@@ -321,11 +327,13 @@ Initial conservative rules:
 - externally supplied domain handles and tables may alias other compatible parameters unless local provenance proves distinct identities. To avoid unsummarized interprocedural memory writes, MIR 1 rejects storing values that recursively contain safe references, slices, tables, domain handles, or domain marks through a dereference-based place; local-place stores remain supported and field-sensitive;
 - Phase 6 resource state is path-sensitive and joins with a conservative union. Checked-operation failure edges observe the state before the checked instruction's effect;
 - Domain identity and parent ancestry are tracked separately: destroying a child does not destroy its parent, while destroying a parent invalidates descendant handles and allocations. MIR 1 permits create/allocate/destroy wholly within each loop iteration, but conservatively rejects function-local domain handles and references carried through block arguments or stored from a cyclic block across a backedge; this avoids conflating dynamic instances of one static allocation site or reviving an older alias.
+- Domain marks keep direct SSA identity. Reset consumes all marks corresponding to the reset domain, and a later `domain.mark` produces a fresh runtime-epoch mark;
 - Ordinary functions may not return `domain_handle` or `domain_mark` in MIR 1. Their result identity and parent relation cannot yet be represented by function-effect summaries, so Phase 2 rejects such signatures rather than losing provenance at a call.
 - local-place provenance distinguishes field paths. Dereference-based memory has no general alias declaration in MIR 1, so Phase 6 conservatively treats dereference stores as possible sources for dereference loads;
 - returned values must not contain references derived from function-local domains;
 - `unreachable` terminators are accepted only in blocks unreachable from the entry block;
 - table identities originate at function table parameters and `table.create` sites and are preserved through block parameters, memory, aggregate/enum values, and ordinary calls. A call returning a newly-created table receives a stable call-site identity;
+- any domain reset invalidates tables that may be owned by that domain, even when the table was created before the mark. This conservative rule prevents hidden element or slot allocations made after the mark from surviving behind a stale table handle;
 - a table lookup result is consumed exactly once, in its defining block, by a `some` switch binding or checked `some` payload extraction. From lookup until extraction, and from successful extraction through `table.view.end`, insert, remove, and ordinary-call or active-cleanup effects that may mutate the same table are forbidden. The checked extraction failure edge observes the pre-extraction state and a switch `none` path has no view to end;
 - table views are ephemeral: every use of a view must stay in its access block, exactly one `table.view.end` follows all other uses, and neither insert nor remove of the same table may occur while any related view remains active;
 - `raw_ptr` values may only cross explicit unsafe boundaries: FFI calls, function boundaries, and returns;

@@ -33,7 +33,7 @@ static void test_lifecycle(void) {
 
     /* Mark, allocate more, reset: post-mark storage is released. */
     AsterDomainMark m = aster_domain_mark(&d);
-    CHECK(m.segment != NULL);
+    CHECK(m.segment_serial != 0u);
     void *post = aster_domain_alloc(&d, 64, 8);
     CHECK(post != NULL);
     CHECK(aster_domain_reset(&d, m));
@@ -47,23 +47,28 @@ static void test_marks(void) {
     AsterDomain d = {0};
     CHECK(aster_domain_init(&d, NULL));
 
-    /* An empty domain marks {NULL, 0} and resets to it successfully. */
+    /* A mark before the first allocation resets the domain to empty. */
     AsterDomainMark m1 = aster_domain_mark(&d);
-    CHECK(m1.segment == NULL);
+    CHECK(m1.domain_serial == d.serial);
+    CHECK(m1.reset_epoch == d.reset_epoch);
+    CHECK(m1.segment_serial == 0u);
     CHECK(m1.offset == 0u);
-    CHECK(aster_domain_reset(&d, m1));
-
-    /* {NULL, 0} cannot reset a non-empty domain. */
     CHECK(aster_domain_alloc(&d, 32, 8) != NULL);
-    AsterDomainMark zero = {NULL, 0};
+    CHECK(aster_domain_reset(&d, m1));
+    CHECK(d.segments_head == NULL && d.segments_tail == NULL);
+    CHECK(!aster_domain_reset(&d, m1)); /* reset consumes the mark epoch */
+
+    /* A zero/forged mark never belongs to an initialized domain. */
+    AsterDomainMark zero = {0};
     CHECK(!aster_domain_reset(&d, zero));
+    CHECK(aster_domain_alloc(&d, 32, 8) != NULL);
 
     /* A mark from a segment released by an earlier reset is rejected. */
     AsterDomainMark m2 = aster_domain_mark(&d);
     void *large = aster_domain_alloc(&d, (size_t)2u * 1024u * 1024u, 16);
     CHECK(large != NULL);
     AsterDomainMark m3 = aster_domain_mark(&d);
-    CHECK(m3.segment != m2.segment);
+    CHECK(m3.segment_serial != m2.segment_serial);
     CHECK(aster_domain_reset(&d, m2));  /* frees the large segment */
     CHECK(!aster_domain_reset(&d, m3)); /* stale mark */
 
@@ -75,11 +80,12 @@ static void test_marks(void) {
     CHECK(!aster_domain_reset(&d, foreign));
     aster_domain_destroy(&other);
 
-    /* Rewinding to an older mark of a still-active segment is allowed. */
+    /* Rewinding to a mark consumes it and every other mark in that epoch. */
     AsterDomainMark earlier = aster_domain_mark(&d);
     CHECK(aster_domain_alloc(&d, 128, 8) != NULL);
     CHECK(aster_domain_alloc(&d, 128, 8) != NULL);
     CHECK(aster_domain_reset(&d, earlier));
+    CHECK(!aster_domain_reset(&d, earlier));
 
     aster_domain_destroy(&d);
     CHECK(aster_runtime_live_allocations() == 0u);
@@ -131,7 +137,8 @@ static void test_invalid(void) {
     aster_domain_destroy(&d);
     CHECK(aster_domain_alloc(&d, 16, 8) == NULL);
     AsterDomainMark m = aster_domain_mark(&d);
-    CHECK(m.segment == NULL);
+    CHECK(m.domain_serial == 0u);
+    CHECK(m.segment_serial == 0u);
     CHECK(!aster_domain_reset(&d, m));
     CHECK(aster_domain_init(&d, NULL)); /* re-init works */
     aster_domain_destroy(&d);

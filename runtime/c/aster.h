@@ -41,6 +41,8 @@ typedef struct AsterSegment AsterSegment;
  */
 struct AsterDomain {
     uint32_t magic;
+    uint64_t serial;
+    uint64_t reset_epoch;
     struct AsterDomain *parent;
     struct AsterDomain *children_head;
     struct AsterDomain *next_sibling;
@@ -50,9 +52,12 @@ struct AsterDomain {
 };
 typedef struct AsterDomain AsterDomain;
 
-/* A resettable frontier of a domain: the active segment and its offset. */
+/* A resettable frontier of one domain epoch. Integer identities avoid retaining
+ * or comparing pointers after segment storage has been released. */
 typedef struct {
-    void *segment;
+    uint64_t domain_serial;
+    uint64_t reset_epoch;
+    uint64_t segment_serial; /* zero denotes the frontier before all segments */
     size_t offset;
 } AsterDomainMark;
 
@@ -60,7 +65,8 @@ typedef struct {
  * Initialize a domain. The struct must be zero-initialized or freshly
  * destroyed. parent may be NULL (a root domain) or an initialized domain; a
  * child domain cannot outlive its parent. Returns false when the struct is
- * already initialized or the parent is not an initialized domain.
+ * already initialized, the parent is not initialized, or the process-wide
+ * domain identity namespace is exhausted.
  */
 bool aster_domain_init(AsterDomain *domain, AsterDomain *parent);
 
@@ -68,27 +74,29 @@ bool aster_domain_init(AsterDomain *domain, AsterDomain *parent);
  * Allocate size bytes aligned to align (a power of two) in the domain.
  * Returns NULL on failure: uninitialized or destroyed domain, align not a
  * power of two (or zero), size/alignment overflow, or out of memory.
+ * Exhaustion of the segment identity namespace is also reported as failure.
  * size == 0 allocates one byte. Allocations stay valid until the domain is
- * reset past them or destroyed; the returned pointer is never NULL on
- * success and must not be freed by the caller.
+ * reset past them or destroyed; the returned pointer is never NULL on success
+ * and must not be freed by the caller.
  */
 void *aster_domain_alloc(AsterDomain *domain, size_t size, size_t align);
 
 /*
- * Return the current allocation frontier. The mark of an uninitialized or
- * destroyed domain is {NULL, 0}, which no reset of a non-empty domain can
- * apply successfully.
+ * Return the current allocation frontier. A mark of an uninitialized or
+ * destroyed domain has zero identities and is never accepted by reset.
  */
 AsterDomainMark aster_domain_mark(AsterDomain *domain);
 
 /*
  * Truncate the domain to the mark: storage allocated after the mark is
  * released. Returns false when the domain is not initialized or the mark
- * does not belong to an active segment of this domain with a valid offset
- * (for example a mark from a segment released by an earlier reset, or a
- * mark of another domain). A {NULL, 0} mark succeeds only on an empty
- * domain. Pointers into released storage become invalid; the MIR verifier
- * prevents their use.
+ * does not belong to the domain's current reset epoch with a valid segment
+ * and offset. A mark made before the first allocation resets the domain to
+ * empty. Every successful reset consumes all marks from the previous epoch.
+ * Exhaustion of the reset-epoch namespace also returns false without changing
+ * the domain.
+ * Pointers into released storage become invalid; the MIR verifier prevents
+ * their use.
  */
 bool aster_domain_reset(AsterDomain *domain, AsterDomainMark mark);
 
@@ -125,10 +133,12 @@ bool aster_slice_range_checked(AsterSlice slice, uint64_t lo, uint64_t hi);
 
 /*
  * Checked helpers for the 64-bit MIR integer operations. Each returns false
- * and leaves *out untouched when the operation would fail: signed
+ * and leaves *out untouched when out is NULL or the operation would fail: signed
  * add/sub/mul overflow, division by zero, INT64_MIN / -1, shifts by a
- * negative or >= 64 count. Narrower MIR integer types lower by promoting to
- * 64 bits and range-checking the result (documented in docs/c-backend.md).
+ * negative or >= 64 count. Narrow non-shift MIR operations promote to 64 bits
+ * and range-check the result. Narrow shifts must instead check against their
+ * source width and mask or sign-extend at that width before using these helpers
+ * (documented in docs/c-backend.md).
  * Shift semantics: left shifts wrap (two's complement bit pattern);
  * right shifts are arithmetic for signed values and logical for unsigned.
  */
@@ -216,8 +226,10 @@ typedef struct AsterTableSlot AsterTableSlot;
 /*
  * Caller-owned table storage. The layout is part of the ABI because
  * generated code and tests embed the struct; treat the fields as internal.
- * The struct must be zero-initialized or freshly destroyed before
- * aster_table_init. The runtime never frees the struct itself.
+ * The struct must be zero-initialized before aster_table_init. After its
+ * domain is reset or destroyed, the old table is invalid and the caller may
+ * explicitly zero the struct before initializing a new table in it. The
+ * runtime never frees the struct itself.
  */
 struct AsterTable {
     uint64_t serial;
@@ -226,6 +238,8 @@ struct AsterTable {
     uint64_t elem_size;
     uint64_t elem_align;
     uint64_t generation_counter;
+    uint64_t domain_serial;
+    uint64_t domain_epoch;
     struct AsterDomain *domain;
     AsterTableSlot *slots;
 };
@@ -244,8 +258,10 @@ typedef struct {
  * Initialize a table whose element storage lives in domain. Returns false
  * when the domain is not initialized, elem_size is zero, elem_align is not
  * a power of two, or the initial slot array cannot be allocated. The struct
- * is caller-owned; the table becomes invalid when its domain is reset past
- * its storage or destroyed (the MIR verifier prevents such uses).
+ * is caller-owned; every successful reset or destruction of its domain
+ * invalidates the table (the MIR verifier prevents such uses). Values not
+ * representable as size_t and exhausted runtime identity namespaces also
+ * fail without modifying the table.
  */
 bool aster_table_init(AsterTable *table, AsterDomain *domain,
                       uint64_t elem_size, uint64_t elem_align);
@@ -254,7 +270,8 @@ bool aster_table_init(AsterTable *table, AsterDomain *domain,
  * Copy elem into table storage and return its fresh id. Returns false on an
  * invalid table, a NULL elem or out_id, or out of memory. Generation values
  * are unique within the table's lifetime, so a removed slot never reuses a
- * previous generation.
+ * previous generation; insertion permanently fails after that namespace is
+ * exhausted.
  */
 bool aster_table_insert(AsterTable *table, const void *elem,
                         AsterTableId *out_id);

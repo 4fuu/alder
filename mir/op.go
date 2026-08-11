@@ -31,7 +31,8 @@ const (
 	OpIntSubChecked
 	OpIntMulChecked
 	OpIntDivChecked
-	OpIntShiftChecked
+	OpIntShlChecked
+	OpIntShrChecked
 	OpSliceLen
 	OpSliceIndexChecked
 	OpSliceRangeChecked
@@ -113,8 +114,10 @@ func (k OpKind) String() string {
 		return "int.mul.checked"
 	case OpIntDivChecked:
 		return "int.div.checked"
-	case OpIntShiftChecked:
-		return "int.shift.checked"
+	case OpIntShlChecked:
+		return "int.shl.checked"
+	case OpIntShrChecked:
+		return "int.shr.checked"
 	case OpSliceLen:
 		return "slice.len"
 	case OpSliceIndexChecked:
@@ -198,7 +201,7 @@ func (k OpKind) ProducesResult() bool {
 func (k OpKind) HasFailEdge() bool {
 	switch k {
 	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked,
-		OpIntShiftChecked, OpSliceIndexChecked, OpSliceRangeChecked,
+		OpIntShlChecked, OpIntShrChecked, OpSliceIndexChecked, OpSliceRangeChecked,
 		OpEnumPayloadChecked:
 		return true
 	}

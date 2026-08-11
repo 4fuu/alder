@@ -2,6 +2,7 @@
  * float-to-integer conversions. */
 #include "aster.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -141,16 +142,39 @@ static void test_float_conversions(void) {
     CHECK(aster_i64_from_f64(9223372036854773760.0, &i64)); /* 2^63 - 2048 */
     CHECK(!aster_i64_from_f64(9223372036854775808.0, &i64));   /* >= 2^63 */
     CHECK(!aster_i64_from_f64(-9223372036854777856.0, &i64));  /* < -2^63 */
-    CHECK(!aster_i64_from_f64(1.0 / 0.0, &i64));               /* +inf */
-    CHECK(!aster_i64_from_f64(-1.0 / 0.0, &i64));              /* -inf */
-    CHECK(!aster_i64_from_f64(0.0 / 0.0, &i64));               /* NaN */
+#ifdef INFINITY
+    CHECK(!aster_i64_from_f64(INFINITY, &i64));
+    CHECK(!aster_i64_from_f64(-INFINITY, &i64));
+#endif
+#ifdef NAN
+    CHECK(!aster_i64_from_f64(NAN, &i64));
+#endif
 
     CHECK(aster_u64_from_f64(0.0, &u64) && u64 == 0);
     CHECK(aster_u64_from_f64(3.9, &u64) && u64 == 3);
     CHECK(aster_u64_from_f64(18446744073709549568.0, &u64)); /* < 2^64 */
     CHECK(!aster_u64_from_f64(-1.0, &u64));
     CHECK(!aster_u64_from_f64(18446744073709551616.0, &u64)); /* >= 2^64 */
-    CHECK(!aster_u64_from_f64(0.0 / 0.0, &u64));
+#ifdef NAN
+    CHECK(!aster_u64_from_f64(NAN, &u64));
+#endif
+    CHECK(!aster_i64_from_f64(1.0, NULL));
+    CHECK(!aster_u64_from_f64(1.0, NULL));
+}
+
+static void test_null_outputs(void) {
+    CHECK(!aster_i64_add_checked(1, 2, NULL));
+    CHECK(!aster_i64_sub_checked(1, 2, NULL));
+    CHECK(!aster_i64_mul_checked(1, 2, NULL));
+    CHECK(!aster_i64_div_checked(1, 2, NULL));
+    CHECK(!aster_i64_shl_checked(1, 2, NULL));
+    CHECK(!aster_i64_shr_checked(1, 2, NULL));
+    CHECK(!aster_u64_add_checked(1, 2, NULL));
+    CHECK(!aster_u64_sub_checked(1, 2, NULL));
+    CHECK(!aster_u64_mul_checked(1, 2, NULL));
+    CHECK(!aster_u64_div_checked(1, 2, NULL));
+    CHECK(!aster_u64_shl_checked(1, 2, NULL));
+    CHECK(!aster_u64_shr_checked(1, 2, NULL));
 }
 
 int main(void) {
@@ -161,6 +185,7 @@ int main(void) {
     test_i64_shifts();
     test_u64_ops();
     test_float_conversions();
+    test_null_outputs();
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

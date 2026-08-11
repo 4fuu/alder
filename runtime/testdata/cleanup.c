@@ -96,9 +96,7 @@ static void test_disarm(void) {
     CHECK(aster_runtime_live_allocations() == 0u);
 }
 
-static void test_failure_path_exactly_once(void) {
-    /* One scope, two exit paths: the pattern the MIR verifier requires
-     * (run + end before every return/fail). */
+static void exercise_exit_path(bool failed) {
     AsterCleanupScope scope = {0};
     CHECK(aster_cleanup_scope_begin(&scope));
     int count = 0;
@@ -106,18 +104,24 @@ static void test_failure_path_exactly_once(void) {
     AsterCleanupId id;
     CHECK(aster_cleanup_push(&scope, cleanup_fn, &ctx, &id));
 
-    bool failed = (count == 12345); /* deterministic fake failure flag */
     reset_log();
     if (failed) {
         CHECK(aster_cleanup_run(&scope));
         CHECK(aster_cleanup_end(&scope));
-        return; /* failure path */
+    } else {
+        CHECK(aster_cleanup_run(&scope));
+        CHECK(aster_cleanup_end(&scope));
     }
-    CHECK(aster_cleanup_run(&scope));
-    CHECK(aster_cleanup_end(&scope));
-    CHECK(count == 1); /* ran exactly once on the success path */
+    CHECK(count == 1);
     CHECK(run_log[0] == 'x');
     CHECK(aster_runtime_live_allocations() == 0u);
+}
+
+static void test_failure_path_exactly_once(void) {
+    /* Exercise both generated exit shapes: run + end must execute before
+     * either return or fail. */
+    exercise_exit_path(false);
+    exercise_exit_path(true);
 }
 
 static void test_end_contract(void) {

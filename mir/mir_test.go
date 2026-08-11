@@ -208,6 +208,8 @@ func TestInferResultType(t *testing.T) {
 	want("copy_to_domain", Instr{Op: OpCopyToDomain, Domain: d, CopyVal: s}, m.Slice(TypeU8))
 	want("cleanup.scope.begin", Instr{Op: OpCleanupScopeBegin}, m.CleanupScope())
 	want("int.add.checked", Instr{Op: OpIntAddChecked, A: x, B: x}, TypeI64)
+	want("int.shl.checked", Instr{Op: OpIntShlChecked, A: x, B: x}, TypeI64)
+	want("int.shr.checked", Instr{Op: OpIntShrChecked, A: x, B: x}, TypeI64)
 	want("slice.len", Instr{Op: OpSliceLen, Slice: s}, TypeU64)
 	want("slice.index.checked", Instr{Op: OpSliceIndexChecked, Slice: s, Index: cnt}, m.SafeMut(TypeU8))
 	want("slice.range.checked", Instr{Op: OpSliceRangeChecked, Slice: s, Lo: cnt, Hi: cnt}, m.Slice(TypeU8))

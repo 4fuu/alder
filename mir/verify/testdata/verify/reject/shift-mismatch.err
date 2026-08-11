@@ -1,1 +1,1 @@
-fn @f: block bb0: op int.shift.checked #0: integer operand: operand types differ: i64 and u8
+fn @f: block bb0: op int.shr.checked #0: integer operand: operand types differ: i64 and u8

@@ -257,7 +257,7 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCleanupScopeRun, OpCleanupScopeEnd:
 		b.WriteString(" " + valueName(f, in.Scope))
 
-	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked, OpIntShiftChecked:
+	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked, OpIntShlChecked, OpIntShrChecked:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 		printFailEdge(b, f, in)
 

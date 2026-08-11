@@ -29,6 +29,7 @@
 
 typedef struct AsterSegment {
     struct AsterSegment *next;
+    uint64_t serial;
     size_t capacity; /* usable bytes in the data area */
     size_t used;     /* bytes consumed from the data area */
 } AsterSegment;
@@ -47,6 +48,8 @@ struct AsterCleanupEntry {
 
 /* Single-threaded by design (structured concurrency is out of scope). */
 static size_t g_live_allocations = 0;
+static uint64_t g_next_domain_serial = 1; /* 0 denotes exhaustion/invalid */
+static uint64_t g_next_segment_serial = 1;
 static uint64_t g_next_table_serial = 1; /* 0 is never a valid serial */
 
 static void *rt_malloc(size_t size) {
@@ -72,6 +75,15 @@ static bool align_is_valid(size_t align) {
     return align != 0 && (align & (align - 1)) == 0;
 }
 
+static bool take_unique_serial(uint64_t *next, uint64_t *out) {
+    if (*next == 0) {
+        return false;
+    }
+    *out = *next;
+    *next = (*next == UINT64_MAX) ? 0 : *next + 1;
+    return true;
+}
+
 static uintptr_t align_up(uintptr_t addr, size_t align) {
     uintptr_t a = (uintptr_t)align;
     return (addr + (a - 1)) & ~(a - 1);
@@ -92,8 +104,14 @@ bool aster_domain_init(AsterDomain *domain, AsterDomain *parent) {
     if (parent != NULL && parent->magic != ASTER_MAGIC) {
         return false;
     }
+    uint64_t serial;
+    if (!take_unique_serial(&g_next_domain_serial, &serial)) {
+        return false;
+    }
     *domain = (AsterDomain){0};
     domain->magic = ASTER_MAGIC;
+    domain->serial = serial;
+    domain->reset_epoch = 1;
     domain->parent = parent;
     if (parent != NULL) {
         domain->next_sibling = parent->children_head;
@@ -108,11 +126,15 @@ static AsterSegment *new_segment(size_t capacity) {
     if (alloc_size < capacity) {
         return NULL; /* overflow */
     }
+    if (g_next_segment_serial == 0) {
+        return NULL;
+    }
     AsterSegment *seg = (AsterSegment *)rt_malloc(alloc_size);
     if (seg == NULL) {
         return NULL;
     }
     seg->next = NULL;
+    (void)take_unique_serial(&g_next_segment_serial, &seg->serial);
     seg->capacity = capacity;
     seg->used = 0;
     return seg;
@@ -173,11 +195,14 @@ void *aster_domain_alloc(AsterDomain *domain, size_t size, size_t align) {
 }
 
 AsterDomainMark aster_domain_mark(AsterDomain *domain) {
-    AsterDomainMark mark = {NULL, 0};
-    if (domain != NULL && domain->magic == ASTER_MAGIC &&
-        domain->segments_tail != NULL) {
-        mark.segment = (void *)domain->segments_tail;
-        mark.offset = domain->segments_tail->used;
+    AsterDomainMark mark = {0, 0, 0, 0};
+    if (domain != NULL && domain->magic == ASTER_MAGIC) {
+        mark.domain_serial = domain->serial;
+        mark.reset_epoch = domain->reset_epoch;
+        if (domain->segments_tail != NULL) {
+            mark.segment_serial = domain->segments_tail->serial;
+            mark.offset = domain->segments_tail->used;
+        }
     }
     return mark;
 }
@@ -186,32 +211,39 @@ bool aster_domain_reset(AsterDomain *domain, AsterDomainMark mark) {
     if (domain == NULL || domain->magic != ASTER_MAGIC) {
         return false;
     }
-    if (mark.segment == NULL) {
-        /* Only an empty domain resets to a {NULL, 0} mark. */
-        return domain->segments_head == NULL && mark.offset == 0;
-    }
-    AsterSegment *seg = (AsterSegment *)mark.segment;
-    /* Validate membership by pointer comparison only: a stale mark may
-     * point into memory the heap already returned to the operating system,
-     * so the segment must not be dereferenced before it is proven live. */
-    AsterSegment *cur = domain->segments_head;
-    while (cur != NULL && cur != seg) {
-        cur = cur->next;
-    }
-    if (cur == NULL) {
-        return false; /* mark of another domain or a released segment */
-    }
-    if (mark.offset > seg->used) {
+    if (mark.domain_serial != domain->serial ||
+        mark.reset_epoch != domain->reset_epoch ||
+        domain->reset_epoch == UINT64_MAX) {
         return false;
     }
-    while (seg->next != NULL) {
-        AsterSegment *victim = seg->next;
-        seg->next = victim->next;
+    AsterSegment *seg = NULL;
+    if (mark.segment_serial != 0) {
+        seg = domain->segments_head;
+        while (seg != NULL && seg->serial != mark.segment_serial) {
+            seg = seg->next;
+        }
+        if (seg == NULL || mark.offset > seg->used) {
+            return false;
+        }
+    } else if (mark.offset != 0) {
+        return false;
+    }
+    AsterSegment *victim = (seg == NULL) ? domain->segments_head : seg->next;
+    while (victim != NULL) {
+        AsterSegment *next = victim->next;
         rt_free(victim);
         domain->segment_count -= 1;
+        victim = next;
     }
-    seg->used = mark.offset;
-    domain->segments_tail = seg;
+    if (seg == NULL) {
+        domain->segments_head = NULL;
+        domain->segments_tail = NULL;
+    } else {
+        seg->next = NULL;
+        seg->used = mark.offset;
+        domain->segments_tail = seg;
+    }
+    domain->reset_epoch += 1;
     return true;
 }
 
@@ -261,8 +293,26 @@ bool aster_slice_range_checked(AsterSlice slice, uint64_t lo, uint64_t hi) {
 /* Checked integer arithmetic                                          */
 /* ------------------------------------------------------------------ */
 
+static bool i64_from_twos_bits(uint64_t bits, int64_t *out) {
+    if (out == NULL) {
+        return false;
+    }
+    if (bits <= (uint64_t)INT64_MAX) {
+        *out = (int64_t)bits;
+        return true;
+    }
+    uint64_t magnitude = (uint64_t)0 - bits;
+    if (magnitude == (uint64_t)INT64_MAX + 1u) {
+        *out = INT64_MIN;
+    } else {
+        *out = -(int64_t)magnitude;
+    }
+    return true;
+}
+
 bool aster_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
-    if ((b > 0 && a > INT64_MAX - b) || (b < 0 && a < INT64_MIN - b)) {
+    if (out == NULL || (b > 0 && a > INT64_MAX - b) ||
+        (b < 0 && a < INT64_MIN - b)) {
         return false;
     }
     *out = a + b;
@@ -270,7 +320,8 @@ bool aster_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
 }
 
 bool aster_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
-    if ((b > 0 && a < INT64_MIN + b) || (b < 0 && a > INT64_MAX + b)) {
+    if (out == NULL || (b > 0 && a < INT64_MIN + b) ||
+        (b < 0 && a > INT64_MAX + b)) {
         return false;
     }
     *out = a - b;
@@ -278,6 +329,9 @@ bool aster_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
 }
 
 bool aster_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL) {
+        return false;
+    }
     if (a == 0 || b == 0) {
         *out = 0;
         return true;
@@ -298,12 +352,11 @@ bool aster_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
         prod = (uint64_t)0 - prod; /* two's complement negation, defined in
                                       unsigned arithmetic */
     }
-    memcpy(out, &prod, sizeof(prod)); /* representation transfer */
-    return true;
+    return i64_from_twos_bits(prod, out);
 }
 
 bool aster_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
-    if (b == 0 || (a == INT64_MIN && b == -1)) {
+    if (out == NULL || b == 0 || (a == INT64_MIN && b == -1)) {
         return false;
     }
     *out = a / b;
@@ -311,16 +364,15 @@ bool aster_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
 }
 
 bool aster_i64_shl_checked(int64_t a, int64_t b, int64_t *out) {
-    if (b < 0 || b >= 64) {
+    if (out == NULL || b < 0 || b >= 64) {
         return false;
     }
     uint64_t r = (uint64_t)a << (unsigned)b; /* unsigned shift is defined */
-    memcpy(out, &r, sizeof(r));
-    return true;
+    return i64_from_twos_bits(r, out);
 }
 
 bool aster_i64_shr_checked(int64_t a, int64_t b, int64_t *out) {
-    if (b < 0 || b >= 64) {
+    if (out == NULL || b < 0 || b >= 64) {
         return false;
     }
     uint64_t u = (uint64_t)a >> (unsigned)b;
@@ -328,12 +380,11 @@ bool aster_i64_shr_checked(int64_t a, int64_t b, int64_t *out) {
         /* Arithmetic shift: sign-extend the shifted-out bits. */
         u |= ~(UINT64_MAX >> (unsigned)b);
     }
-    memcpy(out, &u, sizeof(u));
-    return true;
+    return i64_from_twos_bits(u, out);
 }
 
 bool aster_u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
-    if (a > UINT64_MAX - b) {
+    if (out == NULL || a > UINT64_MAX - b) {
         return false;
     }
     *out = a + b;
@@ -341,7 +392,7 @@ bool aster_u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
 }
 
 bool aster_u64_sub_checked(uint64_t a, uint64_t b, uint64_t *out) {
-    if (a < b) {
+    if (out == NULL || a < b) {
         return false;
     }
     *out = a - b;
@@ -349,7 +400,7 @@ bool aster_u64_sub_checked(uint64_t a, uint64_t b, uint64_t *out) {
 }
 
 bool aster_u64_mul_checked(uint64_t a, uint64_t b, uint64_t *out) {
-    if (a != 0 && b > UINT64_MAX / a) {
+    if (out == NULL || (a != 0 && b > UINT64_MAX / a)) {
         return false;
     }
     *out = a * b;
@@ -358,7 +409,7 @@ bool aster_u64_mul_checked(uint64_t a, uint64_t b, uint64_t *out) {
 
 bool aster_u64_div_checked(uint64_t a, uint64_t b, uint64_t *out) {
     (void)a;
-    if (b == 0) {
+    if (out == NULL || b == 0) {
         return false;
     }
     *out = a / b;
@@ -366,7 +417,7 @@ bool aster_u64_div_checked(uint64_t a, uint64_t b, uint64_t *out) {
 }
 
 bool aster_u64_shl_checked(uint64_t a, uint64_t b, uint64_t *out) {
-    if (b >= 64) {
+    if (out == NULL || b >= 64) {
         return false;
     }
     *out = a << (unsigned)b;
@@ -374,7 +425,7 @@ bool aster_u64_shl_checked(uint64_t a, uint64_t b, uint64_t *out) {
 }
 
 bool aster_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out) {
-    if (b >= 64) {
+    if (out == NULL || b >= 64) {
         return false;
     }
     *out = a >> (unsigned)b;
@@ -382,7 +433,8 @@ bool aster_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out) {
 }
 
 bool aster_i64_from_f64(double v, int64_t *out) {
-    if (v != v || v < -9223372036854775808.0 || v >= 9223372036854775808.0) {
+    if (out == NULL || v != v || v < -9223372036854775808.0 ||
+        v >= 9223372036854775808.0) {
         return false;
     }
     *out = (int64_t)v; /* in-range conversion is defined */
@@ -390,7 +442,8 @@ bool aster_i64_from_f64(double v, int64_t *out) {
 }
 
 bool aster_u64_from_f64(double v, uint64_t *out) {
-    if (v != v || v < 0.0 || v >= 18446744073709551616.0) {
+    if (out == NULL || v != v || v < 0.0 ||
+        v >= 18446744073709551616.0) {
         return false;
     }
     *out = (uint64_t)v; /* in-range conversion is defined */
@@ -508,25 +561,36 @@ bool aster_table_init(AsterTable *table, AsterDomain *domain,
                       uint64_t elem_size, uint64_t elem_align) {
     if (table == NULL || table->serial != 0 || domain == NULL ||
         domain->magic != ASTER_MAGIC || elem_size == 0 ||
-        !align_is_valid((size_t)elem_align)) {
+        elem_size > (uint64_t)SIZE_MAX || elem_align > (uint64_t)SIZE_MAX ||
+        !align_is_valid((size_t)elem_align) || g_next_table_serial == 0) {
         return false;
     }
-    *table = (AsterTable){0};
-    table->serial = g_next_table_serial;
-    g_next_table_serial += 1; /* wraps after 2^64 tables: documented */
-    table->domain = domain;
-    table->elem_size = elem_size;
-    table->elem_align = elem_align;
-    table->slots = (AsterTableSlot *)aster_domain_alloc(
+    AsterTableSlot *slots = (AsterTableSlot *)aster_domain_alloc(
         domain, (size_t)(TABLE_INITIAL_CAPACITY * sizeof(AsterTableSlot)),
         (size_t)_Alignof(AsterTableSlot));
-    if (table->slots == NULL) {
+    if (slots == NULL) {
         return false;
     }
-    memset(table->slots, 0,
+    memset(slots, 0,
            (size_t)(TABLE_INITIAL_CAPACITY * sizeof(AsterTableSlot)));
-    table->capacity = TABLE_INITIAL_CAPACITY;
+    AsterTable fresh = {0};
+    (void)take_unique_serial(&g_next_table_serial, &fresh.serial);
+    fresh.capacity = TABLE_INITIAL_CAPACITY;
+    fresh.elem_size = elem_size;
+    fresh.elem_align = elem_align;
+    fresh.domain_serial = domain->serial;
+    fresh.domain_epoch = domain->reset_epoch;
+    fresh.domain = domain;
+    fresh.slots = slots;
+    *table = fresh;
     return true;
+}
+
+static bool table_is_live(const AsterTable *table) {
+    return table != NULL && table->serial != 0 && table->domain != NULL &&
+           table->domain->magic == ASTER_MAGIC &&
+           table->domain->serial == table->domain_serial &&
+           table->domain->reset_epoch == table->domain_epoch;
 }
 
 static bool table_grow(AsterTable *table) {
@@ -534,10 +598,10 @@ static bool table_grow(AsterTable *table) {
         return false;
     }
     uint64_t new_capacity = table->capacity * 2;
-    size_t slot_bytes = (size_t)new_capacity * sizeof(AsterTableSlot);
-    if ((uint64_t)(slot_bytes / sizeof(AsterTableSlot)) != new_capacity) {
+    if (new_capacity > (uint64_t)(SIZE_MAX / sizeof(AsterTableSlot))) {
         return false; /* overflow */
     }
+    size_t slot_bytes = (size_t)new_capacity * sizeof(AsterTableSlot);
     AsterTableSlot *fresh = (AsterTableSlot *)aster_domain_alloc(
         table->domain, slot_bytes, (size_t)_Alignof(AsterTableSlot));
     if (fresh == NULL) {
@@ -555,8 +619,8 @@ static bool table_grow(AsterTable *table) {
 
 bool aster_table_insert(AsterTable *table, const void *elem,
                         AsterTableId *out_id) {
-    if (table == NULL || table->serial == 0 || elem == NULL ||
-        out_id == NULL || table->domain->magic != ASTER_MAGIC) {
+    if (!table_is_live(table) || elem == NULL || out_id == NULL ||
+        table->generation_counter == UINT64_MAX) {
         return false;
     }
     if (table->count == table->capacity && !table_grow(table)) {
@@ -594,8 +658,7 @@ bool aster_table_insert(AsterTable *table, const void *elem,
  * touched. */
 static bool table_validate(const AsterTable *table, AsterTableId id,
                            AsterTableSlot **out_slot) {
-    if (table == NULL || table->serial == 0 ||
-        table->domain->magic != ASTER_MAGIC) {
+    if (!table_is_live(table)) {
         return false;
     }
     if (id.table_serial != table->serial) {

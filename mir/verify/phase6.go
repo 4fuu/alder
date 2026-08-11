@@ -28,8 +28,9 @@ type domainInfo struct {
 }
 
 type resourceState struct {
-	dead    map[defKey]bool
-	invalid map[domainRoot]bool
+	dead         map[defKey]bool
+	invalid      map[domainRoot]bool
+	invalidMarks map[mir.ValueId]bool
 }
 
 func phase6Domains(m *mir.Module) []Error {
@@ -60,7 +61,7 @@ func phase6Domains(m *mir.Module) []Error {
 					}
 				}
 				if in.Op == mir.OpCleanupScopeRun {
-					errs = append(errs, checkAndApplyCleanupRun(f, mir.BlockId(bi), ii, info, effects, cleanup, &st)...)
+					errs = append(errs, checkAndApplyCleanupRun(m, f, mir.BlockId(bi), ii, info, effects, cleanup, &st)...)
 				} else {
 					for _, v := range instructionUses(in) {
 						if valueInvalid(info, v, st) {
@@ -139,12 +140,15 @@ func solveResourceStates(m *mir.Module, f *mir.Function, info []domainInfo, effe
 
 func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, in *mir.Instr, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, st *resourceState) {
 	kill := func(v mir.ValueId, reset bool, mark mir.ValueId) {
-		applyDomainInvalidation(f, info, v, reset, mark, st)
+		applyDomainInvalidation(m, f, info, v, reset, mark, st)
 	}
 	switch in.Op {
 	case mir.OpDomainCreate:
 		ensureResource(st)
 		delete(st.dead, defKey{blk: bi, in: ii})
+	case mir.OpDomainMark:
+		ensureResource(st)
+		delete(st.invalidMarks, in.Result)
 	case mir.OpAlloc, mir.OpCopyToDomain, mir.OpTableCreate:
 		clearProducedRoots(info, in.Result, bi, ii, st)
 	case mir.OpDomainDestroy:
@@ -174,7 +178,7 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 		for _, entries := range sets {
 			branch := cloneResource(*st)
 			for i := len(entries) - 1; i >= 0; i-- {
-				applyCleanupEntryEffect(f, info, effects, entries[i], &branch)
+				applyCleanupEntryEffect(m, f, info, effects, entries[i], &branch)
 			}
 			mergeResource(&merged, branch)
 		}
@@ -182,18 +186,18 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 	}
 }
 
-func applyCleanupEntryEffect(f *mir.Function, info []domainInfo, effects []functionEffect, e cleanupEntry, st *resourceState) {
+func applyCleanupEntryEffect(m *mir.Module, f *mir.Function, info []domainInfo, effects []functionEffect, e cleanupEntry, st *resourceState) {
 	if int(e.Callback) >= len(effects) {
 		return
 	}
 	for p, yes := range effects[e.Callback].destroys {
 		if yes && p < len(e.Args) {
-			applyDomainInvalidation(f, info, e.Args[p], false, mir.NoValue, st)
+			applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, st)
 		}
 	}
 	for p, yes := range effects[e.Callback].resets {
 		if yes && p < len(e.Args) {
-			applyDomainInvalidation(f, info, e.Args[p], true, mir.NoValue, st)
+			applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, st)
 		}
 	}
 }
@@ -210,7 +214,7 @@ func clearProducedRoots(info []domainInfo, result mir.ValueId, bi mir.BlockId, i
 	}
 }
 
-func checkAndApplyCleanupRun(f *mir.Function, bi mir.BlockId, ii int, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, st *resourceState) []Error {
+func checkAndApplyCleanupRun(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, st *resourceState) []Error {
 	loc := locInstr(f, f.Blocks[bi], ii, &f.Blocks[bi].Instrs[ii])
 	var errs []Error
 	seenErrors := make(map[string]bool)
@@ -245,11 +249,11 @@ func checkAndApplyCleanupRun(f *mir.Function, bi mir.BlockId, ii int, info []dom
 						seenErrors[msg] = true
 					}
 				}
-				applyDomainInvalidation(f, info, e.Args[p], false, mir.NoValue, &branch)
+				applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, &branch)
 			}
 			for p, yes := range effect.resets {
 				if yes && p < len(e.Args) {
-					applyDomainInvalidation(f, info, e.Args[p], true, mir.NoValue, &branch)
+					applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, &branch)
 				}
 			}
 		}
@@ -261,7 +265,7 @@ func checkAndApplyCleanupRun(f *mir.Function, bi mir.BlockId, ii int, info []dom
 	return errs
 }
 
-func applyDomainInvalidation(f *mir.Function, info []domainInfo, v mir.ValueId, reset bool, mark mir.ValueId, st *resourceState) {
+func applyDomainInvalidation(m *mir.Module, f *mir.Function, info []domainInfo, v mir.ValueId, reset bool, mark mir.ValueId, st *resourceState) {
 	if int(v) >= len(info) {
 		return
 	}
@@ -275,6 +279,7 @@ func applyDomainInvalidation(f *mir.Function, info []domainInfo, v mir.ValueId, 
 				st.invalid[r] = true
 			}
 		}
+		invalidateDomainMarks(f, info, v, st)
 		return
 	}
 	md := markPoint(f, mark)
@@ -283,6 +288,61 @@ func applyDomainInvalidation(f *mir.Function, info []domainInfo, v mir.ValueId, 
 			st.invalid[r] = true
 		}
 	}
+	// Runtime table inserts and growth allocate storage that is not represented
+	// by separate MIR values. MIR 1 therefore conservatively invalidates every
+	// table in the reset domain instead of allowing hidden post-mark storage to
+	// survive through a stale table handle.
+	for vi, value := range f.Values {
+		if !containsKind(m, value.Type, mir.TypeTable) {
+			continue
+		}
+		for r := range info[vi].roots {
+			if rootInDomain(info, r, v) {
+				st.invalid[r] = true
+			}
+		}
+	}
+	// A successful reset consumes all outstanding marks for this domain. This
+	// matches the runtime epoch and prevents an unconditional MIR reset from
+	// reaching a runtime-rejected, temporally stale mark.
+	invalidateDomainMarks(f, info, v, st)
+}
+
+func invalidateDomainMarks(f *mir.Function, info []domainInfo, domain mir.ValueId, st *resourceState) {
+	for vi := range f.Values {
+		mark := mir.ValueId(vi)
+		markDomain, ok := directMarkDomain(f, mark)
+		if ok && domainsMayAlias(info, markDomain, domain) {
+			st.invalidMarks[mark] = true
+		}
+	}
+}
+
+func directMarkDomain(f *mir.Function, mark mir.ValueId) (mir.ValueId, bool) {
+	if int(mark) >= len(f.Values) {
+		return mir.NoValue, false
+	}
+	d := f.Values[mark].Def
+	if d.Kind != mir.ValueDefInstr || int(d.Block) >= len(f.Blocks) ||
+		d.Instr < 0 || d.Instr >= len(f.Blocks[d.Block].Instrs) {
+		return mir.NoValue, false
+	}
+	in := f.Blocks[d.Block].Instrs[d.Instr]
+	return in.Domain, in.Op == mir.OpDomainMark
+}
+
+func domainsMayAlias(info []domainInfo, a, b mir.ValueId) bool {
+	if int(a) >= len(info) || int(b) >= len(info) {
+		return false
+	}
+	for x := range info[a].deps {
+		for y := range info[b].deps {
+			if domainDepsMayAlias(x, y) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []domainInfo {
@@ -539,6 +599,9 @@ func valueInvalid(info []domainInfo, v mir.ValueId, s resourceState) bool {
 	if int(v) >= len(info) {
 		return false
 	}
+	if s.invalidMarks[v] {
+		return true
+	}
 	if anyDomainDepDead(info[v].deps, s) || anyDomainDepDead(info[v].parents, s) {
 		return true
 	}
@@ -677,6 +740,9 @@ func ensureResource(s *resourceState) {
 	if s.invalid == nil {
 		s.invalid = map[domainRoot]bool{}
 	}
+	if s.invalidMarks == nil {
+		s.invalidMarks = map[mir.ValueId]bool{}
+	}
 }
 func cloneResource(s resourceState) resourceState {
 	n := resourceState{}
@@ -686,6 +752,9 @@ func cloneResource(s resourceState) resourceState {
 	}
 	for x := range s.invalid {
 		n.invalid[x] = true
+	}
+	for x := range s.invalidMarks {
+		n.invalidMarks[x] = true
 	}
 	return n
 }
@@ -704,6 +773,12 @@ func mergeResource(a *resourceState, b resourceState) bool {
 			c = true
 		}
 	}
+	for x := range b.invalidMarks {
+		if !a.invalidMarks[x] {
+			a.invalidMarks[x] = true
+			c = true
+		}
+	}
 	return c
 }
 func markPoint(f *mir.Function, v mir.ValueId) defKey {
@@ -714,24 +789,17 @@ func markPoint(f *mir.Function, v mir.ValueId) defKey {
 	return defKey{mir.NoBlock, -1}
 }
 func markMatches(info []domainInfo, f *mir.Function, mark, domain mir.ValueId) bool {
-	if int(mark) >= len(f.Values) {
+	markDomain, ok := directMarkDomain(f, mark)
+	if !ok {
 		return false
 	}
-	d := f.Values[mark].Def
-	if d.Kind != mir.ValueDefInstr || int(d.Block) >= len(f.Blocks) || d.Instr < 0 {
+	if int(markDomain) >= len(info) || int(domain) >= len(info) {
 		return false
 	}
-	x := f.Blocks[d.Block].Instrs[d.Instr]
-	if x.Op != mir.OpDomainMark {
+	if len(info[markDomain].deps) != len(info[domain].deps) {
 		return false
 	}
-	if int(x.Domain) >= len(info) || int(domain) >= len(info) {
-		return false
-	}
-	if len(info[x.Domain].deps) != len(info[domain].deps) {
-		return false
-	}
-	for k := range info[x.Domain].deps {
+	for k := range info[markDomain].deps {
 		if !info[domain].deps[k] {
 			return false
 		}

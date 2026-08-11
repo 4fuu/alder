@@ -159,7 +159,7 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	case mir.OpCleanupScopeRun, mir.OpCleanupScopeEnd:
 		c.expectExact(in.Scope, "scope operand", m.CleanupScope())
 
-	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked, mir.OpIntDivChecked, mir.OpIntShiftChecked:
+	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked, mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked:
 		c.expectSamePair(in.A, in.B, "integer operand", mir.IsIntType, "an integer")
 
 	case mir.OpSliceLen:

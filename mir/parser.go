@@ -855,7 +855,7 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		in.Scope, err = p.parseValueRef()
 
-	case "int.add.checked", "int.sub.checked", "int.mul.checked", "int.div.checked", "int.shift.checked":
+	case "int.add.checked", "int.sub.checked", "int.mul.checked", "int.div.checked", "int.shl.checked", "int.shr.checked":
 		var op OpKind
 		switch t.text {
 		case "int.add.checked":
@@ -866,8 +866,10 @@ func (p *parser) parseOp() (Instr, error) {
 			op = OpIntMulChecked
 		case "int.div.checked":
 			op = OpIntDivChecked
+		case "int.shl.checked":
+			op = OpIntShlChecked
 		default:
-			op = OpIntShiftChecked
+			op = OpIntShrChecked
 		}
 		err = parseBinary(op)
 

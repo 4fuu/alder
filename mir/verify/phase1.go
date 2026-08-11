@@ -437,7 +437,7 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	case mir.OpCleanupScopeRun, mir.OpCleanupScopeEnd:
 		require(in.Scope, "scope operand")
 	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked,
-		mir.OpIntDivChecked, mir.OpIntShiftChecked,
+		mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
 		require(in.A, "left operand")
@@ -543,7 +543,7 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpCleanupScopeRun, mir.OpCleanupScopeEnd:
 		add(in.Scope)
 	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked,
-		mir.OpIntDivChecked, mir.OpIntShiftChecked,
+		mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
 		add(in.A)

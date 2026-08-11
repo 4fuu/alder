@@ -9,7 +9,7 @@ bb0:
   %diff = int.sub.checked %sum, %b else bb_fail
   %prod = int.mul.checked %diff, %a else bb_fail
   %quot = int.div.checked %prod, %b else bb_fail
-  %shft = int.shift.checked %quot, %sh else bb_fail
+  %shft = int.shl.checked %quot, %sh else bb_fail
   %len = slice.len %s
   %elem = slice.index.checked %s, %idx else bb_fail
   store deref %elem, %c8

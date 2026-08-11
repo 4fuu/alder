@@ -469,3 +469,97 @@ failed:
 `)
 	})
 }
+
+func TestResetConsumesMarksAndTables(t *testing.T) {
+	t.Run("empty-domain mark resets later allocations", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%root: domain_handle, %n: u64) {
+entry:
+  %d = domain.create %root
+  %m = domain.mark %d
+  %p = alloc %d, u8, %n
+  domain.reset %d, %m
+  domain.destroy %d
+  return
+}
+`)
+	})
+
+	t.Run("reset consumes later mark", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%root: domain_handle, %n: u64) {
+entry:
+  %d = domain.create %root
+  %p0 = alloc %d, u8, %n
+  %m1 = domain.mark %d
+  %p1 = alloc %d, u8, %n
+  %m2 = domain.mark %d
+  domain.reset %d, %m1
+  %p2 = alloc %d, u8, %n
+  domain.reset %d, %m2
+  domain.destroy %d
+  return
+}
+`, "use of %m2 after reset or destruction")
+	})
+
+	t.Run("reset invalidates table with hidden post-mark storage", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+type @P {
+  x: i64
+}
+fn @f(%root: domain_handle, %p: @P) {
+entry:
+  %d = domain.create %root
+  %t = table.create @P, %d
+  %m = domain.mark %d
+  %id = table.insert %t, %p
+  domain.reset %d, %m
+  %opt = table.lookup %t, %id
+  switch %opt {
+    some(%view) -> found
+    none -> absent
+  }
+found:
+  %x = load field(deref %view, x)
+  table.view.end %view
+  domain.destroy %d
+  return
+absent:
+  domain.destroy %d
+  return
+}
+`, "use of %t after reset or destruction")
+	})
+
+	t.Run("reset consumes marks of aliasing external domains", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @f(%a: domain_handle, %b: domain_handle) {
+entry:
+  %ma = domain.mark %a
+  %mb = domain.mark %b
+  domain.reset %a, %ma
+  domain.reset %b, %mb
+  return
+}
+`, "use of %mb after reset or destruction")
+	})
+
+	t.Run("summarized reset consumes caller mark aliases", func(t *testing.T) {
+		requireRejectedWith(t, `mir 1
+fn @reset(%d: domain_handle) {
+entry:
+  %m = domain.mark %d
+  domain.reset %d, %m
+  return
+}
+fn @f(%a: domain_handle, %b: domain_handle) {
+entry:
+  %mb = domain.mark %b
+  %u = call @reset(%a)
+  domain.reset %b, %mb
+  return
+}
+`, "use of %mb after reset or destruction")
+	})
+}

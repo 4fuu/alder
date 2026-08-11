@@ -66,7 +66,7 @@ Generated C must preserve the sequence:
 int64_t aster_tmp_a = aster_left();
 int64_t aster_tmp_b = aster_right();
 int64_t aster_tmp_sum;
-if (aster_i64_add_checked(aster_tmp_a, aster_tmp_b, &aster_tmp_sum)) {
+if (!aster_i64_add_checked(aster_tmp_a, aster_tmp_b, &aster_tmp_sum)) {
     goto aster_overflow;
 }
 ```
@@ -75,9 +75,11 @@ It must not combine these into a C expression whose evaluation order differs fro
 
 ## Integer Semantics
 
-Generated C must not use undefined signed overflow to implement Aster arithmetic. The Milestone 2 runtime provides checked 64-bit helpers (`aster_i64_*` and `aster_u64_*` in `runtime/c/aster.h`) for add, sub, mul, div, and shifts, plus defined float-to-integer conversions. Narrower MIR integer types lower by promoting operands to 64 bits, computing with the checked helpers, and range-checking the result against the narrow type; the narrow operation fails exactly when the promoted computation or the range check fails.
+Generated C must not use undefined signed overflow to implement Aster arithmetic. The Milestone 2 runtime provides checked 64-bit helpers (`aster_i64_*` and `aster_u64_*` in `runtime/c/aster.h`) for add, sub, mul, div, and the distinct `int.shl.checked` and `int.shr.checked` operations, plus defined float-to-integer conversions. Narrow non-shift MIR integer operations lower by promoting operands to 64 bits, computing with the checked helpers, and range-checking the result against the narrow type; the narrow operation fails exactly when the promoted computation or the range check fails.
 
-Shift semantics are defined on the two's-complement bit pattern: left shifts wrap, right shifts are arithmetic for signed values and logical for unsigned. All helpers fail on shift counts below zero or at or above the bit width. Division fails on division by zero and on `INT64_MIN / -1`.
+Narrow shifts are width-aware and must not be implemented by blindly calling a 64-bit helper followed by a range check. The backend first rejects a count greater than or equal to the source width. Left shift masks the result to that width and reconstructs the signed value from the width-bit two's-complement pattern; unsigned right shift is logical, while signed right shift sign-extends from the source width. For example, `i8(127) shl i8(1)` produces `i8(-2)`, while either `i8` or `u8` shifted by eight takes its checked failure edge.
+
+Shift semantics are defined on the two's-complement bit pattern: left shifts wrap, right shifts are arithmetic for signed values and logical for unsigned. The 64-bit helpers fail on shift counts below zero or at or above 64; narrow lowering applies the source-width check described above. Division fails on division by zero and on `INT64_MIN / -1`.
 
 Depending on the final language rule, checked operations lower to:
 
@@ -139,7 +141,9 @@ contracts below are the canonical reference.
 
 typedef struct AsterDomain AsterDomain;   /* layout is ABI, fields internal */
 typedef struct {
-    void *segment;
+    uint64_t domain_serial;
+    uint64_t reset_epoch;
+    uint64_t segment_serial;
     size_t offset;
 } AsterDomainMark;
 
@@ -153,14 +157,16 @@ size_t aster_runtime_live_allocations(void);
 
 Failure contracts:
 
-- `aster_domain_init` returns false for a double init or an uninitialized or
-destroyed parent; the struct must be zero-initialized or freshly destroyed;
+- `aster_domain_init` returns false for a double init, an uninitialized or
+destroyed parent, or exhausted process-wide domain identities; the struct must
+be zero-initialized or freshly destroyed;
 - `aster_domain_alloc` returns NULL when the domain is not initialized, the
 alignment is not a power of two (or zero), size plus alignment slack
-overflows `size_t`, or memory is exhausted. A zero size allocates one byte;
-- `aster_domain_reset` returns false for a destroyed domain, a `{NULL, 0}`
-mark on a non-empty domain, a mark whose segment is no longer active, or a
-mark whose offset exceeds the segment frontier;
+overflows `size_t`, memory is exhausted, or stable segment identities are
+exhausted. A zero size allocates one byte;
+- `aster_domain_reset` returns false for a destroyed domain, an exhausted reset
+epoch, a mark from another domain or an earlier reset epoch, a segment identity
+that is no longer active, or an offset past the segment frontier;
 - `aster_domain_destroy` is a no-op on uninitialized or already-destroyed
 domains; destroying a parent recursively destroys its children.
 
@@ -170,18 +176,21 @@ Lifetime contracts:
 - a child domain cannot outlive its parent: destroying the parent destroys
 children first, so any later child destroy is a no-op;
 - allocations stay valid until the domain is reset past them or destroyed;
+- a mark made before the first allocation can reset a non-empty domain back to
+empty;
 - reset releases every segment after the marked one; pointers into released
 storage become invalid, and the MIR verifier prevents their use;
-- marks are validated by segment-list membership before any dereference, so
-a stale mark into memory the heap already returned to the operating system
-is rejected instead of crashing.
+- every successful reset consumes every mark from the previous domain epoch;
+marks use stable integer identities rather than pointers into segment storage,
+so released storage is never retained or compared through a stale pointer.
 
-Implementation policy: segments are single heap blocks (header plus a
-16-aligned data area); allocations bump with per-allocation alignment;
-regular segments double up to 1 MiB; larger requests receive a dedicated
-exact-size segment. The runtime tracks its live heap blocks in one counter
-so tests can prove leak-free create/reset/destroy cycles without a leak
-sanitizer.
+Implementation policy: domains and segments receive non-reusing process-wide
+identities; namespace exhaustion is a permanent allocation failure rather than
+wraparound. Segments are single heap blocks (header plus a 16-aligned data
+area); allocations bump with per-allocation alignment; regular segments double
+up to 1 MiB; larger requests receive a dedicated exact-size segment. The
+runtime tracks its live heap blocks in one counter so tests can prove leak-free
+create/reset/destroy cycles without a leak sanitizer.
 
 ## Cleanup Lowering
 
@@ -201,11 +210,13 @@ is a backend mechanism and does not appear in MIR semantics.
 
 The Milestone 2 ABI is `AsterTable` plus `AsterTableId { table_serial, slot,
 generation }` and `aster_table_init/insert/lookup/lookup_mut/remove` in
-`runtime/c/aster.h`. The table serial comes from a global counter, so an id
-never resolves against an unrelated table even when a fresh table reuses the
-same address; slot generations are unique within a table's lifetime, so a
-removed slot never reuses a generation and stale ids cannot resolve to a
-replacement object.
+`runtime/c/aster.h`. The table serial comes from a non-wrapping global counter,
+so an id never resolves against an unrelated table even when a fresh table
+reuses the same address; exhaustion permanently fails later initialization.
+Slot generations likewise fail before wraparound, so a removed slot never
+reuses a generation and stale ids cannot resolve to a replacement object.
+Initialization validates `size_t` representability and publishes the caller's
+table struct only after all fallible work succeeds.
 
 Lookup performs, in order:
 
@@ -217,11 +228,13 @@ Lookup performs, in order:
 
 Element storage and the slot array are allocated from the table's domain;
 removal marks the slot empty but leaves element storage in the domain until
-reset or destroy. M2 tables never compact, so a view stays valid memory
-until the domain releases it. `table.view.end` lowers to nothing in M2; the
-verifier enforces view discipline. Compaction may update slot-to-storage
-mappings while preserving IDs; it must not run while an incompatible view
-is active, and it is deferred.
+reset or destroy. Every successful domain reset changes the domain epoch and
+invalidates all of its existing tables; MIR 1 enforces this conservatively
+because inserts and slot growth contain hidden runtime allocations. M2 tables
+never compact, so a view stays valid memory until the domain releases it.
+`table.view.end` lowers to nothing in M2; the verifier enforces view discipline.
+Compaction may update slot-to-storage mappings while preserving IDs; it must
+not run while an incompatible view is active, and it is deferred.
 
 ## C Interoperability
 
