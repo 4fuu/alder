@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -448,9 +449,14 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 	if len(m.sources) != len(inputs) {
 		return m, fmt.Errorf("manifest has %d sources, want %d", len(m.sources), len(inputs))
 	}
+	paths := make([]string, 0, len(inputs))
 	for path := range inputs {
-		if _, ok := m.sourceByPath[path]; !ok {
-			return m, fmt.Errorf("manifest omits source %q", path)
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for i, path := range paths {
+		if m.sources[i].path != path {
+			return m, fmt.Errorf("source %d is %q, want canonical path %q", i, m.sources[i].path, path)
 		}
 	}
 	if err := validateCheckerManifest(m); err != nil {
@@ -503,6 +509,7 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	argOwners := make([]int, len(m.args))
 	typeOwners := make([]int, len(m.types))
+	typeSemanticOwners := make([]int, len(m.types))
 	typeSyntax := make(map[int]bool)
 	for i, checked := range m.types {
 		if checked.id != i+1 || checked.kind < 1 || checked.kind > 13 || checked.syntax < 1 || typeSyntax[checked.syntax] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
@@ -572,7 +579,12 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		nodes[use.node] = true
 		if !valueless {
-			typeOwners[use.checkedType-1]++
+			checkedIndex := use.checkedType - 1
+			typeOwners[checkedIndex]++
+			if typeSemanticOwners[checkedIndex] != 0 && typeSemanticOwners[checkedIndex] != use.owner {
+				return fmt.Errorf("checked type %d has declaration owners %d and %d", use.checkedType, typeSemanticOwners[checkedIndex], use.owner)
+			}
+			typeSemanticOwners[checkedIndex] = use.owner
 		}
 		ordinals[key]++
 	}
@@ -580,6 +592,27 @@ func validateCheckerManifest(m checkerManifest) error {
 		if owners > 1 || len(m.diagnostics) == 0 && owners != 1 {
 			return fmt.Errorf("checked type %d has %d owners", i+1, owners)
 		}
+	}
+	for i := len(m.types) - 1; i >= 0; i-- {
+		owner := typeSemanticOwners[i]
+		if owner == 0 {
+			continue
+		}
+		for _, arg := range checkerDirectArgs(m, m.types[i]) {
+			childIndex := arg.checkedType - 1
+			if typeSemanticOwners[childIndex] != 0 && typeSemanticOwners[childIndex] != owner {
+				return fmt.Errorf("checked type %d has declaration owners %d and %d", arg.checkedType, typeSemanticOwners[childIndex], owner)
+			}
+			typeSemanticOwners[childIndex] = owner
+		}
+	}
+	for i, checked := range m.types {
+		if checked.kind == 6 && typeSemanticOwners[i] != 0 && m.params[checked.target-1].owner != typeSemanticOwners[i] {
+			return fmt.Errorf("checked type %+v targets a parameter outside declaration owner %d", checked, typeSemanticOwners[i])
+		}
+	}
+	if len(m.diagnostics) > 1 {
+		return fmt.Errorf("manifest has %d diagnostics, want at most one", len(m.diagnostics))
 	}
 	for _, diagnostic := range m.diagnostics {
 		if diagnostic.kind < 1 || diagnostic.kind > 9 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
@@ -840,6 +873,8 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"malformed declaration item": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
 		"ownerless failed argument":  "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 0\nA 1 1\nD 4 0 0 1 0\nEND\n",
 		"multiply-owned failed type": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nC 1 1 1 0 0 0\nU 1 1 1 0 2 0 0 1 1 1\nU 2 1 1 1 3 0 0 1 1 1\nD 6 0 0 1 0\nEND\n",
+		"foreign type parameter":     "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 1\nY 2 2 2 0 0 1 1\nP 1 1 3 0 0 1\nP 2 2 4 0 0 1\nC 1 6 5 2 0 0\nU 1 1 1 0 6 0 0 1 5 1\nEND\n",
+		"multiple diagnostics":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 4 0 0 1 0\nD 5 0 0 1 0\nEND\n",
 		"unreachable success type":   "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 0\nEND\n",
 	}
 	for name, text := range malformed {
@@ -848,5 +883,10 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 				t.Fatalf("malformed manifest accepted:\n%s", text)
 			}
 		})
+	}
+	unorderedInputs := map[string]string{"a.al": "", "b.al": ""}
+	unorderedSources := "ALDER-CHECKER-MANIFEST 2\nS 0 622e616c 0\nS 1 612e616c 0\nEND\n"
+	if _, err := decodeCheckerManifest(unorderedSources, unorderedInputs); err == nil {
+		t.Fatalf("noncanonical source order accepted:\n%s", unorderedSources)
 	}
 }
