@@ -266,7 +266,7 @@ func isReservedValueName(name string, c *checker) bool {
 }
 
 func diag(p pos, format string, args ...any) error {
-	return &astError{line: p.line, col: p.col, msg: fmt.Sprintf(format, args...)}
+	return &astError{line: p.line, col: p.col, msg: fmt.Sprintf(format, args...), code: CodeSemantic, span: p.span}
 }
 
 // checkTypeDecl resolves field and variant types against the type

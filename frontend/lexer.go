@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // tokenKind classifies a source token.
@@ -64,6 +65,9 @@ type token struct {
 	text string
 	line int
 	col  int
+	span Span
+	// leading is the exact whitespace/comment range preceding this token.
+	leading Span
 }
 
 func (t *token) describe() string {
@@ -79,21 +83,29 @@ func (t *token) describe() string {
 // lexer tokenizes a whole source file. Comments are // line comments and
 // /* block comments */; block comments must terminate.
 type lexer struct {
-	src  string
-	pos  int
-	line int
-	col  int
+	source Source
+	src    string
+	pos    int
+	line   int
+	col    int
 }
 
 // lex runs the lexer to completion.
 func lex(src string) ([]token, error) {
-	l := &lexer{src: src, line: 1, col: 1}
+	return lexSource(Source{Text: src})
+}
+
+func lexSource(source Source) ([]token, error) {
+	l := &lexer{source: source, src: source.Text, line: 1, col: 1}
 	var toks []token
 	for {
+		leadingStart := l.pos
 		t, err := l.next()
 		if err != nil {
 			return nil, err
 		}
+		t.span = NewSpan(source, t.span.Start, l.pos)
+		t.leading = NewSpan(source, leadingStart, t.span.Start)
 		toks = append(toks, t)
 		if t.kind == tokEOF {
 			return toks, nil
@@ -102,7 +114,16 @@ func lex(src string) ([]token, error) {
 }
 
 func (l *lexer) errf(line, col int, format string, args ...any) error {
-	return fmt.Errorf("line %d, column %d: %s", line, col, fmt.Sprintf(format, args...))
+	start := offsetForLegacyPosition(l.src, line, col)
+	end := start
+	if start < len(l.src) {
+		_, n := utf8.DecodeRuneInString(l.src[start:])
+		if n < 1 {
+			n = 1
+		}
+		end += n
+	}
+	return &astError{line: line, col: col, msg: fmt.Sprintf(format, args...), code: CodeLexical, span: NewSpan(l.source, start, end)}
 }
 
 func (l *lexer) peek() (byte, bool) {
@@ -150,7 +171,7 @@ func (l *lexer) next() (token, error) {
 	for {
 		c, ok := l.peek()
 		if !ok {
-			return token{kind: tokEOF, line: l.line, col: l.col}, nil
+			return token{kind: tokEOF, line: l.line, col: l.col, span: Span{Start: l.pos, End: l.pos}}, nil
 		}
 		switch {
 		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
@@ -183,7 +204,10 @@ func (l *lexer) next() (token, error) {
 			}
 			_ = closed
 		default:
-			return l.lexToken()
+			start := l.pos
+			t, err := l.lexToken()
+			t.span = Span{Start: start, End: l.pos}
+			return t, err
 		}
 	}
 }

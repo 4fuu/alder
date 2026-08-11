@@ -1,9 +1,11 @@
 package frontend
 
-// pos is a source position (1-based line and column).
+// pos is a source position (1-based legacy byte line and column) and the
+// complete span of the token that established it.
 type pos struct {
 	line int
 	col  int
+	span Span
 }
 
 // Decl is a top-level declaration.
@@ -313,6 +315,8 @@ type astError struct {
 	line int
 	col  int
 	msg  string
+	code DiagnosticCode
+	span Span
 }
 
 func (e *astError) Error() string {

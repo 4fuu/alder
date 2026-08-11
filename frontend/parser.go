@@ -12,9 +12,17 @@ type parser struct {
 	exprDepth int
 }
 
+func tokenPos(t token) pos {
+	return pos{line: t.line, col: t.col, span: t.span}
+}
+
 // parseModule parses a complete source module.
 func parseModule(src string) ([]Decl, error) {
-	toks, err := lex(src)
+	return parseModuleSource(Source{Text: src})
+}
+
+func parseModuleSource(source Source) ([]Decl, error) {
+	toks, err := lexSource(source)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +57,7 @@ func (p *parser) advance() token {
 }
 
 func (p *parser) errf(t token, format string, args ...any) error {
-	return &astError{line: t.line, col: t.col, msg: fmt.Sprintf(format, args...)}
+	return &astError{line: t.line, col: t.col, msg: fmt.Sprintf(format, args...), code: CodeSyntax, span: t.span}
 }
 
 func (p *parser) expectPunct(text string) error {
@@ -127,7 +135,7 @@ func (p *parser) parseImport() (Decl, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ImportDecl{P: pos{start.line, start.col}, Name: name.text, Sig: sig}, nil
+	return &ImportDecl{P: tokenPos(start), Name: name.text, Sig: sig}, nil
 }
 
 func (p *parser) parseFnSig() (FuncSigExpr, error) {
@@ -176,7 +184,7 @@ func (p *parser) parseTypeDecl(isEnum bool) (Decl, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &TypeDecl{P: pos{start.line, start.col}, Name: name.text, IsEnum: isEnum}
+	d := &TypeDecl{P: tokenPos(start), Name: name.text, IsEnum: isEnum}
 	if p.cur().kind == tokPunct && p.cur().text == "(" {
 		// Type parameters: Name(A: type, B: type)
 		p.advance()
@@ -277,7 +285,7 @@ func (p *parser) parseFnDecl() (Decl, error) {
 	if err := p.expectPunct("("); err != nil {
 		return nil, err
 	}
-	d := &FnDecl{P: pos{start.line, start.col}, Name: name.text}
+	d := &FnDecl{P: tokenPos(start), Name: name.text}
 	if p.cur().kind == tokPunct && p.cur().text == ")" {
 		p.advance()
 	} else {
@@ -338,7 +346,7 @@ func (p *parser) parseBlock() (*Block, error) {
 	if err := p.expectPunct("{"); err != nil {
 		return nil, err
 	}
-	b := &Block{P: pos{start.line, start.col}}
+	b := &Block{P: tokenPos(start)}
 	for !(p.cur().kind == tokPunct && p.cur().text == "}") {
 		if p.cur().kind == tokEOF {
 			return nil, p.errf(p.cur(), "expected \"}\", got end of input")
@@ -377,7 +385,7 @@ func (p *parser) parseStmt() (Stmt, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
+			return &ExprStmt{P: tokenPos(t), X: x}, nil
 		}
 	}
 	if t.kind == tokPunct && t.text == "{" {
@@ -401,9 +409,9 @@ func (p *parser) parseStmt() (Stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Assign{P: pos{t.line, t.col}, Target: target, Value: value}, nil
+		return &Assign{P: tokenPos(t), Target: target, Value: value}, nil
 	}
-	return &ExprStmt{P: pos{t.line, t.col}, X: x}, nil
+	return &ExprStmt{P: tokenPos(t), X: x}, nil
 }
 
 // assignmentTarget converts a parsed expression into an assignment target.
@@ -414,23 +422,23 @@ func (p *parser) assignmentTarget(x Expr, start token) (AssignTarget, error) {
 			if !ok {
 				return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
 			}
-			return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Index: idx.Index, Field: f.Name}, nil
+			return AssignTarget{P: tokenPos(start), Name: id.Name, Index: idx.Index, Field: f.Name}, nil
 		}
 		id, ok := f.Base.(*Ident)
 		if !ok {
 			return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
 		}
-		return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Field: f.Name}, nil
+		return AssignTarget{P: tokenPos(start), Name: id.Name, Field: f.Name}, nil
 	}
 	if e, ok := x.(*Index); ok {
 		id, ok := e.Base.(*Ident)
 		if !ok {
 			return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
 		}
-		return AssignTarget{P: pos{start.line, start.col}, Name: id.Name, Index: e.Index}, nil
+		return AssignTarget{P: tokenPos(start), Name: id.Name, Index: e.Index}, nil
 	}
 	if e, ok := x.(*Ident); ok {
-		return AssignTarget{P: pos{start.line, start.col}, Name: e.Name}, nil
+		return AssignTarget{P: tokenPos(start), Name: e.Name}, nil
 	}
 	return AssignTarget{}, p.errf(start, "assignment target must be a variable, variable field, or variable index")
 }
@@ -441,7 +449,7 @@ func (p *parser) parseLet() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Let{P: pos{t.line, t.col}, Var: t.kw == kwVar, Name: name.text}
+	s := &Let{P: tokenPos(t), Var: t.kw == kwVar, Name: name.text}
 	if p.cur().kind == tokPunct && p.cur().text == ":" {
 		p.advance()
 		ty, err := p.parseType()
@@ -477,7 +485,7 @@ func (p *parser) parseIf() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &IfStmt{P: pos{t.line, t.col}, Cond: cond, Then: then}
+	s := &IfStmt{P: tokenPos(t), Cond: cond, Then: then}
 	if p.cur().kind == tokIdent && p.cur().kw == kwElse {
 		p.advance()
 		elseB, err := p.parseBlock()
@@ -502,7 +510,7 @@ func (p *parser) parseWhile() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &WhileStmt{P: pos{t.line, t.col}, Cond: cond, Body: body}, nil
+	return &WhileStmt{P: tokenPos(t), Cond: cond, Body: body}, nil
 }
 
 func (p *parser) parseFor() (Stmt, error) {
@@ -525,7 +533,7 @@ func (p *parser) parseFor() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ForStmt{P: pos{t.line, t.col}, Name: name.text, Seq: seq, Body: body}, nil
+	return &ForStmt{P: tokenPos(t), Name: name.text, Seq: seq, Body: body}, nil
 }
 
 func (p *parser) parseUsing() (Stmt, error) {
@@ -554,12 +562,12 @@ func (p *parser) parseUsing() (Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &UsingStmt{P: pos{t.line, t.col}, Name: name.text, Value: value, Cleanup: cleanup.text}, nil
+	return &UsingStmt{P: tokenPos(t), Name: name.text, Value: value, Cleanup: cleanup.text}, nil
 }
 
 func (p *parser) parseReturn() (Stmt, error) {
 	t := p.advance() // return
-	s := &ReturnStmt{P: pos{t.line, t.col}}
+	s := &ReturnStmt{P: tokenPos(t)}
 	if p.trailingClose("}") || p.cur().line > t.line {
 		return s, nil
 	}
@@ -582,7 +590,7 @@ func (p *parser) parseType() (TypeExpr, error) {
 		if err := p.expectPunct("]"); err != nil {
 			return nil, err
 		}
-		return &SliceType{P: pos{t.line, t.col}, Elem: elem}, nil
+		return &SliceType{P: tokenPos(t), Elem: elem}, nil
 	}
 	if t.kind != tokIdent || t.kw != kwNone {
 		return nil, p.errf(t, "expected a type, got %s", t.describe())
@@ -613,9 +621,9 @@ func (p *parser) parseType() (TypeExpr, error) {
 				return nil, err
 			}
 		}
-		return &AppType{P: pos{t.line, t.col}, Name: name.text, Args: args}, nil
+		return &AppType{P: tokenPos(t), Name: name.text, Args: args}, nil
 	}
-	return &PrimType{P: pos{t.line, t.col}, Name: name.text}, nil
+	return &PrimType{P: tokenPos(t), Name: name.text}, nil
 }
 
 // parseExpr parses an expression with the precedence table:
@@ -659,7 +667,7 @@ func (p *parser) parseBinary(minPrec int) (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		left = &Binary{P: pos{t.line, t.col}, Op: op.text, X: left, Y: right}
+		left = &Binary{P: tokenPos(t), Op: op.text, X: left, Y: right}
 	}
 }
 
@@ -674,7 +682,7 @@ func (p *parser) parseUnary() (Expr, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &Unary{P: pos{t.line, t.col}, Op: t.text, X: x}, nil
+		return &Unary{P: tokenPos(t), Op: t.text, X: x}, nil
 	}
 	return p.parsePostfix()
 }
@@ -705,7 +713,7 @@ func (p *parser) parsePostfix() (Expr, error) {
 						p.advance()
 						v, e := p.parseExpr()
 						err = e
-						arg = &NamedArg{P: pos{n.line, n.col}, Name: n.text, Value: v}
+						arg = &NamedArg{P: tokenPos(n), Name: n.text, Value: v}
 					} else {
 						arg, err = p.parseExpr()
 					}
@@ -727,7 +735,7 @@ func (p *parser) parsePostfix() (Expr, error) {
 				}
 				p.exprDepth--
 			}
-			x = &Call{P: pos{t.line, t.col}, Callee: x, Args: args}
+			x = &Call{P: tokenPos(t), Callee: x, Args: args}
 			continue
 		}
 		if t.kind == tokPunct && t.text == "." {
@@ -739,7 +747,7 @@ func (p *parser) parsePostfix() (Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			x = &Field{P: pos{t.line, t.col}, Base: x, Name: name.text}
+			x = &Field{P: tokenPos(t), Base: x, Name: name.text}
 			continue
 		}
 		if t.kind == tokPunct && t.text == "[" {
@@ -756,7 +764,7 @@ func (p *parser) parsePostfix() (Expr, error) {
 				return nil, err
 			}
 			p.exprDepth--
-			x = &Index{P: pos{t.line, t.col}, Base: x, Index: idx}
+			x = &Index{P: tokenPos(t), Base: x, Index: idx}
 			continue
 		}
 		return x, nil
@@ -772,22 +780,22 @@ func (p *parser) parsePrimary() (Expr, error) {
 		if overflow {
 			return nil, p.errf(t, "integer literal %s is out of range", t.text)
 		}
-		return &IntLit{P: pos{t.line, t.col}, Text: t.text, Value: value}, nil
+		return &IntLit{P: tokenPos(t), Text: t.text, Value: value}, nil
 	case t.kind == tokFloat:
 		p.advance()
 		v, err := strconv.ParseFloat(t.text, 64)
 		if err != nil {
 			return nil, p.errf(t, "invalid float literal %s", t.text)
 		}
-		return &FloatLit{P: pos{t.line, t.col}, Value: v}, nil
+		return &FloatLit{P: tokenPos(t), Value: v}, nil
 	case t.kind == tokStr:
 		p.advance()
-		return &StrLit{P: pos{t.line, t.col}, Value: t.text}, nil
+		return &StrLit{P: tokenPos(t), Value: t.text}, nil
 	case t.kind == tokIdent:
 		switch t.kw {
 		case kwTrue, kwFalse:
 			p.advance()
-			return &BoolLit{P: pos{t.line, t.col}, Value: t.kw == kwTrue}, nil
+			return &BoolLit{P: tokenPos(t), Value: t.kw == kwTrue}, nil
 		case kwTry:
 			p.advance()
 			if err := p.requireSameLineAfterPrevious("a try expression"); err != nil {
@@ -797,14 +805,14 @@ func (p *parser) parsePrimary() (Expr, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &Try{P: pos{t.line, t.col}, X: x}, nil
+			return &Try{P: tokenPos(t), X: x}, nil
 		case kwMatch:
 			return p.parseMatch()
 		case kwUnsafe:
 			return p.parseUnsafeC()
 		case kwNone:
 			p.advance()
-			return &Ident{P: pos{t.line, t.col}, Name: t.text}, nil
+			return &Ident{P: tokenPos(t), Name: t.text}, nil
 		}
 		return nil, p.errf(t, "expected an expression, got %q", t.text)
 	case t.kind == tokPunct && t.text == "(":
@@ -848,7 +856,7 @@ func (p *parser) parseUnsafeC() (Expr, error) {
 		return nil, p.errf(p.cur(), "unsafe c block must contain exactly one direct call")
 	}
 	p.exprDepth--
-	return &UnsafeC{P: pos{t.line, t.col}, Call: call}, nil
+	return &UnsafeC{P: tokenPos(t), Call: call}, nil
 }
 
 func (p *parser) parseMatch() (Expr, error) {
@@ -864,7 +872,7 @@ func (p *parser) parseMatch() (Expr, error) {
 		return nil, err
 	}
 	p.exprDepth++
-	m := &Match{P: pos{t.line, t.col}, Value: value}
+	m := &Match{P: tokenPos(t), Value: value}
 	for {
 		if p.cur().kind == tokPunct && p.cur().text == "}" {
 			p.advance()
