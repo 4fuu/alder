@@ -272,7 +272,7 @@ Exit-criteria evidence:
 
 ### Milestone 5.3: Bootstrap Capability Readiness
 
-Status: **active**
+Status: **complete**
 
 The private declaration spike in `bootstrap/spike/*.al` is owned by M5.3. It
 consumes only an explicit host snapshot and emits `ALDER-DECL-MANIFEST 1`; its
@@ -306,9 +306,32 @@ declarations, retained source/range data, nested syntax, recursion, malformed
 input, growth boundaries, and failure cleanup, all producing deterministic
 verified MIR and C.
 
+Exit-criteria evidence:
+
+- commits `d91f60a`, `ce3ce47`, and `b06983f` replace fabricated checked
+  results with cleanup-aware panic, add recoverable checked allocation to MIR
+  3, and provide the private growable Buffer bridge with deterministic initial
+  and growth OOM, identity-exhaustion, prior-buffer-validity, limit, and retry
+  tests;
+- commit `f58bb24` adds the explicit, byte-safe host snapshot and declaration
+  spike, whose compiler-scale corpus covers multiple binary source files, more
+  than sixteen declarations, retained paths/text/ranges, nested delimiters,
+  recursive declaration processing, malformed input, buffer growth, and
+  deterministic verified MIR/C and strict C execution;
+- commits `e0d4484` and `b58d5bf` pin the conservative external-domain loop
+  lifetime rule and exercise it in the first production lexer slice with
+  iterative source and byte scans, lossless trivia, malformed UTF-8 and syntax,
+  growth past initial capacity, stable source-order diagnostics, and repeated
+  process/source-permutation determinism;
+- Linux/GCC acceptance at `b58d5bf` passed format, vet, full and race tests,
+  strict C11, GCC analyzer, generated-C behavior, and complete runtime/cgen
+  ASan/UBSan suites without a skipped compiler-dependent check. Narrow-target
+  `SIZE_MAX` remains a target-specific portability check, not an unsupported
+  bootstrap failure path on accepted hosts.
+
 ### Milestone 5.4: Self-Hosted Compiler Core
 
-Status: **planned**
+Status: **active**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
 current source model and lossless lexer are only a preparatory M5.4 slice: they
