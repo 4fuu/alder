@@ -17,6 +17,8 @@ Changes may advance:
 - Alder MIR representation, verification, and tests;
 - deterministic C11 generation;
 - the minimal C runtime required by generated programs;
+- source identity, structured diagnostics, compiler-service, and thin CLI work
+  required by the active roadmap milestone;
 - bootstrap and self-hosting infrastructure that directly serves those areas.
 
 Do not add:
@@ -24,7 +26,7 @@ Do not add:
 - LLVM dependencies or an LLVM backend;
 - a second native backend;
 - a JIT;
-- unrelated package-manager, IDE, or macro infrastructure;
+- package-manager, LSP, IDE, or macro infrastructure ahead of its roadmap gate;
 - speculative runtime configurability without a current semantic need.
 
 Proposals outside the active scope should update the roadmap or be recorded as a design question rather than partially implemented.

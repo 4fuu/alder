@@ -162,15 +162,168 @@ does not claim that S0 exercises every backend mechanism.
 
 ## Milestone 5: Self-Hosted Compiler
 
-Bootstrap stages:
+Milestone 5 is split into dependency-ordered gates. Passing a later gate must
+not weaken MIR verification, explicit `unsafe c`, deterministic output, or the
+portable C11 path.
 
-1. `alder0`, written in Go, compiles the Alder compiler to C11.
-2. A system C compiler builds that C as `alder1`.
-3. `alder1` compiles the same Alder compiler sources as `alder2`.
-4. Stable MIR or C output is compared between stages.
-5. A generated, auditable `bootstrap/alder.c` is committed for source distribution.
+### Milestone 5.0: Alder Identity Migration
 
-After repeatable self-hosting, the Go bootstrap compiler is frozen except for correctness and bootstrap maintenance.
+Status: **complete**
+
+The language, repository, Go module, runtime ABI, generated C namespace,
+environment variables, documentation, and source fixtures use Alder naming.
+Source fixtures use `.al`; there is no compatibility alias for the pre-release
+Aster C ABI. Commit `a3ed108` passed all Go, race, end-to-end, round-trip,
+determinism, and strict C11 checks before the GitHub repository was renamed.
+
+### Milestone 5.1: Compiler Service and Structured Diagnostics
+
+Status: **active**
+
+Deliverables:
+
+- explicit immutable source identities and UTF-8 byte ranges;
+- one structured diagnostic model with stable codes, severity, primary and
+  related ranges, notes, and deterministic ordering;
+- human and versioned JSON renderers over the same diagnostic records;
+- a pure request/result compiler service that accepts an explicit source list;
+- a thin `alder` executable initially limited to `check`, `compile`, MIR/C
+  emission, and deterministic non-interactive machine output;
+- lossless access to source text and lexical trivia needed by a later
+  formatter, without making formatting part of this milestone.
+
+Exit criteria:
+
+- human and JSON diagnostics agree on codes and source ranges;
+- machine mode emits one versioned result envelope and never mixes diagnostics
+  with generated MIR/C bytes;
+- logical paths and outputs are independent of absolute checkout, working, and
+  temporary directories;
+- malformed source produces structured diagnostics while I/O and internal
+  failures remain distinct;
+- the existing single-file corpus still produces verified MIR and deterministic
+  C through the compiler service and CLI.
+
+### Milestone 5.2: Deterministic Multi-File Compilation
+
+Status: **planned**
+
+- compile an explicit, deterministically ordered source set as one compilation
+  unit before introducing packages or separate compilation;
+- support cross-file declarations and deterministic duplicate diagnostics;
+- make textual MIR round-trip forward and recursive calls through deliberate
+  predeclaration or a versioned MIR change;
+- define a stable entry signature and an audited C host shim for compiler I/O;
+- keep filesystem discovery in the driver, never in the compiler core.
+
+Exit requires shuffled source order to produce identical diagnostics, MIR, and
+C; recursive printed MIR must parse and verify; an executable must consume
+multiple `.al` files and emit C without Go at runtime.
+
+### Milestone 5.3: Bootstrap Capability Readiness
+
+Status: **planned**
+
+First settle checked-operation failure and cleanup semantics; the current S0
+zero-result failure bridge must not become permanent semantics. Then use a
+mini-compiler spike to justify only the storage, growable byte/vector, symbol,
+diagnostic, iteration, and host-wrapper capabilities actually required by the
+compiler. Every temporary bridge needs an owner and removal condition.
+
+Exit requires compiler-scale tests with multiple files, more than sixteen
+declarations, retained source/range data, nested syntax, recursion, malformed
+input, growth boundaries, and failure cleanup, all producing deterministic
+verified MIR and C.
+
+### Milestone 5.4: Self-Hosted Compiler Core
+
+Status: **planned**
+
+Port lexing, parsing, checking, inference, monomorphization, MIR construction,
+all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
+compiler (`alder0`) produces C for the Alder compiler; a system C compiler
+builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
+and without skipping or repairing MIR verification.
+
+This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
+
+### Milestone 5.5: Fixed Point and Source Bootstrap
+
+Status: **planned**
+
+Run `alder1 -> C2 -> alder2 -> C3` and require `C2 == C3` byte-for-byte. Commit
+an auditable `bootstrap/alder.c`, compiler-source manifest and digests, runtime,
+host shim, and regeneration harness. A clean source archive plus a system C
+compiler must regenerate the committed C offline without Go or a prior Alder
+installation.
+
+Only after this gate is the Go bootstrap compiler frozen except for correctness
+and bootstrap maintenance. This is a reproducible **source** bootstrap claim;
+bit-identical native binaries require a separately pinned native toolchain.
+
+## Milestone 6: Local Modules and Build Graph
+
+Status: **planned after self-hosting**
+
+Define module names, imports, visibility, cycle policy, manifest version,
+target/profile/triple, deterministic source enumeration and output layout, and
+compiler-coupled sysroot behavior. Establish shared workspace snapshots and a
+deterministic build-plan boundary used by CLI, tests, packages, and later LSP.
+Local multi-module build/check/test must work without network access before
+remote packages are introduced.
+
+## Milestone 7: Minimal Standard Library
+
+Status: **planned after local modules**
+
+Ship a toolchain-versioned sysroot containing ordinary Alder packages for
+bytes, UTF-8 text, settled collections, paths, files, process execution, and a
+minimal test API. OS calls stay in audited `unsafe c` platform wrappers. Public
+APIs must not expose `__s0_*`, `Domain`, `DomainMark`, the fixed-capacity S0 Map,
+or callback-bearing bootstrap cleanup forms.
+
+## Milestone 8: Canonical Formatter
+
+Status: **planned after lossless syntax stabilizes**
+
+Implement `alder fmt` over lossless syntax rather than the semantic AST. Exit
+requires idempotence, comment/trivia preservation, semantic equivalence for
+newline-sensitive syntax, pinned malformed-input behavior, and a non-writing
+`--check` mode.
+
+## Milestone 9: Git Package Management
+
+Status: **planned after local modules and sysroot**
+
+Start with exact-revision Git dependency graphs, an authoritative `alder.lock`,
+independent canonical-tree hashes, an immutable content-addressed cache, and
+`--locked`, `--offline`, and `--frozen` operation. Network is limited to
+explicit add/update/fetch commands. Registries, publishing, semver solving,
+submodules, Git LFS, and arbitrary lifecycle scripts remain deferred until
+their identity and trust rules are separately approved.
+
+## Milestone 10: Managed Native Provider
+
+Status: **planned after locked Alder packages**
+
+Provide managed, version-pinned xmake/xrepo as the default replaceable C/C++
+provider. Alder remains authoritative for package identity and locking. Pin the
+xmake binary, recipe repository and file, sources, configs, target, and
+toolchain identity; separate network-enabled fetch from offline build; disable
+implicit system packages in reproducible mode; and treat recipes as executable
+native code. The compiler bootstrap and standard library must not require
+xmake.
+
+## Milestone 11: Language Server
+
+Status: **planned after workspace, diagnostics, and formatter**
+
+Implement `alder lsp` as an adapter over the same immutable workspace snapshots,
+resolver, syntax, compiler service, structured diagnostics, and formatter used
+by the CLI. Begin with file-granularity analysis. LSP must not fetch packages or
+native dependencies implicitly. Exit requires CLI/LSP diagnostic parity,
+UTF-8/UTF-16 conversion tests, overlay isolation, cancellation and stale-result
+suppression, formatting parity, and deterministic repeated sessions.
 
 ## Deferred Work
 
@@ -178,11 +331,13 @@ The following items are not part of the current implementation scope:
 
 - LLVM, Cranelift, QBE, or direct machine-code backends;
 - JIT and REPL execution engines;
-- package registry and dependency solver;
-- language server and debugger integration;
+- package registry, publishing, and a general semantic-version solver;
+- debugger integration and broad IDE refactoring/indexing;
 - macros and compile-time execution;
 - advanced optimization pipelines;
-- stable ABI promises beyond intentional C interfaces;
+- remote build and cache services;
+- stable native ABI promises beyond intentional C interfaces;
+- bit-reproducible native binaries without a pinned native toolchain;
 - production readiness or performance claims.
 
 ## LLVM Reconsideration Gate
