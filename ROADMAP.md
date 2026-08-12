@@ -353,9 +353,15 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. These checks are preparatory: bodies, inference,
-monomorphization, MIR lowering, the full checker, and the complete frontend
-remain incomplete. Its
+checking. After all function signatures succeed, its first body slice checks a
+nongeneric body only when its complete shape is one top-level return: a runtime
+parameter identifier must have the declared result type, and a bare return
+requires `Unit`. Stable expression and return records retain the parameter and
+result-use relationships; unsupported body shapes and known expression forms
+outside this slice remain deferred. These checks are preparatory: general body
+checking, literals, locals, calls, control flow, missing-return analysis,
+inference, monomorphization, MIR lowering, the full checker, and the complete
+frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols; these slices do not open a second frontend,

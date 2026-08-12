@@ -574,6 +574,8 @@ result, propagate through `Result`, recover, or unwind caller frames. Explicit
   initializer's type is inferable); `var x: T = e` declares a mutable one;
 - `x = e` reassigns a `var` (also `x.f = e`, `x[i] = e`, `x[i].f = e`);
   `let`-bound names and enum payload bindings are immutable;
+- `return e` checks `e` against the function's declared result type; a bare
+  `return` is valid only when that result is `Unit`;
 - every non-`Unit` function body must return on all paths (the final statement
   must be `return`, an `if`/`else` whose branches both return, a `match`
   whose arms all return, or a block ending in one); a `Unit` function may

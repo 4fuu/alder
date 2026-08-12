@@ -90,12 +90,12 @@ type ParseDiagRec {
     end: U64
 }
 
-// The checker records below are the private M5.4 declaration-resolution
-// model, not a public diagnostic or serialization schema. Symbol, syntax,
-// type-parameter, checked-type, and type-argument references are stable
-// 1-based IDs; zero means absent. Source indices and byte ranges are zero-based.
-// Checked type arguments occupy one flat buffer and are selected by
-// first_arg/arg_count.
+// The checker records below are the private M5.4 declaration-resolution and
+// return-only body model, not a public diagnostic or serialization schema.
+// Symbol, syntax, type-parameter, checked-type, and type-argument references
+// are stable 1-based IDs; zero means absent. Source indices and byte ranges are
+// zero-based. Checked type arguments occupy one flat buffer and are selected
+// by first_arg/arg_count.
 type SymbolRec {
     kind: U64
     node: U64
@@ -142,6 +142,26 @@ type DeclTypeUseRec {
     checked_type: U64
 }
 
+// The first checked-body slice records only a single top-level return in a
+// nongeneric function. A checked expression currently names one runtime
+// parameter: parameter_use is its role-5 DeclTypeUseRec, and checked_type is a
+// borrowed reference to that use's type rather than another owner of the type.
+// A checked return refers to its function's role-6 result use and optionally to
+// one CheckedExprRec. These records remain structurally complete on CheckBad.
+type CheckedExprRec {
+    owner: U64
+    syntax: U64
+    checked_type: U64
+    parameter_use: U64
+}
+
+type CheckedReturnRec {
+    owner: U64
+    syntax: U64
+    expression: U64
+    result_use: U64
+}
+
 // Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
 // 3 duplicate type parameter, 4 unknown type, 5 wrong type arity, 6 duplicate
 // struct field, 7 duplicate enum variant, 8 empty enum, 9 value-type cycle,
@@ -149,7 +169,9 @@ type DeclTypeUseRec {
 // 12 inadmissible Map key, 13 non-copy-trivial Map value, and 14 recursive
 // declared type whose active specialization changes, and 15 unsupported C
 // import signature type, 16 duplicate function runtime parameter, and 17
-// reserved function runtime parameter name.
+// reserved function runtime parameter name. Return-only body diagnostics are
+// 18 unknown identifier, 19 return type mismatch, and 20 valued-result function
+// returning without a value.
 type CheckDiagRec {
     kind: U64
     source: U64
