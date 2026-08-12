@@ -91,7 +91,7 @@ type ParseDiagRec {
 }
 
 // The checker records below are the private M5.4 declaration-resolution and
-// return-only body model, not a public diagnostic or serialization schema.
+// initial body model, not a public diagnostic or serialization schema.
 // Symbol, syntax, type-parameter, checked-type, and type-argument references
 // are stable 1-based IDs; zero means absent. Source indices and byte ranges are
 // zero-based. Checked type arguments occupy one flat buffer and are selected
@@ -147,9 +147,17 @@ type DeclTypeUseRec {
 // parameter_use is its role-5 DeclTypeUseRec, bool_value is zero, and
 // checked_type borrows that use's type. Kind 2 is a Bool literal:
 // parameter_use is zero, bool_value is 0 or 1, and checked_type borrows the
-// owning return's role-6 result type. A checked return refers to that result use
-// and optionally to one CheckedExprRec. These records remain structurally
-// complete on CheckBad.
+// owning return's role-6 result type. Kind 3 is an integer literal:
+// parameter_use and bool_value are zero and checked_type borrows the owning
+// return's role-6 result type. The literal text stays in its token; range was
+// proven against the result type's full-width decimal bounds, including the
+// U64 maximum and negative signed minima that exceed Stage 0 signed host
+// storage. Kind 4 is a decoded string literal: parameter_use and bool_value
+// are zero and checked_type borrows the owning return's role-6 result type,
+// which is String or its [U8] semantic form. Kind 5 names one local binding:
+// parameter_use is its LocalRec ID and checked_type borrows the binding's
+// type. A checked return refers to that result use and optionally to one
+// CheckedExprRec. These records remain structurally complete on CheckBad.
 type CheckedExprRec {
     owner: U64
     syntax: U64
@@ -166,6 +174,21 @@ type CheckedReturnRec {
     result_use: U64
 }
 
+// Local bindings are recorded per function in canonical statement order.
+// syntax is the kind-15/16 binding statement node, mutable is 0 (let) or 1
+// (var), and checked_type is the resolved annotation. Unannotated bindings
+// remain deferred until the inference slice; field and index assignment
+// targets remain deferred until the aggregate-access slice.
+type LocalRec {
+    owner: U64
+    syntax: U64
+    source: U64
+    name_start: U64
+    name_end: U64
+    mutable: U64
+    checked_type: U64
+}
+
 // Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
 // 3 duplicate type parameter, 4 unknown type, 5 wrong type arity, 6 duplicate
 // struct field, 7 duplicate enum variant, 8 empty enum, 9 value-type cycle,
@@ -174,8 +197,12 @@ type CheckedReturnRec {
 // declared type whose active specialization changes, and 15 unsupported C
 // import signature type, 16 duplicate function runtime parameter, and 17
 // reserved function runtime parameter name. Return-only body diagnostics are
-// 18 unknown identifier, 19 return type mismatch, and 20 valued-result function
-// returning without a value.
+// 18 unknown identifier, 19 return type mismatch, 20 valued-result function
+// returning without a value, and 21 integer literal out of range for the
+// declared result type. Binding and assignment diagnostics are 22 reserved
+// binding name, 23 binding type mismatch, 24 assignment type mismatch, 25 Unit
+// value bound, 26 domain mark bound, 27 duplicate binding in function, and 28
+// assignment to an immutable binding.
 type CheckDiagRec {
     kind: U64
     source: U64

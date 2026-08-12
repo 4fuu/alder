@@ -364,15 +364,22 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. After all function signatures succeed, its first body slice checks a
-nongeneric body only when its complete shape is one top-level return: a runtime
-parameter identifier must have the declared result type, `true` and `false`
-require `Bool`, and a bare return requires `Unit`. Stable tagged expression and
-return records retain parameter, Bool-payload, and result-use relationships;
+checking. Its body slice checks a
+nongeneric body whose complete shape is zero or more annotated let/var
+bindings and plain-identifier assignments followed by one top-level return: a
+runtime parameter or local identifier must have the declared type, `true` and
+`false` require `Bool`, a bare return requires `Unit`, an integer literal must
+fit the declared integer type, and a string literal requires `String` or
+its `[U8]` semantic form. Binding order mirrors the Go checker: reserved
+names, annotation resolution, initializer mismatch, Unit/DomainMark
+rejection, then duplicates; parameters are immutable assignment targets.
+Integer bounds compare canonical decimal
+digit text against per-type bounds, preserving every `U64` value and the `I64`
+minimum rather than inheriting Stage 0's signed host-storage limit. Stable
+tagged expression, local-binding, and return records retain parameter, local,
+Bool-payload, and result-use relationships;
 unsupported body shapes and expression forms outside this slice remain
-deferred. Integer literal returns remain deferred until the
-bootstrap adopts a full-width representation that can preserve every `U64`
-value rather than inheriting Stage 0's signed host-storage limit. These checks
+deferred, and a deferred body discards its partial records. These checks
 are preparatory: general body checking, other literals, locals, calls, control
 flow, missing-return analysis, inference, monomorphization, MIR lowering, the
 full checker, and the complete frontend remain incomplete. Its
