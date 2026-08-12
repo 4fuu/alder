@@ -365,7 +365,7 @@ active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
 checking. Its body slice checks a
-nongeneric body whose complete shape is zero or more annotated let/var
+nongeneric body whose complete shape is zero or more let/var
 bindings and plain-identifier assignments followed by one top-level return: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
@@ -380,12 +380,18 @@ Integer bounds compare canonical decimal
 digit text against per-type bounds, preserving every `U64` value and the `I64`
 minimum rather than inheriting Stage 0's signed host-storage limit. Stable
 postorder tagged-expression, local-binding, and return records retain parameter,
-local, Bool-payload, child, operator, statement-site, and result-use relationships;
+local, Bool-payload, child, operator, statement-site, and result-use relationships.
+Unannotated bindings infer scalar types from supported literals, identifiers,
+and unary/binary expressions. Checked types are canonical structure-deduplicated
+DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
+spellings live on annotations. Stable parameter/local binding IDs, persistent
+environment chains, and flattened ordered expression-child ranges establish the
+body model needed by the later direct-call slice without implementing calls;
 unsupported body shapes and expression forms outside this slice remain
 deferred, and a deferred body discards its partial records. These checks
-are preparatory: general body checking, other literals, locals, calls, control
-flow, missing-return analysis, inference, monomorphization, MIR lowering, the
-full checker, and the complete frontend remain incomplete. Its
+are preparatory: general body checking, other literals, local forms, calls,
+control flow, missing-return analysis, generic inference, monomorphization, MIR
+lowering, the full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit

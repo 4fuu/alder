@@ -3,9 +3,12 @@ type CheckStore {
     type_params: __s0_Buffer(TypeParamRec)
     types: __s0_Buffer(CheckedTypeRec)
     type_args: __s0_Buffer(U64)
+    type_annotations: __s0_Buffer(CheckedTypeAnnotationRec)
     uses: __s0_Buffer(DeclTypeUseRec)
     locals: __s0_Buffer(LocalRec)
+    environments: __s0_Buffer(EnvironmentRec)
     expressions: __s0_Buffer(CheckedExprRec)
+    expression_children: __s0_Buffer(CheckedExprChildRec)
     returns: __s0_Buffer(CheckedReturnRec)
     diagnostics: __s0_Buffer(CheckDiagRec)
 }
@@ -156,17 +159,14 @@ fn normalize_interp(store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), ch
 }
 
 fn primitive_same(state: State, parse: ParseStore, a: CheckedTypeRec, b: CheckedTypeRec) -> Bool {
-    let an = __s0_buffer_get(SyntaxRec, parse.nodes, a.syntax - 1)
-    let bn = __s0_buffer_get(SyntaxRec, parse.nodes, b.syntax - 1)
-    return same_name(state, an.source, an.name_start, an.name_end, bn.source, bn.name_start, bn.name_end)
+    return a.target == b.target
 }
 
 fn interpreted_slice_u8(state: State, parse: ParseStore, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), checked: CheckedTypeRec, env: U64) -> Bool {
     if checked.kind != 8 || checked.arg_count != 1 { return false }
     let child = normalize_interp(store, bindings, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env, 0)
     let item = __s0_buffer_get(CheckedTypeRec, store.types, child.checked_type - 1)
-    if item.kind != 1 { return false }
-    return node_word(state, __s0_buffer_get(SyntaxRec, parse.nodes, item.syntax - 1), "U8")
+    return item.kind == 1 && item.target == 6
 }
 
 // Finite structural equality is iterative. Declared applications compare their
@@ -413,9 +413,7 @@ fn interpreted_contains_reference(d: Domain, state: State, parse: ParseStore, st
 }
 
 fn primitive_map_key(state: State, parse: ParseStore, checked: CheckedTypeRec) -> Bool {
-    if checked.kind != 1 { return false }
-    let node = __s0_buffer_get(SyntaxRec, parse.nodes, checked.syntax - 1)
-    return node_word(state, node, "Bool") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64")
+    return checked.kind == 1 && (checked.target == 1 || (checked.target >= 6 && checked.target <= 9))
 }
 
 fn interpreted_map_key_ok(d: Domain, state: State, parse: ParseStore, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), initial_ancestry: __s0_Buffer(DeclAncestryRec), checked_type: U64, env: U64, ancestry_id: U64, boundary: U64) -> Result(Bool, __s0_Error) {
@@ -487,8 +485,8 @@ fn active_target(ancestry: __s0_Buffer(DeclAncestryRec), id: U64, target: U64) -
     return 0
 }
 
-fn type_diag_node(state: State, parse: ParseStore, checked: CheckedTypeRec) -> SyntaxRec {
-    let node = __s0_buffer_get(SyntaxRec, parse.nodes, checked.syntax - 1)
+fn syntax_diag_node(state: State, parse: ParseStore, syntax: U64) -> SyntaxRec {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, syntax - 1)
     if node.name_end != 0 || node.name_start != 0 { return node }
     let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
     return SyntaxRec(kind: node.kind, token: node.token, source: token.source, start: token.start, end: token.end, name_start: token.start, name_end: token.end, children: node.children)
@@ -623,7 +621,7 @@ fn reserved_value_name(state: State, store: CheckStore, node: SyntaxRec) -> Bool
 fn check_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec, related_source: U64, related_start: U64, related_end: U64) -> Result(CheckResult, __s0_Error) {
     let item = CheckDiagRec(kind: kind, source: node.source, start: node.name_start, end: node.name_end, related_source: related_source, related_start: related_start, related_end: related_end)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
 }
 
 fn check_decl_fail(d: Domain, state: State, parse: ParseStore, store: CheckStore, kind: U64, owner: U64) -> Result(CheckResult, __s0_Error) {
@@ -632,14 +630,14 @@ fn check_decl_fail(d: Domain, state: State, parse: ParseStore, store: CheckStore
     let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
     let item = CheckDiagRec(kind: kind, source: token.source, start: token.start, end: token.end, related_source: 0, related_start: 0, related_end: 0)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
 }
 
 fn check_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(CheckResult, __s0_Error) {
     let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
     let item = CheckDiagRec(kind: kind, source: token.source, start: token.start, end: token.end, related_source: 0, related_start: 0, related_end: 0)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
 }
 
 fn symbol_arity(parse: ParseStore, node: SyntaxRec) -> U64 {
@@ -671,7 +669,7 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         if reserved_symbol(state, node) { return check_fail(d, store, 2, node, 0, 0, 0) }
         let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node))
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
-        store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: store.diagnostics)
+        store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
         root_at = root_at + 1
     }
     return Ok(CheckGood(store))
@@ -688,7 +686,7 @@ fn append_type_param(d: Domain, state: State, parse: ParseStore, store: CheckSto
         at = at + 1
     }
     let params = try __s0_buffer_append(TypeParamRec, d, store.type_params, TypeParamRec(owner: owner, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end))
-    return Ok(CheckGood(CheckStore(symbols: store.symbols, type_params: params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: store.diagnostics)))
+    return Ok(CheckGood(CheckStore(symbols: store.symbols, type_params: params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)))
 }
 
 fn collect_param_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64) -> Result(CheckResult, __s0_Error) {
@@ -736,9 +734,62 @@ fn builtin_type_kind(state: State, node: SyntaxRec) -> U64 {
     return 0
 }
 
-fn append_checked_type(d: Domain, store: CheckStore, kind: U64, syntax: U64, target: U64, first_arg: U64, arg_count: U64) -> Result(CheckStore, __s0_Error) {
-    let types = try __s0_buffer_append(CheckedTypeRec, d, store.types, CheckedTypeRec(kind: kind, syntax: syntax, target: target, first_arg: first_arg, arg_count: arg_count))
-    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: store.expressions, returns: store.returns, diagnostics: store.diagnostics))
+fn primitive_type_target(state: State, node: SyntaxRec) -> U64 {
+    if node_word(state, node, "Bool") { return 1 }
+    if node_word(state, node, "I8") { return 2 }
+    if node_word(state, node, "I16") { return 3 }
+    if node_word(state, node, "I32") { return 4 }
+    if node_word(state, node, "I64") { return 5 }
+    if node_word(state, node, "U8") { return 6 }
+    if node_word(state, node, "U16") { return 7 }
+    if node_word(state, node, "U32") { return 8 }
+    if node_word(state, node, "U64") { return 9 }
+    if node_word(state, node, "F32") { return 10 }
+    if node_word(state, node, "F64") { return 11 }
+    if node_word(state, node, "Unit") { return 12 }
+    return 0
+}
+
+fn canonical_type_id(store: CheckStore, kind: U64, target: U64, first_arg: U64, arg_count: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if checked.kind == kind && checked.target == target && checked.arg_count == arg_count {
+            var same = true
+            var arg: U64 = 0
+            while arg < arg_count {
+                if __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + arg) != __s0_buffer_get(U64, store.type_args, first_arg - 1 + arg) { same = false }
+                arg = arg + 1
+            }
+            if same { return at + 1 }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn canonical_single_arg(store: CheckStore, kind: U64, target: U64, arg: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if checked.kind == kind && checked.target == target && checked.arg_count == 1 && __s0_buffer_get(U64, store.type_args, checked.first_arg - 1) == arg { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn annotate_checked_type(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64) -> Result(CheckStore, __s0_Error) {
+    if syntax == 0 { return Ok(store) }
+    let annotations = try __s0_buffer_append(CheckedTypeAnnotationRec, d, store.type_annotations, CheckedTypeAnnotationRec(owner: owner, syntax: syntax, checked_type: checked_type))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics))
+}
+
+fn append_checked_type(d: Domain, store: CheckStore, owner: U64, kind: U64, syntax: U64, target: U64, first_arg: U64, arg_count: U64) -> Result(CheckStore, __s0_Error) {
+    let existing = canonical_type_id(store, kind, target, first_arg, arg_count)
+    if existing != 0 { return annotate_checked_type(d, store, owner, syntax, existing) }
+    let types = try __s0_buffer_append(CheckedTypeRec, d, store.types, CheckedTypeRec(kind: kind, syntax: 0, target: target, first_arg: first_arg, arg_count: arg_count))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+    return annotate_checked_type(d, next, owner, syntax, __s0_buffer_len(CheckedTypeRec, types))
 }
 
 // Type children are reverse linked. Resolve every child (including its nested
@@ -765,8 +816,9 @@ fn resolve_arg_links(d: Domain, state: State, parse: ParseStore, store: CheckSto
 
 fn checked_type_for_syntax(store: CheckStore, syntax: U64) -> U64 {
     var at: U64 = 0
-    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
-        if __s0_buffer_get(CheckedTypeRec, store.types, at).syntax == syntax { return at + 1 }
+    while at < __s0_buffer_len(CheckedTypeAnnotationRec, store.type_annotations) {
+        let annotation = __s0_buffer_get(CheckedTypeAnnotationRec, store.type_annotations, at)
+        if annotation.syntax == syntax { return annotation.checked_type }
         at = at + 1
     }
     return 0
@@ -780,7 +832,7 @@ fn record_arg_links(d: Domain, parse: ParseStore, store: CheckStore, link_id: U6
     let current = try record_arg_links(d, parse, store, link.next)
     let checked = checked_type_for_syntax(current, link.node)
     let args = try __s0_buffer_append(U64, d, current.type_args, checked)
-    return Ok(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, uses: current.uses, locals: current.locals, expressions: current.expressions, returns: current.returns, diagnostics: current.diagnostics))
+    return Ok(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, type_annotations: current.type_annotations, uses: current.uses, locals: current.locals, environments: current.environments, expressions: current.expressions, expression_children: current.expression_children, returns: current.returns, diagnostics: current.diagnostics))
 }
 
 fn type_arg_count(parse: ParseStore, link_id: U64) -> U64 {
@@ -792,6 +844,28 @@ fn type_arg_count(parse: ParseStore, link_id: U64) -> U64 {
         at = link.next
     }
     return count
+}
+
+fn canonical_type_for_links(parse: ParseStore, store: CheckStore, kind: U64, target: U64, link_id: U64) -> U64 {
+    let count = type_arg_count(parse, link_id)
+    var type_at: U64 = 0
+    while type_at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, type_at)
+        if checked.kind == kind && checked.target == target && checked.arg_count == count {
+            var same = true
+            var link_at = link_id
+            var ordinal = count
+            while link_at != 0 {
+                ordinal = ordinal - 1
+                let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+                if __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal) != checked_type_for_syntax(store, link.node) { same = false }
+                link_at = link.next
+            }
+            if same { return type_at + 1 }
+        }
+        type_at = type_at + 1
+    }
+    return 0
 }
 
 // C imports deliberately use a smaller syntactic type surface than ordinary
@@ -820,26 +894,42 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             CheckGood(value) => false
             CheckBad(value) => true
         } { return Ok(args) }
-        let start = __s0_buffer_len(U64, current.type_args)
-        let recorded = try record_arg_links(d, parse, current, node.children)
-        let appended = try append_checked_type(d, recorded, 8, node_id, 0, start + 1, 1)
+        let existing = canonical_type_for_links(parse, current, 8, 0, node.children)
+        var appended = current
+        if existing != 0 { appended = try annotate_checked_type(d, current, owner, node_id, existing) } else {
+            let start = __s0_buffer_len(U64, current.type_args)
+            let recorded = try record_arg_links(d, parse, current, node.children)
+            appended = try append_checked_type(d, recorded, owner, 8, node_id, 0, start + 1, 1)
+        }
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-        let child = __s0_buffer_get(U64, appended.type_args, start)
-        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 10, type_diag_node(state, parse, __s0_buffer_get(CheckedTypeRec, appended.types, __s0_buffer_len(CheckedTypeRec, appended.types) - 1)), 0, 0, 0) }
+        let checked_id = checked_type_for_syntax(appended, node_id)
+        let canonical = __s0_buffer_get(CheckedTypeRec, appended.types, checked_id - 1)
+        let child = __s0_buffer_get(U64, appended.type_args, canonical.first_arg - 1)
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 10, syntax_diag_node(state, parse, node_id), 0, 0, 0) }
         return Ok(CheckGood(appended))
     }
     if node.kind == 4 {
         let builtin = builtin_type_kind(state, node)
-        if builtin != 0 { return Ok(CheckGood(try append_checked_type(d, store, builtin, node_id, 0, 0, 0))) }
+        if builtin == 1 { return Ok(CheckGood(try append_checked_type(d, store, owner, 1, node_id, primitive_type_target(state, node), 0, 0))) }
+        if builtin == 2 {
+            let with_u8 = try append_checked_type(d, store, owner, 1, 0, 6, 0, 0)
+            let u8 = canonical_type_id(with_u8, 1, 6, 0, 0)
+            let existing_string = canonical_single_arg(with_u8, 8, 0, u8)
+            if existing_string != 0 { return Ok(CheckGood(try annotate_checked_type(d, with_u8, owner, node_id, existing_string))) }
+            let args = try __s0_buffer_append(U64, d, with_u8.type_args, u8)
+            let recorded = CheckStore(symbols: with_u8.symbols, type_params: with_u8.type_params, types: with_u8.types, type_args: args, type_annotations: with_u8.type_annotations, uses: with_u8.uses, locals: with_u8.locals, environments: with_u8.environments, expressions: with_u8.expressions, expression_children: with_u8.expression_children, returns: with_u8.returns, diagnostics: with_u8.diagnostics)
+            return Ok(CheckGood(try append_checked_type(d, recorded, owner, 8, node_id, 0, __s0_buffer_len(U64, args), 1)))
+        }
+        if builtin != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, builtin, node_id, 0, 0, 0))) }
         let param = find_type_param(state, store, owner, node)
-        if param != 0 { return Ok(CheckGood(try append_checked_type(d, store, 6, node_id, param, 0, 0))) }
+        if param != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, 6, node_id, param, 0, 0))) }
         let symbol = find_declared_type(state, store, node)
         if symbol == 0 { return check_fail(d, store, 4, node, 0, 0, 0) }
         if __s0_buffer_get(SymbolRec, store.symbols, symbol - 1).type_arity != 0 { return check_fail(d, store, 5, node, 0, 0, 0) }
-        let appended = try append_checked_type(d, store, 7, node_id, symbol, 0, 0)
-        let checked_id = __s0_buffer_len(CheckedTypeRec, appended.types)
-        return validate_concrete_type(d, state, parse, appended, checked_id, 0, type_diag_node(state, parse, __s0_buffer_get(CheckedTypeRec, appended.types, checked_id - 1)), boundary)
+        let appended = try append_checked_type(d, store, owner, 7, node_id, symbol, 0, 0)
+        let checked_id = checked_type_for_syntax(appended, node_id)
+        return validate_concrete_type(d, state, parse, appended, checked_id, 0, syntax_diag_node(state, parse, node_id), boundary)
     }
     let args = try resolve_arg_links(d, state, parse, store, owner, node.children)
     let current = match args {
@@ -874,27 +964,31 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
     // leave ownerless type-argument records in a CheckBad store.
     if kind == 0 { return check_fail(d, current, 4, node, 0, 0, 0) }
     if count != arity { return check_fail(d, current, 5, node, 0, 0, 0) }
-    let start = __s0_buffer_len(U64, current.type_args)
-    let recorded = try record_arg_links(d, parse, current, node.children)
-    var first: U64 = 0
-    if count != 0 { first = start + 1 }
-    let appended = try append_checked_type(d, recorded, kind, node_id, target, first, count)
-    let checked_id = __s0_buffer_len(CheckedTypeRec, appended.types)
+    let existing = canonical_type_for_links(parse, current, kind, target, node.children)
+    var appended = current
+    if existing != 0 { appended = try annotate_checked_type(d, current, owner, node_id, existing) } else {
+        let start = __s0_buffer_len(U64, current.type_args)
+        let recorded = try record_arg_links(d, parse, current, node.children)
+        var first: U64 = 0
+        if count != 0 { first = start + 1 }
+        appended = try append_checked_type(d, recorded, owner, kind, node_id, target, first, count)
+    }
+    let checked_id = checked_type_for_syntax(appended, node_id)
     let checked = __s0_buffer_get(CheckedTypeRec, appended.types, checked_id - 1)
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     if kind == 13 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
-        let child = __s0_buffer_get(U64, appended.type_args, first - 1)
-        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 11, type_diag_node(state, parse, checked), 0, 0, 0) }
+        let child = __s0_buffer_get(U64, appended.type_args, checked.first_arg - 1)
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 11, syntax_diag_node(state, parse, node_id), 0, 0, 0) }
     }
     if kind == 11 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
-        let key = __s0_buffer_get(U64, appended.type_args, first - 1)
-        let value = __s0_buffer_get(U64, appended.type_args, first)
-        if !(try interpreted_map_key_ok(d, state, parse, appended, empty, no_ancestry, key, 0, 0, boundary)) { return check_fail(d, appended, 12, type_diag_node(state, parse, checked), 0, 0, 0) }
-        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, value, 0, 0, boundary) { return check_fail(d, appended, 13, type_diag_node(state, parse, checked), 0, 0, 0) }
+        let key = __s0_buffer_get(U64, appended.type_args, checked.first_arg - 1)
+        let value = __s0_buffer_get(U64, appended.type_args, checked.first_arg)
+        if !(try interpreted_map_key_ok(d, state, parse, appended, empty, no_ancestry, key, 0, 0, boundary)) { return check_fail(d, appended, 12, syntax_diag_node(state, parse, node_id), 0, 0, 0) }
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, value, 0, 0, boundary) { return check_fail(d, appended, 13, syntax_diag_node(state, parse, node_id), 0, 0, 0) }
     }
     if kind == 7 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
-        return validate_concrete_type(d, state, parse, appended, checked_id, 0, type_diag_node(state, parse, checked), boundary)
+        return validate_concrete_type(d, state, parse, appended, checked_id, 0, syntax_diag_node(state, parse, node_id), boundary)
     }
     return Ok(CheckGood(appended))
 }
@@ -933,7 +1027,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     }
     if child.kind == 9 && child.children == 0 {
         let uses = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: owner, role: 2, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: child.name_start, name_end: child.name_end, syntax: 0, checked_type: 0))
-        return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, uses: uses, locals: current.locals, expressions: current.expressions, returns: current.returns, diagnostics: current.diagnostics)))
+        return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: uses, locals: current.locals, environments: current.environments, expressions: current.expressions, expression_children: current.expression_children, returns: current.returns, diagnostics: current.diagnostics)))
     }
     var syntax = link.node
     if child.kind == 8 || child.kind == 9 || child.kind == 10 || child.kind == 13 {
@@ -952,11 +1046,10 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         CheckBad(value) => true
     } { return Ok(resolved) }
     if owner_symbol.kind == 1 || owner_symbol.kind == 12 {
-        let checked_id = __s0_buffer_len(CheckedTypeRec, next.types)
+        let checked_id = checked_type_for_syntax(next, syntax)
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         if try direct_type_concrete(d, next, empty, checked_id, 0) {
-            let checked = __s0_buffer_get(CheckedTypeRec, next.types, checked_id - 1)
-            let validated = try validate_concrete_type(d, state, parse, next, checked_id, 0, type_diag_node(state, parse, checked), 0)
+            let validated = try validate_concrete_type(d, state, parse, next, checked_id, 0, syntax_diag_node(state, parse, syntax), 0)
             if match validated {
                 CheckGood(value) => false
                 CheckBad(value) => true
@@ -964,8 +1057,8 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         }
     }
     if actual_role == 5 {
-        let checked = __s0_buffer_get(CheckedTypeRec, next.types, __s0_buffer_len(CheckedTypeRec, next.types) - 1)
-        let diag_node = type_diag_node(state, parse, checked)
+        let checked = __s0_buffer_get(CheckedTypeRec, next.types, checked_type_for_syntax(next, syntax) - 1)
+        let diag_node = __s0_buffer_get(SyntaxRec, parse.nodes, syntax - 1)
         if duplicate_parameter { return check_fail(d, next, 16, diag_node, 0, 0, 0) }
         if reserved_value_name(state, next, child) { return check_fail(d, next, 17, diag_node, 0, 0, 0) }
     }
@@ -973,8 +1066,8 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     var name_end = child.name_end
     if actual_role == 3 || actual_role == 4 || actual_role == 6 { name_start = 0
         name_end = 0 }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
-    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, uses: uses, locals: next.locals, expressions: next.expressions, returns: next.returns, diagnostics: next.diagnostics)))
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: checked_type_for_syntax(next, syntax)))
+    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)))
 }
 
 fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, signature: SyntaxRec) -> Result(CheckResult, __s0_Error) {
@@ -998,18 +1091,17 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(resolved) }
-    let checked_id = __s0_buffer_len(CheckedTypeRec, next.types)
+    let checked_id = checked_type_for_syntax(next, result_link.node)
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     if try direct_type_concrete(d, next, empty, checked_id, 0) {
-        let checked = __s0_buffer_get(CheckedTypeRec, next.types, checked_id - 1)
-        let validated = try validate_concrete_type(d, state, parse, next, checked_id, 0, type_diag_node(state, parse, checked), 0)
+        let validated = try validate_concrete_type(d, state, parse, next, checked_id, 0, syntax_diag_node(state, parse, result_link.node), 0)
         if match validated {
             CheckGood(value) => false
             CheckBad(value) => true
         } { return Ok(validated) }
     }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
-    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, uses: uses, locals: next.locals, expressions: next.expressions, returns: next.returns, diagnostics: next.diagnostics)))
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: checked_type_for_syntax(next, result_link.node)))
+    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)))
 }
 
 // Materialize aggregate value edges without recursion. Declared applications
@@ -1154,8 +1246,7 @@ fn revalidate_aggregate_roots(d: Domain, state: State, parse: ParseStore, store:
         if (use.role == 1 || use.role == 2) && use.checked_type != 0 {
             let empty = try __s0_buffer_new(TypeBindingRec, d)
             if try direct_type_concrete(d, store, empty, use.checked_type, 0) {
-                let checked = __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1)
-                let validated = try validate_concrete_type(d, state, parse, store, use.checked_type, 0, type_diag_node(state, parse, checked), 0)
+                let validated = try validate_concrete_type(d, state, parse, store, use.checked_type, 0, syntax_diag_node(state, parse, use.syntax), 0)
                 if match validated {
                     CheckGood(value) => false
                     CheckBad(value) => true
@@ -1253,15 +1344,14 @@ fn known_body_identifier(state: State, store: CheckStore, node: SyntaxRec) -> Bo
 
 fn int_result_range(state: State, parse: ParseStore, result_type: CheckedTypeRec) -> IntRangeRec {
     if result_type.kind != 1 { return IntRangeRec(integer: false, signed: false, positive: "", negative: "") }
-    let node = __s0_buffer_get(SyntaxRec, parse.nodes, result_type.syntax - 1)
-    if node_word(state, node, "I8") { return IntRangeRec(integer: true, signed: true, positive: "127", negative: "128") }
-    if node_word(state, node, "I16") { return IntRangeRec(integer: true, signed: true, positive: "32767", negative: "32768") }
-    if node_word(state, node, "I32") { return IntRangeRec(integer: true, signed: true, positive: "2147483647", negative: "2147483648") }
-    if node_word(state, node, "I64") { return IntRangeRec(integer: true, signed: true, positive: "9223372036854775807", negative: "9223372036854775808") }
-    if node_word(state, node, "U8") { return IntRangeRec(integer: true, signed: false, positive: "255", negative: "") }
-    if node_word(state, node, "U16") { return IntRangeRec(integer: true, signed: false, positive: "65535", negative: "") }
-    if node_word(state, node, "U32") { return IntRangeRec(integer: true, signed: false, positive: "4294967295", negative: "") }
-    if node_word(state, node, "U64") { return IntRangeRec(integer: true, signed: false, positive: "18446744073709551615", negative: "") }
+    if result_type.target == 2 { return IntRangeRec(integer: true, signed: true, positive: "127", negative: "128") }
+    if result_type.target == 3 { return IntRangeRec(integer: true, signed: true, positive: "32767", negative: "32768") }
+    if result_type.target == 4 { return IntRangeRec(integer: true, signed: true, positive: "2147483647", negative: "2147483648") }
+    if result_type.target == 5 { return IntRangeRec(integer: true, signed: true, positive: "9223372036854775807", negative: "9223372036854775808") }
+    if result_type.target == 6 { return IntRangeRec(integer: true, signed: false, positive: "255", negative: "") }
+    if result_type.target == 7 { return IntRangeRec(integer: true, signed: false, positive: "65535", negative: "") }
+    if result_type.target == 8 { return IntRangeRec(integer: true, signed: false, positive: "4294967295", negative: "") }
+    if result_type.target == 9 { return IntRangeRec(integer: true, signed: false, positive: "18446744073709551615", negative: "") }
     return IntRangeRec(integer: false, signed: false, positive: "", negative: "")
 }
 
@@ -1319,6 +1409,13 @@ fn body_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     return Ok(BodyBad(bad))
 }
 
+// A failed body retains only its diagnostic. Every semantic buffer is restored
+// to the function-entry snapshot, including types and type arguments appended
+// while resolving local annotations.
+fn rollback_body(base: CheckStore, failed: CheckStore) -> CheckStore {
+    return CheckStore(symbols: base.symbols, type_params: base.type_params, types: base.types, type_args: base.type_args, type_annotations: base.type_annotations, uses: base.uses, locals: base.locals, environments: base.environments, expressions: base.expressions, expression_children: base.expression_children, returns: base.returns, diagnostics: failed.diagnostics)
+}
+
 fn expr_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(ExprOutcome, __s0_Error) {
     let failed = try check_fail(d, store, kind, node, 0, 0, 0)
     let bad = match failed {
@@ -1346,10 +1443,13 @@ fn expr_draft(store: CheckStore, checked_type: U64, expression: U64) -> Result(E
 }
 
 fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: String) -> U64 {
+    var target: U64 = 0
+    if len(name) == 4 && name[0] == 66 { target = 1 }
+    if len(name) == 3 && name[0] == 73 { target = 5 }
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if checked.kind == 1 && node_word(state, __s0_buffer_get(SyntaxRec, parse.nodes, checked.syntax - 1), name) { return at + 1 }
+        if checked.kind == 1 && checked.target == target { return at + 1 }
         at = at + 1
     }
     return 0
@@ -1358,7 +1458,11 @@ fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: S
 fn primitive_type_named(state: State, parse: ParseStore, store: CheckStore, checked_type: U64, name: String) -> Bool {
     if checked_type == 0 { return false }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    return checked.kind == 1 && node_word(state, __s0_buffer_get(SyntaxRec, parse.nodes, checked.syntax - 1), name)
+    var target: U64 = 0
+    if len(name) == 4 && name[0] == 66 { target = 1 }
+    if len(name) == 3 && name[0] == 70 && name[1] == 51 { target = 10 }
+    if len(name) == 3 && name[0] == 70 && name[1] == 54 { target = 11 }
+    return checked.kind == 1 && checked.target == target
 }
 
 fn float_type(state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> Bool {
@@ -1394,8 +1498,20 @@ fn expression_operator(state: State, node: SyntaxRec) -> U64 {
 }
 
 fn append_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, checked_type: U64, reference: U64, bool_value: U64, left: U64, right: U64, operator: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: syntax, kind: kind, checked_type: checked_type, parameter_use: reference, bool_value: bool_value, left: left, right: right, operator: operator, site_kind: site_kind, site_syntax: site_syntax))
-    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, locals: store.locals, expressions: expressions, returns: store.returns, diagnostics: store.diagnostics)
+    var children = store.expression_children
+    var first_child: U64 = 0
+    var child_count: U64 = 0
+    if left != 0 {
+        first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1
+        children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: left))
+        child_count = child_count + 1
+    }
+    if right != 0 {
+        children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: right))
+        child_count = child_count + 1
+    }
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: syntax, kind: kind, checked_type: checked_type, parameter_use: reference, bool_value: bool_value, left: 0, right: 0, annotation: 0, first_child: first_child, child_count: child_count, operator: operator, site_kind: site_kind, site_syntax: site_syntax))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: expressions, expression_children: children, returns: store.returns, diagnostics: store.diagnostics)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
@@ -1426,11 +1542,21 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         return append_expression(d, store, owner, expression_id, 3, literal_type, 0, 0, 0, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 22 {
-        if expected == 0 { return expr_deferred(base) }
-        let expected_type = __s0_buffer_get(CheckedTypeRec, store.types, expected - 1)
+        var string_store = store
+        var string_type = expected
+        if string_type == 0 {
+            let existing = canonical_single_arg(store, 8, 0, 6)
+            if existing != 0 { string_type = existing } else {
+                let args = try __s0_buffer_append(U64, d, store.type_args, 6)
+                let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+                string_store = try append_checked_type(d, recorded, owner, 8, 0, 0, __s0_buffer_len(U64, args), 1)
+                string_type = canonical_single_arg(string_store, 8, 0, 6)
+            }
+        }
+        let expected_type = __s0_buffer_get(CheckedTypeRec, string_store.types, string_type - 1)
         let empty_strings = try __s0_buffer_new(TypeBindingRec, d)
-        if expected_type.kind != 2 && !interpreted_slice_u8(state, parse, store, empty_strings, expected_type, 0) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
-        return append_expression(d, store, owner, expression_id, 4, expected, 0, 0, 0, 0, 0, site_kind, site_syntax)
+        if !interpreted_slice_u8(state, parse, string_store, empty_strings, expected_type, 0) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        return append_expression(d, string_store, owner, expression_id, 4, string_type, 0, 0, 0, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 23 {
         var bool_type = expected
@@ -1449,16 +1575,12 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         var reference = local_id
         var binding_type: U64 = 0
         if local_id != 0 {
-            binding_type = __s0_buffer_get(LocalRec, store.locals, local_id - 1).checked_type
+            let binding = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+            binding_type = binding.checked_type
+            if binding.kind == 1 { kind = 1 }
         } else {
-            let parameter_use_id = function_use(store, owner, 5, expression, state)
-            if parameter_use_id == 0 {
-                if known_body_identifier(state, store, expression) { return expr_deferred(base) }
-                return expr_fail(d, base, 18, expression)
-            }
-            kind = 1
-            reference = parameter_use_id
-            binding_type = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_use_id - 1).checked_type
+            if known_body_identifier(state, store, expression) { return expr_deferred(base) }
+            return expr_fail(d, base, 18, expression)
         }
         if expected != 0 && !(try expression_type_equal(d, state, parse, store, binding_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
         return append_expression(d, store, owner, expression_id, kind, binding_type, reference, 0, 0, 0, 0, site_kind, site_syntax)
@@ -1593,24 +1715,29 @@ fn check_value_expression(d: Domain, state: State, parse: ParseStore, store: Che
 }
 
 // Binding order follows the Go checker: reserved name, annotation resolution,
-// initializer and mismatch, Unit/DomainMark rejection, then duplicates. An
-// unannotated binding defers to the inference slice.
+// initializer and mismatch, Unit/DomainMark rejection, then duplicates.
+// Unannotated scalar bindings infer from integer/Bool literals, identifiers,
+// and supported unary/binary expressions.
 fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64) -> Result(BodyStep, __s0_Error) {
     if reserved_value_name(state, store, statement) { return body_fail(d, store, 22, statement) }
     let head = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
-    if head.next == 0 { return Ok(BodyDefer) }
-    let type_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1)
-    let resolved = try resolve_type(d, state, parse, store, owner, type_link.node)
-    let next = match resolved {
-        CheckGood(value) => value
-        CheckBad(value) => value
+    var next = store
+    var annotated: U64 = 0
+    var annotation_syntax: U64 = 0
+    if head.next != 0 {
+        let type_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1)
+        annotation_syntax = type_link.node
+        let resolved = try resolve_type(d, state, parse, store, owner, type_link.node)
+        next = match resolved {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }
+        if match resolved {
+            CheckGood(value) => false
+            CheckBad(value) => true
+        } { return Ok(BodyBad(next)) }
+        annotated = checked_type_for_syntax(next, type_link.node)
     }
-    if match resolved {
-        CheckGood(value) => false
-        CheckBad(value) => true
-    } { return Ok(BodyBad(next)) }
-    let annotated = __s0_buffer_len(CheckedTypeRec, next.types)
-    let annotation = __s0_buffer_get(CheckedTypeRec, next.types, annotated - 1)
     let init = __s0_buffer_get(SyntaxRec, parse.nodes, head.node - 1)
     let outcome = try check_value_expression(d, state, parse, next, owner, init, head.node, annotated, 23, statement, 1, statement_id)
     let ostore = match outcome {
@@ -1626,14 +1753,24 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(BodyDefer) }
-    let diag_node = type_diag_node(state, parse, annotation)
-    if annotation.kind == 1 && node_word(state, diag_node, "Unit") { return body_fail(d, next, 25, diag_node) }
+    if annotated == 0 { annotated = draft.checked_type }
+    let annotation = __s0_buffer_get(CheckedTypeRec, ostore.types, annotated - 1)
+    var diag_node = statement
+    if annotation_syntax != 0 { diag_node = __s0_buffer_get(SyntaxRec, parse.nodes, annotation_syntax - 1) }
+    if annotation.kind == 1 && annotation.target == 12 { return body_fail(d, next, 25, diag_node) }
     if annotation.kind == 4 { return body_fail(d, next, 26, diag_node) }
     if local_lookup(ostore, owner, statement, state) != 0 || function_use(ostore, owner, 5, statement, state) != 0 { return body_fail(d, next, 27, statement) }
     var mutable: U64 = 0
     if statement.kind == 16 { mutable = 1 }
-    let locals = try __s0_buffer_append(LocalRec, d, ostore.locals, LocalRec(owner: owner, syntax: statement_id, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: mutable, checked_type: annotated))
-    return Ok(BodyGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, uses: ostore.uses, locals: locals, expressions: ostore.expressions, returns: ostore.returns, diagnostics: ostore.diagnostics)))
+    let locals = try __s0_buffer_append(LocalRec, d, ostore.locals, LocalRec(owner: owner, kind: 2, syntax: statement_id, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: mutable, checked_type: annotated))
+    let binding = __s0_buffer_len(LocalRec, locals)
+    var parent: U64 = 0
+    if __s0_buffer_len(EnvironmentRec, ostore.environments) != 0 {
+        let candidate = __s0_buffer_len(EnvironmentRec, ostore.environments)
+        if __s0_buffer_get(EnvironmentRec, ostore.environments, candidate - 1).owner == owner { parent = candidate }
+    }
+    let environments = try __s0_buffer_append(EnvironmentRec, d, ostore.environments, EnvironmentRec(owner: owner, parent: parent, binding: binding))
+    return Ok(BodyGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, type_annotations: ostore.type_annotations, uses: ostore.uses, locals: locals, environments: environments, expressions: ostore.expressions, expression_children: ostore.expression_children, returns: ostore.returns, diagnostics: ostore.diagnostics)))
 }
 
 // Only plain identifier targets are in this slice; field and index targets
@@ -1691,6 +1828,27 @@ fn check_body_statements(d: Domain, state: State, parse: ParseStore, store: Chec
     return Ok(BodyDefer)
 }
 
+fn append_parameter_bindings(d: Domain, store: CheckStore, owner: U64) -> Result(CheckStore, __s0_Error) {
+    var next = store
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == owner && use.role == 5 {
+            let locals = try __s0_buffer_append(LocalRec, d, next.locals, LocalRec(owner: owner, kind: 1, syntax: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, mutable: 0, checked_type: use.checked_type))
+            let binding = __s0_buffer_len(LocalRec, locals)
+            var parent: U64 = 0
+            if __s0_buffer_len(EnvironmentRec, next.environments) != 0 {
+                let candidate = __s0_buffer_len(EnvironmentRec, next.environments)
+                if __s0_buffer_get(EnvironmentRec, next.environments, candidate - 1).owner == owner { parent = candidate }
+            }
+            let environments = try __s0_buffer_append(EnvironmentRec, d, next.environments, EnvironmentRec(owner: owner, parent: parent, binding: binding))
+            next = CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: next.uses, locals: locals, environments: environments, expressions: next.expressions, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)
+        }
+        at = at + 1
+    }
+    return Ok(next)
+}
+
 // A body checks as zero or more leading let/var bindings and plain-identifier
 // assignments followed by one top-level return. Any other statement or
 // expression shape defers the whole body so later slices never consume
@@ -1706,7 +1864,8 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     let statement_link = __s0_buffer_get(SyntaxLinkRec, parse.links, body.children - 1)
     let statement = __s0_buffer_get(SyntaxRec, parse.nodes, statement_link.node - 1)
     if statement.kind != 18 { return Ok(CheckGood(store)) }
-    let stepped = try check_body_statements(d, state, parse, store, owner, statement_link.next)
+    let with_parameters = try append_parameter_bindings(d, store, owner)
+    let stepped = try check_body_statements(d, state, parse, with_parameters, owner, statement_link.next)
     let after = match stepped {
         BodyGood(value) => value
         BodyBad(value) => value
@@ -1716,7 +1875,7 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
         BodyGood(value) => false
         BodyBad(value) => true
         BodyDefer => false
-    } { return Ok(CheckBad(after)) }
+    } { return Ok(CheckBad(rollback_body(store, after))) }
     if match stepped {
         BodyGood(value) => false
         BodyBad(value) => false
@@ -1726,10 +1885,16 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     let result_use = __s0_buffer_get(DeclTypeUseRec, after.uses, result_use_id - 1)
     let result_type = __s0_buffer_get(CheckedTypeRec, after.types, result_use.checked_type - 1)
     if statement.children == 0 {
-        let result_syntax = __s0_buffer_get(SyntaxRec, parse.nodes, result_type.syntax - 1)
-        if result_type.kind != 1 || !node_word(state, result_syntax, "Unit") { return check_token_fail(d, state, after, 20, statement) }
+        if result_type.kind != 1 || result_type.target != 12 {
+            let failed = try check_token_fail(d, state, after, 20, statement)
+            let bad = match failed {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }
+            return Ok(CheckBad(rollback_body(store, bad)))
+        }
         let returns = try __s0_buffer_append(CheckedReturnRec, d, after.returns, CheckedReturnRec(owner: owner, syntax: statement_link.node, expression: 0, result_use: result_use_id))
-        return Ok(CheckGood(CheckStore(symbols: after.symbols, type_params: after.type_params, types: after.types, type_args: after.type_args, uses: after.uses, locals: after.locals, expressions: after.expressions, returns: returns, diagnostics: after.diagnostics)))
+        return Ok(CheckGood(CheckStore(symbols: after.symbols, type_params: after.type_params, types: after.types, type_args: after.type_args, type_annotations: after.type_annotations, uses: after.uses, locals: after.locals, environments: after.environments, expressions: after.expressions, expression_children: after.expression_children, returns: returns, diagnostics: after.diagnostics)))
     }
     let expression_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     let expression = __s0_buffer_get(SyntaxRec, parse.nodes, expression_link.node - 1)
@@ -1742,14 +1907,14 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     if match outcome {
         ExprGood(value) => false
         ExprBad(value) => true
-    } { return Ok(CheckBad(ostore)) }
+    } { return Ok(CheckBad(rollback_body(store, ostore))) }
     let draft = match outcome {
         ExprGood(value) => value.draft
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(CheckGood(store)) }
     let returns = try __s0_buffer_append(CheckedReturnRec, d, ostore.returns, CheckedReturnRec(owner: owner, syntax: statement_link.node, expression: draft.expression, result_use: result_use_id))
-    return Ok(CheckGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, uses: ostore.uses, locals: ostore.locals, expressions: ostore.expressions, returns: returns, diagnostics: ostore.diagnostics)))
+    return Ok(CheckGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, type_annotations: ostore.type_annotations, uses: ostore.uses, locals: ostore.locals, environments: ostore.environments, expressions: ostore.expressions, expression_children: ostore.expression_children, returns: returns, diagnostics: ostore.diagnostics)))
 }
 
 fn check_function_body_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
@@ -1823,7 +1988,13 @@ fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore)
     // Orchestration callers invoke this only for ParseGood. Keep the guard so
     // malformed direct callers cannot run checking after either earlier phase.
     if __s0_buffer_len(LexDiagRec, state.diagnostics) != 0 || __s0_buffer_len(ParseDiagRec, parse.diagnostics) != 0 { return Ok(CheckBad(initial)) }
-    let symbols = try collect_symbols(d, state, parse, initial)
+    var seeded = initial
+    var primitive: U64 = 1
+    while primitive <= 12 {
+        seeded = try append_checked_type(d, seeded, 0, 1, 0, primitive, 0, 0)
+        primitive = primitive + 1
+    }
+    let symbols = try collect_symbols(d, state, parse, seeded)
     let store = match symbols {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -1848,7 +2019,7 @@ fn emit_check_sources(state: State) -> Bool {
 fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 6\n") || !emit_check_sources(state) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 7\n") || !emit_check_sources(state) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -1873,6 +2044,12 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
         at = at + 1
     }
     at = 0
+    while at < __s0_buffer_len(CheckedTypeAnnotationRec, store.type_annotations) {
+        let rec = __s0_buffer_get(CheckedTypeAnnotationRec, store.type_annotations, at)
+        if !out_string("T ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let rec = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
         if !out_string("U ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.role) || !out(32) || !out_u64(rec.ordinal) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
@@ -1881,13 +2058,25 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(LocalRec, store.locals) {
         let rec = __s0_buffer_get(LocalRec, store.locals, at)
-        if !out_string("L ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.mutable) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        if !out_string("L ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.mutable) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(EnvironmentRec, store.environments) {
+        let rec = __s0_buffer_get(EnvironmentRec, store.environments, at)
+        if !out_string("N ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.parent) || !out(32) || !out_u64(rec.binding) || !out(10) { return false }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let rec = __s0_buffer_get(CheckedExprRec, store.expressions, at)
-        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(32) || !out_u64(rec.bool_value) || !out(32) || !out_u64(rec.left) || !out(32) || !out_u64(rec.right) || !out(32) || !out_u64(rec.operator) || !out(32) || !out_u64(rec.site_kind) || !out(32) || !out_u64(rec.site_syntax) || !out(10) { return false }
+        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(32) || !out_u64(rec.bool_value) || !out(32) || !out_u64(rec.left) || !out(32) || !out_u64(rec.right) || !out(32) || !out_u64(rec.annotation) || !out(32) || !out_u64(rec.first_child) || !out(32) || !out_u64(rec.child_count) || !out(32) || !out_u64(rec.operator) || !out(32) || !out_u64(rec.site_kind) || !out(32) || !out_u64(rec.site_syntax) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+        let rec = __s0_buffer_get(CheckedExprChildRec, store.expression_children, at)
+        if !out_string("H ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.expression) || !out(10) { return false }
         at = at + 1
     }
     at = 0
