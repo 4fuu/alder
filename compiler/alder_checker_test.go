@@ -152,8 +152,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	checkerText = strings.ReplaceAll(checkerText, " Err(", "\n Err(")
 	checkerText = strings.ReplaceAll(checkerText, " Ok(", "\n Ok(")
 	sources = append(sources, frontend.Source{ID: 99, Path: "compiler/test/checker_main.al", Text: checkerText})
-	// This latest slice compiles the complete fixed production core (except its
-	// lexer-only main, replaced by this wrapper) once. Round-trip and verify its
+	// This slice compiles the complete fixed production core except the production
+	// driver, which its phase-specific wrapper replaces. Round-trip and verify its
 	// textual MIR before generating the C used for strict direct execution.
 	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {

@@ -223,6 +223,11 @@ this document split, it contains:
   literals;
 - private deterministic manifests used by Go conformance tests.
 
+The fixed production entry drives those implemented slices from source loading
+through checking and emits the private manifest for the last phase reached. This
+is a bootstrap integration contract, not public diagnostics or self-hosted
+compilation.
+
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the
 `I64` minimum instead of inheriting Stage 0's signed host-storage limit.
