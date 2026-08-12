@@ -229,6 +229,9 @@ it against per-type bounds, so the port accepts every `U64` value and the
 String literal results accept `String` and its `[U8]` semantic form alike.
 Bodies with unannotated bindings, compound expressions, calls, control flow,
 or a missing/non-final return defer to later slices without emitting records.
+Unannotated bindings specifically wait on canonical structure-deduplicated
+type identity: current checked-type records are syntax-anchored, so an
+inferred literal type has no record to reference yet.
 
 General body checking, other literals/expressions, inference, monomorphization,
 MIR construction, verifier/backend ports, and self-hosted execution are still
