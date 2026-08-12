@@ -103,6 +103,13 @@ type SymbolRec {
     name_start: U64
     name_end: U64
     type_arity: U64
+    // Function declarations use kind 12. Concrete generic function instances
+    // use kind 13 and retain their declaration, ordered canonical arguments,
+    // and discovery parent. A nongeneric kind-12 function is its own instance.
+    declaration: U64
+    first_instance_arg: U64
+    instance_arg_count: U64
+    discovery_parent: U64
 }
 
 type TypeParamRec {
@@ -152,8 +159,8 @@ type DeclTypeUseRec {
     checked_type: U64
 }
 
-// Checked expressions form an append-only postorder graph per nongeneric
-// function. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
+// Checked expressions form an append-only postorder graph per concrete function
+// instance. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
 // decoded string literals, and locals. parameter_use names the stable LocalRec
 // binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
 // are unary and binary. Ordered children are stored in one
@@ -195,7 +202,8 @@ type CheckedExprChildRec {
 
 // Call annotation kinds: 1 direct user function, 2 direct C import, 3 concrete
 // struct constructor, and 4 concrete enum variant. target is the SymbolRec ID
-// for kinds 1..3 and the owning enum SymbolRec ID for kind 4. variant_use is
+// of a concrete function instance for kind 1, a declaration for kinds 2..3,
+// and the owning enum SymbolRec ID for kind 4. variant_use is
 // zero except for kind 4, where it is the stable role-2 DeclTypeUseRec ID.
 // checked_type is the concrete function/import result or constructed type.
 type CallAnnotationRec {
@@ -263,7 +271,9 @@ type EnvironmentRec {
 // bare, 48 valueless variant called, 49 wrong variant payload arity, 50 variant
 // payload mismatch, 51 C import called outside unsafe-c, 52 invalid unsafe-c
 // root target, 53 nested call/unsafe-c in an unsafe argument, 54 wrong import
-// arity, and 55 import argument mismatch.
+// arity, and 55 import argument mismatch. Generic inference diagnostics are
+// 56 partial or excess explicit type arguments, 57 unresolved inference,
+// 58 conflicting repeated binding, and 59 expanding polymorphic recursion.
 type CheckDiagRec {
     kind: U64
     source: U64

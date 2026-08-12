@@ -14,6 +14,51 @@ type CheckStore {
     diagnostics: __s0_Buffer(CheckDiagRec)
 }
 
+// Concrete instance signatures reuse declaration-item shape while keeping
+// declaration uses immutable. Roles 7 and 8 are instance runtime parameters
+// and result respectively; owner is the concrete instance SymbolRec ID and
+// node/source/name/syntax are copied from the declaration use.
+type InferenceBindingRec {
+    param: U64
+    checked_type: U64
+}
+
+type TypeValueRec {
+    store: CheckStore
+    checked_type: U64
+}
+
+type SubstitutedChildrenRec {
+    store: CheckStore
+    children: __s0_Buffer(U64)
+}
+
+enum UnifyOutcome {
+    UnifyGood(value: __s0_Buffer(InferenceBindingRec))
+    UnifyConflict
+}
+
+type InstanceValueRec {
+    store: CheckStore
+    instance: U64
+}
+
+enum InstanceOutcome {
+    InstanceGood(value: InstanceValueRec)
+    InstanceBad(value: CheckStore)
+}
+
+type CallInferenceRec {
+    store: CheckStore
+    bindings: __s0_Buffer(InferenceBindingRec)
+}
+
+enum CallInferenceOutcome {
+    CallInferenceGood(value: CallInferenceRec)
+    CallInferenceBad(value: CheckStore)
+    CallInferenceDefer
+}
+
 enum CheckResult {
     CheckGood(value: CheckStore)
     CheckBad(value: CheckStore)
@@ -668,7 +713,10 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
             previous = previous + 1
         }
         if reserved_symbol(state, node) { return check_fail(d, store, 2, node, 0, 0, 0) }
-        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node))
+        let symbol_id = __s0_buffer_len(SymbolRec, store.symbols) + 1
+        var declaration: U64 = 0
+        if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
+        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0)
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
         store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
         root_at = root_at + 1
@@ -779,6 +827,24 @@ fn canonical_single_arg(store: CheckStore, kind: U64, target: U64, arg: U64) -> 
     return 0
 }
 
+fn canonical_type_for_children(store: CheckStore, kind: U64, target: U64, children: __s0_Buffer(U64)) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if checked.kind == kind && checked.target == target && checked.arg_count == __s0_buffer_len(U64, children) {
+            var same = true
+            var ordinal: U64 = 0
+            while ordinal < checked.arg_count {
+                if __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal) != __s0_buffer_get(U64, children, ordinal) { same = false }
+                ordinal = ordinal + 1
+            }
+            if same { return at + 1 }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
 fn annotate_checked_type(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64) -> Result(CheckStore, __s0_Error) {
     if syntax == 0 { return Ok(store) }
     let annotations = try __s0_buffer_append(CheckedTypeAnnotationRec, d, store.type_annotations, CheckedTypeAnnotationRec(owner: owner, syntax: syntax, checked_type: checked_type))
@@ -791,6 +857,209 @@ fn append_checked_type(d: Domain, store: CheckStore, owner: U64, kind: U64, synt
     let types = try __s0_buffer_append(CheckedTypeRec, d, store.types, CheckedTypeRec(kind: kind, syntax: 0, target: target, first_arg: first_arg, arg_count: arg_count))
     let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
     return annotate_checked_type(d, next, owner, syntax, __s0_buffer_len(CheckedTypeRec, types))
+}
+
+fn instance_declaration(store: CheckStore, owner: U64) -> U64 {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.kind == 13 { return symbol.declaration }
+    return owner
+}
+
+fn type_param_ordinal(store: CheckStore, declaration: U64, param: U64) -> U64 {
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let item = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if item.owner == declaration {
+            if at + 1 == param { return ordinal }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return ordinal
+}
+
+fn instance_type_arg(store: CheckStore, instance: U64, param: U64) -> U64 {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, instance - 1)
+    if symbol.kind != 13 { return 0 }
+    let ordinal = type_param_ordinal(store, symbol.declaration, param)
+    if ordinal >= symbol.instance_arg_count { return 0 }
+    return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + ordinal)
+}
+
+fn inference_lookup(bindings: __s0_Buffer(InferenceBindingRec), param: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(InferenceBindingRec, bindings) {
+        let binding = __s0_buffer_get(InferenceBindingRec, bindings, at)
+        if binding.param == param { return binding.checked_type }
+        at = at + 1
+    }
+    return 0
+}
+
+fn checked_type_concrete(store: CheckStore, checked_type: U64) -> Bool {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 6 { return false }
+    var ordinal: U64 = 0
+    while ordinal < checked.arg_count {
+        if !checked_type_concrete(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal)) { return false }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+fn substitute_children(d: Domain, store: CheckStore, bindings: __s0_Buffer(InferenceBindingRec), original: CheckStore, checked: CheckedTypeRec, ordinal: U64, children: __s0_Buffer(U64)) -> Result(SubstitutedChildrenRec, __s0_Error) {
+    if ordinal == checked.arg_count { return Ok(SubstitutedChildrenRec(store: store, children: children)) }
+    let child = try substitute_type(d, store, bindings, __s0_buffer_get(U64, original.type_args, checked.first_arg - 1 + ordinal))
+    let next = try __s0_buffer_append(U64, d, children, child.checked_type)
+    return substitute_children(d, child.store, bindings, original, checked, ordinal + 1, next)
+}
+
+fn append_substituted_children(d: Domain, store: CheckStore, children: __s0_Buffer(U64), ordinal: U64) -> Result(CheckStore, __s0_Error) {
+    if ordinal == __s0_buffer_len(U64, children) { return Ok(store) }
+    let args = try __s0_buffer_append(U64, d, store.type_args, __s0_buffer_get(U64, children, ordinal))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+    return append_substituted_children(d, next, children, ordinal + 1)
+}
+
+fn substitute_type(d: Domain, store: CheckStore, bindings: __s0_Buffer(InferenceBindingRec), checked_type: U64) -> Result(TypeValueRec, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 6 {
+        let bound = inference_lookup(bindings, checked.target)
+        return Ok(TypeValueRec(store: store, checked_type: bound))
+    }
+    if checked.arg_count == 0 { return Ok(TypeValueRec(store: store, checked_type: checked_type)) }
+    let empty_children = try __s0_buffer_new(U64, d)
+    let substituted = try substitute_children(d, store, bindings, store, checked, 0, empty_children)
+    var current = substituted.store
+    let prior = canonical_type_for_children(current, checked.kind, checked.target, substituted.children)
+    if prior != 0 { return Ok(TypeValueRec(store: current, checked_type: prior)) }
+    let first = __s0_buffer_len(U64, current.type_args) + 1
+    current = try append_substituted_children(d, current, substituted.children, 0)
+    current = try append_checked_type(d, current, 0, checked.kind, 0, checked.target, first, checked.arg_count)
+    return Ok(TypeValueRec(store: current, checked_type: canonical_type_id(current, checked.kind, checked.target, first, checked.arg_count)))
+}
+
+fn unify_type_children(d: Domain, store: CheckStore, expected: CheckedTypeRec, actual: CheckedTypeRec, ordinal: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(UnifyOutcome, __s0_Error) {
+    if ordinal == expected.arg_count { return Ok(UnifyGood(bindings)) }
+    let step = try unify_types(d, store, __s0_buffer_get(U64, store.type_args, expected.first_arg - 1 + ordinal), __s0_buffer_get(U64, store.type_args, actual.first_arg - 1 + ordinal), bindings)
+    return match step {
+        UnifyGood(value) => unify_type_children(d, store, expected, actual, ordinal + 1, value)
+        UnifyConflict => Ok(UnifyConflict)
+    }
+}
+
+fn unify_types(d: Domain, store: CheckStore, pattern: U64, concrete: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(UnifyOutcome, __s0_Error) {
+    let expected = __s0_buffer_get(CheckedTypeRec, store.types, pattern - 1)
+    if expected.kind == 6 {
+        let prior = inference_lookup(bindings, expected.target)
+        if prior == 0 {
+            let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: expected.target, checked_type: concrete))
+            return Ok(UnifyGood(next))
+        }
+        if prior == concrete { return Ok(UnifyGood(bindings)) }
+        return Ok(UnifyConflict)
+    }
+    let actual = __s0_buffer_get(CheckedTypeRec, store.types, concrete - 1)
+    if expected.kind != actual.kind || expected.target != actual.target || expected.arg_count != actual.arg_count { return Ok(UnifyConflict) }
+    return unify_type_children(d, store, expected, actual, 0, bindings)
+}
+
+fn instance_matches(store: CheckStore, symbol: SymbolRec, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
+    if symbol.kind != 13 || symbol.declaration != declaration || symbol.instance_arg_count != __s0_buffer_get(SymbolRec, store.symbols, declaration - 1).type_arity { return false }
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if param.owner == declaration {
+            if __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + ordinal) != inference_lookup(bindings, at + 1) { return false }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return true
+}
+
+fn existing_instance(store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> U64 {
+    let declared = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
+    if declared.type_arity == 0 { return declaration }
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if instance_matches(store, symbol, declaration, bindings) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn expanding_ancestry(store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), parent: U64) -> Bool {
+    var at = parent
+    while at != 0 {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at - 1)
+        if symbol.declaration == declaration && !instance_matches(store, symbol, declaration, bindings) { return true }
+        at = symbol.discovery_parent
+    }
+    return false
+}
+
+fn append_instance_args(d: Domain, store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), param_at: U64) -> Result(CheckStore, __s0_Error) {
+    if param_at == __s0_buffer_len(TypeParamRec, store.type_params) { return Ok(store) }
+    let param = __s0_buffer_get(TypeParamRec, store.type_params, param_at)
+    var next = store
+    if param.owner == declaration {
+        let args = try __s0_buffer_append(U64, d, store.type_args, inference_lookup(bindings, param_at + 1))
+        next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+    }
+    return append_instance_args(d, next, declaration, bindings, param_at + 1)
+}
+
+fn append_instance_uses(d: Domain, store: CheckStore, declaration: U64, instance: U64, bindings: __s0_Buffer(InferenceBindingRec), use_at: U64) -> Result(CheckStore, __s0_Error) {
+    if use_at == __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(store) }
+    let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
+    var next = store
+    if use.owner == declaration && (use.role == 5 || use.role == 6) {
+        let concrete = try substitute_type(d, store, bindings, use.checked_type)
+        var role: U64 = 7
+        if use.role == 6 { role = 8 }
+        let uses = try __s0_buffer_append(DeclTypeUseRec, d, concrete.store.uses, DeclTypeUseRec(owner: instance, role: role, ordinal: use.ordinal, node: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, syntax: use.syntax, checked_type: concrete.checked_type))
+        next = CheckStore(symbols: concrete.store.symbols, type_params: concrete.store.type_params, types: concrete.store.types, type_args: concrete.store.type_args, type_annotations: concrete.store.type_annotations, uses: uses, locals: concrete.store.locals, environments: concrete.store.environments, expressions: concrete.store.expressions, call_annotations: concrete.store.call_annotations, expression_children: concrete.store.expression_children, returns: concrete.store.returns, diagnostics: concrete.store.diagnostics)
+    }
+    return append_instance_uses(d, next, declaration, instance, bindings, use_at + 1)
+}
+
+fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), parent: U64, site: SyntaxRec) -> Result(InstanceOutcome, __s0_Error) {
+    let found = existing_instance(store, declaration, bindings)
+    if found != 0 { return Ok(InstanceGood(InstanceValueRec(store: store, instance: found))) }
+    if expanding_ancestry(store, declaration, bindings, parent) {
+        let failed = try check_token_fail(d, state, store, 59, site)
+        return Ok(InstanceBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    let declared = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
+    var param_at: U64 = 0
+    while param_at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let param = __s0_buffer_get(TypeParamRec, store.type_params, param_at)
+        if param.owner == declaration {
+            let bound = inference_lookup(bindings, param_at + 1)
+            if bound == 0 || !checked_type_concrete(store, bound) {
+                let failed = try check_token_fail(d, state, store, 57, site)
+                return Ok(InstanceBad(match failed {
+                    CheckGood(value) => value
+                    CheckBad(value) => value
+                }))
+            }
+        }
+        param_at = param_at + 1
+    }
+    let first = __s0_buffer_len(U64, store.type_args) + 1
+    let with_args = try append_instance_args(d, store, declaration, bindings, 0)
+    let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
+    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent))
+    let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, diagnostics: with_args.diagnostics)
+    let signed = try append_instance_uses(d, registered, declaration, instance, bindings, 0)
+    return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
 }
 
 // Type children are reverse linked. Resolve every child (including its nested
@@ -923,8 +1192,13 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             return Ok(CheckGood(try append_checked_type(d, recorded, owner, 8, node_id, 0, __s0_buffer_len(U64, args), 1)))
         }
         if builtin != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, builtin, node_id, 0, 0, 0))) }
-        let param = find_type_param(state, store, owner, node)
-        if param != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, 6, node_id, param, 0, 0))) }
+        let declaration = instance_declaration(store, owner)
+        let param = find_type_param(state, store, declaration, node)
+        if param != 0 {
+            let concrete = instance_type_arg(store, owner, param)
+            if concrete != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, concrete))) }
+            return Ok(CheckGood(try append_checked_type(d, store, owner, 6, node_id, param, 0, 0)))
+        }
         let symbol = find_declared_type(state, store, node)
         if symbol == 0 { return check_fail(d, store, 4, node, 0, 0, 0) }
         if __s0_buffer_get(SymbolRec, store.symbols, symbol - 1).type_arity != 0 { return check_fail(d, store, 5, node, 0, 0, 0) }
@@ -1312,11 +1586,17 @@ fn check_declaration_kind(d: Domain, state: State, parse: ParseStore, store: Che
 }
 
 fn function_use(store: CheckStore, owner: U64, role: U64, node: SyntaxRec, state: State) -> U64 {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    var actual_role = role
+    if symbol.kind == 13 {
+        if role == 5 { actual_role = 7 }
+        if role == 6 { actual_role = 8 }
+    }
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
-        if use.owner == owner && use.role == role {
-            if role == 6 || same_name(state, node.source, node.name_start, node.name_end, use.source, use.name_start, use.name_end) { return at + 1 }
+        if use.owner == owner && use.role == actual_role {
+            if actual_role == 6 || actual_role == 8 || same_name(state, node.source, node.name_start, node.name_end, use.source, use.name_start, use.name_end) { return at + 1 }
         }
         at = at + 1
     }
@@ -1549,6 +1829,109 @@ fn call_link_at(parse: ParseStore, call: SyntaxRec, ordinal: U64) -> SyntaxLinkR
     return __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
 }
 
+fn expression_type_head(state: State, store: CheckStore, node: SyntaxRec) -> CheckedTypeRec {
+    let builtin = builtin_type_kind(state, node)
+    if builtin == 1 { return CheckedTypeRec(kind: 1, syntax: 0, target: primitive_type_target(state, node), first_arg: 0, arg_count: 0) }
+    if builtin == 2 { return CheckedTypeRec(kind: 8, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
+    if builtin != 0 { return CheckedTypeRec(kind: builtin, syntax: 0, target: 0, first_arg: 0, arg_count: 0) }
+    if node_word(state, node, "Option") { return CheckedTypeRec(kind: 9, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
+    if node_word(state, node, "Result") { return CheckedTypeRec(kind: 10, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
+    if node_word(state, node, "Map") { return CheckedTypeRec(kind: 11, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
+    if node_word(state, node, "Ptr") { return CheckedTypeRec(kind: 12, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
+    if node_word(state, node, "__s0_Buffer") { return CheckedTypeRec(kind: 13, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
+    let declared = find_declared_type(state, store, node)
+    if declared != 0 { return CheckedTypeRec(kind: 7, syntax: 0, target: declared, first_arg: 0, arg_count: __s0_buffer_get(SymbolRec, store.symbols, declared - 1).type_arity) }
+    return CheckedTypeRec(kind: 0, syntax: 0, target: 0, first_arg: 0, arg_count: 0)
+}
+
+fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Bool {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+    if node.kind == 24 {
+        if find_type_param(state, store, instance_declaration(store, owner), node) != 0 { return true }
+        return expression_type_head(state, store, node).kind != 0
+    }
+    if node.kind != 27 { return false }
+    let callee_link = call_link_at(parse, node, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 24 { return false }
+    let head = expression_type_head(state, store, callee)
+    let count = call_link_count(parse, node) - 1
+    if head.kind == 0 || count != head.arg_count { return false }
+    var ordinal: U64 = 0
+    while ordinal < count {
+        let link = call_link_at(parse, node, ordinal + 1)
+        if !expression_type_candidate(state, parse, store, owner, link.node) { return false }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+fn leading_type_arg_count(state: State, parse: ParseStore, store: CheckStore, owner: U64, call: SyntaxRec) -> U64 {
+    var count: U64 = 0
+    let total = call_link_count(parse, call) - 1
+    while count < total {
+        let link = call_link_at(parse, call, count + 1)
+        if !expression_type_candidate(state, parse, store, owner, link.node) { return count }
+        count = count + 1
+    }
+    return count
+}
+
+fn resolve_expression_type_args(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, call: SyntaxRec, ordinal: U64, count: U64, children: __s0_Buffer(U64)) -> Result(SubstitutedChildrenRec, __s0_Error) {
+    if ordinal == count { return Ok(SubstitutedChildrenRec(store: store, children: children)) }
+    let link = call_link_at(parse, call, ordinal + 1)
+    let resolved = try resolve_expression_type(d, state, parse, store, owner, link.node)
+    let next_store = match resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(SubstitutedChildrenRec(store: next_store, children: children)) }
+    let next = try __s0_buffer_append(U64, d, children, checked_type_for_syntax(next_store, link.node))
+    return resolve_expression_type_args(d, state, parse, next_store, owner, call, ordinal + 1, count, next)
+}
+
+fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+    if node.kind == 24 {
+        let declaration = instance_declaration(store, owner)
+        let param = find_type_param(state, store, declaration, node)
+        if param != 0 {
+            let concrete = instance_type_arg(store, owner, param)
+            if concrete == 0 { return check_token_fail(d, state, store, 57, node) }
+            return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, concrete)))
+        }
+        let head = expression_type_head(state, store, node)
+        if head.kind == 8 && node_word(state, node, "String") {
+            let u8 = canonical_type_id(store, 1, 6, 0, 0)
+            let existing = canonical_single_arg(store, 8, 0, u8)
+            if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, existing))) }
+            let args = try __s0_buffer_append(U64, d, store.type_args, u8)
+            let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+            return Ok(CheckGood(try append_checked_type(d, recorded, owner, 8, node_id, 0, __s0_buffer_len(U64, args), 1)))
+        }
+        if head.kind == 0 || head.arg_count != 0 { return check_token_fail(d, state, store, 56, node) }
+        return Ok(CheckGood(try append_checked_type(d, store, owner, head.kind, node_id, head.target, 0, 0)))
+    }
+    if node.kind != 27 { return check_token_fail(d, state, store, 56, node) }
+    let callee_link = call_link_at(parse, node, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 24 { return check_token_fail(d, state, store, 56, node) }
+    let head = expression_type_head(state, store, callee)
+    let count = call_link_count(parse, node) - 1
+    if head.kind == 0 || count != head.arg_count { return check_token_fail(d, state, store, 56, node) }
+    let empty = try __s0_buffer_new(U64, d)
+    let children = try resolve_expression_type_args(d, state, parse, store, owner, node, 0, count, empty)
+    if __s0_buffer_len(U64, children.children) != count { return Ok(CheckBad(children.store)) }
+    let existing = canonical_type_for_children(children.store, head.kind, head.target, children.children)
+    if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, children.store, owner, node_id, existing))) }
+    let first = __s0_buffer_len(U64, children.store.type_args) + 1
+    let recorded = try append_substituted_children(d, children.store, children.children, 0)
+    return Ok(CheckGood(try append_checked_type(d, recorded, owner, head.kind, node_id, head.target, first, count)))
+}
+
 fn use_by_ordinal(store: CheckStore, owner: U64, role: U64, ordinal: U64) -> U64 {
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
@@ -1624,9 +2007,12 @@ fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: Che
         if child_mode == 3 { limit = 2 }
         while ordinal < limit {
             let link = call_link_at(parse, child_call, ordinal)
-            if child_count == 0 { first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1 }
-            children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: expression_for_syntax(store, owner, link.node)))
-            child_count = child_count + 1
+            let expression = expression_for_syntax(store, owner, link.node)
+            if expression != 0 {
+                if child_count == 0 { first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1 }
+                children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: expression))
+                child_count = child_count + 1
+            }
             ordinal = ordinal + 1
         }
     }
@@ -1711,9 +2097,318 @@ fn check_record_values(d: Domain, state: State, parse: ParseStore, base: CheckSt
     return check_record_values(d, state, parse, base, current, owner, call, target, ordinal + 1, count)
 }
 
+fn pattern_bound(store: CheckStore, pattern: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, pattern - 1)
+    if checked.kind == 6 { return inference_lookup(bindings, checked.target) != 0 }
+    var ordinal: U64 = 0
+    while ordinal < checked.arg_count {
+        if !pattern_bound(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal), bindings) { return false }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, arg: SyntaxRec, arg_id: U64, pattern: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+    let expected = __s0_buffer_get(CheckedTypeRec, store.types, pattern - 1)
+    if expected.kind != 7 || __s0_buffer_get(SymbolRec, store.symbols, expected.target - 1).kind != 3 || arg.kind != 27 || call_link_count(parse, arg) != 2 { return Ok(CallInferenceDefer) }
+    let callee_link = call_link_at(parse, arg, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 24 { return Ok(CallInferenceDefer) }
+    let variant_id = variant_named(state, store, expected.target, callee)
+    if variant_id == 0 { return Ok(CallInferenceDefer) }
+    let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, variant_id - 1)
+    if variant.checked_type == 0 { return Ok(CallInferenceDefer) }
+    let payload_link = call_link_at(parse, arg, 1)
+    let payload_node = __s0_buffer_get(SyntaxRec, parse.nodes, payload_link.node - 1)
+    let payload = try check_value_expression_inner(d, state, parse, base, store, owner, payload_node, payload_link.node, 0, 50, payload_node, 0, 0)
+    let current = match payload {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match payload {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(CallInferenceBad(current)) }
+    let draft = match payload {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return Ok(CallInferenceDefer) }
+    let unified = try unify_types(d, current, variant.checked_type, draft.checked_type, bindings)
+    let inferred = match unified {
+        UnifyGood(value) => value
+        UnifyConflict => bindings
+    }
+    if match unified {
+        UnifyGood(value) => false
+        UnifyConflict => true
+    } {
+        let failed = try check_token_fail(d, state, base, 58, payload_node)
+        return Ok(CallInferenceBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    if !pattern_bound(current, pattern, inferred) { return Ok(CallInferenceDefer) }
+    let concrete = try substitute_type(d, current, inferred, pattern)
+    let appended = try append_call_expression(d, state, parse, concrete.store, owner, arg_id, 10, concrete.checked_type, 4, expected.target, variant_id, arg, 3, 0, 0)
+    let final_store = match appended {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match appended {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(CallInferenceBad(final_store)) }
+    return Ok(CallInferenceGood(CallInferenceRec(store: final_store, bindings: inferred)))
+}
+
+fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+    if ordinal == count { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
+    let arg_link = call_link_at(parse, call, runtime_start + ordinal + 1)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    if arg.kind == 28 {
+        let failed = try check_token_fail(d, state, base, 42, arg)
+        return Ok(CallInferenceBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    let parameter_id = use_by_ordinal(store, target, 5, ordinal)
+    let pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_id - 1).checked_type
+    if !pattern_bound(store, pattern, bindings) {
+        let variant = try infer_unary_variant_argument(d, state, parse, base, store, owner, arg, arg_link.node, pattern, bindings)
+        let variant_store = match variant {
+            CallInferenceGood(value) => value.store
+            CallInferenceBad(value) => value
+            CallInferenceDefer => store
+        }
+        if match variant {
+            CallInferenceGood(value) => true
+            CallInferenceBad(value) => false
+            CallInferenceDefer => false
+        } {
+            let inferred = match variant {
+                CallInferenceGood(value) => value.bindings
+                CallInferenceBad(value) => bindings
+                CallInferenceDefer => bindings
+            }
+            return infer_call_arguments(d, state, parse, base, variant_store, owner, call, target, runtime_start, ordinal + 1, count, inferred)
+        }
+        if match variant {
+            CallInferenceGood(value) => false
+            CallInferenceBad(value) => true
+            CallInferenceDefer => false
+        } { return Ok(CallInferenceBad(variant_store)) }
+    }
+    var expected: U64 = 0
+    var current = store
+    if pattern_bound(store, pattern, bindings) {
+        let concrete = try substitute_type(d, store, bindings, pattern)
+        current = concrete.store
+        expected = concrete.checked_type
+    }
+    let checked = try check_value_expression_inner(d, state, parse, base, current, owner, arg, arg_link.node, expected, 58, arg, 0, 0)
+    let after = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(CallInferenceBad(after)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return Ok(CallInferenceDefer) }
+    var inferred = bindings
+    if expected == 0 {
+        let unified = try unify_types(d, after, pattern, draft.checked_type, bindings)
+        inferred = match unified {
+            UnifyGood(value) => value
+            UnifyConflict => bindings
+        }
+        if match unified {
+            UnifyGood(value) => false
+            UnifyConflict => true
+        } {
+            let failed = try check_token_fail(d, state, base, 58, arg)
+            return Ok(CallInferenceBad(match failed {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }))
+        }
+    }
+    return infer_call_arguments(d, state, parse, base, after, owner, call, target, runtime_start, ordinal + 1, count, inferred)
+}
+
+fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, declaration: U64, application: SyntaxRec, ordinal: U64, param_at: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+    if ordinal == __s0_buffer_get(SymbolRec, store.symbols, declaration - 1).type_arity { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
+    var at = param_at
+    while __s0_buffer_get(TypeParamRec, store.type_params, at).owner != declaration { at = at + 1 }
+    let link = call_link_at(parse, application, ordinal + 1)
+    let resolved = try resolve_expression_type(d, state, parse, store, owner, link.node)
+    let current = match resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(CallInferenceBad(current)) }
+    let concrete = checked_type_for_syntax(current, link.node)
+    if !checked_type_concrete(current, concrete) {
+        let failed = try check_token_fail(d, state, store, 57, application)
+        return Ok(CallInferenceBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: at + 1, checked_type: concrete))
+    return explicit_function_bindings(d, state, parse, current, owner, declaration, application, ordinal + 1, at + 1, next)
+}
+
+fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, supplied: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    if supplied != symbol.type_arity { return expr_token_fail(d, state, base, 56, call) }
+    let argument_count = call_link_count(parse, call) - 1 - supplied
+    let parameter_count = use_count(store, target, 5)
+    if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    let explicit = try explicit_function_bindings(d, state, parse, store, owner, target, call, 0, 0, empty)
+    let with_types = match explicit {
+        CallInferenceGood(value) => value.store
+        CallInferenceBad(value) => value
+        CallInferenceDefer => base
+    }
+    if match explicit {
+        CallInferenceGood(value) => false
+        CallInferenceBad(value) => true
+        CallInferenceDefer => false
+    } { return Ok(ExprBad(with_types)) }
+    let bindings = match explicit {
+        CallInferenceGood(value) => value.bindings
+        CallInferenceBad(value) => empty
+        CallInferenceDefer => empty
+    }
+    let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied, 0, argument_count, bindings)
+    let current = match arguments {
+        CallInferenceGood(value) => value.store
+        CallInferenceBad(value) => value
+        CallInferenceDefer => base
+    }
+    if match arguments {
+        CallInferenceGood(value) => false
+        CallInferenceBad(value) => true
+        CallInferenceDefer => false
+    } { return Ok(ExprBad(current)) }
+    if match arguments {
+        CallInferenceGood(value) => false
+        CallInferenceBad(value) => false
+        CallInferenceDefer => true
+    } { return expr_deferred(base) }
+    let instance = try instantiate_function(d, state, parse, current, target, bindings, owner, call)
+    let with_instance = match instance {
+        InstanceGood(value) => value.store
+        InstanceBad(value) => value
+    }
+    if match instance {
+        InstanceGood(value) => false
+        InstanceBad(value) => true
+    } { return Ok(ExprBad(with_instance)) }
+    let instance_id = match instance {
+        InstanceGood(value) => value.instance
+        InstanceBad(value) => 0
+    }
+    let result_id = use_by_ordinal(with_instance, instance_id, 8, 0)
+    let result_type = __s0_buffer_get(DeclTypeUseRec, with_instance.uses, result_id - 1).checked_type
+    if expected != 0 && !(try expression_type_equal(d, state, parse, with_instance, result_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    return append_call_expression(d, state, parse, with_instance, owner, call_id, 8, result_type, 1, instance_id, 0, call, 1, site_kind, site_syntax)
+}
+
+fn infer_record_values(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+    if ordinal == count { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
+    let field_id = use_by_ordinal(store, target, 1, ordinal)
+    let field = __s0_buffer_get(DeclTypeUseRec, store.uses, field_id - 1)
+    let named_id = record_source_arg(parse, call, field, state)
+    let named = __s0_buffer_get(SyntaxRec, parse.nodes, named_id - 1)
+    let value_link = __s0_buffer_get(SyntaxLinkRec, parse.links, named.children - 1)
+    let value = __s0_buffer_get(SyntaxRec, parse.nodes, value_link.node - 1)
+    var expected: U64 = 0
+    var current = store
+    if pattern_bound(store, field.checked_type, bindings) {
+        let concrete = try substitute_type(d, store, bindings, field.checked_type)
+        current = concrete.store
+        expected = concrete.checked_type
+    }
+    let checked = try check_value_expression_inner(d, state, parse, base, current, owner, value, value_link.node, expected, 42, value, 0, 0)
+    let after = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(CallInferenceBad(after)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return Ok(CallInferenceDefer) }
+    var inferred = bindings
+    if expected == 0 {
+        let unified = try unify_types(d, after, field.checked_type, draft.checked_type, bindings)
+        inferred = match unified {
+            UnifyGood(found) => found
+            UnifyConflict => bindings
+        }
+        if match unified {
+            UnifyGood(found) => false
+            UnifyConflict => true
+        } {
+            let failed = try check_token_fail(d, state, base, 58, value)
+            return Ok(CallInferenceBad(match failed {
+                CheckGood(item) => item
+                CheckBad(item) => item
+            }))
+        }
+    }
+    return infer_record_values(d, state, parse, base, after, owner, call, target, ordinal + 1, count, inferred)
+}
+
+fn declaration_binding_children(d: Domain, store: CheckStore, target: U64, bindings: __s0_Buffer(InferenceBindingRec), param_at: U64, children: __s0_Buffer(U64)) -> Result(__s0_Buffer(U64), __s0_Error) {
+    if param_at == __s0_buffer_len(TypeParamRec, store.type_params) { return Ok(children) }
+    let param = __s0_buffer_get(TypeParamRec, store.type_params, param_at)
+    var next = children
+    if param.owner == target { next = try __s0_buffer_append(U64, d, children, inference_lookup(bindings, param_at + 1)) }
+    return declaration_binding_children(d, store, target, bindings, param_at + 1, next)
+}
+
+fn concrete_decl_application(d: Domain, store: CheckStore, target: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(TypeValueRec, __s0_Error) {
+    let arity = __s0_buffer_get(SymbolRec, store.symbols, target - 1).type_arity
+    let empty = try __s0_buffer_new(U64, d)
+    let children = try declaration_binding_children(d, store, target, bindings, 0, empty)
+    let existing = canonical_type_for_children(store, 7, target, children)
+    if existing != 0 { return Ok(TypeValueRec(store: store, checked_type: existing)) }
+    let first = __s0_buffer_len(U64, store.type_args) + 1
+    let with_args = try append_substituted_children(d, store, children, 0)
+    let next = try append_checked_type(d, with_args, 0, 7, 0, target, first, arity)
+    return Ok(TypeValueRec(store: next, checked_type: canonical_type_id(next, 7, target, first, arity)))
+}
+
+fn bind_expected_application(d: Domain, store: CheckStore, target: U64, expected: CheckedTypeRec, param_at: U64, arg_at: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(__s0_Buffer(InferenceBindingRec), __s0_Error) {
+    if param_at == __s0_buffer_len(TypeParamRec, store.type_params) { return Ok(bindings) }
+    let param = __s0_buffer_get(TypeParamRec, store.type_params, param_at)
+    if param.owner == target {
+        let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: param_at + 1, checked_type: __s0_buffer_get(U64, store.type_args, expected.first_arg - 1 + arg_at)))
+        return bind_expected_application(d, store, target, expected, param_at + 1, arg_at + 1, next)
+    }
+    return bind_expected_application(d, store, target, expected, param_at + 1, arg_at, bindings)
+}
+
 fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
-    if symbol.type_arity != 0 { return expr_deferred(base) }
     var ordinal: U64 = 1
     let link_count = call_link_count(parse, call)
     while ordinal < link_count {
@@ -1745,6 +2440,46 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
         if record_source_arg(parse, call, field, state) == 0 { return expr_token_fail(d, state, base, 46, call) }
         ordinal = ordinal + 1
     }
+    if symbol.type_arity != 0 {
+        let empty = try __s0_buffer_new(InferenceBindingRec, d)
+        var bindings = empty
+        if expected != 0 {
+            let expected_type = __s0_buffer_get(CheckedTypeRec, store.types, expected - 1)
+            if expected_type.kind == 7 && expected_type.target == target {
+                bindings = try bind_expected_application(d, store, target, expected_type, 0, 0, bindings)
+            }
+        }
+        let inferred = try infer_record_values(d, state, parse, base, store, owner, call, target, 0, field_count, bindings)
+        let current = match inferred {
+            CallInferenceGood(value) => value.store
+            CallInferenceBad(value) => value
+            CallInferenceDefer => base
+        }
+        if match inferred {
+            CallInferenceGood(value) => false
+            CallInferenceBad(value) => true
+            CallInferenceDefer => false
+        } { return Ok(ExprBad(current)) }
+        if match inferred {
+            CallInferenceGood(value) => false
+            CallInferenceBad(value) => false
+            CallInferenceDefer => true
+        } { return expr_deferred(base) }
+        bindings = match inferred {
+            CallInferenceGood(value) => value.bindings
+            CallInferenceBad(value) => bindings
+            CallInferenceDefer => bindings
+        }
+        var param_at: U64 = 0
+        while param_at < __s0_buffer_len(TypeParamRec, current.type_params) {
+            let param = __s0_buffer_get(TypeParamRec, current.type_params, param_at)
+            if param.owner == target && inference_lookup(bindings, param_at + 1) == 0 { return expr_token_fail(d, state, base, 57, call) }
+            param_at = param_at + 1
+        }
+        let applied = try concrete_decl_application(d, current, target, bindings)
+        if expected != 0 && !(try expression_type_equal(d, state, parse, applied.store, applied.checked_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        return append_call_expression(d, state, parse, applied.store, owner, call_id, 9, applied.checked_type, 3, target, 0, call, 2, site_kind, site_syntax)
+    }
     let values = try check_record_values(d, state, parse, base, store, owner, call, target, 0, field_count)
     var current = match values {
         ExprGood(item) => item.store
@@ -1769,10 +2504,68 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
 
 fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
-    if symbol.type_arity != 0 { return expr_deferred(base) }
+    let explicit_count = leading_type_arg_count(state, parse, store, owner, call)
+    if explicit_count != 0 {
+        if symbol.type_arity == 0 { return expr_token_fail(d, state, base, 56, call) }
+        return check_explicit_function_call(d, state, parse, base, store, owner, call, call_id, target, explicit_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+    }
     let argument_count = call_link_count(parse, call) - 1
     let parameter_count = use_count(store, target, 5)
     if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
+    if symbol.type_arity != 0 {
+        let empty = try __s0_buffer_new(InferenceBindingRec, d)
+        var bindings = empty
+        if expected != 0 {
+            let result_id = use_by_ordinal(store, target, 6, 0)
+            let result_pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, result_id - 1).checked_type
+            let unified = try unify_types(d, store, result_pattern, expected, bindings)
+            bindings = match unified {
+                UnifyGood(value) => value
+                UnifyConflict => bindings
+            }
+            if match unified {
+                UnifyGood(value) => false
+                UnifyConflict => true
+            } { return expr_token_fail(d, state, base, 58, call) }
+        }
+        let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, argument_count, bindings)
+        let current = match inferred {
+            CallInferenceGood(value) => value.store
+            CallInferenceBad(value) => value
+            CallInferenceDefer => base
+        }
+        if match inferred {
+            CallInferenceGood(value) => false
+            CallInferenceBad(value) => true
+            CallInferenceDefer => false
+        } { return Ok(ExprBad(current)) }
+        if match inferred {
+            CallInferenceGood(value) => false
+            CallInferenceBad(value) => false
+            CallInferenceDefer => true
+        } { return expr_deferred(base) }
+        bindings = match inferred {
+            CallInferenceGood(value) => value.bindings
+            CallInferenceBad(value) => bindings
+            CallInferenceDefer => bindings
+        }
+        let instance = try instantiate_function(d, state, parse, current, target, bindings, owner, call)
+        let with_instance = match instance {
+            InstanceGood(value) => value.store
+            InstanceBad(value) => value
+        }
+        if match instance {
+            InstanceGood(value) => false
+            InstanceBad(value) => true
+        } { return Ok(ExprBad(with_instance)) }
+        let instance_id = match instance {
+            InstanceGood(value) => value.instance
+            InstanceBad(value) => 0
+        }
+        let concrete_result_id = use_by_ordinal(with_instance, instance_id, 8, 0)
+        let concrete_result = __s0_buffer_get(DeclTypeUseRec, with_instance.uses, concrete_result_id - 1).checked_type
+        return append_call_expression(d, state, parse, with_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax)
+    }
     let arguments = try check_positional_call_args(d, state, parse, base, store, owner, call, target, 5, 0, argument_count, 42)
     let current = match arguments {
         ExprGood(item) => item.store
@@ -1804,7 +2597,6 @@ fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckSto
     if checked.kind != 7 { return expr_fail(d, base, 40, callee) }
     let enum_symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
     if enum_symbol.kind != 3 { return expr_fail(d, base, 40, callee) }
-    if enum_symbol.type_arity != 0 { return expr_deferred(base) }
     let variant_id = variant_named(state, store, checked.target, callee)
     if variant_id == 0 { return expr_fail(d, base, 40, callee) }
     let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, variant_id - 1)
@@ -1813,7 +2605,16 @@ fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckSto
     let arg_link = call_link_at(parse, call, 1)
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
     if arg.kind == 28 { return expr_token_fail(d, state, base, 50, arg) }
-    let payload = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, variant.checked_type, 50, arg, 0, 0)
+    var payload_store = store
+    var payload_type = variant.checked_type
+    if enum_symbol.type_arity != 0 {
+        let empty = try __s0_buffer_new(InferenceBindingRec, d)
+        let bindings = try bind_expected_application(d, store, checked.target, checked, 0, 0, empty)
+        let concrete = try substitute_type(d, store, bindings, variant.checked_type)
+        payload_store = concrete.store
+        payload_type = concrete.checked_type
+    }
+    let payload = try check_value_expression_inner(d, state, parse, base, payload_store, owner, arg, arg_link.node, payload_type, 50, arg, 0, 0)
     let current = match payload {
         ExprGood(item) => item.store
         ExprBad(item) => item
@@ -1834,7 +2635,29 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 {
-        if callee.kind == 27 { return expr_deferred(base) }
+        if callee.kind == 27 {
+            let applied_callee_link = call_link_at(parse, callee, 0)
+            let applied_callee = __s0_buffer_get(SyntaxRec, parse.nodes, applied_callee_link.node - 1)
+            if applied_callee.kind != 24 { return expr_token_fail(d, state, base, 40, call) }
+            let applied_target = symbol_named(state, store, applied_callee)
+            if applied_target == 0 { return expr_token_fail(d, state, base, 40, call) }
+            let applied_symbol = __s0_buffer_get(SymbolRec, store.symbols, applied_target - 1)
+            if applied_symbol.kind == 2 && applied_symbol.type_arity != 0 {
+                let resolved = try resolve_expression_type(d, state, parse, store, owner, callee_link.node)
+                let current = match resolved {
+                    CheckGood(value) => value
+                    CheckBad(value) => value
+                }
+                if match resolved {
+                    CheckGood(value) => false
+                    CheckBad(value) => true
+                } { return Ok(ExprBad(current)) }
+                let applied_type = checked_type_for_syntax(current, callee_link.node)
+                if expected != 0 && !(try expression_type_equal(d, state, parse, current, applied_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+                return check_record_call(d, state, parse, base, current, owner, call, call_id, applied_target, applied_type, mismatch_kind, mismatch_node, site_kind, site_syntax)
+            }
+            return expr_token_fail(d, state, base, 56, callee)
+        }
         return expr_token_fail(d, state, base, 40, call)
     }
     let target = symbol_named(state, store, callee)
@@ -1959,7 +2782,6 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             if expected_type.kind == 7 {
                 let expected_symbol = __s0_buffer_get(SymbolRec, store.symbols, expected_type.target - 1)
                 if expected_symbol.kind == 3 {
-                    if expected_symbol.type_arity != 0 { return expr_deferred(base) }
                     let variant_id = variant_named(state, store, expected_type.target, expression)
                     if variant_id == 0 { return expr_fail(d, base, 40, expression) }
                     let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, variant_id - 1)
@@ -2256,10 +3078,13 @@ fn check_body_statements(d: Domain, state: State, parse: ParseStore, store: Chec
 
 fn append_parameter_bindings(d: Domain, store: CheckStore, owner: U64) -> Result(CheckStore, __s0_Error) {
     var next = store
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    var role: U64 = 5
+    if symbol.kind == 13 { role = 7 }
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
-        if use.owner == owner && use.role == 5 {
+        if use.owner == owner && use.role == role {
             let locals = try __s0_buffer_append(LocalRec, d, next.locals, LocalRec(owner: owner, kind: 1, syntax: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, mutable: 0, checked_type: use.checked_type))
             let binding = __s0_buffer_len(LocalRec, locals)
             var parent: U64 = 0
@@ -2278,12 +3103,13 @@ fn append_parameter_bindings(d: Domain, store: CheckStore, owner: U64) -> Result
 // A body checks as zero or more leading let/var bindings and plain-identifier
 // assignments followed by one top-level return. Any other statement or
 // expression shape defers the whole body so later slices never consume
-// partial records. Generic functions remain deferred until inference and
-// monomorphization exist.
+// partial records. Generic declarations are checked only through concrete
+// instances discovered by calls.
 fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-    if symbol.kind != 12 || symbol.type_arity != 0 { return Ok(CheckGood(store)) }
-    let root = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+    if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return Ok(CheckGood(store)) }
+    let declaration = __s0_buffer_get(SymbolRec, store.symbols, instance_declaration(store, owner) - 1)
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, declaration.node - 1)
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
     let body = __s0_buffer_get(SyntaxRec, parse.nodes, body_link.node - 1)
     if body.children == 0 { return Ok(CheckGood(store)) }
@@ -2445,11 +3271,11 @@ fn emit_check_sources(state: State) -> Bool {
 fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 8\n") || !emit_check_sources(state) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 9\n") || !emit_check_sources(state) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if !out_string("Y ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.type_arity) || !out(10) { return false }
+        if !out_string("Y ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.type_arity) || !out(32) || !out_u64(rec.declaration) || !out(32) || !out_u64(rec.first_instance_arg) || !out(32) || !out_u64(rec.instance_arg_count) || !out(32) || !out_u64(rec.discovery_parent) || !out(10) { return false }
         at = at + 1
     }
     at = 0
@@ -2479,6 +3305,16 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let rec = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
         if !out_string("U ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.role) || !out(32) || !out_u64(rec.ordinal) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    var instance_order: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if rec.declaration != 0 {
+            instance_order = instance_order + 1
+            if !out_string("I ") || !out_u64(instance_order) || !out(32) || !out_u64(at + 1) || !out(32) || !out_u64(rec.declaration) || !out(32) || !out_u64(rec.first_instance_arg) || !out(32) || !out_u64(rec.instance_arg_count) || !out(32) || !out_u64(rec.discovery_parent) || !out(10) { return false }
+        }
         at = at + 1
     }
     at = 0

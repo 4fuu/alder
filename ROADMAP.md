@@ -364,8 +364,8 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. Its body slice checks a
-nongeneric body whose complete shape is zero or more let/var
+checking. Its body slice checks a concrete function instance whose complete
+shape is zero or more let/var
 bindings and plain-identifier assignments followed by one top-level return: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
@@ -386,17 +386,24 @@ and unary/binary expressions. Checked types are canonical structure-deduplicated
 DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
 spellings live on annotations. Stable parameter/local binding IDs, persistent
 environment chains, and flattened ordered expression-child ranges establish the
-body model. Concrete nongeneric direct user calls, record constructors,
-expected-type enum variants, and one direct C-import root inside `unsafe c` now
-use that contract. Stable call annotations retain resolved declaration/variant
-IDs and canonical checked types, and record children use declaration-field
-order. Generic calls and construction still defer the whole body;
+body model. Direct user calls now support all-or-none explicit type arguments,
+structural inference from runtime arguments and expected results, generic record
+construction, expected generic enum variants, and declared-enum unary-payload
+inference. Concrete function instances are keyed by declaration ID plus ordered
+canonical type IDs, registered before body checking, and processed in stable
+first-discovery FIFO order. Calls share instances, same-instance and finite
+concrete mutual recursion close normally, and active specialization-expanding
+polymorphic recursion is rejected. Instance signatures, bodies, expression
+types, aggregate applications, and user-call targets are concrete; stable
+private-manifest instance IDs expose that backend-facing boundary. Concrete C
+imports inside `unsafe c` retain their prior contract. Record children use
+declaration-field order;
 unsupported body shapes and expression forms outside this slice remain
 deferred, and a deferred body discards its partial records. These checks
 are preparatory: general body checking, other literals, local forms, indirect
 calls and function values,
-control flow, missing-return analysis, generic inference, monomorphization, MIR
-lowering, the full checker, and the complete frontend remain incomplete. Its
+control flow, missing-return analysis, MIR lowering, the full checker, and the
+complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit

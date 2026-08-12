@@ -82,7 +82,12 @@ type checkerSource struct {
 }
 
 type checkerSymbol struct {
-	id, kind, node, source, start, end, arity int
+	id, kind, node, source, start, end, arity                        int
+	declaration, firstInstanceArg, instanceArgCount, discoveryParent int
+}
+
+type checkerInstance struct {
+	id, symbol, declaration, firstArg, argCount, discoveryParent int
 }
 
 type checkerTypeParam struct {
@@ -133,6 +138,7 @@ type checkerManifest struct {
 	args            []checkerTypeArg
 	annotations     []checkerTypeAnnotation
 	uses            []checkerTypeUse
+	instances       []checkerInstance
 	locals          []checkerLocal
 	environments    []checkerEnvironment
 	callAnnotations []checkerCallAnnotation
@@ -220,7 +226,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			"enum E {\n Empty\n Full(value: Box(U64))\n}\n" +
 			"fn f(T: type, x: T, y: Box(T),) -> Option(U64) {}\n" +
 			"type Other(T: type) { value: T }\n" +
-			"fn deferred() -> U64 {\n let local = f()\n return wrong\n}\n",
+			"fn deferred() -> U64 {\n while true {}\n return wrong\n}\n",
 		"b.al": "type Forward { x: Later }\n" +
 			"type Later { x: U64 }\n" +
 			"type Recursive { pointer: Ptr(Recursive) }\n",
@@ -508,6 +514,78 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		}
 	}
 
+	genericCalls := map[string]string{
+		"a.al": "type Pair(A: type, B: type) { first: A\n second: B }\n" +
+			"enum Maybe(T: type) { Some(value: T)\n None }\n" +
+			"fn identity(T: type, value: T) -> T { return value }\n" +
+			"fn same(T: type, left: T, right: T) -> T { return left }\n" +
+			"fn wrap(T: type, value: T) -> Maybe(T) { return Some(value) }\n" +
+			"fn pass(T: type, value: Maybe(T)) -> Maybe(T) { return value }\n" +
+			"fn recur(T: type, value: T) -> T { return recur(value) }\n" +
+			"fn left(T: type, value: T) -> T { return right(value) }\n" +
+			"fn right(T: type, value: T) -> T { return left(value) }\n" +
+			"fn inferred() -> I64 { return identity(7) }\n" +
+			"fn explicit() -> U64 { return identity(U64, 7) }\n" +
+			"fn inferred_record() -> Pair(I64, Bool) { return Pair(first: 1, second: true) }\n" +
+			"fn explicit_record() -> Pair(U64, Bool) { return Pair(U64, Bool)(second: true, first: 1) }\n" +
+			"fn expected_variant() -> Maybe(I64) { return Some(1) }\n" +
+			"fn unary_variant() -> Maybe(I64) { return pass(Some(1)) }\n" +
+			"fn shared(value: I64) -> I64 { let first = identity(value)\n return identity(first) }\n" +
+			"fn same_recursion(value: I64) -> I64 { return recur(value) }\n",
+		"z.al": "fn mutual_recursion(value: I64) -> I64 { return left(value) }\n",
+	}
+	genericFirst := runAlderChecker(t, exe, genericCalls, []string{"z.al", "a.al"}, false)
+	genericSecond := runAlderChecker(t, exe, genericCalls, []string{"a.al", "z.al"}, false)
+	if genericFirst != genericSecond {
+		t.Fatal("generic specialization manifest changed with argv order")
+	}
+	genericManifest := parseCheckerManifest(t, genericFirst, genericCalls)
+	if len(genericManifest.instances) < 12 {
+		t.Fatalf("generic fixture exposed only %d concrete instances", len(genericManifest.instances))
+	}
+	identityDecl := checkerSymbolByName(t, genericManifest, genericCalls, "identity")
+	identityInstances := 0
+	for _, instance := range genericManifest.instances {
+		if instance.declaration == identityDecl.id {
+			identityInstances++
+			if instance.argCount != 1 || genericManifest.types[genericManifest.args[instance.firstArg-1].checkedType-1].kind != 1 {
+				t.Fatalf("identity instance is not concretely specialized: %+v", instance)
+			}
+		}
+	}
+	if identityInstances != 2 {
+		t.Fatalf("identity concrete specialization count=%d, want shared I64 and U64 instances", identityInstances)
+	}
+	for _, expression := range genericManifest.expressions {
+		if !checkedManifestTypeConcrete(genericManifest, expression.checkedType) {
+			t.Fatalf("generic body expression retained a nonconcrete type: %+v", expression)
+		}
+	}
+	genericRejects := []struct {
+		name, text string
+		kind       int
+	}{
+		{name: "generic-partial.al", kind: 56, text: "fn pair(A: type, B: type, a: A, b: B) -> A { return a }\nfn f() -> I64 { return pair(I64, 1, 2) }\n"},
+		{name: "generic-excess.al", kind: 56, text: "fn identity(T: type, value: T) -> T { return value }\nfn f() -> I64 { return identity(I64, U64, 1) }\n"},
+		{name: "generic-unresolved.al", kind: 57, text: "fn empty(T: type) -> T {}\nfn f() -> Unit { empty()\n return }\n"},
+		{name: "generic-conflict.al", kind: 58, text: "fn same(T: type, a: T, b: T) -> T { return a }\nfn f() -> I64 { return same(1, true) }\n"},
+		{name: "generic-expanding.al", kind: 59, text: "enum Box(T: type) { Put(value: T) }\nfn grow(T: type, value: T) -> T { return grow(Box(T), Put(value)) }\nfn f() -> I64 { return grow(1) }\n"},
+	}
+	for _, tc := range genericRejects {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name: tc.text}
+			first := runAlderChecker(t, exe, files, []string{tc.name}, true)
+			second := runAlderChecker(t, exe, files, []string{tc.name}, true)
+			if first != second {
+				t.Fatal("generic diagnostic changed across processes")
+			}
+			manifest := parseCheckerManifest(t, first, files)
+			if len(manifest.diagnostics) != 1 || manifest.diagnostics[0].kind != tc.kind {
+				t.Fatalf("generic diagnostic=%+v, want kind %d", manifest.diagnostics, tc.kind)
+			}
+		})
+	}
+
 	callRejects := []struct {
 		name, text, marker string
 		kind, occurrence   int
@@ -563,9 +641,9 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	bodyDeferred := map[string]string{"deferred.al": "type Thing { value: U64 }\n" +
 		"type Generic(T: type) { value: T }\n" +
 		"fn helper(T: type) -> T {}\n" +
-		"fn partial() -> U64 { let scalar = 1\n let complete: Option(U64) = helper(U64)()\n return scalar }\n" +
-		"fn partial_direct() -> U64 { let scalar = 1\n let complete: U64 = helper(1)\n return scalar }\n" +
-		"fn partial_record() -> U64 { let scalar = 1\n let complete: U64 = Generic(value: 1)\n return scalar }\n" +
+		"fn partial() -> U64 { while true {}\n let complete: Option(U64) = helper(U64)\n return 1 }\n" +
+		"fn partial_direct() -> U64 { while true {}\n let complete: U64 = helper(1)\n return 1 }\n" +
+		"fn partial_record() -> U64 { while true {}\n let complete: Generic(U64) = Generic(value: 1)\n return 1 }\n" +
 		"fn generic(T: type, value: T) -> T { return missing }\n" +
 		"fn generic_bool(T: type) -> Bool { return true }\n" +
 		"fn empty() -> U64 {}\n" +
@@ -909,7 +987,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		return m, errors.New("manifest has no final line break")
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 8" || lines[len(lines)-1] != "END" {
+	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 9" || lines[len(lines)-1] != "END" {
 		return m, errors.New("invalid checker manifest envelope")
 	}
 	phase := 0
@@ -921,7 +999,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		if len(fields) == 0 || strings.Join(fields, " ") != line {
 			return m, fmt.Errorf("line %d has noncanonical fields", lineNumber+2)
 		}
-		recordPhase := map[string]int{"S": 0, "Y": 1, "P": 2, "C": 3, "A": 4, "T": 5, "U": 6, "L": 7, "N": 8, "Q": 9, "E": 10, "H": 11, "R": 12, "D": 13}[fields[0]]
+		recordPhase := map[string]int{"S": 0, "Y": 1, "P": 2, "C": 3, "A": 4, "T": 5, "U": 6, "I": 7, "L": 8, "N": 9, "Q": 10, "E": 11, "H": 12, "R": 13, "D": 14}[fields[0]]
 		if recordPhase == 0 && fields[0] != "S" {
 			return m, fmt.Errorf("line %d has unknown record %q", lineNumber+2, fields[0])
 		}
@@ -958,10 +1036,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			m.sourceByPath[path] = id
 			m.sources = append(m.sources, checkerSource{id: id, path: path, length: length})
 		case "Y":
-			if err != nil || len(numbers) != 7 {
+			if err != nil || len(numbers) != 11 {
 				return m, fmt.Errorf("line %d has invalid Y record", lineNumber+2)
 			}
-			m.symbols = append(m.symbols, checkerSymbol{id: numbers[0], kind: numbers[1], node: numbers[2], source: numbers[3], start: numbers[4], end: numbers[5], arity: numbers[6]})
+			m.symbols = append(m.symbols, checkerSymbol{id: numbers[0], kind: numbers[1], node: numbers[2], source: numbers[3], start: numbers[4], end: numbers[5], arity: numbers[6], declaration: numbers[7], firstInstanceArg: numbers[8], instanceArgCount: numbers[9], discoveryParent: numbers[10]})
 		case "P":
 			if err != nil || len(numbers) != 6 {
 				return m, fmt.Errorf("line %d has invalid P record", lineNumber+2)
@@ -987,6 +1065,11 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 				return m, fmt.Errorf("line %d has invalid U record", lineNumber+2)
 			}
 			m.uses = append(m.uses, checkerTypeUse{id: numbers[0], owner: numbers[1], role: numbers[2], ordinal: numbers[3], node: numbers[4], source: numbers[5], nameStart: numbers[6], nameEnd: numbers[7], syntax: numbers[8], checkedType: numbers[9]})
+		case "I":
+			if err != nil || len(numbers) != 6 {
+				return m, fmt.Errorf("line %d has invalid I record", lineNumber+2)
+			}
+			m.instances = append(m.instances, checkerInstance{id: numbers[0], symbol: numbers[1], declaration: numbers[2], firstArg: numbers[3], argCount: numbers[4], discoveryParent: numbers[5]})
 		case "L":
 			if err != nil || len(numbers) != 9 {
 				return m, fmt.Errorf("line %d has invalid L record", lineNumber+2)
@@ -1079,10 +1162,14 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	nodes := make(map[int]bool)
 	for i, symbol := range m.symbols {
-		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12) || symbol.node < 1 || nodes[symbol.node] || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) {
+		instance := symbol.declaration != 0
+		validInstance := symbol.kind == 12 && symbol.arity == 0 && symbol.declaration == symbol.id && symbol.instanceArgCount == 0 || symbol.kind == 13 && symbol.arity == 0 && symbol.declaration >= 1 && symbol.declaration < symbol.id && m.symbols[symbol.declaration-1].kind == 12 && m.symbols[symbol.declaration-1].arity == symbol.instanceArgCount
+		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
 			return fmt.Errorf("invalid symbol %+v", symbol)
 		}
-		nodes[symbol.node] = true
+		if symbol.kind != 13 {
+			nodes[symbol.node] = true
+		}
 	}
 	for i, param := range m.params {
 		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || nodes[param.node] || !validSourceRange(param.source, param.start, param.end, true) {
@@ -1096,6 +1183,27 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 	}
 	argOwners := make([]int, len(m.args))
+	for i, instance := range m.instances {
+		if instance.id != i+1 || instance.symbol < 1 || instance.symbol > len(m.symbols) {
+			return fmt.Errorf("invalid function instance %+v", instance)
+		}
+		symbol := m.symbols[instance.symbol-1]
+		if symbol.declaration == 0 || instance.declaration != symbol.declaration || instance.firstArg != symbol.firstInstanceArg || instance.argCount != symbol.instanceArgCount || instance.discoveryParent != symbol.discoveryParent || (instance.argCount == 0) != (instance.firstArg == 0) || instance.argCount > 0 && (instance.firstArg < 1 || instance.firstArg-1+instance.argCount > len(m.args)) || instance.discoveryParent != 0 && (instance.discoveryParent >= instance.symbol || m.symbols[instance.discoveryParent-1].declaration == 0) {
+			return fmt.Errorf("invalid function instance %+v", instance)
+		}
+		for at := 0; at < instance.argCount; at++ {
+			argOwners[instance.firstArg-1+at]++
+		}
+	}
+	instanceCount := 0
+	for _, symbol := range m.symbols {
+		if symbol.declaration != 0 {
+			instanceCount++
+		}
+	}
+	if len(m.instances) != instanceCount {
+		return fmt.Errorf("manifest has %d instance records for %d concrete symbols", len(m.instances), instanceCount)
+	}
 	typeOwners := make([]int, len(m.types))
 	typeSemanticOwners := make([]int, len(m.types))
 	typeSyntax := make(map[int]bool)
@@ -1150,11 +1258,13 @@ func validateCheckerManifest(m checkerManifest) error {
 	annotations := make(map[[2]int]int)
 	for i, annotation := range m.annotations {
 		key := [2]int{annotation.owner, annotation.syntax}
-		if annotation.id != i+1 || annotation.owner < 1 || annotation.owner > len(m.symbols) || annotation.syntax < 1 || annotation.checkedType < 1 || annotation.checkedType > len(m.types) || annotations[key] != 0 || typeSyntax[annotation.syntax] {
+		if annotation.id != i+1 || annotation.owner < 1 || annotation.owner > len(m.symbols) || annotation.syntax < 1 || annotation.checkedType < 1 || annotation.checkedType > len(m.types) || annotations[key] != 0 {
 			return fmt.Errorf("invalid type annotation %+v", annotation)
 		}
 		annotations[key] = annotation.checkedType
-		typeSyntax[annotation.syntax] = true
+		if m.symbols[annotation.owner-1].kind != 13 {
+			typeSyntax[annotation.syntax] = true
+		}
 	}
 	for i, owners := range argOwners {
 		if owners != 1 {
@@ -1167,7 +1277,7 @@ func validateCheckerManifest(m checkerManifest) error {
 			paramCounts[param.owner-1]++
 		}
 		for i, symbol := range m.symbols {
-			if paramCounts[i] != symbol.arity {
+			if symbol.kind != 13 && paramCounts[i] != symbol.arity || symbol.kind == 13 && paramCounts[i] != 0 {
 				return fmt.Errorf("symbol %+v has %d type parameter records", symbol, paramCounts[i])
 			}
 		}
@@ -1176,16 +1286,19 @@ func validateCheckerManifest(m checkerManifest) error {
 	for i, use := range m.uses {
 		key := [2]int{use.owner, use.role}
 		valueless := use.role == 2 && use.syntax == 0 && use.checkedType == 0
-		named := use.role == 1 || use.role == 2 || use.role == 5
+		named := use.role == 1 || use.role == 2 || use.role == 5 || use.role == 7
 		ownerKind := 0
 		if use.owner >= 1 && use.owner <= len(m.symbols) {
 			ownerKind = m.symbols[use.owner-1].kind
 		}
-		roleMatchesOwner := use.role == 1 && ownerKind == 2 || use.role == 2 && ownerKind == 3 || (use.role == 3 || use.role == 4) && ownerKind == 1 || (use.role == 5 || use.role == 6) && ownerKind == 12
-		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 6 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
+		roleMatchesOwner := use.role == 1 && ownerKind == 2 || use.role == 2 && ownerKind == 3 || (use.role == 3 || use.role == 4) && ownerKind == 1 || (use.role == 5 || use.role == 6) && ownerKind == 12 || (use.role == 7 || use.role == 8) && ownerKind == 13
+		instanceUse := use.role == 7 || use.role == 8
+		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 8 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] && !instanceUse || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || !instanceUse && annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
 			return fmt.Errorf("invalid declaration type use %+v", use)
 		}
-		nodes[use.node] = true
+		if !instanceUse {
+			nodes[use.node] = true
+		}
 		if !valueless {
 			checkedIndex := use.checkedType - 1
 			typeOwners[checkedIndex]++
@@ -1218,6 +1331,9 @@ func validateCheckerManifest(m checkerManifest) error {
 			if symbol.kind == 12 {
 				role = 6
 			}
+			if symbol.kind == 13 {
+				role = 8
+			}
 			if role != 0 && ordinals[[2]int{symbol.id, role}] != 1 {
 				return fmt.Errorf("body phase symbol %+v has %d result records", symbol, ordinals[[2]int{symbol.id, role}])
 			}
@@ -1228,7 +1344,7 @@ func validateCheckerManifest(m checkerManifest) error {
 	// syntax IDs from the traversed parser nodes, while direct E2E fixtures prove
 	// semantic type equality, exact Bool/other primitive spellings, and that a
 	// zero-expression return has a Unit result.
-	bodySyntax := make(map[int]bool)
+	bodySyntax := make(map[[2]int]bool)
 	bindingEnvironments := make([]int, len(m.locals))
 	lastEnvironment := make(map[int]int)
 	lastEnvironmentOwner := 0
@@ -1247,11 +1363,12 @@ func validateCheckerManifest(m checkerManifest) error {
 			ownerArity = m.symbols[local.owner-1].arity
 		}
 		sharedParameterSyntax := local.kind == 1 && local.syntax >= 1 && nodes[local.syntax]
-		if local.id != i+1 || ownerKind != 12 || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[local.syntax] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && (local.mutable != 0 || ownerArity < 0) || local.kind == 2 && ownerArity != 0 || (local.mutable != 0 && local.mutable != 1) || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
+		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
+		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && (local.mutable != 0 || ownerArity < 0) || (local.mutable != 0 && local.mutable != 1) || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
 			return fmt.Errorf("invalid local binding %+v", local)
 		}
 		if local.kind == 2 {
-			bodySyntax[local.syntax] = true
+			bodySyntax[[2]int{local.owner, local.syntax}] = true
 		}
 	}
 	callAnnotationOwners := make([]int, len(m.callAnnotations))
@@ -1263,7 +1380,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && targetKind == 12 && targetArity == 0 || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 && targetArity == 0 || annotation.kind == 4 && targetKind == 3 && targetArity == 0
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -1279,6 +1396,9 @@ func validateCheckerManifest(m checkerManifest) error {
 			if annotation.kind == 2 {
 				resultRole = 4
 			}
+			if annotation.kind == 1 && targetKind == 13 {
+				resultRole = 8
+			}
 			for _, use := range m.uses {
 				if use.owner == annotation.target && use.role == resultRole && use.ordinal == 0 {
 					resultType = use.checkedType
@@ -1286,12 +1406,13 @@ func validateCheckerManifest(m checkerManifest) error {
 			}
 			validType = resultType == annotation.checkedType
 		}
-		if annotation.id != i+1 || ownerKind != 12 || ownerArity != 0 || annotation.kind < 1 || annotation.kind > 4 || !validTarget || !validType || !validVariant {
+		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
+		if annotation.id != i+1 || !validOwner || annotation.kind < 1 || annotation.kind > 4 || !validTarget || !validType || !validVariant {
 			return fmt.Errorf("invalid call annotation %+v", annotation)
 		}
 	}
 	expressionOwners := make([]int, len(m.expressions))
-	expressionSites := make(map[[2]int]int)
+	expressionSites := make(map[[3]int]int)
 	for i, expression := range m.expressions {
 		if expression.left != 0 || expression.right != 0 || (expression.childCount == 0) != (expression.firstChild == 0) || expression.firstChild < 0 || expression.childCount < 0 || expression.childCount > 0 && (expression.firstChild < 1 || expression.firstChild-1+expression.childCount > len(m.children)) {
 			return fmt.Errorf("invalid checked expression child range %+v", expression)
@@ -1342,12 +1463,19 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		if expression.kind >= 8 && expression.kind <= 11 && expression.parameterUse == 0 && expression.boolValue == 0 && expression.operator == 0 && expression.annotation >= 1 && expression.annotation <= len(m.callAnnotations) {
 			annotation := m.callAnnotations[expression.annotation-1]
+			callTargetKind, callTargetArity := 0, -1
+			if annotation.target >= 1 && annotation.target <= len(m.symbols) {
+				callTargetKind, callTargetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
+			}
 			wantAnnotationKind := map[int]int{8: 1, 9: 3, 10: 4, 11: 2}[expression.kind]
 			validPayload = annotation.owner == expression.owner && annotation.checkedType == expression.checkedType && annotation.kind == wantAnnotationKind
 			role, wantChildren := 0, 0
 			switch annotation.kind {
 			case 1:
 				role = 5
+				if callTargetKind == 13 {
+					role = 7
+				}
 			case 2:
 				role = 3
 			case 3:
@@ -1377,7 +1505,7 @@ func validateCheckerManifest(m checkerManifest) error {
 					}
 				}
 				childID := m.children[expression.firstChild-1+childOrdinal].expression
-				validPayload = childID >= 1 && childID < expression.id && m.expressions[childID-1].checkedType == wantType
+				validPayload = childID >= 1 && childID < expression.id && (callTargetArity > 0 && (annotation.kind == 3 || annotation.kind == 4) || m.expressions[childID-1].checkedType == wantType)
 			}
 			if validPayload {
 				callAnnotationOwners[expression.annotation-1]++
@@ -1389,16 +1517,17 @@ func validateCheckerManifest(m checkerManifest) error {
 		validSite := expression.siteKind == 0 && expression.siteSyntax == 0 || expression.siteKind >= 1 && expression.siteKind <= 4 && expression.siteSyntax >= 1
 		if expression.siteKind != 0 {
 			expressionOwners[i]++
-			key := [2]int{expression.siteKind, expression.siteSyntax}
+			key := [3]int{expression.owner, expression.siteKind, expression.siteSyntax}
 			if expressionSites[key] != 0 {
 				return fmt.Errorf("checked expressions %d and %d share site %v", expressionSites[key], expression.id, key)
 			}
 			expressionSites[key] = expression.id
 		}
-		if expression.id != i+1 || ownerKind != 12 || ownerArity != 0 || expression.syntax < 1 || nodes[expression.syntax] || typeSyntax[expression.syntax] || bodySyntax[expression.syntax] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
+		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
+		if expression.id != i+1 || !validOwner || expression.syntax < 1 || nodes[expression.syntax] || typeSyntax[expression.syntax] || bodySyntax[[2]int{expression.owner, expression.syntax}] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
 			return fmt.Errorf("invalid checked expression %+v", expression)
 		}
-		bodySyntax[expression.syntax] = true
+		bodySyntax[[2]int{expression.owner, expression.syntax}] = true
 	}
 	for i, owners := range callAnnotationOwners {
 		if owners != 1 {
@@ -1422,7 +1551,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 	}
 	for _, local := range m.locals {
-		if local.kind == 2 && expressionSites[[2]int{1, local.syntax}] == 0 {
+		if local.kind == 2 && expressionSites[[3]int{local.owner, 1, local.syntax}] == 0 {
 			return fmt.Errorf("local binding %d has no initializer expression", local.id)
 		}
 	}
@@ -1442,11 +1571,13 @@ func validateCheckerManifest(m checkerManifest) error {
 			expression := m.expressions[checkedReturn.expression-1]
 			validExpression = expression.owner == checkedReturn.owner && expression.siteKind == 3 && expression.siteSyntax == checkedReturn.syntax && (expression.kind == 1 || expression.kind == 5 || expression.kind == 6 || expression.kind == 7 || expression.checkedType == result.checkedType)
 		}
-		if checkedReturn.id != i+1 || ownerKind != 12 || ownerArity != 0 || returnOwners[checkedReturn.owner] || checkedReturn.syntax < 1 || nodes[checkedReturn.syntax] || typeSyntax[checkedReturn.syntax] || bodySyntax[checkedReturn.syntax] || !validExpression || result.id == 0 || result.owner != checkedReturn.owner || result.role != 6 {
+		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
+		validRole := result.role == 6 && ownerKind == 12 || result.role == 8 && ownerKind == 13
+		if checkedReturn.id != i+1 || !validOwner || returnOwners[checkedReturn.owner] || checkedReturn.syntax < 1 || nodes[checkedReturn.syntax] || typeSyntax[checkedReturn.syntax] || bodySyntax[[2]int{checkedReturn.owner, checkedReturn.syntax}] || !validExpression || result.id == 0 || result.owner != checkedReturn.owner || !validRole {
 			return fmt.Errorf("invalid checked return %+v", checkedReturn)
 		}
 		returnOwners[checkedReturn.owner] = true
-		bodySyntax[checkedReturn.syntax] = true
+		bodySyntax[[2]int{checkedReturn.owner, checkedReturn.syntax}] = true
 	}
 	for i, owners := range expressionOwners {
 		if owners != 1 {
@@ -1457,7 +1588,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		return fmt.Errorf("manifest has %d diagnostics, want at most one", len(m.diagnostics))
 	}
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind < 1 || diagnostic.kind > 55 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
+		if diagnostic.kind < 1 || diagnostic.kind > 59 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {
@@ -1472,6 +1603,22 @@ func checkerDirectArgs(m checkerManifest, checked checkerType) []checkerTypeArg 
 		return nil
 	}
 	return m.args[checked.first-1 : checked.first-1+checked.count]
+}
+
+func checkedManifestTypeConcrete(m checkerManifest, id int) bool {
+	if id < 1 || id > len(m.types) {
+		return false
+	}
+	checked := m.types[id-1]
+	if checked.kind == 6 {
+		return false
+	}
+	for _, arg := range checkerDirectArgs(m, checked) {
+		if !checkedManifestTypeConcrete(m, arg.checkedType) {
+			return false
+		}
+	}
+	return true
 }
 
 func checkerSourceText(m checkerManifest, inputs map[string]string, source, start, end int) string {
@@ -1705,21 +1852,21 @@ func assertCheckerDiagnostic(t *testing.T, m checkerManifest, kind int, path str
 
 func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	inputs := map[string]string{"a.al": "x"}
-	valid := "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nEND\n"
+	valid := "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nEND\n"
 	if _, err := decodeCheckerManifest(valid, inputs); err != nil {
 		t.Fatalf("valid minimal manifest: %v", err)
 	}
 	malformed := map[string]string{
-		"version 7 envelope":          strings.Replace(valid, "MANIFEST 8", "MANIFEST 7", 1),
-		"record after diagnostics":    "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nD 4 0 0 1 0\nC 1 1 0 1 0 0\nEND\n",
-		"invalid primitive target":    "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nC 1 1 0 0 0 0\nD 4 0 0 1 0\nEND\n",
-		"duplicate canonical type":    "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nC 1 1 0 1 0 0\nC 2 1 0 1 0 0\nD 4 0 0 1 0\nEND\n",
-		"invalid type argument range": "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nC 1 8 0 0 1 1\nD 4 0 0 1 0\nEND\n",
-		"annotation unknown owner":    "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nC 1 1 0 1 0 0\nT 1 1 1 1\nD 4 0 0 1 0\nEND\n",
-		"orphan environment":          "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nN 1 1 0 1\nD 4 0 0 1 0\nEND\n",
-		"truncated expression child":  "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nH 1\nEND\n",
+		"version 8 envelope":          strings.Replace(valid, "MANIFEST 9", "MANIFEST 8", 1),
+		"record after diagnostics":    "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nD 4 0 0 1 0\nC 1 1 0 1 0 0\nEND\n",
+		"invalid primitive target":    "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nC 1 1 0 0 0 0\nD 4 0 0 1 0\nEND\n",
+		"duplicate canonical type":    "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nC 1 1 0 1 0 0\nC 2 1 0 1 0 0\nD 4 0 0 1 0\nEND\n",
+		"invalid type argument range": "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nC 1 8 0 0 1 1\nD 4 0 0 1 0\nEND\n",
+		"annotation unknown owner":    "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nC 1 1 0 1 0 0\nT 1 1 1 1\nD 4 0 0 1 0\nEND\n",
+		"orphan environment":          "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nN 1 1 0 1\nD 4 0 0 1 0\nEND\n",
+		"truncated expression child":  "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nH 1\nEND\n",
 	}
-	bodyPrefix := "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
+	bodyPrefix := "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
 	validUnaryBody := bodyPrefix + "E 1 1 6 1 1 1 0 0 0 0 0 0 0 0 0\nE 2 1 8 6 1 0 0 0 0 0 1 1 1 3 7\nH 1 1\nR 1 1 7 2 2\nEND\n"
 	if _, err := decodeCheckerManifest(validUnaryBody, inputs); err != nil {
 		t.Fatalf("valid unary body manifest: %v", err)
@@ -1729,7 +1876,11 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["invalid environment parent"] = strings.Replace(validUnaryBody, "N 1 1 0 1", "N 1 1 1 1", 1)
 	malformed["invalid environment binding"] = strings.Replace(validUnaryBody, "N 1 1 0 1", "N 1 1 0 2", 1)
 	malformed["binding type disagreement"] = strings.Replace(validUnaryBody, "E 1 1 6 1 1 1", "E 1 1 6 1 2 1", 1)
-	validCallBody := "ALDER-CHECKER-MANIFEST 8\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nQ 1 1 1 1 1 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nEND\n"
+	malformed["missing concrete instance record"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0\n", "", 1)
+	malformed["instance declaration mismatch"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 2 0 0 0", 1)
+	malformed["instance argument range"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 1 1 0", 1)
+	malformed["instance discovery cycle"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 0 0 1", 1)
+	validCallBody := "ALDER-CHECKER-MANIFEST 9\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validCallBody, inputs); err != nil {
 		t.Fatalf("valid call body manifest: %v", err)
 	}

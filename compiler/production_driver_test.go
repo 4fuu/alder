@@ -65,7 +65,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if firstStatus != 0 || secondStatus != 0 || first != second {
 		t.Fatalf("valid production run is not deterministic: status=%d/%d", firstStatus, secondStatus)
 	}
-	if !strings.HasPrefix(first, "ALDER-CHECKER-MANIFEST 8\n") || !strings.Contains(first, "\nY ") || !strings.Contains(first, "\nQ ") || !strings.Contains(first, "\nE ") || strings.Contains(first, "\nD ") || !strings.HasSuffix(first, "END\n") {
+	if !strings.HasPrefix(first, "ALDER-CHECKER-MANIFEST 9\n") || !strings.Contains(first, "\nY ") || !strings.Contains(first, "\nI ") || !strings.Contains(first, "\nQ ") || !strings.Contains(first, "\nE ") || strings.Contains(first, "\nD ") || !strings.HasSuffix(first, "END\n") {
 		t.Fatalf("valid input did not reach checker output:\n%s", first)
 	}
 
@@ -74,7 +74,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	}{
 		{"lex.al", ";", "ALDER-TOKEN-MANIFEST 1\n", "\nD LEX0001 "},
 		{"parse.al", "type Broken { value U64 }\n", "ALDER-PARSER-MANIFEST 1\n", "\nD SYN0001 "},
-		{"check.al", "type Broken { value: Missing }\n", "ALDER-CHECKER-MANIFEST 8\n", "\nD 4 "},
+		{"check.al", "type Broken { value: Missing }\n", "ALDER-CHECKER-MANIFEST 9\n", "\nD 4 "},
 	}
 	for _, fixture := range rejections {
 		t.Run(fixture.name, func(t *testing.T) {
