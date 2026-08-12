@@ -284,6 +284,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, interpretationFiles, []string{"interpretation.al"}, false), interpretationFiles)
 	ffiGood := map[string]string{"ffi.al": "import c primitive_ffi: fn(Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Unit, Ptr(F64)) -> Unit\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, ffiGood, []string{"ffi.al"}, false), ffiGood)
+	functionNameGood := map[string]string{"functions.al": "fn helper() -> U64 {}\nfn use(T: type, helper: T, T: T) -> T {}\nfn main(value: U64) -> Bool {}\n"}
+	parseCheckerManifest(t, runAlderChecker(t, exe, functionNameGood, []string{"functions.al"}, false), functionNameGood)
 
 	rejects := []struct {
 		name, text, marker, relatedMarker string
@@ -365,6 +367,12 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "ffi-slice.al", text: "import c bad: fn([U8]) -> U64\n", kind: 15, marker: "import"},
 		{name: "ffi-domain.al", text: "import c bad: fn(Domain) -> U64\n", kind: 15, marker: "import"},
 		{name: "ffi-declared.al", text: "type A { x: U64 }\nimport c bad: fn(A) -> U64\n", kind: 15, marker: "import"},
+		{name: "duplicate-function-parameter.al", text: "fn f(x: U64, x: U8) -> Unit {}\n", kind: 16, marker: "U8"},
+		{name: "reserved-function-parameter-builtin.al", text: "fn f(len: U64) -> Unit {}\n", kind: 17, marker: "U64"},
+		{name: "reserved-function-parameter-prefix.al", text: "fn f(__s0_private: U64) -> Unit {}\n", kind: 17, marker: "U64"},
+		{name: "reserved-function-parameter-type.al", text: "type User {}\nfn f(User: U64) -> Unit {}\n", kind: 17, marker: "U64"},
+		{name: "reserved-parameter-before-result.al", text: "fn f(len: U64) -> Missing {}\n", kind: 17, marker: "U64"},
+		{name: "function-parameter-type-before-name.al", text: "fn f(x: U64, x: Missing) -> Unit {}\n", kind: 4, marker: "Missing"},
 	}
 	cycleFiles := map[string]string{"z.al": "type B { x: A }\n", "a.al": "type A { x: B }\n"}
 	cycleOne := runAlderChecker(t, exe, cycleFiles, []string{"z.al", "a.al"}, true)
@@ -733,7 +741,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		return fmt.Errorf("manifest has %d diagnostics, want at most one", len(m.diagnostics))
 	}
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind < 1 || diagnostic.kind > 15 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
+		if diagnostic.kind < 1 || diagnostic.kind > 17 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {
@@ -987,7 +995,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"noncanonical integer":       "ALDER-CHECKER-MANIFEST 2\nS 00 612e616c 1\nEND\n",
 		"nonsequential ID":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
 		"truncated diagnostic":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1\nEND\n",
-		"unknown diagnostic kind":    "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 16 0 0 1 0\nEND\n",
+		"unknown diagnostic kind":    "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 18 0 0 1 0\nEND\n",
 		"invalid related flag":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
 		"invalid argument range":     "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
 		"malformed declaration item": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",

@@ -351,8 +351,9 @@ map, and recursive-specialization representation restrictions. Binding traversal
 restores caller context, compares `String` with its `[U8]` semantic form, and
 memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
-also restricts C import signatures to primitives and `Ptr(primitive)`. These
-checks are preparatory: bodies, inference,
+also restricts C import signatures to primitives and `Ptr(primitive)`, and
+rejects duplicate or reserved function runtime parameter names before body
+checking. These checks are preparatory: bodies, inference,
 monomorphization, MIR lowering, the full checker, and the complete frontend
 remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet

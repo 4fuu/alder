@@ -570,6 +570,17 @@ fn reserved_symbol(state: State, node: SyntaxRec) -> Bool {
     return node_word(state, node, "Bool") || node_word(state, node, "I8") || node_word(state, node, "I16") || node_word(state, node, "I32") || node_word(state, node, "I64") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64") || node_word(state, node, "F32") || node_word(state, node, "F64") || node_word(state, node, "Unit") || node_word(state, node, "String") || node_word(state, node, "Option") || node_word(state, node, "Result") || node_word(state, node, "Map") || node_word(state, node, "Ptr") || node_word(state, node, "Domain") || node_word(state, node, "DomainMark") || node_word(state, node, "__s0_Buffer") || node_word(state, node, "__s0_Error") || node_word(state, node, "len") || node_word(state, node, "range") || node_word(state, node, "Get") || node_word(state, node, "Set") || node_word(state, node, "Remove") || node_word(state, node, "None") || node_word(state, node, "Some") || node_word(state, node, "Ok") || node_word(state, node, "Err")
 }
 
+fn reserved_value_name(state: State, store: CheckStore, node: SyntaxRec) -> Bool {
+    if reserved_symbol(state, node) { return true }
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if (symbol.kind == 2 || symbol.kind == 3) && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) { return true }
+        at = at + 1
+    }
+    return false
+}
+
 fn check_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec, related_source: U64, related_start: U64, related_end: U64) -> Result(CheckResult, __s0_Error) {
     let item = CheckDiagRec(kind: kind, source: node.source, start: node.name_start, end: node.name_end, related_source: related_source, related_start: related_start, related_end: related_end)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
@@ -859,6 +870,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     var actual_role = role
     if role == 5 && child.kind != 13 { actual_role = 6 }
     var actual_ordinal: U64 = 0
+    var duplicate_parameter = false
     var use_at: U64 = 0
     while use_at < __s0_buffer_len(DeclTypeUseRec, current.uses) {
         let prior = __s0_buffer_get(DeclTypeUseRec, current.uses, use_at)
@@ -868,6 +880,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
                 if actual_role == 2 { duplicate_kind = 7 }
                 return check_decl_fail(d, state, parse, current, duplicate_kind, owner)
             }
+            if actual_role == 5 && same_name(state, child.source, child.name_start, child.name_end, prior.source, prior.name_start, prior.name_end) { duplicate_parameter = true }
             actual_ordinal = actual_ordinal + 1
         }
         use_at = use_at + 1
@@ -903,6 +916,12 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
                 CheckBad(value) => true
             } { return Ok(validated) }
         }
+    }
+    if actual_role == 5 {
+        let checked = __s0_buffer_get(CheckedTypeRec, next.types, __s0_buffer_len(CheckedTypeRec, next.types) - 1)
+        let diag_node = type_diag_node(state, parse, checked)
+        if duplicate_parameter { return check_fail(d, next, 16, diag_node, 0, 0, 0) }
+        if reserved_value_name(state, next, child) { return check_fail(d, next, 17, diag_node, 0, 0, 0) }
     }
     var name_start = child.name_start
     var name_end = child.name_end

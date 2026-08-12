@@ -111,6 +111,11 @@ fn map(
 }
 ```
 
+Runtime parameter names are unique within the function and may not collide with
+declared type names, builtin types or values, builtin variants, or the reserved
+`__s0_` prefix. These name checks follow signature type validation and precede
+body checking.
+
 A call may omit the complete leading sequence of type arguments when all of them can be inferred from runtime arguments and the expected result type:
 
 ```alder
