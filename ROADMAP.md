@@ -385,10 +385,13 @@ flow, missing-return analysis, inference, monomorphization, MIR lowering, the
 full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
-private conformance protocols; these slices do not open a second frontend,
-replace the M5.3 declaration spike yet, constitute a complete
-frontend, or satisfy any self-hosting claim. Grouping nodes follow the Go
-semantic AST and are erased; the lossless token stream retains their delimiters.
+private conformance protocols. The fixed production entry now loads its explicit
+host snapshot and runs the shared lexer, parser, and current checker in order,
+stopping at the first failed phase and emitting that phase's private manifest.
+This integration is execution evidence only; these slices do not open a second
+frontend, replace the M5.3 declaration spike yet, constitute a complete frontend,
+or satisfy any self-hosting claim. Grouping nodes follow the Go semantic AST and
+are erased; the lossless token stream retains their delimiters.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go

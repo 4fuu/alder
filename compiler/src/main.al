@@ -8,26 +8,147 @@ fn storage_error() -> I32 {
     return 3
 }
 
-fn finish(result: LexResult) -> I32 {
-    return match result {
-        Good(state) => finish_state(state, false)
-        Bad(state) => finish_state(state, true)
+fn finish_check(state: State, result: CheckResult) -> I32 {
+    let failed = match result {
+        CheckGood(store) => false
+        CheckBad(store) => true
+    }
+    let store = match result {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if !emit_check_manifest(state, store) { return 4 }
+    if failed { return 1 }
+    return 0
+}
+
+fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
+    return match check_parsed(d, output.state, output.store, store) {
+        Err(error) => storage_error()
+        Ok(result) => finish_check(output.state, result)
     }
 }
 
-fn finish_state(state: State, failed: Bool) -> I32 {
+fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), expressions: __s0_Buffer(CheckedExprRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 {
+    return match __s0_buffer_new(CheckDiagRec, d) {
+        Err(error) => storage_error()
+        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, uses: uses, locals: locals, expressions: expressions, returns: returns, diagnostics: diagnostics))
+    }
+}
+
+fn init_check_returns(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), expressions: __s0_Buffer(CheckedExprRec)) -> I32 {
+    return match __s0_buffer_new(CheckedReturnRec, d) {
+        Err(error) => storage_error()
+        Ok(returns) => init_check_diagnostics(d, output, symbols, type_params, types, type_args, uses, locals, expressions, returns)
+    }
+}
+
+fn init_check_expressions(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec)) -> I32 {
+    return match __s0_buffer_new(CheckedExprRec, d) {
+        Err(error) => storage_error()
+        Ok(expressions) => init_check_returns(d, output, symbols, type_params, types, type_args, uses, locals, expressions)
+    }
+}
+
+fn init_check_locals(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), uses: __s0_Buffer(DeclTypeUseRec)) -> I32 {
+    return match __s0_buffer_new(LocalRec, d) {
+        Err(error) => storage_error()
+        Ok(locals) => init_check_expressions(d, output, symbols, type_params, types, type_args, uses, locals)
+    }
+}
+
+fn init_check_uses(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64)) -> I32 {
+    return match __s0_buffer_new(DeclTypeUseRec, d) {
+        Err(error) => storage_error()
+        Ok(uses) => init_check_locals(d, output, symbols, type_params, types, type_args, uses)
+    }
+}
+
+fn init_check_type_args(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec)) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => storage_error()
+        Ok(type_args) => init_check_uses(d, output, symbols, type_params, types, type_args)
+    }
+}
+
+fn init_check_types(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec)) -> I32 {
+    return match __s0_buffer_new(CheckedTypeRec, d) {
+        Err(error) => storage_error()
+        Ok(types) => init_check_type_args(d, output, symbols, type_params, types)
+    }
+}
+
+fn init_check_type_params(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec)) -> I32 {
+    return match __s0_buffer_new(TypeParamRec, d) {
+        Err(error) => storage_error()
+        Ok(type_params) => init_check_types(d, output, symbols, type_params)
+    }
+}
+
+fn init_check_symbols(d: Domain, output: ParseOutput) -> I32 {
+    return match __s0_buffer_new(SymbolRec, d) {
+        Err(error) => storage_error()
+        Ok(symbols) => init_check_type_params(d, output, symbols)
+    }
+}
+
+fn finish_parse(d: Domain, result: ParseResult) -> I32 {
+    return match result {
+        ParseGood(output) => init_check_symbols(d, output)
+        ParseBad(output) => finish_parse_failure(output.state, output.store)
+        ParseLexBad(output) => finish_lex_failure(output.state)
+    }
+}
+
+fn finish_parse_failure(state: State, store: ParseStore) -> I32 {
+    if !emit_parse_manifest(state, store) { return 4 }
+    return 1
+}
+
+fn finish_lex_failure(state: State) -> I32 {
     if !emit(state) { return 4 }
-    if failed { return 1 }
-    return 0
+    return 1
+}
+
+fn run_parse(d: Domain, state: State, store: ParseStore) -> I32 {
+    return match parse_sources(d, state, store) {
+        Err(error) => storage_error()
+        Ok(result) => finish_parse(d, result)
+    }
+}
+
+fn init_parse_diagnostics(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64)) -> I32 {
+    return match __s0_buffer_new(ParseDiagRec, d) {
+        Err(error) => storage_error()
+        Ok(diagnostics) => run_parse(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics))
+    }
+}
+
+fn init_parse_roots(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec)) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => storage_error()
+        Ok(roots) => init_parse_diagnostics(d, state, nodes, links, roots)
+    }
+}
+
+fn init_parse_links(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec)) -> I32 {
+    return match __s0_buffer_new(SyntaxLinkRec, d) {
+        Err(error) => storage_error()
+        Ok(links) => init_parse_roots(d, state, nodes, links)
+    }
+}
+
+fn init_parse_nodes(d: Domain, state: State) -> I32 {
+    return match __s0_buffer_new(SyntaxRec, d) {
+        Err(error) => storage_error()
+        Ok(nodes) => init_parse_links(d, state, nodes)
+    }
 }
 
 fn run(d: Domain, state: State) -> I32 {
     return match load_sources(d, state) {
         Err(error) => storage_error()
-        Ok(loaded) => match lex_sources(d, loaded, 0) {
-            Err(error) => storage_error()
-            Ok(result) => finish(result)
-        }
+        Ok(loaded) => init_parse_nodes(d, loaded)
     }
 }
 
