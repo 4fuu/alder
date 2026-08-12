@@ -157,23 +157,21 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sources []frontend.Source
-	for _, name := range compilerSourceManifest {
-		if name != "main.al" {
-			b, e := os.ReadFile(filepath.Join(root, "compiler", "src", name))
-			if e != nil {
-				t.Fatal(e)
-			}
-			sources = append(sources, frontend.Source{ID: frontend.SourceID(len(sources) + 1), Path: "compiler/src/" + name, Text: string(b)})
+	for _, name := range checkerSourceManifest {
+		b, e := os.ReadFile(filepath.Join(root, "compiler", "src", name))
+		if e != nil {
+			t.Fatal(e)
 		}
+		sources = append(sources, frontend.Source{ID: frontend.SourceID(len(sources) + 1), Path: "compiler/src/" + name, Text: string(b)})
 	}
 	checkerText := strings.ReplaceAll(checkerWrapper, " { Err", " {\n Err")
 	checkerText = strings.ReplaceAll(checkerText, " 3 Ok", " 3\n Ok")
 	checkerText = strings.ReplaceAll(checkerText, " Err(", "\n Err(")
 	checkerText = strings.ReplaceAll(checkerText, " Ok(", "\n Ok(")
 	sources = append(sources, frontend.Source{ID: 99, Path: "compiler/test/checker_main.al", Text: checkerText})
-	// This slice compiles the complete fixed production core except the production
-	// driver, which its phase-specific wrapper replaces. Round-trip and verify its
-	// textual MIR before generating the C used for strict direct execution.
+	// This phase-slice closure ends at the checker and deliberately excludes later
+	// MIR consumers. Round-trip and verify its textual MIR before generating the C
+	// used for strict direct execution.
 	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatalf("compile checker MIR: result=%+v error=%v", compiled, err)
