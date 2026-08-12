@@ -404,6 +404,13 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 9. safe/raw pointer boundary validation;
 10. backend precondition validation.
 
+The independent Alder implementation currently provides phases 1–3 over raw
+`MirStore` records with stable numeric diagnostics and first-failing-phase
+orchestration. It does not yet provide phases 4–10 or authorize production C
+emission. Because the frozen flat store contains no module header record, its
+entry point receives the MIR format version alongside the store; the store's
+IDs, kinds, ownership, and type-part encoding remain unchanged.
+
 Initial conservative rules:
 
 - `cleanup_scope` and `cleanup_id` handles keep direct SSA identity: they may only be cleanup instruction results and direct operands, and may not appear in function signatures, aggregate or enum fields/payloads, block parameters, locals, or load/store propagation;

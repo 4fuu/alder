@@ -28,6 +28,11 @@ var compilerSourceManifest = []string{
 	"model.al",
 	"output.al",
 	"parser.al",
+	"verify_analysis.al",
+	"verify_model.al",
+	"verify_phase1.al",
+	"verify_phase2.al",
+	"verify_phase3.al",
 }
 
 // Slice conformance harnesses compile their exact fixed dependency closures;

@@ -408,6 +408,13 @@ compiler (`alder0`) produces C for the Alder compiler; a system C compiler
 builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
 and without skipping or repairing MIR verification.
 
+The independent Alder MIR consumer now provides verifier phases 1–3 for raw
+MIR stores: integrity and reciprocal-ID checks, type/layout/declaration checks,
+and CFG target, switch, reachability, and edge-arity checks. Its stable numeric
+diagnostics are separate from source diagnostics, and orchestration stops after
+the first failing phase. Phases 4–10 and safe production C emission remain
+unavailable.
+
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
 #### Bootstrap execution policy
