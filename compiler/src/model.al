@@ -113,15 +113,25 @@ type TypeParamRec {
     name_end: U64
 }
 
-// Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
-// 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
-// 10 Result, 11 Map, 12 Ptr, and 13 __s0_Buffer.
+// Checked type kinds: 1 primitive, 3 Domain, 4 DomainMark, 5 __s0_Error,
+// 6 type parameter, 7 declared type, 8 slice, 9 Option, 10 Result, 11 Map,
+// 12 Ptr, and 13 __s0_Buffer. Primitive targets 1..12 identify Bool, I8,
+// I16, I32, I64, U8, U16, U32, U64, F32, F64, and Unit directly. String is
+// normalized to the canonical slice-of-U8 structure. Canonical records have no
+// source ownership (syntax is zero); source occurrences are retained by
+// CheckedTypeAnnotationRec.
 type CheckedTypeRec {
     kind: U64
     syntax: U64
     target: U64
     first_arg: U64
     arg_count: U64
+}
+
+type CheckedTypeAnnotationRec {
+    owner: U64
+    syntax: U64
+    checked_type: U64
 }
 
 // Semantic declaration-item roles: 1 struct field, 2 enum variant (including
@@ -144,9 +154,10 @@ type DeclTypeUseRec {
 
 // Checked expressions form an append-only postorder graph per nongeneric
 // function. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
-// decoded string literals, and locals. parameter_use names the role-5
-// DeclTypeUseRec or LocalRec for kinds 1 and 5; bool_value is used only by kind
-// 2. Kind 6 is unary and names left; kind 7 is binary and names left and right.
+// decoded string literals, and locals. parameter_use names the stable LocalRec
+// binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
+// are unary and binary. Ordered children are stored in one
+// flattened child buffer rather than encoded by operator arity.
 // Operator IDs are 1 `-`, 2 `!`, 3 `+`, 4 `-`, 5 `*`, 6 `/`, 7 `%`, 8 `<<`,
 // 9 `>>`, 10 `==`, 11 `!=`, 12 `<`, 13 `<=`, 14 `>`, 15 `>=`, 16 `&&`, and
 // 17 `||`. Child IDs always precede their parent. A root has site_kind 1 for a
@@ -165,9 +176,16 @@ type CheckedExprRec {
     bool_value: U64
     left: U64
     right: U64
+    annotation: U64
+    first_child: U64
+    child_count: U64
     operator: U64
     site_kind: U64
     site_syntax: U64
+}
+
+type CheckedExprChildRec {
+    expression: U64
 }
 
 type CheckedReturnRec {
@@ -177,19 +195,29 @@ type CheckedReturnRec {
     result_use: U64
 }
 
-// Local bindings are recorded per function in canonical statement order.
-// syntax is the kind-15/16 binding statement node, mutable is 0 (let) or 1
-// (var), and checked_type is the resolved annotation. Unannotated bindings
-// remain deferred until the inference slice; field and index assignment
-// targets remain deferred until the aggregate-access slice.
+// Bindings are recorded per function in canonical declaration order. kind is 1
+// for a runtime parameter or 2 for a local; syntax identifies the declaration,
+// mutable is 0 (let/parameter) or 1 (var), and checked_type is canonical.
+// Field and index assignment targets remain deferred until the aggregate-access
+// slice.
 type LocalRec {
     owner: U64
+    kind: U64
     syntax: U64
     source: U64
     name_start: U64
     name_end: U64
     mutable: U64
     checked_type: U64
+}
+
+// Each persistent environment adds one binding to its parent. The current
+// flat body has one deterministic chain per function; nested scopes can later
+// branch that chain without changing expression binding references.
+type EnvironmentRec {
+    owner: U64
+    parent: U64
+    binding: U64
 }
 
 // Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
