@@ -1,6 +1,10 @@
 # Roadmap
 
-This roadmap separates committed near-term work from longer-term direction. Dates are intentionally omitted until implementation velocity and semantic risk are better understood.
+This roadmap orders the shortest path to source self-hosting and then to the
+complete [Alder 1.0 product contract](docs/alder-1.0.md). Dates are
+intentionally omitted until implementation velocity and semantic risk are
+better understood. A planned milestone is a required implementation gate, not
+a claim that its documented 1.0 features work today.
 
 ## Project Principles
 
@@ -15,11 +19,13 @@ This roadmap separates committed near-term work from longer-term direction. Date
 
 ### Milestone 0: Design Baseline
 
-Status: **in progress**
+Status: **complete as the Alder 1.0 documentation baseline**
 
 Deliverables:
 
 - document language goals, non-goals, and unresolved semantics;
+- freeze the required Alder 1.0 language, async, standard-library, C interop,
+  module/package/build, xmake-provider, tooling, and release boundaries;
 - document compile-time `type` values, type application, inference, and the monomorphization boundary;
 - define the first versioned Alder MIR vocabulary;
 - define the C11 lowering contract and undefined-behavior policy;
@@ -32,6 +38,11 @@ Exit criteria:
 - storage-domain and cleanup invariants can be checked without consulting source syntax;
 - the C backend document explains how safe MIR avoids C undefined behavior;
 - open questions are explicit rather than hidden behind examples.
+
+The baseline is intentionally amendable: an explicit design decision may
+change it before 1.0, but must update its owning document, decision register,
+examples, roadmap, and later executable tests together. Documentation status
+does not imply implementation availability.
 
 ### Milestone 1: MIR Toolkit
 
@@ -114,7 +125,7 @@ Status: **complete**
 Deliverables (implemented in the `frontend` Go package):
 
 - a deterministic lexer, parser, type checker, and MIR emitter for the
-  single-file source subset defined in `docs/language-design.md` (Alder S0):
+  single-file source subset now isolated in `docs/s0-language.md` (Alder S0):
   functions, primitives, structs, enums with `match`, slices and `String`,
   `Option`/`Result` with `try`, a fixed-capacity `Map` helper, bootstrap
   domain intrinsics, callback-bearing `using` cleanup, and direct concrete C
@@ -380,6 +391,18 @@ and without skipping or repairing MIR verification.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
+#### Bootstrap execution policy
+
+M5.4 advances by the smallest checker/lowering slices that make the compiler
+compile itself. A finding blocks this path when it demonstrates source
+miscompilation, unsafe generated behavior, malformed compiler state consumed as
+valid, nondeterministic bootstrap output, compiler-scale nontermination or
+resource explosion, or failure of the fixed explicit compiler corpus. Narrow
+diagnostic wording, redundant decoder hardening, and coverage that does not
+challenge the active semantic slice may be recorded for its owning later gate
+rather than stalling self-hosting. This policy never permits a known safety or
+semantic correctness counterexample to be declared complete.
+
 ### Milestone 5.5: Fixed Point and Source Bootstrap
 
 Status: **planned**
@@ -394,69 +417,157 @@ Only after this gate is the Go bootstrap compiler frozen except for correctness
 and bootstrap maintenance. This is a reproducible **source** bootstrap claim;
 bit-identical native binaries require a separately pinned native toolchain.
 
-## Milestone 6: Local Modules and Build Graph
+## Alder 1.0 Implementation Gates
+
+M5.5 produces a trustworthy compiler bootstrap, not the full language. Every
+following milestone is required before the project may claim Alder 1.0. Their
+contracts are already frozen in `docs/`; implementation may amend a contract
+only through the documented design-decision process.
+
+## Milestone 6: Local Modules and Deterministic Build Graph
 
 Status: **planned after self-hosting**
 
-Define module names, imports, visibility, cycle policy, manifest version,
-target/profile/triple, deterministic source enumeration and output layout, and
-compiler-coupled sysroot behavior. Establish shared workspace snapshots and a
-deterministic build-plan boundary used by CLI, tests, packages, and later LSP.
-Local multi-module build/check/test must work without network access before
-remote packages are introduced.
+Implement the one-file/one-module mapping, required `module`, explicit imports,
+private-by-default visibility, `pub`/re-export, cycle rejection, manifest v1,
+targets/profiles/triples, deterministic source enumeration and output layout,
+and compiler-coupled sysroot behavior from
+[Modules and Builds](docs/modules-and-builds.md). Establish the immutable
+workspace snapshot and versioned build-plan boundary shared by CLI, tests,
+packages, documentation, and later LSP.
 
-## Milestone 7: Minimal Standard Library
+Exit requires local multi-module `check`, `build`, `run`, and test-plan
+construction without network access; path/order permutations must produce
+identical graphs, diagnostics, MIR, and C. The compiler core still receives only
+explicit sources and never scans the filesystem.
 
-Status: **planned after local modules**
+## Milestone 7: Complete 1.0 Language and Memory Model
 
-Ship a toolchain-versioned sysroot containing ordinary Alder packages for
-bytes, UTF-8 text, settled collections, paths, files, process execution, and a
-minimal test API. OS calls stay in audited `unsafe c` platform wrappers. Public
-APIs must not expose `__s0_*`, `Domain`, `DomainMark`, the fixed-capacity S0 Map,
-or callback-bearing bootstrap cleanup forms.
+Status: **planned after local modules; may be sliced in dependency order**
 
-## Milestone 8: Canonical Formatter
+Implement the remaining source semantics in [Syntax](docs/syntax.md),
+[Language Semantics](docs/language-semantics.md),
+[Memory and Resources](docs/memory-and-resources.md), and
+[Traits and Closures](docs/traits-and-closures.md): owned UTF-8 `String` and
+`Bytes`, fixed arrays, ordinary `Vec`/ordered `Map`/`Set`, mutable slices,
+inherent methods, static coherent traits, safe closures, inferred storage,
+affine owners, `Cleanup`/`AsyncCleanup`, and the source `Table(T)`/`T.Id`
+surface.
 
-Status: **planned after lossless syntax stabilizes**
+Exit requires focused acceptance/rejection tests for value independence,
+owner transfer, view escape/overlap, storage retention fallback, cross-domain
+copies, cleanup on every normal control exit, table staleness, trait coherence,
+closure capture, generic monomorphization, and compiler-scale layered DAGs. The
+public language and generated MIR/C may no longer expose `__s0_*`, `Domain`,
+`DomainMark`, fixed S0 Map/Buffer, `String = [U8]`, or callback-bearing bootstrap
+cleanup forms.
 
-Implement `alder fmt` over lossless syntax rather than the semantic AST. Exit
-requires idempotence, comment/trivia preservation, semantic equivalence for
-newline-sensitive syntax, pinned malformed-input behavior, and a non-writing
-`--check` mode.
+## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-## Milestone 9: Git Package Management
+Status: **planned after the 1.0 resource/type model**
 
-Status: **planned after local modules and sysroot**
+Implement target-aware `import c` binding blocks, raw C types, header/toolchain
+probes, by-value verified records, explicit shims, safe ownership/retention
+wrappers, C exports, and callback owners from
+[C Interoperability](docs/c-interop.md). Build the provider-free hosted sysroot
+foundation: formatting, Unicode text/bytes, collections, paths, I/O/files,
+environment, processes, time, random, math, testing primitives, and audited OS
+wrappers from [Standard Library](docs/standard-library.md).
 
-Start with exact-revision Git dependency graphs, an authoritative `alder.lock`,
-independent canonical-tree hashes, an immutable content-addressed cache, and
-`--locked`, `--offline`, and `--frozen` operation. Network is limited to
-explicit add/update/fetch commands. Registries, publishing, semver solving,
-submodules, Git LFS, and arbitrary lifecycle scripts remain deferred until
-their identity and trust rules are separately approved.
+Exit requires binding mismatch rejection and strict per-target ABI tests for
+layouts, null/bounds/alignment, integer conversion, borrowed/retained buffers,
+exactly-once release, callbacks and foreign threads. Standard APIs expose only
+safe values, affine owners, `Result`, and locally audited `unsafe c`; no S0 C
+bridge appears publicly.
 
-## Milestone 10: Managed Native Provider
+## Milestone 9: Async Runtime and Structured Concurrency
 
-Status: **planned after locked Alder packages**
+Status: **required before Alder 1.0**
+
+Implement `async fn`, `await`, state-machine MIR/lowering, affine `TaskGroup`
+and `Task(T)`, structured cancellation with async cleanup, multithread and local
+executors, channels, synchronization, atomics, timers, async files/sockets, and
+the bounded blocking-C bridge defined in
+[Async and Structured Concurrency](docs/async.md).
+
+Exit requires data-race rejection, nested join/cancel/cleanup tests, channel
+backpressure/FIFO tests, task-transfer and thread-affinity checks, high task
+counts with bounded stack/storage, blocking C completion after cancellation,
+and sanitizer/race coverage on supported hosts. No child may outlive its group
+and no detached task surface may be introduced.
+
+## Milestone 10: Batteries-Included Standard Library Completion
+
+Status: **required before Alder 1.0**
+
+Complete the [Standard Library](docs/standard-library.md) with async/sync
+networking, DNS, TCP/UDP, URL, HTTP/1.1 and HTTP/2, TLS with secure defaults,
+JSON, encodings, CLI parsing, logging, signals, async processes, and all required
+cross-platform error contracts. Ship versioned Unicode, timezone, certificate,
+and native provenance data with the toolchain.
+
+Exit requires offline use after installation and complete Linux/macOS/Windows
+behavior suites for paths, Unicode, I/O, cancellation, networking, TLS
+verification, bounded parsers, process behavior, and unsupported capabilities.
+HTTP/TLS/JSON are toolchain libraries, not an implicit network download.
+
+## Milestone 11: Formatter, Test/Doc Tools, and Language Server
+
+Status: **required distribution tooling before Alder 1.0**
+
+Implement `alder fmt` over lossless syntax, the isolated deterministic test
+runner (including async tests), `alder doc`, and baseline `alder lsp` over the
+same snapshot, resolver, compiler service, diagnostics, and build plan.
+
+Exit requires formatter idempotence/trivia and malformed-input behavior,
+machine-readable stable test results, compiled documentation examples,
+CLI/LSP diagnostic and formatting parity, UTF-8/UTF-16 conversion, overlay
+isolation, cancellation/stale-result suppression, and no implicit fetch.
+
+## Milestone 12: Locked Git Package Management
+
+Status: **required before Alder 1.0**
+
+Implement workspace/path and exact-revision Git dependency graphs, the
+authoritative `alder.lock`, canonical-tree hashes independent of Git object
+identity, immutable content-addressed caches, and `--locked`, `--offline`, and
+`--frozen` modes from [Modules and Builds](docs/modules-and-builds.md). Network
+is limited to explicit add/update/fetch commands.
+
+Exit requires deterministic transitive resolution, content/path ambiguity
+rejection, cache corruption detection, frozen offline builds, and hostile or
+malformed repository tests. Registries, publishing, general semver solving,
+submodules, Git LFS, and arbitrary lifecycle scripts remain outside 1.0.
+
+## Milestone 13: Managed Native Provider
+
+Status: **required default integration before Alder 1.0**
 
 Provide managed, version-pinned xmake/xrepo as the default replaceable C/C++
-provider. Alder remains authoritative for package identity and locking. Pin the
-xmake binary, recipe repository and file, sources, configs, target, and
-toolchain identity; separate network-enabled fetch from offline build; disable
-implicit system packages in reproducible mode; and treat recipes as executable
-native code. The compiler bootstrap and standard library must not require
-xmake.
+provider below Alder's authoritative package/build-plan boundary. Pin the
+xmake binary, recipe repository/file, sources, patches, configs, target,
+toolchain, outputs, licenses, and hashes; separate network fetch from offline
+build; disable implicit system packages in frozen mode; and treat recipes as
+trusted executable native code.
 
-## Milestone 11: Language Server
+Exit requires repeatable locked native plans and artifacts with a pinned
+toolchain, offline rebuild, provenance output, system-provider drift reporting,
+and identical Alder semantics through an alternate/source provider. The
+compiler bootstrap and standard library must not require xmake.
 
-Status: **planned after workspace, diagnostics, and formatter**
+## Milestone 14: Alder 1.0 Qualification
 
-Implement `alder lsp` as an adapter over the same immutable workspace snapshots,
-resolver, syntax, compiler service, structured diagnostics, and formatter used
-by the CLI. Begin with file-granularity analysis. LSP must not fetch packages or
-native dependencies implicitly. Exit requires CLI/LSP diagnostic parity,
-UTF-8/UTF-16 conversion tests, overlay isolation, cancellation and stale-result
-suppression, formatting parity, and deterministic repeated sessions.
+Status: **final release gate**
+
+Satisfy every item in [Alder 1.0](docs/alder-1.0.md): fixed-point source
+bootstrap; complete language/stdlib/tooling; tier-1 Linux x86-64/AArch64, macOS
+x86-64/Apple silicon, and Windows x86-64 qualification; deterministic semantic
+artifacts; strict C11; analyzers/sanitizers/race tests where supported;
+allocation and malformed-input failures; compiler/runtime scale budgets; API
+snapshots; compatibility/edition policy; and clean offline source/binary
+distribution acceptance.
+
+No earlier milestone may call the language or toolchain Alder 1.0.
 
 ## Deferred Work
 
@@ -471,7 +582,8 @@ The following items are not part of the current implementation scope:
 - remote build and cache services;
 - stable native ABI promises beyond intentional C interfaces;
 - bit-reproducible native binaries without a pinned native toolchain;
-- production readiness or performance claims.
+- dynamic trait objects and specialization;
+- detached fire-and-forget tasks.
 
 ## LLVM Reconsideration Gate
 

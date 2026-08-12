@@ -11,18 +11,33 @@ Current implementation work is limited to:
 - Alder MIR representation, textual format, verification, and tests;
 - deterministic lowering from verified MIR to conservative C11;
 - the minimal C runtime required by that lowering;
-- bootstrap failure semantics, compiler-scale storage, and safe host capability
-  work required by active Roadmap Milestone 5.3;
+- the Alder-written compiler core and fixed-point bootstrap work required by
+  active Roadmap Milestones 5.4 and 5.5;
 - design and bootstrap infrastructure directly supporting those goals.
+
+The full Alder 1.0 product is a frozen documentation target. Do not implement
+later modules, async, package, standard-library, xmake-provider, or tooling
+milestones ahead of their roadmap gate unless an explicit scope decision
+changes the sequence.
 
 LLVM is explicitly out of scope. Do not add LLVM dependencies, bindings, build flags, IR concepts, or a placeholder backend without a new approved project decision.
 
 ## Documentation Ownership
 
-- `docs/language-design.md`: user-facing language semantics and open questions.
+- `docs/alder-1.0.md`: Alder 1.0 product and release requirements.
+- `docs/language-design.md`: user-facing design index and support matrix.
+- `docs/syntax.md` and `docs/language-semantics.md`: source syntax and semantics.
+- `docs/memory-and-resources.md`, `docs/traits-and-closures.md`, and
+  `docs/async.md`: storage, ownership, abstraction, closure, and concurrency
+  contracts.
+- `docs/c-interop.md`, `docs/modules-and-builds.md`, and
+  `docs/standard-library.md`: C, project/toolchain, and distribution contracts.
+- `docs/s0-language.md`: implemented bootstrap-only source contract.
+- `docs/design-decisions.md` and `docs/open-questions.md`: accepted decisions
+  and genuinely unresolved nonblocking choices.
 - `docs/mir.md`: MIR operations and verifier invariants.
 - `docs/c-backend.md`: C lowering and undefined-behavior policy.
-- `ROADMAP.md`: current milestones and deferred work.
+- `ROADMAP.md`: implementation sequence, status, evidence, and deferred work.
 - `CONTRIBUTING.md`: engineering and contribution standards.
 
 Keep all repository documentation, code comments, diagnostics, and commit messages in English. Update the owning document whenever semantics change.

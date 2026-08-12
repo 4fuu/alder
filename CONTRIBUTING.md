@@ -1,6 +1,8 @@
 # Contributing and Project Standards
 
-Alder is in an early semantic-validation phase. Small, reviewable changes that strengthen the current MIR-to-C path are preferred over broad feature work.
+Alder is in the design and self-hosting bootstrap phase. Small, reviewable
+changes that advance the active compiler slice through the verified MIR-to-C
+path are preferred over implementing later Alder 1.0 milestones early.
 
 ## Language and Communication
 
@@ -106,7 +108,8 @@ Expected test categories:
 
 Tests must not depend on:
 
-- map iteration order;
+- host-language map iteration order (Alder 1.0's ordered `Map` contract is a
+  separate user-visible guarantee);
 - wall-clock timing without a documented tolerance;
 - host absolute paths;
 - memory addresses;
@@ -115,7 +118,14 @@ Tests must not depend on:
 
 ## Documentation Standards
 
-- `docs/language-design.md` owns user-facing semantic direction.
+- `docs/alder-1.0.md` owns the 1.0 product/release gate.
+- `docs/language-design.md` is the user-facing design index.
+- `docs/syntax.md` and `docs/language-semantics.md` own source behavior.
+- `docs/memory-and-resources.md`, `docs/traits-and-closures.md`, and
+  `docs/async.md` own their language safety and concurrency contracts.
+- `docs/c-interop.md`, `docs/modules-and-builds.md`, and
+  `docs/standard-library.md` own integration and distribution behavior.
+- `docs/s0-language.md` owns only the implemented bootstrap subset.
 - `docs/mir.md` owns MIR operations and verifier invariants.
 - `docs/c-backend.md` owns C lowering and undefined-behavior policy.
 - `ROADMAP.md` owns sequencing and scope status.
