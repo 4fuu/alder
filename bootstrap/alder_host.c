@@ -83,6 +83,121 @@ bool alderhost_stdout_byte(uint8_t byte) {
     return alderhost_active_context != NULL && fputc((int)byte, stdout) != EOF;
 }
 
+/* Emit the same shortest-round-trip finite float spelling as Go's
+ * strconv.FormatFloat(value, 'g', -1, 64). The scientific conversion finds
+ * the minimum significant digit count that round-trips; the final layout uses
+ * Go's fixed/exponent boundary rather than the precision-dependent C %g rule. */
+bool alderhost_stdout_f64_bits(uint64_t bits) {
+    char scientific[32];
+    char digits[18];
+    char *end;
+    double value;
+    double parsed;
+    uint64_t parsed_bits;
+    long exponent;
+    int precision;
+    int count;
+    size_t digit_count;
+    size_t at;
+    bool negative;
+
+    if (alderhost_active_context == NULL ||
+        ((bits >> 52U) & UINT64_C(0x7ff)) == UINT64_C(0x7ff)) {
+        return false;
+    }
+    (void)memcpy(&value, &bits, sizeof(value));
+    count = -1;
+    for (precision = 1; precision <= 17; precision++) {
+        count = snprintf(scientific, sizeof(scientific), "%.*e", precision - 1,
+                         value);
+        if (count < 0 || (size_t)count >= sizeof(scientific)) {
+            return false;
+        }
+        end = NULL;
+        parsed = strtod(scientific, &end);
+        if (end == scientific || *end != '\0') {
+            return false;
+        }
+        (void)memcpy(&parsed_bits, &parsed, sizeof(parsed_bits));
+        if (parsed_bits == bits) {
+            break;
+        }
+    }
+    if (precision > 17 || count < 0) {
+        return false;
+    }
+
+    negative = scientific[0] == '-';
+    at = negative ? 1U : 0U;
+    digit_count = 0U;
+    while (scientific[at] != 'e') {
+        if (scientific[at] != '.') {
+            digits[digit_count++] = scientific[at];
+        }
+        at++;
+    }
+    exponent = strtol(&scientific[at + 1U], &end, 10);
+    if (*end != '\0' || digit_count == 0U) {
+        return false;
+    }
+
+#define ALDERHOST_FLOAT_BYTE(byte_) \
+    do { \
+        if (fputc((int)(unsigned char)(byte_), stdout) == EOF) { \
+            return false; \
+        } \
+    } while (0)
+    if (negative) {
+        ALDERHOST_FLOAT_BYTE('-');
+    }
+    if (exponent < -4L || exponent >= 6L) {
+        ALDERHOST_FLOAT_BYTE(digits[0]);
+        if (digit_count > 1U) {
+            ALDERHOST_FLOAT_BYTE('.');
+            for (at = 1U; at < digit_count; at++) {
+                ALDERHOST_FLOAT_BYTE(digits[at]);
+            }
+        }
+        ALDERHOST_FLOAT_BYTE('e');
+        ALDERHOST_FLOAT_BYTE(exponent < 0L ? '-' : '+');
+        if (exponent < 0L) {
+            exponent = -exponent;
+        }
+        if (exponent < 10L) {
+            ALDERHOST_FLOAT_BYTE('0');
+        }
+        if (exponent >= 100L) {
+            ALDERHOST_FLOAT_BYTE((char)('0' + exponent / 100L));
+        }
+        if (exponent >= 10L) {
+            ALDERHOST_FLOAT_BYTE((char)('0' + (exponent / 10L) % 10L));
+        }
+        ALDERHOST_FLOAT_BYTE((char)('0' + exponent % 10L));
+    } else if (exponent < 0L) {
+        ALDERHOST_FLOAT_BYTE('0');
+        ALDERHOST_FLOAT_BYTE('.');
+        for (at = 0U; at < (size_t)(-exponent - 1L); at++) {
+            ALDERHOST_FLOAT_BYTE('0');
+        }
+        for (at = 0U; at < digit_count; at++) {
+            ALDERHOST_FLOAT_BYTE(digits[at]);
+        }
+    } else {
+        size_t integer_digits = (size_t)exponent + 1U;
+        for (at = 0U; at < integer_digits; at++) {
+            ALDERHOST_FLOAT_BYTE(at < digit_count ? digits[at] : '0');
+        }
+        if (digit_count > integer_digits) {
+            ALDERHOST_FLOAT_BYTE('.');
+            for (at = integer_digits; at < digit_count; at++) {
+                ALDERHOST_FLOAT_BYTE(digits[at]);
+            }
+        }
+    }
+#undef ALDERHOST_FLOAT_BYTE
+    return true;
+}
+
 bool alderhost_stderr_byte(uint8_t byte) {
     return alderhost_active_context != NULL && fputc((int)byte, stderr) != EOF;
 }

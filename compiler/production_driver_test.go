@@ -147,6 +147,7 @@ uint8_t alderhost_source_path_byte(uint64_t source, uint64_t offset) { (void)sou
 uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint64_t)(sizeof(source_text) - 1); }
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return source_text[offset]; }
 bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
+bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
 bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }
 int main(void) {
     int context = 0;

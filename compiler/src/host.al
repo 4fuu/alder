@@ -4,6 +4,7 @@ import c alderhost_source_path_byte: fn(U64, U64) -> U8
 import c alderhost_source_text_len: fn(U64) -> U64
 import c alderhost_source_text_byte: fn(U64, U64) -> U8
 import c alderhost_stdout_byte: fn(U8) -> Bool
+import c alderhost_stdout_f64_bits: fn(U64) -> Bool
 import c alderhost_stderr_byte: fn(U8) -> Bool
 
 fn copy_host_path(d: Domain, b: __s0_Buffer(U8), source: U64, end: U64) -> Result(__s0_Buffer(U8), __s0_Error) {

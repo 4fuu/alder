@@ -407,11 +407,13 @@ frontend, replace the M5.3 declaration spike yet, constitute a complete frontend
 or satisfy any self-hosting claim. Grouping nodes follow the Go semantic AST and
 are erased; the lossless token stream retains their delimiters.
 
-The independent MIR model now pins its MIR 3 numeric, 1-based ID, flattened
+The independent MIR model pins its MIR 3 numeric, 1-based ID, flattened
 ownership, ordinal, reciprocal-link, named-type-part, and import-signature
 encoding contract with an Alder-generated conformance manifest and malformed
-raw-record fixtures. This is preparatory consumer work only; it does not provide
-a MIR printer or verifier.
+raw-record fixtures. An Alder textual printer now validates that independent
+store before emitting canonical, source-independent MIR 3 bytes; malformed
+stores are rejected without partial output. The independent Alder verifier and
+all lowering into this model remain incomplete.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go

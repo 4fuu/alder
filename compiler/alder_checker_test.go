@@ -16,7 +16,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 const checkerWrapper = `
@@ -180,9 +179,6 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse checker MIR: %v", err)
 	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify checker MIR: %s", verify.Errors(diagnostics).String())
-	}
 	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
 		if !ok {
@@ -196,6 +192,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
+	// GenerateProgram reruns the complete verifier before lowering.
 	generated, err := cgen.GenerateProgram(module)
 	if err != nil {
 		t.Fatalf("generate checker C: %v", err)
