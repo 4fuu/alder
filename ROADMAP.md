@@ -370,14 +370,17 @@ bindings and plain-identifier assignments followed by one top-level return: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
 fit the declared integer type, and a string literal requires `String` or
-its `[U8]` semantic form. Binding order mirrors the Go checker: reserved
+its `[U8]` semantic form. Binding initializers, assignment right-hand sides,
+and returns recursively check unary `-`/`!`, checked integer arithmetic and
+shifts, integer/float comparison and equality, and short-circuit Bool operators
+with the Go Stage 0 operand rules. Binding order mirrors the Go checker: reserved
 names, annotation resolution, initializer mismatch, Unit/DomainMark
 rejection, then duplicates; parameters are immutable assignment targets.
 Integer bounds compare canonical decimal
 digit text against per-type bounds, preserving every `U64` value and the `I64`
 minimum rather than inheriting Stage 0's signed host-storage limit. Stable
-tagged expression, local-binding, and return records retain parameter, local,
-Bool-payload, and result-use relationships;
+postorder tagged-expression, local-binding, and return records retain parameter,
+local, Bool-payload, child, operator, statement-site, and result-use relationships;
 unsupported body shapes and expression forms outside this slice remain
 deferred, and a deferred body discards its partial records. These checks
 are preparatory: general body checking, other literals, locals, calls, control
