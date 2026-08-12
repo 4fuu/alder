@@ -12,10 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/4fuu/alder/cgen"
-	"github.com/4fuu/alder/frontend"
-	"github.com/4fuu/alder/mir"
 )
 
 const checkerWrapper = `
@@ -146,68 +142,7 @@ type checkerDiagnostic struct {
 	relatedSource, relatedStart, relatedEnd int
 }
 
-func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
-	cc, err := exec.LookPath("gcc")
-	if err != nil {
-		t.Skip("gcc not available")
-	}
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sources []frontend.Source
-	for _, name := range checkerSourceManifest {
-		b, e := os.ReadFile(filepath.Join(root, "compiler", "src", name))
-		if e != nil {
-			t.Fatal(e)
-		}
-		sources = append(sources, frontend.Source{ID: frontend.SourceID(len(sources) + 1), Path: "compiler/src/" + name, Text: string(b)})
-	}
-	checkerText := strings.ReplaceAll(checkerWrapper, " { Err", " {\n Err")
-	checkerText = strings.ReplaceAll(checkerText, " 3 Ok", " 3\n Ok")
-	checkerText = strings.ReplaceAll(checkerText, " Err(", "\n Err(")
-	checkerText = strings.ReplaceAll(checkerText, " Ok(", "\n Ok(")
-	sources = append(sources, frontend.Source{ID: 99, Path: "compiler/test/checker_main.al", Text: checkerText})
-	// This phase-slice closure ends at the checker and deliberately excludes later
-	// MIR consumers. Round-trip and verify its textual MIR before generating the C
-	// used for strict direct execution.
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
-	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		t.Fatalf("compile checker MIR: result=%+v error=%v", compiled, err)
-	}
-	module, err := mir.Parse(compiled.Artifact.Text)
-	if err != nil {
-		t.Fatalf("parse checker MIR: %v", err)
-	}
-	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
-		id, ok := module.Function(name)
-		if !ok {
-			t.Fatalf("checker MIR has no %s function", name)
-		}
-		for _, block := range module.Functions[id].Blocks {
-			for _, instruction := range block.Instrs {
-				if instruction.Op == mir.OpCall && instruction.Callee == id {
-					t.Fatalf("%s recursively calls itself", name)
-				}
-			}
-		}
-	}
-	// GenerateProgram reruns the complete verifier before lowering.
-	generated, err := cgen.GenerateProgram(module)
-	if err != nil {
-		t.Fatalf("generate checker C: %v", err)
-	}
-	dir := t.TempDir()
-	cf := filepath.Join(dir, "checker.c")
-	exe := filepath.Join(dir, "checker.exe")
-	if err = os.WriteFile(cf, []byte(generated), 0644); err != nil {
-		t.Fatal(err)
-	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cf, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
-	if out, e := exec.Command(cc, args...).CombinedOutput(); e != nil {
-		t.Fatalf("strict C11: %v\n%s", e, out)
-	}
-
+func runCheckerConformance(t *testing.T, exe string) {
 	good := map[string]string{
 		"a space.al": "import c foreign: fn(U64, Ptr(U8),) -> I32\n" +
 			"type Box(T: type) { value: T }\n" +
@@ -864,12 +799,16 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 func runAlderChecker(t *testing.T, exe string, files map[string]string, order []string, fail bool) string {
 	t.Helper()
 	d := t.TempDir()
+	const sentinel = "!alder-core-checker"
+	if err := os.WriteFile(filepath.Join(d, sentinel), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for n, s := range files {
 		if e := os.WriteFile(filepath.Join(d, n), []byte(s), 0644); e != nil {
 			t.Fatal(e)
 		}
 	}
-	cmd := exec.Command(exe, order...)
+	cmd := exec.Command(exe, append([]string{sentinel}, order...)...)
 	cmd.Dir = d
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/4fuu/alder/cgen"
-	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
 )
@@ -65,56 +63,7 @@ fn main(d: Domain) -> I32 { return match mir_store_new(d) {
 } }
 `
 
-func TestAlderMIRPrinterConformance(t *testing.T) {
-	cc, err := exec.LookPath("gcc")
-	if err != nil {
-		t.Skip("gcc not available")
-	}
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := []string{"output.al", "model.al", "mir_model.al", "mir_build.al", "mir_print.al"}
-	sources := make([]frontend.Source, 0, len(names)+1)
-	for i, name := range names {
-		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
-	}
-	sources = append(sources, frontend.Source{ID: 100, Path: "compiler/test/mir_printer_main.al", Text: mirPrinterWrapper})
-	permuted := append([]frontend.Source(nil), sources...)
-	for left, right := 0, len(permuted)-1; left < right; left, right = left+1, right-1 {
-		permuted[left], permuted[right] = permuted[right], permuted[left]
-	}
-
-	// Compile the deliberately reversed closure; Compile's canonical logical
-	// path ordering is independently permutation-tested by
-	// TestMultiSourcePermutationsProduceIdenticalMIRAndC.
-	result, compileErr := Compile(Request{Sources: permuted, Emit: EmitMIR})
-	if compileErr != nil || result.Artifact == nil || len(result.Diagnostics) != 0 {
-		t.Fatalf("compile source-permuted printer MIR: result=%+v error=%v", result, compileErr)
-	}
-	parsedWrapper, parseErr := mir.Parse(result.Artifact.Text)
-	if parseErr != nil || len(verify.Module(parsedWrapper)) != 0 {
-		t.Fatalf("invalid generated wrapper MIR: parse=%v verify=%v", parseErr, verify.Module(parsedWrapper))
-	}
-	generated, genErr := cgen.GenerateProgram(parsedWrapper)
-	if genErr != nil {
-		t.Fatalf("generate wrapper C: %v", genErr)
-	}
-
-	dir := t.TempDir()
-	cfile, exe := filepath.Join(dir, "printer.c"), filepath.Join(dir, "printer.exe")
-	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
-	if output, compileErr := exec.Command(cc, args...).CombinedOutput(); compileErr != nil {
-		t.Fatalf("strict C11 compile: %v\n%s", compileErr, output)
-	}
-
+func runMIRPrinterConformance(t *testing.T, exe string) {
 	wantSource := "mir 3\n\nconst @min: i64 = -9223372036854775808\n\nconst @max: i64 = 9223372036854775807\n\nconst @tiny: f64 = 5e-324\n\nconst @largest: f64 = 1.7976931348623157e+308\n\nconst @escaped: slice(u8) = \"a\\n\\t\\r\\\\\\\"\\x00z\"\n\nfn @main() {\nbb0:\n  return\n}\n"
 	wantModule, err := mir.Parse(wantSource)
 	if err != nil {
@@ -122,7 +71,14 @@ func TestAlderMIRPrinterConformance(t *testing.T) {
 	}
 	want := mir.Print(wantModule)
 	for run := 0; run < 2; run++ {
-		output, runErr := exec.Command(exe).Output()
+		dir := t.TempDir()
+		const sentinel = "!alder-core-printer"
+		if err := os.WriteFile(filepath.Join(dir, sentinel), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(exe, sentinel)
+		cmd.Dir = dir
+		output, runErr := cmd.Output()
 		if runErr != nil {
 			t.Fatalf("run printer %d: %v", run, runErr)
 		}

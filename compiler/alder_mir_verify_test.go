@@ -7,22 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/4fuu/alder/cgen"
-	"github.com/4fuu/alder/frontend"
-	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
-
-var mirVerifySourceManifest = []string{
-	"mir_model.al",
-	"mir_build.al",
-	"verify_model.al",
-	"verify_analysis.al",
-	"verify_phase1.al",
-	"verify_phase2.al",
-	"verify_phase3.al",
-}
 
 const mirVerifyWrapper = `
 import c alderhost_stdout_byte: fn(U8) -> Bool
@@ -316,64 +301,17 @@ fn main(d: Domain) -> I32 {
 }
 `
 
-func TestAlderMIRVerifierPhasesOneThroughThree(t *testing.T) {
-	cc, err := exec.LookPath("gcc")
-	if err != nil {
-		t.Skip("gcc not available")
-	}
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sources []frontend.Source
-	for i, name := range mirVerifySourceManifest {
-		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
-	}
-	sources = append(sources, frontend.Source{ID: frontend.SourceID(len(sources) + 1), Path: "compiler/test/mir_verify_main.al", Text: mirVerifyWrapper})
-
-	reversed := append([]frontend.Source(nil), sources...)
-	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
-		reversed[i], reversed[j] = reversed[j], reversed[i]
-	}
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
-	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		t.Fatalf("compile verifier wrapper: result=%+v error=%v", compiled, err)
-	}
-	permuted, err := Compile(Request{Sources: reversed, Emit: EmitMIR})
-	if err != nil || permuted.Artifact == nil || len(permuted.Diagnostics) != 0 {
-		t.Fatalf("compile permuted verifier wrapper: result=%+v error=%v", permuted, err)
-	}
-	if compiled.Artifact.Text != permuted.Artifact.Text {
-		t.Fatal("verifier wrapper MIR changed with source permutation")
-	}
-	module, err := mir.Parse(compiled.Artifact.Text)
-	if err != nil {
-		t.Fatalf("parse verifier wrapper MIR: %v", err)
-	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify verifier wrapper MIR: %s", verify.Errors(diagnostics).String())
-	}
-	generated, err := cgen.GenerateProgram(module)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	cfile := filepath.Join(dir, "verifier.c")
-	exe := filepath.Join(dir, "verifier.exe")
-	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
-
+func runMIRVerifierConformance(t *testing.T, exe string) {
 	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
-		cmd := exec.Command(exe)
-		cmd.Dir = t.TempDir()
+		dir := t.TempDir()
+		const sentinel = "!alder-core-verifier"
+		if err := os.WriteFile(filepath.Join(dir, sentinel), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(exe, sentinel)
+		cmd.Dir = dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr

@@ -413,7 +413,10 @@ encoding contract with an Alder-generated conformance manifest and malformed
 raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
 stores are rejected without partial output. The independent Alder verifier and
-all lowering into this model remain incomplete.
+all lowering into this model remain incomplete. Checker, textual-printer, and
+verifier V1–V3 conformance share one fixed source closure and executable while
+retaining independent mode assertions; the complete production root remains an
+independent end-to-end gate.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go

@@ -36,19 +36,10 @@ var compilerSourceManifest = []string{
 	"verify_phase3.al",
 }
 
-var checkerSourceManifest = []string{
-	"checker.al",
-	"host.al",
-	"lexer.al",
-	"model.al",
-	"output.al",
-	"parser.al",
-}
-
-// Slice conformance harnesses compile their exact fixed dependency closures.
+// Conformance harnesses compile exact fixed dependency closures.
 // TestAlderProductionDriverEndToEnd compiles the complete production root.
-// Keeping earlier harnesses narrow prevents every new compiler layer from being
-// recompiled by all preceding layer tests.
+// Keeping earlier lexer/parser harnesses narrow prevents later compiler layers
+// from being recompiled by all preceding layer tests.
 var lexerSourceManifest = []string{
 	"host.al",
 	"lexer.al",
