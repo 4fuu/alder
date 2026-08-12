@@ -144,7 +144,10 @@ type DeclTypeUseRec {
 
 // Private diagnostic kinds: 1 duplicate declaration, 2 reserved declaration,
 // 3 duplicate type parameter, 4 unknown type, 5 wrong type arity, 6 duplicate
-// struct field, 7 duplicate enum variant, 8 empty enum, and 9 value-type cycle.
+// struct field, 7 duplicate enum variant, 8 empty enum, 9 value-type cycle,
+// 10 nested/reference slice element, 11 non-copy-trivial buffer element,
+// 12 inadmissible Map key, 13 non-copy-trivial Map value, and 14 recursive
+// declared type whose active specialization changes.
 type CheckDiagRec {
     kind: U64
     source: U64

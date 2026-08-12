@@ -472,6 +472,9 @@ Restrictions (each with a diagnostic):
   places;
 - value-type recursion (direct or indirect, including through `Option`) is
   rejected as an infinite layout;
+- during bootstrap concrete generic revalidation cuts recursion only when the
+  active declared specialization is unchanged; recursion that reaches the same
+  declaration with different type arguments is rejected deterministically;
 - `Map` keys must be unsigned integers, `Bool`, or structs/enums composed of
   those, so hashing and equality are defined structurally; signed and float
   keys are rejected;

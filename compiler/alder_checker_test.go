@@ -148,7 +148,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify checker MIR: %s", verify.Errors(diagnostics).String())
 	}
-	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles"} {
+	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
 		if !ok {
 			t.Fatalf("checker MIR has no %s function", name)
@@ -179,14 +179,14 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	good := map[string]string{
 		"a space.al": "import c foreign: fn(U64, String,) -> I32\n" +
 			"type Box(T: type) { value: T }\n" +
-			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(DomainMark)\n}\n" +
+			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(U64)\n mark: DomainMark\n}\n" +
 			"enum E {\n Empty\n Full(value: Box(U64))\n}\n" +
 			"fn f(T: type, x: T, y: Box(T),) -> Option(U64) {}\n" +
 			"type Other(T: type) { value: T }\n" +
 			"fn deferred() -> U64 {\n let local: Missing = nope\n return wrong\n}\n",
 		"b.al": "type Forward { x: Later }\n" +
 			"type Later { x: U64 }\n" +
-			"type Recursive { slice: [Recursive]\n pointer: Ptr(Recursive)\n buffer: __s0_Buffer(Recursive) }\n",
+			"type Recursive { pointer: Ptr(Recursive) }\n",
 	}
 	for i := 0; i < 64; i++ {
 		good["b.al"] += fmt.Sprintf("type X%02d(T: type) { x: Option(T) }\n", i)
@@ -208,9 +208,42 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 	deep.WriteString("type Diamond { left: Left\n right: Right }\ntype Left { value: Leaf }\ntype Right { value: Leaf }\ntype Leaf { value: U64 }\n")
 	deep.WriteString("type Phantom(T: type) { value: U64 }\ntype ThroughArg { value: Phantom(ThroughArg) }\n")
-	deep.WriteString("type Cut { option: Option(Ptr(Cut))\n result: Result([Cut], U64)\n map: Map(U64, __s0_Buffer(Cut)) }\n")
+	deep.WriteString("type Cut { option: Option(Ptr(Cut))\n result: Result(U64, U64)\n map: Map(U64, U64) }\n")
 	deepFiles := map[string]string{"deep.al": deep.String()}
 	parseCheckerManifest(t, runAlderChecker(t, exe, deepFiles, []string{"deep.al"}, false), deepFiles)
+
+	genericGood := map[string]string{
+		"a.al": "type Concrete {\n outer: Outer(U64)\n bool_key: Map(Bool, U64)\n u8_key: Map(U8, U64)\n u16_key: Map(U16, U64)\n u32_key: Map(U32, U64)\n u64_key: Map(U64, U64)\n node: Node(U64)\n same: Same(U64)\n mutual: Left(U64)\n pointer_cut: PointerBox(Concrete)\n phantom: Phantom(String)\n}\n",
+		"z.al": "type Key(T: type) { value: T }\n" +
+			"type Transparent(T: type) { value: Key(T) }\n" +
+			"enum Choice(T: type) { None\n Some(value: T) }\n" +
+			"type Inner(T: type) { values: __s0_Buffer(T) }\n" +
+			"type Outer(T: type) { key: Map(Key(T), Choice(T))\n inner: Inner(T) }\n" +
+			"type Node(T: type) { next: Ptr(Node(T))\n value: T }\n" +
+			"type Same(T: type) { next: Ptr(Same(U64)) }\n" +
+			"type Left(T: type) { right: Ptr(Right(T)) }\n" +
+			"type Right(T: type) { left: Ptr(Left(T)) }\n" +
+			"type PointerBox(T: type) { value: Ptr(T) }\n" +
+			"type Phantom(T: type) { value: U64 }\n",
+	}
+	genericOne := runAlderChecker(t, exe, genericGood, []string{"z.al", "a.al"}, false)
+	genericTwo := runAlderChecker(t, exe, genericGood, []string{"a.al", "z.al"}, false)
+	if genericOne != genericTwo {
+		t.Fatal("generic revalidation changed with argv order")
+	}
+	parseCheckerManifest(t, genericOne, genericGood)
+
+	var substitutionGrowth strings.Builder
+	for i := 0; i < 64; i++ {
+		field := "T"
+		if i != 0 {
+			field = fmt.Sprintf("G%02d(T)", i-1)
+		}
+		fmt.Fprintf(&substitutionGrowth, "type G%02d(T: type) { value: %s }\n", i, field)
+	}
+	substitutionGrowth.WriteString("type Root { value: G63(U64) }\n")
+	growthFiles := map[string]string{"growth.al": substitutionGrowth.String()}
+	parseCheckerManifest(t, runAlderChecker(t, exe, growthFiles, []string{"growth.al"}, false), growthFiles)
 
 	rejects := []struct {
 		name, text, marker, relatedMarker string
@@ -247,6 +280,30 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "map-value-cycle.al", text: "type A { x: Map(U64, A) }\n", kind: 9, marker: "type"},
 		{name: "two-cycle.al", text: "type A { x: B }\ntype B { x: A }\n", kind: 9, marker: "type"},
 		{name: "generic-target-cycle.al", text: "type Box(T: type) { x: A }\ntype A { x: Box(U64) }\n", kind: 9, marker: "type"},
+		{name: "substituted-value-cycle.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Root) }\n", kind: 9, marker: "type", last: true},
+		{name: "generic-substituted-value-cycle.al", text: "type Loop(T: type) { value: Box(Loop(T)) }\ntype Box(T: type) { value: T }\n", kind: 9, marker: "type"},
+		{name: "substituted-cycle-before-forward-restriction.al", text: "type Root { value: Box(Root) }\ntype Box(T: type) { bad: Map(T, U64)\n value: T }\n", kind: 9, marker: "type"},
+		{name: "substituted-cycle-sibling.al", text: "type Pair(T: type) { left: Box(T)\n right: Box(Root) }\ntype Box(T: type) { value: T }\ntype Root { value: Pair(U64) }\n", kind: 9, marker: "type"},
+		{name: "nested-string-slice.al", text: "type A { x: [String] }\n", kind: 10, marker: "["},
+		{name: "substituted-slice.al", text: "type Box(T: type) { x: [T] }\ntype A { x: Box(String) }\n", kind: 10, marker: "Box", last: true},
+		{name: "multi-substituted-slice.al", text: "type Leaf(T: type) { x: [T] }\ntype Middle(T: type) { x: Leaf(T) }\ntype A { x: Middle(String) }\n", kind: 10, marker: "Middle", last: true},
+		{name: "recursive-slice.al", text: "type A { x: [A] }\n", kind: 10, marker: "["},
+		{name: "buffer-string.al", text: "type A { x: __s0_Buffer(String) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "substituted-buffer.al", text: "type Box(T: type) { x: __s0_Buffer(T) }\ntype A { x: Box(String) }\n", kind: 11, marker: "Box", last: true},
+		{name: "recursive-buffer.al", text: "type A { x: __s0_Buffer(A) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "map-key-before-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(I64, String) }\n", kind: 12, marker: "Pair", last: true},
+		{name: "map-key-float.al", text: "type A { x: Map(F64, U64) }\n", kind: 12, marker: "Map"},
+		{name: "map-key-generic.al", text: "type Key(T: type) { x: T }\ntype A { x: Map(Key(I64), String) }\n", kind: 12, marker: "Map"},
+		{name: "substituted-map-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(U64, String) }\n", kind: 13, marker: "Pair", last: true},
+		{name: "declared-map-value.al", text: "type Value(T: type) { x: T }\ntype A { x: Map(U64, Value(String)) }\n", kind: 13, marker: "Map"},
+		{name: "struct-member-order.al", text: "type Fields(T: type) { first: __s0_Buffer(T)\n second: Map(T, U64) }\ntype A { x: Fields(String) }\n", kind: 11, marker: "Fields", last: true},
+		{name: "enum-member-order.al", text: "enum E(T: type) { First(value: __s0_Buffer(T))\n Second(value: Map(T, U64)) }\ntype A { x: E(String) }\n", kind: 11, marker: "E", last: true},
+		{name: "changed-recursive-specialization.al", text: "type A(T: type) { next: Ptr(A(Option(T))) }\ntype Root { x: A(U64) }\n", kind: 14, marker: "A", last: true},
+		{name: "recursive-sibling.al", text: "type A(T: type) { next: Ptr(A(T))\n bad: Map(T, U64) }\ntype Root { x: A(I64) }\n", kind: 12, marker: "A", last: true},
+		{name: "restriction-before-cycle.al", text: "type Bad { x: Map(I64, String) }\ntype Cycle { x: Cycle }\n", kind: 12, marker: "Map"},
+		{name: "forward-substituted-buffer.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\n", kind: 11, marker: "Later"},
+		{name: "cycle-before-forward-revalidation.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\ntype Cycle { x: Cycle }\n", kind: 9, marker: "type", last: true},
+		{name: "import-restriction-before-function.al", text: "fn earlier(x: __s0_Buffer(String)) -> U64 {}\nimport c bad: fn(Map(I64, U64)) -> U64\n", kind: 12, marker: "Map"},
 	}
 	cycleFiles := map[string]string{"z.al": "type B { x: A }\n", "a.al": "type A { x: B }\n"}
 	cycleOne := runAlderChecker(t, exe, cycleFiles, []string{"z.al", "a.al"}, true)
@@ -615,7 +672,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		return fmt.Errorf("manifest has %d diagnostics, want at most one", len(m.diagnostics))
 	}
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind < 1 || diagnostic.kind > 9 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
+		if diagnostic.kind < 1 || diagnostic.kind > 14 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {
@@ -726,7 +783,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatal("Box.T did not resolve to its owner-local parameter")
 	}
 	nest := checkerSymbolByName(t, m, inputs, "Nest")
-	for ordinal, name := range []string{"x", "a", "b", "c", "d"} {
+	for ordinal, name := range []string{"x", "a", "b", "c", "d", "mark"} {
 		item := checkerUse(t, m, nest.id, 1, ordinal)
 		if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
 			t.Fatalf("Nest field %d metadata changed: %+v", ordinal, item)
@@ -746,6 +803,9 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		if m.types[checkerUse(t, m, nest.id, 1, ordinal+1).checkedType-1].kind != kind {
 			t.Fatalf("Nest field %d kind changed", ordinal+1)
 		}
+	}
+	if kind := m.types[checkerUse(t, m, nest.id, 1, 5).checkedType-1].kind; kind != 4 {
+		t.Fatalf("Nest DomainMark field kind=%d, want 4", kind)
 	}
 	enum := checkerSymbolByName(t, m, inputs, "E")
 	enumUses := 0
@@ -781,7 +841,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	for _, pair := range []struct {
 		owner checkerSymbol
 		names []string
-	}{{forward, []string{"x"}}, {later, []string{"x"}}, {recursive, []string{"slice", "pointer", "buffer"}}} {
+	}{{forward, []string{"x"}}, {later, []string{"x"}}, {recursive, []string{"pointer"}}} {
 		for ordinal, name := range pair.names {
 			item := checkerUse(t, m, pair.owner.id, 1, ordinal)
 			if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
@@ -792,17 +852,11 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	if target := m.types[checkerUse(t, m, forward.id, 1, 0).checkedType-1].target; target != later.id {
 		t.Fatalf("forward type target=%d, want %d", target, later.id)
 	}
-	if kind := m.types[checkerUse(t, m, recursive.id, 1, 0).checkedType-1].kind; kind != 8 {
-		t.Fatalf("slice-cut recursive field kind=%d, want 8", kind)
-	}
-	if kind := m.types[checkerUse(t, m, recursive.id, 1, 1).checkedType-1].kind; kind != 12 {
+	if kind := m.types[checkerUse(t, m, recursive.id, 1, 0).checkedType-1].kind; kind != 12 {
 		t.Fatalf("pointer-cut recursive field kind=%d, want 12", kind)
 	}
-	if kind := m.types[checkerUse(t, m, recursive.id, 1, 2).checkedType-1].kind; kind != 13 {
-		t.Fatalf("buffer-cut recursive field kind=%d, want 13", kind)
-	}
 	deferred := checkerSymbolByName(t, m, inputs, "deferred")
-	if len(m.uses) != 85 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
+	if len(m.uses) != 84 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
 		t.Fatalf("deferred body was checked or declaration-use count changed: %d", len(m.uses))
 	}
 	for owner := 11; owner <= 74; owner++ {
@@ -868,6 +922,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"noncanonical integer":       "ALDER-CHECKER-MANIFEST 2\nS 00 612e616c 1\nEND\n",
 		"nonsequential ID":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
 		"truncated diagnostic":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1\nEND\n",
+		"unknown diagnostic kind":    "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 15 0 0 1 0\nEND\n",
 		"invalid related flag":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
 		"invalid argument range":     "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
 		"malformed declaration item": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
