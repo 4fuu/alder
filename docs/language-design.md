@@ -474,7 +474,12 @@ Restrictions (each with a diagnostic):
   rejected as an infinite layout;
 - during bootstrap concrete generic revalidation cuts recursion only when the
   active declared specialization is unchanged; recursion that reaches the same
-  declaration with different type arguments is rejected deterministically;
+  declaration with different type arguments is rejected deterministically.
+  Caller-provided type arguments retain their caller declaration ancestry rather
+  than inheriting the callee's active path, `String` and `[U8]` compare as the
+  same specialization argument, and equivalent interpreted specializations are
+  memoized independently of active ancestry so shared finite declaration graphs
+  are traversed by specialization rather than by path;
 - `Map` keys must be unsigned integers, `Bool`, or structs/enums composed of
   those, so hashing and equality are defined structurally; signed and float
   keys are rejected;

@@ -45,6 +45,7 @@ type TypeBindingRec {
     param: U64
     checked_type: U64
     caller_env: U64
+    caller_ancestry: U64
     next: U64
 }
 
@@ -59,6 +60,20 @@ type PairWorkRec {
     left_env: U64
     right_type: U64
     right_env: U64
+}
+
+type InterpStateRec {
+    owner: U64
+    checked_type: U64
+    env: U64
+    ancestry: U64
+}
+
+type ExpansionMemoRec {
+    owner: U64
+    target: U64
+    checked_type: U64
+    env: U64
 }
 
 type DeclAncestryRec {
@@ -81,22 +96,24 @@ fn env_lookup(bindings: __s0_Buffer(TypeBindingRec), env: U64, param: U64) -> Ty
         if item.param == param { return item }
         at = item.next
     }
-    return TypeBindingRec(param: 0, checked_type: 0, caller_env: 0, next: 0)
+    return TypeBindingRec(param: 0, checked_type: 0, caller_env: 0, caller_ancestry: 0, next: 0)
 }
 
-fn normalize_interp(store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64) -> InterpWorkRec {
+fn normalize_interp(store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64, ancestry: U64) -> InterpWorkRec {
     var t = checked_type
     var e = env
+    var a = ancestry
     var done = false
     while !done {
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, t - 1)
         if checked.kind != 6 { done = true } else {
             let bound = env_lookup(bindings, e, checked.target)
             if bound.param == 0 { done = true } else { t = bound.checked_type
-                e = bound.caller_env }
+                e = bound.caller_env
+                a = bound.caller_ancestry }
         }
     }
-    return InterpWorkRec(checked_type: t, env: e, ancestry: 0)
+    return InterpWorkRec(checked_type: t, env: e, ancestry: a)
 }
 
 fn primitive_same(state: State, parse: ParseStore, a: CheckedTypeRec, b: CheckedTypeRec) -> Bool {
@@ -105,29 +122,92 @@ fn primitive_same(state: State, parse: ParseStore, a: CheckedTypeRec, b: Checked
     return same_name(state, an.source, an.name_start, an.name_end, bn.source, bn.name_start, bn.name_end)
 }
 
+fn interpreted_slice_u8(state: State, parse: ParseStore, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), checked: CheckedTypeRec, env: U64) -> Bool {
+    if checked.kind != 8 || checked.arg_count != 1 { return false }
+    let child = normalize_interp(store, bindings, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env, 0)
+    let item = __s0_buffer_get(CheckedTypeRec, store.types, child.checked_type - 1)
+    if item.kind != 1 { return false }
+    return node_word(state, __s0_buffer_get(SyntaxRec, parse.nodes, item.syntax - 1), "U8")
+}
+
 // Finite structural equality is iterative. Declared applications compare their
-// target and direct arguments and never expand declaration bodies.
+// target and direct arguments and never expand declaration bodies. String is
+// compared as its documented [U8] semantic form.
 fn interpreted_type_equal(d: Domain, state: State, parse: ParseStore, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), left_type: U64, left_env: U64, right_type: U64, right_env: U64) -> Result(Bool, __s0_Error) {
     let initial = try __s0_buffer_new(PairWorkRec, d)
     var work = try __s0_buffer_append(PairWorkRec, d, initial, PairWorkRec(left_type: left_type, left_env: left_env, right_type: right_type, right_env: right_env))
+    let first_seen = try __s0_buffer_new(PairWorkRec, d)
+    var seen = first_seen
     var at: U64 = 0
     while at < __s0_buffer_len(PairWorkRec, work) {
         let pair = __s0_buffer_get(PairWorkRec, work, at)
-        let left = normalize_interp(store, bindings, pair.left_type, pair.left_env)
-        let right = normalize_interp(store, bindings, pair.right_type, pair.right_env)
-        let a = __s0_buffer_get(CheckedTypeRec, store.types, left.checked_type - 1)
-        let b = __s0_buffer_get(CheckedTypeRec, store.types, right.checked_type - 1)
-        if a.kind != b.kind || a.target != b.target || a.arg_count != b.arg_count { return Ok(false) }
-        if a.kind == 1 && !primitive_same(state, parse, a, b) { return Ok(false) }
-        if a.kind == 6 && a.target != b.target { return Ok(false) }
-        var child: U64 = 0
-        while child < a.arg_count {
-            work = try __s0_buffer_append(PairWorkRec, d, work, PairWorkRec(left_type: __s0_buffer_get(U64, store.type_args, a.first_arg - 1 + child), left_env: left.env, right_type: __s0_buffer_get(U64, store.type_args, b.first_arg - 1 + child), right_env: right.env))
-            child = child + 1
+        let left = normalize_interp(store, bindings, pair.left_type, pair.left_env, 0)
+        let right = normalize_interp(store, bindings, pair.right_type, pair.right_env, 0)
+        if left.checked_type != right.checked_type || left.env != right.env {
+            var known = false
+            var seen_at: U64 = 0
+            while seen_at < __s0_buffer_len(PairWorkRec, seen) {
+                let prior = __s0_buffer_get(PairWorkRec, seen, seen_at)
+                if prior.left_type == left.checked_type && prior.left_env == left.env && prior.right_type == right.checked_type && prior.right_env == right.env { known = true }
+                seen_at = seen_at + 1
+            }
+            if !known {
+                seen = try __s0_buffer_append(PairWorkRec, d, seen, PairWorkRec(left_type: left.checked_type, left_env: left.env, right_type: right.checked_type, right_env: right.env))
+                let a = __s0_buffer_get(CheckedTypeRec, store.types, left.checked_type - 1)
+                let b = __s0_buffer_get(CheckedTypeRec, store.types, right.checked_type - 1)
+                if a.kind != b.kind {
+                    if !((a.kind == 2 && interpreted_slice_u8(state, parse, store, bindings, b, right.env)) || (b.kind == 2 && interpreted_slice_u8(state, parse, store, bindings, a, left.env))) { return Ok(false) }
+                } else {
+                    if a.target != b.target || a.arg_count != b.arg_count { return Ok(false) }
+                    if a.kind == 1 && !primitive_same(state, parse, a, b) { return Ok(false) }
+                    if a.kind == 6 && a.target != b.target { return Ok(false) }
+                    var child: U64 = 0
+                    while child < a.arg_count {
+                        work = try __s0_buffer_append(PairWorkRec, d, work, PairWorkRec(left_type: __s0_buffer_get(U64, store.type_args, a.first_arg - 1 + child), left_env: left.env, right_type: __s0_buffer_get(U64, store.type_args, b.first_arg - 1 + child), right_env: right.env))
+                        child = child + 1
+                    }
+                }
+            }
         }
         at = at + 1
     }
     return Ok(true)
+}
+
+fn expansion_seen(d: Domain, state: State, parse: ParseStore, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), memo: __s0_Buffer(ExpansionMemoRec), owner: U64, checked_type: U64, env: U64) -> Result(Bool, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    var at: U64 = 0
+    while at < __s0_buffer_len(ExpansionMemoRec, memo) {
+        let prior = __s0_buffer_get(ExpansionMemoRec, memo, at)
+        if prior.owner == owner && prior.target == checked.target {
+            if try interpreted_type_equal(d, state, parse, store, bindings, checked_type, env, prior.checked_type, prior.env) { return Ok(true) }
+        }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+fn remember_expansion(d: Domain, memo: __s0_Buffer(ExpansionMemoRec), owner: U64, target: U64, checked_type: U64, env: U64) -> Result(__s0_Buffer(ExpansionMemoRec), __s0_Error) {
+    return __s0_buffer_append(ExpansionMemoRec, d, memo, ExpansionMemoRec(owner: owner, target: target, checked_type: checked_type, env: env))
+}
+
+fn expansion_target_seen(memo: __s0_Buffer(ExpansionMemoRec), target: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(ExpansionMemoRec, memo) {
+        if __s0_buffer_get(ExpansionMemoRec, memo, at).target == target { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn interp_state_seen(seen: __s0_Buffer(InterpStateRec), owner: U64, checked_type: U64, env: U64, ancestry: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(InterpStateRec, seen) {
+        let item = __s0_buffer_get(InterpStateRec, seen, at)
+        if item.owner == owner && item.checked_type == checked_type && item.env == env && item.ancestry == ancestry { return true }
+        at = at + 1
+    }
+    return false
 }
 
 fn direct_type_concrete(d: Domain, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64) -> Result(Bool, __s0_Error) {
@@ -136,7 +216,7 @@ fn direct_type_concrete(d: Domain, store: CheckStore, bindings: __s0_Buffer(Type
     var at: U64 = 0
     while at < __s0_buffer_len(InterpWorkRec, work) {
         let item = __s0_buffer_get(InterpWorkRec, work, at)
-        let norm = normalize_interp(store, bindings, item.checked_type, item.env)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
         if checked.kind == 6 { return Ok(false) }
         var child: U64 = 0
@@ -159,7 +239,7 @@ fn ancestry_has(ancestry: __s0_Buffer(DeclAncestryRec), id: U64, target: U64) ->
     return false
 }
 
-fn build_target_env(d: Domain, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), target: U64, checked: CheckedTypeRec, caller_env: U64) -> Result(__s0_Buffer(TypeBindingRec), __s0_Error) {
+fn build_target_env(d: Domain, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), target: U64, checked: CheckedTypeRec, caller_env: U64, caller_ancestry: U64) -> Result(__s0_Buffer(TypeBindingRec), __s0_Error) {
     var result = bindings
     var head: U64 = 0
     var ordinal: U64 = 0
@@ -167,7 +247,7 @@ fn build_target_env(d: Domain, store: CheckStore, bindings: __s0_Buffer(TypeBind
     while at < __s0_buffer_len(TypeParamRec, store.type_params) {
         let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
         if param.owner == target {
-            result = try __s0_buffer_append(TypeBindingRec, d, result, TypeBindingRec(param: at + 1, checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal), caller_env: caller_env, next: head))
+            result = try __s0_buffer_append(TypeBindingRec, d, result, TypeBindingRec(param: at + 1, checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal), caller_env: caller_env, caller_ancestry: caller_ancestry, next: head))
             head = __s0_buffer_len(TypeBindingRec, result)
             ordinal = ordinal + 1
         }
@@ -207,33 +287,86 @@ fn declaration_boundary(store: CheckStore, owner: U64) -> U64 {
     return 0
 }
 
-// This mirrors frontend/types.go containsSlice. Repeated declaration targets
-// are cut per path, which makes probes safe even while aggregates are partial.
-fn interpreted_contains_reference(d: Domain, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64, boundary: U64) -> Result(Bool, __s0_Error) {
+// Reusing a specialization is context independent unless it can reach one of
+// the current active declarations. Inspecting every supplied argument and each
+// declaration body once by target is conservative without unfolding a finite
+// declaration DAG once per path.
+fn interpreted_may_reach_ancestry(d: Domain, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64, active: U64, ancestry: __s0_Buffer(DeclAncestryRec)) -> Result(Bool, __s0_Error) {
     var bindings = initial_bindings
     let first_work = try __s0_buffer_new(InterpWorkRec, d)
     var work = try __s0_buffer_append(InterpWorkRec, d, first_work, InterpWorkRec(checked_type: checked_type, env: env, ancestry: 0))
-    let first_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-    var ancestry = first_ancestry
+    let first_seen = try __s0_buffer_new(InterpStateRec, d)
+    var seen = first_seen
+    let first_targets = try __s0_buffer_new(ExpansionMemoRec, d)
+    var targets = first_targets
     var at: U64 = 0
     while at < __s0_buffer_len(InterpWorkRec, work) {
         let item = __s0_buffer_get(InterpWorkRec, work, at)
-        let norm = normalize_interp(store, bindings, item.checked_type, item.env)
-        let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
-        if checked.kind == 2 || checked.kind == 3 || checked.kind == 4 || checked.kind == 8 || checked.kind == 11 || checked.kind == 12 || checked.kind == 13 { return Ok(true) }
-        if checked.kind == 9 || checked.kind == 10 {
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, 0)
+        if !interp_state_seen(seen, 0, norm.checked_type, norm.env, 0) {
+            seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: 0))
+            let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
+            if checked.kind == 6 { return Ok(true) }
+            if checked.kind == 7 && ancestry_has(ancestry, active, checked.target) { return Ok(true) }
             var child: U64 = 0
             while child < checked.arg_count {
-                work = try __s0_buffer_append(InterpWorkRec, d, work, InterpWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), env: norm.env, ancestry: item.ancestry))
+                work = try __s0_buffer_append(InterpWorkRec, d, work, InterpWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), env: norm.env, ancestry: 0))
                 child = child + 1
             }
+            if checked.kind == 7 && !expansion_target_seen(targets, checked.target) {
+                targets = try remember_expansion(d, targets, 0, checked.target, norm.checked_type, norm.env)
+                let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, 0)
+                let target_env = declaration_env_head(bindings, old_len)
+                work = try push_decl_members(d, store, work, checked.target, target_env, 0)
+            }
         }
-        if checked.kind == 7 && declaration_available(boundary, checked.target) && !ancestry_has(ancestry, item.ancestry, checked.target) {
-            let old_len = __s0_buffer_len(TypeBindingRec, bindings)
-            bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env)
-            let target_env = declaration_env_head(bindings, old_len)
-            ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: item.ancestry))
-            work = try push_decl_members(d, store, work, checked.target, target_env, __s0_buffer_len(DeclAncestryRec, ancestry))
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+// This mirrors frontend/types.go containsSlice. Repeated declaration targets
+// are cut per path, while equivalent interpreted specializations are expanded
+// once per probe. Inherited ancestry keeps binding IDs in their owning buffer.
+fn interpreted_contains_reference(d: Domain, state: State, parse: ParseStore, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), initial_ancestry: __s0_Buffer(DeclAncestryRec), checked_type: U64, env: U64, ancestry_id: U64, boundary: U64) -> Result(Bool, __s0_Error) {
+    var bindings = initial_bindings
+    let first_work = try __s0_buffer_new(InterpWorkRec, d)
+    var work = try __s0_buffer_append(InterpWorkRec, d, first_work, InterpWorkRec(checked_type: checked_type, env: env, ancestry: ancestry_id))
+    var ancestry = initial_ancestry
+    let first_memo = try __s0_buffer_new(ExpansionMemoRec, d)
+    var memo = first_memo
+    let first_seen = try __s0_buffer_new(InterpStateRec, d)
+    var seen = first_seen
+    var at: U64 = 0
+    while at < __s0_buffer_len(InterpWorkRec, work) {
+        let item = __s0_buffer_get(InterpWorkRec, work, at)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
+        var inspect = true
+        if checked.kind != 7 {
+            inspect = !interp_state_seen(seen, 0, norm.checked_type, norm.env, norm.ancestry)
+            if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
+        }
+        if inspect {
+            if checked.kind == 2 || checked.kind == 3 || checked.kind == 4 || checked.kind == 8 || checked.kind == 11 || checked.kind == 12 || checked.kind == 13 { return Ok(true) }
+            if checked.kind == 9 || checked.kind == 10 {
+                var child: U64 = 0
+                while child < checked.arg_count {
+                    work = try __s0_buffer_append(InterpWorkRec, d, work, InterpWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), env: norm.env, ancestry: norm.ancestry))
+                    child = child + 1
+                }
+            }
+            if checked.kind == 7 && declaration_available(boundary, checked.target) && !ancestry_has(ancestry, norm.ancestry, checked.target) {
+                if !(try expansion_seen(d, state, parse, store, bindings, memo, 0, norm.checked_type, norm.env)) {
+                    memo = try remember_expansion(d, memo, 0, checked.target, norm.checked_type, norm.env)
+                    let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                    bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, norm.ancestry)
+                    let target_env = declaration_env_head(bindings, old_len)
+                    ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: norm.ancestry))
+                    work = try push_decl_members(d, store, work, checked.target, target_env, __s0_buffer_len(DeclAncestryRec, ancestry))
+                }
+            }
         }
         at = at + 1
     }
@@ -246,30 +379,43 @@ fn primitive_map_key(state: State, parse: ParseStore, checked: CheckedTypeRec) -
     return node_word(state, node, "Bool") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64")
 }
 
-fn interpreted_map_key_ok(d: Domain, state: State, parse: ParseStore, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), checked_type: U64, env: U64, boundary: U64) -> Result(Bool, __s0_Error) {
+fn interpreted_map_key_ok(d: Domain, state: State, parse: ParseStore, store: CheckStore, initial_bindings: __s0_Buffer(TypeBindingRec), initial_ancestry: __s0_Buffer(DeclAncestryRec), checked_type: U64, env: U64, ancestry_id: U64, boundary: U64) -> Result(Bool, __s0_Error) {
     var bindings = initial_bindings
     let first_work = try __s0_buffer_new(InterpWorkRec, d)
-    var work = try __s0_buffer_append(InterpWorkRec, d, first_work, InterpWorkRec(checked_type: checked_type, env: env, ancestry: 0))
-    let first_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-    var ancestry = first_ancestry
+    var work = try __s0_buffer_append(InterpWorkRec, d, first_work, InterpWorkRec(checked_type: checked_type, env: env, ancestry: ancestry_id))
+    var ancestry = initial_ancestry
+    let first_memo = try __s0_buffer_new(ExpansionMemoRec, d)
+    var memo = first_memo
+    let first_seen = try __s0_buffer_new(InterpStateRec, d)
+    var seen = first_seen
     var at: U64 = 0
     while at < __s0_buffer_len(InterpWorkRec, work) {
         let item = __s0_buffer_get(InterpWorkRec, work, at)
-        let norm = normalize_interp(store, bindings, item.checked_type, item.env)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
-        if checked.kind == 1 {
-            if !primitive_map_key(state, parse, checked) { return Ok(false) }
-        } else {
-            if checked.kind == 7 && declaration_available(boundary, checked.target) {
-                if !ancestry_has(ancestry, item.ancestry, checked.target) {
-                    let old_len = __s0_buffer_len(TypeBindingRec, bindings)
-                    bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env)
-                    let target_env = declaration_env_head(bindings, old_len)
-                    ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: item.ancestry))
-                    work = try push_decl_members(d, store, work, checked.target, target_env, __s0_buffer_len(DeclAncestryRec, ancestry))
-                }
+        var inspect = true
+        if checked.kind != 7 {
+            inspect = !interp_state_seen(seen, 0, norm.checked_type, norm.env, norm.ancestry)
+            if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
+        }
+        if inspect {
+            if checked.kind == 1 {
+                if !primitive_map_key(state, parse, checked) { return Ok(false) }
             } else {
-                if checked.kind != 7 { return Ok(false) }
+                if checked.kind == 7 && declaration_available(boundary, checked.target) {
+                    if !ancestry_has(ancestry, norm.ancestry, checked.target) {
+                        if !(try expansion_seen(d, state, parse, store, bindings, memo, 0, norm.checked_type, norm.env)) {
+                            memo = try remember_expansion(d, memo, 0, checked.target, norm.checked_type, norm.env)
+                            let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                            bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, norm.ancestry)
+                            let target_env = declaration_env_head(bindings, old_len)
+                            ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: norm.ancestry))
+                            work = try push_decl_members(d, store, work, checked.target, target_env, __s0_buffer_len(DeclAncestryRec, ancestry))
+                        }
+                    }
+                } else {
+                    if checked.kind != 7 { return Ok(false) }
+                }
             }
         }
         at = at + 1
@@ -317,64 +463,82 @@ fn validate_concrete_type(d: Domain, state: State, parse: ParseStore, store: Che
     var bindings = empty_bindings
     let empty_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     var ancestry = empty_ancestry
+    let empty_memo = try __s0_buffer_new(ExpansionMemoRec, d)
+    var memo = empty_memo
+    let empty_seen = try __s0_buffer_new(InterpStateRec, d)
+    var seen = empty_seen
     let empty_work = try __s0_buffer_new(ValidationWorkRec, d)
     var work = try __s0_buffer_append(ValidationWorkRec, d, empty_work, ValidationWorkRec(checked_type: root_type, env: root_env, ancestry: 0, next: 0))
     var head: U64 = 1
     while head != 0 {
         let item = __s0_buffer_get(ValidationWorkRec, work, head - 1)
         head = item.next
-        let norm = normalize_interp(store, bindings, item.checked_type, item.env)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
-        if checked.kind == 8 {
-            let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
-            if try interpreted_contains_reference(d, store, bindings, child, norm.env, boundary) { return check_fail(d, store, 10, root_node, 0, 0, 0) }
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: child, env: norm.env, ancestry: item.ancestry, next: head))
-            head = __s0_buffer_len(ValidationWorkRec, work)
+        var inspect = true
+        if checked.kind != 7 {
+            inspect = !interp_state_seen(seen, 0, norm.checked_type, norm.env, norm.ancestry)
+            if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
         }
-        if checked.kind == 9 || checked.kind == 12 {
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: item.ancestry, next: head))
-            head = __s0_buffer_len(ValidationWorkRec, work)
-        }
-        if checked.kind == 13 {
-            let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
-            if try interpreted_contains_reference(d, store, bindings, child, norm.env, boundary) { return check_fail(d, store, 11, root_node, 0, 0, 0) }
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: child, env: norm.env, ancestry: item.ancestry, next: head))
-            head = __s0_buffer_len(ValidationWorkRec, work)
-        }
-        if checked.kind == 10 {
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg), env: norm.env, ancestry: item.ancestry, next: head))
-            let err_head = __s0_buffer_len(ValidationWorkRec, work)
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: item.ancestry, next: err_head))
-            head = __s0_buffer_len(ValidationWorkRec, work)
-        }
-        if checked.kind == 11 {
-            let key = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
-            let value = __s0_buffer_get(U64, store.type_args, checked.first_arg)
-            if !(try interpreted_map_key_ok(d, state, parse, store, bindings, key, norm.env, boundary)) { return check_fail(d, store, 12, root_node, 0, 0, 0) }
-            if try interpreted_contains_reference(d, store, bindings, value, norm.env, boundary) { return check_fail(d, store, 13, root_node, 0, 0, 0) }
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: value, env: norm.env, ancestry: item.ancestry, next: head))
-            let value_head = __s0_buffer_len(ValidationWorkRec, work)
-            work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: key, env: norm.env, ancestry: item.ancestry, next: value_head))
-            head = __s0_buffer_len(ValidationWorkRec, work)
-        }
-        if checked.kind == 7 && declaration_available(boundary, checked.target) {
-            let active = active_target(ancestry, item.ancestry, checked.target)
-            if active != 0 {
-                let prior = __s0_buffer_get(DeclAncestryRec, ancestry, active - 1)
-                if !(try specialization_equal(d, state, parse, store, bindings, checked, norm.env, prior.env)) { return check_fail(d, store, 14, root_node, 0, 0, 0) }
-            } else {
-                let old_len = __s0_buffer_len(TypeBindingRec, bindings)
-                bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env)
-                let target_env = declaration_env_head(bindings, old_len)
-                ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: item.ancestry))
-                let chain = __s0_buffer_len(DeclAncestryRec, ancestry)
-                var use_at = __s0_buffer_len(DeclTypeUseRec, store.uses)
-                while use_at != 0 {
-                    use_at = use_at - 1
-                    let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
-                    if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
-                        work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: use.checked_type, env: target_env, ancestry: chain, next: head))
-                        head = __s0_buffer_len(ValidationWorkRec, work)
+        if inspect {
+            if checked.kind == 8 {
+                let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+                if try interpreted_contains_reference(d, state, parse, store, bindings, ancestry, child, norm.env, norm.ancestry, boundary) { return check_fail(d, store, 10, root_node, 0, 0, 0) }
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: child, env: norm.env, ancestry: norm.ancestry, next: head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 9 || checked.kind == 12 {
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: norm.ancestry, next: head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 13 {
+                let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+                if try interpreted_contains_reference(d, state, parse, store, bindings, ancestry, child, norm.env, norm.ancestry, boundary) { return check_fail(d, store, 11, root_node, 0, 0, 0) }
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: child, env: norm.env, ancestry: norm.ancestry, next: head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 10 {
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg), env: norm.env, ancestry: norm.ancestry, next: head))
+                let err_head = __s0_buffer_len(ValidationWorkRec, work)
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: norm.ancestry, next: err_head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 11 {
+                let key = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+                let value = __s0_buffer_get(U64, store.type_args, checked.first_arg)
+                if !(try interpreted_map_key_ok(d, state, parse, store, bindings, ancestry, key, norm.env, norm.ancestry, boundary)) { return check_fail(d, store, 12, root_node, 0, 0, 0) }
+                if try interpreted_contains_reference(d, state, parse, store, bindings, ancestry, value, norm.env, norm.ancestry, boundary) { return check_fail(d, store, 13, root_node, 0, 0, 0) }
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: value, env: norm.env, ancestry: norm.ancestry, next: head))
+                let value_head = __s0_buffer_len(ValidationWorkRec, work)
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: key, env: norm.env, ancestry: norm.ancestry, next: value_head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 7 && declaration_available(boundary, checked.target) {
+                let active = active_target(ancestry, norm.ancestry, checked.target)
+                if active != 0 {
+                    let prior = __s0_buffer_get(DeclAncestryRec, ancestry, active - 1)
+                    if !(try specialization_equal(d, state, parse, store, bindings, checked, norm.env, prior.env)) { return check_fail(d, store, 14, root_node, 0, 0, 0) }
+                } else {
+                    var reuse = try expansion_seen(d, state, parse, store, bindings, memo, 0, norm.checked_type, norm.env)
+                    if reuse {
+                        if try interpreted_may_reach_ancestry(d, store, bindings, norm.checked_type, norm.env, norm.ancestry, ancestry) { reuse = false }
+                    }
+                    if !reuse {
+                        memo = try remember_expansion(d, memo, 0, checked.target, norm.checked_type, norm.env)
+                        let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                        bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, norm.ancestry)
+                        let target_env = declaration_env_head(bindings, old_len)
+                        ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: norm.ancestry))
+                        let chain = __s0_buffer_len(DeclAncestryRec, ancestry)
+                        var use_at = __s0_buffer_len(DeclTypeUseRec, store.uses)
+                        while use_at != 0 {
+                            use_at = use_at - 1
+                            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
+                            if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+                                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: use.checked_type, env: target_env, ancestry: chain, next: head))
+                                head = __s0_buffer_len(ValidationWorkRec, work)
+                            }
+                        }
                     }
                 }
             }
@@ -603,8 +767,9 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         let recorded = try record_arg_links(d, parse, current, node.children)
         let appended = try append_checked_type(d, recorded, 8, node_id, 0, start + 1, 1)
         let empty = try __s0_buffer_new(TypeBindingRec, d)
+        let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
         let child = __s0_buffer_get(U64, appended.type_args, start)
-        if try interpreted_contains_reference(d, appended, empty, child, 0, boundary) { return check_fail(d, appended, 10, type_diag_node(state, parse, __s0_buffer_get(CheckedTypeRec, appended.types, __s0_buffer_len(CheckedTypeRec, appended.types) - 1)), 0, 0, 0) }
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 10, type_diag_node(state, parse, __s0_buffer_get(CheckedTypeRec, appended.types, __s0_buffer_len(CheckedTypeRec, appended.types) - 1)), 0, 0, 0) }
         return Ok(CheckGood(appended))
     }
     if node.kind == 4 {
@@ -660,15 +825,16 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
     let checked_id = __s0_buffer_len(CheckedTypeRec, appended.types)
     let checked = __s0_buffer_get(CheckedTypeRec, appended.types, checked_id - 1)
     let empty = try __s0_buffer_new(TypeBindingRec, d)
+    let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     if kind == 13 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         let child = __s0_buffer_get(U64, appended.type_args, first - 1)
-        if try interpreted_contains_reference(d, appended, empty, child, 0, boundary) { return check_fail(d, appended, 11, type_diag_node(state, parse, checked), 0, 0, 0) }
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 11, type_diag_node(state, parse, checked), 0, 0, 0) }
     }
     if kind == 11 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         let key = __s0_buffer_get(U64, appended.type_args, first - 1)
         let value = __s0_buffer_get(U64, appended.type_args, first)
-        if !(try interpreted_map_key_ok(d, state, parse, appended, empty, key, 0, boundary)) { return check_fail(d, appended, 12, type_diag_node(state, parse, checked), 0, 0, 0) }
-        if try interpreted_contains_reference(d, appended, empty, value, 0, boundary) { return check_fail(d, appended, 13, type_diag_node(state, parse, checked), 0, 0, 0) }
+        if !(try interpreted_map_key_ok(d, state, parse, appended, empty, no_ancestry, key, 0, 0, boundary)) { return check_fail(d, appended, 12, type_diag_node(state, parse, checked), 0, 0, 0) }
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, value, 0, 0, boundary) { return check_fail(d, appended, 13, type_diag_node(state, parse, checked), 0, 0, 0) }
     }
     if kind == 7 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         return validate_concrete_type(d, state, parse, appended, checked_id, 0, type_diag_node(state, parse, checked), boundary)
@@ -785,7 +951,7 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
 // contribute their target and expand that declaration's representation under
 // positional bindings, so substitution-introduced cycles are visible. Option,
 // Result, and Map expose their arguments; Slice, Ptr, and Buffer cut the walk.
-fn collect_cycle_edges(d: Domain, store: CheckStore) -> Result(__s0_Buffer(CycleEdgeRec), __s0_Error) {
+fn collect_cycle_edges(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(__s0_Buffer(CycleEdgeRec), __s0_Error) {
     let initial_work = try __s0_buffer_new(CycleWorkRec, d)
     var work = initial_work
     let initial_edges = try __s0_buffer_new(CycleEdgeRec, d)
@@ -794,6 +960,10 @@ fn collect_cycle_edges(d: Domain, store: CheckStore) -> Result(__s0_Buffer(Cycle
     var bindings = initial_bindings
     let initial_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     var ancestry = initial_ancestry
+    let initial_memo = try __s0_buffer_new(ExpansionMemoRec, d)
+    var memo = initial_memo
+    let initial_seen = try __s0_buffer_new(InterpStateRec, d)
+    var seen = initial_seen
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let item = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
@@ -805,32 +975,42 @@ fn collect_cycle_edges(d: Domain, store: CheckStore) -> Result(__s0_Buffer(Cycle
     at = 0
     while at < __s0_buffer_len(CycleWorkRec, work) {
         let item = __s0_buffer_get(CycleWorkRec, work, at)
-        let norm = normalize_interp(store, bindings, item.checked_type, item.env)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
-        if checked.kind == 7 {
-            edges = try __s0_buffer_append(CycleEdgeRec, d, edges, CycleEdgeRec(owner: item.owner, target: checked.target))
-            if !ancestry_has(ancestry, item.ancestry, checked.target) {
-                let old_len = __s0_buffer_len(TypeBindingRec, bindings)
-                bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env)
-                let target_env = declaration_env_head(bindings, old_len)
-                ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: item.ancestry))
-                let chain = __s0_buffer_len(DeclAncestryRec, ancestry)
-                var use_at: U64 = 0
-                while use_at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
-                    let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
-                    if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
-                        work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: use.checked_type, env: target_env, ancestry: chain))
+        var inspect = true
+        if checked.kind != 7 {
+            inspect = !interp_state_seen(seen, item.owner, norm.checked_type, norm.env, norm.ancestry)
+            if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: item.owner, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
+        }
+        if inspect {
+            if checked.kind == 7 {
+                edges = try __s0_buffer_append(CycleEdgeRec, d, edges, CycleEdgeRec(owner: item.owner, target: checked.target))
+                if !ancestry_has(ancestry, norm.ancestry, checked.target) {
+                    if !(try expansion_seen(d, state, parse, store, bindings, memo, item.owner, norm.checked_type, norm.env)) {
+                        memo = try remember_expansion(d, memo, item.owner, checked.target, norm.checked_type, norm.env)
+                        let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                        bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, norm.ancestry)
+                        let target_env = declaration_env_head(bindings, old_len)
+                        ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: norm.ancestry))
+                        let chain = __s0_buffer_len(DeclAncestryRec, ancestry)
+                        var use_at: U64 = 0
+                        while use_at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+                            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
+                            if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+                                work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: use.checked_type, env: target_env, ancestry: chain))
+                            }
+                            use_at = use_at + 1
+                        }
                     }
-                    use_at = use_at + 1
                 }
             }
-        }
-        if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 {
-            var arg_at: U64 = 0
-            while arg_at < checked.arg_count {
-                let arg = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + arg_at)
-                work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: arg, env: norm.env, ancestry: item.ancestry))
-                arg_at = arg_at + 1
+            if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 {
+                var arg_at: U64 = 0
+                while arg_at < checked.arg_count {
+                    let arg = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + arg_at)
+                    work = try __s0_buffer_append(CycleWorkRec, d, work, CycleWorkRec(owner: item.owner, checked_type: arg, env: norm.env, ancestry: norm.ancestry))
+                    arg_at = arg_at + 1
+                }
             }
         }
         at = at + 1
@@ -859,7 +1039,7 @@ fn cycle_color(colors: __s0_Buffer(CycleColorRec), owner: U64) -> U64 {
 }
 
 fn reject_value_cycles(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
-    let edges = try collect_cycle_edges(d, store)
+    let edges = try collect_cycle_edges(d, state, parse, store)
     let initial_colors = try __s0_buffer_new(CycleColorRec, d)
     var colors = initial_colors
     let initial_frames = try __s0_buffer_new(CycleFrameRec, d)

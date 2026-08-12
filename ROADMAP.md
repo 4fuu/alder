@@ -347,10 +347,14 @@ declaration-level type names and arities, records fields, variants, import and
 function signature items with stable semantic IDs, rejects duplicate aggregate
 members and empty enums, rejects deterministic value-type cycles, and now
 performs concrete generic substitution/revalidation for current slice, buffer,
-map, and recursive-specialization representation restrictions, and restricts C
-import signatures to primitives and `Ptr(primitive)`. These checks are
-preparatory: bodies, inference, monomorphization, MIR lowering, the full checker,
-and the complete frontend remain incomplete. Its
+map, and recursive-specialization representation restrictions. Binding traversal
+restores caller context, compares `String` with its `[U8]` semantic form, and
+memoizes equivalent interpreted declaration specializations independently of
+active ancestry so finite declaration DAGs do not expand by path. The checker
+also restricts C import signatures to primitives and `Ptr(primitive)`. These
+checks are preparatory: bodies, inference,
+monomorphization, MIR lowering, the full checker, and the complete frontend
+remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols; these slices do not open a second frontend,

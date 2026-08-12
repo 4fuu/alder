@@ -148,7 +148,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify checker MIR: %s", verify.Errors(diagnostics).String())
 	}
-	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
+	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
 		if !ok {
 			t.Fatalf("checker MIR has no %s function", name)
@@ -213,8 +213,10 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, deepFiles, []string{"deep.al"}, false), deepFiles)
 
 	genericGood := map[string]string{
-		"a.al": "type Concrete {\n outer: Outer(U64)\n bool_key: Map(Bool, U64)\n u8_key: Map(U8, U64)\n u16_key: Map(U16, U64)\n u32_key: Map(U32, U64)\n u64_key: Map(U64, U64)\n node: Node(U64)\n same: Same(U64)\n mutual: Left(U64)\n pointer_cut: PointerBox(Concrete)\n phantom: Phantom(String)\n}\n",
+		"a.al": "type Concrete {\n outer: Outer(U64)\n bool_key: Map(Bool, U64)\n u8_key: Map(U8, U64)\n u16_key: Map(U16, U64)\n u32_key: Map(U32, U64)\n u64_key: Map(U64, U64)\n nested_key: Map(PairKey(U8, PairKey(Bool, U64)), U64)\n nested_box: CallerBox(CallerBox(U64))\n node: Node(U64)\n same: Same(U64)\n mutual: Left(U64)\n pointer_cut: PointerBox(Concrete)\n phantom: Phantom(String)\n sugar_one: StringSliceOne(String)\n sugar_two: StringSliceTwo([U8])\n sugar_relay: StringRelayRoot(String)\n}\n",
 		"z.al": "type Key(T: type) { value: T }\n" +
+			"type PairKey(A: type, B: type) { first: A\n second: B }\n" +
+			"type CallerBox(T: type) { value: T }\n" +
 			"type Transparent(T: type) { value: Key(T) }\n" +
 			"enum Choice(T: type) { None\n Some(value: T) }\n" +
 			"type Inner(T: type) { values: __s0_Buffer(T) }\n" +
@@ -224,7 +226,12 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			"type Left(T: type) { right: Ptr(Right(T)) }\n" +
 			"type Right(T: type) { left: Ptr(Left(T)) }\n" +
 			"type PointerBox(T: type) { value: Ptr(T) }\n" +
-			"type Phantom(T: type) { value: U64 }\n",
+			"type Phantom(T: type) { value: U64 }\n" +
+			"type StringSliceOne(T: type) { next: Ptr(StringSliceOne([U8])) }\n" +
+			"type StringSliceTwo(T: type) { next: Ptr(StringSliceTwo(String)) }\n" +
+			"type StringRelayRoot(T: type) { next: Ptr(StringRelayOne([U8])) }\n" +
+			"type StringRelayOne(T: type) { next: Ptr(StringRelayTwo(T)) }\n" +
+			"type StringRelayTwo(T: type) { next: Ptr(StringRelayRoot(T)) }\n",
 	}
 	genericOne := runAlderChecker(t, exe, genericGood, []string{"z.al", "a.al"}, false)
 	genericTwo := runAlderChecker(t, exe, genericGood, []string{"a.al", "z.al"}, false)
@@ -244,6 +251,37 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	substitutionGrowth.WriteString("type Root { value: G63(U64) }\n")
 	growthFiles := map[string]string{"growth.al": substitutionGrowth.String()}
 	parseCheckerManifest(t, runAlderChecker(t, exe, growthFiles, []string{"growth.al"}, false), growthFiles)
+	var layeredDAG strings.Builder
+	layeredDAG.WriteString("type PhantomLeaf(T: type) { value: U64 }\ntype DivergentLeaf { first: PhantomLeaf(U64)\n second: PhantomLeaf(U8) }\n")
+	for i := 0; i <= 24; i++ {
+		field := "DivergentLeaf"
+		if i != 0 {
+			field = fmt.Sprintf("D%02d", i-1)
+		}
+		fmt.Fprintf(&layeredDAG, "type D%02d { left: %s\n right: %s }\n", i, field, field)
+	}
+	dagFiles := map[string]string{"dag.al": layeredDAG.String()}
+	parseCheckerManifest(t, runAlderChecker(t, exe, dagFiles, []string{"dag.al"}, false), dagFiles)
+	var compactEquality strings.Builder
+	compactEquality.WriteString("type EqualityPhantom(T: type) { value: U64 }\ntype EqualityLeaf(T: type) { left: EqualityPhantom(T)\n right: EqualityPhantom(T) }\n")
+	for i := 0; i <= 24; i++ {
+		field := "EqualityLeaf(T)"
+		if i != 0 {
+			field = fmt.Sprintf("S%02d(Result(T, T))", i-1)
+		}
+		fmt.Fprintf(&compactEquality, "type S%02d(T: type) { value: %s }\n", i, field)
+	}
+	compactEquality.WriteString("type EqualityRoot { value: S24(U64) }\n")
+	equalityFiles := map[string]string{"equality.al": compactEquality.String()}
+	parseCheckerManifest(t, runAlderChecker(t, exe, equalityFiles, []string{"equality.al"}, false), equalityFiles)
+	var compactInterpretation strings.Builder
+	compactInterpretation.WriteString("type G00(T: type) { value: T\n items: [T] }\n")
+	for i := 1; i <= 24; i++ {
+		fmt.Fprintf(&compactInterpretation, "type G%02d(T: type) { value: G%02d(Result(T, T)) }\n", i, i-1)
+	}
+	compactInterpretation.WriteString("type InterpretationRoot { value: G24(U64) }\n")
+	interpretationFiles := map[string]string{"interpretation.al": compactInterpretation.String()}
+	parseCheckerManifest(t, runAlderChecker(t, exe, interpretationFiles, []string{"interpretation.al"}, false), interpretationFiles)
 	ffiGood := map[string]string{"ffi.al": "import c primitive_ffi: fn(Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Unit, Ptr(F64)) -> Unit\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, ffiGood, []string{"ffi.al"}, false), ffiGood)
 
@@ -283,24 +321,36 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "two-cycle.al", text: "type A { x: B }\ntype B { x: A }\n", kind: 9, marker: "type"},
 		{name: "generic-target-cycle.al", text: "type Box(T: type) { x: A }\ntype A { x: Box(U64) }\n", kind: 9, marker: "type"},
 		{name: "substituted-value-cycle.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Root) }\n", kind: 9, marker: "type", last: true},
+		{name: "nested-substituted-value-cycle.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Root)) }\n", kind: 9, marker: "type", last: true},
+		{name: "cycle-owner-memo.al", text: "type Leaf(T: type) { value: T }\ntype A { value: Leaf(B) }\ntype B { value: Leaf(B) }\n", kind: 9, marker: "type", last: true},
 		{name: "generic-substituted-value-cycle.al", text: "type Loop(T: type) { value: Box(Loop(T)) }\ntype Box(T: type) { value: T }\n", kind: 9, marker: "type"},
 		{name: "substituted-cycle-before-forward-restriction.al", text: "type Root { value: Box(Root) }\ntype Box(T: type) { bad: Map(T, U64)\n value: T }\n", kind: 9, marker: "type"},
 		{name: "substituted-cycle-sibling.al", text: "type Pair(T: type) { left: Box(T)\n right: Box(Root) }\ntype Box(T: type) { value: T }\ntype Root { value: Pair(U64) }\n", kind: 9, marker: "type"},
 		{name: "nested-string-slice.al", text: "type A { x: [String] }\n", kind: 10, marker: "["},
 		{name: "substituted-slice.al", text: "type Box(T: type) { x: [T] }\ntype A { x: Box(String) }\n", kind: 10, marker: "Box", last: true},
 		{name: "multi-substituted-slice.al", text: "type Leaf(T: type) { x: [T] }\ntype Middle(T: type) { x: Leaf(T) }\ntype A { x: Middle(String) }\n", kind: 10, marker: "Middle", last: true},
+		{name: "caller-ancestry-slice.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box([String])) }\n", kind: 10, marker: "["},
+		{name: "inherited-ancestry-forward-slice.al", text: "type Inner(T: type) { value: T }\ntype Outer { value: Inner([Later]) }\ntype Later { text: String }\ntype Root { value: Outer }\n", kind: 10, marker: "Outer", last: true},
+		{name: "shared-specialization-slice.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: [Pair(String)] }\n", kind: 10, marker: "["},
 		{name: "recursive-slice.al", text: "type A { x: [A] }\n", kind: 10, marker: "["},
 		{name: "buffer-string.al", text: "type A { x: __s0_Buffer(String) }\n", kind: 11, marker: "__s0_Buffer"},
 		{name: "substituted-buffer.al", text: "type Box(T: type) { x: __s0_Buffer(T) }\ntype A { x: Box(String) }\n", kind: 11, marker: "Box", last: true},
+		{name: "caller-ancestry-buffer.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(__s0_Buffer(String))) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "shared-specialization-buffer.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: __s0_Buffer(Pair(String)) }\n", kind: 11, marker: "__s0_Buffer"},
 		{name: "recursive-buffer.al", text: "type A { x: __s0_Buffer(A) }\n", kind: 11, marker: "__s0_Buffer"},
 		{name: "map-key-before-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(I64, String) }\n", kind: 12, marker: "Pair", last: true},
 		{name: "map-key-float.al", text: "type A { x: Map(F64, U64) }\n", kind: 12, marker: "Map"},
 		{name: "map-key-generic.al", text: "type Key(T: type) { x: T }\ntype A { x: Map(Key(I64), String) }\n", kind: 12, marker: "Map"},
+		{name: "caller-ancestry-map-key.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Map(I64, U64))) }\n", kind: 12, marker: "Map"},
+		{name: "shared-specialization-map-key.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: Map(Pair(I64), U64) }\n", kind: 12, marker: "Map"},
 		{name: "substituted-map-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(U64, String) }\n", kind: 13, marker: "Pair", last: true},
 		{name: "declared-map-value.al", text: "type Value(T: type) { x: T }\ntype A { x: Map(U64, Value(String)) }\n", kind: 13, marker: "Map"},
+		{name: "caller-ancestry-map-value.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Map(U64, String))) }\n", kind: 13, marker: "Map"},
+		{name: "shared-specialization-map-value.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: Map(U64, Pair(String)) }\n", kind: 13, marker: "Map"},
 		{name: "struct-member-order.al", text: "type Fields(T: type) { first: __s0_Buffer(T)\n second: Map(T, U64) }\ntype A { x: Fields(String) }\n", kind: 11, marker: "Fields", last: true},
 		{name: "enum-member-order.al", text: "enum E(T: type) { First(value: __s0_Buffer(T))\n Second(value: Map(T, U64)) }\ntype A { x: E(String) }\n", kind: 11, marker: "E", last: true},
 		{name: "changed-recursive-specialization.al", text: "type A(T: type) { next: Ptr(A(Option(T))) }\ntype Root { x: A(U64) }\n", kind: 14, marker: "A", last: true},
+		{name: "memoized-changed-recursive-specialization.al", text: "type C { next: Ptr(A(Option(U64))) }\ntype A(T: type) { next: Ptr(C) }\ntype D(T: type) { first: C\n second: A(T) }\ntype Root { value: D(U64) }\n", kind: 14, marker: "D", last: true},
 		{name: "recursive-sibling.al", text: "type A(T: type) { next: Ptr(A(T))\n bad: Map(T, U64) }\ntype Root { x: A(I64) }\n", kind: 12, marker: "A", last: true},
 		{name: "restriction-before-cycle.al", text: "type Bad { x: Map(I64, String) }\ntype Cycle { x: Cycle }\n", kind: 12, marker: "Map"},
 		{name: "forward-substituted-buffer.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\n", kind: 11, marker: "Later"},
