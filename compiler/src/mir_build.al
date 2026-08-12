@@ -117,13 +117,13 @@ fn mir_new_parts(d: Domain, names: __s0_Buffer(U8), types: __s0_Buffer(MirTypeRe
 }
 
 fn mir_append_primitive(d: Domain, types: __s0_Buffer(MirTypeRec)) -> Result(__s0_Buffer(MirTypeRec), __s0_Error) {
-    return __s0_buffer_append(MirTypeRec, d, types, MirTypeRec(kind: 0, name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0))
+    return __s0_buffer_append(MirTypeRec, d, types, MirTypeRec(kind: mir_type_kind_primitive(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0))
 }
 
 fn mir_new_types(d: Domain, names: __s0_Buffer(U8)) -> Result(MirStore, __s0_Error) {
     var types = try __s0_buffer_new(MirTypeRec, d)
     var at: U64 = 0
-    while at < 12 {
+    while at < mir_primitive_type_count() {
         types = try mir_append_primitive(d, types)
         at = at + 1
     }
@@ -157,12 +157,13 @@ fn mir_type_parts_equal(store: MirStore, first: U64, count: U64, parts: __s0_Buf
     return true
 }
 
-// Structural type kinds 3..17 are interned by deterministic ascending scans.
+// Structural type kinds option..table_mut_view are interned by deterministic
+// ascending scans.
 // For unary and singleton types parts is empty; function types use ordered
 // parameter Type IDs and result_type. Named aggregate/enum kinds are appended
 // separately and are never structurally merged.
 fn mir_intern_type(d: Domain, store: MirStore, kind: U64, elem: U64, ok_type: U64, err_type: U64, parts: __s0_Buffer(U64), result_type: U64) -> Result(MirTypeStep, __s0_Error) {
-    var at: U64 = 12
+    var at: U64 = mir_primitive_type_count()
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let prior = __s0_buffer_get(MirTypeRec, store.types, at)
         if prior.kind == kind && prior.elem == elem && prior.ok_type == ok_type && prior.err_type == err_type && prior.result_type == result_type && mir_type_parts_equal(store, prior.first_part, prior.part_count, parts) {
@@ -176,7 +177,7 @@ fn mir_intern_type(d: Domain, store: MirStore, kind: U64, elem: U64, ok_type: U6
     var part_at: U64 = 0
     while part_at < __s0_buffer_len(U64, parts) {
         if first == 0 { first = __s0_buffer_len(MirTypePartRec, type_parts) + 1 }
-        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: 3, owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, parts, part_at)))
+        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_param(), owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, parts, part_at)))
         part_at = part_at + 1
     }
     let rec = MirTypeRec(kind: kind, name_start: 0, name_end: 0, elem: elem, ok_type: ok_type, err_type: err_type, first_part: first, part_count: part_at, result_type: result_type)
@@ -201,6 +202,14 @@ fn mir_add_import(d: Domain, store: MirStore, name: String, result_type: U64) ->
     let named = try mir_append_name(d, store, name)
     let items = try __s0_buffer_append(MirImportRec, d, named.store.imports, MirImportRec(name_start: named.start, name_end: named.end, result_type: result_type))
     return Ok(MirBuildStep(store: mir_with_imports(named.store, items), id: __s0_buffer_len(MirImportRec, items)))
+}
+
+// Import signatures use append-only operand records so malformed owner and
+// ordinal combinations remain directly constructible for verifier fixtures.
+fn mir_add_import_param(d: Domain, store: MirStore, import_id: U64, ordinal: U64, param_type: U64) -> Result(MirStore, __s0_Error) {
+    let rec = MirOperandRec(kind: mir_operand_import_param(), owner: import_id, ordinal: ordinal, edge: 0, value: 0, target: 0, operand_type: param_type, name_start: 0, name_end: 0)
+    let step = try mir_add_operand(d, store, rec)
+    return Ok(step.store)
 }
 
 fn mir_add_const(d: Domain, store: MirStore, name: String, const_type: U64, kind: U64, bool_value: U64, int_value: I64, float_bits: U64, text: String) -> Result(MirBuildStep, __s0_Error) {
@@ -231,9 +240,9 @@ fn mir_add_value(d: Domain, store: MirStore, function: U64, name: String, value_
 }
 
 fn mir_add_function_param(d: Domain, store: MirStore, function: U64, ordinal: U64, name: String, param_type: U64) -> Result(MirBuildStep, __s0_Error) {
-    let value = try mir_add_value(d, store, function, name, param_type, 0, 0, ordinal)
+    let value = try mir_add_value(d, store, function, name, param_type, mir_value_def_function_param(), 0, ordinal + 1)
     let named = try mir_append_name(d, value.store, name)
-    let rec = MirParamRec(kind: 1, function: function, block: 0, ordinal: ordinal, name_start: named.start, name_end: named.end, param_type: param_type, value: value.id)
+    let rec = MirParamRec(kind: mir_param_function(), function: function, block: 0, ordinal: ordinal, name_start: named.start, name_end: named.end, param_type: param_type, value: value.id)
     let params = try __s0_buffer_append(MirParamRec, d, named.store.params, rec)
     return Ok(MirBuildStep(store: mir_with_params(named.store, params), id: value.id))
 }
@@ -251,9 +260,9 @@ fn mir_add_block(d: Domain, store: MirStore, function: U64, ordinal: U64, name: 
 }
 
 fn mir_add_block_param(d: Domain, store: MirStore, function: U64, block: U64, ordinal: U64, name: String, param_type: U64) -> Result(MirBuildStep, __s0_Error) {
-    let value = try mir_add_value(d, store, function, name, param_type, 1, block, ordinal)
+    let value = try mir_add_value(d, store, function, name, param_type, mir_value_def_block_param(), block, ordinal + 1)
     let named = try mir_append_name(d, value.store, name)
-    let rec = MirParamRec(kind: 2, function: function, block: block, ordinal: ordinal, name_start: named.start, name_end: named.end, param_type: param_type, value: value.id)
+    let rec = MirParamRec(kind: mir_param_block(), function: function, block: block, ordinal: ordinal, name_start: named.start, name_end: named.end, param_type: param_type, value: value.id)
     let params = try __s0_buffer_append(MirParamRec, d, named.store.params, rec)
     return Ok(MirBuildStep(store: mir_with_params(named.store, params), id: value.id))
 }

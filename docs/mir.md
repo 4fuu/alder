@@ -73,6 +73,63 @@ SpanId        (reserved)
 
 `DomainId`, `CleanupId`, and `SpanId` are reserved parts of the identity vocabulary and are not yet used by operations. Printed ordering must not depend on host-language map iteration, pointer values, allocation addresses, or traversal races. Within a function, value IDs are assigned in textual or construction order: function parameters, then per block in order its parameters, instruction results, and switch case bindings.
 
+### Independent Alder MIR 3 encoding
+
+The bootstrap compiler's independent flat model in `compiler/src/mir_model.al`
+uses external 1-based `U64` identities so that zero uniformly means absent. A
+nonzero module-table identity converts to a Go MIR slice index by subtracting
+one. The twelve primitive types therefore have fixed external IDs 1 through 12
+in this order: `unit`, `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+`u64`, `f32`, `f64`. Type, constant, value-definition, place, operation, and
+terminator kinds retain the exact zero-based numeric values of the Go model;
+the Alder-only type-part, parameter, and flattened-operand kinds are explicitly
+numbered by named functions in that file. The independent model's format
+version is exactly 3.
+
+Function-local Go IDs are encoded as ordinal + 1. Consumers resolve a block,
+value, or local by scanning its flat buffer for the owning function and the
+zero-based ordinal. Parameters, blocks, locals, values, instructions within a
+block, the one terminator for each block, and every ordered child family must
+have contiguous ordinals beginning at zero. Global flat record identities
+(including instruction, terminator, operand, and type-part records) are buffer
+index + 1. Append order is deterministic but is not evidence of validity.
+
+The following ownership rules are part of the encoding contract:
+
+- function parameters are owned by a function, have block zero, and point to
+  leading function values; block parameters additionally own a logical block
+  ID. Each parameter and value definition links reciprocally, with the value's
+  `item` storing parameter ordinal + 1;
+- import parameters are `import_param` operand records owned by an Import ID;
+  their `operand_type` fields, in ordinal order, plus the import record's result
+  type form the signature;
+- locals, blocks, values, and places name their owning function. An instruction
+  names both that function and one of its blocks; its ordinal is local to the
+  block. An instruction result and its value definition link reciprocally, with
+  `item` storing instruction ordinal + 1;
+- exactly one terminator record names each function/block pair. Terminator edge
+  arguments are owned by the global terminator-record ID. Their `edge` is 0 for
+  jump, 1 for branch-then, and 2 for branch-else, so equal branch targets remain
+  unambiguous;
+- instruction operands, checked failure-edge arguments, and aggregate fields
+  are owned by the global instruction-record ID. Checked arguments also repeat
+  the failure target. Aggregate fields carry their field name and value in
+  declaration order;
+- switch cases are owned by the global switch-terminator ID. Their optional
+  payload binding links reciprocally to a switch-case value definition whose
+  `item` stores case ordinal + 1. A switch-case argument is owned by the global
+  switch-case operand ID and repeats that case's target;
+- aggregate fields and enum variants are `MirTypePartRec` records owned by the
+  named Type ID. Membership is the owner scan and ordinals are contiguous per
+  owner and part kind. Anonymous function types additionally carry a
+  `first_part`/`part_count` boundary which must exactly cover their reciprocal
+  function-parameter parts.
+
+Consumers validate in-range IDs, owners, boundaries, contiguous ordinals,
+single ownership, and every reciprocal link. Builders remain append-only data
+constructors: they neither verify nor repair malformed raw records, which must
+remain observable for deterministic verifier rejection tests.
+
 ## Initial Type Vocabulary
 
 ```text
