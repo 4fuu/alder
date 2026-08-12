@@ -27,11 +27,10 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_const_get() || op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
     return 0
 }
-fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
     let type_count = __s0_buffer_len(MirTypeRec, store.types)
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
     if version < 1 || version > mir_format_version() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_version(), 0, 0, 0, 0, 0, 0, 0, 1, version, mir_format_version())) }
     if type_count < mir_primitive_type_count() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_missing_primitives(), 0, 0, 0, 0, 0, 0, 0, mir_primitive_type_count(), type_count, 0)) }
     var at: U64 = 0
@@ -58,6 +57,13 @@ prior = at }
         }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    var at: U64 = 0
     // Module declarations: names and duplicates remain in storage order.
     at = 0
     while at < __s0_buffer_len(MirImportRec, store.imports) {
@@ -93,6 +99,12 @@ prior = prior + 1 }
         if mir_vblock_index(store, at + 1, 1) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_missing_block(), at + 1, 0, 0, 0, 0, 0, at + 1, 1, 0, 0)) }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     // Every owner-local table is checked directly; builders are not trusted.
     at = 0
     while at < __s0_buffer_len(MirParamRec, store.params) {
@@ -112,6 +124,12 @@ if p.kind == mir_param_block() { want = mir_value_def_block_param() }
 if v.def_kind != want || v.block != p.block || v.item != p.ordinal + 1 || v.value_type != p.param_type { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), p.function, p.block, 0, 0, 0, 0, at + 1, want, v.def_kind, p.value)) } }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_locals(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     at = 0
     while at < __s0_buffer_len(MirLocalRec, store.locals) {
         let item = __s0_buffer_get(MirLocalRec, store.locals, at)
@@ -124,6 +142,12 @@ scan = scan + 1 }
         if !mir_vname_valid(store, item.name_start, item.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_blocks(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     at = 0
     while at < __s0_buffer_len(MirBlockRec, store.blocks) {
         let item = __s0_buffer_get(MirBlockRec, store.blocks, at)
@@ -136,6 +160,12 @@ scan = scan + 1 }
         if !mir_vname_valid(store, item.name_start, item.name_end, true) || mir_vname_word(store, item.name_start, item.name_end, "else") { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), item.function, item.ordinal + 1, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     at = 0
     while at < __s0_buffer_len(MirValueRec, store.values) {
         let v = __s0_buffer_get(MirValueRec, store.values, at)
@@ -147,8 +177,29 @@ scan = scan + 1 }
         if v.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), v.function, v.block, 0, 0, 0, 0, at + 1, expected, v.ordinal, 0)) }
         if !mir_vname_valid(store, v.name_start, v.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         if v.def_kind != mir_value_def_function_param() && mir_vblock_index(store, v.function, v.block) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, v.block)) }
+        var reciprocal: U64 = 0
+        if v.def_kind == mir_value_def_function_param() || v.def_kind == mir_value_def_block_param() { var pi: U64 = 0
+while pi < __s0_buffer_len(MirParamRec, store.params) { let p = __s0_buffer_get(MirParamRec, store.params, pi)
+if p.function == v.function && p.block == v.block && p.ordinal + 1 == v.item && p.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
+pi = pi + 1 } }
+        if v.def_kind == mir_value_def_instruction() { var ii: U64 = 0
+while ii < __s0_buffer_len(MirInstrRec, store.instructions) { let i = __s0_buffer_get(MirInstrRec, store.instructions, ii)
+if i.function == v.function && i.block == v.block && i.ordinal + 1 == v.item && i.result == v.ordinal + 1 { reciprocal = reciprocal + 1 }
+ii = ii + 1 } }
+        if v.def_kind == mir_value_def_switch_case() { var oi: U64 = 0
+while oi < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, oi)
+if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, __s0_buffer_len(MirTermRec, store.terminators)) { let term = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1)
+if term.function == v.function && term.block == v.block { reciprocal = reciprocal + 1 } }
+oi = oi + 1 } }
+        if reciprocal != 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), v.function, v.block, 0, 0, 0, 0, at + 1, 1, reciprocal, v.item)) }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     // Instructions, places, and terminators use only range-checked lookups.
     at = 0
     while at < __s0_buffer_len(MirPlaceRec, store.places) {
@@ -162,9 +213,16 @@ var steps: U64 = 0
 while mir_vid_valid(next, __s0_buffer_len(MirPlaceRec, store.places)) && steps <= __s0_buffer_len(MirPlaceRec, store.places) { let base = __s0_buffer_get(MirPlaceRec, store.places, next - 1)
 if base.function != p.function { steps = __s0_buffer_len(MirPlaceRec, store.places) + 2 } else { if base.kind == mir_place_field() { next = base.base } else { next = 0 } }
 steps = steps + 1 }
-if steps > __s0_buffer_len(MirPlaceRec, store.places) + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_place(), p.function, 0, 0, 0, 0, 0, at + 1, 0, 0, p.base)) } }
+if steps > __s0_buffer_len(MirPlaceRec, store.places) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_place(), p.function, 0, 0, 0, 0, 0, at + 1, 0, 0, p.base)) } }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    var at: U64 = 0
     at = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let i = __s0_buffer_get(MirInstrRec, store.instructions, at)
@@ -177,15 +235,16 @@ scan = scan + 1 }
         if !mir_vfunction_exists(store, i.function) || mir_vblock_index(store, i.function, i.block) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
         if i.op > mir_op_ffi_call_unsafe() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_ffi_call_unsafe(), i.op, 0)) } else {
-            var produces = mir_vop_produces(i.op)
+            let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
-            if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).result_type == mir_type_unit() { produces = has_result }
-            if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) && __s0_buffer_get(MirImportRec, store.imports, i.target - 1).result_type == mir_type_unit() { produces = has_result }
-            if (produces && !has_result) || (!produces && has_result) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_result(), i.function, i.block, id, 0, 0, 0, id, 0, i.result, 0)) }
+            var droppable = false
+            if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).result_type == mir_type_unit() { droppable = true }
+            if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) && __s0_buffer_get(MirImportRec, store.imports, i.target - 1).result_type == mir_type_unit() { droppable = true }
+            if (produces && !has_result && !droppable) || (!produces && has_result) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_result(), i.function, i.block, id, 0, 0, 0, id, 0, i.result, 0)) }
             let fail_count = mir_vcount_operands(store, mir_operand_checked_edge_arg(), id, 0)
-let has_fail = i.target != 0
             let checked = mir_vop_checked(i.op)
-            if (checked && !has_fail) || (!checked && has_fail) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_failure_edge(), i.function, i.block, id, 0, 0, 0, id, 0, fail_count, 0)) }
+            let has_fail = checked && i.target != 0
+            if checked && !has_fail { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_failure_edge(), i.function, i.block, id, 0, 0, 0, id, 0, fail_count, 0)) }
             let mask = mir_vop_required_mask(i.op)
             if ((mask % 2 == 1) && i.a == 0) || (((mask / 2) % 2 == 1) && i.b == 0) || (((mask / 4) % 2 == 1) && i.c == 0) || (((mask / 8) % 2 == 1) && i.place == 0) || (((mask / 16) % 2 == 1) && i.type_op == 0) || (((mask / 32) % 2 == 1) && i.target == 0) || (((mask / 64) % 2 == 1) && i.name_start == i.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), i.function, i.block, id, 0, 0, 0, id, mask, 0, 0)) }
             if (i.a != 0 && mir_vvalue_index(store, i.function, i.a) == 0) || (i.b != 0 && mir_vvalue_index(store, i.function, i.b) == 0) || (i.c != 0 && mir_vvalue_index(store, i.function, i.c) == 0) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.a)) }
@@ -200,16 +259,29 @@ if v.def_kind != mir_value_def_instruction() || v.block != i.block || v.item != 
         }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     at = 0
     while at < __s0_buffer_len(MirTermRec, store.terminators) {
         let t = __s0_buffer_get(MirTermRec, store.terminators, at)
 let id = at + 1
         if !mir_vfunction_exists(store, t.function) || mir_vblock_index(store, t.function, t.block) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), t.function, t.block, 0, id, 0, 0, id, 0, 0, 0)) }
         if t.kind > mir_term_panic() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), t.function, t.block, 0, id, 0, 0, id, mir_term_panic(), t.kind, 0)) }
+        if (t.kind == mir_term_branch() || t.kind == mir_term_switch() || t.kind == mir_term_fail()) && t.value == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), t.function, t.block, 0, id, 0, 0, id, 1, 0, 0)) }
+        if t.value != 0 && mir_vvalue_index(store, t.function, t.value) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), t.function, t.block, 0, id, 0, 0, id, 0, 0, t.value)) }
         if t.kind == mir_term_panic() && (version < 2 || t.value != 0) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), t.function, t.block, 0, id, 0, 0, id, 2, version, t.value)) }
-        if t.kind == mir_term_fail() && t.value == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), t.function, t.block, 0, id, 0, 0, id, 1, 0, 0)) }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     // Exactly one terminator per block.
     at = 0
     while at < __s0_buffer_len(MirBlockRec, store.blocks) { let b = __s0_buffer_get(MirBlockRec, store.blocks, at)
@@ -220,6 +292,12 @@ if t.function == b.function && t.block == b.ordinal + 1 { count = count + 1 }
 ti = ti + 1 }
 if count != 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), b.function, b.ordinal + 1, 0, 0, 0, 0, at + 1, 1, count, 0)) }
 at = at + 1 }
+    return Ok(out)
+}
+fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    var at: U64 = 0
     // Flattened operands validate kind, owner, contiguous ordinal, and values.
     at = 0
     while at < __s0_buffer_len(MirOperandRec, store.operands) {
@@ -257,5 +335,19 @@ if o.target != c.target { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_
         }
         at = at + 1
     }
+    return Ok(out)
+}
+fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = try mir_vphase1_types(d, store, version, initial)
+    out = try mir_vphase1_declarations(d, store, out)
+    out = try mir_vphase1_params(d, store, out)
+    out = try mir_vphase1_locals(d, store, out)
+    out = try mir_vphase1_blocks(d, store, out)
+    out = try mir_vphase1_values(d, store, out)
+    out = try mir_vphase1_places(d, store, out)
+    out = try mir_vphase1_instructions(d, store, version, out)
+    out = try mir_vphase1_terminators(d, store, version, out)
+    out = try mir_vphase1_block_terminators(d, store, out)
+    out = try mir_vphase1_operands(d, store, out)
     return Ok(out)
 }

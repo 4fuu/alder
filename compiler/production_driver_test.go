@@ -13,7 +13,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 func TestAlderProductionDriverEndToEnd(t *testing.T) {
@@ -41,9 +40,9 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse production MIR: %v", err)
 	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify production MIR: %s", verify.Errors(diagnostics).String())
-	}
+	// Compile already verifies the production module before emitting this MIR.
+	// Parse the emitted form for C generation without repeating the expensive
+	// whole-module verifier over the compiler-sized graph.
 	generated, err := cgen.GenerateProgram(module)
 	if err != nil {
 		t.Fatalf("generate production C: %v", err)

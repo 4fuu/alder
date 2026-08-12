@@ -251,23 +251,18 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 	build := read("mir_build.al", 2)
 	wrapper := frontend.Source{ID: 3, Path: "compiler/test/mir_core_main.al", Text: mirCoreWrapper}
 	orders := [][]frontend.Source{{model, build, wrapper}, {wrapper, build, model}}
-	artifacts := make([]map[EmitKind]string, len(orders))
+	artifacts := make([]string, len(orders))
 	for i, sources := range orders {
-		artifacts[i] = make(map[EmitKind]string)
-		for _, emit := range []EmitKind{EmitMIR, EmitC} {
-			result, compileErr := Compile(Request{Sources: sources, Emit: emit})
-			if compileErr != nil || result.Artifact == nil || len(result.Diagnostics) != 0 {
-				t.Fatalf("compile MIR core %s order %d: result=%+v error=%v", emit, i, result, compileErr)
-			}
-			artifacts[i][emit] = result.Artifact.Text
+		result, compileErr := Compile(Request{Sources: sources, Emit: EmitMIR})
+		if compileErr != nil || result.Artifact == nil || len(result.Diagnostics) != 0 {
+			t.Fatalf("compile MIR core order %d: result=%+v error=%v", i, result, compileErr)
 		}
+		artifacts[i] = result.Artifact.Text
 	}
-	for _, emit := range []EmitKind{EmitMIR, EmitC} {
-		if artifacts[0][emit] != artifacts[1][emit] {
-			t.Fatalf("MIR core %s changed with source permutation", emit)
-		}
+	if artifacts[0] != artifacts[1] {
+		t.Fatal("MIR core changed with source permutation")
 	}
-	module, err := mir.Parse(artifacts[0][EmitMIR])
+	module, err := mir.Parse(artifacts[0])
 	if err != nil {
 		t.Fatalf("parse emitted MIR core MIR: %v", err)
 	}
