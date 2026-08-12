@@ -347,7 +347,8 @@ declaration-level type names and arities, records fields, variants, import and
 function signature items with stable semantic IDs, rejects duplicate aggregate
 members and empty enums, rejects deterministic value-type cycles, and now
 performs concrete generic substitution/revalidation for current slice, buffer,
-map, and recursive-specialization representation restrictions. These checks are
+map, and recursive-specialization representation restrictions, and restricts C
+import signatures to primitives and `Ptr(primitive)`. These checks are
 preparatory: bodies, inference, monomorphization, MIR lowering, the full checker,
 and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet

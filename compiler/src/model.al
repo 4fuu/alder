@@ -147,7 +147,8 @@ type DeclTypeUseRec {
 // struct field, 7 duplicate enum variant, 8 empty enum, 9 value-type cycle,
 // 10 nested/reference slice element, 11 non-copy-trivial buffer element,
 // 12 inadmissible Map key, 13 non-copy-trivial Map value, and 14 recursive
-// declared type whose active specialization changes.
+// declared type whose active specialization changes, and 15 unsupported C
+// import signature type.
 type CheckDiagRec {
     kind: U64
     source: U64

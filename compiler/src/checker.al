@@ -573,6 +573,19 @@ fn type_arg_count(parse: ParseStore, link_id: U64) -> U64 {
     return count
 }
 
+// C imports deliberately use a smaller syntactic type surface than ordinary
+// Alder declarations: primitives and exactly Ptr(primitive). Check this before
+// general resolution so unsupported signatures receive the import diagnostic,
+// not a nested representation or unknown-type diagnostic.
+fn ffi_type_syntax_ok(state: State, parse: ParseStore, node_id: U64) -> Bool {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+    if node.kind == 4 { return builtin_type_kind(state, node) == 1 }
+    if node.kind != 6 || !node_word(state, node, "Ptr") || type_arg_count(parse, node.children) != 1 { return false }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+    let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    return child.kind == 4 && builtin_type_kind(state, child) == 1
+}
+
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     let boundary = declaration_boundary(store, owner)
@@ -702,6 +715,8 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
         syntax = head.node
     }
+    let owner_symbol = __s0_buffer_get(SymbolRec, current.symbols, owner - 1)
+    if owner_symbol.kind == 1 && !ffi_type_syntax_ok(state, parse, syntax) { return check_decl_fail(d, state, parse, current, 15, owner) }
     let resolved = try resolve_type(d, state, parse, current, owner, syntax)
     let next = match resolved {
         CheckGood(value) => value
@@ -711,7 +726,6 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(resolved) }
-    let owner_symbol = __s0_buffer_get(SymbolRec, next.symbols, owner - 1)
     if owner_symbol.kind == 1 || owner_symbol.kind == 12 {
         let checked_id = __s0_buffer_len(CheckedTypeRec, next.types)
         let empty = try __s0_buffer_new(TypeBindingRec, d)
@@ -743,6 +757,7 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(params) }
+    if !ffi_type_syntax_ok(state, parse, result_link.node) { return check_decl_fail(d, state, parse, current, 15, owner) }
     let resolved = try resolve_type(d, state, parse, current, owner, result_link.node)
     let next = match resolved {
         CheckGood(value) => value

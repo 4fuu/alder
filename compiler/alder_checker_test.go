@@ -177,9 +177,9 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 
 	good := map[string]string{
-		"a space.al": "import c foreign: fn(U64, String,) -> I32\n" +
+		"a space.al": "import c foreign: fn(U64, Ptr(U8),) -> I32\n" +
 			"type Box(T: type) { value: T }\n" +
-			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(U64)\n mark: DomainMark\n}\n" +
+			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(U64)\n mark: DomainMark\n text: String\n}\n" +
 			"enum E {\n Empty\n Full(value: Box(U64))\n}\n" +
 			"fn f(T: type, x: T, y: Box(T),) -> Option(U64) {}\n" +
 			"type Other(T: type) { value: T }\n" +
@@ -244,6 +244,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	substitutionGrowth.WriteString("type Root { value: G63(U64) }\n")
 	growthFiles := map[string]string{"growth.al": substitutionGrowth.String()}
 	parseCheckerManifest(t, runAlderChecker(t, exe, growthFiles, []string{"growth.al"}, false), growthFiles)
+	ffiGood := map[string]string{"ffi.al": "import c primitive_ffi: fn(Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Unit, Ptr(F64)) -> Unit\n"}
+	parseCheckerManifest(t, runAlderChecker(t, exe, ffiGood, []string{"ffi.al"}, false), ffiGood)
 
 	rejects := []struct {
 		name, text, marker, relatedMarker string
@@ -270,7 +272,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "interleaved-type-order.al", text: "enum First { X\n X }\ntype Later { x: U64\n x: U8 }\n", kind: 7, marker: "enum"},
 		{name: "shape-before-cycle.al", text: "type Cyclic { x: Cyclic }\nenum Empty {}\n", kind: 8, marker: "enum"},
 		{name: "cycle-before-import.al", text: "import c bad: fn(Missing) -> U64\ntype Cyclic { x: Cyclic }\n", kind: 9, marker: "type"},
-		{name: "import-before-function.al", text: "fn earlier() -> Missing {}\nimport c bad: fn(Nope) -> U64\n", kind: 4, marker: "Nope", last: true},
+		{name: "import-before-function.al", text: "fn earlier() -> Missing {}\nimport c bad: fn(Nope) -> U64\n", kind: 15, marker: "import"},
 		{name: "self-cycle.al", text: "type A { x: A }\n", kind: 9, marker: "type"},
 		{name: "enum-payload-cycle.al", text: "enum A { Wrap(value: A) }\n", kind: 9, marker: "enum"},
 		{name: "option-cycle.al", text: "type A { x: Option(A) }\n", kind: 9, marker: "type"},
@@ -303,7 +305,16 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "restriction-before-cycle.al", text: "type Bad { x: Map(I64, String) }\ntype Cycle { x: Cycle }\n", kind: 12, marker: "Map"},
 		{name: "forward-substituted-buffer.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\n", kind: 11, marker: "Later"},
 		{name: "cycle-before-forward-revalidation.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\ntype Cycle { x: Cycle }\n", kind: 9, marker: "type", last: true},
-		{name: "import-restriction-before-function.al", text: "fn earlier(x: __s0_Buffer(String)) -> U64 {}\nimport c bad: fn(Map(I64, U64)) -> U64\n", kind: 12, marker: "Map"},
+		{name: "import-restriction-before-function.al", text: "fn earlier(x: __s0_Buffer(String)) -> U64 {}\nimport c bad: fn(Map(I64, U64)) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-string-parameter.al", text: "import c bad: fn(String) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-string-result.al", text: "import c bad: fn(U64) -> String\n", kind: 15, marker: "import"},
+		{name: "ffi-pointer-string.al", text: "import c bad: fn(Ptr(String)) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-nested-pointer.al", text: "import c bad: fn(Ptr(Ptr(U8))) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-bare-pointer.al", text: "import c bad: fn(Ptr) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-pointer-arity.al", text: "import c bad: fn(Ptr(U8, U16)) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-slice.al", text: "import c bad: fn([U8]) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-domain.al", text: "import c bad: fn(Domain) -> U64\n", kind: 15, marker: "import"},
+		{name: "ffi-declared.al", text: "type A { x: U64 }\nimport c bad: fn(A) -> U64\n", kind: 15, marker: "import"},
 	}
 	cycleFiles := map[string]string{"z.al": "type B { x: A }\n", "a.al": "type A { x: B }\n"}
 	cycleOne := runAlderChecker(t, exe, cycleFiles, []string{"z.al", "a.al"}, true)
@@ -672,7 +683,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		return fmt.Errorf("manifest has %d diagnostics, want at most one", len(m.diagnostics))
 	}
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind < 1 || diagnostic.kind > 14 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
+		if diagnostic.kind < 1 || diagnostic.kind > 15 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {
@@ -773,7 +784,8 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 
 	foreign := checkerSymbolByName(t, m, inputs, "foreign")
 	foreign0, foreign1, foreignResult := checkerUse(t, m, foreign.id, 3, 0), checkerUse(t, m, foreign.id, 3, 1), checkerUse(t, m, foreign.id, 4, 0)
-	if foreign0.nameStart != 0 || foreign0.nameEnd != 0 || foreign1.nameStart != 0 || foreign1.nameEnd != 0 || foreignResult.nameStart != 0 || foreignResult.nameEnd != 0 || m.types[foreign0.checkedType-1].kind != 1 || m.types[foreign1.checkedType-1].kind != 2 || m.types[foreignResult.checkedType-1].kind != 1 {
+	foreignPointer := m.types[foreign1.checkedType-1]
+	if foreign0.nameStart != 0 || foreign0.nameEnd != 0 || foreign1.nameStart != 0 || foreign1.nameEnd != 0 || foreignResult.nameStart != 0 || foreignResult.nameEnd != 0 || m.types[foreign0.checkedType-1].kind != 1 || foreignPointer.kind != 12 || m.types[checkerDirectArgs(m, foreignPointer)[0].checkedType-1].kind != 1 || m.types[foreignResult.checkedType-1].kind != 1 {
 		t.Fatal("import type-use order or kinds changed")
 	}
 	box := checkerSymbolByName(t, m, inputs, "Box")
@@ -783,7 +795,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatal("Box.T did not resolve to its owner-local parameter")
 	}
 	nest := checkerSymbolByName(t, m, inputs, "Nest")
-	for ordinal, name := range []string{"x", "a", "b", "c", "d", "mark"} {
+	for ordinal, name := range []string{"x", "a", "b", "c", "d", "mark", "text"} {
 		item := checkerUse(t, m, nest.id, 1, ordinal)
 		if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
 			t.Fatalf("Nest field %d metadata changed: %+v", ordinal, item)
@@ -806,6 +818,9 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	}
 	if kind := m.types[checkerUse(t, m, nest.id, 1, 5).checkedType-1].kind; kind != 4 {
 		t.Fatalf("Nest DomainMark field kind=%d, want 4", kind)
+	}
+	if kind := m.types[checkerUse(t, m, nest.id, 1, 6).checkedType-1].kind; kind != 2 {
+		t.Fatalf("Nest String field kind=%d, want 2", kind)
 	}
 	enum := checkerSymbolByName(t, m, inputs, "E")
 	enumUses := 0
@@ -856,7 +871,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatalf("pointer-cut recursive field kind=%d, want 12", kind)
 	}
 	deferred := checkerSymbolByName(t, m, inputs, "deferred")
-	if len(m.uses) != 84 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
+	if len(m.uses) != 85 || m.types[checkerUse(t, m, deferred.id, 6, 0).checkedType-1].kind != 1 {
 		t.Fatalf("deferred body was checked or declaration-use count changed: %d", len(m.uses))
 	}
 	for owner := 11; owner <= 74; owner++ {
@@ -922,7 +937,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"noncanonical integer":       "ALDER-CHECKER-MANIFEST 2\nS 00 612e616c 1\nEND\n",
 		"nonsequential ID":           "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
 		"truncated diagnostic":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1\nEND\n",
-		"unknown diagnostic kind":    "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 15 0 0 1 0\nEND\n",
+		"unknown diagnostic kind":    "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 16 0 0 1 0\nEND\n",
 		"invalid related flag":       "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
 		"invalid argument range":     "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
 		"malformed declaration item": "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
