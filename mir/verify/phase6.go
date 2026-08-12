@@ -656,12 +656,16 @@ func allEdgeArgsTo(b *mir.Block, target mir.BlockId) [][]mir.ValueId {
 func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect) []Error {
 	var errs []Error
 	for bi, b := range f.Blocks {
+		var reaches []bool
 		for vi, v := range f.Values {
 			if v.Def.Kind != mir.ValueDefBlockParam || int(v.Def.Block) != bi {
 				continue
 			}
+			if reaches == nil {
+				reaches = reachableFrom(f, mir.BlockId(bi))
+			}
 			for pi, p := range f.Blocks {
-				if !canReachBlock(f, mir.BlockId(bi), mir.BlockId(pi)) {
+				if !reaches[pi] {
 					continue
 				}
 				for _, args := range allEdgeArgsTo(p, mir.BlockId(bi)) {

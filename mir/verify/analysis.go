@@ -124,13 +124,19 @@ func successors(f *mir.Function, b *mir.Block) []mir.BlockId {
 // reachable returns a per-block bit set marking blocks reachable from the
 // entry block (block 0).
 func reachable(f *mir.Function) []bool {
+	return reachableFrom(f, 0)
+}
+
+// reachableFrom returns a per-block bit set marking blocks reachable from
+// from (including from itself).
+func reachableFrom(f *mir.Function, from mir.BlockId) []bool {
 	n := len(f.Blocks)
 	seen := make([]bool, n)
-	if n == 0 {
+	if int(from) >= n {
 		return seen
 	}
-	seen[0] = true
-	queue := []mir.BlockId{0}
+	seen[from] = true
+	queue := []mir.BlockId{from}
 	for len(queue) > 0 {
 		b := queue[0]
 		queue = queue[1:]
