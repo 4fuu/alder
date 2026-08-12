@@ -218,9 +218,10 @@ this document split, it contains:
 - declaration collection and a growing checker for names, generic type shapes,
   aggregate members, representation cycles/restrictions, import/function
   signatures, and initial function bodies made of annotated let/var bindings,
-  plain-identifier assignments, and one closing return over parameter or local
-  identifiers, Boolean literals, integer literals, and decoded string
-  literals;
+  plain-identifier assignments, and one closing return. Binding initializers,
+  assignment right-hand sides, and returns accept recursively nested S0 unary
+  and binary operators over parameter/local identifiers, Boolean literals,
+  integer literals, and decoded string literals;
 - private deterministic manifests used by Go conformance tests.
 
 The fixed production entry drives those implemented slices from source loading
@@ -232,8 +233,11 @@ Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the
 `I64` minimum instead of inheriting Stage 0's signed host-storage limit.
 String literal results accept `String` and its `[U8]` semantic form alike.
-Bodies with unannotated bindings, compound expressions, calls, control flow,
-or a missing/non-final return defer to later slices without emitting records.
+The operator slice covers unary `-` and `!`, checked integer arithmetic and
+shifts, integer/float comparison and equality, and short-circuit Boolean
+operators with the Go Stage 0 operand rules. Bodies with unannotated bindings,
+calls, aggregate access, control flow, or a missing/non-final return defer to
+later slices without emitting records.
 Unannotated bindings specifically wait on canonical structure-deduplicated
 type identity: current checked-type records are syntax-anchored, so an
 inferred literal type has no record to reference yet.

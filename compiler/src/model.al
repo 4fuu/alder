@@ -142,22 +142,20 @@ type DeclTypeUseRec {
     checked_type: U64
 }
 
-// The first checked-body slice records only a single top-level return in a
-// nongeneric function. Checked expression kind 1 names one runtime parameter:
-// parameter_use is its role-5 DeclTypeUseRec, bool_value is zero, and
-// checked_type borrows that use's type. Kind 2 is a Bool literal:
-// parameter_use is zero, bool_value is 0 or 1, and checked_type borrows the
-// owning return's role-6 result type. Kind 3 is an integer literal:
-// parameter_use and bool_value are zero and checked_type borrows the owning
-// return's role-6 result type. The literal text stays in its token; range was
-// proven against the result type's full-width decimal bounds, including the
-// U64 maximum and negative signed minima that exceed Stage 0 signed host
-// storage. Kind 4 is a decoded string literal: parameter_use and bool_value
-// are zero and checked_type borrows the owning return's role-6 result type,
-// which is String or its [U8] semantic form. Kind 5 names one local binding:
-// parameter_use is its LocalRec ID and checked_type borrows the binding's
-// type. A checked return refers to that result use and optionally to one
-// CheckedExprRec. These records remain structurally complete on CheckBad.
+// Checked expressions form an append-only postorder graph per nongeneric
+// function. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
+// decoded string literals, and locals. parameter_use names the role-5
+// DeclTypeUseRec or LocalRec for kinds 1 and 5; bool_value is used only by kind
+// 2. Kind 6 is unary and names left; kind 7 is binary and names left and right.
+// Operator IDs are 1 `-`, 2 `!`, 3 `+`, 4 `-`, 5 `*`, 6 `/`, 7 `%`, 8 `<<`,
+// 9 `>>`, 10 `==`, 11 `!=`, 12 `<`, 13 `<=`, 14 `>`, 15 `>=`, 16 `&&`, and
+// 17 `||`. Child IDs always precede their parent. A root has site_kind 1 for a
+// binding initializer, 2 for an assignment RHS, or 3 for a return, and
+// site_syntax names that statement; children have a zero site. This makes
+// ownership deterministic even where no separate checked statement record yet
+// exists. Literal text stays in its token; range is proven against full-width
+// decimal bounds, including U64 maximum and signed minima. These records remain
+// structurally complete on CheckBad.
 type CheckedExprRec {
     owner: U64
     syntax: U64
@@ -165,6 +163,11 @@ type CheckedExprRec {
     checked_type: U64
     parameter_use: U64
     bool_value: U64
+    left: U64
+    right: U64
+    operator: U64
+    site_kind: U64
+    site_syntax: U64
 }
 
 type CheckedReturnRec {
@@ -202,7 +205,11 @@ type LocalRec {
 // declared result type. Binding and assignment diagnostics are 22 reserved
 // binding name, 23 binding type mismatch, 24 assignment type mismatch, 25 Unit
 // value bound, 26 domain mark bound, 27 duplicate binding in function, and 28
-// assignment to an immutable binding.
+// assignment to an immutable binding. Operator diagnostics are 29 logical-not
+// operand mismatch, 30 unsigned negation, 31 unsupported negation, 32 Bool
+// operator operands, 33 noninteger shift left operand, 34 shift-count mismatch,
+// 35 comparison operand mismatch, 36 unsupported comparison operands, 37
+// noninteger arithmetic operands, and 38 arithmetic operand mismatch.
 type CheckDiagRec {
     kind: U64
     source: U64
