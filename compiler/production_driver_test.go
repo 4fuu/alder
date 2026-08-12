@@ -13,7 +13,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 func TestAlderProductionDriverEndToEnd(t *testing.T) {
@@ -41,9 +40,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse production MIR: %v", err)
 	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify production MIR: %s", verify.Errors(diagnostics).String())
-	}
+	// GenerateProgram runs the complete verified-input gate before lowering.
 	generated, err := cgen.GenerateProgram(module)
 	if err != nil {
 		t.Fatalf("generate production C: %v", err)
@@ -148,6 +145,7 @@ uint8_t alderhost_source_path_byte(uint64_t source, uint64_t offset) { (void)sou
 uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint64_t)(sizeof(source_text) - 1); }
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return source_text[offset]; }
 bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
+bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
 bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }
 int main(void) {
     int context = 0;

@@ -25,6 +25,7 @@ var compilerSourceManifest = []string{
 	"main.al",
 	"mir_build.al",
 	"mir_model.al",
+	"mir_print.al",
 	"model.al",
 	"output.al",
 	"parser.al",

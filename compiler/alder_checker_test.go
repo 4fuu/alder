@@ -16,7 +16,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 const checkerWrapper = `
@@ -152,7 +151,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 	var sources []frontend.Source
 	for _, name := range compilerSourceManifest {
-		if name != "main.al" {
+		if name != "main.al" && name != "mir_print.al" {
 			b, e := os.ReadFile(filepath.Join(root, "compiler", "src", name))
 			if e != nil {
 				t.Fatal(e)
@@ -165,8 +164,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	checkerText = strings.ReplaceAll(checkerText, " Err(", "\n Err(")
 	checkerText = strings.ReplaceAll(checkerText, " Ok(", "\n Ok(")
 	sources = append(sources, frontend.Source{ID: 99, Path: "compiler/test/checker_main.al", Text: checkerText})
-	// This slice compiles the complete fixed production core except the production
-	// driver, which its phase-specific wrapper replaces. Round-trip and verify its
+	// This slice compiles its fixed checker closure. The production driver and
+	// independent MIR printer are covered by their owning harnesses. Round-trip and verify its
 	// textual MIR before generating the C used for strict direct execution.
 	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
@@ -175,9 +174,6 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	module, err := mir.Parse(compiled.Artifact.Text)
 	if err != nil {
 		t.Fatalf("parse checker MIR: %v", err)
-	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify checker MIR: %s", verify.Errors(diagnostics).String())
 	}
 	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
@@ -192,6 +188,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
+	// GenerateProgram reruns the complete verifier before lowering.
 	generated, err := cgen.GenerateProgram(module)
 	if err != nil {
 		t.Fatalf("generate checker C: %v", err)

@@ -130,6 +130,14 @@ single ownership, and every reciprocal link. Builders remain append-only data
 constructors: they neither verify nor repair malformed raw records, which must
 remain observable for deterministic verifier rejection tests.
 
+The bootstrap compiler's Alder textual printer implements this consumer
+validation and emits the canonical MIR 3 spelling directly from the independent
+store. It does not read source files or retain host paths. Its float output uses
+a narrow host formatting primitive with the same finite, shortest-round-trip
+contract as Go's `strconv.FormatFloat(value, 'g', -1, 64)`; non-finite constant
+bits are rejected before output. This printer is not a MIR parser or the
+independent Alder verifier.
+
 ## Initial Type Vocabulary
 
 ```text
