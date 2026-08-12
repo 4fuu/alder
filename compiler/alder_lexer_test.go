@@ -23,6 +23,8 @@ var compilerSourceManifest = []string{
 	"host.al",
 	"lexer.al",
 	"main.al",
+	"mir_build.al",
+	"mir_model.al",
 	"model.al",
 	"output.al",
 	"parser.al",
