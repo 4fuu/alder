@@ -57,7 +57,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
 
 	validFiles := map[string]string{
-		"z.al": "fn identity(value: U64) -> U64 { return value }\n",
+		"z.al": "fn call(value: U64) -> U64 { return identity(value) }\nfn identity(value: U64) -> U64 { return value }\n",
 		"a.al": "type Box { value: U64 }\n",
 	}
 	first, firstStatus := runProductionCompiler(t, exe, validFiles, []string{"z.al", "a.al"})
@@ -65,7 +65,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if firstStatus != 0 || secondStatus != 0 || first != second {
 		t.Fatalf("valid production run is not deterministic: status=%d/%d", firstStatus, secondStatus)
 	}
-	if !strings.HasPrefix(first, "ALDER-CHECKER-MANIFEST 7\n") || !strings.Contains(first, "\nY ") || strings.Contains(first, "\nD ") || !strings.HasSuffix(first, "END\n") {
+	if !strings.HasPrefix(first, "ALDER-CHECKER-MANIFEST 8\n") || !strings.Contains(first, "\nY ") || !strings.Contains(first, "\nQ ") || !strings.Contains(first, "\nE ") || strings.Contains(first, "\nD ") || !strings.HasSuffix(first, "END\n") {
 		t.Fatalf("valid input did not reach checker output:\n%s", first)
 	}
 
@@ -74,7 +74,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	}{
 		{"lex.al", ";", "ALDER-TOKEN-MANIFEST 1\n", "\nD LEX0001 "},
 		{"parse.al", "type Broken { value U64 }\n", "ALDER-PARSER-MANIFEST 1\n", "\nD SYN0001 "},
-		{"check.al", "type Broken { value: Missing }\n", "ALDER-CHECKER-MANIFEST 7\n", "\nD 4 "},
+		{"check.al", "type Broken { value: Missing }\n", "ALDER-CHECKER-MANIFEST 8\n", "\nD 4 "},
 	}
 	for _, fixture := range rejections {
 		t.Run(fixture.name, func(t *testing.T) {

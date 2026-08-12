@@ -221,7 +221,9 @@ this document split, it contains:
   plain-identifier assignments, and one closing return. Binding initializers,
   assignment right-hand sides, and returns accept recursively nested S0 unary
   and binary operators over parameter/local identifiers, Boolean literals,
-  integer literals, and decoded string literals;
+  integer literals, and decoded string literals, plus concrete nongeneric
+  direct calls, record constructors, expected-type enum variants, and direct
+  imported calls inside `unsafe c`;
 - private deterministic manifests used by Go conformance tests.
 
 The fixed production entry drives those implemented slices from source loading
@@ -235,8 +237,12 @@ it against per-type bounds, so the port accepts every `U64` value and the
 String literal results accept `String` and its `[U8]` semantic form alike.
 The operator slice covers unary `-` and `!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Boolean
-operators with the Go Stage 0 operand rules. Bodies with calls, aggregate
-access, control flow, or a missing/non-final return defer to later slices
+operators with the Go Stage 0 operand rules. Concrete calls are limited to
+direct nongeneric user functions, nongeneric records, variants resolved through
+a concrete expected enum, and one direct C-import root in `unsafe c`; record
+fields are checked and stored in declaration order. Generic or explicitly
+applied/chained calls and construction defer the whole body. Bodies with
+aggregate access, control flow, or a missing/non-final return likewise defer
 without emitting records. Unannotated let/var bindings infer scalar types from
 supported literals, identifiers, and unary/binary expressions.
 
@@ -245,9 +251,10 @@ argument IDs. Primitive targets are fixed, repeated applications share one
 canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
 separate annotations retain each source spelling. Nongeneric checked bodies use
 stable parameter/local binding IDs, a persistent lexical-environment chain,
-postorder expression records, and flattened ordered child ranges. Calls remain
-deferred, but the expression shape and reserved annotation slot are ready for
-their later resolution without changing existing operator semantics.
+postorder expression records, and flattened ordered child ranges. Calls are
+resolved only at the concrete boundary above; stable annotations retain
+declaration/variant IDs and canonical checked types without introducing MIR
+identities.
 
 General body checking, other literals/expressions, generic inference and
 monomorphization, MIR construction, verifier/backend ports, and self-hosted

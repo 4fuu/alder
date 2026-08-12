@@ -158,11 +158,16 @@ type DeclTypeUseRec {
 // binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
 // are unary and binary. Ordered children are stored in one
 // flattened child buffer rather than encoded by operator arity.
+// Kinds 8..11 are direct user calls, concrete record constructors, concrete
+// enum variants, and direct C-import calls. Their annotation is a stable
+// CallAnnotationRec ID; the annotation names declaration semantic IDs and
+// canonical checked types, never source spellings or later MIR IDs.
 // Operator IDs are 1 `-`, 2 `!`, 3 `+`, 4 `-`, 5 `*`, 6 `/`, 7 `%`, 8 `<<`,
 // 9 `>>`, 10 `==`, 11 `!=`, 12 `<`, 13 `<=`, 14 `>`, 15 `>=`, 16 `&&`, and
 // 17 `||`. Child IDs always precede their parent. A root has site_kind 1 for a
 // binding initializer, 2 for an assignment RHS, or 3 for a return, and
-// site_syntax names that statement; children have a zero site. This makes
+// 4 for an expression statement; site_syntax names that statement and children
+// have a zero site. This makes
 // ownership deterministic even where no separate checked statement record yet
 // exists. Literal text stays in its token; range is proven against full-width
 // decimal bounds, including U64 maximum and signed minima. These records remain
@@ -186,6 +191,19 @@ type CheckedExprRec {
 
 type CheckedExprChildRec {
     expression: U64
+}
+
+// Call annotation kinds: 1 direct user function, 2 direct C import, 3 concrete
+// struct constructor, and 4 concrete enum variant. target is the SymbolRec ID
+// for kinds 1..3 and the owning enum SymbolRec ID for kind 4. variant_use is
+// zero except for kind 4, where it is the stable role-2 DeclTypeUseRec ID.
+// checked_type is the concrete function/import result or constructed type.
+type CallAnnotationRec {
+    owner: U64
+    kind: U64
+    target: U64
+    checked_type: U64
+    variant_use: U64
 }
 
 type CheckedReturnRec {
@@ -238,6 +256,14 @@ type EnvironmentRec {
 // operator operands, 33 noninteger shift left operand, 34 shift-count mismatch,
 // 35 comparison operand mismatch, 36 unsupported comparison operands, 37
 // noninteger arithmetic operands, and 38 arithmetic operand mismatch.
+// Concrete-call diagnostics are 39 bare function value, 40 unknown or
+// non-callable call target, 41 wrong direct-function arity, 42 direct-function
+// argument mismatch, 43 record positional argument, 44 unknown record field,
+// 45 duplicate record field, 46 missing record field, 47 payload variant used
+// bare, 48 valueless variant called, 49 wrong variant payload arity, 50 variant
+// payload mismatch, 51 C import called outside unsafe-c, 52 invalid unsafe-c
+// root target, 53 nested call/unsafe-c in an unsafe argument, 54 wrong import
+// arity, and 55 import argument mismatch.
 type CheckDiagRec {
     kind: U64
     source: U64

@@ -386,10 +386,15 @@ and unary/binary expressions. Checked types are canonical structure-deduplicated
 DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
 spellings live on annotations. Stable parameter/local binding IDs, persistent
 environment chains, and flattened ordered expression-child ranges establish the
-body model needed by the later direct-call slice without implementing calls;
+body model. Concrete nongeneric direct user calls, record constructors,
+expected-type enum variants, and one direct C-import root inside `unsafe c` now
+use that contract. Stable call annotations retain resolved declaration/variant
+IDs and canonical checked types, and record children use declaration-field
+order. Generic calls and construction still defer the whole body;
 unsupported body shapes and expression forms outside this slice remain
 deferred, and a deferred body discards its partial records. These checks
-are preparatory: general body checking, other literals, local forms, calls,
+are preparatory: general body checking, other literals, local forms, indirect
+calls and function values,
 control flow, missing-return analysis, generic inference, monomorphization, MIR
 lowering, the full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet

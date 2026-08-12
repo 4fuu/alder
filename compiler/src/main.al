@@ -29,31 +29,38 @@ fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
     }
 }
 
-fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), expression_children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 {
+fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec), expression_children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 {
     return match __s0_buffer_new(CheckDiagRec, d) {
         Err(error) => storage_error()
-        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, expression_children: expression_children, returns: returns, diagnostics: diagnostics))
+        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, diagnostics: diagnostics))
     }
 }
 
-fn init_check_returns(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), expression_children: __s0_Buffer(CheckedExprChildRec)) -> I32 {
+fn init_check_returns(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec), expression_children: __s0_Buffer(CheckedExprChildRec)) -> I32 {
     return match __s0_buffer_new(CheckedReturnRec, d) {
         Err(error) => storage_error()
-        Ok(returns) => init_check_diagnostics(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, expression_children, returns)
+        Ok(returns) => init_check_diagnostics(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, expression_children, returns)
     }
 }
 
-fn init_check_expression_children(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec)) -> I32 {
+fn init_check_expression_children(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec)) -> I32 {
     return match __s0_buffer_new(CheckedExprChildRec, d) {
         Err(error) => storage_error()
-        Ok(children) => init_check_returns(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, children)
+        Ok(children) => init_check_returns(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, children)
+    }
+}
+
+fn init_check_call_annotations(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec)) -> I32 {
+    return match __s0_buffer_new(CallAnnotationRec, d) {
+        Err(error) => storage_error()
+        Ok(annotations) => init_check_expression_children(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, annotations)
     }
 }
 
 fn init_check_expressions(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec)) -> I32 {
     return match __s0_buffer_new(CheckedExprRec, d) {
         Err(error) => storage_error()
-        Ok(expressions) => init_check_expression_children(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions)
+        Ok(expressions) => init_check_call_annotations(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions)
     }
 }
 
