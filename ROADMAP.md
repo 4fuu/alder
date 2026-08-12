@@ -355,13 +355,16 @@ also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
 checking. After all function signatures succeed, its first body slice checks a
 nongeneric body only when its complete shape is one top-level return: a runtime
-parameter identifier must have the declared result type, and a bare return
-requires `Unit`. Stable expression and return records retain the parameter and
-result-use relationships; unsupported body shapes and known expression forms
-outside this slice remain deferred. These checks are preparatory: general body
-checking, literals, locals, calls, control flow, missing-return analysis,
-inference, monomorphization, MIR lowering, the full checker, and the complete
-frontend remain incomplete. Its
+parameter identifier must have the declared result type, `true` and `false`
+require `Bool`, and a bare return requires `Unit`. Stable tagged expression and
+return records retain parameter, Bool-payload, and result-use relationships;
+unsupported body shapes and expression forms outside this slice remain
+deferred. Integer literal returns remain deferred until the
+bootstrap adopts a full-width representation that can preserve every `U64`
+value rather than inheriting Stage 0's signed host-storage limit. These checks
+are preparatory: general body checking, other literals, locals, calls, control
+flow, missing-return analysis, inference, monomorphization, MIR lowering, the
+full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols; these slices do not open a second frontend,

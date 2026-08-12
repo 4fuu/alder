@@ -143,16 +143,20 @@ type DeclTypeUseRec {
 }
 
 // The first checked-body slice records only a single top-level return in a
-// nongeneric function. A checked expression currently names one runtime
-// parameter: parameter_use is its role-5 DeclTypeUseRec, and checked_type is a
-// borrowed reference to that use's type rather than another owner of the type.
-// A checked return refers to its function's role-6 result use and optionally to
-// one CheckedExprRec. These records remain structurally complete on CheckBad.
+// nongeneric function. Checked expression kind 1 names one runtime parameter:
+// parameter_use is its role-5 DeclTypeUseRec, bool_value is zero, and
+// checked_type borrows that use's type. Kind 2 is a Bool literal:
+// parameter_use is zero, bool_value is 0 or 1, and checked_type borrows the
+// owning return's role-6 result type. A checked return refers to that result use
+// and optionally to one CheckedExprRec. These records remain structurally
+// complete on CheckBad.
 type CheckedExprRec {
     owner: U64
     syntax: U64
+    kind: U64
     checked_type: U64
     parameter_use: U64
+    bool_value: U64
 }
 
 type CheckedReturnRec {

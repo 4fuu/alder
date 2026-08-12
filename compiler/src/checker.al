@@ -1239,16 +1239,33 @@ fn check_return_body(d: Domain, state: State, parse: ParseStore, store: CheckSto
     }
     let expression_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     let expression = __s0_buffer_get(SyntaxRec, parse.nodes, expression_link.node - 1)
-    if expression_link.next != 0 || expression.kind != 24 { return Ok(CheckGood(store)) }
-    let parameter_use_id = function_use(store, owner, 5, expression, state)
-    if parameter_use_id == 0 {
-        if known_body_identifier(state, store, expression) { return Ok(CheckGood(store)) }
-        return check_fail(d, store, 18, expression, 0, 0, 0)
+    if expression_link.next != 0 { return Ok(CheckGood(store)) }
+    var expression_kind: U64 = 0
+    var expression_type: U64 = 0
+    var parameter_use_id: U64 = 0
+    var bool_value: U64 = 0
+    if expression.kind == 23 {
+        let result_syntax = __s0_buffer_get(SyntaxRec, parse.nodes, result_type.syntax - 1)
+        if result_type.kind != 1 || !node_word(state, result_syntax, "Bool") { return check_token_fail(d, state, store, 19, statement) }
+        let token = __s0_buffer_get(TokenRec, state.tokens, expression.token - 1)
+        if token.keyword == 17 { bool_value = 1 }
+        else { if token.keyword != 18 { return Ok(CheckGood(store)) } }
+        expression_kind = 2
+        expression_type = result_use.checked_type
+    } else {
+        if expression.kind != 24 { return Ok(CheckGood(store)) }
+        parameter_use_id = function_use(store, owner, 5, expression, state)
+        if parameter_use_id == 0 {
+            if known_body_identifier(state, store, expression) { return Ok(CheckGood(store)) }
+            return check_fail(d, store, 18, expression, 0, 0, 0)
+        }
+        let parameter_use = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_use_id - 1)
+        let bindings = try __s0_buffer_new(TypeBindingRec, d)
+        if !(try interpreted_type_equal(d, state, parse, store, bindings, parameter_use.checked_type, 0, result_use.checked_type, 0)) { return check_token_fail(d, state, store, 19, statement) }
+        expression_kind = 1
+        expression_type = parameter_use.checked_type
     }
-    let parameter_use = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_use_id - 1)
-    let bindings = try __s0_buffer_new(TypeBindingRec, d)
-    if !(try interpreted_type_equal(d, state, parse, store, bindings, parameter_use.checked_type, 0, result_use.checked_type, 0)) { return check_token_fail(d, state, store, 19, statement) }
-    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: expression_link.node, checked_type: parameter_use.checked_type, parameter_use: parameter_use_id))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: expression_link.node, kind: expression_kind, checked_type: expression_type, parameter_use: parameter_use_id, bool_value: bool_value))
     let expression_id = __s0_buffer_len(CheckedExprRec, expressions)
     let returns = try __s0_buffer_append(CheckedReturnRec, d, store.returns, CheckedReturnRec(owner: owner, syntax: statement_link.node, expression: expression_id, result_use: result_use_id))
     return Ok(CheckGood(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, uses: store.uses, expressions: expressions, returns: returns, diagnostics: store.diagnostics)))
@@ -1350,7 +1367,7 @@ fn emit_check_sources(state: State) -> Bool {
 fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 3\n") || !emit_check_sources(state) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 4\n") || !emit_check_sources(state) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -1383,7 +1400,7 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let rec = __s0_buffer_get(CheckedExprRec, store.expressions, at)
-        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(10) { return false }
+        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(32) || !out_u64(rec.bool_value) || !out(10) { return false }
         at = at + 1
     }
     at = 0

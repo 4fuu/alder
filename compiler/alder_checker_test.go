@@ -97,7 +97,7 @@ type checkerTypeUse struct {
 }
 
 type checkerExpression struct {
-	id, owner, syntax, checkedType, parameterUse int
+	id, owner, syntax, kind, checkedType, parameterUse, boolValue int
 }
 
 type checkerReturn struct {
@@ -305,7 +305,9 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 			"fn string_to_slice(value: String) -> [U8] { return value }\n" +
 			"fn slice_to_string(value: [U8]) -> String { return value }\n" +
 			"fn declared(value: Pair(U64)) -> Pair(U64) { return value }\n" +
-			"fn done() -> Unit { return }\n",
+			"fn done() -> Unit { return }\n" +
+			"fn yes() -> Bool { return true }\n" +
+			"fn no() -> Bool { return false }\n",
 		"z.al": "",
 	}
 	for i := 0; i < 20; i++ {
@@ -317,8 +319,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		t.Fatal("checked body manifest changed with argv order")
 	}
 	bodyManifest := parseCheckerManifest(t, bodyOne, bodyGood)
-	if len(bodyManifest.expressions) != 25 || len(bodyManifest.returns) != 26 {
-		t.Fatalf("body records: expressions=%d returns=%d, want 25/26", len(bodyManifest.expressions), len(bodyManifest.returns))
+	if len(bodyManifest.expressions) != 27 || len(bodyManifest.returns) != 28 {
+		t.Fatalf("body records: expressions=%d returns=%d, want 27/28", len(bodyManifest.expressions), len(bodyManifest.returns))
 	}
 	for i, expression := range bodyManifest.expressions {
 		if expression.id != i+1 || i > 0 && expression.owner <= bodyManifest.expressions[i-1].owner {
@@ -339,7 +341,7 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 	choose := checkerSymbolByName(t, bodyManifest, bodyGood, "choose")
 	chooseExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, choose.id).expression-1]
-	if parameter := bodyManifest.uses[chooseExpression.parameterUse-1]; parameter.ordinal != 1 || checkerSourceText(bodyManifest, bodyGood, parameter.source, parameter.nameStart, parameter.nameEnd) != "second" {
+	if parameter := bodyManifest.uses[chooseExpression.parameterUse-1]; chooseExpression.kind != 1 || chooseExpression.boolValue != 0 || parameter.ordinal != 1 || checkerSourceText(bodyManifest, bodyGood, parameter.source, parameter.nameStart, parameter.nameEnd) != "second" {
 		t.Fatalf("multi-parameter return resolved the wrong binding: %+v", parameter)
 	}
 	stringToSlice := checkerSymbolByName(t, bodyManifest, bodyGood, "string_to_slice")
@@ -356,12 +358,24 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	if checkedReturn := checkerReturnForOwner(t, bodyManifest, done.id); checkedReturn.expression != 0 {
 		t.Fatalf("bare Unit return has expression %d", checkedReturn.expression)
 	}
+	for name, value := range map[string]int{"yes": 1, "no": 0} {
+		owner := checkerSymbolByName(t, bodyManifest, bodyGood, name)
+		checkedReturn := checkerReturnForOwner(t, bodyManifest, owner.id)
+		expression := bodyManifest.expressions[checkedReturn.expression-1]
+		result := checkerUse(t, bodyManifest, owner.id, 6, 0)
+		if expression.kind != 2 || expression.parameterUse != 0 || expression.boolValue != value || expression.checkedType != result.checkedType || bodyManifest.types[expression.checkedType-1].kind != 1 {
+			t.Fatalf("Bool return %s has invalid expression/result records: expression=%+v result=%+v", name, expression, result)
+		}
+	}
 	bodyDeferred := map[string]string{"deferred.al": "type Thing { value: U64 }\n" +
 		"enum Choice { Red }\n" +
 		"fn helper() -> U64 {}\n" +
 		"fn generic(T: type, value: T) -> T { return missing }\n" +
+		"fn generic_bool(T: type) -> Bool { return true }\n" +
 		"fn empty() -> U64 {}\n" +
 		"fn literal() -> U64 { return 1 }\n" +
+		"fn float_literal() -> F64 { return 1.5 }\n" +
+		"fn string_literal() -> String { return \"text\" }\n" +
 		"fn call() -> U64 { return helper() }\n" +
 		"fn nested(value: U64) -> U64 { { return value } }\n" +
 		"fn two(value: U64) -> U64 { return value\n return value }\n" +
@@ -381,6 +395,13 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 	}
 	badReturn := strings.LastIndex(bodyFailure["body.al"], "return")
 	assertCheckerDiagnostic(t, bodyFailureManifest, 19, "body.al", badReturn, badReturn+len("return"), "", -1, -1)
+	bodyBoolFailure := map[string]string{"bool-body.al": "fn good() -> Bool { return false }\nfn bad() -> U64 { return true }\n"}
+	bodyBoolFailureManifest := parseCheckerManifest(t, runAlderChecker(t, exe, bodyBoolFailure, []string{"bool-body.al"}, true), bodyBoolFailure)
+	if len(bodyBoolFailureManifest.expressions) != 1 || len(bodyBoolFailureManifest.returns) != 1 || bodyBoolFailureManifest.expressions[0].kind != 2 || bodyBoolFailureManifest.expressions[0].boolValue != 0 || checkerSourceText(bodyBoolFailureManifest, bodyBoolFailure, bodyBoolFailureManifest.symbols[bodyBoolFailureManifest.expressions[0].owner-1].source, bodyBoolFailureManifest.symbols[bodyBoolFailureManifest.expressions[0].owner-1].start, bodyBoolFailureManifest.symbols[bodyBoolFailureManifest.expressions[0].owner-1].end) != "good" {
+		t.Fatalf("Bool body failure retained an incomplete record prefix: expressions=%+v returns=%+v", bodyBoolFailureManifest.expressions, bodyBoolFailureManifest.returns)
+	}
+	badBoolReturn := strings.LastIndex(bodyBoolFailure["bool-body.al"], "return")
+	assertCheckerDiagnostic(t, bodyBoolFailureManifest, 19, "bool-body.al", badBoolReturn, badBoolReturn+len("return"), "", -1, -1)
 	bodyOrderFiles := map[string]string{
 		"z.al": "fn zed(value: U64) -> I64 { return value }\n",
 		"a.al": "fn alpha() -> U64 { return missing }\n",
@@ -482,6 +503,8 @@ func TestAlderCheckerConformanceEndToEnd(t *testing.T) {
 		{name: "function-parameter-type-before-name.al", text: "fn f(x: U64, x: Missing) -> Unit {}\n", kind: 4, marker: "Missing"},
 		{name: "body-unknown.al", text: "fn f() -> U64 { return missing }\n", kind: 18, marker: "missing"},
 		{name: "body-return-mismatch.al", text: "fn f(value: U64) -> I64 { return value }\n", kind: 19, marker: "return"},
+		{name: "body-bool-return-mismatch.al", text: "fn f() -> U64 { return true }\n", kind: 19, marker: "return"},
+		{name: "body-bool-string-mismatch.al", text: "fn f() -> String { return false }\n", kind: 19, marker: "return"},
 		{name: "body-bare-valued.al", text: "fn f() -> U64 { return }\n", kind: 20, marker: "return"},
 		{name: "signature-before-body.al", text: "fn earlier(value: U64) -> I64 { return value }\nfn later() -> Missing {}\n", kind: 4, marker: "Missing"},
 	}
@@ -599,7 +622,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		return m, errors.New("manifest has no final line break")
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 3" || lines[len(lines)-1] != "END" {
+	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 4" || lines[len(lines)-1] != "END" {
 		return m, errors.New("invalid checker manifest envelope")
 	}
 	phase := 0
@@ -673,10 +696,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.uses = append(m.uses, checkerTypeUse{id: numbers[0], owner: numbers[1], role: numbers[2], ordinal: numbers[3], node: numbers[4], source: numbers[5], nameStart: numbers[6], nameEnd: numbers[7], syntax: numbers[8], checkedType: numbers[9]})
 		case "E":
-			if err != nil || len(numbers) != 5 {
+			if err != nil || len(numbers) != 7 {
 				return m, fmt.Errorf("line %d has invalid E record", lineNumber+2)
 			}
-			m.expressions = append(m.expressions, checkerExpression{id: numbers[0], owner: numbers[1], syntax: numbers[2], checkedType: numbers[3], parameterUse: numbers[4]})
+			m.expressions = append(m.expressions, checkerExpression{id: numbers[0], owner: numbers[1], syntax: numbers[2], kind: numbers[3], checkedType: numbers[4], parameterUse: numbers[5], boolValue: numbers[6]})
 		case "R":
 			if err != nil || len(numbers) != 5 {
 				return m, fmt.Errorf("line %d has invalid R record", lineNumber+2)
@@ -881,7 +904,8 @@ func validateCheckerManifest(m checkerManifest) error {
 	// The private checker manifest omits the parser graph. These checks therefore
 	// prove relational ownership among semantic records. The producer derives
 	// syntax IDs from the traversed parser nodes, while direct E2E fixtures prove
-	// semantic type equality and that a zero-expression return has a Unit result.
+	// semantic type equality, exact Bool/other primitive spellings, and that a
+	// zero-expression return has a Unit result.
 	bodySyntax := make(map[int]bool)
 	expressionOwners := make([]int, len(m.expressions))
 	for i, expression := range m.expressions {
@@ -890,11 +914,15 @@ func validateCheckerManifest(m checkerManifest) error {
 			ownerKind = m.symbols[expression.owner-1].kind
 			ownerArity = m.symbols[expression.owner-1].arity
 		}
-		var parameter checkerTypeUse
-		if expression.parameterUse >= 1 && expression.parameterUse <= len(m.uses) {
-			parameter = m.uses[expression.parameterUse-1]
+		validPayload := false
+		if expression.kind == 1 && expression.parameterUse >= 1 && expression.parameterUse <= len(m.uses) && expression.boolValue == 0 {
+			parameter := m.uses[expression.parameterUse-1]
+			validPayload = parameter.owner == expression.owner && parameter.role == 5 && parameter.checkedType == expression.checkedType
 		}
-		if expression.id != i+1 || ownerKind != 12 || ownerArity != 0 || expression.syntax < 1 || nodes[expression.syntax] || typeSyntax[expression.syntax] || bodySyntax[expression.syntax] || expression.checkedType < 1 || expression.checkedType > len(m.types) || parameter.id == 0 || parameter.owner != expression.owner || parameter.role != 5 || parameter.checkedType != expression.checkedType {
+		if expression.kind == 2 {
+			validPayload = expression.parameterUse == 0 && (expression.boolValue == 0 || expression.boolValue == 1) && expression.checkedType >= 1 && expression.checkedType <= len(m.types) && m.types[expression.checkedType-1].kind == 1
+		}
+		if expression.id != i+1 || ownerKind != 12 || ownerArity != 0 || expression.syntax < 1 || nodes[expression.syntax] || typeSyntax[expression.syntax] || bodySyntax[expression.syntax] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload {
 			return fmt.Errorf("invalid checked expression %+v", expression)
 		}
 		bodySyntax[expression.syntax] = true
@@ -913,7 +941,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		validExpression := checkedReturn.expression == 0
 		if checkedReturn.expression >= 1 && checkedReturn.expression <= len(m.expressions) {
 			expression := m.expressions[checkedReturn.expression-1]
-			validExpression = expression.owner == checkedReturn.owner
+			validExpression = expression.owner == checkedReturn.owner && (expression.kind != 2 || expression.checkedType == result.checkedType)
 			if validExpression {
 				expressionOwners[checkedReturn.expression-1]++
 			}
@@ -1178,54 +1206,66 @@ func assertCheckerDiagnostic(t *testing.T, m checkerManifest, kind int, path str
 
 func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	inputs := map[string]string{"a.al": "x"}
-	valid := "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nEND\n"
+	valid := "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nEND\n"
 	if _, err := decodeCheckerManifest(valid, inputs); err != nil {
 		t.Fatalf("valid minimal manifest: %v", err)
 	}
-	partial := "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nC 1 1 1 0 0 0\nD 4 0 0 1 0\nEND\n"
+	partial := "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nC 1 1 1 0 0 0\nD 4 0 0 1 0\nEND\n"
 	if _, err := decodeCheckerManifest(partial, inputs); err != nil {
 		t.Fatalf("valid partial failure manifest: %v", err)
 	}
-	bodyPrefix := "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nC 1 1 2 0 0 0\nC 2 1 3 0 0 0\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\n"
-	validBody := bodyPrefix + "E 1 1 6 1 1\nR 1 1 7 1 2\nEND\n"
-	if _, err := decodeCheckerManifest(validBody, inputs); err != nil {
-		t.Fatalf("valid body manifest: %v", err)
+	bodyPrefix := "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nC 1 1 2 0 0 0\nC 2 1 3 0 0 0\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\n"
+	validParameterBody := bodyPrefix + "E 1 1 6 1 1 1 0\nR 1 1 7 1 2\nEND\n"
+	if _, err := decodeCheckerManifest(validParameterBody, inputs); err != nil {
+		t.Fatalf("valid parameter body manifest: %v", err)
 	}
-	validBodyFailure := bodyPrefix + "E 1 1 6 1 1\nR 1 1 7 1 2\nD 18 0 0 1 0\nEND\n"
+	validBoolBody := bodyPrefix + "E 1 1 6 2 2 0 1\nR 1 1 7 1 2\nEND\n"
+	if _, err := decodeCheckerManifest(validBoolBody, inputs); err != nil {
+		t.Fatalf("valid Bool body manifest: %v", err)
+	}
+	validBodyFailure := bodyPrefix + "E 1 1 6 1 1 1 0\nR 1 1 7 1 2\nD 18 0 0 1 0\nEND\n"
 	if _, err := decodeCheckerManifest(validBodyFailure, inputs); err != nil {
 		t.Fatalf("valid body prefix in failed manifest: %v", err)
 	}
 	malformed := map[string]string{
-		"missing final line break":         strings.TrimSuffix(valid, "\n"),
-		"version 2 envelope":               "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nEND\n",
-		"blank record":                     "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\n\nEND\n",
-		"unknown record":                   "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nQ 1\nEND\n",
-		"invalid path hex":                 "ALDER-CHECKER-MANIFEST 3\nS 0 zz 1\nEND\n",
-		"noncanonical path hex":            "ALDER-CHECKER-MANIFEST 3\nS 0 612E616C 1\nEND\n",
-		"unknown source":                   "ALDER-CHECKER-MANIFEST 3\nS 0 67686f73742e616c 1\nEND\n",
-		"duplicate source":                 "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nS 1 612e616c 1\nEND\n",
-		"negative integer":                 "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 2 1 0 -1 0 0\nEND\n",
-		"noncanonical integer":             "ALDER-CHECKER-MANIFEST 3\nS 00 612e616c 1\nEND\n",
-		"nonsequential ID":                 "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
-		"truncated diagnostic":             "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nD 1\nEND\n",
-		"unknown diagnostic kind":          "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nD 21 0 0 1 0\nEND\n",
-		"invalid related flag":             "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
-		"invalid argument range":           "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
-		"malformed declaration item":       "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
-		"ownerless failed argument":        "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nC 1 1 1 0 0 0\nA 1 1\nD 4 0 0 1 0\nEND\n",
-		"multiply-owned failed type":       "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nC 1 1 1 0 0 0\nU 1 1 1 0 2 0 0 1 1 1\nU 2 1 1 1 3 0 0 1 1 1\nD 6 0 0 1 0\nEND\n",
-		"foreign type parameter":           "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 2 1 0 0 1 1\nY 2 2 2 0 0 1 1\nP 1 1 3 0 0 1\nP 2 2 4 0 0 1\nC 1 6 5 2 0 0\nU 1 1 1 0 6 0 0 1 5 1\nEND\n",
-		"multiple diagnostics":             "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nD 4 0 0 1 0\nD 5 0 0 1 0\nEND\n",
-		"unreachable success type":         "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nC 1 1 1 0 0 0\nEND\n",
-		"unreferenced expression":          bodyPrefix + "E 1 1 6 1 1\nEND\n",
-		"expression on generic owner":      "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 12 1 0 0 1 1\nC 1 1 2 0 0 0\nC 2 1 3 0 0 0\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nE 1 1 6 1 1\nR 1 1 7 1 2\nD 18 0 0 1 0\nEND\n",
-		"expression uses result":           bodyPrefix + "E 1 1 6 2 2\nR 1 1 7 1 2\nEND\n",
-		"return uses parameter":            bodyPrefix + "E 1 1 6 1 1\nR 1 1 7 1 1\nEND\n",
-		"return reuses expression ID":      bodyPrefix + "E 1 1 6 1 1\nR 1 1 7 1 2\nR 2 1 8 1 2\nEND\n",
-		"duplicate return owner":           bodyPrefix + "R 1 1 7 0 2\nR 2 1 8 0 2\nEND\n",
-		"duplicate body syntax":            bodyPrefix + "E 1 1 6 1 1\nR 1 1 6 1 2\nEND\n",
-		"body record after diagnostic":     bodyPrefix + "D 18 0 0 1 0\nE 1 1 6 1 1\nEND\n",
-		"body diagnostic before signature": "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nD 18 0 0 1 0\nEND\n",
+		"missing final line break":            strings.TrimSuffix(valid, "\n"),
+		"version 2 envelope":                  "ALDER-CHECKER-MANIFEST 2\nS 0 612e616c 1\nEND\n",
+		"version 3 envelope":                  "ALDER-CHECKER-MANIFEST 3\nS 0 612e616c 1\nEND\n",
+		"blank record":                        "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\n\nEND\n",
+		"unknown record":                      "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nQ 1\nEND\n",
+		"invalid path hex":                    "ALDER-CHECKER-MANIFEST 4\nS 0 zz 1\nEND\n",
+		"noncanonical path hex":               "ALDER-CHECKER-MANIFEST 4\nS 0 612E616C 1\nEND\n",
+		"unknown source":                      "ALDER-CHECKER-MANIFEST 4\nS 0 67686f73742e616c 1\nEND\n",
+		"duplicate source":                    "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nS 1 612e616c 1\nEND\n",
+		"negative integer":                    "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 2 1 0 -1 0 0\nEND\n",
+		"noncanonical integer":                "ALDER-CHECKER-MANIFEST 4\nS 00 612e616c 1\nEND\n",
+		"nonsequential ID":                    "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 2 2 1 0 0 1 0\nEND\n",
+		"truncated diagnostic":                "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nD 1\nEND\n",
+		"unknown diagnostic kind":             "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nD 21 0 0 1 0\nEND\n",
+		"invalid related flag":                "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nD 1 0 0 1 2\nEND\n",
+		"invalid argument range":              "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nC 1 1 1 0 0 1\nEND\n",
+		"malformed declaration item":          "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nU 1 1 1 0 2 0 0 1 0 0\nEND\n",
+		"ownerless failed argument":           "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nC 1 1 1 0 0 0\nA 1 1\nD 4 0 0 1 0\nEND\n",
+		"multiply-owned failed type":          "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 2 1 0 0 1 0\nC 1 1 1 0 0 0\nU 1 1 1 0 2 0 0 1 1 1\nU 2 1 1 1 3 0 0 1 1 1\nD 6 0 0 1 0\nEND\n",
+		"foreign type parameter":              "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 2 1 0 0 1 1\nY 2 2 2 0 0 1 1\nP 1 1 3 0 0 1\nP 2 2 4 0 0 1\nC 1 6 5 2 0 0\nU 1 1 1 0 6 0 0 1 5 1\nEND\n",
+		"multiple diagnostics":                "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nD 4 0 0 1 0\nD 5 0 0 1 0\nEND\n",
+		"unreachable success type":            "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nC 1 1 1 0 0 0\nEND\n",
+		"unreferenced expression":             bodyPrefix + "E 1 1 6 1 1 1 0\nEND\n",
+		"unknown expression kind":             bodyPrefix + "E 1 1 6 3 1 1 0\nR 1 1 7 1 2\nEND\n",
+		"parameter expression without use":    bodyPrefix + "E 1 1 6 1 1 0 0\nR 1 1 7 1 2\nEND\n",
+		"parameter expression Bool payload":   bodyPrefix + "E 1 1 6 1 1 1 1\nR 1 1 7 1 2\nEND\n",
+		"Bool expression with parameter":      bodyPrefix + "E 1 1 6 2 2 1 1\nR 1 1 7 1 2\nEND\n",
+		"Bool expression invalid payload":     bodyPrefix + "E 1 1 6 2 2 0 2\nR 1 1 7 1 2\nEND\n",
+		"Bool expression wrong result type":   bodyPrefix + "E 1 1 6 2 1 0 1\nR 1 1 7 1 2\nEND\n",
+		"Bool expression nonprimitive result": strings.Replace(bodyPrefix, "C 2 1 3", "C 2 2 3", 1) + "E 1 1 6 2 2 0 1\nR 1 1 7 1 2\nEND\n",
+		"expression on generic owner":         "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 12 1 0 0 1 1\nC 1 1 2 0 0 0\nC 2 1 3 0 0 0\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nE 1 1 6 1 1 1 0\nR 1 1 7 1 2\nD 18 0 0 1 0\nEND\n",
+		"expression uses result":              bodyPrefix + "E 1 1 6 1 2 2 0\nR 1 1 7 1 2\nEND\n",
+		"return uses parameter":               bodyPrefix + "E 1 1 6 1 1 1 0\nR 1 1 7 1 1\nEND\n",
+		"return reuses expression ID":         bodyPrefix + "E 1 1 6 1 1 1 0\nR 1 1 7 1 2\nR 2 1 8 1 2\nEND\n",
+		"duplicate return owner":              bodyPrefix + "R 1 1 7 0 2\nR 2 1 8 0 2\nEND\n",
+		"duplicate body syntax":               bodyPrefix + "E 1 1 6 1 1 1 0\nR 1 1 6 1 2\nEND\n",
+		"body record after diagnostic":        bodyPrefix + "D 18 0 0 1 0\nE 1 1 6 1 1 1 0\nEND\n",
+		"body diagnostic before signature":    "ALDER-CHECKER-MANIFEST 4\nS 0 612e616c 1\nY 1 12 1 0 0 1 0\nD 18 0 0 1 0\nEND\n",
 	}
 	for name, text := range malformed {
 		t.Run(name, func(t *testing.T) {
@@ -1235,7 +1275,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		})
 	}
 	unorderedInputs := map[string]string{"a.al": "", "b.al": ""}
-	unorderedSources := "ALDER-CHECKER-MANIFEST 3\nS 0 622e616c 0\nS 1 612e616c 0\nEND\n"
+	unorderedSources := "ALDER-CHECKER-MANIFEST 4\nS 0 622e616c 0\nS 1 612e616c 0\nEND\n"
 	if _, err := decodeCheckerManifest(unorderedSources, unorderedInputs); err == nil {
 		t.Fatalf("noncanonical source order accepted:\n%s", unorderedSources)
 	}
