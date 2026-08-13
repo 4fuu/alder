@@ -183,6 +183,13 @@ bridge. It runs cleanup in reverse order on normal exit, return, failed `try`,
 and checked failure in the detecting function. The 1.0 form is
 `using name = expression`, selected by `Cleanup`.
 
+The Alder-written S0 checker now resolves `CleanupFn` as a nongeneric user
+function with exactly one runtime parameter whose concrete type exactly equals
+the initializer type and whose result is `Unit`. The binding is lexical. A
+cleanup may contain nested blocks and loops, and nested cleanups are supported
+outside loops; declaring a cleanup while already inside a loop remains rejected
+because that scope could begin repeatedly while active.
+
 ## Failure behavior
 
 Recoverable source failures use `Result` and `try`. Checked arithmetic, shift,
@@ -256,8 +263,9 @@ retain stable semantic IDs, and concrete generic field types are substituted
 before checking the right-hand side. Lexical environments do not leak block,
 branch, loop, or `for` element bindings. Non-`Unit` functions must return on
 every path, statements after a guaranteed return are rejected before their
-contents, and conservative loops fall through. `using` remains deferred outside
-loops pending its owning milestone and is rejected anywhere under a loop.
+contents, and conservative loops fall through. `using` cleanup facts cover
+lexical fallthrough, return, and failed `try`; cleanup lowering remains pending.
+The declaration is rejected anywhere under a loop.
 Unannotated let/var bindings infer scalar types from supported literals,
 identifiers, and unary/binary expressions.
 

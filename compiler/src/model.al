@@ -203,17 +203,19 @@ type CheckedExprChildRec {
 }
 
 // Call annotation kinds: 1 direct user function, 2 direct C import, 3 concrete
-// struct constructor, and 4 concrete enum variant. target is the SymbolRec ID
+// struct constructor, 4 concrete enum variant, and 5 S0 builtin. target is the SymbolRec ID
 // of a concrete function instance for kind 1, a declaration for kinds 2..3,
 // and the owning enum SymbolRec ID for kind 4. variant_use is
 // zero except for kind 4, where it is the stable role-2 DeclTypeUseRec ID.
 // checked_type is the concrete function/import result or constructed type.
+// builtin is zero for kinds 1..4 and a stable builtin identity for kind 5.
 type CallAnnotationRec {
     owner: U64
     kind: U64
     target: U64
     checked_type: U64
     variant_use: U64
+    builtin: U64
 }
 
 type CheckedReturnRec {
@@ -228,7 +230,7 @@ type CheckedReturnRec {
 // chain. Statements name checked expressions, stable bindings and assignment
 // places, and child blocks without introducing MIR blocks or control-flow IDs.
 // Statement kinds mirror supported syntax: 1 let, 2 var, 3 assignment,
-// 4 return, 5 expression, 6 block, 7 if, 8 while, and 9 for.
+// 4 return, 5 expression, 6 block, 7 if, 8 while, 9 for, and 10 using.
 type CheckedBlockRec {
     owner: U64
     syntax: U64
@@ -306,6 +308,24 @@ type CheckedTryRec {
     error_type: U64
 }
 
+// A cleanup record is owned by one concrete function instance and one using
+// statement. environment is the lexical environment before the binding is
+// introduced; binding and initializer are concrete checker IDs, and callback
+// is the concrete nongeneric function instance. The exit facts tell lowering
+// that this scope must run on lexical fallthrough, return, and Result `try`
+// propagation without predicting MIR blocks or CFG IDs.
+type CheckedCleanupRec {
+    owner: U64
+    syntax: U64
+    environment: U64
+    binding: U64
+    initializer: U64
+    callback: U64
+    normal_exit: U64
+    return_exit: U64
+    try_exit: U64
+}
+
 type CheckedControlStore {
     blocks: __s0_Buffer(CheckedBlockRec)
     statement_links: __s0_Buffer(CheckedStatementLinkRec)
@@ -314,6 +334,7 @@ type CheckedControlStore {
     matches: __s0_Buffer(CheckedMatchRec)
     match_arms: __s0_Buffer(CheckedMatchArmRec)
     tries: __s0_Buffer(CheckedTryRec)
+    cleanups: __s0_Buffer(CheckedCleanupRec)
 }
 
 // Bindings are recorded per function in canonical declaration order. kind is 1
@@ -376,7 +397,9 @@ type EnvironmentRec {
 // bound, 74 valueless variant bound, 75 reserved arm binding, 76 duplicate arm
 // binding, 77 arm type mismatch, 78 no arms, 79 nonexhaustive match, 80 try in
 // a non-Result function, 81 try of a non-Result expression, and 82 try error
-// type mismatch.
+// type mismatch. Cleanup diagnostics are 83 unknown cleanup function, 84
+// cleanup function not having exactly one concrete runtime parameter, 85
+// cleanup parameter mismatch, and 86 cleanup result not Unit.
 type CheckDiagRec {
     kind: U64
     source: U64
