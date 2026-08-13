@@ -26,16 +26,25 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
-The Alder-written backend lane currently exposes only
+The Alder-written flat-MIR verifier now exposes
+`mir_verify_complete(d, store, version, hosted)`. Its `complete == true` result
+is the required gate for any Alder-written C generator before it writes bytes;
+hosted success also carries the verified 1-based entry function ID. Every
+failure and every unhosted result carries entry ID zero; duplicate `main`
+declarations are rejected earlier by V1's duplicate function-name rule. Public
+Alder-written production generation is not available yet: source lowering is
+tracked by #21, and the declaration-only Cgen skeleton tracked by #22 remains
+parked in draft PR #42 until it is rebased to consume this contract.
+
+The parked declaration-only Alder backend lane currently exposes
 `cgen_write_declaration_skeleton(d, store, hosted)`. It consumes the independent
 flat MIR 3 store directly, validates its declaration subset, constructs all
 bytes in a deterministic buffer, and then writes headers, stable type layouts,
 constant storage, import prototypes, internal function declarations, and the
 optional hosted entry adapter. It does not emit function bodies and is not a
 production generator. In particular, there is intentionally no public
-`cgen_generate` entry until Alder verifier phase V10 supplies the complete
-backend-precondition result that must gate emission. Declaration-skeleton
-rejection is pre-output and never sanitizes or repairs an invalid store.
+`cgen_generate` entry. Declaration-skeleton rejection is pre-output and never
+sanitizes or repairs an invalid store.
 
 ## Generated program entry
 

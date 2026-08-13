@@ -155,12 +155,28 @@ ci = ci + 1 }
     }
     return Ok(out)
 }
-fn mir_verify_1_3(d: Domain, store: MirStore, version: U64) -> Result(MirVerifyOutput, __s0_Error) {
+fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVerifyOutput, __s0_Error) {
     var diagnostics = try __s0_buffer_new(MirVerifyDiagRec, d)
     diagnostics = try mir_vphase1(d, store, version, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase2(d, store, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase3(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase4(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase5(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    let cleanup = try mir_v7_analyze(d, store, try __s0_buffer_new(MirVerifyDiagRec, d))
+    let provenance = try mir_v6_compute(d, store, cleanup)
+    diagnostics = try mir_vphase6_with(d, store, diagnostics, cleanup, provenance)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = cleanup.diagnostics
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase8_with(d, store, diagnostics, cleanup, provenance)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase9(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase10(d, store, diagnostics)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))
 }

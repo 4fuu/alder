@@ -364,9 +364,8 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. Its body slice checks a concrete function instance whose complete
-shape is zero or more let/var
-bindings and plain-identifier assignments followed by one top-level return: a
+checking. Its body slice checks concrete function instances compositionally
+across lexical blocks, assignments, `if`/`else`, `while`, and slice `for`: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
 fit the declared integer type, and a string literal requires `String` or
@@ -375,12 +374,17 @@ and returns recursively check unary `-`/`!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Bool operators
 with the Go Stage 0 operand rules. Binding order mirrors the Go checker: reserved
 names, annotation resolution, initializer mismatch, Unit/DomainMark
-rejection, then duplicates; parameters are immutable assignment targets.
+rejection, then duplicates; parameters are immutable direct assignment targets,
+while immutable slice bindings retain reference-style indexed mutation. Block,
+branch, loop, and `for` bindings do not escape. Assignment roots use stable local
+IDs, fields use declaration ordinals after concrete generic substitution, and
+indices require `U64` and the existing copy-trivial element restriction.
 Integer bounds compare canonical decimal
 digit text against per-type bounds, preserving every `U64` value and the `I64`
 minimum rather than inheriting Stage 0's signed host-storage limit. Stable
-postorder tagged-expression, local-binding, and return records retain parameter,
-local, Bool-payload, child, operator, statement-site, and result-use relationships.
+postorder tagged-expression, local-binding, return, lexical-block, ordered-
+statement, and assignment-place records retain parameter, local, Bool-payload,
+child, operator, statement-site, scope, concrete type, and result-use relationships.
 Unannotated bindings infer scalar types from supported literals, identifiers,
 and unary/binary expressions. Checked types are canonical structure-deduplicated
 DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
@@ -398,11 +402,13 @@ types, aggregate applications, and user-call targets are concrete; stable
 private-manifest instance IDs expose that backend-facing boundary. Concrete C
 imports inside `unsafe c` retain their prior contract. Record children use
 declaration-field order;
-unsupported body shapes and expression forms outside this slice remain
-deferred, and a deferred body discards its partial records. These checks
-are preparatory: general body checking, other literals, local forms, indirect
-calls and function values,
-control flow, missing-return analysis, MIR lowering, the full checker, and the
+unsupported expression forms and Issue #7 cleanup semantics outside this slice
+remain deferred, and a deferred body discards its partial records. `using` under
+a loop is rejected. Non-`Unit` paths must return, loops conservatively fall
+through, both `if` branches must return to guarantee return, and unreachable
+statements are rejected before checking their contents. These checks are
+preparatory: other literals, local forms, indirect calls and function values,
+match/try, complete cleanup checking, MIR lowering, the full checker, and the
 complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
@@ -419,11 +425,11 @@ ownership, ordinal, reciprocal-link, named-type-part, and import-signature
 encoding contract with an Alder-generated conformance manifest and malformed
 raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
-stores are rejected without partial output. The independent Alder verifier and
-all lowering into this model remain incomplete. Checker, textual-printer, and
-verifier V1–V3 conformance share one fixed source closure and executable while
-retaining independent mode assertions; the complete production root remains an
-independent end-to-end gate.
+stores are rejected without partial output. Source lowering into this model
+remains incomplete. Checker, textual-printer, and verifier V1–V10 conformance
+share one fixed source closure and executable while retaining independent mode
+assertions; the complete production root remains an independent end-to-end
+gate.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
@@ -431,12 +437,29 @@ compiler (`alder0`) produces C for the Alder compiler; a system C compiler
 builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
 and without skipping or repairing MIR verification.
 
-The independent Alder MIR consumer now provides verifier phases 1–3 for raw
+The independent Alder MIR consumer now provides all ten verifier phases for raw
 MIR stores: integrity and reciprocal-ID checks, type/layout/declaration checks,
-and CFG target, switch, reachability, and edge-arity checks. Its stable numeric
-diagnostics are separate from source diagnostics, and orchestration stops after
-the first failing phase. Phases 4–10 and safe production C emission remain
-unavailable.
+CFG target, switch, reachability, and edge-arity checks, plus point-level
+dominance, checked-failure-edge availability, use-def, and definite local
+initialization, followed by complete current-opcode operand, result, place,
+projection, edge, call/import-call, aggregate, enum, checked-failure, and
+terminator typing. Phase 6 adds domain identity and strict ancestry, allocation
+provenance, path-sensitive reset/destroy state, interprocedural lifetime
+effects, loop-carried resource rules, and safe-reference escape/use and
+dereference-store rejection. Its stable numeric diagnostics are separate from
+source diagnostics, and orchestration stops after the first failing phase.
+Phase 7 adds path-sensitive cleanup scope and registration-stack identity,
+checked-failure and multiexit handling, exactly-once execution, and repeatable
+per-iteration lifecycles. Its path-specific active registration sets feed Phase
+6 callback-argument validation, LIFO resource effects, and whole-module
+function-effect summaries. Phase 8 validates table identity, lookup consumption,
+view regions, aliasing, and mutation effects using those provenance and cleanup
+facts. Phase 9 confines recursively raw-pointer-bearing values to explicit
+unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
+types and external names. `mir_verify_complete` adds the hosted `main` contract
+and returns the sole positive complete-verifier gate. Source-to-MIR lowering and
+public production C generation remain unavailable until the work tracked by
+#21 and #22 (the latter currently parked in draft PR #42) is integrated.
 
 The independent Alder C-backend lane now consumes those flat MIR 3 records
 directly and provides a deterministic buffered declaration skeleton: portable
