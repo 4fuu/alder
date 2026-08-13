@@ -25,6 +25,7 @@ var compilerSourceManifest = []string{
 	"cgen/writer.al",
 	"host.al",
 	"lexer.al",
+	"lower.al",
 	"main.al",
 	"mir_build.al",
 	"mir_model.al",

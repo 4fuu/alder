@@ -23,6 +23,7 @@ var coreConformanceSourceManifest = []string{
 	"cgen/writer.al",
 	"host.al",
 	"lexer.al",
+	"lower.al",
 	"mir_build.al",
 	"mir_model.al",
 	"mir_print.al",
@@ -57,6 +58,7 @@ fn host_path_is(source: U64, word: String) -> Bool {
 fn main(d: Domain) -> I32 {
     if unsafe c { alderhost_source_count() } == 0 { return 2 }
     if host_path_is(0, "!alder-core-checker") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
@@ -95,6 +97,10 @@ func coreConformanceWrapper() string {
 	checker = strings.ReplaceAll(checker, " Err(", "\n Err(")
 	checker = strings.ReplaceAll(checker, " Ok(", "\n Ok(")
 	checker = strings.Replace(checker, "fn loaded(d: Domain,state: State) -> I32 { return match load_sources(d,state) {\n\n Err(e)=>3\n Ok(s)=>pi_nodes(d,s) } }", checkerSentinelLoader, 1)
+	checker = strings.Replace(checker, "fn checker_good(state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", "fn checker_good(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", 1)
+	checker = strings.Replace(checker, "fn checker_done(state: State, parse: ParseStore, result: CheckResult) -> I32", "fn checker_done(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32", 1)
+	checker = strings.Replace(checker, "CheckGood(store) => checker_good(state, parse, store)", "CheckGood(store) => checker_good(d, state, parse, store)", 1)
+	checker = strings.Replace(checker, "Ok(result) => checker_done(output.state, output.store, result)", "Ok(result) => checker_done(d, output.state, output.store, result)", 1)
 	checker = strings.Replace(checker, "fn main(d: Domain)", "fn checker_mode(d: Domain)", 1)
 
 	printer := strings.TrimPrefix(mirPrinterWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\nimport c alderhost_stdout_f64_bits: fn(U64) -> Bool\n")
@@ -102,7 +108,21 @@ func coreConformanceWrapper() string {
 
 	verifier := strings.TrimPrefix(mirVerifyWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\n")
 	verifier = strings.Replace(verifier, "fn main(d: Domain)", "fn verifier_mode(d: Domain)", 1)
-	return checker + printer + verifier + cgenSkeletonWrapper + coreConformanceDispatch
+	return checker + printer + verifier + cgenSkeletonWrapper + `
+fn lower_print(mir: MirStore) -> I32 {
+    if mir_print(mir) { return 0 }
+    return 5
+}
+fn lower_mode(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {
+    return match lower_checked(d, state, parse, store) {
+        Err(error) => 3
+        Ok(result) => match result {
+            LowerBad => 5
+            LowerGood(mir) => lower_print(mir)
+        }
+    }
+}
+` + coreConformanceDispatch
 }
 
 func TestAlderCoreConformance(t *testing.T) {
@@ -172,6 +192,7 @@ func TestAlderCoreConformance(t *testing.T) {
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
 
 	t.Run("checker", func(t *testing.T) { runCheckerConformance(t, exe) })
+	t.Run("lower", func(t *testing.T) { runLowerConformance(t, exe) })
 	t.Run("cgen-skeleton", func(t *testing.T) { runCgenSkeletonConformance(t, cc, root, exe) })
 	t.Run("printer", func(t *testing.T) { runMIRPrinterConformance(t, exe) })
 	t.Run("verifier-v1-v10", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
