@@ -221,9 +221,15 @@ this document split, it contains:
   plain-identifier assignments, and one closing return. Binding initializers,
   assignment right-hand sides, and returns accept recursively nested S0 unary
   and binary operators over parameter/local identifiers, Boolean literals,
-  integer literals, and decoded string literals, plus concrete nongeneric
-  direct calls, record constructors, expected-type enum variants, and direct
+  integer literals, and decoded string literals, plus direct calls with
+  all-or-none explicit or inferred generic arguments, generic record
+  constructors, expected-type generic enum variants, and direct
   imported calls inside `unsafe c`;
+- deterministic concrete function specialization closure. Instances are keyed
+  by declaration ID and ordered canonical concrete type IDs, registered before
+  body checking, and checked in first-discovery FIFO order. Same-instance and
+  finite concrete mutual recursion are accepted; specialization-expanding
+  active polymorphic recursion is rejected;
 - private deterministic manifests used by Go conformance tests.
 
 The fixed production entry drives those implemented slices from source loading
@@ -237,11 +243,12 @@ it against per-type bounds, so the port accepts every `U64` value and the
 String literal results accept `String` and its `[U8]` semantic form alike.
 The operator slice covers unary `-` and `!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Boolean
-operators with the Go Stage 0 operand rules. Concrete calls are limited to
-direct nongeneric user functions, nongeneric records, variants resolved through
-a concrete expected enum, and one direct C-import root in `unsafe c`; record
-fields are checked and stored in declaration order. Generic or explicitly
-applied/chained calls and construction defer the whole body. Bodies with
+operators with the Go Stage 0 operand rules. Direct calls support concrete and
+generic user functions, generic records, variants resolved through a concrete
+expected enum, unary-payload inference through declared generic enums, and one
+direct C-import root in `unsafe c`; record fields are checked and stored in
+declaration order. Explicit type arguments are all-or-none and use the same
+postfix call tree as runtime arguments. Bodies with
 aggregate access, control flow, or a missing/non-final return likewise defer
 without emitting records. Unannotated let/var bindings infer scalar types from
 supported literals, identifiers, and unary/binary expressions.
@@ -249,15 +256,17 @@ supported literals, identifiers, and unary/binary expressions.
 The checked model interns types by kind, semantic target, and ordered canonical
 argument IDs. Primitive targets are fixed, repeated applications share one
 canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
-separate annotations retain each source spelling. Nongeneric checked bodies use
+separate annotations retain each source spelling. Concrete checked bodies use
 stable parameter/local binding IDs, a persistent lexical-environment chain,
-postorder expression records, and flattened ordered child ranges. Calls are
-resolved only at the concrete boundary above; stable annotations retain
-declaration/variant IDs and canonical checked types without introducing MIR
-identities.
+postorder expression records, and flattened ordered child ranges. Generic
+function signatures and bodies are owned by stable concrete instance IDs;
+direct call targets name those instances. Aggregate applications, expression
+types, instance signatures, and checked instance bodies are concrete at this
+boundary. Stable annotations retain declaration/variant IDs and canonical
+checked types without introducing MIR identities.
 
-General body checking, other literals/expressions, generic inference and
-monomorphization, MIR construction, verifier/backend ports, and self-hosted
+General body checking, other literals/expressions, MIR construction,
+verifier/backend ports, and self-hosted
 execution are still incomplete. Consult [Roadmap](../ROADMAP.md) and executable
 tests for the exact latest slice.
 
