@@ -30,9 +30,21 @@ fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
 }
 
 fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec), expression_children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 {
-    return match __s0_buffer_new(CheckDiagRec, d) {
+    return match __s0_buffer_new(CheckedBlockRec, d) {
         Err(error) => storage_error()
-        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, diagnostics: diagnostics))
+        Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) {
+            Err(error) => storage_error()
+            Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) {
+                Err(error) => storage_error()
+                Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) {
+                    Err(error) => storage_error()
+                    Ok(places) => match __s0_buffer_new(CheckDiagRec, d) {
+                        Err(error) => storage_error()
+                        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places), diagnostics: diagnostics))
+                    }
+                }
+            }
+        }
     }
 }
 

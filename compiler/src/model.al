@@ -221,11 +221,62 @@ type CheckedReturnRec {
     result_use: U64
 }
 
+// Checked control records are the lowering-facing source model. Blocks retain
+// their persistent entry environment and a reverse source-order statement
+// chain. Statements name checked expressions, stable bindings and assignment
+// places, and child blocks without introducing MIR blocks or control-flow IDs.
+// Statement kinds mirror supported syntax: 1 let, 2 var, 3 assignment,
+// 4 return, 5 expression, 6 block, 7 if, 8 while, and 9 for.
+type CheckedBlockRec {
+    owner: U64
+    syntax: U64
+    environment: U64
+    statements: U64
+    guaranteed_return: U64
+}
+
+type CheckedStatementLinkRec {
+    statement: U64
+    next: U64
+}
+
+type CheckedStatementRec {
+    owner: U64
+    syntax: U64
+    kind: U64
+    environment: U64
+    expression: U64
+    place: U64
+    binding: U64
+    body: U64
+    alternative: U64
+}
+
+// Place kinds are 1 local, 2 struct field, 3 slice index, and 4 indexed struct
+// field. root is a stable LocalRec ID, field is a declaration-ordinal
+// DeclTypeUseRec ID, index is a checked U64 expression, and checked_type is the
+// concrete value accepted by the store.
+type CheckedPlaceRec {
+    owner: U64
+    syntax: U64
+    kind: U64
+    root: U64
+    field: U64
+    index: U64
+    checked_type: U64
+}
+
+type CheckedControlStore {
+    blocks: __s0_Buffer(CheckedBlockRec)
+    statement_links: __s0_Buffer(CheckedStatementLinkRec)
+    statements: __s0_Buffer(CheckedStatementRec)
+    places: __s0_Buffer(CheckedPlaceRec)
+}
+
 // Bindings are recorded per function in canonical declaration order. kind is 1
-// for a runtime parameter or 2 for a local; syntax identifies the declaration,
-// mutable is 0 (let/parameter) or 1 (var), and checked_type is canonical.
-// Field and index assignment targets remain deferred until the aggregate-access
-// slice.
+// for a runtime parameter or 2 for a local/for element; syntax identifies the
+// declaration, mutable is 0 (let/parameter/for) or 1 (var), and checked_type is
+// canonical.
 type LocalRec {
     owner: U64
     kind: U64
@@ -237,9 +288,9 @@ type LocalRec {
     checked_type: U64
 }
 
-// Each persistent environment adds one binding to its parent. The current
-// flat body has one deterministic chain per function; nested scopes can later
-// branch that chain without changing expression binding references.
+// Each persistent environment either adds one binding to its parent or, when
+// binding is zero, restores a lexical-scope snapshot. This permits nested and
+// sibling blocks to retain stable histories without leaking bindings.
 type EnvironmentRec {
     owner: U64
     parent: U64
@@ -273,7 +324,11 @@ type EnvironmentRec {
 // root target, 53 nested call/unsafe-c in an unsafe argument, 54 wrong import
 // arity, and 55 import argument mismatch. Generic inference diagnostics are
 // 56 partial or excess explicit type arguments, 57 unresolved inference,
-// 58 conflicting repeated binding, and 59 expanding polymorphic recursion.
+// 58 conflicting repeated binding, 59 expanding polymorphic recursion,
+// 60 non-struct field root, 61 unknown assignment field, 62 non-slice index
+// root, 63 non-U64 index, 64 non-copy-trivial indexed element, 65 non-Bool
+// condition, 66 unsupported for sequence, 67 valued function fallthrough,
+// 68 unreachable statement, and 69 using under a loop.
 type CheckDiagRec {
     kind: U64
     source: U64
