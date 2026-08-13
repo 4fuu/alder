@@ -163,7 +163,9 @@ type DeclTypeUseRec {
 // instance. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
 // decoded string literals, and locals. parameter_use names the stable LocalRec
 // binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
-// are unary and binary. Ordered children are stored in one
+// are unary and binary. Kinds 12 and 13 are checked match and Result try;
+// parameter_use names their lowering-facing CheckedMatchRec/CheckedTryRec.
+// Ordered children are stored in one
 // flattened child buffer rather than encoded by operator arity.
 // Kinds 8..11 are direct user calls, concrete record constructors, concrete
 // enum variants, and direct C-import calls. Their annotation is a stable
@@ -266,11 +268,52 @@ type CheckedPlaceRec {
     checked_type: U64
 }
 
+// Match and try records are lowering-facing source semantics. They retain only
+// concrete checker IDs: owners, canonical types, expressions, bindings,
+// environments, declaration variant uses, and syntax. variant_kind is 0 for a
+// declared enum variant, 1 None, 2 Some, 3 Ok, 4 Err, 5 OutOfMemory, 6 Limit,
+// and 7 wildcard. Declared variants carry variant_use; builtins and wildcard do
+// not. Arm bodies are checked expressions, including statement-form matches.
+// Expression kinds 14..17 are concrete None, Some, Ok, and Err constructors;
+// payload constructors own exactly one ordered expression child.
+type CheckedMatchRec {
+    owner: U64
+    syntax: U64
+    scrutinee: U64
+    scrutinee_type: U64
+    checked_type: U64
+    first_arm: U64
+    arm_count: U64
+}
+
+type CheckedMatchArmRec {
+    owner: U64
+    syntax: U64
+    checked_match: U64
+    variant_use: U64
+    variant_kind: U64
+    binding: U64
+    environment: U64
+    body: U64
+}
+
+type CheckedTryRec {
+    owner: U64
+    syntax: U64
+    expression: U64
+    result_type: U64
+    ok_type: U64
+    error_type: U64
+}
+
 type CheckedControlStore {
     blocks: __s0_Buffer(CheckedBlockRec)
     statement_links: __s0_Buffer(CheckedStatementLinkRec)
     statements: __s0_Buffer(CheckedStatementRec)
     places: __s0_Buffer(CheckedPlaceRec)
+    matches: __s0_Buffer(CheckedMatchRec)
+    match_arms: __s0_Buffer(CheckedMatchArmRec)
+    tries: __s0_Buffer(CheckedTryRec)
 }
 
 // Bindings are recorded per function in canonical declaration order. kind is 1
@@ -328,7 +371,12 @@ type EnvironmentRec {
 // 60 non-struct field root, 61 unknown assignment field, 62 non-slice index
 // root, 63 non-U64 index, 64 non-copy-trivial indexed element, 65 non-Bool
 // condition, 66 unsupported for sequence, 67 valued function fallthrough,
-// 68 unreachable statement, and 69 using under a loop.
+// 68 unreachable statement, and 69 using under a loop. Match/try diagnostics:
+// 70 non-enum match, 71 unknown variant, 72 duplicate variant, 73 payload not
+// bound, 74 valueless variant bound, 75 reserved arm binding, 76 duplicate arm
+// binding, 77 arm type mismatch, 78 no arms, 79 nonexhaustive match, 80 try in
+// a non-Result function, 81 try of a non-Result expression, and 82 try error
+// type mismatch.
 type CheckDiagRec {
     kind: U64
     source: U64

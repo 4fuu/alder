@@ -224,7 +224,9 @@ this document split, it contains:
   integer literals, and decoded string literals, plus direct calls with
   all-or-none explicit or inferred generic arguments, generic record
   constructors, expected-type generic enum variants, and direct
-  imported calls inside `unsafe c`;
+  imported calls inside `unsafe c`. Checked bodies also retain exhaustive enum,
+  `Option`, and `Result` matches (including expression statements), concrete
+  builtin constructors, and exact-error-type `try` records;
 - deterministic concrete function specialization closure. Instances are keyed
   by declaration ID and ordered canonical concrete type IDs, registered before
   body checking, and checked in first-discovery FIFO order. Same-instance and

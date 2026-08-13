@@ -38,9 +38,18 @@ fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(S
                 Err(error) => storage_error()
                 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) {
                     Err(error) => storage_error()
-                    Ok(places) => match __s0_buffer_new(CheckDiagRec, d) {
+                    Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) {
                         Err(error) => storage_error()
-                        Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places), diagnostics: diagnostics))
+                        Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) {
+                            Err(error) => storage_error()
+                            Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) {
+                                Err(error) => storage_error()
+                                Ok(tries) => match __s0_buffer_new(CheckDiagRec, d) {
+                                    Err(error) => storage_error()
+                                    Ok(diagnostics) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries), diagnostics: diagnostics))
+                                }
+                            }
+                        }
                     }
                 }
             }

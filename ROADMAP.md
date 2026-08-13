@@ -408,7 +408,7 @@ a loop is rejected. Non-`Unit` paths must return, loops conservatively fall
 through, both `if` branches must return to guarantee return, and unreachable
 statements are rejected before checking their contents. These checks are
 preparatory: other literals, local forms, indirect calls and function values,
-match/try, complete cleanup checking, MIR lowering, the full checker, and the
+complete cleanup checking, MIR lowering, the full checker, and the
 complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
