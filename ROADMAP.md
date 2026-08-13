@@ -364,9 +364,8 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. Its body slice checks a concrete function instance whose complete
-shape is zero or more let/var
-bindings and plain-identifier assignments followed by one top-level return: a
+checking. Its body slice checks concrete function instances compositionally
+across lexical blocks, assignments, `if`/`else`, `while`, and slice `for`: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
 fit the declared integer type, and a string literal requires `String` or
@@ -375,12 +374,17 @@ and returns recursively check unary `-`/`!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Bool operators
 with the Go Stage 0 operand rules. Binding order mirrors the Go checker: reserved
 names, annotation resolution, initializer mismatch, Unit/DomainMark
-rejection, then duplicates; parameters are immutable assignment targets.
+rejection, then duplicates; parameters are immutable direct assignment targets,
+while immutable slice bindings retain reference-style indexed mutation. Block,
+branch, loop, and `for` bindings do not escape. Assignment roots use stable local
+IDs, fields use declaration ordinals after concrete generic substitution, and
+indices require `U64` and the existing copy-trivial element restriction.
 Integer bounds compare canonical decimal
 digit text against per-type bounds, preserving every `U64` value and the `I64`
 minimum rather than inheriting Stage 0's signed host-storage limit. Stable
-postorder tagged-expression, local-binding, and return records retain parameter,
-local, Bool-payload, child, operator, statement-site, and result-use relationships.
+postorder tagged-expression, local-binding, return, lexical-block, ordered-
+statement, and assignment-place records retain parameter, local, Bool-payload,
+child, operator, statement-site, scope, concrete type, and result-use relationships.
 Unannotated bindings infer scalar types from supported literals, identifiers,
 and unary/binary expressions. Checked types are canonical structure-deduplicated
 DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
@@ -398,11 +402,13 @@ types, aggregate applications, and user-call targets are concrete; stable
 private-manifest instance IDs expose that backend-facing boundary. Concrete C
 imports inside `unsafe c` retain their prior contract. Record children use
 declaration-field order;
-unsupported body shapes and expression forms outside this slice remain
-deferred, and a deferred body discards its partial records. These checks
-are preparatory: general body checking, other literals, local forms, indirect
-calls and function values,
-control flow, missing-return analysis, MIR lowering, the full checker, and the
+unsupported expression forms and Issue #7 cleanup semantics outside this slice
+remain deferred, and a deferred body discards its partial records. `using` under
+a loop is rejected. Non-`Unit` paths must return, loops conservatively fall
+through, both `if` branches must return to guarantee return, and unreachable
+statements are rejected before checking their contents. These checks are
+preparatory: other literals, local forms, indirect calls and function values,
+match/try, complete cleanup checking, MIR lowering, the full checker, and the
 complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are

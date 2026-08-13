@@ -217,9 +217,9 @@ this document split, it contains:
   unsafe calls;
 - declaration collection and a growing checker for names, generic type shapes,
   aggregate members, representation cycles/restrictions, import/function
-  signatures, and initial function bodies made of annotated let/var bindings,
-  plain-identifier assignments, and one closing return. Binding initializers,
-  assignment right-hand sides, and returns accept recursively nested S0 unary
+  signatures, lexical blocks, assignments, and synchronous `if`/`while`/slice
+  `for` control flow. Binding initializers, assignment right-hand sides,
+  conditions, sequences, indices, and returns accept recursively nested S0 unary
   and binary operators over parameter/local identifiers, Boolean literals,
   integer literals, and decoded string literals, plus direct calls with
   all-or-none explicit or inferred generic arguments, generic record
@@ -248,24 +248,32 @@ generic user functions, generic records, variants resolved through a concrete
 expected enum, unary-payload inference through declared generic enums, and one
 direct C-import root in `unsafe c`; record fields are checked and stored in
 declaration order. Explicit type arguments are all-or-none and use the same
-postfix call tree as runtime arguments. Bodies with
-aggregate access, control flow, or a missing/non-final return likewise defer
-without emitting records. Unannotated let/var bindings infer scalar types from
-supported literals, identifiers, and unary/binary expressions.
+postfix call tree as runtime arguments. Checked places cover mutable locals and
+struct fields plus slice indices and indexed struct fields; roots and fields
+retain stable semantic IDs, and concrete generic field types are substituted
+before checking the right-hand side. Lexical environments do not leak block,
+branch, loop, or `for` element bindings. Non-`Unit` functions must return on
+every path, statements after a guaranteed return are rejected before their
+contents, and conservative loops fall through. `using` remains deferred outside
+loops pending its owning milestone and is rejected anywhere under a loop.
+Unannotated let/var bindings infer scalar types from supported literals,
+identifiers, and unary/binary expressions.
 
 The checked model interns types by kind, semantic target, and ordered canonical
 argument IDs. Primitive targets are fixed, repeated applications share one
 canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
 separate annotations retain each source spelling. Concrete checked bodies use
 stable parameter/local binding IDs, a persistent lexical-environment chain,
-postorder expression records, and flattened ordered child ranges. Generic
+postorder expression records, flattened ordered child ranges, and private block,
+statement-link, statement, and assignment-place records. These are structured
+source records for later lowering, not MIR blocks or a MIR CFG. Generic
 function signatures and bodies are owned by stable concrete instance IDs;
 direct call targets name those instances. Aggregate applications, expression
 types, instance signatures, and checked instance bodies are concrete at this
 boundary. Stable annotations retain declaration/variant IDs and canonical
 checked types without introducing MIR identities.
 
-General body checking, other literals/expressions, MIR construction,
+Other literals/expressions, match/try and complete cleanup checking, MIR construction,
 verifier/backend ports, and self-hosted
 execution are still incomplete. Consult [Roadmap](../ROADMAP.md) and executable
 tests for the exact latest slice.

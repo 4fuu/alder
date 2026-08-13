@@ -11,6 +11,7 @@ type CheckStore {
     call_annotations: __s0_Buffer(CallAnnotationRec)
     expression_children: __s0_Buffer(CheckedExprChildRec)
     returns: __s0_Buffer(CheckedReturnRec)
+    control: CheckedControlStore
     diagnostics: __s0_Buffer(CheckDiagRec)
 }
 
@@ -68,9 +69,46 @@ enum CheckResult {
 // whole body so no partial records survive; the caller returns its own
 // function-entry store. Diagnostics stay first-failure ordered.
 enum BodyStep {
-    BodyGood(value: CheckStore)
+    BodyGood(value: BodyValueRec)
     BodyBad(value: CheckStore)
     BodyDefer
+}
+
+type BodyValueRec {
+    store: CheckStore
+    environment: U64
+    semantic: U64
+    guaranteed_return: Bool
+}
+
+// Transient body events separate parser-graph structure from semantic state.
+// Kinds are 1 block, 2 ordered statement-list cell, 3 leaf statement,
+// 4 nested block statement, 5 if, 6 while, and 7 for. first/second/third name
+// event IDs or parser syntax IDs according to kind. Events never enter the
+// manifest and carry no CheckStore or domain-backed semantic buffer.
+type BodyEventRec {
+    kind: U64
+    syntax: U64
+    first: U64
+    second: U64
+    third: U64
+}
+
+type BodyEventBuildRec {
+    events: __s0_Buffer(BodyEventRec)
+    event: U64
+}
+
+type PlaceValueRec {
+    store: CheckStore
+    place: U64
+    checked_type: U64
+}
+
+enum PlaceOutcome {
+    PlaceGood(value: PlaceValueRec)
+    PlaceBad(value: CheckStore)
+    PlaceDefer
 }
 
 type ExprDraftRec {
@@ -667,7 +705,7 @@ fn reserved_value_name(state: State, store: CheckStore, node: SyntaxRec) -> Bool
 fn check_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec, related_source: U64, related_start: U64, related_end: U64) -> Result(CheckResult, __s0_Error) {
     let item = CheckDiagRec(kind: kind, source: node.source, start: node.name_start, end: node.name_end, related_source: related_source, related_start: related_start, related_end: related_end)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: diagnostics)))
 }
 
 fn check_decl_fail(d: Domain, state: State, parse: ParseStore, store: CheckStore, kind: U64, owner: U64) -> Result(CheckResult, __s0_Error) {
@@ -676,14 +714,14 @@ fn check_decl_fail(d: Domain, state: State, parse: ParseStore, store: CheckStore
     let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
     let item = CheckDiagRec(kind: kind, source: token.source, start: token.start, end: token.end, related_source: 0, related_start: 0, related_end: 0)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: diagnostics)))
 }
 
 fn check_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(CheckResult, __s0_Error) {
     let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
     let item = CheckDiagRec(kind: kind, source: token.source, start: token.start, end: token.end, related_source: 0, related_start: 0, related_end: 0)
     let diagnostics = try __s0_buffer_append(CheckDiagRec, d, store.diagnostics, item)
-    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: diagnostics)))
+    return Ok(CheckBad(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: diagnostics)))
 }
 
 fn symbol_arity(parse: ParseStore, node: SyntaxRec) -> U64 {
@@ -718,7 +756,7 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
         let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0)
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
-        store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+        store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
         root_at = root_at + 1
     }
     return Ok(CheckGood(store))
@@ -735,7 +773,7 @@ fn append_type_param(d: Domain, state: State, parse: ParseStore, store: CheckSto
         at = at + 1
     }
     let params = try __s0_buffer_append(TypeParamRec, d, store.type_params, TypeParamRec(owner: owner, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end))
-    return Ok(CheckGood(CheckStore(symbols: store.symbols, type_params: params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)))
+    return Ok(CheckGood(CheckStore(symbols: store.symbols, type_params: params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)))
 }
 
 fn collect_param_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64) -> Result(CheckResult, __s0_Error) {
@@ -848,14 +886,14 @@ fn canonical_type_for_children(store: CheckStore, kind: U64, target: U64, childr
 fn annotate_checked_type(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64) -> Result(CheckStore, __s0_Error) {
     if syntax == 0 { return Ok(store) }
     let annotations = try __s0_buffer_append(CheckedTypeAnnotationRec, d, store.type_annotations, CheckedTypeAnnotationRec(owner: owner, syntax: syntax, checked_type: checked_type))
-    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics))
 }
 
 fn append_checked_type(d: Domain, store: CheckStore, owner: U64, kind: U64, syntax: U64, target: U64, first_arg: U64, arg_count: U64) -> Result(CheckStore, __s0_Error) {
     let existing = canonical_type_id(store, kind, target, first_arg, arg_count)
     if existing != 0 { return annotate_checked_type(d, store, owner, syntax, existing) }
     let types = try __s0_buffer_append(CheckedTypeRec, d, store.types, CheckedTypeRec(kind: kind, syntax: 0, target: target, first_arg: first_arg, arg_count: arg_count))
-    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
     return annotate_checked_type(d, next, owner, syntax, __s0_buffer_len(CheckedTypeRec, types))
 }
 
@@ -918,7 +956,7 @@ fn substitute_children(d: Domain, store: CheckStore, bindings: __s0_Buffer(Infer
 fn append_substituted_children(d: Domain, store: CheckStore, children: __s0_Buffer(U64), ordinal: U64) -> Result(CheckStore, __s0_Error) {
     if ordinal == __s0_buffer_len(U64, children) { return Ok(store) }
     let args = try __s0_buffer_append(U64, d, store.type_args, __s0_buffer_get(U64, children, ordinal))
-    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
     return append_substituted_children(d, next, children, ordinal + 1)
 }
 
@@ -1008,7 +1046,7 @@ fn append_instance_args(d: Domain, store: CheckStore, declaration: U64, bindings
     var next = store
     if param.owner == declaration {
         let args = try __s0_buffer_append(U64, d, store.type_args, inference_lookup(bindings, param_at + 1))
-        next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+        next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
     }
     return append_instance_args(d, next, declaration, bindings, param_at + 1)
 }
@@ -1022,7 +1060,7 @@ fn append_instance_uses(d: Domain, store: CheckStore, declaration: U64, instance
         var role: U64 = 7
         if use.role == 6 { role = 8 }
         let uses = try __s0_buffer_append(DeclTypeUseRec, d, concrete.store.uses, DeclTypeUseRec(owner: instance, role: role, ordinal: use.ordinal, node: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, syntax: use.syntax, checked_type: concrete.checked_type))
-        next = CheckStore(symbols: concrete.store.symbols, type_params: concrete.store.type_params, types: concrete.store.types, type_args: concrete.store.type_args, type_annotations: concrete.store.type_annotations, uses: uses, locals: concrete.store.locals, environments: concrete.store.environments, expressions: concrete.store.expressions, call_annotations: concrete.store.call_annotations, expression_children: concrete.store.expression_children, returns: concrete.store.returns, diagnostics: concrete.store.diagnostics)
+        next = CheckStore(symbols: concrete.store.symbols, type_params: concrete.store.type_params, types: concrete.store.types, type_args: concrete.store.type_args, type_annotations: concrete.store.type_annotations, uses: uses, locals: concrete.store.locals, environments: concrete.store.environments, expressions: concrete.store.expressions, call_annotations: concrete.store.call_annotations, expression_children: concrete.store.expression_children, returns: concrete.store.returns, control: concrete.store.control, diagnostics: concrete.store.diagnostics)
     }
     return append_instance_uses(d, next, declaration, instance, bindings, use_at + 1)
 }
@@ -1057,7 +1095,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
     let with_args = try append_instance_args(d, store, declaration, bindings, 0)
     let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
     let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent))
-    let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, diagnostics: with_args.diagnostics)
+    let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings, 0)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
 }
@@ -1102,7 +1140,7 @@ fn record_arg_links(d: Domain, parse: ParseStore, store: CheckStore, link_id: U6
     let current = try record_arg_links(d, parse, store, link.next)
     let checked = checked_type_for_syntax(current, link.node)
     let args = try __s0_buffer_append(U64, d, current.type_args, checked)
-    return Ok(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, type_annotations: current.type_annotations, uses: current.uses, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, diagnostics: current.diagnostics))
+    return Ok(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, type_annotations: current.type_annotations, uses: current.uses, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics))
 }
 
 fn type_arg_count(parse: ParseStore, link_id: U64) -> U64 {
@@ -1188,7 +1226,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             let existing_string = canonical_single_arg(with_u8, 8, 0, u8)
             if existing_string != 0 { return Ok(CheckGood(try annotate_checked_type(d, with_u8, owner, node_id, existing_string))) }
             let args = try __s0_buffer_append(U64, d, with_u8.type_args, u8)
-            let recorded = CheckStore(symbols: with_u8.symbols, type_params: with_u8.type_params, types: with_u8.types, type_args: args, type_annotations: with_u8.type_annotations, uses: with_u8.uses, locals: with_u8.locals, environments: with_u8.environments, expressions: with_u8.expressions, call_annotations: with_u8.call_annotations, expression_children: with_u8.expression_children, returns: with_u8.returns, diagnostics: with_u8.diagnostics)
+            let recorded = CheckStore(symbols: with_u8.symbols, type_params: with_u8.type_params, types: with_u8.types, type_args: args, type_annotations: with_u8.type_annotations, uses: with_u8.uses, locals: with_u8.locals, environments: with_u8.environments, expressions: with_u8.expressions, call_annotations: with_u8.call_annotations, expression_children: with_u8.expression_children, returns: with_u8.returns, control: with_u8.control, diagnostics: with_u8.diagnostics)
             return Ok(CheckGood(try append_checked_type(d, recorded, owner, 8, node_id, 0, __s0_buffer_len(U64, args), 1)))
         }
         if builtin != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, builtin, node_id, 0, 0, 0))) }
@@ -1302,7 +1340,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     }
     if child.kind == 9 && child.children == 0 {
         let uses = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: owner, role: 2, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: child.name_start, name_end: child.name_end, syntax: 0, checked_type: 0))
-        return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: uses, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, diagnostics: current.diagnostics)))
+        return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: uses, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics)))
     }
     var syntax = link.node
     if child.kind == 8 || child.kind == 9 || child.kind == 10 || child.kind == 13 {
@@ -1342,7 +1380,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     if actual_role == 3 || actual_role == 4 || actual_role == 6 { name_start = 0
         name_end = 0 }
     let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: checked_type_for_syntax(next, syntax)))
-    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)))
+    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics)))
 }
 
 fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, signature: SyntaxRec) -> Result(CheckResult, __s0_Error) {
@@ -1376,7 +1414,7 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
         } { return Ok(validated) }
     }
     let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: checked_type_for_syntax(next, result_link.node)))
-    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)))
+    return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics)))
 }
 
 // Materialize aggregate value edges without recursion. Declared applications
@@ -1662,14 +1700,37 @@ fn digits_at_most(values: __s0_Buffer(U8), start: U64, end: U64, limit: String) 
     return true
 }
 
+fn current_environment(store: CheckStore, owner: U64) -> U64 {
+    var at = __s0_buffer_len(EnvironmentRec, store.environments)
+    while at != 0 {
+        let environment = __s0_buffer_get(EnvironmentRec, store.environments, at - 1)
+        if environment.owner == owner { return at }
+        at = at - 1
+    }
+    return 0
+}
+
 fn local_lookup(store: CheckStore, owner: U64, node: SyntaxRec, state: State) -> U64 {
+    var environment = current_environment(store, owner)
+    while environment != 0 {
+        let item = __s0_buffer_get(EnvironmentRec, store.environments, environment - 1)
+        if item.binding != 0 {
+            let local = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
+            if same_name(state, node.source, node.name_start, node.name_end, local.source, local.name_start, local.name_end) { return item.binding }
+        }
+        environment = item.parent
+    }
+    return 0
+}
+
+fn local_declared(store: CheckStore, owner: U64, node: SyntaxRec, state: State) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(LocalRec, store.locals) {
         let local = __s0_buffer_get(LocalRec, store.locals, at)
-        if local.owner == owner && same_name(state, node.source, node.name_start, node.name_end, local.source, local.name_start, local.name_end) { return at + 1 }
+        if local.owner == owner && same_name(state, node.source, node.name_start, node.name_end, local.source, local.name_start, local.name_end) { return true }
         at = at + 1
     }
-    return 0
+    return false
 }
 
 fn body_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(BodyStep, __s0_Error) {
@@ -1694,7 +1755,7 @@ fn body_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
 // to the function-entry snapshot, including types and type arguments appended
 // while resolving local annotations.
 fn rollback_body(base: CheckStore, failed: CheckStore) -> CheckStore {
-    return CheckStore(symbols: base.symbols, type_params: base.type_params, types: base.types, type_args: base.type_args, type_annotations: base.type_annotations, uses: base.uses, locals: base.locals, environments: base.environments, expressions: base.expressions, call_annotations: base.call_annotations, expression_children: base.expression_children, returns: base.returns, diagnostics: failed.diagnostics)
+    return CheckStore(symbols: base.symbols, type_params: base.type_params, types: base.types, type_args: base.type_args, type_annotations: base.type_annotations, uses: base.uses, locals: base.locals, environments: base.environments, expressions: base.expressions, call_annotations: base.call_annotations, expression_children: base.expression_children, returns: base.returns, control: base.control, diagnostics: failed.diagnostics)
 }
 
 fn expr_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(ExprOutcome, __s0_Error) {
@@ -1726,7 +1787,7 @@ fn expr_draft(store: CheckStore, checked_type: U64, expression: U64) -> Result(E
 fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: String) -> U64 {
     var target: U64 = 0
     if len(name) == 4 && name[0] == 66 { target = 1 }
-    if len(name) == 3 && name[0] == 73 { target = 5 }
+    if len(name) == 3 && name[0] == 85 { target = 9 }
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
@@ -1792,7 +1853,7 @@ fn append_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind
         child_count = child_count + 1
     }
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: syntax, kind: kind, checked_type: checked_type, parameter_use: reference, bool_value: bool_value, left: 0, right: 0, annotation: 0, first_child: first_child, child_count: child_count, operator: operator, site_kind: site_kind, site_syntax: site_syntax))
-    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: store.call_annotations, expression_children: children, returns: store.returns, diagnostics: store.diagnostics)
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: store.call_annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
@@ -1909,7 +1970,7 @@ fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: Ch
             let existing = canonical_single_arg(store, 8, 0, u8)
             if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, existing))) }
             let args = try __s0_buffer_append(U64, d, store.type_args, u8)
-            let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+            let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
             return Ok(CheckGood(try append_checked_type(d, recorded, owner, 8, node_id, 0, __s0_buffer_len(U64, args), 1)))
         }
         if head.kind == 0 || head.arg_count != 0 { return check_token_fail(d, state, store, 56, node) }
@@ -2032,7 +2093,7 @@ fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: Che
         }
     }
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, syntax: syntax, kind: expression_kind, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: annotation, first_child: first_child, child_count: child_count, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
-    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, diagnostics: store.diagnostics)
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
@@ -2754,7 +2815,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             let existing = canonical_single_arg(store, 8, 0, 6)
             if existing != 0 { string_type = existing } else {
                 let args = try __s0_buffer_append(U64, d, store.type_args, 6)
-                let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, diagnostics: store.diagnostics)
+                let recorded = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
                 string_store = try append_checked_type(d, recorded, owner, 8, 0, 0, __s0_buffer_len(U64, args), 1)
                 string_type = canonical_single_arg(string_store, 8, 0, 6)
             }
@@ -2941,11 +3002,148 @@ fn check_value_expression(d: Domain, state: State, parse: ParseStore, store: Che
     return check_value_expression_inner(d, state, parse, store, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
 }
 
+fn with_control(store: CheckStore, control: CheckedControlStore) -> CheckStore {
+    return CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: control, diagnostics: store.diagnostics)
+}
+
+fn append_checked_statement(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, environment: U64, expression: U64, place: U64, binding: U64, body: U64, alternative: U64, guaranteed: Bool) -> Result(BodyStep, __s0_Error) {
+    let statements = try __s0_buffer_append(CheckedStatementRec, d, store.control.statements, CheckedStatementRec(owner: owner, syntax: syntax, kind: kind, environment: environment, expression: expression, place: place, binding: binding, body: body, alternative: alternative))
+    let control = CheckedControlStore(blocks: store.control.blocks, statement_links: store.control.statement_links, statements: statements, places: store.control.places)
+    return Ok(BodyGood(BodyValueRec(store: with_control(store, control), environment: current_environment(store, owner), semantic: __s0_buffer_len(CheckedStatementRec, statements), guaranteed_return: guaranteed)))
+}
+
+fn restore_environment(d: Domain, store: CheckStore, owner: U64, parent: U64) -> Result(CheckStore, __s0_Error) {
+    let environments = try __s0_buffer_append(EnvironmentRec, d, store.environments, EnvironmentRec(owner: owner, parent: parent, binding: 0))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics))
+}
+
+fn field_use_named(state: State, store: CheckStore, target: U64, node: SyntaxRec) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == target && use.role == 1 && same_name(state, node.source, node.name_start, node.name_end, use.source, use.name_start, use.name_end) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn concrete_field_type(d: Domain, store: CheckStore, aggregate: U64, field: U64) -> Result(TypeValueRec, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, aggregate - 1)
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    let bindings = try bind_expected_application(d, store, checked.target, checked, 0, 0, empty)
+    return substitute_type(d, store, bindings, __s0_buffer_get(DeclTypeUseRec, store.uses, field - 1).checked_type)
+}
+
+fn place_bad(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(PlaceOutcome, __s0_Error) {
+    let failed = try check_fail(d, store, kind, node, 0, 0, 0)
+    let bad = match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return Ok(PlaceBad(bad))
+}
+
+fn place_token_bad(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(PlaceOutcome, __s0_Error) {
+    let failed = try check_token_fail(d, state, store, kind, node)
+    let bad = match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return Ok(PlaceBad(bad))
+}
+
+fn append_place(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, root: U64, field: U64, index: U64, checked_type: U64) -> Result(PlaceOutcome, __s0_Error) {
+    let places = try __s0_buffer_append(CheckedPlaceRec, d, store.control.places, CheckedPlaceRec(owner: owner, syntax: syntax, kind: kind, root: root, field: field, index: index, checked_type: checked_type))
+    let control = CheckedControlStore(blocks: store.control.blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: places)
+    return Ok(PlaceGood(PlaceValueRec(store: with_control(store, control), place: __s0_buffer_len(CheckedPlaceRec, places), checked_type: checked_type)))
+}
+
+// Place components are checked before the assignment value. Indexing is the
+// one reference-style mutation permitted through an immutable slice binding;
+// direct and direct-field stores require a mutable root.
+fn check_assignment_place(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, target: SyntaxRec, target_id: U64, statement: SyntaxRec, statement_id: U64) -> Result(PlaceOutcome, __s0_Error) {
+    var root = target
+    var root_id = target_id
+    var field_node = target
+    var field: U64 = 0
+    var index_node = target
+    var index_id: U64 = 0
+    var kind: U64 = 1
+    if target.kind == 29 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, target.children - 1)
+        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        field_node = target
+        if base.kind == 30 {
+            kind = 4
+            index_node = base
+            let index_link = __s0_buffer_get(SyntaxLinkRec, parse.links, base.children - 1)
+            index_id = index_link.node
+            let root_link = __s0_buffer_get(SyntaxLinkRec, parse.links, index_link.next - 1)
+            root_id = root_link.node
+            root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+        } else {
+            kind = 2
+            root_id = base_link.node
+            root = base
+        }
+    }
+    if target.kind == 30 {
+        kind = 3
+        index_node = target
+        let index_link = __s0_buffer_get(SyntaxLinkRec, parse.links, target.children - 1)
+        index_id = index_link.node
+        let root_link = __s0_buffer_get(SyntaxLinkRec, parse.links, index_link.next - 1)
+        root_id = root_link.node
+        root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+    }
+    if root.kind != 24 { return Ok(PlaceDefer) }
+    let local_id = local_lookup(store, owner, root, state)
+    if local_id == 0 { return place_bad(d, store, 18, root) }
+    let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+    if local.mutable == 0 && kind <= 2 { return place_bad(d, store, 28, root) }
+    var current = store
+    var value_type = local.checked_type
+    var index_expression: U64 = 0
+    if kind == 3 || kind == 4 {
+        let slice = __s0_buffer_get(CheckedTypeRec, current.types, value_type - 1)
+        if slice.kind != 8 { return place_token_bad(d, state, store, 62, index_node) }
+        value_type = __s0_buffer_get(U64, current.type_args, slice.first_arg - 1)
+        let empty = try __s0_buffer_new(TypeBindingRec, d)
+        let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+        if try interpreted_contains_reference(d, state, parse, current, empty, no_ancestry, value_type, 0, 0, 0) { return place_token_bad(d, state, store, 64, index_node) }
+        let index_syntax = __s0_buffer_get(SyntaxRec, parse.nodes, index_id - 1)
+        let index_type = primitive_type_id(state, parse, current, "U64")
+        let checked_index = try check_value_expression(d, state, parse, current, owner, index_syntax, index_id, index_type, 63, index_node, 7, statement_id)
+        current = match checked_index {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked_index {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(PlaceBad(current)) }
+        let draft = match checked_index {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return Ok(PlaceDefer) }
+        index_expression = draft.expression
+    }
+    if kind == 2 || kind == 4 {
+        let aggregate = __s0_buffer_get(CheckedTypeRec, current.types, value_type - 1)
+        if aggregate.kind != 7 || __s0_buffer_get(SymbolRec, current.symbols, aggregate.target - 1).kind != 2 { return place_bad(d, store, 60, field_node) }
+        field = field_use_named(state, current, aggregate.target, field_node)
+        if field == 0 { return place_bad(d, store, 61, field_node) }
+        let concrete = try concrete_field_type(d, current, value_type, field)
+        current = concrete.store
+        value_type = concrete.checked_type
+    }
+    return append_place(d, current, owner, target_id, kind, local_id, field, index_expression, value_type)
+}
+
 // Binding order follows the Go checker: reserved name, annotation resolution,
 // initializer and mismatch, Unit/DomainMark rejection, then duplicates.
-// Unannotated scalar bindings infer from integer/Bool literals, identifiers,
-// and supported unary/binary expressions.
-fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64) -> Result(BodyStep, __s0_Error) {
+fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64) -> Result(BodyStep, __s0_Error) {
     if reserved_value_name(state, store, statement) { return body_fail(d, store, 22, statement) }
     let head = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     var next = store
@@ -2986,39 +3184,47 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
     if annotation_syntax != 0 { diag_node = __s0_buffer_get(SyntaxRec, parse.nodes, annotation_syntax - 1) }
     if annotation.kind == 1 && annotation.target == 12 { return body_fail(d, next, 25, diag_node) }
     if annotation.kind == 4 { return body_fail(d, next, 26, diag_node) }
-    if local_lookup(ostore, owner, statement, state) != 0 || function_use(ostore, owner, 5, statement, state) != 0 { return body_fail(d, next, 27, statement) }
+    if local_declared(ostore, owner, statement, state) || function_use(ostore, owner, 5, statement, state) != 0 { return body_fail(d, next, 27, statement) }
     var mutable: U64 = 0
-    if statement.kind == 16 { mutable = 1 }
+    var statement_kind: U64 = 1
+    if statement.kind == 16 {
+        mutable = 1
+        statement_kind = 2
+    }
     let locals = try __s0_buffer_append(LocalRec, d, ostore.locals, LocalRec(owner: owner, kind: 2, syntax: statement_id, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: mutable, checked_type: annotated))
     let binding = __s0_buffer_len(LocalRec, locals)
-    var parent: U64 = 0
-    if __s0_buffer_len(EnvironmentRec, ostore.environments) != 0 {
-        let candidate = __s0_buffer_len(EnvironmentRec, ostore.environments)
-        if __s0_buffer_get(EnvironmentRec, ostore.environments, candidate - 1).owner == owner { parent = candidate }
-    }
-    let environments = try __s0_buffer_append(EnvironmentRec, d, ostore.environments, EnvironmentRec(owner: owner, parent: parent, binding: binding))
-    return Ok(BodyGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, type_annotations: ostore.type_annotations, uses: ostore.uses, locals: locals, environments: environments, expressions: ostore.expressions, call_annotations: ostore.call_annotations, expression_children: ostore.expression_children, returns: ostore.returns, diagnostics: ostore.diagnostics)))
+    let environments = try __s0_buffer_append(EnvironmentRec, d, ostore.environments, EnvironmentRec(owner: owner, parent: environment, binding: binding))
+    let recorded = CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, type_annotations: ostore.type_annotations, uses: ostore.uses, locals: locals, environments: environments, expressions: ostore.expressions, call_annotations: ostore.call_annotations, expression_children: ostore.expression_children, returns: ostore.returns, control: ostore.control, diagnostics: ostore.diagnostics)
+    return append_checked_statement(d, recorded, owner, statement_id, statement_kind, environment, draft.expression, 0, binding, 0, 0, false)
 }
 
-// Only plain identifier targets are in this slice; field and index targets
-// defer. Parameters are immutable, matching the Go checker's bindParam.
-fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64) -> Result(BodyStep, __s0_Error) {
+fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64) -> Result(BodyStep, __s0_Error) {
     let head = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     let target_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1)
     let target = __s0_buffer_get(SyntaxRec, parse.nodes, target_link.node - 1)
-    if target.kind != 24 { return Ok(BodyDefer) }
-    var binding_type: U64 = 0
-    let local_id = local_lookup(store, owner, target, state)
-    if local_id != 0 {
-        let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
-        if local.mutable == 0 { return body_fail(d, store, 28, target) }
-        binding_type = local.checked_type
-    } else {
-        if function_use(store, owner, 5, target, state) == 0 { return body_fail(d, store, 18, target) }
-        return body_fail(d, store, 28, target)
+    let checked_place = try check_assignment_place(d, state, parse, store, owner, target, target_link.node, statement, statement_id)
+    let current = match checked_place {
+        PlaceGood(value) => value.store
+        PlaceBad(value) => value
+        PlaceDefer => store
+    }
+    if match checked_place {
+        PlaceGood(value) => false
+        PlaceBad(value) => true
+        PlaceDefer => false
+    } { return Ok(BodyBad(current)) }
+    if match checked_place {
+        PlaceGood(value) => false
+        PlaceBad(value) => false
+        PlaceDefer => true
+    } { return Ok(BodyDefer) }
+    let place = match checked_place {
+        PlaceGood(value) => value
+        PlaceBad(value) => PlaceValueRec(store: value, place: 0, checked_type: 0)
+        PlaceDefer => PlaceValueRec(store: store, place: 0, checked_type: 0)
     }
     let rhs = __s0_buffer_get(SyntaxRec, parse.nodes, head.node - 1)
-    let outcome = try check_value_expression(d, state, parse, store, owner, rhs, head.node, binding_type, 24, statement, 2, statement_id)
+    let outcome = try check_value_expression(d, state, parse, place.store, owner, rhs, head.node, place.checked_type, 24, statement, 2, statement_id)
     let ostore = match outcome {
         ExprGood(value) => value.store
         ExprBad(value) => value
@@ -3032,10 +3238,42 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(BodyDefer) }
-    return Ok(BodyGood(ostore))
+    return append_checked_statement(d, ostore, owner, statement_id, 3, environment, draft.expression, place.place, 0, 0, 0, false)
 }
 
-fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64) -> Result(BodyStep, __s0_Error) {
+fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64) -> Result(BodyStep, __s0_Error) {
+    let result_use_id = function_use(store, owner, 6, statement, state)
+    let result_use = __s0_buffer_get(DeclTypeUseRec, store.uses, result_use_id - 1)
+    let result_type = __s0_buffer_get(CheckedTypeRec, store.types, result_use.checked_type - 1)
+    var current = store
+    var expression: U64 = 0
+    if statement.children == 0 {
+        if result_type.kind != 1 || result_type.target != 12 { return body_token_fail(d, state, store, 20, statement) }
+    } else {
+        let expression_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
+        let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, expression_link.node - 1)
+        let outcome = try check_value_expression(d, state, parse, store, owner, syntax, expression_link.node, result_use.checked_type, 19, statement, 3, statement_id)
+        current = match outcome {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match outcome {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(BodyBad(current)) }
+        let draft = match outcome {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return Ok(BodyDefer) }
+        expression = draft.expression
+    }
+    let returns = try __s0_buffer_append(CheckedReturnRec, d, current.returns, CheckedReturnRec(owner: owner, syntax: statement_id, expression: expression, result_use: result_use_id))
+    let recorded = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: returns, control: current.control, diagnostics: current.diagnostics)
+    return append_checked_statement(d, recorded, owner, statement_id, 4, environment, expression, 0, 0, 0, 0, true)
+}
+
+fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64) -> Result(BodyStep, __s0_Error) {
     let expression_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     let expression = __s0_buffer_get(SyntaxRec, parse.nodes, expression_link.node - 1)
     let outcome = try check_value_expression(d, state, parse, store, owner, expression, expression_link.node, 0, 23, statement, 4, statement_id)
@@ -3052,28 +3290,201 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
         ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(BodyDefer) }
-    return Ok(BodyGood(current))
+    return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, false)
 }
 
-fn check_body_statements(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64) -> Result(BodyStep, __s0_Error) {
-    if link_id == 0 { return Ok(BodyGood(store)) }
-    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
-    let before = try check_body_statements(d, state, parse, store, owner, link.next)
-    let current = match before {
-        BodyGood(value) => value
-        BodyBad(value) => value
-        BodyDefer => store
+// Structural flattening is self-recursive and carries only parser IDs. role is
+// 1 for a block syntax node, 2 for a reverse SyntaxLinkRec chain, and 3 for a
+// statement syntax node.
+fn build_body_event(d: Domain, parse: ParseStore, events: __s0_Buffer(BodyEventRec), role: U64, item: U64) -> Result(BodyEventBuildRec, __s0_Error) {
+    if role == 2 && item == 0 { return Ok(BodyEventBuildRec(events: events, event: 0)) }
+    if role == 1 {
+        let block = __s0_buffer_get(SyntaxRec, parse.nodes, item - 1)
+        let children = try build_body_event(d, parse, events, 2, block.children)
+        let appended = try __s0_buffer_append(BodyEventRec, d, children.events, BodyEventRec(kind: 1, syntax: item, first: children.event, second: 0, third: 0))
+        return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
     }
-    if match before {
+    if role == 2 {
+        let link = __s0_buffer_get(SyntaxLinkRec, parse.links, item - 1)
+        let prior = try build_body_event(d, parse, events, 2, link.next)
+        let statement = try build_body_event(d, parse, prior.events, 3, link.node)
+        let appended = try __s0_buffer_append(BodyEventRec, d, statement.events, BodyEventRec(kind: 2, syntax: link.node, first: prior.event, second: statement.event, third: 0))
+        return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
+    }
+    let statement = __s0_buffer_get(SyntaxRec, parse.nodes, item - 1)
+    if statement.kind == 14 {
+        let body = try build_body_event(d, parse, events, 1, item)
+        let appended = try __s0_buffer_append(BodyEventRec, d, body.events, BodyEventRec(kind: 4, syntax: item, first: body.event, second: 0, third: 0))
+        return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
+    }
+    if statement.kind == 32 || statement.kind == 33 {
+        let head = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
+        var body_link = head
+        var condition_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1)
+        var alternative_node: U64 = 0
+        if statement.kind == 32 && condition_link.next != 0 {
+            alternative_node = head.node
+            body_link = condition_link
+            condition_link = __s0_buffer_get(SyntaxLinkRec, parse.links, condition_link.next - 1)
+        }
+        let body = try build_body_event(d, parse, events, 1, body_link.node)
+        var current = body
+        var alternative: U64 = 0
+        if alternative_node != 0 {
+            current = try build_body_event(d, parse, body.events, 1, alternative_node)
+            alternative = current.event
+        }
+        var kind: U64 = 5
+        if statement.kind == 33 { kind = 6 }
+        let appended = try __s0_buffer_append(BodyEventRec, d, current.events, BodyEventRec(kind: kind, syntax: item, first: condition_link.node, second: body.event, third: alternative))
+        return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
+    }
+    if statement.kind == 34 {
+        let head = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
+        let sequence_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1)
+        let body = try build_body_event(d, parse, events, 1, head.node)
+        let appended = try __s0_buffer_append(BodyEventRec, d, body.events, BodyEventRec(kind: 7, syntax: item, first: sequence_link.node, second: body.event, third: 0))
+        return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
+    }
+    let appended = try __s0_buffer_append(BodyEventRec, d, events, BodyEventRec(kind: 3, syntax: item, first: 0, second: 0, third: 0))
+    return Ok(BodyEventBuildRec(events: appended, event: __s0_buffer_len(BodyEventRec, appended)))
+}
+
+fn body_event_value(step: BodyStep, fallback: CheckStore) -> BodyValueRec {
+    return match step {
+        BodyGood(value) => value
+        BodyBad(value) => BodyValueRec(store: value, environment: 0, semantic: 0, guaranteed_return: false)
+        BodyDefer => BodyValueRec(store: fallback, environment: 0, semantic: 0, guaranteed_return: false)
+    }
+}
+
+fn body_event_store(step: BodyStep, fallback: CheckStore) -> CheckStore {
+    return match step {
+        BodyGood(value) => value.store
+        BodyBad(value) => value
+        BodyDefer => fallback
+    }
+}
+
+fn body_event_stopped(step: BodyStep) -> Bool {
+    return match step {
         BodyGood(value) => false
         BodyBad(value) => true
         BodyDefer => true
-    } { return Ok(before) }
-    let statement = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
-    if statement.kind == 15 || statement.kind == 16 { return check_binding(d, state, parse, current, owner, statement, link.node) }
-    if statement.kind == 17 { return check_assignment(d, state, parse, current, owner, statement, link.node) }
-    if statement.kind == 19 { return check_expression_statement(d, state, parse, current, owner, statement, link.node) }
-    return Ok(BodyDefer)
+    }
+}
+
+// The sole semantic control traversal is directly self-recursive. It never
+// carries CheckStore across a loop backedge and no helper calls back into it.
+fn check_body_event(d: Domain, state: State, parse: ParseStore, events: __s0_Buffer(BodyEventRec), store: CheckStore, owner: U64, event_id: U64, in_loop: Bool, restore: Bool) -> Result(BodyStep, __s0_Error) {
+    if event_id == 0 { return Ok(BodyGood(BodyValueRec(store: store, environment: current_environment(store, owner), semantic: 0, guaranteed_return: false))) }
+    let event = __s0_buffer_get(BodyEventRec, events, event_id - 1)
+    let statement = __s0_buffer_get(SyntaxRec, parse.nodes, event.syntax - 1)
+    if event.kind == 1 {
+        let entry = current_environment(store, owner)
+        let checked = try check_body_event(d, state, parse, events, store, owner, event.first, in_loop, false)
+        if body_event_stopped(checked) { return Ok(checked) }
+        let value = body_event_value(checked, store)
+        var guaranteed: U64 = 0
+        if value.guaranteed_return { guaranteed = 1 }
+        let blocks = try __s0_buffer_append(CheckedBlockRec, d, value.store.control.blocks, CheckedBlockRec(owner: owner, syntax: event.syntax, environment: entry, statements: value.semantic, guaranteed_return: guaranteed))
+        var current = with_control(value.store, CheckedControlStore(blocks: blocks, statement_links: value.store.control.statement_links, statements: value.store.control.statements, places: value.store.control.places))
+        if restore { current = try restore_environment(d, current, owner, entry) }
+        return Ok(BodyGood(BodyValueRec(store: current, environment: current_environment(current, owner), semantic: __s0_buffer_len(CheckedBlockRec, blocks), guaranteed_return: value.guaranteed_return)))
+    }
+    if event.kind == 2 {
+        let before = try check_body_event(d, state, parse, events, store, owner, event.first, in_loop, false)
+        if body_event_stopped(before) { return Ok(before) }
+        let prior = body_event_value(before, store)
+        if prior.guaranteed_return { return body_token_fail(d, state, prior.store, 68, statement) }
+        let checked = try check_body_event(d, state, parse, events, prior.store, owner, event.second, in_loop, false)
+        if body_event_stopped(checked) { return Ok(checked) }
+        let value = body_event_value(checked, prior.store)
+        let links = try __s0_buffer_append(CheckedStatementLinkRec, d, value.store.control.statement_links, CheckedStatementLinkRec(statement: value.semantic, next: prior.semantic))
+        let current = with_control(value.store, CheckedControlStore(blocks: value.store.control.blocks, statement_links: links, statements: value.store.control.statements, places: value.store.control.places))
+        return Ok(BodyGood(BodyValueRec(store: current, environment: current_environment(current, owner), semantic: __s0_buffer_len(CheckedStatementLinkRec, links), guaranteed_return: value.guaranteed_return)))
+    }
+    let environment = current_environment(store, owner)
+    if event.kind == 3 {
+        if statement.kind == 15 || statement.kind == 16 { return check_binding(d, state, parse, store, owner, statement, event.syntax, environment) }
+        if statement.kind == 17 { return check_assignment(d, state, parse, store, owner, statement, event.syntax, environment) }
+        if statement.kind == 18 { return check_return_statement(d, state, parse, store, owner, statement, event.syntax, environment) }
+        if statement.kind == 19 { return check_expression_statement(d, state, parse, store, owner, statement, event.syntax, environment) }
+        if statement.kind == 35 && in_loop { return body_token_fail(d, state, store, 69, statement) }
+        return Ok(BodyDefer)
+    }
+    if event.kind == 4 {
+        let checked = try check_body_event(d, state, parse, events, store, owner, event.first, in_loop, true)
+        if body_event_stopped(checked) { return Ok(checked) }
+        let value = body_event_value(checked, store)
+        return append_checked_statement(d, value.store, owner, event.syntax, 6, environment, 0, 0, 0, value.semantic, 0, value.guaranteed_return)
+    }
+    if event.kind == 5 || event.kind == 6 {
+        let condition = __s0_buffer_get(SyntaxRec, parse.nodes, event.first - 1)
+        let bool_type = primitive_type_id(state, parse, store, "Bool")
+        let checked_condition = try check_value_expression(d, state, parse, store, owner, condition, event.first, bool_type, 65, statement, 5, event.syntax)
+        var current = match checked_condition {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked_condition {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(BodyBad(current)) }
+        let condition_draft = match checked_condition {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if condition_draft.deferred { return Ok(BodyDefer) }
+        let checked_body = try check_body_event(d, state, parse, events, current, owner, event.second, in_loop || event.kind == 6, true)
+        if body_event_stopped(checked_body) { return Ok(checked_body) }
+        let body = body_event_value(checked_body, current)
+        current = body.store
+        var alternative: U64 = 0
+        var alternative_returns = false
+        if event.third != 0 {
+            let checked_alternative = try check_body_event(d, state, parse, events, current, owner, event.third, in_loop, true)
+            if body_event_stopped(checked_alternative) { return Ok(checked_alternative) }
+            let alternative_value = body_event_value(checked_alternative, current)
+            current = alternative_value.store
+            alternative = alternative_value.semantic
+            alternative_returns = alternative_value.guaranteed_return
+        }
+        var guaranteed = false
+        var statement_kind: U64 = 7
+        if event.kind == 5 && alternative != 0 && body.guaranteed_return && alternative_returns { guaranteed = true }
+        if event.kind == 6 { statement_kind = 8 }
+        return append_checked_statement(d, current, owner, event.syntax, statement_kind, environment, condition_draft.expression, 0, 0, body.semantic, alternative, guaranteed)
+    }
+    if reserved_value_name(state, store, statement) { return body_fail(d, store, 22, statement) }
+    let sequence = __s0_buffer_get(SyntaxRec, parse.nodes, event.first - 1)
+    let checked_sequence = try check_value_expression(d, state, parse, store, owner, sequence, event.first, 0, 66, statement, 6, event.syntax)
+    var current = match checked_sequence {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked_sequence {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(BodyBad(current)) }
+    let sequence_draft = match checked_sequence {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if sequence_draft.deferred { return Ok(BodyDefer) }
+    let sequence_type = __s0_buffer_get(CheckedTypeRec, current.types, sequence_draft.checked_type - 1)
+    if sequence_type.kind != 8 { return body_token_fail(d, state, store, 66, statement) }
+    if local_declared(current, owner, statement, state) || function_use(current, owner, 5, statement, state) != 0 { return body_fail(d, store, 27, statement) }
+    let element = __s0_buffer_get(U64, current.type_args, sequence_type.first_arg - 1)
+    let locals = try __s0_buffer_append(LocalRec, d, current.locals, LocalRec(owner: owner, kind: 2, syntax: event.syntax, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: 0, checked_type: element))
+    let binding = __s0_buffer_len(LocalRec, locals)
+    let environments = try __s0_buffer_append(EnvironmentRec, d, current.environments, EnvironmentRec(owner: owner, parent: environment, binding: binding))
+    current = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, locals: locals, environments: environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics)
+    let checked_body = try check_body_event(d, state, parse, events, current, owner, event.second, true, true)
+    if body_event_stopped(checked_body) { return Ok(checked_body) }
+    let body = body_event_value(checked_body, current)
+    current = try restore_environment(d, body.store, owner, environment)
+    return append_checked_statement(d, current, owner, event.syntax, 9, environment, sequence_draft.expression, 0, binding, body.semantic, 0, false)
 }
 
 fn append_parameter_bindings(d: Domain, store: CheckStore, owner: U64) -> Result(CheckStore, __s0_Error) {
@@ -3093,18 +3504,16 @@ fn append_parameter_bindings(d: Domain, store: CheckStore, owner: U64) -> Result
                 if __s0_buffer_get(EnvironmentRec, next.environments, candidate - 1).owner == owner { parent = candidate }
             }
             let environments = try __s0_buffer_append(EnvironmentRec, d, next.environments, EnvironmentRec(owner: owner, parent: parent, binding: binding))
-            next = CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: next.uses, locals: locals, environments: environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, diagnostics: next.diagnostics)
+            next = CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: next.uses, locals: locals, environments: environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics)
         }
         at = at + 1
     }
     return Ok(next)
 }
 
-// A body checks as zero or more leading let/var bindings and plain-identifier
-// assignments followed by one top-level return. Any other statement or
-// expression shape defers the whole body so later slices never consume
-// partial records. Generic declarations are checked only through concrete
-// instances discovered by calls.
+// Bodies are checked compositionally in source order. Unsupported Issue #7
+// constructs still defer transactionally; control-flow and every nested block
+// retain concrete-instance ownership and persistent lexical environments.
 fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return Ok(CheckGood(store)) }
@@ -3112,14 +3521,12 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, declaration.node - 1)
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
     let body = __s0_buffer_get(SyntaxRec, parse.nodes, body_link.node - 1)
-    if body.children == 0 { return Ok(CheckGood(store)) }
-    let statement_link = __s0_buffer_get(SyntaxLinkRec, parse.links, body.children - 1)
-    let statement = __s0_buffer_get(SyntaxRec, parse.nodes, statement_link.node - 1)
-    if statement.kind != 18 { return Ok(CheckGood(store)) }
     let with_parameters = try append_parameter_bindings(d, store, owner)
-    let stepped = try check_body_statements(d, state, parse, with_parameters, owner, statement_link.next)
+    let events = try __s0_buffer_new(BodyEventRec, d)
+    let built = try build_body_event(d, parse, events, 1, body_link.node)
+    let stepped = try check_body_event(d, state, parse, built.events, with_parameters, owner, built.event, false, false)
     let after = match stepped {
-        BodyGood(value) => value
+        BodyGood(value) => value.store
         BodyBad(value) => value
         BodyDefer => store
     }
@@ -3133,40 +3540,23 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
         BodyBad(value) => false
         BodyDefer => true
     } { return Ok(CheckGood(store)) }
-    let result_use_id = function_use(after, owner, 6, statement, state)
+    let checked_block = match stepped {
+        BodyGood(value) => value
+        BodyBad(value) => BodyValueRec(store: value, environment: 0, semantic: 0, guaranteed_return: false)
+        BodyDefer => BodyValueRec(store: store, environment: 0, semantic: 0, guaranteed_return: false)
+    }
+    let result_use_id = function_use(after, owner, 6, body, state)
     let result_use = __s0_buffer_get(DeclTypeUseRec, after.uses, result_use_id - 1)
     let result_type = __s0_buffer_get(CheckedTypeRec, after.types, result_use.checked_type - 1)
-    if statement.children == 0 {
-        if result_type.kind != 1 || result_type.target != 12 {
-            let failed = try check_token_fail(d, state, after, 20, statement)
-            let bad = match failed {
-                CheckGood(value) => value
-                CheckBad(value) => value
-            }
-            return Ok(CheckBad(rollback_body(store, bad)))
+    if (result_type.kind != 1 || result_type.target != 12) && !checked_block.guaranteed_return {
+        let failed = try check_token_fail(d, state, after, 67, body)
+        let bad = match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
         }
-        let returns = try __s0_buffer_append(CheckedReturnRec, d, after.returns, CheckedReturnRec(owner: owner, syntax: statement_link.node, expression: 0, result_use: result_use_id))
-        return Ok(CheckGood(CheckStore(symbols: after.symbols, type_params: after.type_params, types: after.types, type_args: after.type_args, type_annotations: after.type_annotations, uses: after.uses, locals: after.locals, environments: after.environments, expressions: after.expressions, call_annotations: after.call_annotations, expression_children: after.expression_children, returns: returns, diagnostics: after.diagnostics)))
+        return Ok(CheckBad(rollback_body(store, bad)))
     }
-    let expression_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
-    let expression = __s0_buffer_get(SyntaxRec, parse.nodes, expression_link.node - 1)
-    if expression_link.next != 0 { return Ok(CheckGood(store)) }
-    let outcome = try check_value_expression(d, state, parse, after, owner, expression, expression_link.node, result_use.checked_type, 19, statement, 3, statement_link.node)
-    let ostore = match outcome {
-        ExprGood(value) => value.store
-        ExprBad(value) => value
-    }
-    if match outcome {
-        ExprGood(value) => false
-        ExprBad(value) => true
-    } { return Ok(CheckBad(rollback_body(store, ostore))) }
-    let draft = match outcome {
-        ExprGood(value) => value.draft
-        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
-    }
-    if draft.deferred { return Ok(CheckGood(store)) }
-    let returns = try __s0_buffer_append(CheckedReturnRec, d, ostore.returns, CheckedReturnRec(owner: owner, syntax: statement_link.node, expression: draft.expression, result_use: result_use_id))
-    return Ok(CheckGood(CheckStore(symbols: ostore.symbols, type_params: ostore.type_params, types: ostore.types, type_args: ostore.type_args, type_annotations: ostore.type_annotations, uses: ostore.uses, locals: ostore.locals, environments: ostore.environments, expressions: ostore.expressions, call_annotations: ostore.call_annotations, expression_children: ostore.expression_children, returns: returns, diagnostics: ostore.diagnostics)))
+    return Ok(CheckGood(after))
 }
 
 fn check_function_body_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
@@ -3268,10 +3658,7 @@ fn emit_check_sources(state: State) -> Bool {
     return true
 }
 
-fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
-    // Checker paths are hex encoded so every host path remains one unambiguous
-    // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 9\n") || !emit_check_sources(state) { return false }
+fn emit_checked_symbols(store: CheckStore) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -3284,7 +3671,11 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
         if !out_string("P ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(10) { return false }
         at = at + 1
     }
-    at = 0
+    return true
+}
+
+fn emit_checked_types(store: CheckStore) -> Bool {
+    var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let rec = __s0_buffer_get(CheckedTypeRec, store.types, at)
         if !out_string("C ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.target) || !out(32) || !out_u64(rec.first_arg) || !out(32) || !out_u64(rec.arg_count) || !out(10) { return false }
@@ -3307,7 +3698,61 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
         if !out_string("U ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.role) || !out(32) || !out_u64(rec.ordinal) || !out(32) || !out_u64(rec.node) || !out(32) || !out_u64(rec.source) || !out(32) || !out_u64(rec.name_start) || !out(32) || !out_u64(rec.name_end) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
         at = at + 1
     }
+    return true
+}
+
+fn emit_checked_control(store: CheckStore) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedPlaceRec, store.control.places) {
+        let rec = __s0_buffer_get(CheckedPlaceRec, store.control.places, at)
+        if !out_string("V ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.root) || !out(32) || !out_u64(rec.field) || !out(32) || !out_u64(rec.index) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        at = at + 1
+    }
     at = 0
+    while at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+        let rec = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
+        if !out_string("J ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.expression) || !out(32) || !out_u64(rec.place) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.body) || !out(32) || !out_u64(rec.alternative) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+        let rec = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at)
+        if !out_string("K ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.statement) || !out(32) || !out_u64(rec.next) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+        let rec = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
+        if !out_string("B ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.statements) || !out(32) || !out_u64(rec.guaranteed_return) || !out(10) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn emit_checked_expressions(store: CheckStore) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let rec = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(32) || !out_u64(rec.bool_value) || !out(32) || !out_u64(rec.left) || !out(32) || !out_u64(rec.right) || !out(32) || !out_u64(rec.annotation) || !out(32) || !out_u64(rec.first_child) || !out(32) || !out_u64(rec.child_count) || !out(32) || !out_u64(rec.operator) || !out(32) || !out_u64(rec.site_kind) || !out(32) || !out_u64(rec.site_syntax) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+        let rec = __s0_buffer_get(CheckedExprChildRec, store.expression_children, at)
+        if !out_string("H ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.expression) || !out(10) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedReturnRec, store.returns) {
+        let rec = __s0_buffer_get(CheckedReturnRec, store.returns, at)
+        if !out_string("R ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.expression) || !out(32) || !out_u64(rec.result_use) || !out(10) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn emit_checked_bindings(store: CheckStore) -> Bool {
+    var at: U64 = 0
     var instance_order: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let rec = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -3335,25 +3780,19 @@ fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
         if !out_string("Q ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.target) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.variant_use) || !out(10) { return false }
         at = at + 1
     }
-    at = 0
-    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-        let rec = __s0_buffer_get(CheckedExprRec, store.expressions, at)
-        if !out_string("E ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.parameter_use) || !out(32) || !out_u64(rec.bool_value) || !out(32) || !out_u64(rec.left) || !out(32) || !out_u64(rec.right) || !out(32) || !out_u64(rec.annotation) || !out(32) || !out_u64(rec.first_child) || !out(32) || !out_u64(rec.child_count) || !out(32) || !out_u64(rec.operator) || !out(32) || !out_u64(rec.site_kind) || !out(32) || !out_u64(rec.site_syntax) || !out(10) { return false }
-        at = at + 1
-    }
-    at = 0
-    while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
-        let rec = __s0_buffer_get(CheckedExprChildRec, store.expression_children, at)
-        if !out_string("H ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.expression) || !out(10) { return false }
-        at = at + 1
-    }
-    at = 0
-    while at < __s0_buffer_len(CheckedReturnRec, store.returns) {
-        let rec = __s0_buffer_get(CheckedReturnRec, store.returns, at)
-        if !out_string("R ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.expression) || !out(32) || !out_u64(rec.result_use) || !out(10) { return false }
-        at = at + 1
-    }
-    at = 0
+    return true
+}
+
+fn emit_check_manifest(state: State, store: CheckStore) -> Bool {
+    // Checker paths are hex encoded so every host path remains one unambiguous
+    // whitespace-delimited field. All later records refer to numeric source IDs.
+    if !out_string("ALDER-CHECKER-MANIFEST 10\n") || !emit_check_sources(state) { return false }
+    if !emit_checked_symbols(store) { return false }
+    if !emit_checked_types(store) { return false }
+    if !emit_checked_bindings(store) { return false }
+    if !emit_checked_expressions(store) { return false }
+    if !emit_checked_control(store) { return false }
+    var at: U64 = 0
     while at < __s0_buffer_len(CheckDiagRec, store.diagnostics) {
         let rec = __s0_buffer_get(CheckDiagRec, store.diagnostics, at)
         let related = rec.related_start != 0 || rec.related_end != 0
