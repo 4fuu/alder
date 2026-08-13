@@ -15,6 +15,17 @@ type CheckStore {
     diagnostics: __s0_Buffer(CheckDiagRec)
 }
 
+fn checked_spans(d: Domain, parse: ParseStore) -> Result(__s0_Buffer(CheckedSpanRec), __s0_Error) {
+    var spans = try __s0_buffer_new(CheckedSpanRec, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(SyntaxRec, parse.nodes) {
+        let node = __s0_buffer_get(SyntaxRec, parse.nodes, at)
+        spans = try __s0_buffer_append(CheckedSpanRec, d, spans, CheckedSpanRec(source: node.source, start: node.start, end: node.end, name_start: node.name_start, name_end: node.name_end))
+        at = at + 1
+    }
+    return Ok(spans)
+}
+
 // Concrete instance signatures reuse declaration-item shape while keeping
 // declaration uses immutable. Roles 7 and 8 are instance runtime parameters
 // and result respectively; owner is the concrete instance SymbolRec ID and

@@ -138,7 +138,11 @@ func testProductionFailureStatus(t *testing.T, cc, root, generated, dir, mode st
 	source := fmt.Sprintf(`#include "alder_host.h"
 #include "alder.h"
 #include <stdbool.h>
+#include <inttypes.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 static const uint8_t source_text[] = "type Good { value: U64 }\n";
 uint64_t alderhost_source_count(void) { return 1; }
@@ -148,6 +152,7 @@ uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return source_text[offset]; }
 bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
 bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
+uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent) { double value = (double)significand; uint64_t bits = 0; while (exponent > 0) { value *= 10.0; exponent--; } while (exponent < 0) { value /= 10.0; exponent++; } if (negative != 0) value = -value; memcpy(&bits, &value, sizeof(bits)); return bits; }
 bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }
 int main(void) {
     int context = 0;

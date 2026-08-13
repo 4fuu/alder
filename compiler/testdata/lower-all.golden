@@ -1,0 +1,468 @@
+mir 3
+
+enum @Maybe {
+  None
+  Some(u64)
+}
+
+type @Pair {
+  value: u64
+}
+
+const @lit3: i64 = 5
+
+const @lit5: i32 = 7
+
+const @lit6: i32 = 0
+
+const @lit8: i32 = 1
+
+const @lit9: i64 = 2
+
+const @lit10: i32 = 0
+
+const @lit11: i64 = 3
+
+const @lit12: i64 = 4
+
+const @lit13: i32 = 0
+
+const @lit14: i64 = 6
+
+const @lit15: i64 = 2
+
+const @lit17: i64 = 10
+
+const @lit18: i64 = 0
+
+const @lit22: i64 = 10
+
+const @lit29: u64 = 3
+
+const @lit32: u64 = 1
+
+const @lit35: u64 = 3
+
+const @lit38: u64 = 0
+
+const @lit.bool44: bool = false
+
+const @lit45: u64 = 0
+
+const @lit.int29: u64 = 0
+
+const @lit.int30: u64 = 1
+
+const @lit52: i64 = 0
+
+const @lit54: i64 = 1
+
+const @lit60: i64 = 10
+
+const @lit67: u64 = 0
+
+const @lit73: u64 = 0
+
+const @lit.bool78: bool = true
+
+const @lit.bool79: bool = false
+
+const @lit80: u64 = 3
+
+const @lit.float84: f64 = 1.5
+
+import @counter: fn(i64) -> unit
+
+import @foreign: fn(u64) -> u64
+
+fn @close(%value: i64) {
+bb0:
+  ffi.call.unsafe @counter(%value)
+  return
+
+bb_panic:
+  panic
+}
+
+fn @attempt(%bad: bool) -> i32 {
+  local %handle: i64
+
+bb0:
+  %v3 = const.get @lit3
+  store local %handle, %v3
+  branch %bad, bb_then2, bb_else3
+
+bb_panic:
+  panic
+
+bb_then2:
+  %v4 = const.get @lit5
+  %v5 = load local %handle
+  call @close(%v5)
+  return %v4
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v6 = const.get @lit6
+  %v7 = load local %handle
+  call @close(%v7)
+  return %v6
+}
+
+fn @before_using(%bad: bool) -> i32 {
+  local %handle: i64
+
+bb0:
+  branch %bad, bb_then2, bb_else3
+
+bb_panic:
+  panic
+
+bb_then2:
+  %v9 = const.get @lit8
+  return %v9
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v10 = const.get @lit9
+  store local %handle, %v10
+  %v11 = const.get @lit10
+  %v12 = load local %handle
+  call @close(%v12)
+  return %v11
+}
+
+fn @nested_cleanup() -> i32 {
+  local %inner: i64
+  local %outer: i64
+
+bb0:
+  %v13 = const.get @lit11
+  store local %inner, %v13
+  %v14 = load local %inner
+  call @close(%v14)
+  %v15 = const.get @lit12
+  store local %outer, %v15
+  %v16 = const.get @lit13
+  %v17 = load local %outer
+  call @close(%v17)
+  return %v16
+
+bb_panic:
+  panic
+}
+
+fn @cleanup_try(%bad: bool) -> result(i64, i64) {
+  local %handle: i64
+  local %divisor: i64
+
+bb0:
+  %v19 = const.get @lit14
+  store local %handle, %v19
+  %v20 = const.get @lit15
+  store local %divisor, %v20
+  branch %bad, bb_then2, bb_else3
+
+bb_panic:
+  panic
+
+bb_then2:
+  %v21 = const.get @lit17
+  %v22 = const.get @lit18
+  %v23 = call @checked(%v21, %v22)
+  switch %v23 {
+    ok(%try_ok20) -> bb_try_ok5
+    err(%try_err20) -> bb_try_err6
+  }
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v30 = const.get @lit22
+  %v31 = load local %divisor
+  %v32 = call @checked(%v30, %v31)
+  switch %v32 {
+    ok(%try_ok25) -> bb_try_ok7
+    err(%try_err25) -> bb_try_err8
+  }
+
+bb_try_ok5:
+  %v28 = enum.construct result(i64, i64), ok, %try_ok20
+  %v29 = load local %handle
+  call @close(%v29)
+  return %v28
+
+bb_try_err6:
+  %v26 = enum.construct result(i64, i64), err, %try_err20
+  %v27 = load local %handle
+  call @close(%v27)
+  fail %v26
+
+bb_try_ok7:
+  %v37 = enum.construct result(i64, i64), ok, %try_ok25
+  %v38 = load local %handle
+  call @close(%v38)
+  return %v37
+
+bb_try_err8:
+  %v35 = enum.construct result(i64, i64), err, %try_err25
+  %v36 = load local %handle
+  call @close(%v36)
+  fail %v35
+}
+
+fn @calculate(%value: u64) -> u64 {
+  local %next: u64
+  local %fallback: u64
+
+bb0:
+  store local %next, %value
+  jump bb_head2
+
+bb_panic:
+  panic
+
+bb_head2:
+  %v40 = load local %next
+  %v41 = const.get @lit29
+  %v42 = int.lt %v40, %v41
+  branch %v42, bb_body3, bb_join4
+
+bb_body3:
+  %v43 = load local %next
+  %v44 = const.get @lit32
+  %v45 = int.add.checked %v43, %v44 else bb_panic
+  store local %next, %v45
+  jump bb_head2
+
+bb_join4:
+  %v46 = load local %next
+  %v47 = const.get @lit35
+  %v48 = int.eq %v46, %v47
+  branch %v48, bb_then5, bb_else6
+
+bb_then5:
+  %v49 = load local %next
+  return %v49
+
+bb_else6:
+  %v50 = const.get @lit38
+  %v51 = call @identity21(%v50)
+  store local %fallback, %v51
+  %v52 = load local %fallback
+  %v53 = ffi.call.unsafe @foreign(%v52)
+  return %v53
+
+bb_join7:
+  unreachable
+}
+
+fn @short(%left: bool, %right: bool) -> bool {
+bb0:
+  branch %left, bb_short2, bb_short_const3
+
+bb_panic:
+  panic
+
+bb_short2:
+  jump bb_short_join4(%right)
+
+bb_short_const3:
+  %v57 = const.get @lit.bool44
+  jump bb_short_join4(%v57)
+
+bb_short_join4(%short: bool):
+  return %short
+}
+
+fn @sum(%values: slice(u64)) -> u64 {
+  local %total: u64
+  local %value: u64
+
+bb0:
+  %v59 = const.get @lit45
+  store local %total, %v59
+  %v60 = slice.len %values
+  %v61 = const.get @lit.int29
+  jump bb_for_head2(%v61, %values)
+
+bb_panic:
+  panic
+
+bb_for_head2(%index: u64, %sequence: slice(u64)):
+  %v64 = int.lt %index, %v60
+  branch %v64, bb_for_body3, bb_for_join4
+
+bb_for_body3:
+  %for_ref = slice.index.checked %sequence, %index else bb_panic
+  %v66 = load deref %for_ref
+  store local %value, %v66
+  %v67 = load local %total
+  %v68 = load local %value
+  %v69 = int.add.checked %v67, %v68 else bb_panic
+  store local %total, %v69
+  %v70 = const.get @lit.int30
+  %v71 = int.add.checked %index, %v70 else bb_panic
+  jump bb_for_head2(%v71, %sequence)
+
+bb_for_join4:
+  %v72 = load local %total
+  return %v72
+}
+
+fn @checked(%n: i64, %d: i64) -> result(i64, i64) {
+bb0:
+  %v75 = const.get @lit52
+  %v76 = int.eq %d, %v75
+  branch %v76, bb_then2, bb_else3
+
+bb_panic:
+  panic
+
+bb_then2:
+  %v77 = const.get @lit54
+  %v78 = enum.construct result(i64, i64), err, %v77
+  return %v78
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v79 = int.div.checked %n, %d else bb_panic
+  %v80 = enum.construct result(i64, i64), ok, %v79
+  return %v80
+}
+
+fn @propagate(%d: i64) -> result(i64, i64) {
+  local %q: i64
+
+bb0:
+  %v82 = const.get @lit60
+  %v83 = call @checked(%v82, %d)
+  switch %v83 {
+    ok(%try_ok63) -> bb_try_ok2
+    err(%try_err63) -> bb_try_err3
+  }
+
+bb_panic:
+  panic
+
+bb_try_ok2:
+  store local %q, %try_ok63
+  %v87 = load local %q
+  %v88 = enum.construct result(i64, i64), ok, %v87
+  return %v88
+
+bb_try_err3:
+  %v86 = enum.construct result(i64, i64), err, %try_err63
+  fail %v86
+}
+
+fn @choose(%value: @Maybe) -> u64 {
+  local %item: u64
+
+bb0:
+  switch %value {
+    None -> bb_match_arm3
+    Some(%match_payload1) -> bb_match_arm4
+  }
+
+bb_panic:
+  panic
+
+bb_match_join2(%match: u64):
+  return %match
+
+bb_match_arm3:
+  %v92 = const.get @lit67
+  jump bb_match_join2(%v92)
+
+bb_match_arm4:
+  jump bb_match_join2(%match_payload1)
+}
+
+fn @scalar(%pair: @Pair, %values: slice(u64), %flag: bool) -> u64 {
+  local %called: u64
+  local %field_tmp71: @Pair
+
+bb0:
+  store local %field_tmp71, %pair
+  %v96 = load field(local %field_tmp71, value)
+  %v97 = const.get @lit73
+  %v98 = slice.index.checked %values, %v97 else bb_panic
+  %v99 = load deref %v98
+  %v100 = int.add.checked %v96, %v99 else bb_panic
+  %v101 = call @identity21(%v100)
+  store local %called, %v101
+  branch %flag, bb_not_false3, bb_not_true2
+
+bb_panic:
+  panic
+
+bb_not_true2:
+  %v103 = const.get @lit.bool78
+  jump bb_not_join4(%v103)
+
+bb_not_false3:
+  %v104 = const.get @lit.bool79
+  jump bb_not_join4(%v104)
+
+bb_not_join4(%not: bool):
+  branch %not, bb_then5, bb_else6
+
+bb_then5:
+  %v105 = load local %called
+  %v106 = const.get @lit80
+  %v107 = int.div.checked %v105, %v106 else bb_panic
+  %v108 = int.mul.checked %v107, %v106 else bb_panic
+  %v109 = int.sub.checked %v105, %v108 else bb_panic
+  return %v109
+
+bb_else6:
+  jump bb_join7
+
+bb_join7:
+  %v110 = load local %called
+  %v111 = ffi.call.unsafe @foreign(%v110)
+  return %v111
+}
+
+fn @floating() -> f64 {
+bb0:
+  %v112 = const.get @lit.float84
+  return %v112
+
+bb_panic:
+  panic
+}
+
+fn @make_pair(%value: u64) -> @Pair {
+bb0:
+  %v114 = aggregate.construct @Pair { value: %value }
+  return %v114
+
+bb_panic:
+  panic
+}
+
+fn @make_some(%value: u64) -> @Maybe {
+bb0:
+  %v116 = enum.construct @Maybe, Some, %value
+  return %v116
+
+bb_panic:
+  panic
+}
+
+fn @identity21(%value: u64) -> u64 {
+bb0:
+  return %value
+
+bb_panic:
+  panic
+}

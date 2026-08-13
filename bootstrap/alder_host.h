@@ -15,6 +15,7 @@ uint64_t alderhost_source_text_len(uint64_t source);
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset);
 bool alderhost_stdout_byte(uint8_t byte);
 bool alderhost_stdout_f64_bits(uint64_t bits);
+uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent);
 bool alderhost_stderr_byte(uint8_t byte);
 
 #endif /* ALDER_HOST_H */

@@ -1,5 +1,6 @@
 #include "alder_host.h"
 
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -196,6 +197,28 @@ bool alderhost_stdout_f64_bits(uint64_t bits) {
     }
 #undef ALDERHOST_FLOAT_BYTE
     return true;
+}
+
+uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand,
+                                    int64_t exponent) {
+    char text[96];
+    char *parsed_end;
+    double value;
+    uint64_t bits = 0;
+    int count;
+
+    count = snprintf(text, sizeof(text), "%s%" PRIu64 "e%" PRId64,
+                     negative != 0U ? "-" : "", significand, exponent);
+    if (count < 0 || (size_t)count >= sizeof(text)) {
+        alderhost_contract_failure();
+    }
+    parsed_end = NULL;
+    value = strtod(text, &parsed_end);
+    if (parsed_end == text || *parsed_end != '\0') {
+        alderhost_contract_failure();
+    }
+    (void)memcpy(&bits, &value, sizeof(bits));
+    return bits;
 }
 
 bool alderhost_stderr_byte(uint8_t byte) {

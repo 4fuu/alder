@@ -13,7 +13,8 @@ There are currently two implementation profiles:
 - the Go `frontend` package implements the complete Milestone 4 S0 pipeline to
   verified MIR and C11;
 - `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
-  the current S0 syntax, while its checker and lowering are still partial.
+  the current S0 syntax; its checker and sealed-manifest lowering cover the
+  current M5.4 slices but are not yet a production pipeline.
 
 Neither profile is a usable Alder 1.0 compiler.
 
@@ -266,8 +267,10 @@ before checking the right-hand side. Lexical environments do not leak block,
 branch, loop, or `for` element bindings. Non-`Unit` functions must return on
 every path, statements after a guaranteed return are rejected before their
 contents, and conservative loops fall through. `using` cleanup facts cover
-lexical fallthrough, return, and failed `try`; cleanup lowering remains pending.
-The declaration is rejected anywhere under a loop.
+lexical fallthrough, return, and failed `try`. Current lowering walks the
+checked site environment to run only active callbacks, exactly once in reverse
+lexical order, on those exits. The declaration is rejected anywhere under a
+loop.
 Unannotated let/var bindings infer scalar types from supported literals,
 identifiers, and unary/binary expressions.
 
@@ -277,8 +280,11 @@ canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
 separate annotations retain each source spelling. Concrete checked bodies use
 stable parameter/local binding IDs, a persistent lexical-environment chain,
 postorder expression records, flattened ordered child ranges, and private block,
-statement-link, statement, and assignment-place records. These are structured
-source records for later lowering, not MIR blocks or a MIR CFG. Generic
+statement-link, statement, and assignment-place records. The Alder lowering
+package consumes these records with canonical Z spans and source bytes, never
+parser nodes, links, or kinds. It emits the current scalar, call, aggregate,
+place, and structured-control MIR slice or rejects the model without output;
+it does not infer types or repair CFG. Generic
 function signatures and bodies are owned by stable concrete instance IDs;
 direct call targets name those instances. Aggregate applications, expression
 types, instance signatures, and checked instance bodies are concrete at this

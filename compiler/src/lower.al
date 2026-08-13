@@ -1,7 +1,7 @@
 // Deterministic lowering from the sealed checked model to independent MIR 3.
-// This layer consumes semantic IDs and source spans only. Syntax records are
-// used solely to recover literal spans; their kinds and child graph are never
-// inspected. A malformed or unresolved checked model is an internal failure.
+// This layer consumes semantic IDs and canonical source spans only. Parser
+// records, kinds, links, and child graphs are not part of its input. A
+// malformed or unresolved checked model is an internal failure.
 
 type LowerTypeMapRec {
     checked_type: U64
@@ -460,6 +460,12 @@ fn lower_jump_value(d: Domain, state: LowerState, function: U64, block: U64, tar
     return lower_add_term_operand(d, lower_with_mir(state, term.store), term.id, 0, mir_edge_jump(), value, target)
 }
 
+fn lower_jump_two(d: Domain, state: LowerState, function: U64, block: U64, target: U64, first: U64, second: U64) -> Result(LowerState, __s0_Error) {
+    let term = try mir_add_terminator(d, state.mir, MirTermRec(function: function, block: block, kind: mir_term_jump(), value: 0, target: target, then_block: 0, else_block: 0))
+    let one = try lower_add_term_operand(d, lower_with_mir(state, term.store), term.id, 0, mir_edge_jump(), first, target)
+    return lower_add_term_operand(d, one, term.id, 1, mir_edge_jump(), second, target)
+}
+
 fn lower_branch(d: Domain, state: LowerState, function: U64, block: U64, value: U64, then_block: U64, else_block: U64) -> Result(LowerState, __s0_Error) {
     let term = try mir_add_terminator(d, state.mir, MirTermRec(function: function, block: block, kind: mir_term_branch(), value: value, target: 0, then_block: then_block, else_block: else_block))
     return Ok(lower_with_mir(state, term.store))
@@ -512,9 +518,9 @@ fn lower_add_switch_case(d: Domain, state: LowerState, term: U64, ordinal: U64, 
     return Ok(LowerStep(state: lower_with_mir(state, step.store), id: step.id))
 }
 
-fn lower_parse_i64(source_state: State, parse: ParseStore, expression: CheckedExprRec) -> I64 {
-    if expression.syntax == 0 || expression.syntax > __s0_buffer_len(SyntaxRec, parse.nodes) { return 0 }
-    let span = __s0_buffer_get(SyntaxRec, parse.nodes, expression.syntax - 1)
+fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expression: CheckedExprRec) -> I64 {
+    if expression.syntax == 0 || expression.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return 0 }
+    let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
     let source = __s0_buffer_get(SourceRec, source_state.sources, span.source)
     var value: I64 = 0
     var negative = false
@@ -542,6 +548,62 @@ fn lower_parse_i64(source_state: State, parse: ParseStore, expression: CheckedEx
     return value
 }
 
+fn lower_float_bits(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expression: CheckedExprRec) -> U64 {
+    let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
+    let source = __s0_buffer_get(SourceRec, source_state.sources, span.source)
+    var at = source.text_start + span.start
+    let end = source.text_start + span.end
+    var negative: U64 = 0
+    if at < end && __s0_buffer_get(U8, source_state.texts, at) == 45 {
+        negative = 1
+        at = at + 1
+    }
+    var significand: U64 = 0
+    var fraction: I64 = 0
+    var exponent: I64 = 0
+    var exponent_negative = false
+    var after_point = false
+    var after_exponent = false
+    while at < end {
+        let byte = __s0_buffer_get(U8, source_state.texts, at)
+        if byte == 46 { after_point = true } else {
+            if byte == 101 || byte == 69 { after_exponent = true } else {
+                if after_exponent && byte == 45 { exponent_negative = true } else {
+                    if after_exponent && byte == 43 { exponent_negative = false } else {
+                        var digit: U64 = 0
+                        var signed_digit: I64 = 0
+                        if byte == 49 { digit = 1 }
+                        if byte == 50 { digit = 2 }
+                        if byte == 51 { digit = 3 }
+                        if byte == 52 { digit = 4 }
+                        if byte == 53 { digit = 5 }
+                        if byte == 54 { digit = 6 }
+                        if byte == 55 { digit = 7 }
+                        if byte == 56 { digit = 8 }
+                        if byte == 57 { digit = 9 }
+                        if byte == 49 { signed_digit = 1 }
+                        if byte == 50 { signed_digit = 2 }
+                        if byte == 51 { signed_digit = 3 }
+                        if byte == 52 { signed_digit = 4 }
+                        if byte == 53 { signed_digit = 5 }
+                        if byte == 54 { signed_digit = 6 }
+                        if byte == 55 { signed_digit = 7 }
+                        if byte == 56 { signed_digit = 8 }
+                        if byte == 57 { signed_digit = 9 }
+                        if after_exponent { exponent = exponent * 10 + signed_digit } else {
+                            significand = significand * 10 + digit
+                            if after_point { fraction = fraction + 1 }
+                        }
+                    }
+                }
+            }
+        }
+        at = at + 1
+    }
+    if exponent_negative { exponent = 0 - exponent }
+    return unsafe c { alderhost_decimal_f64_bits(negative, significand, exponent - fraction) }
+}
+
 fn lower_bool_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, value: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
     let name = try lower_decimal_name(d, "lit.bool", suffix)
@@ -559,7 +621,7 @@ fn lower_int_value(d: Domain, source_state: State, store: CheckStore, state: Low
     return Ok(LowerStep(state: instr.state, id: result.id))
 }
 
-fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -580,12 +642,12 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         var text = ""
         if expression.kind == 3 {
             kind = mir_const_int()
-            int_value = lower_parse_i64(source_state, parse, expression)
+            int_value = lower_parse_i64(source_state, spans, expression)
         }
         if expression.kind == 4 {
             kind = mir_const_string()
-            if expression.syntax == 0 || expression.syntax > __s0_buffer_len(SyntaxRec, parse.nodes) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-            let span = __s0_buffer_get(SyntaxRec, parse.nodes, expression.syntax - 1)
+            if expression.syntax == 0 || expression.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+            let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
             var token_at: U64 = 0
             var found = false
             while token_at < __s0_buffer_len(TokenRec, source_state.tokens) {
@@ -604,10 +666,78 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
         return Ok(LowerStep(state: instr.state, id: result.id))
     }
+    if expression.kind == 20 {
+        if expression.syntax == 0 || expression.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
+        if span.source >= __s0_buffer_len(SourceRec, source_state.sources) || span.start >= span.end { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let typ = try lower_type(d, source_state, store, state, expression.checked_type)
+        let bits = lower_float_bits(source_state, spans, expression)
+        let name = try lower_decimal_name(d, "lit.float", expression_id)
+        let constant = try mir_add_const(d, typ.state.mir, name, typ.id, mir_const_float(), 0, 0, bits, "")
+        let result = try lower_add_result(d, lower_with_mir(typ.state, constant.store), function, block, expression.checked_type, source_state, store)
+        let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+        return Ok(LowerStep(state: instr.state, id: result.id))
+    }
+    if expression.kind == 19 {
+        if expression.child_count != 2 || expression.first_child == 0 || expression.first_child >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let index_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+        let base = try lower_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+        let base_block = lower_open_block(base.state.mir, function, block)
+        let index = try lower_expression(d, source_state, spans, store, base.state, owner, function, base_block, index_id, environment, panic_block)
+        let active = lower_open_block(index.state.mir, function, base_block)
+        let element = try lower_type(d, source_state, store, index.state, expression.checked_type)
+        let empty = try __s0_buffer_new(U64, d)
+        let reference = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+        let ref_value = try mir_add_value(d, reference.store, function, try lower_decimal_name(d, "v", __s0_buffer_len(MirValueRec, reference.store.values) + 1), reference.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(reference.store, function, active) + 1)
+        let indexed = try lower_add_instr(d, lower_with_mir(element.state, ref_value.store), function, active, mir_op_slice_index_checked(), ref_value.id, 0, 0, base.id, index.id, panic_block, "")
+        let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
+        let result = try lower_add_result(d, lower_with_mir(indexed.state, place.store), function, active, expression.checked_type, source_state, store)
+        let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
+        return Ok(LowerStep(state: loaded.state, id: result.id))
+    }
+    if expression.kind == 21 {
+        if expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) || expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let field = __s0_buffer_get(DeclTypeUseRec, store.uses, expression.parameter_use - 1)
+        if field.role != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let base = try lower_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+        let active = lower_open_block(base.state.mir, function, block)
+        let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
+        let base_type = try lower_type(d, source_state, store, base.state, base_expression.checked_type)
+        var ordinal: U64 = 0
+        var local_at: U64 = 0
+        while local_at < __s0_buffer_len(MirLocalRec, base_type.state.mir.locals) {
+            if __s0_buffer_get(MirLocalRec, base_type.state.mir.locals, local_at).function == function { ordinal = ordinal + 1 }
+            local_at = local_at + 1
+        }
+        let temporary = try mir_add_local(d, base_type.state.mir, function, ordinal, try lower_decimal_name(d, "field_tmp", expression_id), base_type.id)
+        let local_place = try mir_add_place(d, temporary.store, MirPlaceRec(function: function, kind: mir_place_local(), local: temporary.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        let stored = try lower_add_instr(d, lower_with_mir(base_type.state, local_place.store), function, active, mir_op_store(), 0, local_place.id, 0, base.id, 0, 0, "")
+        let named = try mir_append_name(d, stored.state.mir, try lower_source_word(d, source_state, field.source, field.name_start, field.name_end))
+        let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: local_place.id, field_start: named.start, field_end: named.end, deref_value: 0))
+        let result = try lower_add_result(d, lower_with_mir(stored.state, field_place.store), function, active, expression.checked_type, source_state, store)
+        let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, field_place.id, 0, 0, 0, 0, "")
+        return Ok(LowerStep(state: loaded.state, id: result.id))
+    }
     if expression.kind == 6 || expression.kind == 7 {
         if expression.child_count == 0 || expression.first_child == 0 || expression.first_child - 1 + expression.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let left_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-        let left = try lower_expression(d, source_state, parse, store, state, owner, function, block, left_id, panic_block)
+        let left = try lower_expression(d, source_state, spans, store, state, owner, function, block, left_id, environment, panic_block)
+        if expression.kind == 6 && expression.operator == 2 {
+            let true_block = try lower_add_block(d, left.state, function, "bb_not_true")
+            let false_block = try lower_add_block(d, true_block.state, function, "bb_not_false")
+            let join = try lower_add_block(d, false_block.state, function, "bb_not_join")
+            let typ = try lower_type(d, source_state, store, join.state, expression.checked_type)
+            let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, "not", typ.id)
+            var current = lower_with_mir(typ.state, param.store)
+            current = try lower_branch(d, current, function, block, left.id, false_block.id, true_block.id)
+            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, expression_id)
+            current = try lower_jump_value(d, truth.state, function, true_block.id, join.id, truth.id)
+            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, expression_id + 1)
+            current = try lower_jump_value(d, falsity.state, function, false_block.id, join.id, falsity.id)
+            return Ok(LowerStep(state: current, id: param.id))
+        }
         if expression.kind == 7 && (expression.operator == 16 || expression.operator == 17) {
             if expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(left.state), id: 0)) }
             let right_block = try lower_add_block(d, left.state, function, "bb_short")
@@ -620,7 +750,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
             if expression.operator == 16 { current = try lower_branch(d, current, function, source_block, left.id, right_block.id, constant_block.id) }
             if expression.operator == 17 { current = try lower_branch(d, current, function, source_block, left.id, constant_block.id, right_block.id) }
             let right_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
-            let right = try lower_expression(d, source_state, parse, store, current, owner, function, right_block.id, right_id, panic_block)
+            let right = try lower_expression(d, source_state, spans, store, current, owner, function, right_block.id, right_id, environment, panic_block)
             current = try lower_jump_value(d, right.state, function, lower_open_block(right.state.mir, function, right_block.id), join.id, right.id)
             var constant_value: U64 = 0
             if expression.operator == 17 { constant_value = 1 }
@@ -632,7 +762,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         if expression.kind == 7 {
             if expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(left.state), id: 0)) }
             let right_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
-            right = try lower_expression(d, source_state, parse, store, left.state, owner, function, block, right_id, panic_block)
+            right = try lower_expression(d, source_state, spans, store, left.state, owner, function, block, right_id, environment, panic_block)
         }
         var op: U64 = 0
         if expression.operator == 3 { op = mir_op_int_add_checked() }
@@ -647,6 +777,15 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         if expression.operator == 13 { op = mir_op_int_le() }
         if expression.operator == 14 { op = mir_op_int_gt() }
         if expression.operator == 15 { op = mir_op_int_ge() }
+        if expression.operator == 7 {
+            let quotient = try lower_add_result(d, right.state, function, block, expression.checked_type, source_state, store)
+            let divided = try lower_add_instr(d, quotient.state, function, block, mir_op_int_div_checked(), quotient.id, 0, 0, left.id, right.id, panic_block, "")
+            let product = try lower_add_result(d, divided.state, function, block, expression.checked_type, source_state, store)
+            let multiplied = try lower_add_instr(d, product.state, function, block, mir_op_int_mul_checked(), product.id, 0, 0, quotient.id, right.id, panic_block, "")
+            let remainder = try lower_add_result(d, multiplied.state, function, block, expression.checked_type, source_state, store)
+            let subtracted = try lower_add_instr(d, remainder.state, function, block, mir_op_int_sub_checked(), remainder.id, 0, 0, left.id, product.id, panic_block, "")
+            return Ok(LowerStep(state: subtracted.state, id: remainder.id))
+        }
         if expression.operator == 2 || expression.operator == 16 || expression.operator == 17 || op == 0 { return Ok(LowerStep(state: lower_invalid(right.state), id: 0)) }
         var a = left.id
         var b = right.id
@@ -675,7 +814,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         while ordinal < expression.child_count {
             if expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
-            let child = try lower_expression(d, source_state, parse, store, current, owner, function, block, child_id, panic_block)
+            let child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1
@@ -739,7 +878,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         var payload: U64 = 0
         if expression.child_count == 1 {
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-            let child = try lower_expression(d, source_state, parse, store, current, owner, function, block, child_id, panic_block)
+            let child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
             current = child.state
             payload = child.id
         }
@@ -752,7 +891,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(CheckedMatchRec, store.control.matches) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
         if checked.owner != owner || checked.first_arm == 0 || checked.first_arm - 1 + checked.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        let scrutinee = try lower_expression(d, source_state, parse, store, state, owner, function, block, checked.scrutinee, panic_block)
+        let scrutinee = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.scrutinee, environment, panic_block)
         let join = try lower_add_block(d, scrutinee.state, function, "bb_match_join")
         let result_type = try lower_type(d, source_state, store, join.state, checked.checked_type)
         let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, "match", result_type.id)
@@ -791,7 +930,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         while ordinal < checked.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
             let arm_block = __s0_buffer_get(U64, arm_blocks, ordinal)
-            let value = try lower_expression(d, source_state, parse, store, current, owner, function, arm_block, arm.body, panic_block)
+            let value = try lower_expression(d, source_state, spans, store, current, owner, function, arm_block, arm.body, arm.environment, panic_block)
             current = try lower_jump_value(d, value.state, function, lower_open_block(value.state.mir, function, arm_block), join.id, value.id)
             ordinal = ordinal + 1
         }
@@ -801,14 +940,14 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(CheckedTryRec, store.control.tries) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1)
         if checked.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        let value = try lower_expression(d, source_state, parse, store, state, owner, function, block, checked.expression, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.expression, environment, panic_block)
         let ok_block = try lower_add_block(d, value.state, function, "bb_try_ok")
         let err_block = try lower_add_block(d, ok_block.state, function, "bb_try_err")
         let ok_type = try lower_type(d, source_state, store, err_block.state, checked.ok_type)
         let err_type = try lower_type(d, source_state, store, ok_type.state, checked.error_type)
         let source_block = lower_open_block(err_type.state.mir, function, block)
-        let ok_value = try mir_add_value(d, err_type.state.mir, function, "try_ok", ok_type.id, mir_value_def_switch_case(), source_block, 1)
-        let err_value = try mir_add_value(d, ok_value.store, function, "try_err", err_type.id, mir_value_def_switch_case(), source_block, 2)
+        let ok_value = try mir_add_value(d, err_type.state.mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
+        let err_value = try mir_add_value(d, ok_value.store, function, try lower_decimal_name(d, "try_err", expression_id), err_type.id, mir_value_def_switch_case(), source_block, 2)
         let term = try mir_add_terminator(d, err_value.store, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))
         var current = lower_with_mir(err_type.state, term.store)
         let ok_case = try lower_add_switch_case(d, current, term.id, 0, "ok", ok_value.id, ok_block.id)
@@ -823,7 +962,7 @@ fn lower_expression(d: Domain, source_state: State, parse: ParseStore, store: Ch
         let fn_type = try lower_type(d, source_state, store, current, owner_result.checked_type)
         let wrapped = try lower_add_result(d, fn_type.state, function, err_block.id, owner_result.checked_type, source_state, store)
         let constructed = try lower_add_instr(d, wrapped.state, function, err_block.id, mir_op_enum_construct(), wrapped.id, 0, fn_type.id, err_value.id, 0, 0, "err")
-        current = try lower_cleanup_exits(d, source_state, store, constructed.state, owner, function, err_block.id, 3)
+        current = try lower_cleanup_exits(d, source_state, store, constructed.state, owner, function, err_block.id, environment, 0, 3)
         let failed = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: err_block.id, kind: mir_term_fail(), value: wrapped.id, target: 0, then_block: 0, else_block: 0))
         return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_value.id))
     }
@@ -838,15 +977,29 @@ fn lower_store_binding(d: Domain, state: LowerState, function: U64, block: U64, 
     return Ok(instr.state)
 }
 
-fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, exit_kind: U64) -> Result(LowerState, __s0_Error) {
+fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, site_environment: U64, boundary_environment: U64, exit_kind: U64) -> Result(LowerState, __s0_Error) {
     var current = state
-    var cleanup_at = __s0_buffer_len(CheckedCleanupRec, store.control.cleanups)
-    while cleanup_at > 0 {
-        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_at - 1)
-        var applies = cleanup.normal_exit != 0
-        if exit_kind == 2 { applies = cleanup.return_exit != 0 }
-        if exit_kind == 3 { applies = cleanup.try_exit != 0 }
-        if cleanup.owner == owner && applies {
+    var environment = site_environment
+    while environment != boundary_environment {
+        if environment == 0 || environment > __s0_buffer_len(EnvironmentRec, store.environments) { return Ok(lower_invalid(current)) }
+        let active = __s0_buffer_get(EnvironmentRec, store.environments, environment - 1)
+        if active.owner != owner { return Ok(lower_invalid(current)) }
+        var cleanup_id: U64 = 0
+        var cleanup_at: U64 = 0
+        while cleanup_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+            let candidate = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_at)
+            if candidate.owner == owner && candidate.binding == active.binding && candidate.environment == active.parent {
+                if cleanup_id != 0 { return Ok(lower_invalid(current)) }
+                cleanup_id = cleanup_at + 1
+            }
+            cleanup_at = cleanup_at + 1
+        }
+        if cleanup_id != 0 {
+            let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_id - 1)
+            var applies = cleanup.normal_exit != 0
+            if exit_kind == 2 { applies = cleanup.return_exit != 0 }
+            if exit_kind == 3 { applies = cleanup.try_exit != 0 }
+            if !applies { return Ok(lower_invalid(current)) }
             let callback = lower_owner_lookup(current.owners, cleanup.callback)
             let binding = lower_binding_lookup(current, cleanup.binding)
             if callback == 0 || binding.binding == 0 { return Ok(lower_invalid(current)) }
@@ -862,12 +1015,30 @@ fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state:
             let call = try lower_add_instr(d, current, function, block, mir_op_call(), 0, 0, 0, 0, 0, callback, "")
             current = try lower_add_instr_operand(d, call.state, call.id, 0, value, mir_operand_instruction(), "")
         }
-        cleanup_at = cleanup_at - 1
+        environment = active.parent
     }
     return Ok(current)
 }
 
-fn lower_checked_place(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, place_id: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_chain_environment(store: CheckStore, owner: U64, link_id: U64, initial: U64) -> U64 {
+    if link_id == 0 || link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return initial }
+    let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
+    var environment = lower_chain_environment(store, owner, link.next, initial)
+    if link.statement == 0 || link.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return environment }
+    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
+    if statement.owner != owner || statement.environment != environment { return environment }
+    if statement.kind == 1 || statement.kind == 2 || statement.kind == 10 {
+        var at: U64 = 0
+        while at < __s0_buffer_len(EnvironmentRec, store.environments) {
+            let candidate = __s0_buffer_get(EnvironmentRec, store.environments, at)
+            if candidate.owner == owner && candidate.parent == environment && candidate.binding == statement.binding { return at + 1 }
+            at = at + 1
+        }
+    }
+    return environment
+}
+
+fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, place_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if place_id == 0 || place_id > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place_id - 1)
     if checked.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -889,7 +1060,7 @@ fn lower_checked_place(d: Domain, source_state: State, parse: ParseStore, store:
         if root_type.kind != 8 || root_type.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         let loaded = try lower_add_result(d, current, function, block, root_local.checked_type, source_state, store)
         let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, root.id, 0, 0, 0, 0, "")
-        let index = try lower_expression(d, source_state, parse, store, load.state, owner, function, block, checked.index, panic_block)
+        let index = try lower_expression(d, source_state, spans, store, load.state, owner, function, block, checked.index, environment, panic_block)
         let elem_checked = __s0_buffer_get(U64, store.type_args, root_type.first_arg - 1)
         let elem = try lower_type(d, source_state, store, index.state, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
@@ -908,18 +1079,22 @@ fn lower_checked_place(d: Domain, source_state: State, parse: ParseStore, store:
     return Ok(LowerStep(state: lower_invalid(current), id: 0))
 }
 
-fn lower_block_statements(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_block: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+fn lower_block_statements(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_block: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
     if checked_block == 0 || checked_block > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
     let body = __s0_buffer_get(CheckedBlockRec, store.control.blocks, checked_block - 1)
     if body.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
-    return lower_statement_chain(d, source_state, parse, store, state, owner, function, block, body.statements, panic_block)
+    let flow = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, body.statements, panic_block)
+    if flow.terminated { return Ok(flow) }
+    let exit_environment = lower_chain_environment(store, owner, body.statements, body.environment)
+    let cleaned = try lower_cleanup_exits(d, source_state, store, flow.state, owner, function, flow.block, exit_environment, body.environment, 1)
+    return Ok(LowerFlowStep(state: cleaned, block: flow.block, terminated: false))
 }
 
-fn lower_statement_chain(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
     if link_id == 0 { return Ok(LowerFlowStep(state: state, block: block, terminated: false)) }
     if link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
     let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
-    let prior = try lower_statement_chain(d, source_state, parse, store, state, owner, function, block, link.next, panic_block)
+    let prior = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, link.next, panic_block)
     var current = prior.state
     var active = prior.block
     if prior.terminated { return Ok(prior) }
@@ -927,48 +1102,49 @@ fn lower_statement_chain(d: Domain, source_state: State, parse: ParseStore, stor
     let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
     if statement.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
     if statement.kind == 1 || statement.kind == 2 {
-        let value = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         active = lower_open_block(value.state.mir, function, active)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     if statement.kind == 3 {
-        let place = try lower_checked_place(d, source_state, parse, store, current, owner, function, active, statement.place, panic_block)
-        let value = try lower_expression(d, source_state, parse, store, place.state, owner, function, active, statement.expression, panic_block)
+        let place = try lower_checked_place(d, source_state, spans, store, current, owner, function, active, statement.place, statement.environment, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, place.state, owner, function, active, statement.expression, statement.environment, panic_block)
         let instr = try lower_add_instr(d, value.state, function, active, mir_op_store(), 0, place.id, 0, value.id, 0, 0, "")
         return Ok(LowerFlowStep(state: instr.state, block: active, terminated: false))
     }
     if statement.kind == 4 {
         var value: U64 = 0
         if statement.expression != 0 {
-            let lowered = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+            let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
             current = lowered.state
             value = lowered.id
             active = lower_open_block(current.mir, function, active)
         }
-        current = try lower_cleanup_exits(d, source_state, store, current, owner, function, active, 2)
+        current = try lower_cleanup_exits(d, source_state, store, current, owner, function, active, statement.environment, 0, 2)
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: active, kind: mir_term_return(), value: value, target: 0, then_block: 0, else_block: 0))
         return Ok(LowerFlowStep(state: lower_with_mir(current, term.store), block: active, terminated: true))
     }
     if statement.kind == 5 {
-        let lowered = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+        let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         active = lower_open_block(lowered.state.mir, function, active)
         return Ok(LowerFlowStep(state: lowered.state, block: active, terminated: false))
     }
     if statement.kind == 6 {
-        return lower_block_statements(d, source_state, parse, store, current, owner, function, active, statement.body, panic_block)
+        return lower_block_statements(d, source_state, spans, store, current, owner, function, active, statement.body, panic_block)
     }
     if statement.kind == 7 {
-        let condition = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        active = lower_open_block(condition.state.mir, function, active)
         let then_block = try lower_add_block(d, condition.state, function, "bb_then")
         let else_block = try lower_add_block(d, then_block.state, function, "bb_else")
         let join = try lower_add_block(d, else_block.state, function, "bb_join")
         current = try lower_branch(d, join.state, function, active, condition.id, then_block.id, else_block.id)
-        let then_flow = try lower_block_statements(d, source_state, parse, store, current, owner, function, then_block.id, statement.body, panic_block)
+        let then_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, then_block.id, statement.body, panic_block)
         current = then_flow.state
         if !then_flow.terminated { current = try lower_jump(d, current, function, then_flow.block, join.id) }
         var else_flow = LowerFlowStep(state: current, block: else_block.id, terminated: false)
-        if statement.alternative != 0 { else_flow = try lower_block_statements(d, source_state, parse, store, current, owner, function, else_block.id, statement.alternative, panic_block) }
+        if statement.alternative != 0 { else_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, else_block.id, statement.alternative, panic_block) }
         current = else_flow.state
         if !else_flow.terminated { current = try lower_jump(d, current, function, else_flow.block, join.id) }
         if then_flow.terminated && else_flow.terminated {
@@ -982,15 +1158,16 @@ fn lower_statement_chain(d: Domain, source_state: State, parse: ParseStore, stor
         let body = try lower_add_block(d, head.state, function, "bb_body")
         let join = try lower_add_block(d, body.state, function, "bb_join")
         current = try lower_jump(d, join.state, function, active, head.id)
-        let condition = try lower_expression(d, source_state, parse, store, current, owner, function, head.id, statement.expression, panic_block)
-        current = try lower_branch(d, condition.state, function, head.id, condition.id, body.id, join.id)
-        let body_flow = try lower_block_statements(d, source_state, parse, store, current, owner, function, body.id, statement.body, panic_block)
+        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, head.id, statement.expression, statement.environment, panic_block)
+        let condition_block = lower_open_block(condition.state.mir, function, head.id)
+        current = try lower_branch(d, condition.state, function, condition_block, condition.id, body.id, join.id)
+        let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
         if !body_flow.terminated { current = try lower_jump(d, current, function, body_flow.block, head.id) }
         return Ok(LowerFlowStep(state: current, block: join.id, terminated: false))
     }
     if statement.kind == 9 {
-        let sequence = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+        let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         let sequence_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
         let sequence_type = __s0_buffer_get(CheckedTypeRec, store.types, sequence_expression.checked_type - 1)
         if sequence_type.kind != 8 || sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
@@ -1002,7 +1179,9 @@ fn lower_statement_chain(d: Domain, source_state: State, parse: ParseStore, stor
         let body = try lower_add_block(d, head.state, function, "bb_for_body")
         let join = try lower_add_block(d, body.state, function, "bb_for_join")
         let index_param = try mir_add_block_param(d, join.state.mir, function, head.id, 0, "index", mir_type_u64())
-        current = try lower_jump_value(d, lower_with_mir(join.state, index_param.store), function, active, head.id, zero_value.id)
+        let lowered_sequence_type = try lower_type(d, source_state, store, lower_with_mir(join.state, index_param.store), sequence_expression.checked_type)
+        let sequence_param = try mir_add_block_param(d, lowered_sequence_type.state.mir, function, head.id, 1, "sequence", lowered_sequence_type.id)
+        current = try lower_jump_two(d, lower_with_mir(lowered_sequence_type.state, sequence_param.store), function, active, head.id, zero_value.id, sequence.id)
         let compared = try lower_add_result(d, current, function, head.id, 1, source_state, store)
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
         current = try lower_branch(d, compare.state, function, head.id, compared.id, body.id, join.id)
@@ -1011,30 +1190,30 @@ fn lower_statement_chain(d: Domain, source_state: State, parse: ParseStore, stor
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
         let ref_value = try mir_add_value(d, ref_type.store, function, "for_ref", ref_type.type_id, mir_value_def_instruction(), body.id, lower_instruction_ordinal(ref_type.store, function, body.id) + 1)
-        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, sequence.id, index_param.id, panic_block, "")
+        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, sequence_param.id, index_param.id, panic_block, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
         current = try lower_store_binding(d, loaded.state, function, body.id, statement.binding, element_value.id)
-        let body_flow = try lower_block_statements(d, source_state, parse, store, current, owner, function, body.id, statement.body, panic_block)
+        let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
         if !body_flow.terminated {
             let one = try lower_int_value(d, source_state, store, current, function, body_flow.block, 1, link.statement + 1)
             let next = try lower_add_result(d, one.state, function, body_flow.block, 9, source_state, store)
             let added = try lower_add_instr(d, next.state, function, body_flow.block, mir_op_int_add_checked(), next.id, 0, 0, index_param.id, one.id, panic_block, "")
-            current = try lower_jump_value(d, added.state, function, lower_open_block(added.state.mir, function, body_flow.block), head.id, next.id)
+            current = try lower_jump_two(d, added.state, function, lower_open_block(added.state.mir, function, body_flow.block), head.id, next.id, sequence_param.id)
         }
         return Ok(LowerFlowStep(state: current, block: join.id, terminated: false))
     }
     if statement.kind == 10 {
-        let value = try lower_expression(d, source_state, parse, store, current, owner, function, active, statement.expression, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true))
 }
 
-fn lower_function(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
+fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(lower_invalid(state)) }
     var current = state
@@ -1087,12 +1266,10 @@ fn lower_function(d: Domain, source_state: State, parse: ParseStore, store: Chec
         at = at + 1
     }
     if root == 0 { return Ok(lower_invalid(current)) }
-    let root_block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, root - 1)
-    let flow = try lower_statement_chain(d, source_state, parse, store, current, owner, function, entry.id, root_block.statements, panic.id)
+    let flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, entry.id, root, panic.id)
     current = flow.state
     if !current.valid { return Ok(current) }
     if !flow.terminated {
-        current = try lower_cleanup_exits(d, source_state, store, current, owner, function, flow.block, 1)
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: flow.block, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
         current = lower_with_mir(current, term.store)
     }
@@ -1100,13 +1277,13 @@ fn lower_function(d: Domain, source_state: State, parse: ParseStore, store: Chec
     return Ok(lower_with_mir(current, panic_term.store))
 }
 
-fn lower_functions(d: Domain, source_state: State, parse: ParseStore, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
+fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
     var current = state
     var owner: U64 = 1
     while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
         if (symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13 {
-            current = try lower_function(d, source_state, parse, store, current, owner)
+            current = try lower_function(d, source_state, spans, store, current, owner)
             if !current.valid { return Ok(current) }
         }
         owner = owner + 1
@@ -1114,8 +1291,98 @@ fn lower_functions(d: Domain, source_state: State, parse: ParseStore, store: Che
     return Ok(current)
 }
 
-fn lower_checked(d: Domain, source_state: State, parse: ParseStore, store: CheckStore) -> Result(LowerResult, __s0_Error) {
+fn lower_environment_valid(store: CheckStore, owner: U64, environment: U64) -> Bool {
+    var remaining = __s0_buffer_len(EnvironmentRec, store.environments) + 1
+    var current = environment
+    while current != 0 {
+        if remaining == 0 || current > __s0_buffer_len(EnvironmentRec, store.environments) { return false }
+        let item = __s0_buffer_get(EnvironmentRec, store.environments, current - 1)
+        if item.owner != owner || item.parent >= current { return false }
+        if item.binding != 0 {
+            if item.binding > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).owner != owner { return false }
+        }
+        current = item.parent
+        remaining = remaining - 1
+    }
+    return true
+}
+
+fn lower_model_valid(store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
+        if item.kind == 18 || item.kind == 0 || item.kind > 21 { return false }
+        if item.left > at || item.right > at { return false }
+        if item.child_count != 0 && (item.first_child == 0 || item.first_child - 1 + item.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children)) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+        let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at)
+        if item.statement == 0 || item.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) || item.next > at { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+        let item = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || !lower_environment_valid(store, item.owner, item.environment) { return false }
+        if item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || item.place > __s0_buffer_len(CheckedPlaceRec, store.control.places) || item.body > __s0_buffer_len(CheckedBlockRec, store.control.blocks) || item.alternative > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+        let item = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || !lower_environment_valid(store, item.owner, item.environment) || item.statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedMatchRec, store.control.matches) {
+        let item = __s0_buffer_get(CheckedMatchRec, store.control.matches, at)
+        if item.owner == 0 || item.scrutinee == 0 || item.scrutinee > __s0_buffer_len(CheckedExprRec, store.expressions) || item.first_arm == 0 || item.first_arm - 1 + item.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return false }
+        var ordinal: U64 = 0
+        while ordinal < item.arm_count {
+            let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal)
+            if arm.owner != item.owner || arm.checked_match != at + 1 { return false }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
+        let item = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
+        if item.owner == 0 || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || !lower_environment_valid(store, item.owner, item.environment) || item.body == 0 || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+        if item.binding != 0 && (item.binding > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).owner != item.owner) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedTryRec, store.control.tries) {
+        let item = __s0_buffer_get(CheckedTryRec, store.control.tries, at)
+        if item.owner == 0 || item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.result_type) || !lower_type_concrete(store, item.ok_type) || !lower_type_concrete(store, item.error_type) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+        let item = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, at)
+        if item.owner == 0 || !lower_environment_valid(store, item.owner, item.environment) || item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) || item.callback == 0 || item.callback > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+        let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
+        if binding.owner != item.owner || item.initializer == 0 || item.initializer > __s0_buffer_len(CheckedExprRec, store.expressions) || item.normal_exit != 1 || item.return_exit != 1 || item.try_exit != 1 { return false }
+        var environment_at: U64 = 0
+        var found = false
+        while environment_at < __s0_buffer_len(EnvironmentRec, store.environments) {
+            let environment = __s0_buffer_get(EnvironmentRec, store.environments, environment_at)
+            if environment.owner == item.owner && environment.parent == item.environment && environment.binding == item.binding { found = true }
+            environment_at = environment_at + 1
+        }
+        if !found { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(LowerResult, __s0_Error) {
     if __s0_buffer_len(CheckDiagRec, store.diagnostics) != 0 { return Ok(LowerBad) }
+    if !lower_model_valid(store, spans) { return Ok(LowerBad) }
     let mir = try mir_store_new(d)
     let types = try __s0_buffer_new(LowerTypeMapRec, d)
     let owners = try __s0_buffer_new(LowerOwnerMapRec, d)
@@ -1125,7 +1392,7 @@ fn lower_checked(d: Domain, source_state: State, parse: ParseStore, store: Check
     var state = LowerState(mir: mir, types: types, owners: owners, imports: imports, bindings: bindings, values: values, valid: true)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid { return Ok(LowerBad) }
-    state = try lower_functions(d, source_state, parse, store, state)
+    state = try lower_functions(d, source_state, spans, store, state)
     if !state.valid { return Ok(LowerBad) }
     return Ok(LowerGood(state.mir))
 }

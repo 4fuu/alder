@@ -141,6 +141,17 @@ type CheckedTypeAnnotationRec {
     checked_type: U64
 }
 
+// Canonical manifest-v14 Z spans are the only syntax-derived lowering input.
+// Their 1-based IDs match checked syntax references; parser kinds, tokens,
+// links, and child structure are deliberately absent.
+type CheckedSpanRec {
+    source: U64
+    start: U64
+    end: U64
+    name_start: U64
+    name_end: U64
+}
+
 // Semantic declaration-item roles: 1 struct field, 2 enum variant (including
 // valueless variants), 3 import parameter, 4 import result, 5 function runtime
 // parameter, and 6 function result. The item ID is its 1-based buffer index.

@@ -411,9 +411,18 @@ statements are rejected before checking their contents. Issue #8 seals this S0
 boundary: every concrete owner has one root block (including empty `Unit`
 bodies), unsupported body syntax is one deterministic source failure rather
 than silent record discard, and private manifest v14 carries canonical syntax
-spans plus stable diagnostic codes, related ranges, and notes. These checks are
-preparatory: later Alder 1.0 forms, MIR lowering, the full checker, and the
-complete frontend remain incomplete. Its
+spans plus stable diagnostic codes, related ranges, and notes. Issues #9 and
+#10 add the first Alder-owned lowering package over that sealed boundary. It
+consumes only canonical concrete records plus Z spans and source bytes, rejects
+malformed ownership and edges before output, and emits exact MIR for the
+current scalar/call/aggregate/place slice and structured
+`if`/loop/short-circuit/`match`/typed-`try` CFG. Active `using` cleanups are
+selected from lexical environment chains and emitted in reverse order on scope
+fallthrough, return, and failed `try`. Its MIR is independently parsed and
+verifier-gated in the fixed shared-core harness; this is not the #21 source
+pipeline or #23 production C generator. These checks are preparatory: later
+Alder 1.0 forms, resource/domain operations, the full checker, and the complete
+frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit
@@ -429,8 +438,9 @@ ownership, ordinal, reciprocal-link, named-type-part, and import-signature
 encoding contract with an Alder-generated conformance manifest and malformed
 raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
-stores are rejected without partial output. Source lowering into this model
-remains incomplete. Checker, textual-printer, and verifier V1–V10 conformance
+stores are rejected without partial output. The current sealed S0 lowering
+slice remains incomplete for resource/domain operations and is not wired as a
+production pipeline. Checker, textual-printer, and verifier V1–V10 conformance
 share one fixed source closure and executable while retaining independent mode
 assertions; the complete production root remains an independent end-to-end
 gate.
