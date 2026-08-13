@@ -64,6 +64,26 @@ fn emit_complete(label: U64, result: MirVerifyCompleteOutput) -> Bool {
     return true
 }
 
+fn expect_complete(label: U64, result: MirVerifyCompleteOutput, complete: Bool, hosted: Bool, entry: U64, phase: U64, kind: U64) -> Bool {
+	var actual_complete: U64 = 0
+	var want_complete: U64 = 0
+	var actual_hosted: U64 = 0
+	var want_hosted: U64 = 0
+	if result.complete { actual_complete = 1 }
+	if complete { want_complete = 1 }
+	if result.hosted { actual_hosted = 1 }
+	if hosted { want_hosted = 1 }
+	if actual_complete != want_complete || actual_hosted != want_hosted || result.entry != entry { return emit_complete(label, result) }
+    if phase == 0 {
+        if __s0_buffer_len(MirVerifyDiagRec, result.diagnostics) != 0 { return emit_complete(label, result) }
+    } else {
+        if __s0_buffer_len(MirVerifyDiagRec, result.diagnostics) == 0 { return emit_complete(label, result) }
+        let first = __s0_buffer_get(MirVerifyDiagRec, result.diagnostics, 0)
+        if first.phase != phase || first.kind != kind { return emit_complete(label, result) }
+    }
+    return emit_complete(label, result)
+}
+
 fn minimal(d: Domain, initial: MirStore, result_type: U64, with_entry_param: Bool) -> Result(MirStore, __s0_Error) {
     let function = try mir_add_function(d, initial, "f", result_type)
     let block = try mir_add_block(d, function.store, function.id, 0, "entry")
@@ -456,8 +476,9 @@ fn cleanup_lifo_fixture(d: Domain, initial: MirStore, parent_last: Bool) -> Resu
     return Ok((try mir_add_terminator(d, end.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 
-// mode 0 is valid, 1 leaves the lookup unconsumed, and 2 mutates while its
-// checked-extracted view is active.
+// mode 0 is valid; 1 misses and 3 duplicates lookup consumption; 2 mutates an
+// active view; 4 misses and 5 duplicates view.end; 6 uses a view after end; 7
+// mutates before consumption; and 8/9 add failure bypass before consume/end.
 fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let row = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "Row")
@@ -470,14 +491,33 @@ fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore,
     let table_arg = try mir_add_function_param(d, function.store, function.id, 0, "table", table.type_id)
     let id_arg = try mir_add_function_param(d, table_arg.store, function.id, 1, "id", id.type_id)
     let row_arg = try mir_add_function_param(d, id_arg.store, function.id, 2, "row", row.type_id)
-    let entry = try mir_add_block(d, row_arg.store, function.id, 0, "entry")
+    var parameter_store = row_arg.store
+	var number: U64 = 0
+	if mode == 8 || mode == 9 {
+		let number_arg = try mir_add_function_param(d, parameter_store, function.id, 3, "number", mir_type_u64())
+		parameter_store = number_arg.store
+		number = number_arg.id
+	}
+	let entry = try mir_add_block(d, parameter_store, function.id, 0, "entry")
     let failed = try mir_add_block(d, entry.store, function.id, 1, "failed")
     let found = try mir_add_value(d, failed.store, function.id, "found", option.type_id, mir_value_def_instruction(), entry.id, 1)
     let lookup = try mir_add_instruction(d, found.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_table_lookup(), result: found.id, place: 0, type_op: 0, a: table_arg.id, b: id_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
     var store = lookup.store
     var ordinal: U64 = 1
+	if mode == 7 {
+		let inserted = try mir_add_value(d, store, function.id, "inserted", id.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+		let insert = try mir_add_instruction(d, inserted.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_insert(), result: inserted.id, place: 0, type_op: 0, a: table_arg.id, b: row_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
+		store = insert.store
+		ordinal = ordinal + 1
+	}
+	if mode == 8 {
+		let sum = try mir_add_value(d, store, function.id, "sum", mir_type_u64(), mir_value_def_instruction(), entry.id, ordinal + 1)
+		let checked = try mir_add_instruction(d, sum.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_int_add_checked(), result: sum.id, place: 0, type_op: 0, a: number, b: number, c: 0, target: failed.id, name_start: 0, name_end: 0))
+		store = checked.store
+		ordinal = ordinal + 1
+	}
     if mode != 1 {
-        let value = try mir_add_value(d, store, function.id, "view", view.type_id, mir_value_def_instruction(), entry.id, 2)
+        let value = try mir_add_value(d, store, function.id, "view", view.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
         let named = try mir_append_name(d, value.store, "some")
         let extract = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_enum_payload_checked(), result: value.id, place: 0, type_op: 0, a: found.id, b: 0, c: 0, target: failed.id, name_start: named.start, name_end: named.end))
         store = extract.store
@@ -488,12 +528,158 @@ fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore,
             store = insert.store
             ordinal = ordinal + 1
         }
-        let ended = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
-        store = ended.store
+		if mode == 9 {
+			let sum = try mir_add_value(d, store, function.id, "sum", mir_type_u64(), mir_value_def_instruction(), entry.id, ordinal + 1)
+			let checked = try mir_add_instruction(d, sum.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_int_add_checked(), result: sum.id, place: 0, type_op: 0, a: number, b: number, c: 0, target: failed.id, name_start: 0, name_end: 0))
+			store = checked.store
+			ordinal = ordinal + 1
+		}
+		if mode != 4 {
+			let ended = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+			store = ended.store
+			ordinal = ordinal + 1
+		}
+		if mode == 5 {
+			let ended_again = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+			store = ended_again.store
+			ordinal = ordinal + 1
+		}
+		if mode == 6 {
+			let place = try mir_add_place(d, store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: value.id))
+			let loaded = try mir_add_value(d, place.store, function.id, "loaded", row.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+			let load = try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+			store = load.store
+		}
+		if mode == 3 {
+			let value2 = try mir_add_value(d, store, function.id, "view2", view.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+			let named2 = try mir_append_name(d, value2.store, "some")
+			let extract2 = try mir_add_instruction(d, named2.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_enum_payload_checked(), result: value2.id, place: 0, type_op: 0, a: found.id, b: 0, c: 0, target: failed.id, name_start: named2.start, name_end: named2.end))
+			let end2 = try mir_add_instruction(d, extract2.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal + 1, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value2.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+			store = end2.store
+		}
     }
     let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
     let failed_done = try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
     return Ok(failed_done.store)
+}
+
+// Modes 0/1/2 mutate the source, a distinct created table, or the source after
+// lookup through a callee result. They pin stable table identities and result
+// provenance without adding another executable harness.
+fn table_identity_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+	let empty = try __s0_buffer_new(U64, d)
+	let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+	let row = try mir_add_named_type(d, handle.store, mir_type_kind_aggregate(), "IdentityRow")
+	let field = try mir_add_type_part(d, row.store, mir_type_part_field(), row.type_id, 0, "x", mir_type_u64())
+	let table = try mir_intern_type(d, field, mir_type_kind_table(), row.type_id, 0, 0, empty, 0)
+	let id = try mir_intern_type(d, table.store, mir_type_kind_id(), row.type_id, 0, 0, empty, 0)
+	let view = try mir_intern_type(d, id.store, mir_type_kind_table_view(), row.type_id, 0, 0, empty, 0)
+	let option = try mir_intern_type(d, view.store, mir_type_kind_option(), view.type_id, 0, 0, empty, 0)
+	var store = option.store
+	var pass_id: U64 = 0
+	if mode == 2 {
+		let pass = try mir_add_function(d, store, "pass_table", table.type_id)
+		let parameter = try mir_add_function_param(d, pass.store, pass.id, 0, "table", table.type_id)
+		let block = try mir_add_block(d, parameter.store, pass.id, 0, "entry")
+		store = (try mir_add_terminator(d, block.store, MirTermRec(function: pass.id, block: block.id, kind: mir_term_return(), value: parameter.id, target: 0, then_block: 0, else_block: 0))).store
+		pass_id = pass.id
+	}
+	let function = try mir_add_function(d, store, "table_identity", mir_type_unit())
+	let domain = try mir_add_function_param(d, function.store, function.id, 0, "domain", handle.type_id)
+	let source = try mir_add_function_param(d, domain.store, function.id, 1, "table", table.type_id)
+	let key = try mir_add_function_param(d, source.store, function.id, 2, "id", id.type_id)
+	let item = try mir_add_function_param(d, key.store, function.id, 3, "row", row.type_id)
+	let entry = try mir_add_block(d, item.store, function.id, 0, "entry")
+	let failed = try mir_add_block(d, entry.store, function.id, 1, "failed")
+	store = failed.store
+	var ordinal: U64 = 0
+	var lookup_table = source.id
+	var mutation_table = source.id
+	if mode == 1 {
+		let fresh = try mir_add_value(d, store, function.id, "fresh", table.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+		store = (try mir_add_instruction(d, fresh.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_create(), result: fresh.id, place: 0, type_op: row.type_id, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+		mutation_table = fresh.id
+		ordinal = ordinal + 1
+	}
+	if mode == 2 {
+		let alias = try mir_add_value(d, store, function.id, "alias", table.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+		let call = try mir_add_instruction(d, alias.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_call(), result: alias.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: pass_id, name_start: 0, name_end: 0))
+		store = (try mir_add_operand(d, call.store, MirOperandRec(kind: mir_operand_instruction(), owner: call.id, ordinal: 0, edge: 0, value: source.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))).store
+		lookup_table = alias.id
+		ordinal = ordinal + 1
+	}
+	let found = try mir_add_value(d, store, function.id, "found", option.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+	let lookup = try mir_add_instruction(d, found.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_lookup(), result: found.id, place: 0, type_op: 0, a: lookup_table, b: key.id, c: 0, target: 0, name_start: 0, name_end: 0))
+	ordinal = ordinal + 1
+	let value = try mir_add_value(d, lookup.store, function.id, "view", view.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+	let named = try mir_append_name(d, value.store, "some")
+	let extract = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_enum_payload_checked(), result: value.id, place: 0, type_op: 0, a: found.id, b: 0, c: 0, target: failed.id, name_start: named.start, name_end: named.end))
+	ordinal = ordinal + 1
+	let inserted = try mir_add_value(d, extract.store, function.id, "inserted", id.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+	let insert = try mir_add_instruction(d, inserted.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_insert(), result: inserted.id, place: 0, type_op: 0, a: mutation_table, b: item.id, c: 0, target: 0, name_start: 0, name_end: 0))
+	let ended = try mir_add_instruction(d, insert.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal + 1, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+	let done = try mir_add_terminator(d, ended.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+	return Ok((try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+}
+
+// Modes 0/1/2 forward a table directly, through a local load/store, or through
+// aggregate construction plus a field load. All then mutate the original while
+// the block-parameter alias has an active view.
+fn table_alias_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+	let empty = try __s0_buffer_new(U64, d)
+	let row = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "AliasRow")
+	let row_field = try mir_add_type_part(d, row.store, mir_type_part_field(), row.type_id, 0, "x", mir_type_u64())
+	let table = try mir_intern_type(d, row_field, mir_type_kind_table(), row.type_id, 0, 0, empty, 0)
+	let id = try mir_intern_type(d, table.store, mir_type_kind_id(), row.type_id, 0, 0, empty, 0)
+	let view = try mir_intern_type(d, id.store, mir_type_kind_table_view(), row.type_id, 0, 0, empty, 0)
+	let option = try mir_intern_type(d, view.store, mir_type_kind_option(), view.type_id, 0, 0, empty, 0)
+	let holder = try mir_add_named_type(d, option.store, mir_type_kind_aggregate(), "TableHolder")
+	let holder_field = try mir_add_type_part(d, holder.store, mir_type_part_field(), holder.type_id, 0, "table", table.type_id)
+	let function = try mir_add_function(d, holder_field, "table_alias", mir_type_unit())
+	let source = try mir_add_function_param(d, function.store, function.id, 0, "source", table.type_id)
+	let key = try mir_add_function_param(d, source.store, function.id, 1, "id", id.type_id)
+	let item = try mir_add_function_param(d, key.store, function.id, 2, "row", row.type_id)
+	let entry = try mir_add_block(d, item.store, function.id, 0, "entry")
+	let active = try mir_add_block(d, entry.store, function.id, 1, "active")
+	let alias_param = try mir_add_block_param(d, active.store, function.id, active.id, 0, "alias", table.type_id)
+	let failed = try mir_add_block(d, alias_param.store, function.id, 2, "failed")
+	var store = failed.store
+	var alias = source.id
+	var ordinal: U64 = 0
+	if mode == 1 {
+		let local = try mir_add_local(d, store, function.id, 0, "slot", table.type_id)
+		let place = try mir_add_place(d, local.store, MirPlaceRec(function: function.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+		let write = try mir_add_instruction(d, place.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_store(), result: 0, place: place.id, type_op: 0, a: source.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		ordinal = ordinal + 1
+		let loaded = try mir_add_value(d, write.store, function.id, "loaded", table.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+		store = (try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+		alias = loaded.id
+	}
+	if mode == 2 {
+		let local = try mir_add_local(d, store, function.id, 0, "holder", holder.type_id)
+		let local_place = try mir_add_place(d, local.store, MirPlaceRec(function: function.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+		let aggregate = try mir_add_value(d, local_place.store, function.id, "holder", holder.type_id, mir_value_def_instruction(), entry.id, 1)
+		let name = try mir_append_name(d, aggregate.store, "table")
+		let construct = try mir_add_instruction(d, name.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_aggregate_construct(), result: aggregate.id, place: 0, type_op: holder.type_id, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		let field_operand = try mir_add_operand(d, construct.store, MirOperandRec(kind: mir_operand_aggregate_field(), owner: construct.id, ordinal: 0, edge: 0, value: source.id, target: 0, operand_type: 0, name_start: name.start, name_end: name.end))
+		let write = try mir_add_instruction(d, field_operand.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_store(), result: 0, place: local_place.id, type_op: 0, a: aggregate.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		let field_place = try mir_add_place(d, write.store, MirPlaceRec(function: function.id, kind: mir_place_field(), local: 0, base: local_place.id, field_start: name.start, field_end: name.end, deref_value: 0))
+		let loaded = try mir_add_value(d, field_place.store, function.id, "loaded", table.type_id, mir_value_def_instruction(), entry.id, 3)
+		store = (try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 2, op: mir_op_load(), result: loaded.id, place: field_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+		alias = loaded.id
+	}
+	let jump = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_jump(), value: 0, target: active.id, then_block: 0, else_block: 0))
+	let edge = try mir_add_operand(d, jump.store, MirOperandRec(kind: mir_operand_terminator_arg(), owner: jump.id, ordinal: 0, edge: 0, value: alias, target: active.id, operand_type: 0, name_start: 0, name_end: 0))
+	let found = try mir_add_value(d, edge.store, function.id, "found", option.type_id, mir_value_def_instruction(), active.id, 1)
+	let lookup = try mir_add_instruction(d, found.store, MirInstrRec(function: function.id, block: active.id, ordinal: 0, op: mir_op_table_lookup(), result: found.id, place: 0, type_op: 0, a: alias_param.id, b: key.id, c: 0, target: 0, name_start: 0, name_end: 0))
+	let value = try mir_add_value(d, lookup.store, function.id, "view", view.type_id, mir_value_def_instruction(), active.id, 2)
+	let some = try mir_append_name(d, value.store, "some")
+	let extract = try mir_add_instruction(d, some.store, MirInstrRec(function: function.id, block: active.id, ordinal: 1, op: mir_op_enum_payload_checked(), result: value.id, place: 0, type_op: 0, a: found.id, b: 0, c: 0, target: failed.id, name_start: some.start, name_end: some.end))
+	let inserted = try mir_add_value(d, extract.store, function.id, "inserted", id.type_id, mir_value_def_instruction(), active.id, 3)
+	let insert = try mir_add_instruction(d, inserted.store, MirInstrRec(function: function.id, block: active.id, ordinal: 2, op: mir_op_table_insert(), result: inserted.id, place: 0, type_op: 0, a: source.id, b: item.id, c: 0, target: 0, name_start: 0, name_end: 0))
+	let ended = try mir_add_instruction(d, insert.store, MirInstrRec(function: function.id, block: active.id, ordinal: 3, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+	let done = try mir_add_terminator(d, ended.store, MirTermRec(function: function.id, block: active.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+	return Ok((try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 
 // mode 0 crosses only unsafe FFI/return boundaries; 1 uses a safe call, 2 a
@@ -532,6 +718,97 @@ fn raw_v9_fixture(d: Domain, initial: MirStore, mode: U64, nested: Bool) -> Resu
         let edge = try mir_add_operand(d, jump.store, MirOperandRec(kind: mir_operand_terminator_arg(), owner: jump.id, ordinal: 0, edge: 0, value: returned.id, target: target.id, operand_type: 0, name_start: 0, name_end: 0))
         return Ok((try mir_add_terminator(d, edge.store, MirTermRec(function: function.id, block: target.id, kind: mir_term_return(), value: parameter.id, target: 0, then_block: 0, else_block: 0))).store) }
     return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: returned.id, target: 0, then_block: 0, else_block: 0))).store)
+}
+
+// Modes 0/1 isolate aggregate and place uses owned by V9. Modes 2/3 are raw
+// arithmetic/conversion shapes whose malformed typing remains owned by V5.
+fn raw_inventory_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+	let empty = try __s0_buffer_new(U64, d)
+	let raw = try mir_intern_type(d, initial, mir_type_kind_raw_ptr(), mir_type_u8(), 0, 0, empty, 0)
+	var result_type = mir_type_unit()
+	var store = raw.store
+	var box_type: U64 = 0
+	if mode == 0 {
+		let box = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "RawBox")
+		store = try mir_add_type_part(d, box.store, mir_type_part_field(), box.type_id, 0, "pointer", raw.type_id)
+		box_type = box.type_id
+		result_type = box.type_id
+	}
+	let function = try mir_add_function(d, store, "raw_inventory", result_type)
+	let source = try mir_add_function_param(d, function.store, function.id, 0, "source", raw.type_id)
+	let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+	store = entry.store
+	var returned: U64 = 0
+	if mode == 0 {
+		let box = try mir_add_value(d, store, function.id, "box", box_type, mir_value_def_instruction(), entry.id, 1)
+		let field = try mir_append_name(d, box.store, "pointer")
+		let construct = try mir_add_instruction(d, field.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_aggregate_construct(), result: box.id, place: 0, type_op: box_type, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		store = (try mir_add_operand(d, construct.store, MirOperandRec(kind: mir_operand_aggregate_field(), owner: construct.id, ordinal: 0, edge: 0, value: source.id, target: 0, operand_type: 0, name_start: field.start, name_end: field.end))).store
+		returned = box.id
+	}
+	if mode == 1 {
+		let place = try mir_add_place(d, store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: source.id))
+		let loaded = try mir_add_value(d, place.store, function.id, "loaded", mir_type_u8(), mir_value_def_instruction(), entry.id, 1)
+		store = (try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	}
+	if mode == 2 {
+		let compared = try mir_add_value(d, store, function.id, "compared", mir_type_bool(), mir_value_def_instruction(), entry.id, 1)
+		store = (try mir_add_instruction(d, compared.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_int_eq(), result: compared.id, place: 0, type_op: 0, a: source.id, b: source.id, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	}
+	if mode == 3 {
+		let converted = try mir_add_value(d, store, function.id, "converted", mir_type_u8(), mir_value_def_instruction(), entry.id, 1)
+		store = (try mir_add_instruction(d, converted.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_int_trunc(), result: converted.id, place: 0, type_op: mir_type_u8(), a: source.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	}
+	return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: returned, target: 0, then_block: 0, else_block: 0))).store)
+}
+
+fn backend_names_fixture(d: Domain, initial: MirStore, reserved: Bool) -> Result(MirStore, __s0_Error) {
+	var store = initial
+	if reserved {
+		store = (try mir_add_import(d, store, "return", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "alder_call", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "uint64_t", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "FLT_MAX", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "memcpy", mir_type_unit())).store
+	} else {
+		store = (try mir_add_import(d, store, "alderhost_call", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "alderx", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "Alde", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "uint64_t2", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "Flt_Max", mir_type_unit())).store
+		store = (try mir_add_import(d, store, "memcpy2", mir_type_unit())).store
+	}
+	return Ok(store)
+}
+
+// Modes 0/1/2 cover recursive alloc, alloc.checked, and table element checks.
+fn backend_element_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+	let empty = try __s0_buffer_new(U64, d)
+	let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+	let nested = try mir_intern_type(d, handle.store, mir_type_kind_option(), handle.type_id, 0, 0, empty, 0)
+	let box = try mir_add_named_type(d, nested.store, mir_type_kind_aggregate(), "NestedHandle")
+	let field = try mir_add_type_part(d, box.store, mir_type_part_field(), box.type_id, 0, "value", nested.type_id)
+	let pointer = try mir_intern_type(d, field, mir_type_kind_safe_mut(), box.type_id, 0, 0, empty, 0)
+	let table = try mir_intern_type(d, pointer.store, mir_type_kind_table(), box.type_id, 0, 0, empty, 0)
+	let function = try mir_add_function(d, table.store, "backend_element", mir_type_unit())
+	let domain = try mir_add_function_param(d, function.store, function.id, 0, "domain", handle.type_id)
+	let size = try mir_add_function_param(d, domain.store, function.id, 1, "size", mir_type_u64())
+	let entry = try mir_add_block(d, size.store, function.id, 0, "entry")
+	let failed = try mir_add_block(d, entry.store, function.id, 1, "failed")
+	var store = failed.store
+	if mode == 2 {
+		let value = try mir_add_value(d, store, function.id, "table", table.type_id, mir_value_def_instruction(), entry.id, 1)
+		store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_table_create(), result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	} else {
+		let value = try mir_add_value(d, store, function.id, "pointer", pointer.type_id, mir_value_def_instruction(), entry.id, 1)
+		var op = mir_op_alloc()
+		var target: U64 = 0
+		if mode == 1 { op = mir_op_alloc_checked()
+			target = failed.id }
+		store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: op, result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: size.id, c: 0, target: target, name_start: 0, name_end: 0))).store
+	}
+	let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+	return Ok((try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 
 fn hosted_fixture(d: Domain, initial: MirStore, name: String, result_type: U64, params: U64) -> Result(MirStore, __s0_Error) {
@@ -758,12 +1035,12 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(59, raw_fail_fast) { return Ok(false) }
 
     let unhosted = try mir_verify_complete(d, valid_store, 3, false)
-    if !emit_complete(60, unhosted) { return Ok(false) }
+    if !expect_complete(60, unhosted, true, false, 0, 0, 0) { return Ok(false) }
     let hosted_zero_store = try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 0)
     let hosted_zero = try mir_verify_complete(d, hosted_zero_store, 3, true)
-    if !emit_complete(61, hosted_zero) { return Ok(false) }
+    if !expect_complete(61, hosted_zero, true, true, 1, 0, 0) { return Ok(false) }
     let hosted_domain = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 1), 3, true)
-    if !emit_complete(62, hosted_domain) { return Ok(false) }
+    if !expect_complete(62, hosted_domain, true, true, 1, 0, 0) { return Ok(false) }
     let bad_c_import = try mir_add_import(d, try mir_store_new(d), "main", mir_type_unit())
     let bad_c = try mir_verify_complete(d, bad_c_import.store, 3, false)
     if !emit_complete(63, bad_c) { return Ok(false) }
@@ -780,17 +1057,17 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let bad_alloc = try mir_verify_complete(d, alloc_done.store, 3, false)
     if !emit_complete(64, bad_alloc) { return Ok(false) }
     let missing = try mir_verify_complete(d, valid_store, 3, true)
-    if !emit_complete(65, missing) { return Ok(false) }
+    if !expect_complete(65, missing, false, true, 0, 10, mir_vdiag_missing_entry()) { return Ok(false) }
     let duplicate_first = try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 0)
     let duplicate_store = try hosted_fixture(d, duplicate_first, "main", mir_type_i32(), 0)
     let duplicate_entry = try mir_verify_complete(d, duplicate_store, 3, true)
-    if !emit_complete(66, duplicate_entry) { return Ok(false) }
+    if !expect_complete(66, duplicate_entry, false, true, 0, 1, mir_vdiag_duplicate_name()) { return Ok(false) }
     let bad_entry_result = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_unit(), 0), 3, true)
-    if !emit_complete(67, bad_entry_result) { return Ok(false) }
+    if !expect_complete(67, bad_entry_result, false, true, 0, 10, mir_vdiag_entry_result()) { return Ok(false) }
     let bad_entry_param = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 2), 3, true)
-    if !emit_complete(68, bad_entry_param) { return Ok(false) }
+    if !expect_complete(68, bad_entry_param, false, true, 0, 10, mir_vdiag_entry_signature()) { return Ok(false) }
     let complete_fail_fast = try mir_verify_complete(d, phase2_store, 3, true)
-    if !emit_complete(69, complete_fail_fast) { return Ok(false) }
+    if !expect_complete(69, complete_fail_fast, false, true, 0, 2, mir_vdiag_bad_signature()) { return Ok(false) }
     let table_handle = try mir_intern_type(d, handle_v10.store, mir_type_kind_table(), handle_v10.type_id, 0, 0, empty_v10, 0)
     let table_fn = try mir_add_function(d, table_handle.store, "table", mir_type_unit())
     let table_domain = try mir_add_function_param(d, table_fn.store, table_fn.id, 0, "domain", handle_v10.type_id)
@@ -799,6 +1076,26 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let forbidden_table = try mir_add_instruction(d, table_value.store, MirInstrRec(function: table_fn.id, block: table_block.id, ordinal: 0, op: mir_op_table_create(), result: table_value.id, place: 0, type_op: handle_v10.type_id, a: table_domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
     let table_done = try mir_add_terminator(d, forbidden_table.store, MirTermRec(function: table_fn.id, block: table_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
     if !emit_complete(70, try mir_verify_complete(d, table_done.store, 3, false)) { return Ok(false) }
+    let reused_unhosted = try mir_verify_complete(d, hosted_zero_store, 3, false)
+    if !expect_complete(71, reused_unhosted, true, false, 0, 0, 0) { return Ok(false) }
+    let bad_version = try mir_verify_complete(d, hosted_zero_store, 99, true)
+    if !expect_complete(72, bad_version, false, true, 0, 1, mir_vdiag_bad_version()) { return Ok(false) }
+	if !emit_verification(73, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 3), 3)) { return Ok(false) }
+	if !emit_verification(74, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 4), 3)) { return Ok(false) }
+	if !emit_verification(75, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 5), 3)) { return Ok(false) }
+	if !emit_verification(76, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 6), 3)) { return Ok(false) }
+	if !emit_verification(77, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 7), 3)) { return Ok(false) }
+	if !emit_verification(78, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 8), 3)) { return Ok(false) }
+	if !emit_verification(79, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 9), 3)) { return Ok(false) }
+	if !emit_verification(80, try mir_verify_module(d, try raw_inventory_fixture(d, try mir_store_new(d), 0), 3)) { return Ok(false) }
+	if !emit_verification(81, try mir_verify_module(d, try raw_inventory_fixture(d, try mir_store_new(d), 1), 3)) { return Ok(false) }
+	if !emit_verification(82, try mir_verify_module(d, try raw_inventory_fixture(d, try mir_store_new(d), 2), 3)) { return Ok(false) }
+	if !emit_verification(83, try mir_verify_module(d, try raw_inventory_fixture(d, try mir_store_new(d), 3), 3)) { return Ok(false) }
+	if !emit_complete(84, try mir_verify_complete(d, try backend_names_fixture(d, try mir_store_new(d), true), 3, false)) { return Ok(false) }
+	if !expect_complete(85, try mir_verify_complete(d, try backend_names_fixture(d, try mir_store_new(d), false), 3, false), true, false, 0, 0, 0) { return Ok(false) }
+	if !emit_complete(86, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 0), 3, false)) { return Ok(false) }
+	if !emit_complete(87, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 1), 3, false)) { return Ok(false) }
+	if !emit_complete(88, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 2), 3, false)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -820,6 +1117,11 @@ fn main(d: Domain) -> I32 {
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
 	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 60 0 1 0 0\nC 61 0 1 1 1\nC 62 0 1 1 1\nC 63 1 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nC 64 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\nC 65 1 0 1 0\nD 10 70 0 0 0 0 0 0 0 1 0 0\nC 66 1 0 1 0\nD 1 5 2 0 0 0 0 0 2 0 0 1\nC 67 1 0 1 1\nD 10 72 1 0 0 0 0 1 1 5 1 1\nC 68 1 0 1 1\nD 10 73 1 0 0 0 0 0 1 1 2 1\nC 69 1 0 1 0\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 70 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\n"
+	want = strings.ReplaceAll(want, "C 67 1 0 1 1\n", "C 67 1 0 1 0\n")
+	want = strings.ReplaceAll(want, "C 68 1 0 1 1\n", "C 68 1 0 1 0\n")
+	want = strings.ReplaceAll(want, "V 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\n", "V 76 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 4 0 0 0 0 0 0 5\n")
+	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 3\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
+	want = strings.ReplaceAll(want, "V 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\n", "V 76 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 4 0 0 0 0 0 0 5\n")
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

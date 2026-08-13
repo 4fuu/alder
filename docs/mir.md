@@ -435,9 +435,12 @@ external names.
 consumer may emit bytes only when its `MirVerifyCompleteOutput.complete` field
 is true. For `hosted == true`, success also guarantees one `main` returning
 `i32` with either no parameters or one `domain_handle` parameter, and `entry`
-is that function's external 1-based ID. Unhosted success has `entry == 0`.
-Failure preserves the first failing phase diagnostics, sets `complete` false,
-and never repairs the store. This contract makes all verifier phases available;
+is that function's external 1-based ID. Unhosted success has `entry == 0`, and
+every failure has `entry == 0` regardless of whether entry discovery preceded
+the failing signature check. Duplicate function names, including duplicate
+`main`, remain V1 representation errors rather than V10 entry errors. Failure
+preserves the first failing phase diagnostics, sets `complete` false, and never
+repairs the store. This contract makes all verifier phases available;
 it does not make Alder source lowering or public production C generation
 available. Those remain gated on Roadmap work #21 and #22.
 Because the frozen flat store contains no module header record,

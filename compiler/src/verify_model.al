@@ -80,6 +80,8 @@ fn mir_vdiag_raw_boundary() -> U64 { return 67 }
 fn mir_vdiag_c_external_name() -> U64 { return 68 }
 fn mir_vdiag_backend_element_type() -> U64 { return 69 }
 fn mir_vdiag_missing_entry() -> U64 { return 70 }
+// Reserved for diagnostic-number stability. Duplicate main declarations are
+// rejected by V1's mir_vdiag_duplicate_name before V10 can run.
 fn mir_vdiag_duplicate_entry() -> U64 { return 71 }
 fn mir_vdiag_entry_result() -> U64 { return 72 }
 fn mir_vdiag_entry_signature() -> U64 { return 73 }
@@ -104,8 +106,9 @@ type MirVerifyOutput {
 }
 // complete is the sole positive V10 gate. Consumers must receive this output
 // from mir_verify_complete and check complete before producing any bytes.
-// entry is zero for an unhosted module and the external Function ID of the
-// unique hosted main otherwise.
+// entry is nonzero only for successful hosted completion, where it is the
+// external 1-based Function ID of main. Every failure and unhosted result has
+// entry zero. V1 owns duplicate function-name rejection, including main.
 type MirVerifyCompleteOutput {
     diagnostics: __s0_Buffer(MirVerifyDiagRec)
     complete: Bool

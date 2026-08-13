@@ -28,7 +28,9 @@ Only verified MIR may reach code generation: `cgen.Generate` runs the full verif
 The Alder-written flat-MIR verifier now exposes
 `mir_verify_complete(d, store, version, hosted)`. Its `complete == true` result
 is the required gate for any Alder-written C generator before it writes bytes;
-hosted success also carries the verified 1-based entry function ID. Public
+hosted success also carries the verified 1-based entry function ID. Every
+failure and every unhosted result carries entry ID zero; duplicate `main`
+declarations are rejected earlier by V1's duplicate function-name rule. Public
 Alder-written production generation is not available yet: source lowering is
 tracked by #21, and the declaration-only Cgen skeleton tracked by #22 remains
 parked in draft PR #42 until it is rebased to consume this contract.

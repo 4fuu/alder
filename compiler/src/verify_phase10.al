@@ -71,7 +71,7 @@ fn mir_v10_entry(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagR
 var entry: U64 = 0
 var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
-if mir_vname_word(store, item.name_start, item.name_end, "main") { if entry == 0 { entry = function } else { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_duplicate_entry(), function, 0, 0, 0, 0, 0, function, 1, function, entry)) } }
+if mir_vname_word(store, item.name_start, item.name_end, "main") { entry = function }
 function = function + 1 }
     if entry == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_missing_entry(), 0, 0, 0, 0, 0, 0, 0, 1, 0, 0))
 return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: true, entry: 0)) }
@@ -81,7 +81,9 @@ return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: tru
     var signature = count == 0
     if count == 1 { signature = mir_vtype_kind(store, mir_v5_param_type(store, entry, 0, mir_param_function(), 0)) == mir_type_kind_domain_handle() }
     if !signature { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_signature(), entry, 0, 0, 0, 0, 0, entry, 1, count, entry)) }
-    return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: __s0_buffer_len(MirVerifyDiagRec, out) == 0, hosted: true, entry: entry))
+    let complete = __s0_buffer_len(MirVerifyDiagRec, out) == 0
+    if !complete { entry = 0 }
+    return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: complete, hosted: true, entry: entry))
 }
 
 fn mir_verify_complete(d: Domain, store: MirStore, version: U64, hosted: Bool) -> Result(MirVerifyCompleteOutput, __s0_Error) {
