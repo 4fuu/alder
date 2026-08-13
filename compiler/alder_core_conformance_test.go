@@ -117,21 +117,14 @@ func TestAlderCoreConformance(t *testing.T) {
 		t.Fatal("checker sentinel loader was not installed")
 	}
 	sources = append(sources, frontend.Source{ID: frontend.SourceID(len(sources) + 1), Path: "compiler/test/core_conformance_main.al", Text: wrapper})
-	reversed := append([]frontend.Source(nil), sources...)
-	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
-		reversed[left], reversed[right] = reversed[right], reversed[left]
-	}
 
+	// TestMultiSourcePermutationsProduceIdenticalMIRAndC owns source-order
+	// determinism at the shared Compile-to-CompileSources canonicalization
+	// boundary. Checker and production argv permutations plus repeated printer
+	// and verifier processes retain executable-level determinism coverage here.
 	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		t.Fatalf("compile canonical core closure: result=%+v error=%v", compiled, err)
-	}
-	permuted, err := Compile(Request{Sources: reversed, Emit: EmitMIR})
-	if err != nil || permuted.Artifact == nil || len(permuted.Diagnostics) != 0 {
-		t.Fatalf("compile reversed core closure: result=%+v error=%v", permuted, err)
-	}
-	if compiled.Artifact.Text != permuted.Artifact.Text {
-		t.Fatal("core conformance MIR changed with source permutation")
+		t.Fatalf("compile core closure: result=%+v error=%v", compiled, err)
 	}
 
 	module, err := mir.Parse(compiled.Artifact.Text)
