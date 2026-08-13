@@ -172,5 +172,7 @@ fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVeri
     diagnostics = try mir_vphase7(d, store, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase8(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase9(d, store, diagnostics)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))
 }

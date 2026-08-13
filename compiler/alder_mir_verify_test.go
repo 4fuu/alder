@@ -481,6 +481,44 @@ fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore,
     return Ok(failed_done.store)
 }
 
+// mode 0 crosses only unsafe FFI/return boundaries; 1 uses a safe call, 2 a
+// store, and 3 an edge. nested wraps raw_ptr in option.
+fn raw_v9_fixture(d: Domain, initial: MirStore, mode: U64, nested: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let raw = try mir_intern_type(d, initial, mir_type_kind_raw_ptr(), mir_type_u8(), 0, 0, empty, 0)
+    var value_type = raw.type_id
+    var store = raw.store
+    if nested { let option = try mir_intern_type(d, store, mir_type_kind_option(), raw.type_id, 0, 0, empty, 0)
+        store = option.store
+        value_type = option.type_id }
+    let imported = try mir_add_import(d, store, "foreign", value_type)
+    store = try mir_add_import_param(d, imported.store, imported.id, 0, value_type)
+    var callee_id: U64 = 0
+    if mode == 1 { let callee = try mir_add_function(d, store, "safe", mir_type_unit())
+        let parameter = try mir_add_function_param(d, callee.store, callee.id, 0, "raw", value_type)
+        let block = try mir_add_block(d, parameter.store, callee.id, 0, "entry")
+        store = (try mir_add_terminator(d, block.store, MirTermRec(function: callee.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store
+        callee_id = callee.id }
+    let function = try mir_add_function(d, store, "raw_case", value_type)
+    let source = try mir_add_function_param(d, function.store, function.id, 0, "source", value_type)
+    let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+    let returned = try mir_add_value(d, entry.store, function.id, "returned", value_type, mir_value_def_instruction(), entry.id, 1)
+    let ffi = try mir_add_instruction(d, returned.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_ffi_call_unsafe(), result: returned.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: imported.id, name_start: 0, name_end: 0))
+    let ffi_arg = try mir_add_operand(d, ffi.store, MirOperandRec(kind: mir_operand_instruction(), owner: ffi.id, ordinal: 0, edge: 0, value: source.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    store = ffi_arg.store
+    if mode == 1 { let call = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_call(), result: 0, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: callee_id, name_start: 0, name_end: 0))
+        store = (try mir_add_operand(d, call.store, MirOperandRec(kind: mir_operand_instruction(), owner: call.id, ordinal: 0, edge: 0, value: returned.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))).store }
+    if mode == 2 { let local = try mir_add_local(d, store, function.id, 0, "slot", value_type)
+        let place = try mir_add_place(d, local.store, MirPlaceRec(function: function.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        store = (try mir_add_instruction(d, place.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_store(), result: 0, place: place.id, type_op: 0, a: returned.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    if mode == 3 { let target = try mir_add_block(d, store, function.id, 1, "target")
+        let parameter = try mir_add_block_param(d, target.store, function.id, target.id, 0, "raw", value_type)
+        let jump = try mir_add_terminator(d, parameter.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_jump(), value: 0, target: target.id, then_block: 0, else_block: 0))
+        let edge = try mir_add_operand(d, jump.store, MirOperandRec(kind: mir_operand_terminator_arg(), owner: jump.id, ordinal: 0, edge: 0, value: returned.id, target: target.id, operand_type: 0, name_start: 0, name_end: 0))
+        return Ok((try mir_add_terminator(d, edge.store, MirTermRec(function: function.id, block: target.id, kind: mir_term_return(), value: parameter.id, target: 0, then_block: 0, else_block: 0))).store) }
+    return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: returned.id, target: 0, then_block: 0, else_block: 0))).store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -666,6 +704,19 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let table_fail_fast = try mir_verify_module(d, mir_with_terminators(table_raw_base, no_table_terms), 3)
     if !emit_verification(53, table_fail_fast) { return Ok(false) }
 
+    let raw_ok = try mir_verify_module(d, try raw_v9_fixture(d, try mir_store_new(d), 0, false), 3)
+    if !emit_verification(54, raw_ok) { return Ok(false) }
+    let raw_safe = try mir_verify_module(d, try raw_v9_fixture(d, try mir_store_new(d), 1, false), 3)
+    if !emit_verification(55, raw_safe) { return Ok(false) }
+    let raw_store = try mir_verify_module(d, try raw_v9_fixture(d, try mir_store_new(d), 2, false), 3)
+    if !emit_verification(56, raw_store) { return Ok(false) }
+    let raw_edge = try mir_verify_module(d, try raw_v9_fixture(d, try mir_store_new(d), 3, false), 3)
+    if !emit_verification(57, raw_edge) { return Ok(false) }
+    let raw_nested = try mir_verify_module(d, try raw_v9_fixture(d, try mir_store_new(d), 2, true), 3)
+    if !emit_verification(58, raw_nested) { return Ok(false) }
+    let raw_fail_fast = try mir_verify_module(d, phase2_store, 3)
+    if !emit_verification(59, raw_fail_fast) { return Ok(false) }
+
     return Ok(true)
 }
 
@@ -686,7 +737,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
