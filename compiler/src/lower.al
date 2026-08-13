@@ -1920,6 +1920,12 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         while ordinal < item.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal)
             if arm.owner != item.owner || arm.checked_match != at + 1 { return false }
+            var prior_ordinal: U64 = 0
+            while prior_ordinal < ordinal {
+                let prior = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + prior_ordinal)
+                if arm.variant_kind == prior.variant_kind && arm.variant_use == prior.variant_use { return false }
+                prior_ordinal = prior_ordinal + 1
+            }
             ordinal = ordinal + 1
         }
         at = at + 1

@@ -249,12 +249,15 @@ func checkLowerGolden(t *testing.T, name string, got []byte) {
 
 func runMalformedLowerCompiler(t *testing.T, exe string) {
 	t.Helper()
-	for _, mode := range []string{"!alder-core-lower-bad", "!alder-core-lower-bad-k", "!alder-core-lower-bad-m", "!alder-core-lower-bad-w", "!alder-core-lower-bad-x", "!alder-core-lower-bad-g", "!alder-core-lower-bad-v", "!alder-core-lower-bad-h", "!alder-core-lower-bad-q", "!alder-core-lower-bad-l", "!alder-core-lower-bad-e", "!alder-core-lower-bad-ea", "!alder-core-lower-bad-y", "!alder-core-lower-bad-c", "!alder-core-lower-bad-u", "!alder-core-lower-bad-n", "!alder-core-lower-bad-ca", "!alder-core-lower-bad-eliteral", "!alder-core-lower-bad-j", "!alder-core-lower-bad-gactive"} {
+	for _, mode := range []string{"!alder-core-lower-bad", "!alder-core-lower-bad-k", "!alder-core-lower-bad-m", "!alder-core-lower-bad-w", "!alder-core-lower-bad-x", "!alder-core-lower-bad-g", "!alder-core-lower-bad-v", "!alder-core-lower-bad-h", "!alder-core-lower-bad-q", "!alder-core-lower-bad-l", "!alder-core-lower-bad-e", "!alder-core-lower-bad-ea", "!alder-core-lower-bad-y", "!alder-core-lower-bad-c", "!alder-core-lower-bad-u", "!alder-core-lower-bad-n", "!alder-core-lower-bad-ca", "!alder-core-lower-bad-eliteral", "!alder-core-lower-bad-j", "!alder-core-lower-bad-gactive", "!alder-core-lower-bad-wduplicate"} {
 		t.Run(strings.TrimPrefix(mode, "!alder-core-lower-bad"), func(t *testing.T) {
 			dir := t.TempDir()
 			source := "fn bad() -> Unit {}\n"
 			if mode == "!alder-core-lower-bad-gactive" {
 				source = "fn close(value: I64) -> Unit {}\nfn bad() -> Unit { using value = 1 with close }\n"
+			}
+			if mode == "!alder-core-lower-bad-wduplicate" {
+				source = "fn bad(value: Option(U64)) -> U64 {\n    return match value {\n        None => 0\n        Some(item) => item\n    }\n}\n"
 			}
 			for name, text := range map[string]string{mode: "", "bad.al": source} {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
