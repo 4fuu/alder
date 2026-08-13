@@ -8,11 +8,17 @@ import (
 	"testing"
 )
 
-// The fixture constructs flat MIR records directly. Failed writes precede the
-// accepted write, so any repair or partial output changes the golden bytes.
+// The fixture constructs flat MIR records directly. Rejection cases run as
+// separate processes so the Go harness observes their exact stdout byte count.
 const cgenSkeletonWrapper = `
 fn cgen_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
     var store = initial
+    let helper = try mir_add_function(d, store, "ns.helper", mir_type_unit())
+    store = helper.store
+    let helper_block = try mir_add_block(d, store, helper.id, 0, "entry")
+    store = helper_block.store
+    let helper_term = try mir_add_terminator(d, store, MirTermRec(function: helper.id, block: helper_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    store = helper_term.store
     let pair = try mir_add_named_type(d, store, mir_type_kind_aggregate(), "pkg.Pair")
     store = pair.store
     let no_parts = try __s0_buffer_new(U64, d)
@@ -51,22 +57,32 @@ fn cgen_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
     let main_block = try mir_add_block(d, store, main.id, 0, "entry")
     store = main_block.store
     let main_term = try mir_add_terminator(d, store, MirTermRec(function: main.id, block: main_block.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
-    store = main_term.store
-    let helper = try mir_add_function(d, store, "ns.helper", mir_type_unit())
-    store = helper.store
-    let helper_block = try mir_add_block(d, store, helper.id, 0, "entry")
-    store = helper_block.store
-    let helper_term = try mir_add_terminator(d, store, MirTermRec(function: helper.id, block: helper_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
-    return Ok(helper_term.store)
+    return Ok(main_term.store)
+}
+
+fn cgen_rejected(result: Bool) -> I32 {
+    if result { return 8 }
+    return 0
 }
 
 fn cgen_run(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
-    let malformed = try mir_add_const(d, store, "bad", 999, mir_const_int(), 0, 1, 0, "")
-    if try cgen_write_declaration_skeleton(d, malformed.store, true) { return Ok(5) }
-    let reserved = try mir_add_import(d, store, "return", mir_type_unit())
-    if try cgen_write_declaration_skeleton(d, reserved.store, false) { return Ok(6) }
-    let fixture = try cgen_fixture(d, store)
-    if try cgen_write_declaration_skeleton(d, fixture, true) { return Ok(0) }
+    if unsafe c { alderhost_source_count() } > 1 {
+        if host_path_is(1, "!cgen-bad-version") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try cgen_fixture(d, store), 99, true))) }
+        if host_path_is(1, "!cgen-earlier-v1-v9") { let malformed = try mir_add_const(d, try cgen_fixture(d, store), "bad", 999, mir_const_int(), 0, 1, 0, "")
+        return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, malformed.store, 3, true))) }
+        if host_path_is(1, "!cgen-missing-entry") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try minimal(d, store, mir_type_unit(), false), 3, true))) }
+        if host_path_is(1, "!cgen-invalid-entry") { let invalid = try mir_add_function(d, store, "main", 999)
+        return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, invalid.store, 3, true))) }
+        if host_path_is(1, "!cgen-duplicate-entry") { let first = try hosted_fixture(d, store, "main", mir_type_i32(), 0)
+        return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try hosted_fixture(d, first, "main", mir_type_i32(), 0), 3, true))) }
+        if host_path_is(1, "!cgen-bad-entry-result") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try hosted_fixture(d, store, "main", mir_type_unit(), 0), 3, true))) }
+        if host_path_is(1, "!cgen-bad-entry-params") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try hosted_fixture(d, store, "main", mir_type_i32(), 2), 3, true))) }
+        if host_path_is(1, "!cgen-v10-backend") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try backend_names_fixture(d, store, true), 3, false))) }
+        if host_path_is(1, "!cgen-unhosted") { if try cgen_write_declaration_skeleton(d, try cgen_fixture(d, store), 3, false) { return Ok(0) }
+        return Ok(7) }
+        return Ok(9)
+    }
+    if try cgen_write_declaration_skeleton(d, try cgen_fixture(d, store), 3, true) { return Ok(0) }
     return Ok(7)
 }
 
@@ -114,8 +130,8 @@ static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_3_bits = UINT64_C(4607182418800017408);
 static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = "a\000\"\\9";
 
-static ALDER_MAYBE_UNUSED int32_t alder_fn_main_0(AlderDomain * alder_v0);
-static ALDER_MAYBE_UNUSED void alder_fn_ns_helper_1(void);
+static ALDER_MAYBE_UNUSED void alder_fn_ns_helper_0(void);
+static ALDER_MAYBE_UNUSED int32_t alder_fn_main_1(AlderDomain * alder_v0);
 
 AlderTy12 (foreign_call)(AlderFnTy15);
 
@@ -124,32 +140,101 @@ int32_t alder_program_entry(void *host_context) {
   AlderDomain alder_root = {0};
   int32_t alder_status;
   if (!alder_domain_init(&alder_root, NULL)) { return ALDER_PROGRAM_FAILURE_STATUS; }
-  alder_status = alder_fn_main_0(&alder_root);
+  alder_status = alder_fn_main_1(&alder_root);
   alder_domain_destroy(&alder_root);
   return alder_status;
 }
 `
 
+const cgenSkeletonUnhostedGolden = `/* Generated by the Alder declaration-only C11 backend skeleton. */
+/* Production generation remains gated on MIR verifier V10. */
+#include "alder.h"
+#include <float.h>
+#include <string.h>
+
+typedef struct AlderTy12 AlderTy12;
+typedef struct AlderTy13 AlderTy13;
+typedef struct AlderTy14 AlderTy14;
+
+struct AlderTy13 {
+  union {
+    uint64_t alder_p1;
+  } alder_u;
+  uint32_t alder_tag;
+};
+/* @pkg.Pair */
+struct AlderTy12 {
+  AlderTy13 alder_f0;
+};
+/* @pkg.Choice */
+struct AlderTy14 {
+  union {
+    AlderTy12 alder_p1;
+  } alder_u;
+  uint32_t alder_tag;
+};
+typedef bool (*AlderFnTy15)(AlderTy12);
+/* unit constant alder_const_0 has no storage. */
+static ALDER_MAYBE_UNUSED const bool alder_const_1 = true;
+static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854775807LL - 1);
+static ALDER_MAYBE_UNUSED const uint64_t alder_const_3_bits = UINT64_C(4607182418800017408);
+static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = "a\000\"\\9";
+
+static ALDER_MAYBE_UNUSED void alder_fn_ns_helper_0(void);
+static ALDER_MAYBE_UNUSED int32_t alder_fn_main_1(AlderDomain * alder_v0);
+
+AlderTy12 (foreign_call)(AlderFnTy15);
+
+`
+
 func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 	t.Helper()
-	for run := 0; run < 2; run++ {
+	run := func(t *testing.T, testCase string) string {
+		t.Helper()
 		dir := t.TempDir()
 		const sentinel = "!alder-core-cgen"
 		if err := os.WriteFile(filepath.Join(dir, sentinel), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(exe, sentinel)
+		args := []string{sentinel}
+		if testCase != "" {
+			if err := os.WriteFile(filepath.Join(dir, testCase), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args = append(args, testCase)
+		}
+		cmd := exec.Command(exe, args...)
 		cmd.Dir = dir
 		output, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("run C skeleton %d: %v", run, err)
+			t.Fatalf("run C skeleton %q: %v", testCase, err)
 		}
 		got := string(output)
 		if strings.Contains(got, root) || strings.Contains(got, dir) {
 			t.Fatal("C skeleton contains an absolute host path")
 		}
-		if got != cgenSkeletonGolden {
-			t.Fatalf("C skeleton mismatch on run %d\nwant:\n%s\ngot:\n%s", run, cgenSkeletonGolden, got)
+		return got
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if got := run(t, ""); got != cgenSkeletonGolden {
+			t.Fatalf("hosted C skeleton mismatch on run %d\nwant:\n%s\ngot:\n%s", attempt, cgenSkeletonGolden, got)
+		}
+		if got := run(t, "!cgen-unhosted"); got != cgenSkeletonUnhostedGolden {
+			t.Fatalf("unhosted C skeleton mismatch on run %d\nwant:\n%s\ngot:\n%s", attempt, cgenSkeletonUnhostedGolden, got)
+		}
+	}
+	for _, testCase := range []string{
+		"!cgen-bad-version",
+		"!cgen-earlier-v1-v9",
+		"!cgen-missing-entry",
+		"!cgen-invalid-entry",
+		"!cgen-duplicate-entry",
+		"!cgen-bad-entry-result",
+		"!cgen-bad-entry-params",
+		"!cgen-v10-backend",
+	} {
+		if got := run(t, testCase); got != "" {
+			t.Fatalf("rejected C skeleton %q wrote %d stdout bytes: %q", testCase, len(got), got)
 		}
 	}
 	for _, fragment := range []string{
@@ -158,7 +243,7 @@ func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 		"struct AlderTy13 {",
 		"struct AlderTy12 {",
 		"typedef bool (*AlderFnTy15)(AlderTy12);",
-		"alder_fn_ns_helper_1(void);",
+		"alder_fn_ns_helper_0(void);",
 		"AlderTy12 (foreign_call)(AlderFnTy15);",
 		"alder_const_2 = (int64_t)(-9223372036854775807LL - 1);",
 		"alder_const_3_bits = UINT64_C(4607182418800017408);",
@@ -173,8 +258,8 @@ func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 	// The skeleton intentionally contains declarations rather than instruction
 	// bodies. Complete those declarations only in this strict-syntax fixture.
 	strict := cgenSkeletonGolden + `
-static int32_t alder_fn_main_0(AlderDomain *alder_v0) { (void)alder_v0; return (int32_t)0; }
-static void alder_fn_ns_helper_1(void) {}
+static void alder_fn_ns_helper_0(void) {}
+static int32_t alder_fn_main_1(AlderDomain *alder_v0) { (void)alder_v0; return (int32_t)0; }
 `
 	cfile := filepath.Join(t.TempDir(), "skeleton.c")
 	if err := os.WriteFile(cfile, []byte(strict), 0o644); err != nil {

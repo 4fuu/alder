@@ -33,18 +33,19 @@ hosted success also carries the verified 1-based entry function ID. Every
 failure and every unhosted result carries entry ID zero; duplicate `main`
 declarations are rejected earlier by V1's duplicate function-name rule. Public
 Alder-written production generation is not available yet: source lowering is
-tracked by #21, and the declaration-only Cgen skeleton tracked by #22 remains
-parked in draft PR #42 until it is rebased to consume this contract.
+tracked by #21, and the declaration-only Cgen skeleton does not emit bodies.
 
-The parked declaration-only Alder backend lane currently exposes
-`cgen_write_declaration_skeleton(d, store, hosted)`. It consumes the independent
-flat MIR 3 store directly, validates its declaration subset, constructs all
-bytes in a deterministic buffer, and then writes headers, stable type layouts,
+The declaration-only Alder backend lane exposes
+`cgen_write_declaration_skeleton(d, store, version, hosted)`. Before allocating
+its output buffer it calls `mir_verify_complete`; only `complete == true`
+proceeds. Emission consumes the returned `hosted` and external 1-based `entry`
+fields rather than independently authorizing the caller's request. The complete
+skeleton is buffered before stdout and contains headers, stable type layouts,
 constant storage, import prototypes, internal function declarations, and the
-optional hosted entry adapter. It does not emit function bodies and is not a
-production generator. In particular, there is intentionally no public
-`cgen_generate` entry. Declaration-skeleton rejection is pre-output and never
-sanitizes or repairs an invalid store.
+optional verified hosted entry adapter. It does not emit function bodies and is
+not a production generator. In particular, there is intentionally no public
+`cgen_generate` entry. Every rejection is zero-output and never sanitizes or
+repairs an invalid store.
 
 ## Generated program entry
 
@@ -70,7 +71,7 @@ Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
 The Alder declaration skeleton can render this adapter for conformance, but its
 internal function declarations have no bodies. It is therefore strict-C syntax
 evidence only and cannot be linked as a generated program before body lowering
-and the V10 production gate land.
+and a separate production-generation entry land.
 
 The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
 through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and

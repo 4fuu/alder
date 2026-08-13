@@ -459,7 +459,7 @@ unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
 types and external names. `mir_verify_complete` adds the hosted `main` contract
 and returns the sole positive complete-verifier gate. Source-to-MIR lowering and
 public production C generation remain unavailable until the work tracked by
-#21 and #22 (the latter currently parked in draft PR #42) is integrated.
+#21 and later body-lowering work is integrated.
 
 The independent Alder C-backend lane now consumes those flat MIR 3 records
 directly and provides a deterministic buffered declaration skeleton: portable
@@ -468,9 +468,13 @@ C import prototypes, internal function declarations, and the temporary hosted
 entry adapter. Hand-built MIR fixtures pin rejection before output, escaping,
 ordering, process determinism, absence of host paths, and strict GCC syntax in
 the existing one-Stage0 shared core harness. This is not instruction/body
-lowering and does not expose production generation. The exact remaining V10
-dependency is a successful complete Alder verifier result covering backend
-preconditions; only that result may gate a future public generation entry.
+lowering and does not expose production generation. The declaration API now
+calls `mir_verify_complete` before allocating its byte buffer and proceeds only
+on `complete == true`, consuming the verifier-returned hosted mode and external
+entry ID. Focused process fixtures observe zero stdout bytes for bad versions,
+V1–V9 failures, entry failures, and V10 rejection; hosted success uses a non-1
+verified entry and unhosted success retains entry zero. Function bodies and a
+separate public production generator remain unavailable.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
