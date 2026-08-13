@@ -1335,11 +1335,6 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if item.instance_arg_count == 0 || item.first_instance_arg == 0 || item.first_instance_arg - 1 + item.instance_arg_count > __s0_buffer_len(U64, store.type_args) { return false }
             if item.instance_arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.declaration - 1).type_arity { return false }
             if item.discovery_parent != 0 && (item.discovery_parent > at || __s0_buffer_get(SymbolRec, store.symbols, item.discovery_parent - 1).declaration == 0) { return false }
-            var instance_ordinal: U64 = 0
-            while instance_ordinal < item.instance_arg_count {
-                if !lower_type_concrete(store, __s0_buffer_get(U64, store.type_args, item.first_instance_arg - 1 + instance_ordinal)) { return false }
-                instance_ordinal = instance_ordinal + 1
-            }
         } else {
             if item.kind == 12 && item.type_arity == 0 {
                 if item.declaration != at + 1 { return false }
@@ -1371,6 +1366,18 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         if item.kind == 7 && item.arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).type_arity { return false }
         if (item.kind == 8 || item.kind == 9 || item.kind == 12 || item.kind == 13) && item.arg_count != 1 { return false }
         if (item.kind == 10 || item.kind == 11) && item.arg_count != 2 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let item = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if item.kind == 13 {
+            var instance_ordinal: U64 = 0
+            while instance_ordinal < item.instance_arg_count {
+                if !lower_type_concrete(store, __s0_buffer_get(U64, store.type_args, item.first_instance_arg - 1 + instance_ordinal)) { return false }
+                instance_ordinal = instance_ordinal + 1
+            }
+        }
         at = at + 1
     }
     at = 0
@@ -1512,6 +1519,20 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         if item.kind >= 1 && item.kind <= 5 && item.child_count != 0 { return false }
         if item.kind == 2 && item.bool_value > 1 { return false }
         if item.kind != 2 && item.bool_value != 0 { return false }
+        if item.kind == 2 {
+            let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if literal_type.kind != 1 || literal_type.target != 1 { return false }
+        }
+        if item.kind == 3 {
+            let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if literal_type.kind != 1 || literal_type.target < 2 || literal_type.target > 9 { return false }
+        }
+        if item.kind == 4 {
+            let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if literal_type.kind != 8 { return false }
+            let element_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, literal_type.first_arg - 1) - 1)
+            if element_type.kind != 1 || element_type.target != 6 { return false }
+        }
         if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2)) { return false }
         if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 17) { return false }
         if item.kind != 6 && item.kind != 7 && item.operator != 0 { return false }
@@ -1672,6 +1693,13 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
         }
         if (item.kind == 1 || item.kind == 3) && item.field != 0 { return false }
+        var place_owners: U64 = 0
+        var statement_at: U64 = 0
+        while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+            if __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at).place == at + 1 { place_owners = place_owners + 1 }
+            statement_at = statement_at + 1
+        }
+        if place_owners != 1 { return false }
         at = at + 1
     }
     at = 0
@@ -1681,22 +1709,213 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         at = at + 1
     }
     at = 0
+    while at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+        if __s0_buffer_get(CheckedBlockRec, store.control.blocks, at).statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+        let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at)
+        if item.statement == 0 || item.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) || item.next > at { return false }
+        var link_owners: U64 = 0
+        var block_at: U64 = 0
+        while block_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+            var link = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_at).statements
+            while link != 0 {
+                if link == at + 1 { link_owners = link_owners + 1 }
+                link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1).next
+            }
+            block_at = block_at + 1
+        }
+        if link_owners != 1 { return false }
+        at = at + 1
+    }
+    at = 0
     while at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
         let item = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || !lower_environment_valid(store, item.owner, item.environment) { return false }
-        if item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || item.place > __s0_buffer_len(CheckedPlaceRec, store.control.places) || item.body > __s0_buffer_len(CheckedBlockRec, store.control.blocks) || item.alternative > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.kind == 0 || item.kind > 10 || !lower_environment_valid(store, item.owner, item.environment) { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        var statement_owners: U64 = 0
+        var link_at: U64 = 0
+        while link_at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+            if __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_at).statement == at + 1 { statement_owners = statement_owners + 1 }
+            link_at = link_at + 1
+        }
+        if statement_owners != 1 { return false }
+        var expression_site: U64 = 0
+        var needs_expression = false
+        var needs_binding = false
+        var needs_block = false
+        if item.kind == 1 || item.kind == 2 {
+            expression_site = 1
+            needs_expression = true
+            needs_binding = true
+        }
+        if item.kind == 3 {
+            expression_site = 2
+            needs_expression = true
+        }
+        if item.kind == 4 { expression_site = 3 }
+        if item.kind == 5 {
+            expression_site = 4
+            needs_expression = true
+        }
+        if item.kind == 6 { needs_block = true }
+        if item.kind == 7 || item.kind == 8 {
+            expression_site = 5
+            needs_expression = true
+            needs_block = true
+        }
+        if item.kind == 9 {
+            expression_site = 6
+            needs_expression = true
+            needs_binding = true
+            needs_block = true
+        }
+        if item.kind == 10 {
+            expression_site = 8
+            needs_expression = true
+            needs_binding = true
+        }
+        if needs_expression && (item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions)) { return false }
+        if !needs_expression && item.kind != 4 && item.expression != 0 { return false }
+        if item.expression != 0 {
+            if item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1)
+            if expression.owner != item.owner || expression.site_kind != expression_site || expression.site_syntax != item.syntax { return false }
+        }
+        if item.kind == 3 {
+            if item.place == 0 || item.place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
+            let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, item.place - 1)
+            if place.owner != item.owner || place.checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+        } else { if item.place != 0 { return false } }
+        if needs_binding {
+            if item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) { return false }
+            let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
+            if binding.owner != item.owner || binding.kind != 2 || binding.syntax != item.syntax { return false }
+            if item.kind == 1 && binding.mutable != 0 { return false }
+            if item.kind == 2 && binding.mutable != 1 { return false }
+            if item.kind == 10 && binding.checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+        } else { if item.binding != 0 { return false } }
+        if needs_block {
+            if item.body == 0 || item.body > __s0_buffer_len(CheckedBlockRec, store.control.blocks) || __s0_buffer_get(CheckedBlockRec, store.control.blocks, item.body - 1).owner != item.owner { return false }
+        }
+        if item.kind == 10 {
+            if item.body == 0 || item.body > __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) { return false }
+            let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, item.body - 1)
+            if cleanup.owner != item.owner || cleanup.syntax != item.syntax || cleanup.environment != item.environment || cleanup.binding != item.binding || cleanup.initializer != item.expression { return false }
+        }
+        if !needs_block && item.kind != 10 && item.body != 0 { return false }
+        if item.kind == 7 {
+            if item.alternative != 0 && (item.alternative > __s0_buffer_len(CheckedBlockRec, store.control.blocks) || __s0_buffer_get(CheckedBlockRec, store.control.blocks, item.alternative - 1).owner != item.owner) { return false }
+        } else { if item.alternative != 0 { return false } }
+        if item.kind == 7 || item.kind == 8 {
+            let condition_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type - 1)
+            if condition_type.kind != 1 || condition_type.target != 1 { return false }
+        }
+        if item.kind == 9 {
+            let sequence = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type - 1)
+            if sequence.kind != 8 || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(U64, store.type_args, sequence.first_arg - 1) { return false }
+        }
+        if item.kind == 1 || item.kind == 2 {
+            if __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+        }
+        if item.kind == 4 {
+            var result_role: U64 = 6
+            if owner.kind == 13 { result_role = 8 }
+            let result_use = lower_use_by_role(store, item.owner, result_role, 0)
+            if result_use == 0 { return false }
+            let result_type = __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type
+            if item.expression == 0 {
+                let checked_result = __s0_buffer_get(CheckedTypeRec, store.types, result_type - 1)
+                if checked_result.kind != 1 || checked_result.target != 12 { return false }
+            } else { if __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type != result_type { return false } }
+        }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
         let item = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || !lower_environment_valid(store, item.owner, item.environment) || item.statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_environment_valid(store, item.owner, item.environment) || item.statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) || item.guaranteed_return > 1 { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        var parent_count: U64 = 0
+        var statement_at: U64 = 0
+        while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
+            if statement.body == at + 1 && statement.kind != 10 { parent_count = parent_count + 1 }
+            if statement.alternative == at + 1 { parent_count = parent_count + 1 }
+            statement_at = statement_at + 1
+        }
+        if parent_count > 1 { return false }
+        if parent_count == 0 {
+            var owner_roots: U64 = 0
+            var root_at: U64 = 0
+            while root_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+                let candidate = __s0_buffer_get(CheckedBlockRec, store.control.blocks, root_at)
+                if candidate.owner == item.owner {
+                    var candidate_parents: U64 = 0
+                    statement_at = 0
+                    while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
+                        if (statement.body == root_at + 1 && statement.kind != 10) || statement.alternative == root_at + 1 { candidate_parents = candidate_parents + 1 }
+                        statement_at = statement_at + 1
+                    }
+                    if candidate_parents == 0 { owner_roots = owner_roots + 1 }
+                }
+                root_at = root_at + 1
+            }
+            if owner_roots != 1 { return false }
+        }
+        var link = item.statements
+        while link != 0 {
+            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1).statement - 1)
+            if statement.owner != item.owner { return false }
+            link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1).next
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if (owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13 {
+            var root_count: U64 = 0
+            var block_at: U64 = 0
+            while block_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
+                let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_at)
+                if block.owner == at + 1 {
+                    var parent_count: U64 = 0
+                    var statement_at: U64 = 0
+                    while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
+                        if (statement.body == block_at + 1 && statement.kind != 10) || statement.alternative == block_at + 1 { parent_count = parent_count + 1 }
+                        statement_at = statement_at + 1
+                    }
+                    if parent_count == 0 { root_count = root_count + 1 }
+                }
+                block_at = block_at + 1
+            }
+            if root_count != 1 { return false }
+        }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CheckedMatchRec, store.control.matches) {
         let item = __s0_buffer_get(CheckedMatchRec, store.control.matches, at)
-        if item.owner == 0 || item.scrutinee == 0 || item.scrutinee > __s0_buffer_len(CheckedExprRec, store.expressions) || item.first_arm == 0 || item.first_arm - 1 + item.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.scrutinee == 0 || item.scrutinee > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.scrutinee_type) || !lower_type_concrete(store, item.checked_type) || item.arm_count == 0 || item.first_arm == 0 || item.first_arm - 1 + item.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        let scrutinee = __s0_buffer_get(CheckedExprRec, store.expressions, item.scrutinee - 1)
+        if scrutinee.owner != item.owner || scrutinee.checked_type != item.scrutinee_type { return false }
+        var match_owners: U64 = 0
+        var expression_at: U64 = 0
+        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
+            if expression.kind == 12 && expression.parameter_use == at + 1 { match_owners = match_owners + 1 }
+            expression_at = expression_at + 1
+        }
+        if match_owners != 1 { return false }
         var ordinal: U64 = 0
         while ordinal < item.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal)
@@ -1708,30 +1927,139 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
     at = 0
     while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
         let item = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
-        if item.owner == 0 || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || !lower_environment_valid(store, item.owner, item.environment) || item.body == 0 || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
-        if item.binding != 0 && (item.binding > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).owner != item.owner) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || item.body == 0 || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+        let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.checked_match - 1)
+        let body = __s0_buffer_get(CheckedExprRec, store.expressions, item.body - 1)
+        if checked_match.owner != item.owner || body.owner != item.owner || body.checked_type != checked_match.checked_type { return false }
+        var arm_owners: U64 = 0
+        var match_at: U64 = 0
+        while match_at < __s0_buffer_len(CheckedMatchRec, store.control.matches) {
+            let candidate = __s0_buffer_get(CheckedMatchRec, store.control.matches, match_at)
+            if candidate.arm_count != 0 && at + 1 >= candidate.first_arm && at + 1 < candidate.first_arm + candidate.arm_count { arm_owners = arm_owners + 1 }
+            match_at = match_at + 1
+        }
+        if arm_owners != 1 { return false }
+        let scrutinee_type = __s0_buffer_get(CheckedTypeRec, store.types, checked_match.scrutinee_type - 1)
+        var payload_type: U64 = 0
+        if item.variant_kind == 0 {
+            if scrutinee_type.kind != 7 || item.variant_use == 0 || item.variant_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return false }
+            let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, item.variant_use - 1)
+            if variant.owner != scrutinee_type.target || variant.role != 2 { return false }
+            payload_type = variant.checked_type
+        } else {
+            if item.variant_use != 0 { return false }
+            if item.variant_kind == 1 || item.variant_kind == 2 {
+                if scrutinee_type.kind != 9 { return false }
+                if item.variant_kind == 2 { payload_type = __s0_buffer_get(U64, store.type_args, scrutinee_type.first_arg - 1) }
+            }
+            if item.variant_kind == 3 || item.variant_kind == 4 {
+                if scrutinee_type.kind != 10 { return false }
+                var payload_ordinal: U64 = 0
+                if item.variant_kind == 4 { payload_ordinal = 1 }
+                payload_type = __s0_buffer_get(U64, store.type_args, scrutinee_type.first_arg - 1 + payload_ordinal)
+            }
+            if (item.variant_kind == 5 || item.variant_kind == 6) && scrutinee_type.kind != 5 { return false }
+        }
+        if payload_type == 0 {
+            if item.binding != 0 { return false }
+        } else {
+            if item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) { return false }
+            let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
+            if binding.owner != item.owner || binding.kind != 2 { return false }
+            if lower_type_concrete(store, payload_type) && binding.checked_type != payload_type { return false }
+            var binding_active = false
+            var environment = item.environment
+            while environment != 0 {
+                let active = __s0_buffer_get(EnvironmentRec, store.environments, environment - 1)
+                if active.binding == item.binding { binding_active = true }
+                environment = active.parent
+            }
+            if !binding_active { return false }
+        }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CheckedTryRec, store.control.tries) {
         let item = __s0_buffer_get(CheckedTryRec, store.control.tries, at)
-        if item.owner == 0 || item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.result_type) || !lower_type_concrete(store, item.ok_type) || !lower_type_concrete(store, item.error_type) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.result_type) || !lower_type_concrete(store, item.ok_type) || !lower_type_concrete(store, item.error_type) { return false }
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1)
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, item.result_type - 1)
+        if expression.owner != item.owner || expression.checked_type != item.result_type || result.kind != 10 || __s0_buffer_get(U64, store.type_args, result.first_arg - 1) != item.ok_type || __s0_buffer_get(U64, store.type_args, result.first_arg) != item.error_type { return false }
+        var try_owners: U64 = 0
+        var expression_at: U64 = 0
+        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+            let candidate = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
+            if candidate.kind == 13 && candidate.parameter_use == at + 1 { try_owners = try_owners + 1 }
+            expression_at = expression_at + 1
+        }
+        if try_owners != 1 { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        var result_role: U64 = 6
+        if owner.kind == 13 { result_role = 8 }
+        let owner_result_use = lower_use_by_role(store, item.owner, result_role, 0)
+        if owner_result_use == 0 { return false }
+        let owner_result = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, owner_result_use - 1).checked_type - 1)
+        if owner_result.kind != 10 || __s0_buffer_get(U64, store.type_args, owner_result.first_arg) != item.error_type { return false }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
         let item = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, at)
-        if item.owner == 0 || !lower_environment_valid(store, item.owner, item.environment) || item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) || item.callback == 0 || item.callback > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_environment_valid(store, item.owner, item.environment) || item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) || item.callback == 0 || item.callback > __s0_buffer_len(SymbolRec, store.symbols) { return false }
         let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
-        if binding.owner != item.owner || item.initializer == 0 || item.initializer > __s0_buffer_len(CheckedExprRec, store.expressions) || item.normal_exit != 1 || item.return_exit != 1 || item.try_exit != 1 { return false }
+        if binding.owner != item.owner || binding.kind != 2 || binding.syntax != item.syntax || item.initializer == 0 || item.initializer > __s0_buffer_len(CheckedExprRec, store.expressions) || item.normal_exit != 1 || item.return_exit != 1 || item.try_exit != 1 { return false }
+        let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, item.initializer - 1)
+        if initializer.owner != item.owner || initializer.checked_type != binding.checked_type || initializer.site_kind != 8 || initializer.site_syntax != item.syntax { return false }
+        let callback = __s0_buffer_get(SymbolRec, store.symbols, item.callback - 1)
+        if callback.kind != 12 || callback.type_arity != 0 || callback.declaration != item.callback { return false }
+        let callback_parameter = lower_use_by_role(store, item.callback, 5, 0)
+        let callback_result = lower_use_by_role(store, item.callback, 6, 0)
+        if callback_parameter == 0 || callback_result == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, callback_parameter - 1).checked_type != binding.checked_type { return false }
+        if lower_use_by_role(store, item.callback, 5, 1) != 0 { return false }
+        let callback_result_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_result - 1).checked_type - 1)
+        if callback_result_type.kind != 1 || callback_result_type.target != 12 { return false }
         var environment_at: U64 = 0
-        var found = false
+        var activation_count: U64 = 0
         while environment_at < __s0_buffer_len(EnvironmentRec, store.environments) {
             let environment = __s0_buffer_get(EnvironmentRec, store.environments, environment_at)
-            if environment.owner == item.owner && environment.parent == item.environment && environment.binding == item.binding { found = true }
+            if environment.owner == item.owner && environment.parent == item.environment && environment.binding == item.binding { activation_count = activation_count + 1 }
             environment_at = environment_at + 1
         }
-        if !found { return false }
+        if activation_count != 1 { return false }
+        var cleanup_owners: U64 = 0
+        var statement_at: U64 = 0
+        while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
+            if statement.kind == 10 && statement.body == at + 1 { cleanup_owners = cleanup_owners + 1 }
+            statement_at = statement_at + 1
+        }
+        if cleanup_owners != 1 { return false }
+        var duplicate_count: U64 = 0
+        var cleanup_at: U64 = 0
+        while cleanup_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+            let candidate = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_at)
+            if candidate.owner == item.owner && candidate.environment == item.environment && candidate.binding == item.binding { duplicate_count = duplicate_count + 1 }
+            cleanup_at = cleanup_at + 1
+        }
+        if duplicate_count != 1 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        var expression_owners: U64 = 0
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if expression.site_kind != 0 { expression_owners = expression_owners + 1 }
+        var child_at: U64 = 0
+        while child_at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+            if __s0_buffer_get(CheckedExprChildRec, store.expression_children, child_at).expression == at + 1 { expression_owners = expression_owners + 1 }
+            child_at = child_at + 1
+        }
+        var arm_at: U64 = 0
+        while arm_at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
+            if __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, arm_at).body == at + 1 { expression_owners = expression_owners + 1 }
+            arm_at = arm_at + 1
+        }
+        if expression_owners != 1 { return false }
         at = at + 1
     }
     return true

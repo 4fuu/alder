@@ -75,6 +75,10 @@ fn main(d: Domain) -> I32 {
 	if host_path_is(0, "!alder-core-lower-bad-c") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad-u") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad-n") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower-bad-ca") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower-bad-eliteral") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower-bad-j") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower-bad-gactive") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
@@ -114,7 +118,7 @@ func coreConformanceWrapper() string {
 	checker = strings.ReplaceAll(checker, " Ok(", "\n Ok(")
 	checker = strings.Replace(checker, "fn loaded(d: Domain,state: State) -> I32 { return match load_sources(d,state) {\n\n Err(e)=>3\n Ok(s)=>pi_nodes(d,s) } }", checkerSentinelLoader, 1)
 	checker = strings.Replace(checker, "fn checker_good(state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", "fn checker_good(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", 1)
-	checker = strings.Replace(checker, "if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }", "if host_path_is(0, \"!alder-core-lower\") || host_path_is(0, \"!alder-core-lower-bad\") || host_path_is(0, \"!alder-core-lower-bad-k\") || host_path_is(0, \"!alder-core-lower-bad-m\") || host_path_is(0, \"!alder-core-lower-bad-w\") || host_path_is(0, \"!alder-core-lower-bad-x\") || host_path_is(0, \"!alder-core-lower-bad-g\") || host_path_is(0, \"!alder-core-lower-bad-v\") || host_path_is(0, \"!alder-core-lower-bad-h\") || host_path_is(0, \"!alder-core-lower-bad-q\") || host_path_is(0, \"!alder-core-lower-bad-l\") || host_path_is(0, \"!alder-core-lower-bad-e\") || host_path_is(0, \"!alder-core-lower-bad-ea\") || host_path_is(0, \"!alder-core-lower-bad-y\") || host_path_is(0, \"!alder-core-lower-bad-c\") || host_path_is(0, \"!alder-core-lower-bad-u\") || host_path_is(0, \"!alder-core-lower-bad-n\") { return lower_mode(d, state, parse, store) }", 1)
+	checker = strings.Replace(checker, "if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }", "if host_path_is(0, \"!alder-core-lower\") || host_path_is(0, \"!alder-core-lower-bad\") || host_path_is(0, \"!alder-core-lower-bad-k\") || host_path_is(0, \"!alder-core-lower-bad-m\") || host_path_is(0, \"!alder-core-lower-bad-w\") || host_path_is(0, \"!alder-core-lower-bad-x\") || host_path_is(0, \"!alder-core-lower-bad-g\") || host_path_is(0, \"!alder-core-lower-bad-v\") || host_path_is(0, \"!alder-core-lower-bad-h\") || host_path_is(0, \"!alder-core-lower-bad-q\") || host_path_is(0, \"!alder-core-lower-bad-l\") || host_path_is(0, \"!alder-core-lower-bad-e\") || host_path_is(0, \"!alder-core-lower-bad-ea\") || host_path_is(0, \"!alder-core-lower-bad-y\") || host_path_is(0, \"!alder-core-lower-bad-c\") || host_path_is(0, \"!alder-core-lower-bad-u\") || host_path_is(0, \"!alder-core-lower-bad-n\") || host_path_is(0, \"!alder-core-lower-bad-ca\") || host_path_is(0, \"!alder-core-lower-bad-eliteral\") || host_path_is(0, \"!alder-core-lower-bad-j\") || host_path_is(0, \"!alder-core-lower-bad-gactive\") { return lower_mode(d, state, parse, store) }", 1)
 	checker = strings.Replace(checker, "fn checker_done(state: State, parse: ParseStore, result: CheckResult) -> I32", "fn checker_done(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32", 1)
 	checker = strings.Replace(checker, "CheckGood(store) => checker_good(state, parse, store)", "CheckGood(store) => checker_good(d, state, parse, store)", 1)
 	checker = strings.Replace(checker, "Ok(result) => checker_done(output.state, output.store, result)", "Ok(result) => checker_done(d, output.state, output.store, result)", 1)
@@ -151,11 +155,17 @@ fn lower_bad_control(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec)
     if host_path_is(0, "!alder-core-lower-bad-w") { control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: control.statements, places: control.places, matches: control.matches, match_arms: try __s0_buffer_append(CheckedMatchArmRec, d, control.match_arms, CheckedMatchArmRec(owner: 999, syntax: 1, checked_match: 999, variant_use: 0, variant_kind: 7, binding: 0, environment: 0, body: 1)), tries: control.tries, cleanups: control.cleanups) }
     if host_path_is(0, "!alder-core-lower-bad-x") { control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: control.statements, places: control.places, matches: control.matches, match_arms: control.match_arms, tries: try __s0_buffer_append(CheckedTryRec, d, control.tries, CheckedTryRec(owner: 999, syntax: 1, expression: 999, result_type: 1, ok_type: 1, error_type: 1)), cleanups: control.cleanups) }
     if host_path_is(0, "!alder-core-lower-bad-g") { control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: control.statements, places: control.places, matches: control.matches, match_arms: control.match_arms, tries: control.tries, cleanups: try __s0_buffer_append(CheckedCleanupRec, d, control.cleanups, CheckedCleanupRec(owner: 999, syntax: 1, environment: 999, binding: 999, initializer: 999, callback: 999, normal_exit: 1, return_exit: 1, try_exit: 1))) }
+    if host_path_is(0, "!alder-core-lower-bad-j") { control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: try __s0_buffer_append(CheckedStatementRec, d, control.statements, CheckedStatementRec(owner: 1, syntax: 1, kind: 99, environment: 0, expression: 0, place: 0, binding: 0, body: 0, alternative: 0)), places: control.places, matches: control.matches, match_arms: control.match_arms, tries: control.tries, cleanups: control.cleanups) }
+    if host_path_is(0, "!alder-core-lower-bad-gactive") {
+        let cleanup = __s0_buffer_get(CheckedCleanupRec, control.cleanups, 0)
+        control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: control.statements, places: control.places, matches: control.matches, match_arms: control.match_arms, tries: control.tries, cleanups: try __s0_buffer_append(CheckedCleanupRec, d, control.cleanups, cleanup))
+    }
     return Ok(lower_bad_done(lower_checked(d, state, spans, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: control, diagnostics: store.diagnostics))))
 }
 fn lower_bad_family(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(I32, __s0_Error) {
     var symbols = store.symbols
     var types = store.types
+    var type_args = store.type_args
     var uses = store.uses
     var locals = store.locals
     var environments = store.environments
@@ -173,7 +183,12 @@ fn lower_bad_family(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec),
     if host_path_is(0, "!alder-core-lower-bad-c") { types = try __s0_buffer_append(CheckedTypeRec, d, types, CheckedTypeRec(kind: 11, syntax: 0, target: 0, first_arg: 0, arg_count: 0)) }
     if host_path_is(0, "!alder-core-lower-bad-u") { uses = try __s0_buffer_append(DeclTypeUseRec, d, uses, DeclTypeUseRec(owner: 999, role: 1, ordinal: 0, node: 1, source: 0, name_start: 0, name_end: 0, syntax: 1, checked_type: 1)) }
     if host_path_is(0, "!alder-core-lower-bad-n") { environments = try __s0_buffer_append(EnvironmentRec, d, environments, EnvironmentRec(owner: 999, parent: 0, binding: 0)) }
-    let bad = CheckStore(symbols: symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: control, diagnostics: store.diagnostics)
+    if host_path_is(0, "!alder-core-lower-bad-ca") {
+        type_args = try __s0_buffer_append(U64, d, type_args, __s0_buffer_len(CheckedTypeRec, types) + 1)
+        types = try __s0_buffer_append(CheckedTypeRec, d, types, CheckedTypeRec(kind: 8, syntax: 0, target: 0, first_arg: __s0_buffer_len(U64, type_args), arg_count: 1))
+    }
+    if host_path_is(0, "!alder-core-lower-bad-eliteral") { expressions = try __s0_buffer_append(CheckedExprRec, d, expressions, CheckedExprRec(owner: 1, syntax: 1, kind: 2, checked_type: 9, parameter_use: 0, bool_value: 1, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: 4, site_syntax: 1)) }
+    let bad = CheckStore(symbols: symbols, type_params: store.type_params, types: types, type_args: type_args, type_annotations: store.type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: control, diagnostics: store.diagnostics)
     return Ok(lower_bad_done(lower_checked(d, state, spans, bad)))
 }
 fn lower_mode_spans(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> I32 {
@@ -183,11 +198,11 @@ fn lower_mode_spans(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec),
             Ok(blocks) => lower_bad_blocks(d, state, spans, store, blocks)
         }
     }
-    if host_path_is(0, "!alder-core-lower-bad-k") || host_path_is(0, "!alder-core-lower-bad-m") || host_path_is(0, "!alder-core-lower-bad-w") || host_path_is(0, "!alder-core-lower-bad-x") || host_path_is(0, "!alder-core-lower-bad-g") { return match lower_bad_control(d, state, spans, store) {
+    if host_path_is(0, "!alder-core-lower-bad-k") || host_path_is(0, "!alder-core-lower-bad-m") || host_path_is(0, "!alder-core-lower-bad-w") || host_path_is(0, "!alder-core-lower-bad-x") || host_path_is(0, "!alder-core-lower-bad-g") || host_path_is(0, "!alder-core-lower-bad-j") || host_path_is(0, "!alder-core-lower-bad-gactive") { return match lower_bad_control(d, state, spans, store) {
         Err(error) => 3
         Ok(status) => status
     } }
-    if host_path_is(0, "!alder-core-lower-bad-v") || host_path_is(0, "!alder-core-lower-bad-h") || host_path_is(0, "!alder-core-lower-bad-q") || host_path_is(0, "!alder-core-lower-bad-l") || host_path_is(0, "!alder-core-lower-bad-e") || host_path_is(0, "!alder-core-lower-bad-ea") || host_path_is(0, "!alder-core-lower-bad-y") || host_path_is(0, "!alder-core-lower-bad-c") || host_path_is(0, "!alder-core-lower-bad-u") || host_path_is(0, "!alder-core-lower-bad-n") { return match lower_bad_family(d, state, spans, store) {
+    if host_path_is(0, "!alder-core-lower-bad-v") || host_path_is(0, "!alder-core-lower-bad-h") || host_path_is(0, "!alder-core-lower-bad-q") || host_path_is(0, "!alder-core-lower-bad-l") || host_path_is(0, "!alder-core-lower-bad-e") || host_path_is(0, "!alder-core-lower-bad-ea") || host_path_is(0, "!alder-core-lower-bad-y") || host_path_is(0, "!alder-core-lower-bad-c") || host_path_is(0, "!alder-core-lower-bad-u") || host_path_is(0, "!alder-core-lower-bad-n") || host_path_is(0, "!alder-core-lower-bad-ca") || host_path_is(0, "!alder-core-lower-bad-eliteral") { return match lower_bad_family(d, state, spans, store) {
         Err(error) => 3
         Ok(status) => status
     } }
