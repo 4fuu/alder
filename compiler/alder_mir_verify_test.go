@@ -255,6 +255,35 @@ fn bad_aggregate_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_
     return Ok(done.store)
 }
 
+fn domain_lifetime_fixture(d: Domain, initial: MirStore, invalidate: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle_step = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    let reference = try mir_intern_type(d, handle_step.store, mir_type_kind_safe_mut(), mir_type_u8(), 0, 0, empty, 0)
+    let handle = handle_step.type_id
+    let function = try mir_add_function(d, reference.store, "domain_lifetime", mir_type_unit())
+    let root = try mir_add_function_param(d, function.store, function.id, 0, "root", handle)
+    let size = try mir_add_function_param(d, root.store, function.id, 1, "size", mir_type_u64())
+    let entry = try mir_add_block(d, size.store, function.id, 0, "entry")
+    let domain_value = try mir_add_value(d, entry.store, function.id, "domain", handle, mir_value_def_instruction(), entry.id, 1)
+    let create = try mir_add_instruction(d, domain_value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_domain_create(), result: domain_value.id, place: 0, type_op: 0, a: root.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let pointer = try mir_add_value(d, create.store, function.id, "pointer", reference.type_id, mir_value_def_instruction(), entry.id, 2)
+    let allocate = try mir_add_instruction(d, pointer.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_alloc(), result: pointer.id, place: 0, type_op: mir_type_u8(), a: domain_value.id, b: size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    var store = allocate.store
+    var ordinal: U64 = 2
+    if invalidate { let destroy = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: domain_value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+store = destroy.store
+ordinal = ordinal + 1 }
+    let place = try mir_add_place(d, store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: pointer.id))
+    let loaded = try mir_add_value(d, place.store, function.id, "loaded", mir_type_u8(), mir_value_def_instruction(), entry.id, ordinal + 1)
+    let read = try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    ordinal = ordinal + 1
+    store = read.store
+    if !invalidate { let destroy = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: domain_value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+store = destroy.store }
+    let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -406,6 +435,10 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !expect_verification(37, readonly_store, mir_vdiag(5, mir_vdiag_readonly_place(), 1, 1, 1, 0, 1, mir_type_u64(), 0, 0, mir_type_u64(), 1)) { return Ok(false) }
     let bad_aggregate = try mir_verify_module(d, try bad_aggregate_fixture(d, try mir_store_new(d)), 3)
     if !expect_verification(38, bad_aggregate, mir_vdiag(5, mir_vdiag_bad_aggregate(), 1, 1, 1, 0, 1, 0, 0, 0, 0, 1)) { return Ok(false) }
+    let domain_live = try mir_verify_module(d, try domain_lifetime_fixture(d, try mir_store_new(d), false), 3)
+    if !emit_verification(39, domain_live) { return Ok(false) }
+    let domain_dead = try mir_verify_module(d, try domain_lifetime_fixture(d, try mir_store_new(d), true), 3)
+    if !expect_verification(40, domain_dead, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 1, 1, 4, 0, 0, 0, 0, 0, 0, 4)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -426,7 +459,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

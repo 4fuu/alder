@@ -14,7 +14,7 @@ import (
 )
 
 // coreConformanceSourceManifest is the exact fixed union closure for the
-// checker, MIR printer, and MIR verifier V1-V5 harnesses. Production main.al is
+// checker, MIR printer, and MIR verifier V1-V6 harnesses. Production main.al is
 // deliberately excluded, and no source is discovered from the filesystem.
 var coreConformanceSourceManifest = []string{
 	"checker.al",
@@ -33,6 +33,7 @@ var coreConformanceSourceManifest = []string{
 	"verify_phase3.al",
 	"verify_phase4.al",
 	"verify_phase5.al",
+	"verify_phase6.al",
 }
 
 const coreConformanceDispatch = `
@@ -164,5 +165,5 @@ func TestAlderCoreConformance(t *testing.T) {
 
 	t.Run("checker", func(t *testing.T) { runCheckerConformance(t, exe) })
 	t.Run("printer", func(t *testing.T) { runMIRPrinterConformance(t, exe) })
-	t.Run("verifier-v1-v5", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
+	t.Run("verifier-v1-v6", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
 }
