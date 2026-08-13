@@ -7,6 +7,7 @@ fn mir_verify_phase_dominance() -> U64 { return 4 }
 fn mir_verify_phase_typing() -> U64 { return 5 }
 fn mir_verify_phase_domains() -> U64 { return 6 }
 fn mir_verify_phase_cleanup() -> U64 { return 7 }
+fn mir_verify_phase_tables() -> U64 { return 8 }
 fn mir_vdiag_bad_version() -> U64 { return 1 }
 fn mir_vdiag_missing_primitives() -> U64 { return 2 }
 fn mir_vdiag_bad_kind() -> U64 { return 3 }
@@ -64,6 +65,15 @@ fn mir_vdiag_loop_block_resource() -> U64 { return 54 }
 fn mir_vdiag_loop_store_resource() -> U64 { return 55 }
 fn mir_vdiag_cleanup_state() -> U64 { return 56 }
 fn mir_vdiag_cleanup_exit() -> U64 { return 57 }
+fn mir_vdiag_table_lookup_consumption() -> U64 { return 58 }
+fn mir_vdiag_table_failure_bypass() -> U64 { return 59 }
+fn mir_vdiag_table_mutation_before_consume() -> U64 { return 60 }
+fn mir_vdiag_table_view_source() -> U64 { return 61 }
+fn mir_vdiag_table_view_region() -> U64 { return 62 }
+fn mir_vdiag_table_view_end_count() -> U64 { return 63 }
+fn mir_vdiag_table_view_after_end() -> U64 { return 64 }
+fn mir_vdiag_table_view_failure_bypass() -> U64 { return 65 }
+fn mir_vdiag_table_view_active_mutation() -> U64 { return 66 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {

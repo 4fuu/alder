@@ -441,6 +441,46 @@ fn cleanup_lifo_fixture(d: Domain, initial: MirStore, parent_last: Bool) -> Resu
     return Ok((try mir_add_terminator(d, end.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 
+// mode 0 is valid, 1 leaves the lookup unconsumed, and 2 mutates while its
+// checked-extracted view is active.
+fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let row = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "Row")
+    let field = try mir_add_type_part(d, row.store, mir_type_part_field(), row.type_id, 0, "x", mir_type_u64())
+    let table = try mir_intern_type(d, field, mir_type_kind_table(), row.type_id, 0, 0, empty, 0)
+    let id = try mir_intern_type(d, table.store, mir_type_kind_id(), row.type_id, 0, 0, empty, 0)
+    let view = try mir_intern_type(d, id.store, mir_type_kind_table_view(), row.type_id, 0, 0, empty, 0)
+    let option = try mir_intern_type(d, view.store, mir_type_kind_option(), view.type_id, 0, 0, empty, 0)
+    let function = try mir_add_function(d, option.store, "table_case", mir_type_unit())
+    let table_arg = try mir_add_function_param(d, function.store, function.id, 0, "table", table.type_id)
+    let id_arg = try mir_add_function_param(d, table_arg.store, function.id, 1, "id", id.type_id)
+    let row_arg = try mir_add_function_param(d, id_arg.store, function.id, 2, "row", row.type_id)
+    let entry = try mir_add_block(d, row_arg.store, function.id, 0, "entry")
+    let failed = try mir_add_block(d, entry.store, function.id, 1, "failed")
+    let found = try mir_add_value(d, failed.store, function.id, "found", option.type_id, mir_value_def_instruction(), entry.id, 1)
+    let lookup = try mir_add_instruction(d, found.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_table_lookup(), result: found.id, place: 0, type_op: 0, a: table_arg.id, b: id_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    var store = lookup.store
+    var ordinal: U64 = 1
+    if mode != 1 {
+        let value = try mir_add_value(d, store, function.id, "view", view.type_id, mir_value_def_instruction(), entry.id, 2)
+        let named = try mir_append_name(d, value.store, "some")
+        let extract = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_enum_payload_checked(), result: value.id, place: 0, type_op: 0, a: found.id, b: 0, c: 0, target: failed.id, name_start: named.start, name_end: named.end))
+        store = extract.store
+        ordinal = ordinal + 1
+        if mode == 2 {
+            let inserted = try mir_add_value(d, store, function.id, "inserted", id.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+            let insert = try mir_add_instruction(d, inserted.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_insert(), result: inserted.id, place: 0, type_op: 0, a: table_arg.id, b: row_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
+            store = insert.store
+            ordinal = ordinal + 1
+        }
+        let ended = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_view_end(), result: 0, place: 0, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+        store = ended.store
+    }
+    let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let failed_done = try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(failed_done.store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -614,6 +654,18 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(48, cleanup_lifo) { return Ok(false) }
     let cleanup_bad_lifo = try mir_verify_module(d, try cleanup_lifo_fixture(d, try mir_store_new(d), true), 3)
     if !expect_verification(49, cleanup_bad_lifo, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 2, 1, 6, 0, 1, 0, 0, 0, 0, 2)) { return Ok(false) }
+
+    let table_ok = try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 0), 3)
+    if !emit_verification(50, table_ok) { return Ok(false) }
+    let table_unconsumed = try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 1), 3)
+    if !emit_verification(51, table_unconsumed) { return Ok(false) }
+    let table_mutation = try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 2), 3)
+    if !emit_verification(52, table_mutation) { return Ok(false) }
+    let table_raw_base = try table_v8_fixture(d, try mir_store_new(d), 1)
+    let no_table_terms = try __s0_buffer_new(MirTermRec, d)
+    let table_fail_fast = try mir_verify_module(d, mir_with_terminators(table_raw_base, no_table_terms), 3)
+    if !emit_verification(53, table_fail_fast) { return Ok(false) }
+
     return Ok(true)
 }
 
@@ -634,7 +686,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
