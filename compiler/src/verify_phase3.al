@@ -155,12 +155,14 @@ ci = ci + 1 }
     }
     return Ok(out)
 }
-fn mir_verify_1_3(d: Domain, store: MirStore, version: U64) -> Result(MirVerifyOutput, __s0_Error) {
+fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVerifyOutput, __s0_Error) {
     var diagnostics = try __s0_buffer_new(MirVerifyDiagRec, d)
     diagnostics = try mir_vphase1(d, store, version, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase2(d, store, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase3(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase4(d, store, diagnostics)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))
 }

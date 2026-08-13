@@ -412,12 +412,14 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 9. safe/raw pointer boundary validation;
 10. backend precondition validation.
 
-The independent Alder implementation currently provides phases 1–3 over raw
+The independent Alder implementation currently provides phases 1–4 over raw
 `MirStore` records with stable numeric diagnostics and first-failing-phase
-orchestration. It does not yet provide phases 4–10 or authorize production C
-emission. Because the frozen flat store contains no module header record, its
-entry point receives the MIR format version alongside the store; the store's
-IDs, kinds, ownership, and type-part encoding remain unchanged.
+orchestration. Phase 4 includes instruction-boundary dominance, checked
+failure-edge positions, all flat value-use forms, and field-sensitive definite
+local initialization. It does not yet provide phases 5–10 or authorize
+production C emission. Because the frozen flat store contains no module header
+record, `mir_verify_module` receives the MIR format version alongside the store;
+the store's IDs, kinds, ownership, and type-part encoding remain unchanged.
 
 Initial conservative rules:
 

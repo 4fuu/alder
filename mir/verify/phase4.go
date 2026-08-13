@@ -100,8 +100,21 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 		}
 	}
 	universe := make(initSet)
-	for i, local := range f.Locals {
-		addInitializedLeaves(m, local.Type, fmt.Sprintf("%d", i), universe)
+	// Track only leaves that a load can observe. The full local universe can be
+	// enormous in compiler-generated functions, while leaves that are never
+	// loaded cannot affect this analysis or any diagnostic.
+	for _, b := range f.Blocks {
+		for i := range b.Instrs {
+			in := &b.Instrs[i]
+			if in.Op != mir.OpLoad {
+				continue
+			}
+			key, keyOK := localPlaceKey(&in.Place)
+			t, typeOK := m.PlaceType(f, &in.Place)
+			if keyOK && typeOK {
+				addInitializedLeaves(m, t, key, universe, nil)
+			}
+		}
 	}
 	state := make([]initSet, n)
 	for v := 0; v < n; v++ {
@@ -136,7 +149,7 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 						if next == nil {
 							next = make(initSet)
 						}
-						addInitializedLeaves(m, t, key, next)
+						addInitializedLeaves(m, t, key, next, universe)
 					}
 				}
 			}
@@ -201,14 +214,16 @@ func localPlaceKey(p *mir.Place) (string, bool) {
 	}
 }
 
-func addInitializedLeaves(m *mir.Module, t mir.TypeId, key string, set map[string]bool) {
+func addInitializedLeaves(m *mir.Module, t mir.TypeId, key string, set, filter map[string]bool) {
 	ty := &m.Types[t]
 	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
-		set[key] = true
+		if filter == nil || filter[key] {
+			set[key] = true
+		}
 		return
 	}
 	for _, field := range ty.Fields {
-		addInitializedLeaves(m, field.Type, key+"\x00"+field.Name, set)
+		addInitializedLeaves(m, field.Type, key+"\x00"+field.Name, set, filter)
 	}
 }
 
