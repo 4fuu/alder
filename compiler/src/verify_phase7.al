@@ -7,8 +7,19 @@ fn mir_v7_running() -> U64 { return 2 }
 fn mir_v7_ended() -> U64 { return 3 }
 
 type MirV7Node {
+    function: U64
     parent: U64
     entry: U64
+}
+type MirV7RunSet {
+    function: U64
+    instruction: U64
+    active: U64
+}
+type MirV7Analysis {
+    nodes: __s0_Buffer(MirV7Node)
+    run_sets: __s0_Buffer(MirV7RunSet)
+    diagnostics: __s0_Buffer(MirVerifyDiagRec)
 }
 type MirV7Config {
     block: U64
@@ -38,14 +49,14 @@ fn mir_v7_exit_has(xs: __s0_Buffer(MirV7Exit), block: U64) -> Bool { var at: U64
 while at < __s0_buffer_len(MirV7Exit, xs) { if __s0_buffer_get(MirV7Exit, xs, at).block == block { return true }
 at = at + 1 }
 return false }
-fn mir_v7_node(d: Domain, nodes0: __s0_Buffer(MirV7Node), parent: U64, entry: U64) -> Result(__s0_Buffer(MirV7Node), __s0_Error) { var at: U64 = 0
+fn mir_v7_node(d: Domain, nodes0: __s0_Buffer(MirV7Node), function: U64, parent: U64, entry: U64) -> Result(__s0_Buffer(MirV7Node), __s0_Error) { var at: U64 = 0
 while at < __s0_buffer_len(MirV7Node, nodes0) { let n = __s0_buffer_get(MirV7Node, nodes0, at)
-if n.parent == parent && n.entry == entry { return Ok(nodes0) }
+if n.function == function && n.parent == parent && n.entry == entry { return Ok(nodes0) }
 at = at + 1 }
-return __s0_buffer_append(MirV7Node, d, nodes0, MirV7Node(parent: parent, entry: entry)) }
-fn mir_v7_node_id(nodes: __s0_Buffer(MirV7Node), parent: U64, entry: U64) -> U64 { var at: U64 = 0
+return __s0_buffer_append(MirV7Node, d, nodes0, MirV7Node(function: function, parent: parent, entry: entry)) }
+fn mir_v7_node_id(nodes: __s0_Buffer(MirV7Node), function: U64, parent: U64, entry: U64) -> U64 { var at: U64 = 0
 while at < __s0_buffer_len(MirV7Node, nodes) { let n = __s0_buffer_get(MirV7Node, nodes, at)
-if n.parent == parent && n.entry == entry { return at + 1 }
+if n.function == function && n.parent == parent && n.entry == entry { return at + 1 }
 at = at + 1 }
 return 0 }
 fn mir_v7_active_has(nodes: __s0_Buffer(MirV7Node), active0: U64, entry: U64) -> Bool { var active = active0
@@ -61,7 +72,7 @@ return false }
 
 // Removal collects newest-to-oldest IDs, then rebuilds oldest-to-newest.  The
 // canonical node interner ensures equal ordered active sets have equal IDs.
-fn mir_v7_remove(d: Domain, nodes0: __s0_Buffer(MirV7Node), active0: U64, entry: U64) -> Result(MirV7Remove, __s0_Error) { var nodes = nodes0
+fn mir_v7_remove(d: Domain, nodes0: __s0_Buffer(MirV7Node), function: U64, active0: U64, entry: U64) -> Result(MirV7Remove, __s0_Error) { var nodes = nodes0
 var ids = try __s0_buffer_new(U64, d)
 var active = active0
 var found = false
@@ -72,8 +83,8 @@ if !found { return Ok(MirV7Remove(nodes: nodes, active: active0, found: false)) 
 var rebuilt: U64 = 0
 var at = __s0_buffer_len(U64, ids)
 while at > 0 { let id = __s0_buffer_get(U64, ids, at - 1)
-nodes = try mir_v7_node(d, nodes, rebuilt, id)
-rebuilt = mir_v7_node_id(nodes, rebuilt, id)
+nodes = try mir_v7_node(d, nodes, function, rebuilt, id)
+rebuilt = mir_v7_node_id(nodes, function, rebuilt, id)
 at = at - 1 }
 return Ok(MirV7Remove(nodes: nodes, active: rebuilt, found: true)) }
 type MirV7Remove {
@@ -96,8 +107,16 @@ type MirV7Add {
 fn mir_v7_diag(d: Domain, out: __s0_Buffer(MirVerifyDiagRec), kind: U64, function: U64, block: U64, instruction: U64, terminator: U64, scope: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
 return mir_vadd(d, out, mir_vdiag(mir_verify_phase_cleanup(), kind, function, block, instruction, terminator, 0, 0, 0, 0, 0, scope)) }
 
-fn mir_v7_one(d: Domain, store: MirStore, function: U64, scope: U64, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = out0
-var nodes = try __s0_buffer_new(MirV7Node, d)
+fn mir_v7_run_set_has(sets: __s0_Buffer(MirV7RunSet), function: U64, instruction: U64, active: U64) -> Bool { var at: U64 = 0
+while at < __s0_buffer_len(MirV7RunSet, sets) { let x = __s0_buffer_get(MirV7RunSet, sets, at)
+if x.function == function && x.instruction == instruction && x.active == active { return true }
+at = at + 1 }
+return false }
+
+fn mir_v7_one(d: Domain, store: MirStore, function: U64, scope: U64, analysis0: MirV7Analysis) -> Result(MirV7Analysis, __s0_Error) { var analysis = analysis0
+var out = analysis.diagnostics
+var nodes = analysis.nodes
+var run_sets = analysis.run_sets
 var seen = try __s0_buffer_new(MirV7Config, d)
 var queue = try __s0_buffer_new(MirV7Config, d)
 var bad = try __s0_buffer_new(MirV7Bad, d)
@@ -125,17 +144,18 @@ if valid { status = mir_v7_open()
 active = 0 } }
 if x.op == mir_op_cleanup_push() && x.a == scope { relevant = true
 valid = status == mir_v7_open() && !mir_v7_active_has(nodes, active, x.result)
-if valid { nodes = try mir_v7_node(d, nodes, active, x.result)
-active = mir_v7_node_id(nodes, active, x.result) } }
+if valid { nodes = try mir_v7_node(d, nodes, function, active, x.result)
+active = mir_v7_node_id(nodes, function, active, x.result) } }
 if x.op == mir_op_cleanup_disarm() && mir_v7_entry_belongs(store, function, scope, x.a) { relevant = true
-let removed = try mir_v7_remove(d, nodes, active, x.a)
+let removed = try mir_v7_remove(d, nodes, function, active, x.a)
 nodes = removed.nodes
 valid = status == mir_v7_open()
 if valid { valid = removed.found }
 if valid { active = removed.active } }
 if x.op == mir_op_cleanup_scope_run() && x.a == scope { relevant = true
 valid = status == mir_v7_open()
-if valid { status = mir_v7_running() } }
+if valid { if !mir_v7_run_set_has(run_sets, function, iid, active) { run_sets = try __s0_buffer_append(MirV7RunSet, d, run_sets, MirV7RunSet(function: function, instruction: iid, active: active)) }
+status = mir_v7_running() } }
 if x.op == mir_op_cleanup_scope_end() && x.a == scope { relevant = true
 valid = status == mir_v7_running()
 if valid { status = mir_v7_ended()
@@ -174,15 +194,22 @@ while ei < __s0_buffer_len(MirV7Exit, exits) { let e = __s0_buffer_get(MirV7Exit
 if e.block == block { out = try mir_v7_diag(d, out, mir_vdiag_cleanup_exit(), function, block, 0, e.terminator, scope) }
 ei = ei + 1 }
 block = block + 1 }
-return Ok(out) }
+analysis.nodes = nodes
+analysis.run_sets = run_sets
+analysis.diagnostics = out
+return Ok(analysis) }
 
-fn mir_vphase7(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = initial
+fn mir_v7_analyze(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirV7Analysis, __s0_Error) {
+var analysis = MirV7Analysis(nodes: try __s0_buffer_new(MirV7Node, d), run_sets: try __s0_buffer_new(MirV7RunSet, d), diagnostics: initial)
 var function: U64 = 1
 while function <= __s0_buffer_len(MirFunctionRec, store.functions) { var value: U64 = 1
 while mir_vvalue_index(store, function, value) != 0 { let vi = mir_vvalue_index(store, function, value)
 let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if mir_vtype_kind(store, v.value_type) == mir_type_kind_cleanup_scope() && v.def_kind == mir_value_def_instruction() { let iid = mir_v6_instruction_for_value(store, v)
-if iid != 0 && __s0_buffer_get(MirInstrRec, store.instructions, iid - 1).op == mir_op_cleanup_scope_begin() { out = try mir_v7_one(d, store, function, value, out) } }
+if iid != 0 && __s0_buffer_get(MirInstrRec, store.instructions, iid - 1).op == mir_op_cleanup_scope_begin() { analysis = try mir_v7_one(d, store, function, value, analysis) } }
 value = value + 1 }
 function = function + 1 }
-return Ok(out) }
+return Ok(analysis) }
+
+fn mir_vphase7(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+return Ok((try mir_v7_analyze(d, store, initial)).diagnostics) }

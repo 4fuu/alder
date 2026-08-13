@@ -299,6 +299,148 @@ store = end.store }
     return Ok(done.store)
 }
 
+// Modes: 1 destroys and 2 resets through the callback; 3 checks a deferred
+// safe-reference argument after its domain has already been destroyed.
+fn cleanup_callback_effect_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle_step = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    let mark_step = try mir_intern_type(d, handle_step.store, mir_type_kind_domain_mark(), 0, 0, 0, empty, 0)
+    let ref_step = try mir_intern_type(d, mark_step.store, mir_type_kind_safe_mut(), mir_type_u8(), 0, 0, empty, 0)
+    let scope_step = try mir_intern_type(d, ref_step.store, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+    let cleanup_step = try mir_intern_type(d, scope_step.store, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
+    var callback_type = handle_step.type_id
+    if mode == 3 { callback_type = ref_step.type_id }
+    let callback = try mir_add_function(d, cleanup_step.store, "callback", mir_type_unit())
+    let callback_arg = try mir_add_function_param(d, callback.store, callback.id, 0, "argument", callback_type)
+    let callback_entry = try mir_add_block(d, callback_arg.store, callback.id, 0, "entry")
+    var store = callback_entry.store
+    if mode == 1 { store = (try mir_add_instruction(d, store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 0, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: callback_arg.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    if mode == 2 { let mark = try mir_add_value(d, store, callback.id, "mark", mark_step.type_id, mir_value_def_instruction(), callback_entry.id, 1)
+let marked = try mir_add_instruction(d, mark.store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 0, op: mir_op_domain_mark(), result: mark.id, place: 0, type_op: 0, a: callback_arg.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+store = (try mir_add_instruction(d, marked.store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 1, op: mir_op_domain_reset(), result: 0, place: 0, type_op: 0, a: callback_arg.id, b: mark.id, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    if mode == 3 { let place = try mir_add_place(d, store, MirPlaceRec(function: callback.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: callback_arg.id))
+let loaded = try mir_add_value(d, place.store, callback.id, "loaded", mir_type_u8(), mir_value_def_instruction(), callback_entry.id, 1)
+store = (try mir_add_instruction(d, loaded.store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 0, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    store = (try mir_add_terminator(d, store, MirTermRec(function: callback.id, block: callback_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store
+	if mode != 3 {
+		let wrapper = try mir_add_function(d, store, "wrapper", mir_type_unit())
+		let wrapper_domain = try mir_add_function_param(d, wrapper.store, wrapper.id, 0, "domain", handle_step.type_id)
+		let wrapper_entry = try mir_add_block(d, wrapper_domain.store, wrapper.id, 0, "entry")
+		let wrapper_scope = try mir_add_value(d, wrapper_entry.store, wrapper.id, "scope", scope_step.type_id, mir_value_def_instruction(), wrapper_entry.id, 1)
+		let wrapper_begin = try mir_add_instruction(d, wrapper_scope.store, MirInstrRec(function: wrapper.id, block: wrapper_entry.id, ordinal: 0, op: mir_op_cleanup_scope_begin(), result: wrapper_scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		let wrapper_cleanup = try mir_add_value(d, wrapper_begin.store, wrapper.id, "cleanup", cleanup_step.type_id, mir_value_def_instruction(), wrapper_entry.id, 2)
+		let wrapper_push = try mir_add_instruction(d, wrapper_cleanup.store, MirInstrRec(function: wrapper.id, block: wrapper_entry.id, ordinal: 1, op: mir_op_cleanup_push(), result: wrapper_cleanup.id, place: 0, type_op: 0, a: wrapper_scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+		let wrapper_arg = try mir_add_operand(d, wrapper_push.store, MirOperandRec(kind: mir_operand_instruction(), owner: wrapper_push.id, ordinal: 0, edge: 0, value: wrapper_domain.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+		let wrapper_run = try mir_add_instruction(d, wrapper_arg.store, MirInstrRec(function: wrapper.id, block: wrapper_entry.id, ordinal: 2, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: wrapper_scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		let wrapper_end = try mir_add_instruction(d, wrapper_run.store, MirInstrRec(function: wrapper.id, block: wrapper_entry.id, ordinal: 3, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: wrapper_scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		let wrapper_done = try mir_add_terminator(d, wrapper_end.store, MirTermRec(function: wrapper.id, block: wrapper_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+		let caller = try mir_add_function(d, wrapper_done.store, "caller", mir_type_unit())
+		let caller_domain = try mir_add_function_param(d, caller.store, caller.id, 0, "domain", handle_step.type_id)
+		let caller_size = try mir_add_function_param(d, caller_domain.store, caller.id, 1, "size", mir_type_u64())
+		let caller_entry = try mir_add_block(d, caller_size.store, caller.id, 0, "entry")
+		let caller_pointer = try mir_add_value(d, caller_entry.store, caller.id, "pointer", ref_step.type_id, mir_value_def_instruction(), caller_entry.id, 1)
+		let caller_alloc = try mir_add_instruction(d, caller_pointer.store, MirInstrRec(function: caller.id, block: caller_entry.id, ordinal: 0, op: mir_op_alloc(), result: caller_pointer.id, place: 0, type_op: mir_type_u8(), a: caller_domain.id, b: caller_size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+		let call = try mir_add_instruction(d, caller_alloc.store, MirInstrRec(function: caller.id, block: caller_entry.id, ordinal: 1, op: mir_op_call(), result: 0, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: wrapper.id, name_start: 0, name_end: 0))
+		let call_arg = try mir_add_operand(d, call.store, MirOperandRec(kind: mir_operand_instruction(), owner: call.id, ordinal: 0, edge: 0, value: caller_domain.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+		let caller_place = try mir_add_place(d, call_arg.store, MirPlaceRec(function: caller.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: caller_pointer.id))
+		let caller_loaded = try mir_add_value(d, caller_place.store, caller.id, "loaded", mir_type_u8(), mir_value_def_instruction(), caller_entry.id, 3)
+		let caller_load = try mir_add_instruction(d, caller_loaded.store, MirInstrRec(function: caller.id, block: caller_entry.id, ordinal: 2, op: mir_op_load(), result: caller_loaded.id, place: caller_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+		return Ok((try mir_add_terminator(d, caller_load.store, MirTermRec(function: caller.id, block: caller_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+	}
+    let function = try mir_add_function(d, store, "cleanup_effect", mir_type_unit())
+    let domain = try mir_add_function_param(d, function.store, function.id, 0, "domain", handle_step.type_id)
+    let size = try mir_add_function_param(d, domain.store, function.id, 1, "size", mir_type_u64())
+    let entry = try mir_add_block(d, size.store, function.id, 0, "entry")
+    let pointer = try mir_add_value(d, entry.store, function.id, "pointer", ref_step.type_id, mir_value_def_instruction(), entry.id, 1)
+    let allocate = try mir_add_instruction(d, pointer.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_alloc(), result: pointer.id, place: 0, type_op: mir_type_u8(), a: domain.id, b: size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let scope = try mir_add_value(d, allocate.store, function.id, "scope", scope_step.type_id, mir_value_def_instruction(), entry.id, 2)
+    let begin = try mir_add_instruction(d, scope.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_cleanup_scope_begin(), result: scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let cleanup = try mir_add_value(d, begin.store, function.id, "cleanup", cleanup_step.type_id, mir_value_def_instruction(), entry.id, 3)
+    let push = try mir_add_instruction(d, cleanup.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 2, op: mir_op_cleanup_push(), result: cleanup.id, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+    let push_arg = try mir_add_operand(d, push.store, MirOperandRec(kind: mir_operand_instruction(), owner: push.id, ordinal: 0, edge: 0, value: pointer.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    var ordinal: U64 = 3
+    store = push_arg.store
+    store = (try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	ordinal = ordinal + 1
+    let run = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let end = try mir_add_instruction(d, run.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal + 1, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    store = end.store
+    return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+}
+
+fn cleanup_join_fixture(d: Domain, initial: MirStore, use_after: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle_step = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    let ref_step = try mir_intern_type(d, handle_step.store, mir_type_kind_safe_mut(), mir_type_u8(), 0, 0, empty, 0)
+    let scope_step = try mir_intern_type(d, ref_step.store, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+    let cleanup_step = try mir_intern_type(d, scope_step.store, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
+    let callback = try mir_add_function(d, cleanup_step.store, "destroy", mir_type_unit())
+    let callback_domain = try mir_add_function_param(d, callback.store, callback.id, 0, "domain", handle_step.type_id)
+    let callback_entry = try mir_add_block(d, callback_domain.store, callback.id, 0, "entry")
+    let destroy = try mir_add_instruction(d, callback_entry.store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 0, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: callback_domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let callback_done = try mir_add_terminator(d, destroy.store, MirTermRec(function: callback.id, block: callback_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let function = try mir_add_function(d, callback_done.store, "join", mir_type_unit())
+    let domain = try mir_add_function_param(d, function.store, function.id, 0, "domain", handle_step.type_id)
+    let size = try mir_add_function_param(d, domain.store, function.id, 1, "size", mir_type_u64())
+    let choose = try mir_add_function_param(d, size.store, function.id, 2, "choose", mir_type_bool())
+    let entry = try mir_add_block(d, choose.store, function.id, 0, "entry")
+    let left = try mir_add_block(d, entry.store, function.id, 1, "left")
+    let right = try mir_add_block(d, left.store, function.id, 2, "right")
+    let join = try mir_add_block(d, right.store, function.id, 3, "join")
+    let pointer = try mir_add_value(d, join.store, function.id, "pointer", ref_step.type_id, mir_value_def_instruction(), entry.id, 1)
+    let allocate = try mir_add_instruction(d, pointer.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_alloc(), result: pointer.id, place: 0, type_op: mir_type_u8(), a: domain.id, b: size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let scope = try mir_add_value(d, allocate.store, function.id, "scope", scope_step.type_id, mir_value_def_instruction(), entry.id, 2)
+    let begin = try mir_add_instruction(d, scope.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_cleanup_scope_begin(), result: scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let branch = try mir_add_terminator(d, begin.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_branch(), value: choose.id, target: 0, then_block: left.id, else_block: right.id))
+    let left_id = try mir_add_value(d, branch.store, function.id, "left_cleanup", cleanup_step.type_id, mir_value_def_instruction(), left.id, 1)
+    let left_push = try mir_add_instruction(d, left_id.store, MirInstrRec(function: function.id, block: left.id, ordinal: 0, op: mir_op_cleanup_push(), result: left_id.id, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+    let left_arg = try mir_add_operand(d, left_push.store, MirOperandRec(kind: mir_operand_instruction(), owner: left_push.id, ordinal: 0, edge: 0, value: domain.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    let left_done = try mir_add_terminator(d, left_arg.store, MirTermRec(function: function.id, block: left.id, kind: mir_term_jump(), value: 0, target: join.id, then_block: 0, else_block: 0))
+    let right_id = try mir_add_value(d, left_done.store, function.id, "right_cleanup", cleanup_step.type_id, mir_value_def_instruction(), right.id, 1)
+    let right_push = try mir_add_instruction(d, right_id.store, MirInstrRec(function: function.id, block: right.id, ordinal: 0, op: mir_op_cleanup_push(), result: right_id.id, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+    let right_arg = try mir_add_operand(d, right_push.store, MirOperandRec(kind: mir_operand_instruction(), owner: right_push.id, ordinal: 0, edge: 0, value: domain.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    let right_done = try mir_add_terminator(d, right_arg.store, MirTermRec(function: function.id, block: right.id, kind: mir_term_jump(), value: 0, target: join.id, then_block: 0, else_block: 0))
+    let run = try mir_add_instruction(d, right_done.store, MirInstrRec(function: function.id, block: join.id, ordinal: 0, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let end = try mir_add_instruction(d, run.store, MirInstrRec(function: function.id, block: join.id, ordinal: 1, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    var store = end.store
+    if use_after { let place = try mir_add_place(d, store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: pointer.id))
+let loaded = try mir_add_value(d, place.store, function.id, "loaded", mir_type_u8(), mir_value_def_instruction(), join.id, 3)
+store = (try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: join.id, ordinal: 2, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store }
+    return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: join.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+}
+
+fn cleanup_lifo_fixture(d: Domain, initial: MirStore, parent_last: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle_step = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    let scope_step = try mir_intern_type(d, handle_step.store, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+    let cleanup_step = try mir_intern_type(d, scope_step.store, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
+    let callback = try mir_add_function(d, cleanup_step.store, "destroy", mir_type_unit())
+    let callback_domain = try mir_add_function_param(d, callback.store, callback.id, 0, "domain", handle_step.type_id)
+    let callback_entry = try mir_add_block(d, callback_domain.store, callback.id, 0, "entry")
+    let destroy = try mir_add_instruction(d, callback_entry.store, MirInstrRec(function: callback.id, block: callback_entry.id, ordinal: 0, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: callback_domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let callback_done = try mir_add_terminator(d, destroy.store, MirTermRec(function: callback.id, block: callback_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let function = try mir_add_function(d, callback_done.store, "lifo", mir_type_unit())
+    let parent = try mir_add_function_param(d, function.store, function.id, 0, "parent", handle_step.type_id)
+    let entry = try mir_add_block(d, parent.store, function.id, 0, "entry")
+    let child = try mir_add_value(d, entry.store, function.id, "child", handle_step.type_id, mir_value_def_instruction(), entry.id, 1)
+    let create = try mir_add_instruction(d, child.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_domain_create(), result: child.id, place: 0, type_op: 0, a: parent.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let scope = try mir_add_value(d, create.store, function.id, "scope", scope_step.type_id, mir_value_def_instruction(), entry.id, 2)
+    let begin = try mir_add_instruction(d, scope.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_cleanup_scope_begin(), result: scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let first_id = try mir_add_value(d, begin.store, function.id, "first", cleanup_step.type_id, mir_value_def_instruction(), entry.id, 3)
+    let first_push = try mir_add_instruction(d, first_id.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 2, op: mir_op_cleanup_push(), result: first_id.id, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+    var first_arg_value = parent.id
+    if parent_last { first_arg_value = child.id }
+    let first_arg = try mir_add_operand(d, first_push.store, MirOperandRec(kind: mir_operand_instruction(), owner: first_push.id, ordinal: 0, edge: 0, value: first_arg_value, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    let second_id = try mir_add_value(d, first_arg.store, function.id, "second", cleanup_step.type_id, mir_value_def_instruction(), entry.id, 4)
+    let second_push = try mir_add_instruction(d, second_id.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 3, op: mir_op_cleanup_push(), result: second_id.id, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: callback.id, name_start: 0, name_end: 0))
+    var second_arg_value = child.id
+    if parent_last { second_arg_value = parent.id }
+    let second_arg = try mir_add_operand(d, second_push.store, MirOperandRec(kind: mir_operand_instruction(), owner: second_push.id, ordinal: 0, edge: 0, value: second_arg_value, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    let run = try mir_add_instruction(d, second_arg.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 4, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let end = try mir_add_instruction(d, run.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 5, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    return Ok((try mir_add_terminator(d, end.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -458,6 +600,20 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(41, cleanup_closed) { return Ok(false) }
     let cleanup_open = try mir_verify_module(d, try cleanup_fixture(d, try mir_store_new(d), false), 3)
     if !expect_verification(42, cleanup_open, mir_vdiag(7, mir_vdiag_cleanup_exit(), 1, 1, 0, 1, 0, 0, 0, 0, 0, 1)) { return Ok(false) }
+    let cleanup_destroy = try mir_verify_module(d, try cleanup_callback_effect_fixture(d, try mir_store_new(d), 1), 3)
+    if !expect_verification(43, cleanup_destroy, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 3, 1, 8, 0, 0, 0, 0, 0, 0, 3)) { return Ok(false) }
+    let cleanup_reset = try mir_verify_module(d, try cleanup_callback_effect_fixture(d, try mir_store_new(d), 2), 3)
+    if !expect_verification(44, cleanup_reset, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 3, 1, 9, 0, 0, 0, 0, 0, 0, 3)) { return Ok(false) }
+    let cleanup_argument = try mir_verify_module(d, try cleanup_callback_effect_fixture(d, try mir_store_new(d), 3), 3)
+    if !expect_verification(45, cleanup_argument, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 2, 1, 6, 0, 1, 0, 0, 0, 0, 3)) { return Ok(false) }
+    let cleanup_join = try mir_verify_module(d, try cleanup_join_fixture(d, try mir_store_new(d), false), 3)
+    if !emit_verification(46, cleanup_join) { return Ok(false) }
+    let cleanup_join_use = try mir_verify_module(d, try cleanup_join_fixture(d, try mir_store_new(d), true), 3)
+    if !expect_verification(47, cleanup_join_use, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 2, 4, 8, 0, 0, 0, 0, 0, 0, 4)) { return Ok(false) }
+    let cleanup_lifo = try mir_verify_module(d, try cleanup_lifo_fixture(d, try mir_store_new(d), false), 3)
+    if !emit_verification(48, cleanup_lifo) { return Ok(false) }
+    let cleanup_bad_lifo = try mir_verify_module(d, try cleanup_lifo_fixture(d, try mir_store_new(d), true), 3)
+    if !expect_verification(49, cleanup_bad_lifo, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 2, 1, 6, 0, 1, 0, 0, 0, 0, 2)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -478,7 +634,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

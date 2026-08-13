@@ -444,7 +444,9 @@ dereference-store rejection. Its stable numeric diagnostics are separate from
 source diagnostics, and orchestration stops after the first failing phase.
 Phase 7 adds path-sensitive cleanup scope and registration-stack identity,
 checked-failure and multiexit handling, exactly-once execution, and repeatable
-per-iteration lifecycles. Backend phases 8–10 and safe production C emission
+per-iteration lifecycles. Its path-specific active registration sets feed Phase
+6 callback-argument validation, LIFO resource effects, and whole-module
+function-effect summaries. Backend phases 8–10 and safe production C emission
 remain unavailable.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
