@@ -239,7 +239,9 @@ this document split, it contains:
   body checking, and checked in first-discovery FIFO order. Same-instance and
   finite concrete mutual recursion are accepted; specialization-expanding
   active polymorphic recursion is rejected;
-- private deterministic manifests used by Go conformance tests.
+- private deterministic manifest v14 records used by Go conformance tests. It
+  includes a canonical source-span table and stable checker diagnostic
+  code/primary/related/note rendering independent of the eventual CLI envelope.
 
 The fixed production entry drives those implemented slices from source loading
 through checking and emits the private manifest for the last phase reached. This
@@ -283,10 +285,13 @@ types, instance signatures, and checked instance bodies are concrete at this
 boundary. Stable annotations retain declaration/variant IDs and canonical
 checked types without introducing MIR identities.
 
-Other literals/expressions, match/try and complete cleanup checking, MIR construction,
-verifier/backend ports, and self-hosted
-execution are still incomplete. Consult [Roadmap](../ROADMAP.md) and executable
-tests for the exact latest slice.
+Every concrete checked S0 body now has exactly one root block, including an
+empty `Unit` body. A syntax form outside this supported S0 contract receives one
+stable boundary diagnostic; it no longer causes partial body records to be
+silently discarded as a successful check. Later Alder 1.0 expressions, MIR
+construction, verifier/backend ports, and self-hosted execution are still
+incomplete. Consult [Roadmap](../ROADMAP.md) and executable tests for the exact
+latest slice.
 
 ## Removal gates
 

@@ -8,7 +8,7 @@ fn storage_error() -> I32 {
     return 3
 }
 
-fn finish_check(state: State, result: CheckResult) -> I32 {
+fn finish_check(state: State, parse: ParseStore, result: CheckResult) -> I32 {
     let failed = match result {
         CheckGood(store) => false
         CheckBad(store) => true
@@ -17,7 +17,7 @@ fn finish_check(state: State, result: CheckResult) -> I32 {
         CheckGood(value) => value
         CheckBad(value) => value
     }
-    if !emit_check_manifest(state, store) { return 4 }
+    if !emit_check_manifest(state, parse, store) { return 4 }
     if failed { return 1 }
     return 0
 }
@@ -25,7 +25,7 @@ fn finish_check(state: State, result: CheckResult) -> I32 {
 fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
     return match check_parsed(d, output.state, output.store, store) {
         Err(error) => storage_error()
-        Ok(result) => finish_check(output.state, result)
+        Ok(result) => finish_check(output.state, output.store, result)
     }
 }
 

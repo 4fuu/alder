@@ -163,7 +163,9 @@ type DeclTypeUseRec {
 // instance. Kinds 1..5 are runtime parameters, Bool literals, integer literals,
 // decoded string literals, and locals. parameter_use names the stable LocalRec
 // binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
-// are unary and binary. Kinds 12 and 13 are checked match and Result try;
+// are unary and binary. Kind 20 is a float literal and kind 21 is a concrete
+// field projection whose parameter_use names the declaration-field use.
+// Kinds 12 and 13 are checked match and Result try;
 // parameter_use names their lowering-facing CheckedMatchRec/CheckedTryRec.
 // Ordered children are stored in one
 // flattened child buffer rather than encoded by operator arity.
@@ -399,7 +401,11 @@ type EnvironmentRec {
 // a non-Result function, 81 try of a non-Result expression, and 82 try error
 // type mismatch. Cleanup diagnostics are 83 unknown cleanup function, 84
 // cleanup function not having exactly one concrete runtime parameter, 85
-// cleanup parameter mismatch, and 86 cleanup result not Unit.
+// cleanup parameter mismatch, and 86 cleanup result not Unit. Code 87 is the
+// deterministic boundary rejection for syntax outside the supported S0 body
+// contract. kind is the stable checker diagnostic code. The primary range is
+// source/start/end; the optional related range is owned by this record and is
+// rendered with a stable note selected by kind, independently of any CLI.
 type CheckDiagRec {
     kind: U64
     source: U64

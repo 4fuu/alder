@@ -401,17 +401,18 @@ polymorphic recursion is rejected. Instance signatures, bodies, expression
 types, aggregate applications, and user-call targets are concrete; stable
 private-manifest instance IDs expose that backend-facing boundary. Concrete C
 imports inside `unsafe c` retain their prior contract. Record children use
-declaration-field order;
-unsupported expression forms outside this slice remain deferred, and a deferred
-body discards its partial records. Issue #7 adds callback `using` resolution,
+declaration-field order. Issue #7 adds callback `using` resolution,
 exact concrete callback signatures, lexical bindings, nested cleanup scopes,
 and lowering-facing normal/return/`try` exit facts without MIR CFG IDs. `using`
 under a loop is rejected while loops nested beneath an active cleanup remain
 valid. Non-`Unit` paths must return, loops conservatively fall
 through, both `if` branches must return to guarantee return, and unreachable
-statements are rejected before checking their contents. These checks are
-preparatory: other literals, local forms, indirect calls and function values,
-complete cleanup checking, MIR lowering, the full checker, and the
+statements are rejected before checking their contents. Issue #8 seals this S0
+boundary: every concrete owner has one root block (including empty `Unit`
+bodies), unsupported body syntax is one deterministic source failure rather
+than silent record discard, and private manifest v14 carries canonical syntax
+spans plus stable diagnostic codes, related ranges, and notes. These checks are
+preparatory: later Alder 1.0 forms, MIR lowering, the full checker, and the
 complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
