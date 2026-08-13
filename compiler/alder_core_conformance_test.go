@@ -59,6 +59,7 @@ fn main(d: Domain) -> I32 {
     if unsafe c { alderhost_source_count() } == 0 { return 2 }
     if host_path_is(0, "!alder-core-checker") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-lower-bad") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
@@ -98,6 +99,7 @@ func coreConformanceWrapper() string {
 	checker = strings.ReplaceAll(checker, " Ok(", "\n Ok(")
 	checker = strings.Replace(checker, "fn loaded(d: Domain,state: State) -> I32 { return match load_sources(d,state) {\n\n Err(e)=>3\n Ok(s)=>pi_nodes(d,s) } }", checkerSentinelLoader, 1)
 	checker = strings.Replace(checker, "fn checker_good(state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", "fn checker_good(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", 1)
+	checker = strings.Replace(checker, "if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }", "if host_path_is(0, \"!alder-core-lower\") || host_path_is(0, \"!alder-core-lower-bad\") { return lower_mode(d, state, parse, store) }", 1)
 	checker = strings.Replace(checker, "fn checker_done(state: State, parse: ParseStore, result: CheckResult) -> I32", "fn checker_done(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32", 1)
 	checker = strings.Replace(checker, "CheckGood(store) => checker_good(state, parse, store)", "CheckGood(store) => checker_good(d, state, parse, store)", 1)
 	checker = strings.Replace(checker, "Ok(result) => checker_done(output.state, output.store, result)", "Ok(result) => checker_done(d, output.state, output.store, result)", 1)
@@ -113,7 +115,27 @@ fn lower_print(mir: MirStore) -> I32 {
     if mir_print(mir) { return 0 }
     return 5
 }
+fn lower_expect_bad(result: LowerResult) -> I32 { return match result {
+    LowerBad => 0
+    LowerGood(mir) => 5
+} }
+fn lower_bad_done(result: Result(LowerResult, __s0_Error)) -> I32 { return match result {
+    Err(error) => 3
+    Ok(value) => lower_expect_bad(value)
+} }
+fn lower_bad_blocks(d: Domain, state: State, parse: ParseStore, store: CheckStore, blocks: __s0_Buffer(CheckedBlockRec)) -> I32 {
+    return match __s0_buffer_append(CheckedBlockRec, d, blocks, CheckedBlockRec(owner: 999, syntax: 1, environment: 0, statements: 0, guaranteed_return: 0)) {
+        Err(error) => 3
+        Ok(bad_blocks) => lower_bad_done(lower_checked(d, state, parse, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: CheckedControlStore(blocks: bad_blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: store.control.places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups), diagnostics: store.diagnostics)))
+    }
+}
 fn lower_mode(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {
+    if host_path_is(0, "!alder-core-lower-bad") {
+        return match __s0_buffer_new(CheckedBlockRec, d) {
+            Err(error) => 3
+            Ok(blocks) => lower_bad_blocks(d, state, parse, store, blocks)
+        }
+    }
     return match lower_checked(d, state, parse, store) {
         Err(error) => 3
         Ok(result) => match result {
