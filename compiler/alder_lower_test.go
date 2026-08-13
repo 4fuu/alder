@@ -249,7 +249,7 @@ func checkLowerGolden(t *testing.T, name string, got []byte) {
 
 func runMalformedLowerCompiler(t *testing.T, exe string) {
 	t.Helper()
-	for _, mode := range []string{"!alder-core-lower-bad", "!alder-core-lower-bad-k", "!alder-core-lower-bad-m", "!alder-core-lower-bad-w", "!alder-core-lower-bad-x", "!alder-core-lower-bad-g"} {
+	for _, mode := range []string{"!alder-core-lower-bad", "!alder-core-lower-bad-k", "!alder-core-lower-bad-m", "!alder-core-lower-bad-w", "!alder-core-lower-bad-x", "!alder-core-lower-bad-g", "!alder-core-lower-bad-v", "!alder-core-lower-bad-h", "!alder-core-lower-bad-q", "!alder-core-lower-bad-l", "!alder-core-lower-bad-e", "!alder-core-lower-bad-ea", "!alder-core-lower-bad-y", "!alder-core-lower-bad-c", "!alder-core-lower-bad-u", "!alder-core-lower-bad-n"} {
 		t.Run(strings.TrimPrefix(mode, "!alder-core-lower-bad"), func(t *testing.T) {
 			dir := t.TempDir()
 			for name, text := range map[string]string{mode: "", "bad.al": "fn bad() -> Unit {}\n"} {

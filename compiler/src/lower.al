@@ -1307,14 +1307,371 @@ fn lower_environment_valid(store: CheckStore, owner: U64, environment: U64) -> B
     return true
 }
 
-fn lower_model_valid(store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
+fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U64, nonempty: Bool) -> Bool {
+    if source >= __s0_buffer_len(SourceRec, source_state.sources) || start > end { return false }
+    let source_rec = __s0_buffer_get(SourceRec, source_state.sources, source)
+    if end > source_rec.text_end - source_rec.text_start || (nonempty && start == end) { return false }
+    return true
+}
+
+fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     var at: U64 = 0
+    while at < __s0_buffer_len(CheckedSpanRec, spans) {
+        let item = __s0_buffer_get(CheckedSpanRec, spans, at)
+        if !lower_source_range_valid(source_state, item.source, item.start, item.end, true) { return false }
+        if item.name_end == 0 { if item.name_start != 0 { return false } } else {
+            if !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) || item.name_start < item.start || item.name_end > item.end { return false }
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let item = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 12 && item.kind != 13 { return false }
+        if item.node == 0 || item.node > __s0_buffer_len(CheckedSpanRec, spans) { return false }
+        if !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        if item.kind == 13 {
+            if item.declaration == 0 || item.declaration > __s0_buffer_len(SymbolRec, store.symbols) || item.declaration > at || __s0_buffer_get(SymbolRec, store.symbols, item.declaration - 1).kind != 12 { return false }
+            if item.instance_arg_count == 0 || item.first_instance_arg == 0 || item.first_instance_arg - 1 + item.instance_arg_count > __s0_buffer_len(U64, store.type_args) { return false }
+            if item.instance_arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.declaration - 1).type_arity { return false }
+            if item.discovery_parent != 0 && (item.discovery_parent > at || __s0_buffer_get(SymbolRec, store.symbols, item.discovery_parent - 1).declaration == 0) { return false }
+            var instance_ordinal: U64 = 0
+            while instance_ordinal < item.instance_arg_count {
+                if !lower_type_concrete(store, __s0_buffer_get(U64, store.type_args, item.first_instance_arg - 1 + instance_ordinal)) { return false }
+                instance_ordinal = instance_ordinal + 1
+            }
+        } else {
+            if item.kind == 12 && item.type_arity == 0 {
+                if item.declaration != at + 1 { return false }
+            } else { if item.declaration != 0 { return false } }
+            if item.first_instance_arg != 0 || item.instance_arg_count != 0 { return false }
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if item.kind != 1 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 { return false }
+        if item.syntax != 0 { return false }
+        if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
+        if (item.kind == 3 || item.kind == 4 || item.kind == 5) && (item.target != 0 || item.arg_count != 0) { return false }
+        if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
+        if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
+        if item.kind >= 8 && item.kind <= 13 && item.target != 0 { return false }
+        if item.arg_count == 0 && item.first_arg != 0 { return false }
+        if item.arg_count != 0 {
+            if item.first_arg == 0 || item.first_arg - 1 + item.arg_count > __s0_buffer_len(U64, store.type_args) { return false }
+            var ordinal: U64 = 0
+            while ordinal < item.arg_count {
+                let argument = __s0_buffer_get(U64, store.type_args, item.first_arg - 1 + ordinal)
+                if argument == 0 || argument > at { return false }
+                ordinal = ordinal + 1
+            }
+        }
+        if item.kind == 7 && item.arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).type_arity { return false }
+        if (item.kind == 8 || item.kind == 9 || item.kind == 12 || item.kind == 13) && item.arg_count != 1 { return false }
+        if (item.kind == 10 || item.kind == 11) && item.arg_count != 2 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let item = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1).kind == 13 || item.node == 0 || item.node > __s0_buffer_len(CheckedSpanRec, spans) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        var parameter_count: U64 = 0
+        var parameter_at: U64 = 0
+        while parameter_at < __s0_buffer_len(TypeParamRec, store.type_params) {
+            if __s0_buffer_get(TypeParamRec, store.type_params, parameter_at).owner == at + 1 { parameter_count = parameter_count + 1 }
+            parameter_at = parameter_at + 1
+        }
+        if symbol.kind != 13 && parameter_count != symbol.type_arity { return false }
+        if symbol.kind == 13 && parameter_count != 0 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let item = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.role == 0 || item.role > 8 || item.node == 0 || item.node > __s0_buffer_len(CheckedSpanRec, spans) { return false }
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        let named = item.role == 1 || item.role == 2 || item.role == 5 || item.role == 7
+        if named && !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        if !named && item.name_end == 0 && item.name_start != 0 { return false }
+        if !named && item.name_end != 0 && !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        if item.role == 1 && symbol.kind != 2 { return false }
+        if item.role == 2 && symbol.kind != 3 { return false }
+        if (item.role == 3 || item.role == 4) && symbol.kind != 1 { return false }
+        if (item.role == 5 || item.role == 6) && symbol.kind != 12 { return false }
+        if (item.role == 7 || item.role == 8) && symbol.kind != 13 { return false }
+        var prior_uses: U64 = 0
+        var prior_at: U64 = 0
+        while prior_at < at {
+            let prior = __s0_buffer_get(DeclTypeUseRec, store.uses, prior_at)
+            if prior.owner == item.owner && prior.role == item.role { prior_uses = prior_uses + 1 }
+            prior_at = prior_at + 1
+        }
+        if item.ordinal != prior_uses { return false }
+        if item.role == 2 && item.syntax == 0 {
+            if item.checked_type != 0 { return false }
+        } else {
+            if item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+            if (item.role == 3 || item.role == 4 || item.role == 7 || item.role == 8 || ((item.role == 1 || item.role == 2 || item.role == 5 || item.role == 6) && symbol.type_arity == 0)) && !lower_type_concrete(store, item.checked_type) { return false }
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(LocalRec, store.locals) {
+        let item = __s0_buffer_get(LocalRec, store.locals, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 2 || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.mutable > 1 || !lower_type_concrete(store, item.checked_type) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return false }
+        if item.kind == 1 && item.mutable != 0 { return false }
+        var environment_count: U64 = 0
+        var environment_at: U64 = 0
+        while environment_at < __s0_buffer_len(EnvironmentRec, store.environments) {
+            if __s0_buffer_get(EnvironmentRec, store.environments, environment_at).binding == at + 1 { environment_count = environment_count + 1 }
+            environment_at = environment_at + 1
+        }
+        if environment_count != 1 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(EnvironmentRec, store.environments) {
+        let item = __s0_buffer_get(EnvironmentRec, store.environments, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.parent > at { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if item.parent != 0 && __s0_buffer_get(EnvironmentRec, store.environments, item.parent - 1).owner != item.owner { return false }
+        if item.binding != 0 && (item.binding > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).owner != item.owner) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+        let item = __s0_buffer_get(CheckedExprChildRec, store.expression_children, at)
+        if item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
+        let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 4 || item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || !lower_type_concrete(store, item.checked_type) || item.builtin != 0 { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        let target = __s0_buffer_get(SymbolRec, store.symbols, item.target - 1)
+        if item.kind == 1 {
+            if !((target.kind == 12 && target.type_arity == 0) || target.kind == 13) { return false }
+            var result_role: U64 = 6
+            if target.kind == 13 { result_role = 8 }
+            let result_use = lower_use_by_role(store, item.target, result_role, 0)
+            if result_use == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type != item.checked_type { return false }
+        }
+        if item.kind == 2 {
+            if target.kind != 1 { return false }
+            let result_use = lower_use_by_role(store, item.target, 4, 0)
+            if result_use == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type != item.checked_type { return false }
+        }
+        if item.kind == 3 {
+            if target.kind != 2 { return false }
+            let result_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if result_type.kind != 7 || result_type.target != item.target { return false }
+        }
+        if item.kind == 4 {
+            if target.kind != 3 || item.variant_use == 0 || item.variant_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return false }
+            let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, item.variant_use - 1)
+            if variant.owner != item.target || variant.role != 2 { return false }
+            let result_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if result_type.kind != 7 || result_type.target != item.target { return false }
+        } else { if item.variant_use != 0 { return false } }
+        at = at + 1
+    }
+    at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
         if item.kind == 18 || item.kind == 0 || item.kind > 21 { return false }
-        if item.left > at || item.right > at { return false }
-        if item.child_count != 0 && (item.first_child == 0 || item.first_child - 1 + item.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children)) { return false }
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
+        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if item.left != 0 || item.right != 0 { return false }
+        if (item.child_count == 0 && item.first_child != 0) || (item.child_count != 0 && item.first_child == 0) { return false }
+        if item.child_count != 0 && item.first_child - 1 + item.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
+        var child_at: U64 = 0
+        while child_at < item.child_count {
+            let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + child_at).expression
+            if child == 0 || child > at || __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).owner != item.owner { return false }
+            child_at = child_at + 1
+        }
+        if item.site_kind > 8 || (item.site_kind == 0 && item.site_syntax != 0) || (item.site_kind != 0 && item.site_syntax == 0) || item.site_syntax > __s0_buffer_len(CheckedSpanRec, spans) { return false }
+        if item.kind == 1 || item.kind == 5 {
+            if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).owner != item.owner { return false }
+        }
+        if item.kind == 1 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 1 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
+        if item.kind == 5 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 2 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
+        if item.kind >= 1 && item.kind <= 5 && item.child_count != 0 { return false }
+        if item.kind == 2 && item.bool_value > 1 { return false }
+        if item.kind != 2 && item.bool_value != 0 { return false }
+        if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2)) { return false }
+        if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 17) { return false }
+        if item.kind != 6 && item.kind != 7 && item.operator != 0 { return false }
+        if item.kind == 6 {
+            let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            if child.checked_type != item.checked_type { return false }
+            if item.operator == 2 {
+                let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+                if checked_type.kind != 1 || checked_type.target != 1 { return false }
+            }
+        }
+        if item.kind == 7 {
+            let left = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            let right = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child).expression - 1)
+            if left.checked_type != right.checked_type { return false }
+            if item.operator >= 3 && item.operator <= 9 && item.checked_type != left.checked_type { return false }
+            if item.operator >= 10 {
+                let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+                if checked_type.kind != 1 || checked_type.target != 1 { return false }
+            }
+            if item.operator >= 16 && left.checked_type != item.checked_type { return false }
+        }
+        if item.kind >= 8 && item.kind <= 11 {
+            if item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+            let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
+            var annotation_kind: U64 = 1
+            if item.kind == 9 { annotation_kind = 3 }
+            if item.kind == 10 { annotation_kind = 4 }
+            if item.kind == 11 { annotation_kind = 2 }
+            if annotation.owner != item.owner || annotation.checked_type != item.checked_type || annotation.kind != annotation_kind { return false }
+            var argument_role: U64 = 0
+            if annotation.kind == 1 {
+                argument_role = 5
+                if __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1).kind == 13 { argument_role = 7 }
+            }
+            if annotation.kind == 2 { argument_role = 3 }
+            if annotation.kind == 3 { argument_role = 1 }
+            var argument_count: U64 = 0
+            if annotation.kind == 4 {
+                if __s0_buffer_get(DeclTypeUseRec, store.uses, annotation.variant_use - 1).checked_type != 0 { argument_count = 1 }
+            } else {
+                var use_at: U64 = 0
+                while use_at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+                    let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_at)
+                    if use.owner == annotation.target && use.role == argument_role { argument_count = argument_count + 1 }
+                    use_at = use_at + 1
+                }
+            }
+            if item.child_count != argument_count { return false }
+            var argument_at: U64 = 0
+            while argument_at < argument_count {
+                var expected_type: U64 = 0
+                if annotation.kind == 4 { expected_type = __s0_buffer_get(DeclTypeUseRec, store.uses, annotation.variant_use - 1).checked_type } else {
+                    let argument_use = lower_use_by_role(store, annotation.target, argument_role, argument_at)
+                    if argument_use == 0 { return false }
+                    expected_type = __s0_buffer_get(DeclTypeUseRec, store.uses, argument_use - 1).checked_type
+                }
+                let argument = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + argument_at).expression - 1)
+                if lower_type_concrete(store, expected_type) && argument.checked_type != expected_type { return false }
+                argument_at = argument_at + 1
+            }
+        } else { if item.annotation != 0 { return false } }
+        if item.kind == 12 {
+            if item.child_count != 1 || item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(CheckedMatchRec, store.control.matches) { return false }
+            let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.parameter_use - 1)
+            let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+            if checked.owner != item.owner || checked.syntax != item.syntax || checked.scrutinee != child || checked.checked_type != item.checked_type { return false }
+        }
+        if item.kind == 13 {
+            if item.child_count != 1 || item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(CheckedTryRec, store.control.tries) { return false }
+            let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, item.parameter_use - 1)
+            let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+            if checked.owner != item.owner || checked.syntax != item.syntax || checked.expression != child || checked.ok_type != item.checked_type { return false }
+        }
+        if item.kind == 14 && item.child_count != 0 { return false }
+        if item.kind >= 15 && item.kind <= 17 && item.child_count != 1 { return false }
+        if item.kind >= 14 && item.kind <= 17 {
+            let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if (item.kind == 14 || item.kind == 15) && checked_type.kind != 9 { return false }
+            if (item.kind == 16 || item.kind == 17) && checked_type.kind != 10 { return false }
+            if item.kind >= 15 {
+                var type_ordinal: U64 = 0
+                if item.kind == 17 { type_ordinal = 1 }
+                let expected_type = __s0_buffer_get(U64, store.type_args, checked_type.first_arg - 1 + type_ordinal)
+                let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+                if child.checked_type != expected_type { return false }
+            }
+        }
+        if item.kind == 19 {
+            if item.child_count != 2 { return false }
+            let base = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            let index = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child).expression - 1)
+            let base_type = __s0_buffer_get(CheckedTypeRec, store.types, base.checked_type - 1)
+            let index_type = __s0_buffer_get(CheckedTypeRec, store.types, index.checked_type - 1)
+            if base_type.kind != 8 || __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1) != item.checked_type || index_type.kind != 1 || index_type.target != 9 { return false }
+        }
+        if item.kind == 20 {
+            if item.child_count != 0 { return false }
+            let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if checked_type.kind != 1 || (checked_type.target != 10 && checked_type.target != 11) { return false }
+        }
+        if item.kind == 21 {
+            if item.child_count != 1 || item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) || __s0_buffer_get(DeclTypeUseRec, store.uses, item.parameter_use - 1).role != 1 { return false }
+            let field = __s0_buffer_get(DeclTypeUseRec, store.uses, item.parameter_use - 1)
+            let base = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            let base_type = __s0_buffer_get(CheckedTypeRec, store.types, base.checked_type - 1)
+            if base_type.kind != 7 || base_type.target != field.owner { return false }
+            if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
+        }
+        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.parameter_use != 0 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+        var child_owners: U64 = 0
+        var expression_at: U64 = 0
+        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
+            if expression.child_count != 0 && at + 1 >= expression.first_child && at + 1 < expression.first_child + expression.child_count { child_owners = child_owners + 1 }
+            expression_at = expression_at + 1
+        }
+        if child_owners != 1 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
+        var annotation_owners: U64 = 0
+        var expression_at: U64 = 0
+        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+            if __s0_buffer_get(CheckedExprRec, store.expressions, expression_at).annotation == at + 1 { annotation_owners = annotation_owners + 1 }
+            expression_at = expression_at + 1
+        }
+        if annotation_owners != 1 { return false }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedPlaceRec, store.control.places) {
+        let item = __s0_buffer_get(CheckedPlaceRec, store.control.places, at)
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.kind == 0 || item.kind > 4 || item.root == 0 || item.root > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.root - 1).owner != item.owner || !lower_type_concrete(store, item.checked_type) { return false }
+        let root = __s0_buffer_get(LocalRec, store.locals, item.root - 1)
+        if item.kind == 1 && (item.field != 0 || item.index != 0) { return false }
+        if item.kind == 1 && item.checked_type != root.checked_type { return false }
+        if (item.kind == 2 || item.kind == 4) && (item.field == 0 || item.field > __s0_buffer_len(DeclTypeUseRec, store.uses) || __s0_buffer_get(DeclTypeUseRec, store.uses, item.field - 1).role != 1) { return false }
+        var base_type = __s0_buffer_get(CheckedTypeRec, store.types, root.checked_type - 1)
+        if (item.kind == 3 || item.kind == 4) {
+            if item.index == 0 || item.index > __s0_buffer_len(CheckedExprRec, store.expressions) || __s0_buffer_get(CheckedExprRec, store.expressions, item.index - 1).owner != item.owner { return false }
+            if base_type.kind != 8 { return false }
+            let element_type = __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1)
+            if item.kind == 3 && item.checked_type != element_type { return false }
+            base_type = __s0_buffer_get(CheckedTypeRec, store.types, element_type - 1)
+            if __s0_buffer_get(CheckedExprRec, store.expressions, item.index - 1).site_kind != 7 { return false }
+            let index_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, item.index - 1).checked_type - 1)
+            if index_type.kind != 1 || index_type.target != 9 { return false }
+        } else { if item.index != 0 { return false } }
+        if item.kind == 2 || item.kind == 4 {
+            let field = __s0_buffer_get(DeclTypeUseRec, store.uses, item.field - 1)
+            if base_type.kind != 7 || base_type.target != field.owner { return false }
+            if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
+        }
+        if (item.kind == 1 || item.kind == 3) && item.field != 0 { return false }
         at = at + 1
     }
     at = 0
@@ -1382,7 +1739,7 @@ fn lower_model_valid(store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> B
 
 fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(LowerResult, __s0_Error) {
     if __s0_buffer_len(CheckDiagRec, store.diagnostics) != 0 { return Ok(LowerBad) }
-    if !lower_model_valid(store, spans) { return Ok(LowerBad) }
+    if !lower_model_valid(source_state, store, spans) { return Ok(LowerBad) }
     let mir = try mir_store_new(d)
     let types = try __s0_buffer_new(LowerTypeMapRec, d)
     let owners = try __s0_buffer_new(LowerOwnerMapRec, d)
