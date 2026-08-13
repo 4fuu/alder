@@ -20,6 +20,9 @@ import (
 // never discovered by walking the checkout.
 var compilerSourceManifest = []string{
 	"checker.al",
+	"cgen/program.al",
+	"cgen/types.al",
+	"cgen/writer.al",
 	"host.al",
 	"lexer.al",
 	"main.al",

@@ -1,6 +1,7 @@
 # C11 Backend
 
-Status: Milestone 3 lowering contract with a working Go implementation
+Status: Milestone 3 lowering contract with a working Go implementation; Alder
+declaration skeleton available, production Alder generation gated
 
 The Alder backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Alder MIR. Its purpose is to validate Alder MIR semantics and provide a bootstrap path, not to make C the semantic definition of Alder.
 
@@ -25,6 +26,17 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
+The Alder-written backend lane currently exposes only
+`cgen_write_declaration_skeleton(d, store, hosted)`. It consumes the independent
+flat MIR 3 store directly, validates its declaration subset, constructs all
+bytes in a deterministic buffer, and then writes headers, stable type layouts,
+constant storage, import prototypes, internal function declarations, and the
+optional hosted entry adapter. It does not emit function bodies and is not a
+production generator. In particular, there is intentionally no public
+`cgen_generate` entry until Alder verifier phase V10 supplies the complete
+backend-precondition result that must gate emission. Declaration-skeleton
+rejection is pre-output and never sanitizes or repairs an invalid store.
+
 ## Generated program entry
 
 `cgen.GenerateProgram` is the explicit hosted-program path; generic
@@ -45,6 +57,11 @@ layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.
 Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
 `EXIT_FAILURE`.
+
+The Alder declaration skeleton can render this adapter for conformance, but its
+internal function declarations have no bodies. It is therefore strict-C syntax
+evidence only and cannot be linked as a generated program before body lowering
+and the V10 production gate land.
 
 The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
 through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and

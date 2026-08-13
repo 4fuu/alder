@@ -438,6 +438,17 @@ diagnostics are separate from source diagnostics, and orchestration stops after
 the first failing phase. Phases 4–10 and safe production C emission remain
 unavailable.
 
+The independent Alder C-backend lane now consumes those flat MIR 3 records
+directly and provides a deterministic buffered declaration skeleton: portable
+C11 headers, dependency-first type layouts, stable numeric names, constants,
+C import prototypes, internal function declarations, and the temporary hosted
+entry adapter. Hand-built MIR fixtures pin rejection before output, escaping,
+ordering, process determinism, absence of host paths, and strict GCC syntax in
+the existing one-Stage0 shared core harness. This is not instruction/body
+lowering and does not expose production generation. The exact remaining V10
+dependency is a successful complete Alder verifier result covering backend
+preconditions; only that result may gate a future public generation entry.
+
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
 #### Bootstrap execution policy
