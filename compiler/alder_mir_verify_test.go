@@ -478,7 +478,8 @@ fn cleanup_lifo_fixture(d: Domain, initial: MirStore, parent_last: Bool) -> Resu
 
 // mode 0 is valid; 1 misses and 3 duplicates lookup consumption; 2 mutates an
 // active view; 4 misses and 5 duplicates view.end; 6 uses a view after end; 7
-// mutates before consumption; and 8/9 add failure bypass before consume/end.
+// mutates before consumption; 8/9 add failure bypass before consume/end; and
+// 10 has two distinct uses after end.
 fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let row = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "Row")
@@ -544,11 +545,17 @@ fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore,
 			store = ended_again.store
 			ordinal = ordinal + 1
 		}
-		if mode == 6 {
+		if mode == 6 || mode == 10 {
 			let place = try mir_add_place(d, store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: value.id))
 			let loaded = try mir_add_value(d, place.store, function.id, "loaded", row.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
 			let load = try mir_add_instruction(d, loaded.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_load(), result: loaded.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
 			store = load.store
+			ordinal = ordinal + 1
+			if mode == 10 {
+				let loaded_again = try mir_add_value(d, store, function.id, "loaded_again", row.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+				let load_again = try mir_add_instruction(d, loaded_again.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_load(), result: loaded_again.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+				store = load_again.store
+			}
 		}
 		if mode == 3 {
 			let value2 = try mir_add_value(d, store, function.id, "view2", view.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
@@ -1096,6 +1103,10 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if !emit_complete(86, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 0), 3, false)) { return Ok(false) }
 	if !emit_complete(87, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 1), 3, false)) { return Ok(false) }
 	if !emit_complete(88, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 2), 3, false)) { return Ok(false) }
+	if !emit_verification(89, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 10), 3)) { return Ok(false) }
+	let hosted_later_base = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
+	let hosted_later_store = try hosted_fixture(d, hosted_later_base, "main", mir_type_i32(), 0)
+	if !expect_complete(90, try mir_verify_complete(d, hosted_later_store, 3, true), true, true, 2, 0, 0) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1119,9 +1130,8 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 60 0 1 0 0\nC 61 0 1 1 1\nC 62 0 1 1 1\nC 63 1 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nC 64 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\nC 65 1 0 1 0\nD 10 70 0 0 0 0 0 0 0 1 0 0\nC 66 1 0 1 0\nD 1 5 2 0 0 0 0 0 2 0 0 1\nC 67 1 0 1 1\nD 10 72 1 0 0 0 0 1 1 5 1 1\nC 68 1 0 1 1\nD 10 73 1 0 0 0 0 0 1 1 2 1\nC 69 1 0 1 0\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 70 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\n"
 	want = strings.ReplaceAll(want, "C 67 1 0 1 1\n", "C 67 1 0 1 0\n")
 	want = strings.ReplaceAll(want, "C 68 1 0 1 1\n", "C 68 1 0 1 0\n")
-	want = strings.ReplaceAll(want, "V 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\n", "V 76 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 4 0 0 0 0 0 0 5\n")
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 3\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
-	want = strings.ReplaceAll(want, "V 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\n", "V 76 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 4 0 0 0 0 0 0 5\n")
+	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

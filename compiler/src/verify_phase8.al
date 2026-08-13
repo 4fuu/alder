@@ -17,6 +17,9 @@ fn mir_v8_is_view(store: MirStore, function: U64, value: U64) -> Bool {
     let kind = mir_vtype_kind(store, __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type)
     return kind == mir_type_kind_table_view() || kind == mir_type_kind_table_mut_view()
 }
+fn mir_v8_same_use(a: MirVP4Use, b: MirVP4Use) -> Bool {
+    return a.value == b.value && a.block == b.block && a.instruction == b.instruction && a.terminator == b.terminator && a.operand == b.operand && a.switch_case == b.switch_case
+}
 fn mir_v8_same_table(facts: __s0_Buffer(MirV6Fact), function: U64, a: U64, b: U64) -> Bool {
     var x: U64 = 0
     while x < __s0_buffer_len(MirV6Fact, facts) { let left = __s0_buffer_get(MirV6Fact, facts, x)
@@ -145,12 +148,16 @@ fn mir_v8_function(d: Domain, store: MirStore, facts: __s0_Buffer(MirV6Fact), cl
                 var ends: U64 = 0
                 var end_id: U64 = 0
                 var ui2: U64 = 0
+                var prior_use: U64 = 0
                 while ui2 < __s0_buffer_len(MirVP4Use, uses) { let site = __s0_buffer_get(MirVP4Use, uses, ui2)
-                    if site.value == value { if site.block != region { out = try mir_v8_diag(d, out, mir_vdiag_table_view_region(), function, site.block, site.instruction, site.terminator, value) }
-                        if site.instruction != 0 { let use = __s0_buffer_get(MirInstrRec, store.instructions, site.instruction - 1)
-                            if use.op == mir_op_table_view_end() { if ends != 0 { out = try mir_v8_diag(d, out, mir_vdiag_table_view_end_count(), function, use.block, site.instruction, 0, value) }
-                                ends = ends + 1
-                                end_id = site.instruction } else { if end_id != 0 && use.block == region && use.ordinal > __s0_buffer_get(MirInstrRec, store.instructions, end_id - 1).ordinal { out = try mir_v8_diag(d, out, mir_vdiag_table_view_after_end(), function, use.block, site.instruction, 0, value) } } } }
+                    if site.value == value { var duplicate = false
+                        if prior_use != 0 { duplicate = mir_v8_same_use(__s0_buffer_get(MirVP4Use, uses, prior_use - 1), site) }
+                        prior_use = ui2 + 1
+                        if !duplicate { if site.block != region { out = try mir_v8_diag(d, out, mir_vdiag_table_view_region(), function, site.block, site.instruction, site.terminator, value) }
+                            if site.instruction != 0 { let use = __s0_buffer_get(MirInstrRec, store.instructions, site.instruction - 1)
+                                if use.op == mir_op_table_view_end() { if ends != 0 { out = try mir_v8_diag(d, out, mir_vdiag_table_view_end_count(), function, use.block, site.instruction, 0, value) }
+                                    ends = ends + 1
+                                    end_id = site.instruction } else { if end_id != 0 && use.block == region && use.ordinal > __s0_buffer_get(MirInstrRec, store.instructions, end_id - 1).ordinal { out = try mir_v8_diag(d, out, mir_vdiag_table_view_after_end(), function, use.block, site.instruction, 0, value) } } } } }
                     ui2 = ui2 + 1 }
                 if source == 0 { out = try mir_v8_diag(d, out, mir_vdiag_table_view_source(), function, region, 0, 0, value) }
                 if ends == 0 { out = try mir_v8_diag(d, out, mir_vdiag_table_view_end_count(), function, region, 0, 0, value) }
