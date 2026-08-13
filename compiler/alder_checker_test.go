@@ -1392,38 +1392,126 @@ func validateCheckerManifest(m checkerManifest) error {
 			bodySyntax[[2]int{local.owner, local.syntax}] = true
 		}
 	}
+	placeOwners := make([]int, len(m.places))
+	controlExpressionOwners := make([]int, len(m.expressions))
 	for i, place := range m.places {
-		validRoot := place.root >= 1 && place.root <= len(m.locals) && m.locals[place.root-1].owner == place.owner
-		validField := place.kind == 1 || place.kind == 3
-		if (place.kind == 2 || place.kind == 4) && place.field >= 1 && place.field <= len(m.uses) {
-			field := m.uses[place.field-1]
-			validField = field.role == 1
+		if place.id != i+1 || !checkerConcreteOwner(m, place.owner) || place.syntax < 1 || place.kind < 1 || place.kind > 4 || place.root < 1 || place.root > len(m.locals) || m.locals[place.root-1].owner != place.owner || place.checkedType < 1 || place.checkedType > len(m.types) {
+			return fmt.Errorf("invalid checked place identity %+v", place)
 		}
-		validIndex := place.kind <= 2 && place.index == 0
-		if (place.kind == 3 || place.kind == 4) && place.index >= 1 && place.index <= len(m.expressions) {
+		rootType := m.locals[place.root-1].checkedType
+		valueType := rootType
+		if place.kind >= 3 {
+			if rootType < 1 || rootType > len(m.types) || m.types[rootType-1].kind != 8 || m.types[rootType-1].count != 1 {
+				return fmt.Errorf("checked place has nonslice indexed root %+v", place)
+			}
+			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
+			if place.index < 1 || place.index > len(m.expressions) {
+				return fmt.Errorf("checked place has invalid index %+v", place)
+			}
 			index := m.expressions[place.index-1]
-			validIndex = index.owner == place.owner && index.siteKind == 7
+			if index.owner != place.owner || index.siteKind != 7 || index.checkedType < 1 || index.checkedType > len(m.types) || m.types[index.checkedType-1].kind != 1 || m.types[index.checkedType-1].target != 9 {
+				return fmt.Errorf("checked place index is not owned U64 %+v", place)
+			}
+			controlExpressionOwners[place.index-1]++
+		} else if place.index != 0 {
+			return fmt.Errorf("nonindexed checked place has index %+v", place)
 		}
-		if place.id != i+1 || place.kind < 1 || place.kind > 4 || place.syntax < 1 || !validRoot || !validField || !validIndex || place.checkedType < 1 || place.checkedType > len(m.types) {
-			return fmt.Errorf("invalid checked place %+v", place)
+		if place.kind == 2 || place.kind == 4 {
+			valueType = checkerConcreteFieldType(m, valueType, place.field)
+			if valueType == 0 {
+				return fmt.Errorf("checked place field does not belong to concrete aggregate %+v", place)
+			}
+		} else if place.field != 0 {
+			return fmt.Errorf("fieldless checked place has field %+v", place)
+		}
+		if place.checkedType != valueType {
+			return fmt.Errorf("checked place type disagrees with concrete target %+v", place)
 		}
 	}
+	statementOwners := make([]int, len(m.statements))
+	childBlockOwners := make([]int, len(m.blocks))
+	returnStatementOwners := make([]int, len(m.returns))
+	statementSyntax := make(map[[2]int]bool)
 	for i, statement := range m.statements {
-		validOwner := statement.owner >= 1 && statement.owner <= len(m.symbols)
 		validEnvironment := statement.environment == 0 || statement.environment <= len(m.environments) && m.environments[statement.environment-1].owner == statement.owner
-		validExpression := statement.expression == 0 || statement.expression <= len(m.expressions) && m.expressions[statement.expression-1].owner == statement.owner
-		validPlace := statement.place == 0 || statement.place <= len(m.places) && m.places[statement.place-1].owner == statement.owner
-		validBinding := statement.binding == 0 || statement.binding <= len(m.locals) && m.locals[statement.binding-1].owner == statement.owner
-		validBody := statement.body == 0 || statement.body <= len(m.blocks) && m.blocks[statement.body-1].owner == statement.owner
-		validAlternative := statement.alternative == 0 || statement.alternative <= len(m.blocks) && m.blocks[statement.alternative-1].owner == statement.owner
-		if statement.id != i+1 || !validOwner || statement.syntax < 1 || statement.kind < 1 || statement.kind > 9 || !validEnvironment || !validExpression || !validPlace || !validBinding || !validBody || !validAlternative {
-			return fmt.Errorf("invalid checked statement %+v", statement)
+		if statement.id != i+1 || !checkerConcreteOwner(m, statement.owner) || statement.syntax < 1 || statement.kind < 1 || statement.kind > 9 || !validEnvironment || statementSyntax[[2]int{statement.owner, statement.syntax}] {
+			return fmt.Errorf("invalid checked statement identity %+v", statement)
+		}
+		statementSyntax[[2]int{statement.owner, statement.syntax}] = true
+		expressionSite, requireExpression := 0, false
+		requirePlace, requireBinding, requireBody := false, false, false
+		allowAlternative := false
+		switch statement.kind {
+		case 1, 2:
+			expressionSite, requireExpression, requireBinding = 1, true, true
+		case 3:
+			expressionSite, requireExpression, requirePlace = 2, true, true
+		case 4:
+			expressionSite = 3
+		case 5:
+			expressionSite, requireExpression = 4, true
+		case 6:
+			requireBody = true
+		case 7:
+			expressionSite, requireExpression, requireBody, allowAlternative = 5, true, true, true
+		case 8:
+			expressionSite, requireExpression, requireBody = 5, true, true
+		case 9:
+			expressionSite, requireExpression, requireBinding, requireBody = 6, true, true, true
+		}
+		validExpression := !requireExpression && statement.expression == 0
+		if statement.expression >= 1 && statement.expression <= len(m.expressions) {
+			expression := m.expressions[statement.expression-1]
+			validExpression = expression.owner == statement.owner && expression.siteKind == expressionSite && expression.siteSyntax == statement.syntax
+			controlExpressionOwners[statement.expression-1]++
+		}
+		validPlace := !requirePlace && statement.place == 0
+		if statement.place >= 1 && statement.place <= len(m.places) {
+			place := m.places[statement.place-1]
+			validPlace = requirePlace && place.owner == statement.owner && place.syntax < statement.syntax
+			placeOwners[statement.place-1]++
+			if place.index != 0 && (m.expressions[place.index-1].siteSyntax != statement.syntax || statement.expression != 0 && place.index >= statement.expression) {
+				return fmt.Errorf("checked place components do not precede assignment value %+v", statement)
+			}
+		}
+		validBinding := !requireBinding && statement.binding == 0
+		if statement.binding >= 1 && statement.binding <= len(m.locals) {
+			binding := m.locals[statement.binding-1]
+			validBinding = requireBinding && binding.owner == statement.owner && binding.syntax == statement.syntax && binding.kind == 2 && (statement.kind != 1 || binding.mutable == 0) && (statement.kind != 2 || binding.mutable == 1) && (statement.kind != 9 || binding.mutable == 0)
+		}
+		validBody := !requireBody && statement.body == 0
+		if statement.body >= 1 && statement.body <= len(m.blocks) {
+			body := m.blocks[statement.body-1]
+			validBody = requireBody && body.owner == statement.owner && body.id < len(m.blocks)+1
+			childBlockOwners[statement.body-1]++
+			if statement.kind == 6 && body.syntax != statement.syntax {
+				validBody = false
+			}
+		}
+		validAlternative := statement.alternative == 0
+		if statement.alternative >= 1 && statement.alternative <= len(m.blocks) {
+			alternative := m.blocks[statement.alternative-1]
+			validAlternative = allowAlternative && alternative.owner == statement.owner
+			childBlockOwners[statement.alternative-1]++
+		}
+		validReturn := statement.kind != 4
+		if statement.kind == 4 {
+			for i, checkedReturn := range m.returns {
+				if checkedReturn.owner == statement.owner && checkedReturn.syntax == statement.syntax && checkedReturn.expression == statement.expression {
+					validReturn = true
+					returnStatementOwners[i]++
+				}
+			}
+		}
+		if !validExpression || !validPlace || !validBinding || !validBody || !validAlternative || !validReturn {
+			return fmt.Errorf("invalid checked statement payload %+v", statement)
 		}
 	}
 	linkOwners := make([]int, len(m.statementLinks))
+	rootBlocks := make(map[int]int)
 	for i, block := range m.blocks {
 		validEnvironment := block.environment == 0 || block.environment <= len(m.environments) && m.environments[block.environment-1].owner == block.owner
-		if block.id != i+1 || block.owner < 1 || block.owner > len(m.symbols) || block.syntax < 1 || !validEnvironment || block.statements < 0 || block.statements > len(m.statementLinks) || block.guaranteedReturn < 0 || block.guaranteedReturn > 1 {
+		if block.id != i+1 || !checkerConcreteOwner(m, block.owner) || block.syntax < 1 || !validEnvironment || block.statements < 0 || block.statements > len(m.statementLinks) || block.guaranteedReturn < 0 || block.guaranteedReturn > 1 {
 			return fmt.Errorf("invalid checked block %+v", block)
 		}
 		link := block.statements
@@ -1436,12 +1524,71 @@ func validateCheckerManifest(m checkerManifest) error {
 				return fmt.Errorf("invalid checked statement link %+v", item)
 			}
 			linkOwners[link-1]++
+			statementOwners[item.statement-1]++
+			statement := m.statements[item.statement-1]
+			if statement.body != 0 && statement.body >= block.id || statement.alternative != 0 && statement.alternative >= block.id {
+				return fmt.Errorf("checked statement child block is not acyclic %+v", statement)
+			}
+			if item.next != 0 && m.statements[m.statementLinks[item.next-1].statement-1].syntax >= m.statements[item.statement-1].syntax {
+				return fmt.Errorf("checked statement link is not in source order %+v", item)
+			}
 			link = item.next
+		}
+		if childBlockOwners[i] == 0 {
+			rootBlocks[block.owner]++
+		} else if childBlockOwners[i] != 1 {
+			return fmt.Errorf("checked block %d has %d parents", i+1, childBlockOwners[i])
 		}
 	}
 	for i, owners := range linkOwners {
 		if owners != 1 {
 			return fmt.Errorf("checked statement link %d has %d block owners", i+1, owners)
+		}
+	}
+	for i, owners := range statementOwners {
+		if owners != 1 {
+			return fmt.Errorf("checked statement %d has %d link owners", i+1, owners)
+		}
+	}
+	for i, owners := range placeOwners {
+		if owners != 1 {
+			return fmt.Errorf("checked place %d has %d statement owners", i+1, owners)
+		}
+	}
+	for i, owners := range returnStatementOwners {
+		if owners != 1 {
+			return fmt.Errorf("checked return %d has %d statement owners", i+1, owners)
+		}
+	}
+	for i, expression := range m.expressions {
+		if expression.siteKind != 0 && expression.siteKind <= 7 && controlExpressionOwners[i] != 1 {
+			return fmt.Errorf("checked expression %d has %d control owners", i+1, controlExpressionOwners[i])
+		}
+	}
+	for owner, roots := range rootBlocks {
+		if roots != 1 {
+			return fmt.Errorf("concrete owner %d has %d root blocks", owner, roots)
+		}
+	}
+	blockGuarantee := make([]int, len(m.blocks))
+	for i, block := range m.blocks {
+		guaranteed := 0
+		if block.statements != 0 {
+			statement := m.statements[m.statementLinks[block.statements-1].statement-1]
+			switch statement.kind {
+			case 4:
+				guaranteed = 1
+			case 6:
+				guaranteed = blockGuarantee[statement.body-1]
+			case 7:
+				if statement.alternative != 0 && blockGuarantee[statement.body-1] == 1 && blockGuarantee[statement.alternative-1] == 1 {
+					guaranteed = 1
+				}
+			}
+		}
+		blockGuarantee[i] = guaranteed
+		if block.guaranteedReturn != guaranteed {
+			return fmt.Errorf("checked block has invalid return guarantee %+v", block)
 		}
 	}
 	callAnnotationOwners := make([]int, len(m.callAnnotations))
@@ -1680,6 +1827,72 @@ func checkerDirectArgs(m checkerManifest, checked checkerType) []checkerTypeArg 
 		return nil
 	}
 	return m.args[checked.first-1 : checked.first-1+checked.count]
+}
+
+func checkerConcreteOwner(m checkerManifest, owner int) bool {
+	if owner < 1 || owner > len(m.symbols) {
+		return false
+	}
+	symbol := m.symbols[owner-1]
+	return symbol.kind == 12 && symbol.arity == 0 || symbol.kind == 13
+}
+
+func checkerSubstitutedType(m checkerManifest, id int, bindings map[int]int) int {
+	if id < 1 || id > len(m.types) {
+		return 0
+	}
+	checked := m.types[id-1]
+	if checked.kind == 6 {
+		return bindings[checked.target]
+	}
+	args := checkerDirectArgs(m, checked)
+	want := make([]int, len(args))
+	for i, arg := range args {
+		want[i] = checkerSubstitutedType(m, arg.checkedType, bindings)
+		if want[i] == 0 {
+			return 0
+		}
+	}
+	for _, candidate := range m.types {
+		if candidate.kind != checked.kind || candidate.target != checked.target || candidate.count != len(want) {
+			continue
+		}
+		candidateArgs := checkerDirectArgs(m, candidate)
+		matches := true
+		for i := range want {
+			matches = matches && candidateArgs[i].checkedType == want[i]
+		}
+		if matches {
+			return candidate.id
+		}
+	}
+	return 0
+}
+
+func checkerConcreteFieldType(m checkerManifest, aggregate, field int) int {
+	if aggregate < 1 || aggregate > len(m.types) || field < 1 || field > len(m.uses) {
+		return 0
+	}
+	checked, use := m.types[aggregate-1], m.uses[field-1]
+	if checked.kind != 7 || use.owner != checked.target || use.role != 1 {
+		return 0
+	}
+	bindings := make(map[int]int)
+	args := checkerDirectArgs(m, checked)
+	ordinal := 0
+	for _, param := range m.params {
+		if param.owner == checked.target {
+			if ordinal >= len(args) {
+				return 0
+			}
+			bindings[param.id] = args[ordinal].checkedType
+			ordinal++
+		}
+	}
+	if ordinal != len(args) {
+		return 0
+	}
+	return checkerSubstitutedType(m, use.checkedType, bindings)
 }
 
 func checkedManifestTypeConcrete(m checkerManifest, id int) bool {
@@ -1944,7 +2157,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"truncated expression child":  "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nH 1\nEND\n",
 	}
 	bodyPrefix := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
-	validUnaryBody := bodyPrefix + "E 1 1 6 1 1 1 0 0 0 0 0 0 0 0 0\nE 2 1 8 6 1 0 0 0 0 0 1 1 1 3 7\nH 1 1\nR 1 1 7 2 2\nEND\n"
+	validUnaryBody := bodyPrefix + "E 1 1 6 1 1 1 0 0 0 0 0 0 0 0 0\nE 2 1 8 6 1 0 0 0 0 0 1 1 1 3 7\nH 1 1\nR 1 1 7 2 2\nJ 1 1 7 4 1 2 0 0 0 0\nK 1 1 0\nB 1 1 8 1 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validUnaryBody, inputs); err != nil {
 		t.Fatalf("valid unary body manifest: %v", err)
 	}
@@ -1957,7 +2170,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["instance declaration mismatch"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 2 0 0 0", 1)
 	malformed["instance argument range"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 1 1 0", 1)
 	malformed["instance discovery cycle"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 0 0 1", 1)
-	validCallBody := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nEND\n"
+	validCallBody := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validCallBody, inputs); err != nil {
 		t.Fatalf("valid call body manifest: %v", err)
 	}
@@ -1978,6 +2191,54 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["statement unknown place"] = controlPrefix + "J 1 1 4 3 0 0 1 0 0 0\nK 1 1 0\nB 1 1 5 0 1 0\nEND\n"
 	malformed["statement link unknown statement"] = controlPrefix + "K 1 1 0\nB 1 1 4 0 1 0\nEND\n"
 	malformed["block unknown environment"] = strings.Replace(validControlBody, "B 1 1 4 0 0 0", "B 1 1 4 1 0 0", 1)
+	assignmentPrefix := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nT 1 1 2 1\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\nE 1 1 6 1 1 1 0 0 0 0 0 0 0 2 7\nV 1 1 5 1 1 0 0 1\nJ 1 1 7 3 1 1 1 0 0 0\nK 1 1 0\nB 1 1 8 1 1 0\nEND\n"
+	if _, err := decodeCheckerManifest(assignmentPrefix, inputs); err != nil {
+		t.Fatalf("valid assignment control manifest: %v", err)
+	}
+	genericFieldBody := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 2 1 0 0 1 1 0 0 0 0\nY 2 12 4 0 0 1 0 2 0 0 0\nP 1 1 2 0 0 1\nC 1 1 0 9 0 0\nC 2 6 0 1 0 0\nC 3 7 0 1 1 1\nC 4 1 0 12 0 0\nA 1 1\nT 1 1 5 2\nT 2 2 6 3\nT 3 2 7 4\nU 1 1 1 0 3 0 0 1 5 2\nU 2 2 5 0 5 0 0 1 6 3\nU 3 2 6 0 6 0 0 0 7 4\nI 1 2 2 0 0 0\nL 1 2 1 5 0 0 1 0 3\nN 1 2 0 1\nE 1 2 8 3 1 0 0 0 0 0 0 0 0 2 9\nV 1 2 7 2 1 1 0 1\nJ 1 2 9 3 1 1 1 0 0 0\nK 1 1 0\nB 1 2 10 1 1 0\nEND\n"
+	if _, err := decodeCheckerManifest(genericFieldBody, inputs); err != nil {
+		t.Fatalf("valid generic field control manifest: %v", err)
+	}
+	indexedBody := "ALDER-CHECKER-MANIFEST 10\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nC 3 8 0 0 1 1\nA 1 1\nT 1 1 2 3\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 3\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 3\nN 1 1 0 1\nE 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2 1 0 0 0\nK 1 1 0\nB 1 1 9 1 1 0\nEND\n"
+	if _, err := decodeCheckerManifest(indexedBody, inputs); err != nil {
+		t.Fatalf("valid indexed control manifest: %v", err)
+	}
+	nestedBlockBody := controlPrefix + "J 1 1 5 6 0 0 0 0 1 0\nK 1 1 0\nB 1 1 5 0 0 0\nB 2 1 6 0 1 0\nEND\n"
+	if _, err := decodeCheckerManifest(nestedBlockBody, inputs); err != nil {
+		t.Fatalf("valid nested block control manifest: %v", err)
+	}
+	childBlockCycle := strings.Replace(nestedBlockBody, "J 1 1 5 6 0 0 0 0 1 0", "J 1 1 5 6 0 0 0 0 2 0", 1)
+	childBlockCycle = strings.Replace(childBlockCycle, "B 2 1 6 0 1 0", "B 2 1 5 0 1 0", 1)
+	focusedMalformed := map[string]struct {
+		text, errorPart string
+	}{
+		"orphan statement":               {strings.Replace(assignmentPrefix, "K 1 1 0\nB 1 1 8 1 1 0", "B 1 1 8 1 0 0", 1), "checked statement 1 has 0 link owners"},
+		"duplicate statement ownership":  {strings.Replace(assignmentPrefix, "K 1 1 0\nB 1 1 8 1 1 0", "K 1 1 0\nK 2 1 0\nB 1 1 8 1 1 0\nB 2 1 9 1 2 0", 1), "checked statement 1 has 2 link owners"},
+		"unordered statement chain":      {strings.Replace(assignmentPrefix, "K 1 1 0\nB 1 1 8 1 1 0", "K 1 1 0\nK 2 1 1\nB 1 1 8 1 2 0", 1), "not in source order"},
+		"nonconcrete block owner":        {strings.Replace(assignmentPrefix, "B 1 1 8 1 1 0", "B 1 2 8 1 1 0", 1), "invalid checked block"},
+		"forbidden statement payload":    {strings.Replace(assignmentPrefix, "J 1 1 7 3 1 1 1 0 0 0", "J 1 1 7 3 1 1 1 1 0 0", 1), "invalid checked statement payload"},
+		"place kind payload":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 1 0 1", 1), "fieldless checked place has field"},
+		"place checked type":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 0 0 2", 1), "place type disagrees"},
+		"place source component order":   {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 7 1 1 0 0 1", 1), "statement payload"},
+		"expression statement site":      {strings.Replace(assignmentPrefix, "0 2 7\nV", "0 2 8\nV", 1), "statement payload"},
+		"orphan place":                   {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 0 0 1\nV 2 1 4 1 1 0 0 1", 1), "checked place 2 has 0 statement owners"},
+		"invalid block return guarantee": {strings.Replace(assignmentPrefix, "B 1 1 8 1 1 0", "B 1 1 8 1 1 1", 1), "invalid return guarantee"},
+		"field use wrong aggregate":      {strings.Replace(genericFieldBody, "V 1 2 7 2 1 1 0 1", "V 1 2 7 2 1 2 0 1", 1), "field does not belong"},
+		"generic field substitution":     {strings.Replace(genericFieldBody, "V 1 2 7 2 1 1 0 1", "V 1 2 7 2 1 1 0 4", 1), "place type disagrees"},
+		"index is not U64":               {strings.Replace(indexedBody, "E 1 1 6 3 1", "E 1 1 6 3 2", 1), "index is not owned U64"},
+		"index expression owner":         {strings.Replace(indexedBody, "E 1 1 6 3 1", "E 1 2 6 3 1", 1), "index is not owned U64"},
+		"place component order":          {strings.Replace(indexedBody, "E 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2", "E 1 1 6 3 1 0 0 0 0 0 0 0 0 2 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 7 8\nV 1 1 5 3 1 0 2 1\nJ 1 1 8 3 1 1", 1), "components do not precede"},
+		"child block cycle":              {childBlockCycle, "child block is not acyclic"},
+		"child block parent ownership":   {strings.Replace(nestedBlockBody, "B 1 1 5 0 0 0", "B 1 2 5 0 0 0", 1), "statement payload"},
+	}
+	for name, fixture := range focusedMalformed {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeCheckerManifest(fixture.text, inputs)
+			if err == nil || !strings.Contains(err.Error(), fixture.errorPart) {
+				t.Fatalf("malformed control manifest error=%v, want %q\n%s", err, fixture.errorPart, fixture.text)
+			}
+		})
+	}
 	for name, text := range malformed {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeCheckerManifest(text, inputs); err == nil {
