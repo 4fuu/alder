@@ -164,13 +164,16 @@ fn mir_v8_function(d: Domain, store: MirStore, facts: __s0_Buffer(MirV6Fact), cl
     return Ok(out)
 }
 
-fn mir_vphase8(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase8_with(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
-let cleanup = try mir_v7_analyze(d, store, initial)
-let provenance = try mir_v6_compute(d, store, cleanup)
 let effects = try mir_v8_compute_effects(d, store, provenance.facts, cleanup)
 var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v8_function(d, store, provenance.facts, cleanup, effects, out, function)
 function = function + 1 }
     return Ok(out)
 }
+
+fn mir_vphase8(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+let cleanup = try mir_v7_analyze(d, store, initial)
+let provenance = try mir_v6_compute(d, store, cleanup)
+return mir_vphase8_with(d, store, initial, cleanup, provenance) }

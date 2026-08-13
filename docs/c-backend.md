@@ -25,6 +25,14 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
+The Alder-written flat-MIR verifier now exposes
+`mir_verify_complete(d, store, version, hosted)`. Its `complete == true` result
+is the required gate for any Alder-written C generator before it writes bytes;
+hosted success also carries the verified 1-based entry function ID. Public
+Alder-written production generation is not available yet: source lowering is
+tracked by #21, and the declaration-only Cgen skeleton tracked by #22 remains
+parked in draft PR #42 until it is rebased to consume this contract.
+
 ## Generated program entry
 
 `cgen.GenerateProgram` is the explicit hosted-program path; generic

@@ -9,6 +9,7 @@ fn mir_verify_phase_domains() -> U64 { return 6 }
 fn mir_verify_phase_cleanup() -> U64 { return 7 }
 fn mir_verify_phase_tables() -> U64 { return 8 }
 fn mir_verify_phase_pointers() -> U64 { return 9 }
+fn mir_verify_phase_backend() -> U64 { return 10 }
 fn mir_vdiag_bad_version() -> U64 { return 1 }
 fn mir_vdiag_missing_primitives() -> U64 { return 2 }
 fn mir_vdiag_bad_kind() -> U64 { return 3 }
@@ -76,6 +77,12 @@ fn mir_vdiag_table_view_after_end() -> U64 { return 64 }
 fn mir_vdiag_table_view_failure_bypass() -> U64 { return 65 }
 fn mir_vdiag_table_view_active_mutation() -> U64 { return 66 }
 fn mir_vdiag_raw_boundary() -> U64 { return 67 }
+fn mir_vdiag_c_external_name() -> U64 { return 68 }
+fn mir_vdiag_backend_element_type() -> U64 { return 69 }
+fn mir_vdiag_missing_entry() -> U64 { return 70 }
+fn mir_vdiag_duplicate_entry() -> U64 { return 71 }
+fn mir_vdiag_entry_result() -> U64 { return 72 }
+fn mir_vdiag_entry_signature() -> U64 { return 73 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {
@@ -94,6 +101,16 @@ type MirVerifyDiagRec {
 }
 type MirVerifyOutput {
     diagnostics: __s0_Buffer(MirVerifyDiagRec)
+}
+// complete is the sole positive V10 gate. Consumers must receive this output
+// from mir_verify_complete and check complete before producing any bytes.
+// entry is zero for an unhosted module and the external Function ID of the
+// unique hosted main otherwise.
+type MirVerifyCompleteOutput {
+    diagnostics: __s0_Buffer(MirVerifyDiagRec)
+    complete: Bool
+    hosted: Bool
+    entry: U64
 }
 fn mir_vdiag(phase: U64, kind: U64, function: U64, block: U64, instruction: U64, terminator: U64, operand: U64, type_id: U64, declaration: U64, expected: U64, actual: U64, reference: U64) -> MirVerifyDiagRec {
     return MirVerifyDiagRec(phase: phase, kind: kind, function: function, block: block, instruction: instruction, terminator: terminator, operand: operand, type_id: type_id, declaration: declaration, expected: expected, actual: actual, reference: reference)

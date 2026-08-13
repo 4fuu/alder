@@ -49,6 +49,21 @@ fn expect_verification(label: U64, result: MirVerifyOutput, expected: MirVerifyD
     return vout(69) && vf(label) && vf(item.phase) && vf(item.kind) && vout(10)
 }
 
+fn emit_complete(label: U64, result: MirVerifyCompleteOutput) -> Bool {
+    var complete: U64 = 0
+    var hosted: U64 = 0
+    if result.complete { complete = 1 }
+    if result.hosted { hosted = 1 }
+    if !vout(67) || !vf(label) || !vf(__s0_buffer_len(MirVerifyDiagRec, result.diagnostics)) || !vf(complete) || !vf(hosted) || !vf(result.entry) || !vout(10) { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirVerifyDiagRec, result.diagnostics) {
+        let item = __s0_buffer_get(MirVerifyDiagRec, result.diagnostics, at)
+        if !vout(68) || !vf(item.phase) || !vf(item.kind) || !vf(item.function) || !vf(item.block) || !vf(item.instruction) || !vf(item.terminator) || !vf(item.operand) || !vf(item.type_id) || !vf(item.declaration) || !vf(item.expected) || !vf(item.actual) || !vf(item.reference) || !vout(10) { return false }
+        at = at + 1
+    }
+    return true
+}
+
 fn minimal(d: Domain, initial: MirStore, result_type: U64, with_entry_param: Bool) -> Result(MirStore, __s0_Error) {
     let function = try mir_add_function(d, initial, "f", result_type)
     let block = try mir_add_block(d, function.store, function.id, 0, "entry")
@@ -519,6 +534,31 @@ fn raw_v9_fixture(d: Domain, initial: MirStore, mode: U64, nested: Bool) -> Resu
     return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: returned.id, target: 0, then_block: 0, else_block: 0))).store)
 }
 
+fn hosted_fixture(d: Domain, initial: MirStore, name: String, result_type: U64, params: U64) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    var base = handle.store
+    var constant_id: U64 = 0
+    if result_type == mir_type_i32() { if __s0_buffer_len(MirConstRec, base.constants) == 0 { let constant = try mir_add_const(d, base, "status", mir_type_i32(), mir_const_int(), 0, 0, 0, "")
+            base = constant.store
+            constant_id = constant.id } else { constant_id = 1 } }
+    let function = try mir_add_function(d, base, name, result_type)
+    var store = function.store
+    if params >= 1 { var param_type = handle.type_id
+        if params != 1 { param_type = mir_type_u64() }
+        store = (try mir_add_function_param(d, store, function.id, 0, "domain", param_type)).store }
+    if params >= 2 { store = (try mir_add_function_param(d, store, function.id, 1, "extra", mir_type_u64())).store }
+    let block = try mir_add_block(d, store, function.id, 0, "entry")
+    store = block.store
+    var returned: U64 = 0
+    if result_type == mir_type_i32() { let value = try mir_add_value(d, store, function.id, "status", mir_type_i32(), mir_value_def_instruction(), block.id, 1)
+        let named = try mir_append_name(d, value.store, "status")
+        let get = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: block.id, ordinal: 0, op: mir_op_const_get(), result: value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: constant_id, name_start: named.start, name_end: named.end))
+        store = get.store
+        returned = value.id }
+    return Ok((try mir_add_terminator(d, store, MirTermRec(function: function.id, block: block.id, kind: mir_term_return(), value: returned, target: 0, then_block: 0, else_block: 0))).store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -717,6 +757,48 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let raw_fail_fast = try mir_verify_module(d, phase2_store, 3)
     if !emit_verification(59, raw_fail_fast) { return Ok(false) }
 
+    let unhosted = try mir_verify_complete(d, valid_store, 3, false)
+    if !emit_complete(60, unhosted) { return Ok(false) }
+    let hosted_zero_store = try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 0)
+    let hosted_zero = try mir_verify_complete(d, hosted_zero_store, 3, true)
+    if !emit_complete(61, hosted_zero) { return Ok(false) }
+    let hosted_domain = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 1), 3, true)
+    if !emit_complete(62, hosted_domain) { return Ok(false) }
+    let bad_c_import = try mir_add_import(d, try mir_store_new(d), "main", mir_type_unit())
+    let bad_c = try mir_verify_complete(d, bad_c_import.store, 3, false)
+    if !emit_complete(63, bad_c) { return Ok(false) }
+    let empty_v10 = try __s0_buffer_new(U64, d)
+    let handle_v10 = try mir_intern_type(d, try mir_store_new(d), mir_type_kind_domain_handle(), 0, 0, 0, empty_v10, 0)
+    let safe_handle = try mir_intern_type(d, handle_v10.store, mir_type_kind_safe_mut(), handle_v10.type_id, 0, 0, empty_v10, 0)
+    let alloc_fn = try mir_add_function(d, safe_handle.store, "allocate", mir_type_unit())
+    let alloc_domain = try mir_add_function_param(d, alloc_fn.store, alloc_fn.id, 0, "domain", handle_v10.type_id)
+    let alloc_size = try mir_add_function_param(d, alloc_domain.store, alloc_fn.id, 1, "size", mir_type_u64())
+    let alloc_block = try mir_add_block(d, alloc_size.store, alloc_fn.id, 0, "entry")
+    let alloc_value = try mir_add_value(d, alloc_block.store, alloc_fn.id, "pointer", safe_handle.type_id, mir_value_def_instruction(), alloc_block.id, 1)
+    let forbidden_alloc = try mir_add_instruction(d, alloc_value.store, MirInstrRec(function: alloc_fn.id, block: alloc_block.id, ordinal: 0, op: mir_op_alloc(), result: alloc_value.id, place: 0, type_op: handle_v10.type_id, a: alloc_domain.id, b: alloc_size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let alloc_done = try mir_add_terminator(d, forbidden_alloc.store, MirTermRec(function: alloc_fn.id, block: alloc_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let bad_alloc = try mir_verify_complete(d, alloc_done.store, 3, false)
+    if !emit_complete(64, bad_alloc) { return Ok(false) }
+    let missing = try mir_verify_complete(d, valid_store, 3, true)
+    if !emit_complete(65, missing) { return Ok(false) }
+    let duplicate_first = try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 0)
+    let duplicate_store = try hosted_fixture(d, duplicate_first, "main", mir_type_i32(), 0)
+    let duplicate_entry = try mir_verify_complete(d, duplicate_store, 3, true)
+    if !emit_complete(66, duplicate_entry) { return Ok(false) }
+    let bad_entry_result = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_unit(), 0), 3, true)
+    if !emit_complete(67, bad_entry_result) { return Ok(false) }
+    let bad_entry_param = try mir_verify_complete(d, try hosted_fixture(d, try mir_store_new(d), "main", mir_type_i32(), 2), 3, true)
+    if !emit_complete(68, bad_entry_param) { return Ok(false) }
+    let complete_fail_fast = try mir_verify_complete(d, phase2_store, 3, true)
+    if !emit_complete(69, complete_fail_fast) { return Ok(false) }
+    let table_handle = try mir_intern_type(d, handle_v10.store, mir_type_kind_table(), handle_v10.type_id, 0, 0, empty_v10, 0)
+    let table_fn = try mir_add_function(d, table_handle.store, "table", mir_type_unit())
+    let table_domain = try mir_add_function_param(d, table_fn.store, table_fn.id, 0, "domain", handle_v10.type_id)
+    let table_block = try mir_add_block(d, table_domain.store, table_fn.id, 0, "entry")
+    let table_value = try mir_add_value(d, table_block.store, table_fn.id, "table", table_handle.type_id, mir_value_def_instruction(), table_block.id, 1)
+    let forbidden_table = try mir_add_instruction(d, table_value.store, MirInstrRec(function: table_fn.id, block: table_block.id, ordinal: 0, op: mir_op_table_create(), result: table_value.id, place: 0, type_op: handle_v10.type_id, a: table_domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let table_done = try mir_add_terminator(d, forbidden_table.store, MirTermRec(function: table_fn.id, block: table_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    if !emit_complete(70, try mir_verify_complete(d, table_done.store, 3, false)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -737,7 +819,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 60 0 1 0 0\nC 61 0 1 1 1\nC 62 0 1 1 1\nC 63 1 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nC 64 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\nC 65 1 0 1 0\nD 10 70 0 0 0 0 0 0 0 1 0 0\nC 66 1 0 1 0\nD 1 5 2 0 0 0 0 0 2 0 0 1\nC 67 1 0 1 1\nD 10 72 1 0 0 0 0 1 1 5 1 1\nC 68 1 0 1 1\nD 10 73 1 0 0 0 0 0 1 1 2 1\nC 69 1 0 1 0\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 70 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

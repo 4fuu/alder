@@ -40,6 +40,7 @@ var compilerSourceManifest = []string{
 	"verify_phase7.al",
 	"verify_phase8.al",
 	"verify_phase9.al",
+	"verify_phase10.al",
 }
 
 // Conformance harnesses compile exact fixed dependency closures.

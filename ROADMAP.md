@@ -419,11 +419,11 @@ ownership, ordinal, reciprocal-link, named-type-part, and import-signature
 encoding contract with an Alder-generated conformance manifest and malformed
 raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
-stores are rejected without partial output. The independent Alder verifier and
-all lowering into this model remain incomplete. Checker, textual-printer, and
-verifier V1–V7 conformance share one fixed source closure and executable while
-retaining independent mode assertions; the complete production root remains an
-independent end-to-end gate.
+stores are rejected without partial output. Source lowering into this model
+remains incomplete. Checker, textual-printer, and verifier V1–V10 conformance
+share one fixed source closure and executable while retaining independent mode
+assertions; the complete production root remains an independent end-to-end
+gate.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
@@ -431,7 +431,7 @@ compiler (`alder0`) produces C for the Alder compiler; a system C compiler
 builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
 and without skipping or repairing MIR verification.
 
-The independent Alder MIR consumer now provides verifier phases 1–7 for raw
+The independent Alder MIR consumer now provides all ten verifier phases for raw
 MIR stores: integrity and reciprocal-ID checks, type/layout/declaration checks,
 CFG target, switch, reachability, and edge-arity checks, plus point-level
 dominance, checked-failure-edge availability, use-def, and definite local
@@ -446,8 +446,14 @@ Phase 7 adds path-sensitive cleanup scope and registration-stack identity,
 checked-failure and multiexit handling, exactly-once execution, and repeatable
 per-iteration lifecycles. Its path-specific active registration sets feed Phase
 6 callback-argument validation, LIFO resource effects, and whole-module
-function-effect summaries. Backend phases 8–10 and safe production C emission
-remain unavailable.
+function-effect summaries. Phase 8 validates table identity, lookup consumption,
+view regions, aliasing, and mutation effects using those provenance and cleanup
+facts. Phase 9 confines recursively raw-pointer-bearing values to explicit
+unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
+types and external names. `mir_verify_complete` adds the hosted `main` contract
+and returns the sole positive complete-verifier gate. Source-to-MIR lowering and
+public production C generation remain unavailable until the work tracked by
+#21 and #22 (the latter currently parked in draft PR #42) is integrated.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
