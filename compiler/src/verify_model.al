@@ -3,6 +3,10 @@
 fn mir_verify_phase_integrity() -> U64 { return 1 }
 fn mir_verify_phase_types() -> U64 { return 2 }
 fn mir_verify_phase_cfg() -> U64 { return 3 }
+fn mir_verify_phase_dominance() -> U64 { return 4 }
+fn mir_verify_phase_typing() -> U64 { return 5 }
+fn mir_verify_phase_domains() -> U64 { return 6 }
+fn mir_verify_phase_cleanup() -> U64 { return 7 }
 fn mir_vdiag_bad_version() -> U64 { return 1 }
 fn mir_vdiag_missing_primitives() -> U64 { return 2 }
 fn mir_vdiag_bad_kind() -> U64 { return 3 }
@@ -39,6 +43,27 @@ fn mir_vdiag_unknown_case() -> U64 { return 33 }
 fn mir_vdiag_unit_binding() -> U64 { return 34 }
 fn mir_vdiag_nonexhaustive_switch() -> U64 { return 35 }
 fn mir_vdiag_reachable_unreachable() -> U64 { return 36 }
+fn mir_vdiag_not_dominated() -> U64 { return 37 }
+fn mir_vdiag_uninitialized_load() -> U64 { return 38 }
+fn mir_vdiag_invalid_value_type() -> U64 { return 39 }
+fn mir_vdiag_bad_operand_type() -> U64 { return 40 }
+fn mir_vdiag_bad_result_type() -> U64 { return 41 }
+fn mir_vdiag_bad_place_type() -> U64 { return 42 }
+fn mir_vdiag_readonly_place() -> U64 { return 43 }
+fn mir_vdiag_bad_argument_count() -> U64 { return 44 }
+fn mir_vdiag_bad_aggregate() -> U64 { return 45 }
+fn mir_vdiag_bad_variant() -> U64 { return 46 }
+fn mir_vdiag_bad_conversion() -> U64 { return 47 }
+fn mir_vdiag_lifetime_deref_store() -> U64 { return 48 }
+fn mir_vdiag_invalid_resource_use() -> U64 { return 49 }
+fn mir_vdiag_dead_domain() -> U64 { return 50 }
+fn mir_vdiag_mark_domain_mismatch() -> U64 { return 51 }
+fn mir_vdiag_invalid_resource_exit() -> U64 { return 52 }
+fn mir_vdiag_local_domain_escape() -> U64 { return 53 }
+fn mir_vdiag_loop_block_resource() -> U64 { return 54 }
+fn mir_vdiag_loop_store_resource() -> U64 { return 55 }
+fn mir_vdiag_cleanup_state() -> U64 { return 56 }
+fn mir_vdiag_cleanup_exit() -> U64 { return 57 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {

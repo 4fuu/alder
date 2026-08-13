@@ -427,7 +427,7 @@ raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
 stores are rejected without partial output. The independent Alder verifier and
 all lowering into this model remain incomplete. Checker, textual-printer, and
-verifier V1–V3 conformance share one fixed source closure and executable while
+verifier V1–V7 conformance share one fixed source closure and executable while
 retaining independent mode assertions; the complete production root remains an
 independent end-to-end gate.
 
@@ -437,12 +437,23 @@ compiler (`alder0`) produces C for the Alder compiler; a system C compiler
 builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
 and without skipping or repairing MIR verification.
 
-The independent Alder MIR consumer now provides verifier phases 1–3 for raw
+The independent Alder MIR consumer now provides verifier phases 1–7 for raw
 MIR stores: integrity and reciprocal-ID checks, type/layout/declaration checks,
-and CFG target, switch, reachability, and edge-arity checks. Its stable numeric
-diagnostics are separate from source diagnostics, and orchestration stops after
-the first failing phase. Phases 4–10 and safe production C emission remain
-unavailable.
+CFG target, switch, reachability, and edge-arity checks, plus point-level
+dominance, checked-failure-edge availability, use-def, and definite local
+initialization, followed by complete current-opcode operand, result, place,
+projection, edge, call/import-call, aggregate, enum, checked-failure, and
+terminator typing. Phase 6 adds domain identity and strict ancestry, allocation
+provenance, path-sensitive reset/destroy state, interprocedural lifetime
+effects, loop-carried resource rules, and safe-reference escape/use and
+dereference-store rejection. Its stable numeric diagnostics are separate from
+source diagnostics, and orchestration stops after the first failing phase.
+Phase 7 adds path-sensitive cleanup scope and registration-stack identity,
+checked-failure and multiexit handling, exactly-once execution, and repeatable
+per-iteration lifecycles. Its path-specific active registration sets feed Phase
+6 callback-argument validation, LIFO resource effects, and whole-module
+function-effect summaries. Backend phases 8–10 and safe production C emission
+remain unavailable.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
