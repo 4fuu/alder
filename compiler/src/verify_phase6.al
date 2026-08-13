@@ -522,9 +522,7 @@ if x.function == function && x.op == mir_op_store() && mir_v6_reach_has(reach, x
 ii = ii + 1 }
 return Ok(out) }
 
-fn mir_vphase6(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = initial
-let cleanup = try mir_v7_analyze(d, store, try __s0_buffer_new(MirVerifyDiagRec, d))
-let analysis = try mir_v6_compute(d, store, cleanup)
+fn mir_vphase6_with(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, analysis: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = initial
 var function: U64 = 1
 while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v6_check_loops(d, store, analysis, function, out)
 let entries = try mir_v6_solve_states(d, store, analysis, cleanup, function)
@@ -557,3 +555,8 @@ ti = ti + 1 } }
 block = block + 1 }
 function = function + 1 }
 return Ok(out) }
+
+fn mir_vphase6(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+let cleanup = try mir_v7_analyze(d, store, try __s0_buffer_new(MirVerifyDiagRec, d))
+let analysis = try mir_v6_compute(d, store, cleanup)
+return mir_vphase6_with(d, store, initial, cleanup, analysis) }

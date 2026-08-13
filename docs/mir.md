@@ -412,7 +412,7 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 9. safe/raw pointer boundary validation;
 10. backend precondition validation.
 
-The independent Alder implementation currently provides phases 1–7 over raw
+The independent Alder implementation provides all ten phases over raw
 `MirStore` records with stable numeric diagnostics and first-failing-phase
 orchestration. Phase 4 includes instruction-boundary dominance, checked
 failure-edge positions, all flat value-use forms, and field-sensitive definite
@@ -421,11 +421,28 @@ projection, operand and result, ordinary and checked edge, call and import call,
 aggregate and enum operation, and terminator without coercion or repair. Phase
 6 provides domain identity and strict ancestry, allocation provenance,
 path-sensitive reset/destroy invalidation, interprocedural lifetime effects,
-function-boundary and loop rules, and dereference-store restrictions. It does
-Phase 7 adds path-correlated cleanup scope state, registration identity and
+function-boundary and loop rules, and dereference-store restrictions. Phase 7
+adds path-correlated cleanup scope state, registration identity and
 LIFO order, checked-failure and exit invariants, and repeatable per-iteration
-lifecycles. It does not yet provide table path state, unsafe/backend boundaries,
-or phases 8–10, and does not authorize production C emission.
+lifecycles. Phase 8 consumes the V6 provenance and V7 cleanup contracts to check
+table lookup consumption, identity, aliases, mutations, and lexical view
+regions. Phase 9 checks every V4 use of recursively raw-pointer-bearing values
+and permits consumption only as an unsafe FFI argument or return/fail operand.
+Phase 10 checks conservative C11 allocation/table element restrictions and C
+external names.
+
+`mir_verify_complete(d, store, version, hosted)` is the explicit final gate. A
+consumer may emit bytes only when its `MirVerifyCompleteOutput.complete` field
+is true. For `hosted == true`, success also guarantees one `main` returning
+`i32` with either no parameters or one `domain_handle` parameter, and `entry`
+is that function's external 1-based ID. Unhosted success has `entry == 0`, and
+every failure has `entry == 0` regardless of whether entry discovery preceded
+the failing signature check. Duplicate function names, including duplicate
+`main`, remain V1 representation errors rather than V10 entry errors. Failure
+preserves the first failing phase diagnostics, sets `complete` false, and never
+repairs the store. This contract makes all verifier phases available;
+it does not make Alder source lowering or public production C generation
+available. Those remain gated on Roadmap work #21 and #22.
 Because the frozen flat store contains no module header record,
 `mir_verify_module` receives the MIR format version alongside the store; the
 store's IDs, kinds, ownership, and type-part encoding remain unchanged.

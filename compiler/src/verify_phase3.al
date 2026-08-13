@@ -167,8 +167,16 @@ fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVeri
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase5(d, store, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase6(d, store, diagnostics)
+    let cleanup = try mir_v7_analyze(d, store, try __s0_buffer_new(MirVerifyDiagRec, d))
+    let provenance = try mir_v6_compute(d, store, cleanup)
+    diagnostics = try mir_vphase6_with(d, store, diagnostics, cleanup, provenance)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase7(d, store, diagnostics)
+    diagnostics = cleanup.diagnostics
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase8_with(d, store, diagnostics, cleanup, provenance)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase9(d, store, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase10(d, store, diagnostics)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))
 }

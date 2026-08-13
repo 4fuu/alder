@@ -14,10 +14,13 @@ import (
 )
 
 // coreConformanceSourceManifest is the exact fixed union closure for the
-// checker, MIR printer, and MIR verifier V1-V7 harnesses. Production main.al is
+// checker, MIR printer, and MIR verifier V1-V10 harnesses. Production main.al is
 // deliberately excluded, and no source is discovered from the filesystem.
 var coreConformanceSourceManifest = []string{
 	"checker.al",
+	"cgen/program.al",
+	"cgen/types.al",
+	"cgen/writer.al",
 	"host.al",
 	"lexer.al",
 	"mir_build.al",
@@ -35,6 +38,9 @@ var coreConformanceSourceManifest = []string{
 	"verify_phase5.al",
 	"verify_phase6.al",
 	"verify_phase7.al",
+	"verify_phase8.al",
+	"verify_phase9.al",
+	"verify_phase10.al",
 }
 
 const coreConformanceDispatch = `
@@ -51,6 +57,7 @@ fn host_path_is(source: U64, word: String) -> Bool {
 fn main(d: Domain) -> I32 {
     if unsafe c { alderhost_source_count() } == 0 { return 2 }
     if host_path_is(0, "!alder-core-checker") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
     return 2
@@ -95,7 +102,7 @@ func coreConformanceWrapper() string {
 
 	verifier := strings.TrimPrefix(mirVerifyWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\n")
 	verifier = strings.Replace(verifier, "fn main(d: Domain)", "fn verifier_mode(d: Domain)", 1)
-	return checker + printer + verifier + coreConformanceDispatch
+	return checker + printer + verifier + cgenSkeletonWrapper + coreConformanceDispatch
 }
 
 func TestAlderCoreConformance(t *testing.T) {
@@ -165,6 +172,7 @@ func TestAlderCoreConformance(t *testing.T) {
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
 
 	t.Run("checker", func(t *testing.T) { runCheckerConformance(t, exe) })
+	t.Run("cgen-skeleton", func(t *testing.T) { runCgenSkeletonConformance(t, cc, root, exe) })
 	t.Run("printer", func(t *testing.T) { runMIRPrinterConformance(t, exe) })
-	t.Run("verifier-v1-v7", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
+	t.Run("verifier-v1-v10", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
 }
