@@ -412,7 +412,7 @@ The verifier (`mir/verify`) runs explicit, independently testable phases:
 9. safe/raw pointer boundary validation;
 10. backend precondition validation.
 
-The independent Alder implementation currently provides phases 1–6 over raw
+The independent Alder implementation currently provides phases 1–7 over raw
 `MirStore` records with stable numeric diagnostics and first-failing-phase
 orchestration. Phase 4 includes instruction-boundary dominance, checked
 failure-edge positions, all flat value-use forms, and field-sensitive definite
@@ -422,8 +422,10 @@ aggregate and enum operation, and terminator without coercion or repair. Phase
 6 provides domain identity and strict ancestry, allocation provenance,
 path-sensitive reset/destroy invalidation, interprocedural lifetime effects,
 function-boundary and loop rules, and dereference-store restrictions. It does
-not yet provide cleanup/table path state, unsafe/backend boundaries, or phases
-7–10, and does not authorize production C emission.
+Phase 7 adds path-correlated cleanup scope state, registration identity and
+LIFO order, checked-failure and exit invariants, and repeatable per-iteration
+lifecycles. It does not yet provide table path state, unsafe/backend boundaries,
+or phases 8–10, and does not authorize production C emission.
 Because the frozen flat store contains no module header record,
 `mir_verify_module` receives the MIR format version alongside the store; the
 store's IDs, kinds, ownership, and type-part encoding remain unchanged.

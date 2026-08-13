@@ -284,6 +284,21 @@ store = destroy.store }
     return Ok(done.store)
 }
 
+fn cleanup_fixture(d: Domain, initial: MirStore, close: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let scope_step = try mir_intern_type(d, initial, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+    let function = try mir_add_function(d, scope_step.store, "cleanup", mir_type_unit())
+    let entry = try mir_add_block(d, function.store, function.id, 0, "entry")
+    let scope = try mir_add_value(d, entry.store, function.id, "scope", scope_step.type_id, mir_value_def_instruction(), entry.id, 1)
+    let begin = try mir_add_instruction(d, scope.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_cleanup_scope_begin(), result: scope.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    var store = begin.store
+    if close { let run = try mir_add_instruction(d, store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_cleanup_scope_run(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+let end = try mir_add_instruction(d, run.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 2, op: mir_op_cleanup_scope_end(), result: 0, place: 0, type_op: 0, a: scope.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+store = end.store }
+    let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -439,6 +454,10 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(39, domain_live) { return Ok(false) }
     let domain_dead = try mir_verify_module(d, try domain_lifetime_fixture(d, try mir_store_new(d), true), 3)
     if !expect_verification(40, domain_dead, mir_vdiag(6, mir_vdiag_invalid_resource_use(), 1, 1, 4, 0, 0, 0, 0, 0, 0, 4)) { return Ok(false) }
+    let cleanup_closed = try mir_verify_module(d, try cleanup_fixture(d, try mir_store_new(d), true), 3)
+    if !emit_verification(41, cleanup_closed) { return Ok(false) }
+    let cleanup_open = try mir_verify_module(d, try cleanup_fixture(d, try mir_store_new(d), false), 3)
+    if !expect_verification(42, cleanup_open, mir_vdiag(7, mir_vdiag_cleanup_exit(), 1, 1, 0, 1, 0, 0, 0, 0, 0, 1)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -459,7 +478,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
