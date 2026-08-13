@@ -194,6 +194,67 @@ fn checked_position_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __
     return Ok(failed.store)
 }
 
+fn bad_store_type_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let function = try mir_add_function(d, initial, "bad_store", mir_type_unit())
+    let source = try mir_add_function_param(d, function.store, function.id, 0, "source", mir_type_bool())
+    let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+    let local = try mir_add_local(d, entry.store, function.id, 0, "slot", mir_type_u64())
+    let place = try mir_add_place(d, local.store, MirPlaceRec(function: function.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    let write = try mir_add_instruction(d, place.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_store(), result: 0, place: place.id, type_op: 0, a: source.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let done = try mir_add_terminator(d, write.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
+fn bad_result_type_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let constant = try mir_add_const(d, initial, "answer", mir_type_u64(), mir_const_int(), 0, 42, 0, "")
+    let function = try mir_add_function(d, constant.store, "bad_result", mir_type_bool())
+    let entry = try mir_add_block(d, function.store, function.id, 0, "entry")
+    let result = try mir_add_value(d, entry.store, function.id, "answer", mir_type_bool(), mir_value_def_instruction(), entry.id, 1)
+    let named = try mir_append_name(d, result.store, "answer")
+    let get = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_const_get(), result: result.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: constant.id, name_start: named.start, name_end: named.end))
+    let done = try mir_add_terminator(d, get.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: result.id, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
+fn bad_call_arity_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let callee = try mir_add_function(d, initial, "callee", mir_type_unit())
+    let parameter = try mir_add_function_param(d, callee.store, callee.id, 0, "value", mir_type_u64())
+    let callee_entry = try mir_add_block(d, parameter.store, callee.id, 0, "entry")
+    let callee_done = try mir_add_terminator(d, callee_entry.store, MirTermRec(function: callee.id, block: callee_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let caller = try mir_add_function(d, callee_done.store, "caller", mir_type_unit())
+    let caller_entry = try mir_add_block(d, caller.store, caller.id, 0, "entry")
+    let call = try mir_add_instruction(d, caller_entry.store, MirInstrRec(function: caller.id, block: caller_entry.id, ordinal: 0, op: mir_op_call(), result: 0, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: callee.id, name_start: 0, name_end: 0))
+    let done = try mir_add_terminator(d, call.store, MirTermRec(function: caller.id, block: caller_entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
+fn readonly_store_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let reference = try mir_intern_type(d, initial, mir_type_kind_safe_ref(), mir_type_u64(), 0, 0, empty, 0)
+    let function = try mir_add_function(d, reference.store, "readonly_store", mir_type_unit())
+    let target = try mir_add_function_param(d, function.store, function.id, 0, "target", reference.type_id)
+    let source = try mir_add_function_param(d, target.store, function.id, 1, "source", mir_type_u64())
+    let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+    let place = try mir_add_place(d, entry.store, MirPlaceRec(function: function.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target.id))
+    let write = try mir_add_instruction(d, place.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_store(), result: 0, place: place.id, type_op: 0, a: source.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let done = try mir_add_terminator(d, write.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
+fn bad_aggregate_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let aggregate = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "Box")
+    let field = try mir_add_type_part(d, aggregate.store, mir_type_part_field(), aggregate.type_id, 0, "value", mir_type_u64())
+    let function = try mir_add_function(d, field, "bad_aggregate", aggregate.type_id)
+    let source = try mir_add_function_param(d, function.store, function.id, 0, "source", mir_type_u64())
+    let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+    let result = try mir_add_value(d, entry.store, function.id, "box", aggregate.type_id, mir_value_def_instruction(), entry.id, 1)
+    let named = try mir_append_name(d, result.store, "other")
+    let construct = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_aggregate_construct(), result: result.id, place: 0, type_op: aggregate.type_id, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let operand = try mir_add_operand(d, construct.store, MirOperandRec(kind: mir_operand_aggregate_field(), owner: construct.id, ordinal: 0, edge: 0, value: source.id, target: 0, operand_type: 0, name_start: named.start, name_end: named.end))
+    let done = try mir_add_terminator(d, operand.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: result.id, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
 fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let valid_store = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let valid = try mir_verify_module(d, valid_store, 3)
@@ -335,6 +396,16 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(32, initialized) { return Ok(false) }
     let checked_position = try mir_verify_module(d, try checked_position_fixture(d, try mir_store_new(d)), 3)
     if !expect_verification(33, checked_position, mir_vdiag(4, mir_vdiag_not_dominated(), 1, 1, 1, 0, 1, mir_type_u64(), 4, 0, 0, 4)) { return Ok(false) }
+    let bad_store_type = try mir_verify_module(d, try bad_store_type_fixture(d, try mir_store_new(d)), 3)
+    if !expect_verification(34, bad_store_type, mir_vdiag(5, mir_vdiag_bad_operand_type(), 1, 1, 1, 0, 0, mir_type_bool(), 0, mir_type_u64(), mir_type_bool(), 1)) { return Ok(false) }
+    let bad_result_type = try mir_verify_module(d, try bad_result_type_fixture(d, try mir_store_new(d)), 3)
+    if !expect_verification(35, bad_result_type, mir_vdiag(5, mir_vdiag_bad_result_type(), 1, 1, 1, 0, 0, mir_type_bool(), 0, mir_type_u64(), mir_type_bool(), 1)) { return Ok(false) }
+    let bad_call_arity = try mir_verify_module(d, try bad_call_arity_fixture(d, try mir_store_new(d)), 3)
+    if !expect_verification(36, bad_call_arity, mir_vdiag(5, mir_vdiag_bad_argument_count(), 2, 1, 1, 0, 0, 0, 0, 1, 0, 1)) { return Ok(false) }
+    let readonly_store = try mir_verify_module(d, try readonly_store_fixture(d, try mir_store_new(d)), 3)
+    if !expect_verification(37, readonly_store, mir_vdiag(5, mir_vdiag_readonly_place(), 1, 1, 1, 0, 1, mir_type_u64(), 0, 0, mir_type_u64(), 1)) { return Ok(false) }
+    let bad_aggregate = try mir_verify_module(d, try bad_aggregate_fixture(d, try mir_store_new(d)), 3)
+    if !expect_verification(38, bad_aggregate, mir_vdiag(5, mir_vdiag_bad_aggregate(), 1, 1, 1, 0, 1, 0, 0, 0, 0, 1)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -355,7 +426,7 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

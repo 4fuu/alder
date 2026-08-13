@@ -4,6 +4,7 @@ fn mir_verify_phase_integrity() -> U64 { return 1 }
 fn mir_verify_phase_types() -> U64 { return 2 }
 fn mir_verify_phase_cfg() -> U64 { return 3 }
 fn mir_verify_phase_dominance() -> U64 { return 4 }
+fn mir_verify_phase_typing() -> U64 { return 5 }
 fn mir_vdiag_bad_version() -> U64 { return 1 }
 fn mir_vdiag_missing_primitives() -> U64 { return 2 }
 fn mir_vdiag_bad_kind() -> U64 { return 3 }
@@ -42,6 +43,15 @@ fn mir_vdiag_nonexhaustive_switch() -> U64 { return 35 }
 fn mir_vdiag_reachable_unreachable() -> U64 { return 36 }
 fn mir_vdiag_not_dominated() -> U64 { return 37 }
 fn mir_vdiag_uninitialized_load() -> U64 { return 38 }
+fn mir_vdiag_invalid_value_type() -> U64 { return 39 }
+fn mir_vdiag_bad_operand_type() -> U64 { return 40 }
+fn mir_vdiag_bad_result_type() -> U64 { return 41 }
+fn mir_vdiag_bad_place_type() -> U64 { return 42 }
+fn mir_vdiag_readonly_place() -> U64 { return 43 }
+fn mir_vdiag_bad_argument_count() -> U64 { return 44 }
+fn mir_vdiag_bad_aggregate() -> U64 { return 45 }
+fn mir_vdiag_bad_variant() -> U64 { return 46 }
+fn mir_vdiag_bad_conversion() -> U64 { return 47 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {
