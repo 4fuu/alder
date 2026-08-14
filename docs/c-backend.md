@@ -47,8 +47,8 @@ unsupported MIR therefore returns false with zero output and is never repaired
 or rewritten.
 
 This is a production-shaped internal compiler-core generator, not yet a
-user-facing self-hosted source pipeline. The Alder source-to-MIR production
-wiring remains tracked by #21, while domain, cleanup, table, and bootstrap
+user-facing self-hosted source-to-C pipeline. The Alder source-to-MIR production
+entry is complete-verifier-gated, while domain, cleanup, table, and bootstrap
 buffer lowering remain tracked by #24. Those operations are refused rather
 than partially emitted. The Go `cgen` package remains the complete active
 backend for those domains until the later M5.4 slices land.

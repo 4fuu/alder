@@ -423,14 +423,20 @@ bridge-to-MIR slice: domain create/mark/reset/destroy and allocation, active
 lexical cleanup exactly once in reverse order, fixed 16-slot `Map` structural
 hash/equality and probe helpers, private buffers with recoverable OOM retry,
 and the required FFI bridge forms. Its MIR is independently parsed and
-verifier-gated in the fixed shared-core harness; #21 source wiring and the #24
-resource C backend remain deferred. These checks are preparatory: later Alder
+verifier-gated in the fixed shared-core harness. Issue #21 wires the production
+entry from successful checking through canonical checked spans and unchanged
+lowering into the complete V1–V10 verifier; only its complete result authorizes
+textual MIR output. The #24 resource C backend remains deferred. These checks
+are preparatory: later Alder
 1.0 forms, the full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit
 host snapshot and runs the shared lexer, parser, and current checker in order,
-stopping at the first failed phase and emitting that phase's private manifest.
+stopping at the first failed source phase and emitting that phase's private
+manifest. Successful checking lowers directly to MIR 3 and prints only after
+complete unhosted verification; malformed checked/lowered state and verifier
+rejection produce no MIR bytes.
 This integration is execution evidence only; these slices do not open a second
 frontend, replace the M5.3 declaration spike yet, constitute a complete frontend,
 or satisfy any self-hosting claim. Grouping nodes follow the Go semantic AST and
@@ -474,9 +480,9 @@ view regions, aliasing, and mutation effects using those provenance and cleanup
 facts. Phase 9 confines recursively raw-pointer-bearing values to explicit
 unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
 types and external names. `mir_verify_complete` adds the hosted `main` contract
-and returns the sole positive complete-verifier gate. Production source-to-MIR
-wiring remains unavailable until the work tracked by #21 is integrated; the
-raw verified-MIR scalar/CFG generator is described below.
+and returns the sole positive complete-verifier gate. The production source-to-
+MIR path now consumes that complete result as its only output authorization;
+the raw verified-MIR scalar/CFG generator is described below.
 
 The independent Alder C-backend lane consumes those flat MIR 3 records
 directly. Its retained declaration conformance API emits portable headers,
@@ -492,8 +498,9 @@ strict C11, process determinism, no nested C evaluation-order shortcut, and
 zero-output refusal. Both APIs call `mir_verify_complete` before allocating an
 output buffer and consume the verifier-returned hosted mode and external entry
 ID. Invalid MIR and the #24 domain/cleanup/table/buffer operation set are
-refused without repair. Source-pipeline wiring tracked by #21 and those
-resource-oriented backend operations remain unavailable.
+refused without repair. Source-to-MIR wiring is complete; the #24 resource-
+oriented backend operations still prevent a complete production source-to-C
+pipeline.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
