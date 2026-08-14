@@ -1442,7 +1442,15 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let root_local = __s0_buffer_get(LocalRec, store.locals, checked.root - 1)
         let root_type = __s0_buffer_get(CheckedTypeRec, store.types, root_local.checked_type - 1)
         if root_type.kind != 8 || root_type.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-        let loaded = try lower_add_result(d, current, function, block, root_local.checked_type, source_state, store)
+        var root_mir_type: U64 = 0
+        var local_at: U64 = 0
+        while local_at < __s0_buffer_len(MirLocalRec, current.mir.locals) {
+            let candidate = __s0_buffer_get(MirLocalRec, current.mir.locals, local_at)
+            if candidate.function == function && candidate.ordinal + 1 == binding.mir_id { root_mir_type = candidate.local_type }
+            local_at = local_at + 1
+        }
+        if root_mir_type == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let loaded = try lower_add_typed_result(d, current, function, block, root_mir_type)
         let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, root.id, 0, 0, 0, 0, "")
         let index = try lower_expression(d, source_state, spans, store, load.state, owner, function, block, checked.index, environment, panic_block)
         let elem_checked = __s0_buffer_get(U64, store.type_args, root_type.first_arg - 1)
