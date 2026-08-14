@@ -1082,6 +1082,7 @@ func runMatchTryCheckerConformance(t *testing.T, exe string) {
 			"fn unit() -> Unit { return }\n" +
 			"fn generic(value: Choice(U64)) -> U64 { return match value { Empty => 0\n First(item) => item\n Second(item) => item } }\n" +
 			"fn result(value: Result(U64, U8)) -> U64 { return match value { Ok(item) => item\n Err(error) => 0 } }\n" +
+			"fn nested(value: Option(Result(U64, U8))) -> U64 { return match value { None => 0\n Some(result) => match result { Ok(item) => item\n Err(error) => 0 } } }\n" +
 			"fn error(value: __s0_Error) -> U64 { return match value { OutOfMemory => 0\n Limit => 1 } }\n" +
 			"fn wild(value: Option(U64)) -> U64 { return match value { _ => 1\n _ => 2 } }\n" +
 			"fn statement(value: Option(U64)) -> Unit { match value { None => unit()\n Some(item) => unit() }\n return }\n" +
@@ -1094,8 +1095,31 @@ func runMatchTryCheckerConformance(t *testing.T, exe string) {
 			t.Fatal("match/try manifest changed with argv order or across processes")
 		}
 		m := parseCheckerManifest(t, one, files)
-		if len(m.matches) != 5 || len(m.matchArms) != 11 || len(m.tries) != 1 {
-			t.Fatalf("match/try records: M=%d W=%d X=%d, want 5/11/1", len(m.matches), len(m.matchArms), len(m.tries))
+		if len(m.matches) != 7 || len(m.matchArms) != 15 || len(m.tries) != 1 {
+			t.Fatalf("match/try records: M=%d W=%d X=%d, want 7/15/1", len(m.matches), len(m.matchArms), len(m.tries))
+		}
+		nestedOwner := checkerSymbolByName(t, m, files, "nested").id
+		nestedMatches := 0
+		for _, checkedMatch := range m.matches {
+			if checkedMatch.owner != nestedOwner {
+				continue
+			}
+			nestedMatches++
+			owners := 0
+			for _, expression := range m.expressions {
+				if expression.kind == 12 && expression.parameterUse == checkedMatch.id {
+					owners++
+					if expression.childCount != 1 || checkedMatch.syntax != expression.syntax || checkedMatch.scrutinee != m.children[expression.firstChild-1].expression {
+						t.Fatalf("nested match is not reciprocal: match=%+v expression=%+v", checkedMatch, expression)
+					}
+				}
+			}
+			if owners != 1 {
+				t.Fatalf("nested match %+v has %d owning expressions", checkedMatch, owners)
+			}
+		}
+		if nestedMatches != 2 {
+			t.Fatalf("nested Option/Result match records=%d, want 2", nestedMatches)
 		}
 		wildcards := 0
 		for _, arm := range m.matchArms {
@@ -1111,7 +1135,7 @@ func runMatchTryCheckerConformance(t *testing.T, exe string) {
 			field        int
 			value        string
 		}{
-			{"M owner", "M", 2, "999"}, {"M scrutinee reference", "M", 4, "999"}, {"M type reference", "M", 5, "999"},
+			{"M owner", "M", 2, "999"}, {"M syntax reciprocity", "M", 3, "999"}, {"M scrutinee reciprocity", "M", 4, "999"}, {"M type reference", "M", 5, "999"},
 			{"W owner", "W", 2, "999"}, {"W match reference", "W", 4, "999"}, {"W variant kind", "W", 6, "8"}, {"W body ownership", "W", 9, "999"},
 			{"X owner", "X", 2, "999"}, {"X expression reference", "X", 4, "999"}, {"X result type", "X", 5, "999"},
 		}
