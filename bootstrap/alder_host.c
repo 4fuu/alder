@@ -1,5 +1,6 @@
 #include "alder_host.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
@@ -27,6 +28,7 @@ struct AlderHostContext {
     uint64_t output_path_len;
     uint64_t output_mode;
     bool output_failed;
+    bool response_started;
     uint8_t *response;
     size_t response_len;
     size_t response_capacity;
@@ -139,6 +141,7 @@ bool alderhost_response_reset(void) {
     }
     alderhost_active_context->response_len = 0;
     alderhost_active_context->output_mode = 0;
+    alderhost_active_context->response_started = false;
     return true;
 }
 
@@ -177,20 +180,18 @@ static bool alderhost_artifact_open(struct AlderHostContext *context) {
         return false;
     }
     for (attempt = 0; attempt < 1000U; attempt++) {
-        FILE *existing;
         int count = snprintf(context->artifact_temp, suffix, "%s.alder-tmp-%u",
                              context->output_path, attempt);
         if (count < 0 || (size_t)count >= suffix) {
             return false;
         }
-        existing = fopen(context->artifact_temp, "rb");
-        if (existing != NULL) {
-            (void)fclose(existing);
-            continue;
-        }
-        context->artifact = fopen(context->artifact_temp, "wb");
+        errno = 0;
+        context->artifact = fopen(context->artifact_temp, "wbx");
         if (context->artifact != NULL) {
             return true;
+        }
+        if (errno == EEXIST) {
+            continue;
         }
         return false;
     }
@@ -245,6 +246,8 @@ bool alderhost_stdout_byte(uint8_t byte) {
     }
     if (!wrote) {
         context->output_failed = true;
+    } else if (context->output_mode != UINT64_C(2)) {
+        context->response_started = true;
     }
     return wrote;
 }
@@ -387,7 +390,12 @@ uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand,
 }
 
 bool alderhost_stderr_byte(uint8_t byte) {
-    return alderhost_active_context != NULL && fputc((int)byte, stderr) != EOF;
+    bool wrote = alderhost_active_context != NULL &&
+                 fputc((int)byte, stderr) != EOF;
+    if (wrote) {
+        alderhost_active_context->response_started = true;
+    }
+    return wrote;
 }
 
 static int alderhost_compare_paths(const void *left, const void *right) {
@@ -478,13 +486,17 @@ static int alderhost_fail(uint64_t command, bool json, int status,
     if (json) {
         const char *command_name = command == UINT64_C(1) ? "check" :
                                    command == UINT64_C(2) || command == UINT64_C(3) ? "compile" : "";
-        (void)fprintf(stdout,
-                      "{\"version\":1,\"command\":\"%s\",\"success\":false,"
-                      "\"diagnostics\":[],\"failure\":{\"kind\":\"%s\","
-                      "\"message\":\"%s\"}}\n",
-                      command_name, kind, message);
+        if (fprintf(stdout,
+                    "{\"version\":1,\"command\":\"%s\",\"success\":false,"
+                    "\"diagnostics\":[],\"failure\":{\"kind\":\"%s\","
+                    "\"message\":\"%s\"}}\n",
+                    command_name, kind, message) < 0 || fflush(stdout) != 0) {
+            return 3;
+        }
     } else {
-        (void)fprintf(stderr, "alder: %s\n", message);
+        if (fprintf(stderr, "alder: %s\n", message) < 0 || fflush(stderr) != 0) {
+            return 3;
+        }
     }
     return status;
 }
@@ -740,6 +752,17 @@ int main(int argc, char **argv) {
     alderhost_active_context = &context;
     status = (int)alder_program_entry((void *)&context);
     alderhost_active_context = NULL;
+
+    if (status != 0 && !context.response_started) {
+        context.response_len = 0;
+        if (status == 3 && context.output_failed) {
+            status = alderhost_fail(context.command, context.json, 3, "io",
+                                    "cannot write compiler output");
+        } else {
+            status = alderhost_fail(context.command, context.json, 4, "internal",
+                                    "internal compiler failure");
+        }
+    }
 
     if (context.artifact != NULL) {
         flush_ok = fflush(context.artifact) == 0;
