@@ -249,6 +249,8 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 func runShortCircuitLowerConformance(t *testing.T, exe string) {
 	t.Helper()
 	files := map[string]string{"short.al": `import c observe: fn(U64, Bool) -> Bool
+fn short_collision(short_5: Bool, right: Bool) -> Bool { return short_5 && right }
+fn short_collision_again(short_5: Bool, right: Bool) -> Bool { return short_5 || right }
 fn short_single(left: Bool, right: Bool) -> Bool { return left && right }
 fn short_right_nested(left: Bool, middle: Bool, right: Bool) -> Bool { return left && (middle && right) }
 fn short_repeated_and(left: Bool, middle: Bool, right: Bool) -> Bool { return left && middle && right }
@@ -283,6 +285,8 @@ fn short_order_mixed() -> Bool {
 		}
 		return id
 	}
+	collision := functionID("short_collision")
+	collisionAgain := functionID("short_collision_again")
 	single := functionID("short_single")
 	rightNested := functionID("short_right_nested")
 	repeatedAnd := functionID("short_repeated_and")
@@ -292,6 +296,26 @@ fn short_order_mixed() -> Bool {
 	orderAnd := functionID("short_order_and")
 	orderOr := functionID("short_order_or")
 	orderMixed := functionID("short_order_mixed")
+	if got := module.Functions[collision].Params[0].Name; got != "short_5" {
+		t.Fatalf("source parameter renamed: got %q", got)
+	}
+	blockParamNames := func(id mir.FunctionId) []string {
+		var names []string
+		for _, block := range module.Functions[id].Blocks {
+			for _, param := range block.Params {
+				names = append(names, param.Name)
+			}
+		}
+		return names
+	}
+	for _, id := range []mir.FunctionId{collision, collisionAgain, single} {
+		if got := blockParamNames(id); len(got) != 1 || got[0] != "__s0_short_5" {
+			t.Fatalf("single short-circuit join names = %v, want [__s0_short_5]", got)
+		}
+	}
+	if got := blockParamNames(repeatedAnd); len(got) != 2 || got[0] != "__s0_short_5" || got[1] != "__s0_short_8" {
+		t.Fatalf("repeated short-circuit join names = %v, want [__s0_short_5 __s0_short_8]", got)
+	}
 	generated := runResourceCgenCompiler(t, exe, files, []string{"short.al"})
 	if second := runResourceCgenCompiler(t, exe, files, []string{"short.al"}); !bytes.Equal(generated, second) {
 		t.Fatal("short-circuit C changed across fresh processes")
@@ -300,6 +324,8 @@ fn short_order_mixed() -> Bool {
 static uint64_t alder_test_observed;
 bool observe(uint64_t ordinal, bool value) { alder_test_observed = alder_test_observed * 10 + ordinal; return value; }
 int main(void) {
+  if (!alder_fn_short_collision_%d(true, true) || alder_fn_short_collision_%d(false, true)) return 10;
+  if (!alder_fn_short_collision_again_%d(false, true) || alder_fn_short_collision_again_%d(false, false)) return 11;
   if (!alder_fn_short_single_%d(true, true) || alder_fn_short_single_%d(true, false)) return 1;
   if (!alder_fn_short_right_nested_%d(true, true, true) || alder_fn_short_right_nested_%d(true, false, true)) return 2;
   if (!alder_fn_short_repeated_and_%d(true, true, true) || alder_fn_short_repeated_and_%d(true, false, true)) return 3;
@@ -314,7 +340,7 @@ int main(void) {
   if (!alder_fn_short_order_mixed_%d() || alder_test_observed != 123) return 9;
   return 0;
 }
-`, single, single, rightNested, rightNested, repeatedAnd, repeatedAnd, explicitAnd, explicitAnd,
+`, collision, collision, collisionAgain, collisionAgain, single, single, rightNested, rightNested, repeatedAnd, repeatedAnd, explicitAnd, explicitAnd,
 		repeatedOr, repeatedOr, mixed, mixed, orderAnd, orderOr, orderMixed)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "short-circuit.c")
