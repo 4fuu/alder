@@ -1059,13 +1059,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         }
         if expression.kind == 7 && (expression.operator == 16 || expression.operator == 17) {
             if expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(left.state), id: 0)) }
+            let source_block = lower_open_block(left.state.mir, function, block)
             let right_block = try lower_add_block(d, left.state, function, "bb_short")
             let constant_block = try lower_add_block(d, right_block.state, function, "bb_short_const")
             let join = try lower_add_block(d, constant_block.state, function, "bb_short_join")
             let result_type = try lower_type(d, source_state, store, join.state, expression.checked_type)
-            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "short_", join.id), result_type.id)
+            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_short_", join.id), result_type.id)
             var current = lower_with_mir(result_type.state, param.store)
-            let source_block = lower_open_block(current.mir, function, block)
             if expression.operator == 16 { current = try lower_branch(d, current, function, source_block, left.id, right_block.id, constant_block.id) }
             if expression.operator == 17 { current = try lower_branch(d, current, function, source_block, left.id, constant_block.id, right_block.id) }
             let right_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
