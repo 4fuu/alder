@@ -67,6 +67,13 @@ fn cgen_rejected(result: Bool) -> I32 {
 
 fn cgen_run(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
     if unsafe c { alderhost_source_count() } > 1 {
+        if host_path_is(1, "!cgen-body-verify") { if emit_verification(99, try mir_verify_module(d, try cgen_body_fixture(d, store), 3)) { return Ok(0) }
+        return Ok(7) }
+        if host_path_is(1, "!cgen-body") { if try cgen_generate(d, try cgen_body_fixture(d, store), 3, true) { return Ok(0) }
+        return Ok(7) }
+        if host_path_is(1, "!cgen-body-invalid") { let malformed = try mir_add_const(d, try cgen_body_fixture(d, store), "bad", 999, mir_const_int(), 0, 1, 0, "")
+        return Ok(cgen_rejected(try cgen_generate(d, malformed.store, 3, true))) }
+        if host_path_is(1, "!cgen-body-unsupported") { return Ok(cgen_rejected(try cgen_generate(d, try cgen_unsupported_fixture(d, store), 3, false))) }
         if host_path_is(1, "!cgen-bad-version") { return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, try cgen_fixture(d, store), 99, true))) }
         if host_path_is(1, "!cgen-earlier-v1-v9") { let malformed = try mir_add_const(d, try cgen_fixture(d, store), "bad", 999, mir_const_int(), 0, 1, 0, "")
         return Ok(cgen_rejected(try cgen_write_declaration_skeleton(d, malformed.store, 3, true))) }

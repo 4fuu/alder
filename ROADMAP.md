@@ -471,24 +471,26 @@ view regions, aliasing, and mutation effects using those provenance and cleanup
 facts. Phase 9 confines recursively raw-pointer-bearing values to explicit
 unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
 types and external names. `mir_verify_complete` adds the hosted `main` contract
-and returns the sole positive complete-verifier gate. Source-to-MIR lowering and
-public production C generation remain unavailable until the work tracked by
-#21 and later body-lowering work is integrated.
+and returns the sole positive complete-verifier gate. Production source-to-MIR
+wiring remains unavailable until the work tracked by #21 is integrated; the
+raw verified-MIR scalar/CFG generator is described below.
 
-The independent Alder C-backend lane now consumes those flat MIR 3 records
-directly and provides a deterministic buffered declaration skeleton: portable
-C11 headers, dependency-first type layouts, stable numeric names, constants,
-C import prototypes, internal function declarations, and the temporary hosted
-entry adapter. Hand-built MIR fixtures pin rejection before output, escaping,
-ordering, process determinism, absence of host paths, and strict GCC syntax in
-the existing one-Stage0 shared core harness. This is not instruction/body
-lowering and does not expose production generation. The declaration API now
-calls `mir_verify_complete` before allocating its byte buffer and proceeds only
-on `complete == true`, consuming the verifier-returned hosted mode and external
-entry ID. Focused process fixtures observe zero stdout bytes for bad versions,
-V1–V9 failures, entry failures, and V10 rejection; hosted success uses a non-1
-verified entry and unhosted success retains entry zero. Function bodies and a
-separate public production generator remain unavailable.
+The independent Alder C-backend lane consumes those flat MIR 3 records
+directly. Its retained declaration conformance API emits portable headers,
+dependency-first type layouts, stable numeric names, constants, C import
+prototypes, internal declarations, and the temporary hosted adapter. The
+production-shaped `cgen_generate` entry additionally emits the complete M5.4
+scalar/CFG body slice: ordered scalar and checked operations, places and
+assignments, aggregates and enum-like values, direct and unsafe-import calls,
+parallel-copy block edges, branches, loops, switches, and typed return/fail
+control flow. Hand-built MIR fixtures pin a runtime backedge swap cycle,
+checked failure, struct/enum/option/result and concrete-generic behavior, FFI,
+strict C11, process determinism, no nested C evaluation-order shortcut, and
+zero-output refusal. Both APIs call `mir_verify_complete` before allocating an
+output buffer and consume the verifier-returned hosted mode and external entry
+ID. Invalid MIR and the #24 domain/cleanup/table/buffer operation set are
+refused without repair. Source-pipeline wiring tracked by #21 and those
+resource-oriented backend operations remain unavailable.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
