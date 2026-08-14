@@ -153,6 +153,19 @@ fn cgen_body_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Erro
     return Ok((try mir_add_terminator(d, store, MirTermRec(function: main.id, block: failure.id, kind: mir_term_fail(), value: failed_value.id, target: 0, then_block: 0, else_block: 0))).store)
 }
 
+fn cgen_ffi_result_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let load = try mir_add_import(d, initial, "fixture_load", mir_type_i32())
+    let save = try mir_add_import(d, load.store, "fixture_store", mir_type_unit())
+    var store = try mir_add_import_param(d, save.store, save.id, 0, mir_type_i32())
+    let main = try mir_add_function(d, store, "main", mir_type_i32())
+    let entry = try mir_add_block(d, main.store, main.id, 0, "entry")
+    let loaded = try mir_add_value(d, entry.store, main.id, "loaded", mir_type_i32(), mir_value_def_instruction(), entry.id, 1)
+    let load_call = try mir_add_instruction(d, loaded.store, MirInstrRec(function: main.id, block: entry.id, ordinal: 0, op: mir_op_ffi_call_unsafe(), result: loaded.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: load.id, name_start: 0, name_end: 0))
+    let store_call = try mir_add_instruction(d, load_call.store, MirInstrRec(function: main.id, block: entry.id, ordinal: 1, op: mir_op_ffi_call_unsafe(), result: 0, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: save.id, name_start: 0, name_end: 0))
+    store = (try mir_add_operand(d, store_call.store, MirOperandRec(kind: mir_operand_instruction(), owner: store_call.id, ordinal: 0, edge: 0, value: loaded.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))).store
+    return Ok((try mir_add_terminator(d, store, MirTermRec(function: main.id, block: entry.id, kind: mir_term_return(), value: loaded.id, target: 0, then_block: 0, else_block: 0))).store)
+}
+
 fn cgen_unsupported_fixture(d: Domain, store: MirStore) -> Result(MirStore, __s0_Error) {
     let parts = try __s0_buffer_new(U64, d)
     let handle = try mir_intern_type(d, store, mir_type_kind_domain_handle(), 0, 0, 0, parts, 0)
@@ -213,6 +226,19 @@ func runCgenBodyConformance(t *testing.T, cc, root, exe string) {
 	if strings.Contains(first, "fixture_add_one)(alder_fn_") || strings.Contains(first, "alder_i64_add_checked(alder_fn_") {
 		t.Fatal("generated C contains a nested side-effecting call expression")
 	}
+	if verification := run(t, "!cgen-ffi-result-verify"); verification != "V 97 0\n" {
+		t.Fatalf("FFI result fixture failed verifier:\n%s", verification)
+	}
+	ffiFirst := run(t, "!cgen-ffi-result")
+	ffiSecond := run(t, "!cgen-ffi-result")
+	if ffiFirst == "" || ffiFirst != ffiSecond {
+		t.Fatal("FFI result generation is empty or process-nondeterministic")
+	}
+	for _, fragment := range []string{"alder_v0 = (fixture_load)();", "(fixture_store)(alder_v0);"} {
+		if !strings.Contains(ffiFirst, fragment) {
+			t.Fatalf("generated FFI body missing %q\n%s", fragment, ffiFirst)
+		}
+	}
 	if got := run(t, "!cgen-body-invalid"); got != "" {
 		t.Fatalf("invalid MIR wrote %d bytes", len(got))
 	}
@@ -240,5 +266,23 @@ int32_t fixture_add_one(int32_t value) { return value + INT32_C(1); }
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), program, "-DALDER_HOST_CONFORMANCE", driver)
 	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
 		t.Fatalf("scalar/CFG generated program: %v\n%s\n%s", err, output, first)
+	}
+
+	ffiCFile := filepath.Join(dir, "ffi-result.c")
+	ffiDriver := filepath.Join(dir, "ffi-driver.c")
+	ffiProgram := filepath.Join(dir, "ffi-result.exe")
+	if err := os.WriteFile(ffiCFile, []byte(ffiFirst), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const ffiDriverSource = `#include <stdint.h>
+int32_t fixture_load(void) { return (int32_t)0; }
+void fixture_store(int32_t value) { (void)value; }
+`
+	if err := os.WriteFile(ffiDriver, []byte(ffiDriverSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compileGeneratedProgram(t, cc, root, ffiCFile, filepath.Join(root, "bootstrap", "alder_host.c"), ffiProgram, "-DALDER_HOST_CONFORMANCE", ffiDriver)
+	if output, err := conformanceCommand(ffiProgram).CombinedOutput(); err != nil {
+		t.Fatalf("FFI result generated program: %v\n%s\n%s", err, output, ffiFirst)
 	}
 }

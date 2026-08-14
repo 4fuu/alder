@@ -543,20 +543,20 @@ fn @option_value(%value: option(u64), %missing: u64) -> u64 {
 bb0:
   switch %value {
     none -> bb_match_arm3
-    some(%match_payload1) -> bb_match_arm4
+    some(%__s0_match_payload2) -> bb_match_arm4
   }
 
 bb_panic:
   panic
 
-bb_match_join2(%match: u64):
-  return %match
+bb_match_join2(%__s0_match_join3: u64):
+  return %__s0_match_join3
 
 bb_match_arm3:
   jump bb_match_join2(%missing)
 
 bb_match_arm4:
-  jump bb_match_join2(%match_payload1)
+  jump bb_match_join2(%__s0_match_payload2)
 }
 
 fn @map_bridge(%d: domain_handle) -> i32 {
@@ -620,11 +620,11 @@ bb_map_set_ok10:
   %v83 = call @map_get_25(%v81, %v82)
   switch %v83 {
     none -> bb_match_arm12
-    some(%match_payload1) -> bb_match_arm13
+    some(%__s0_match_payload4) -> bb_match_arm13
   }
 
-bb_match_join11(%match: u64):
-  store local %found, %match
+bb_match_join11(%__s0_match_join12: u64):
+  store local %found, %__s0_match_join12
   %v87 = load local %found
   %v88 = const.get @lit47
   %v89 = int.ne %v87, %v88
@@ -635,7 +635,7 @@ bb_match_arm12:
   jump bb_match_join11(%v86)
 
 bb_match_arm13:
-  jump bb_match_join11(%match_payload1)
+  jump bb_match_join11(%__s0_match_payload4)
 
 bb_then14:
   %v90 = const.get @lit49
@@ -1141,23 +1141,23 @@ bb_try_ok18:
   %v300 = const.get @lit245
   %v301 = call @buffer_append_24(%d, %v299, %v300)
   switch %v301 {
-    ok(%match_payload0) -> bb_match_arm21
-    err(%match_payload1) -> bb_match_arm22
+    ok(%__s0_match_payload5) -> bb_match_arm21
+    err(%__s0_match_payload6) -> bb_match_arm22
   }
 
 bb_try_err19:
   %v298 = enum.construct result(u64, @__s0_Error), err, %try_err242
   fail %v298
 
-bb_match_join20(%match: u64):
-  store local %attempt, %match
+bb_match_join20(%__s0_match_join21: u64):
+  store local %attempt, %__s0_match_join21
   %v307 = load local %attempt
   %v308 = const.get @lit252
   %v309 = int.ne %v307, %v308
   branch %v309, bb_then23, bb_else24
 
 bb_match_arm21:
-  %v305 = call @buffer_len_24(%match_payload0)
+  %v305 = call @buffer_len_24(%__s0_match_payload5)
   jump bb_match_join20(%v305)
 
 bb_match_arm22:
@@ -1447,8 +1447,8 @@ bb_short_const3:
   %v409 = const.get @lit.bool336
   jump bb_short_join4(%v409)
 
-bb_short_join4(%short: bool):
-  return %short
+bb_short_join4(%__s0_short_5: bool):
+  return %__s0_short_5
 }
 
 fn @sum(%values: slice(u64)) -> u64 {
@@ -1540,21 +1540,21 @@ fn @choose(%value: @Maybe) -> u64 {
 bb0:
   switch %value {
     None -> bb_match_arm3
-    Some(%match_payload1) -> bb_match_arm4
+    Some(%__s0_match_payload8) -> bb_match_arm4
   }
 
 bb_panic:
   panic
 
-bb_match_join2(%match: u64):
-  return %match
+bb_match_join2(%__s0_match_join3: u64):
+  return %__s0_match_join3
 
 bb_match_arm3:
   %v444 = const.get @lit359
   jump bb_match_join2(%v444)
 
 bb_match_arm4:
-  jump bb_match_join2(%match_payload1)
+  jump bb_match_join2(%__s0_match_payload8)
 }
 
 fn @scalar(%pair: @Pair, %values: slice(u64), %flag: bool) -> u64 {
