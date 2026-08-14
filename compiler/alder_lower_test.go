@@ -245,7 +245,159 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	checkLowerGolden(t, "lower-all.golden", first)
 	runLowerCgenBehavior(t, module, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
 	runMalformedLowerCompiler(t, exe)
+	runMatchNameConformance(t, exe)
 	runShortCircuitLowerConformance(t, exe)
+}
+
+func checkMatchValueNames(t *testing.T, module *mir.Module, functionName string, wantJoins, wantPayloads int) {
+	t.Helper()
+	id, ok := module.Function(functionName)
+	if !ok {
+		t.Fatalf("lowered MIR has no function %q", functionName)
+	}
+	joins, payloads := 0, 0
+	for _, value := range module.Functions[id].Values {
+		switch {
+		case strings.HasPrefix(value.Name, "__s0_match_join"):
+			joins++
+		case strings.HasPrefix(value.Name, "__s0_match_payload"):
+			payloads++
+		case value.Name == "match" || strings.HasPrefix(value.Name, "match_payload") && value.Def.Kind != mir.ValueDefFuncParam:
+			t.Fatalf("%s retained colliding match value name %%%s", functionName, value.Name)
+		}
+	}
+	if joins != wantJoins || payloads != wantPayloads {
+		t.Fatalf("%s synthetic match values: joins=%d payloads=%d, want %d and %d", functionName, joins, payloads, wantJoins, wantPayloads)
+	}
+}
+
+func checkExactMatchValueNames(t *testing.T, module *mir.Module, functionName string, want []string) {
+	t.Helper()
+	id, ok := module.Function(functionName)
+	if !ok {
+		t.Fatalf("lowered MIR has no function %q", functionName)
+	}
+	var got []string
+	for _, value := range module.Functions[id].Values {
+		if strings.HasPrefix(value.Name, "__s0_match_join") || strings.HasPrefix(value.Name, "__s0_match_payload") {
+			got = append(got, value.Name)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("%s synthetic match names = %v, want %v", functionName, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s synthetic match names = %v, want %v", functionName, got, want)
+		}
+	}
+}
+
+func runMatchNameConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"types.al": `enum Maybe {
+    None
+    Some(value: U64)
+}
+fn wrap(value: U64) -> Maybe { return Some(value) }
+`,
+		"match_names.al": `fn repeated_matches(match_value: Maybe, match_payload0: Maybe, match_payload4: U64) -> U64 {
+    let first = match match_value {
+        None => match_payload4
+        Some(match_payload1) => match_payload1
+    }
+    return match match_payload0 {
+        None => first
+        Some(match_payload2) => match_payload2
+    }
+}
+fn repeated_matches_again(match_value: Maybe, match_payload0: Maybe) -> U64 {
+    let first: U64 = match match_payload0 {
+        None => 0
+        Some(match_payload1) => match_payload1
+    }
+    return match match_value {
+        None => first
+        Some(match_payload2) => match_payload2
+    }
+}
+fn nested_match(match_value: Maybe, match_payload0: Maybe, match_payload4: U64) -> U64 {
+    return match wrap(match match_value {
+        None => match_payload4
+        Some(match_payload1) => match_payload1
+    }) {
+        None => 0
+        Some(match_payload2) => match_payload2
+    }
+}
+`,
+	}
+	first := runLowerCompiler(t, exe, files, []string{"types.al", "match_names.al"})
+	second := runLowerCompiler(t, exe, files, []string{"match_names.al", "types.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("match lowering changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse match-name MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify match-name MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	checkMatchValueNames(t, module, "repeated_matches", 2, 2)
+	checkMatchValueNames(t, module, "repeated_matches_again", 2, 2)
+	checkMatchValueNames(t, module, "nested_match", 2, 2)
+	checkExactMatchValueNames(t, module, "nested_match", []string{"__s0_match_payload10", "__s0_match_join3", "__s0_match_payload12", "__s0_match_join6"})
+	runMatchNameCgenBehavior(t, module, exe, files)
+}
+
+func runMatchNameCgenBehavior(t *testing.T, module *mir.Module, coreExe string, files map[string]string) {
+	t.Helper()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	generated := runResourceCgenCompiler(t, coreExe, files, []string{"types.al", "match_names.al"})
+	repeated, _ := module.Function("repeated_matches")
+	again, _ := module.Function("repeated_matches_again")
+	nested, _ := module.Function("nested_match")
+	maybeType := module.Functions[repeated].Params[0].Type
+	none, _ := module.VariantIndex(maybeType, "None")
+	some, _ := module.VariantIndex(maybeType, "Some")
+	driver := fmt.Sprintf(`
+int main(void) {
+  AlderTy%d none = {0};
+  AlderTy%d some = {0};
+  none.alder_tag = %d;
+  some.alder_tag = %d;
+  some.alder_u.alder_p%d = 9;
+  if (alder_fn_repeated_matches_%d(none, none, 7) != 7) return 1;
+  if (alder_fn_repeated_matches_%d(some, some, 7) != 9) return 2;
+  if (alder_fn_repeated_matches_%d(none, some, 7) != 9) return 3;
+  if (alder_fn_repeated_matches_again_%d(none, some) != 9) return 4;
+  if (alder_fn_nested_match_%d(none, some, 7) != 7) return 5;
+  if (alder_fn_nested_match_%d(some, none, 7) != 9) return 6;
+  return 0;
+}
+`, maybeType, maybeType, none, some, some, repeated, repeated, repeated, again, nested, nested)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "match-name-behavior.c")
+	if err := os.WriteFile(file, append(generated, []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "match-name-behavior.exe")
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
+	if compiled, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("compile match-name C: %v\n%s", err, compiled)
+	}
+	if ran, err := conformanceCommand(output).CombinedOutput(); err != nil {
+		t.Fatalf("run match-name C: %v\n%s", err, ran)
+	}
 }
 
 func runShortCircuitLowerConformance(t *testing.T, exe string) {
