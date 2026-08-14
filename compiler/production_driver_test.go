@@ -13,6 +13,7 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
+	"github.com/4fuu/alder/mir/verify"
 )
 
 func TestAlderProductionDriverEndToEnd(t *testing.T) {
@@ -65,11 +66,24 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	}
 	first, firstStatus := runProductionCompiler(t, exe, validFiles, []string{"z.al", "a.al"})
 	second, secondStatus := runProductionCompiler(t, exe, validFiles, []string{"a.al", "z.al"})
-	if firstStatus != 0 || secondStatus != 0 || first != second {
-		t.Fatalf("valid production run is not deterministic: status=%d/%d", firstStatus, secondStatus)
+	repeated, repeatedStatus := runProductionCompiler(t, exe, validFiles, []string{"z.al", "a.al"})
+	if firstStatus != 0 || secondStatus != 0 || repeatedStatus != 0 || first != second || first != repeated {
+		t.Fatalf("valid production run is not deterministic: status=%d/%d/%d", firstStatus, secondStatus, repeatedStatus)
 	}
-	if !strings.HasPrefix(first, "ALDER-CHECKER-MANIFEST 14\n") || !strings.Contains(first, "\nZ ") || !strings.Contains(first, "\nY ") || !strings.Contains(first, "\nI ") || !strings.Contains(first, "\nQ ") || !strings.Contains(first, "\nE ") || !strings.Contains(first, "\nB ") || strings.Contains(first, "\nD ") || !strings.HasSuffix(first, "END\n") {
-		t.Fatalf("valid input did not reach checker output:\n%s", first)
+	if !strings.HasPrefix(first, "mir 3\n") {
+		t.Fatalf("valid input did not reach MIR output:\n%s", first)
+	}
+	produced, err := mir.Parse(first)
+	if err != nil {
+		t.Fatalf("parse production output MIR: %v", err)
+	}
+	if diagnostics := verify.Module(produced); len(diagnostics) != 0 {
+		t.Fatalf("independently verify production output MIR: %s", verify.Errors(diagnostics).String())
+	}
+	for _, name := range []string{"call", "identity"} {
+		if _, ok := produced.Function(name); !ok {
+			t.Fatalf("production output MIR has no %s function", name)
+		}
 	}
 
 	rejections := []struct {
@@ -89,6 +103,9 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 			}
 			if !strings.HasPrefix(one, fixture.prefix) || !strings.Contains(one, fixture.diagnostic) || !strings.HasSuffix(one, "END\n") {
 				t.Fatalf("failure reached the wrong phase:\n%s", one)
+			}
+			if strings.HasPrefix(one, "mir ") {
+				t.Fatalf("source failure emitted MIR:\n%s", one)
 			}
 		})
 	}

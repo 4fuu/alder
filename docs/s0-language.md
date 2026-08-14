@@ -15,9 +15,10 @@ There are currently two implementation profiles:
 - `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
   the current S0 syntax; its checker and sealed-manifest lowering cover the
   current M5.4 slices, and its complete-verifier-gated C generator covers the
-  scalar/CFG MIR slice. Source-to-MIR production wiring and the resource,
-  cleanup, table, and buffer backend slice are still unavailable, so it is not
-  yet a complete production pipeline.
+  scalar/CFG MIR slice. The production entry now emits MIR only after complete
+  V1–V10 verification. The resource, cleanup, table, and buffer backend slice
+  is still unavailable, so this is not yet a complete source-to-C production
+  pipeline.
 
 Neither profile is a usable Alder 1.0 compiler.
 
@@ -248,9 +249,12 @@ this document split, it contains:
   code/primary/related/note rendering independent of the eventual CLI envelope.
 
 The fixed production entry drives those implemented slices from source loading
-through checking and emits the private manifest for the last phase reached. This
-is a bootstrap integration contract, not public diagnostics or self-hosted
-compilation.
+through checking. A failed source phase emits that phase's private manifest; a
+successful check derives canonical checked spans, lowers the checked model, and
+emits MIR 3 only when `mir_verify_complete` reports complete unhosted V1–V10
+verification. Malformed checked or lowered state and verifier rejection emit no
+MIR. This is a bootstrap integration contract, not public diagnostics or
+self-hosted compilation.
 
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the

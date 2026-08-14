@@ -48,8 +48,8 @@ unsupported MIR therefore returns false with zero output and is never repaired
 or rewritten.
 
 This is a production-shaped internal compiler-core generator, not yet a
-user-facing self-hosted source pipeline. The Alder source-to-MIR production
-wiring remains tracked by #21. The shared-core resource fixture independently
+user-facing self-hosted source-to-C pipeline. The Alder source-to-MIR production
+entry is complete-verifier-gated. The shared-core resource fixture independently
 lowers the existing Stage 0 domain, lexical-cleanup, fixed-map, and private-
 buffer bridge corpus, emits it through this path, and compiles and runs the
 result against the existing runtime ABI. The Go `cgen` package remains the

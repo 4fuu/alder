@@ -8,24 +8,52 @@ fn storage_error() -> I32 {
     return 3
 }
 
-fn finish_check(state: State, parse: ParseStore, result: CheckResult) -> I32 {
-    let failed = match result {
-        CheckGood(store) => false
-        CheckBad(store) => true
-    }
-    let store = match result {
-        CheckGood(value) => value
-        CheckBad(value) => value
-    }
-    if !emit_check_manifest(state, parse, store) { return 4 }
-    if failed { return 1 }
+fn finish_verify(mir: MirStore, result: MirVerifyCompleteOutput) -> I32 {
+    if !result.complete { return 5 }
+    if !mir_print(mir) { return 4 }
     return 0
+}
+
+fn run_verify(d: Domain, mir: MirStore) -> I32 {
+    return match mir_verify_complete(d, mir, 3, false) {
+        Err(error) => storage_error()
+        Ok(result) => finish_verify(mir, result)
+    }
+}
+
+fn finish_lower(d: Domain, result: LowerResult) -> I32 {
+    return match result {
+        LowerBad => 5
+        LowerGood(mir) => run_verify(d, mir)
+    }
+}
+
+fn run_lower(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {
+    return match checked_spans(d, parse) {
+        Err(error) => storage_error()
+        Ok(spans) => match lower_checked(d, state, spans, store) {
+            Err(error) => storage_error()
+            Ok(result) => finish_lower(d, result)
+        }
+    }
+}
+
+fn finish_check_bad(state: State, parse: ParseStore, store: CheckStore) -> I32 {
+    if !emit_check_manifest(state, parse, store) { return 4 }
+    return 1
+}
+
+fn finish_check(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32 {
+    return match result {
+        CheckGood(store) => run_lower(d, state, parse, store)
+        CheckBad(store) => finish_check_bad(state, parse, store)
+    }
 }
 
 fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
     return match check_parsed(d, output.state, output.store, store) {
         Err(error) => storage_error()
-        Ok(result) => finish_check(output.state, output.store, result)
+        Ok(result) => finish_check(d, output.state, output.store, result)
     }
 }
 
