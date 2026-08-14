@@ -16,6 +16,7 @@ import (
 func runLowerConformance(t *testing.T, exe string) {
 	t.Helper()
 	runSyntheticValueNameCollisionConformance(t, exe)
+	runPreferredResultNameCollisionConformance(t, exe)
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -392,6 +393,197 @@ func runSyntheticValueNameCollisionConformance(t *testing.T, exe string) {
 				t.Fatalf("verify collision MIR: %s\n%s", verify.Errors(diagnostics), first)
 			}
 		})
+	}
+}
+
+func runPreferredResultNameCollisionConformance(t *testing.T, exe string) {
+	t.Helper()
+	fixtures := []struct {
+		name, source, preferred, driver string
+		op                              mir.OpKind
+	}{
+		{
+			name:      "for-reference",
+			preferred: "for_ref",
+			op:        mir.OpSliceIndexChecked,
+			source: `fn collision(for_ref: U64, values: [U64]) -> U64 {
+    var total: U64 = 0
+    for value in values {
+        total = total + value
+    }
+    return total
+}
+`,
+			driver: `
+int main(void) {
+  uint64_t values[3] = {1, 2, 3};
+  AlderSlice slice = {(void *)values, 3};
+  return alder_fn_collision_%d(0, slice) == 6 ? 0 : 1;
+}
+`,
+		},
+		{
+			name:      "cleanup-scope",
+			preferred: "cleanup_scope3",
+			op:        mir.OpCleanupScopeBegin,
+			source: `import c counter: fn(I64) -> Unit
+fn close(value: I64) -> Unit { unsafe c { counter(value) } }
+fn collision(cleanup_scope3: U64) -> I64 {
+    using handle = 5 with close
+    return 7
+}
+`,
+			driver: `
+static int64_t observed;
+void counter(int64_t value) { observed = value; }
+int main(void) {
+  if (alder_fn_collision_%d(0) != 7) return 1;
+  return observed == 5 ? 0 : 2;
+}
+`,
+		},
+		{
+			name:      "cleanup-id",
+			preferred: "cleanup_id3",
+			op:        mir.OpCleanupPush,
+			source: `import c counter: fn(I64) -> Unit
+fn close(value: I64) -> Unit { unsafe c { counter(value) } }
+fn collision(cleanup_id3: U64) -> I64 {
+    using handle = 5 with close
+    return 7
+}
+`,
+			driver: `
+static int64_t observed;
+void counter(int64_t value) { observed = value; }
+int main(void) {
+  if (alder_fn_collision_%d(0) != 7) return 1;
+  return observed == 5 ? 0 : 2;
+}
+`,
+		},
+	}
+	for _, fixture := range fixtures {
+		t.Run("preferred-result-name-"+fixture.name, func(t *testing.T) {
+			files := map[string]string{"collision.al": fixture.source}
+			first := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			second := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			if len(first) == 0 || !bytes.Equal(first, second) {
+				t.Fatal("preferred-name collision lowering was empty or changed across fresh processes")
+			}
+			module, err := mir.Parse(string(first))
+			if err != nil {
+				t.Fatalf("independently parse preferred-name collision MIR: %v\n%s", err, first)
+			}
+			if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+				t.Fatalf("complete V1-V10 verification of preferred-name collision MIR: %s\n%s", verify.Errors(diagnostics), first)
+			}
+			functionID, ok := module.Function("collision")
+			if !ok {
+				t.Fatalf("preferred-name collision MIR has no collision function\n%s", first)
+			}
+			function := module.Functions[functionID]
+			foundParameter := false
+			for _, parameter := range function.Params {
+				if parameter.Name == fixture.preferred {
+					foundParameter = true
+				}
+			}
+			if !foundParameter {
+				t.Fatalf("collision function has no parameter %%%s", fixture.preferred)
+			}
+			resultName := instructionResultName(t, function, fixture.op)
+			if resultName == fixture.preferred {
+				t.Fatalf("%s result retained occupied preferred name %%%s", fixture.op, fixture.preferred)
+			}
+			if !strings.HasPrefix(resultName, "v") {
+				t.Fatalf("%s result = %%%s, want deterministic fallback after %%%s collision", fixture.op, resultName, fixture.preferred)
+			}
+			runPreferredResultNameCgenBehavior(t, exe, files, functionID, fixture.driver)
+		})
+	}
+
+	t.Run("preferred-result-name-cross-function-reuse", func(t *testing.T) {
+		const source = `fn first(values: [U64]) -> U64 {
+    for value in values { return value }
+    return 0
+}
+fn second(values: [U64]) -> U64 {
+    for value in values { return value }
+    return 0
+}
+`
+		files := map[string]string{"reuse.al": source}
+		first := runLowerCompiler(t, exe, files, []string{"reuse.al"})
+		second := runLowerCompiler(t, exe, files, []string{"reuse.al"})
+		if len(first) == 0 || !bytes.Equal(first, second) {
+			t.Fatal("cross-function preferred-name lowering was empty or changed across fresh processes")
+		}
+		module, err := mir.Parse(string(first))
+		if err != nil {
+			t.Fatalf("independently parse cross-function preferred-name MIR: %v\n%s", err, first)
+		}
+		if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+			t.Fatalf("complete V1-V10 verification of cross-function preferred-name MIR: %s\n%s", verify.Errors(diagnostics), first)
+		}
+		for _, name := range []string{"first", "second"} {
+			functionID, ok := module.Function(name)
+			if !ok {
+				t.Fatalf("cross-function preferred-name MIR has no %s function", name)
+			}
+			if got := instructionResultName(t, module.Functions[functionID], mir.OpSliceIndexChecked); got != "for_ref" {
+				t.Fatalf("%s slice index result = %%%s, want %%for_ref", name, got)
+			}
+		}
+	})
+}
+
+func instructionResultName(t *testing.T, function *mir.Function, op mir.OpKind) string {
+	t.Helper()
+	name := ""
+	for _, block := range function.Blocks {
+		for _, instruction := range block.Instrs {
+			if instruction.Op != op {
+				continue
+			}
+			if name != "" {
+				t.Fatalf("function %s has more than one %s result", function.Name, op)
+			}
+			if instruction.Result == mir.NoValue || int(instruction.Result) >= len(function.Values) {
+				t.Fatalf("function %s has invalid %s result", function.Name, op)
+			}
+			name = function.Values[instruction.Result].Name
+		}
+	}
+	if name == "" {
+		t.Fatalf("function %s has no %s result", function.Name, op)
+	}
+	return name
+}
+
+func runPreferredResultNameCgenBehavior(t *testing.T, coreExe string, files map[string]string, functionID mir.FunctionId, driverFormat string) {
+	t.Helper()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	generated := runResourceCgenCompiler(t, coreExe, files, []string{"collision.al"})
+	dir := t.TempDir()
+	cfile := filepath.Join(dir, "preferred-result-name.c")
+	if err := os.WriteFile(cfile, append(generated, []byte(fmt.Sprintf(driverFormat, functionID))...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "preferred-result-name.exe")
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), cfile, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
+	if compileOutput, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of preferred-name collision: %v\n%s", err, compileOutput)
+	}
+	if runOutput, err := exec.Command(output).CombinedOutput(); err != nil {
+		t.Fatalf("run preferred-name collision C: %v\n%s", err, runOutput)
 	}
 }
 
