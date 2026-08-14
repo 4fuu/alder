@@ -1285,6 +1285,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
         if checked.owner != owner || checked.first_arm == 0 || checked.first_arm - 1 + checked.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let scrutinee = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.scrutinee, environment, panic_block)
+        let source_block = lower_open_block(scrutinee.state.mir, function, block)
         let join = try lower_add_block(d, scrutinee.state, function, "bb_match_join")
         let result_type = try lower_type(d, source_state, store, join.state, checked.checked_type)
         let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_match_join", join.id), result_type.id)
@@ -1297,7 +1298,6 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             arm_blocks = try __s0_buffer_append(U64, d, arm_blocks, arm_block.id)
             ordinal = ordinal + 1
         }
-        let source_block = lower_open_block(current.mir, function, block)
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: scrutinee.id, target: 0, then_block: 0, else_block: 0))
         current = lower_with_mir(current, term.store)
         ordinal = 0
