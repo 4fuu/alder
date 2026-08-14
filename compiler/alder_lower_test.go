@@ -15,6 +15,7 @@ import (
 
 func runLowerConformance(t *testing.T, exe string) {
 	t.Helper()
+	runSyntheticValueNameCollisionConformance(t, exe)
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -272,6 +273,35 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	checkLowerGolden(t, "lower-all.golden", first)
 	runLowerCgenBehavior(t, module, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
 	runMalformedLowerCompiler(t, exe)
+}
+
+func runSyntheticValueNameCollisionConformance(t *testing.T, exe string) {
+	t.Helper()
+	fixtures := []struct {
+		name   string
+		source string
+	}{
+		{name: "parameter", source: "fn collision(v2: U64) -> U64 { return 1 }\n"},
+		{name: "block-parameter-progress", source: "fn collision(v5: U64, flag: Bool) -> Bool { return !flag }\n"},
+		{name: "function-local", source: "fn first(v2: U64) -> U64 { return 1 }\nfn second(v2: U64) -> U64 { return 1 }\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run("synthetic-value-name-"+fixture.name, func(t *testing.T) {
+			files := map[string]string{"collision.al": fixture.source}
+			first := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			second := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			if len(first) == 0 || !bytes.Equal(first, second) {
+				t.Fatal("collision lowering was empty or changed across fresh processes")
+			}
+			module, err := mir.Parse(string(first))
+			if err != nil {
+				t.Fatalf("parse collision MIR: %v\n%s", err, first)
+			}
+			if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+				t.Fatalf("verify collision MIR: %s\n%s", verify.Errors(diagnostics), first)
+			}
+		})
+	}
 }
 
 func runLowerCgenBehavior(t *testing.T, module *mir.Module, coreExe string, files map[string]string, order []string) {
