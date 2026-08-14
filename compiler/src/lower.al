@@ -1044,13 +1044,14 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let left_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
         let left = try lower_expression(d, source_state, spans, store, state, owner, function, block, left_id, environment, panic_block)
         if expression.kind == 6 && expression.operator == 2 {
+            let source_block = lower_open_block(left.state.mir, function, block)
             let true_block = try lower_add_block(d, left.state, function, "bb_not_true")
             let false_block = try lower_add_block(d, true_block.state, function, "bb_not_false")
             let join = try lower_add_block(d, false_block.state, function, "bb_not_join")
             let typ = try lower_type(d, source_state, store, join.state, expression.checked_type)
             let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, "not", typ.id)
             var current = lower_with_mir(typ.state, param.store)
-            current = try lower_branch(d, current, function, block, left.id, false_block.id, true_block.id)
+            current = try lower_branch(d, current, function, source_block, left.id, false_block.id, true_block.id)
             let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, expression_id)
             current = try lower_jump_value(d, truth.state, function, true_block.id, join.id, truth.id)
             let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, expression_id + 1)
