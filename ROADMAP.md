@@ -418,11 +418,14 @@ malformed ownership and edges before output, and emits exact MIR for the
 current scalar/call/aggregate/place slice and structured
 `if`/loop/short-circuit/`match`/typed-`try` CFG. Active `using` cleanups are
 selected from lexical environment chains and emitted in reverse order on scope
-fallthrough, return, and failed `try`. Its MIR is independently parsed and
-verifier-gated in the fixed shared-core harness; this is not the #21 source
-pipeline or #23 production C generator. These checks are preparatory: later
-Alder 1.0 forms, resource/domain operations, the full checker, and the complete
-frontend remain incomplete. Its
+fallthrough, return, and failed `try`. Issue #11 adds the manifest-v14
+bridge-to-MIR slice: domain create/mark/reset/destroy and allocation, active
+lexical cleanup exactly once in reverse order, fixed 16-slot `Map` structural
+hash/equality and probe helpers, private buffers with recoverable OOM retry,
+and the required FFI bridge forms. Its MIR is independently parsed and
+verifier-gated in the fixed shared-core harness; #21 source wiring and the #24
+resource C backend remain deferred. These checks are preparatory: later Alder
+1.0 forms, the full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit
