@@ -95,6 +95,32 @@ fn minimal(d: Domain, initial: MirStore, result_type: U64, with_entry_param: Boo
     return Ok(term.store)
 }
 
+fn duplicate_value_name_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let function = try mir_add_function(d, initial, "duplicate_values", mir_type_unit())
+    let first = try mir_add_function_param(d, function.store, function.id, 0, "first", mir_type_u64())
+    let second = try mir_add_function_param(d, first.store, function.id, 1, "second", mir_type_u64())
+    let block = try mir_add_block(d, second.store, function.id, 0, "entry")
+    let term = try mir_add_terminator(d, block.store, MirTermRec(function: function.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let first_value = __s0_buffer_get(MirValueRec, term.store.values, 0)
+    let second_value = __s0_buffer_get(MirValueRec, term.store.values, 1)
+    var values = try __s0_buffer_new(MirValueRec, d)
+    values = try __s0_buffer_append(MirValueRec, d, values, first_value)
+    values = try __s0_buffer_append(MirValueRec, d, values, MirValueRec(function: second_value.function, ordinal: second_value.ordinal, name_start: first_value.name_start, name_end: first_value.name_end, value_type: second_value.value_type, def_kind: second_value.def_kind, block: second_value.block, item: second_value.item))
+    return Ok(mir_with_values(term.store, values))
+}
+
+fn cross_function_value_names_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let first = try mir_add_function(d, initial, "first", mir_type_unit())
+    let first_value = try mir_add_function_param(d, first.store, first.id, 0, "shared", mir_type_u64())
+    let first_block = try mir_add_block(d, first_value.store, first.id, 0, "entry")
+    let first_term = try mir_add_terminator(d, first_block.store, MirTermRec(function: first.id, block: first_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let second = try mir_add_function(d, first_term.store, "second", mir_type_unit())
+    let second_value = try mir_add_function_param(d, second.store, second.id, 0, "shared", mir_type_u64())
+    let second_block = try mir_add_block(d, second_value.store, second.id, 0, "entry")
+    let second_term = try mir_add_terminator(d, second_block.store, MirTermRec(function: second.id, block: second_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(second_term.store)
+}
+
 fn call_fixture(d: Domain, initial: MirStore, result_type: U64, bind: Bool, ffi: Bool) -> Result(MirStore, __s0_Error) {
     var store = initial
     var target: U64 = 1
@@ -1106,6 +1132,15 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	let hosted_later_base = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
 	let hosted_later_store = try hosted_fixture(d, hosted_later_base, "main", mir_type_i32(), 0)
 	if !expect_complete(90, try mir_verify_complete(d, hosted_later_store, 3, true), true, true, 2, 0, 0) { return Ok(false) }
+	let duplicate_values = try duplicate_value_name_fixture(d, try mir_store_new(d))
+	if !expect_verification(91, try mir_verify_module(d, duplicate_values, 3), mir_vdiag(1, mir_vdiag_duplicate_name(), 1, 0, 0, 0, 0, 0, 2, 0, 0, 1)) { return Ok(false) }
+	let rejected_values = try mir_verify_complete(d, duplicate_values, 3, false)
+	if !expect_complete(92, rejected_values, false, false, 0, 1, mir_vdiag_duplicate_name()) { return Ok(false) }
+	// Mirror the production fail-shut MIR authorization. Any accidental MIR or C
+	// bytes from these rejection checks make the exact process output fail.
+	if rejected_values.complete { if mir_print(duplicate_values) { return Ok(false) } }
+	if try cgen_generate(d, duplicate_values, 3, false) { return Ok(false) }
+	if !expect_complete(93, try mir_verify_complete(d, try cross_function_value_names_fixture(d, try mir_store_new(d)), 3, false), true, false, 0, 0, 0) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1131,6 +1166,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.ReplaceAll(want, "C 68 1 0 1 1\n", "C 68 1 0 1 0\n")
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 3\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 93 0 1 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
