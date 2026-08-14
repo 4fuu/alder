@@ -1334,11 +1334,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1)
         if checked.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let value = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.expression, environment, panic_block)
+        let source_block = lower_open_block(value.state.mir, function, block)
         let ok_block = try lower_add_block(d, value.state, function, "bb_try_ok")
         let err_block = try lower_add_block(d, ok_block.state, function, "bb_try_err")
         let ok_type = try lower_type(d, source_state, store, err_block.state, checked.ok_type)
         let err_type = try lower_type(d, source_state, store, ok_type.state, checked.error_type)
-        let source_block = lower_open_block(err_type.state.mir, function, block)
         let ok_value = try mir_add_value(d, err_type.state.mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
         let err_value = try mir_add_value(d, ok_value.store, function, try lower_decimal_name(d, "try_err", expression_id), err_type.id, mir_value_def_switch_case(), source_block, 2)
         let term = try mir_add_terminator(d, err_value.store, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))

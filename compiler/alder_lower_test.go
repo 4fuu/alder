@@ -79,6 +79,14 @@ fn propagate(d: I64) -> Result(I64, I64) {
     let q = try checked(10, d)
     return Ok(q)
 }
+fn sequential_try(d: I64) -> Result(I64, I64) {
+    var value = try checked(20, d)
+    value = try checked(value, 2)
+    return Ok(value)
+}
+fn nested_try(d: I64) -> Result(I64, I64) {
+    return Ok(try checked(try checked(20, d), 2))
+}
 fn choose(value: Maybe) -> U64 {
     return match value {
         None => 0
@@ -226,9 +234,30 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify lowered MIR: %s\n%s", verify.Errors(diagnostics), first)
 	}
-	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
+	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "sequential_try", "nested_try", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
 		if _, ok := module.Function(name); !ok {
 			t.Fatalf("lowered MIR has no function %q\n%s", name, first)
+		}
+	}
+	for _, name := range []string{"sequential_try", "nested_try"} {
+		id, _ := module.Function(name)
+		okArms, errArms := 0, 0
+		for _, block := range module.Functions[id].Blocks {
+			switch {
+			case strings.HasPrefix(block.Name, "bb_try_ok"):
+				okArms++
+				if block.Term.Kind == mir.TermFail {
+					t.Fatalf("%s success arm %s takes the early-return path", name, block.Name)
+				}
+			case strings.HasPrefix(block.Name, "bb_try_err"):
+				errArms++
+				if block.Term.Kind != mir.TermFail {
+					t.Fatalf("%s error arm %s has %s terminator, want fail", name, block.Name, block.Term.Kind)
+				}
+			}
+		}
+		if okArms != 2 || errArms != 2 {
+			t.Fatalf("%s has try arms ok=%d err=%d, want two of each", name, okArms, errArms)
 		}
 	}
 	foundIdentity := false
@@ -267,6 +296,8 @@ func runLowerCgenBehavior(t *testing.T, module *mir.Module, coreExe string, file
 	sum := functionID("sum")
 	choose := functionID("choose")
 	propagate := functionID("propagate")
+	sequentialTry := functionID("sequential_try")
+	nestedTry := functionID("nested_try")
 	attempt := functionID("attempt")
 	beforeUsing := functionID("before_using")
 	nestedCleanup := functionID("nested_cleanup")
@@ -296,6 +327,8 @@ int main(void) {
   AlderTy%d some = {0};
   %s success;
   %s failure;
+  %s sequential;
+  %s nested;
   %s retried;
   AlderDomain root = {0};
   none.alder_tag = %d;
@@ -308,6 +341,12 @@ int main(void) {
   success = alder_fn_propagate_%d(2);
   failure = alder_fn_propagate_%d(0);
   if (success.alder_tag != %d || failure.alder_tag != %d) return 5;
+  sequential = alder_fn_sequential_try_%d(2);
+  nested = alder_fn_nested_try_%d(2);
+  if (sequential.alder_tag != %d || sequential.alder_u.alder_p%d != 5) return 19;
+  if (nested.alder_tag != %d || nested.alder_u.alder_p%d != 5) return 20;
+  if (alder_fn_sequential_try_%d(0).alder_tag != %d) return 21;
+  if (alder_fn_nested_try_%d(0).alder_tag != %d) return 22;
   if (alder_fn_attempt_%d(false) != 0 || alder_test_cleanup != 5) return 6;
   alder_test_cleanup = 0;
   if (alder_fn_attempt_%d(true) != 7 || alder_test_cleanup != 5) return 7;
@@ -334,8 +373,9 @@ int main(void) {
   alder_domain_destroy(&root);
   return 0;
 }
-`, maybeType, maybeType, resultCType, resultCType, bufferResultCType,
+`, maybeType, maybeType, resultCType, resultCType, resultCType, resultCType, bufferResultCType,
 		none, some, some, calculate, short, short, sum, choose, choose, propagate, propagate, ok, errVariant,
+		sequentialTry, nestedTry, ok, ok, ok, ok, sequentialTry, errVariant, nestedTry, errVariant,
 		attempt, attempt, beforeUsing, beforeUsing, nestedCleanup, cleanupTry, cleanupTry,
 		domainBridge, mapBridge, mapProbeBridge, mapStructuralBridge, bufferOOMRetry, ok, ok)
 	dir := t.TempDir()
