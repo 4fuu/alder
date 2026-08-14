@@ -266,13 +266,15 @@ fn bad_store_type_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0
 }
 
 fn bad_result_type_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
-    let constant = try mir_add_const(d, initial, "answer", mir_type_u64(), mir_const_int(), 0, 42, 0, "")
-    let function = try mir_add_function(d, constant.store, "bad_result", mir_type_bool())
-    let entry = try mir_add_block(d, function.store, function.id, 0, "entry")
-    let result = try mir_add_value(d, entry.store, function.id, "answer", mir_type_bool(), mir_value_def_instruction(), entry.id, 1)
-    let named = try mir_append_name(d, result.store, "answer")
-    let get = try mir_add_instruction(d, named.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_const_get(), result: result.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: constant.id, name_start: named.start, name_end: named.end))
-    let done = try mir_add_terminator(d, get.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: result.id, target: 0, then_block: 0, else_block: 0))
+    let function = try mir_add_function(d, initial, "bad_result", mir_type_u64())
+    let source = try mir_add_function_param(d, function.store, function.id, 0, "source", mir_type_bool())
+    let entry = try mir_add_block(d, source.store, function.id, 0, "entry")
+    let local = try mir_add_local(d, entry.store, function.id, 0, "slot", mir_type_bool())
+    let place = try mir_add_place(d, local.store, MirPlaceRec(function: function.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    let write = try mir_add_instruction(d, place.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_store(), result: 0, place: place.id, type_op: 0, a: source.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let result = try mir_add_value(d, write.store, function.id, "loaded", mir_type_u64(), mir_value_def_instruction(), entry.id, 2)
+    let load = try mir_add_instruction(d, result.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 1, op: mir_op_load(), result: result.id, place: place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let done = try mir_add_terminator(d, load.store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: result.id, target: 0, then_block: 0, else_block: 0))
     return Ok(done.store)
 }
 
@@ -1012,7 +1014,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     let bad_store_type = try mir_verify_module(d, try bad_store_type_fixture(d, try mir_store_new(d)), 3)
     if !expect_verification(34, bad_store_type, mir_vdiag(5, mir_vdiag_bad_operand_type(), 1, 1, 1, 0, 0, mir_type_bool(), 0, mir_type_u64(), mir_type_bool(), 1)) { return Ok(false) }
     let bad_result_type = try mir_verify_module(d, try bad_result_type_fixture(d, try mir_store_new(d)), 3)
-    if !expect_verification(35, bad_result_type, mir_vdiag(5, mir_vdiag_bad_result_type(), 1, 1, 1, 0, 0, mir_type_bool(), 0, mir_type_u64(), mir_type_bool(), 1)) { return Ok(false) }
+    if !expect_verification(35, bad_result_type, mir_vdiag(5, mir_vdiag_bad_result_type(), 1, 1, 2, 0, 0, mir_type_u64(), 0, mir_type_bool(), mir_type_u64(), 2)) { return Ok(false) }
     let bad_call_arity = try mir_verify_module(d, try bad_call_arity_fixture(d, try mir_store_new(d)), 3)
     if !expect_verification(36, bad_call_arity, mir_vdiag(5, mir_vdiag_bad_argument_count(), 2, 1, 1, 0, 0, 0, 0, 1, 0, 1)) { return Ok(false) }
     let readonly_store = try mir_verify_module(d, try readonly_store_fixture(d, try mir_store_new(d)), 3)
