@@ -18,6 +18,7 @@ import (
 // deliberately excluded, and no source is discovered from the filesystem.
 var coreConformanceSourceManifest = []string{
 	"checker.al",
+	"cgen/body.al",
 	"cgen/program.al",
 	"cgen/types.al",
 	"cgen/writer.al",
@@ -130,7 +131,7 @@ func coreConformanceWrapper() string {
 
 	verifier := strings.TrimPrefix(mirVerifyWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\n")
 	verifier = strings.Replace(verifier, "fn main(d: Domain)", "fn verifier_mode(d: Domain)", 1)
-	return checker + printer + verifier + cgenSkeletonWrapper + `
+	return checker + printer + verifier + cgenBodyWrapper + cgenSkeletonWrapper + `
 fn lower_print(mir: MirStore) -> I32 {
     if mir_print(mir) { return 0 }
     return 5
@@ -299,6 +300,7 @@ func TestAlderCoreConformance(t *testing.T) {
 	t.Run("checker", func(t *testing.T) { runCheckerConformance(t, exe) })
 	t.Run("lower", func(t *testing.T) { runLowerConformance(t, exe) })
 	t.Run("cgen-skeleton", func(t *testing.T) { runCgenSkeletonConformance(t, cc, root, exe) })
+	t.Run("cgen-scalar-cfg", func(t *testing.T) { runCgenBodyConformance(t, cc, root, exe) })
 	t.Run("printer", func(t *testing.T) { runMIRPrinterConformance(t, exe) })
 	t.Run("verifier-v1-v10", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
 }

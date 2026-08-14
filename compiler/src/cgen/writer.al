@@ -1,5 +1,5 @@
-// Deterministic byte writer for the declaration-only C11 backend lane. Bytes
-// are retained until the complete skeleton has passed validation and allocation;
+// Deterministic byte writer shared by declaration conformance and production
+// body generation. Bytes are retained until validation and allocation finish;
 // callers can therefore reject malformed MIR without partial output.
 
 type CgenWriter {

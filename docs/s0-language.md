@@ -14,7 +14,10 @@ There are currently two implementation profiles:
   verified MIR and C11;
 - `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
   the current S0 syntax; its checker and sealed-manifest lowering cover the
-  current M5.4 slices but are not yet a production pipeline.
+  current M5.4 slices, and its complete-verifier-gated C generator covers the
+  scalar/CFG MIR slice. Source-to-MIR production wiring and the resource,
+  cleanup, table, and buffer backend slice are still unavailable, so it is not
+  yet a complete production pipeline.
 
 Neither profile is a usable Alder 1.0 compiler.
 
