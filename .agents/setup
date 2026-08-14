@@ -6,8 +6,16 @@ cd "$repo_root"
 
 packages=()
 
-if ! command -v go >/dev/null 2>&1; then
-  packages+=(golang-go)
+if ! command -v curl >/dev/null 2>&1; then
+  packages+=(curl ca-certificates)
+fi
+
+if ! command -v sha256sum >/dev/null 2>&1; then
+  packages+=(coreutils)
+fi
+
+if ! command -v tar >/dev/null 2>&1; then
+  packages+=(tar)
 fi
 
 if ! command -v cc >/dev/null 2>&1; then
@@ -21,13 +29,74 @@ if ((${#packages[@]} > 0)); then
     apt_get=(sudo apt-get)
   fi
 
-  printf 'Installing missing toolchain packages: %s\n' "${packages[*]}"
+  printf 'Installing missing system packages: %s\n' "${packages[*]}"
   "${apt_get[@]}" update
   DEBIAN_FRONTEND=noninteractive "${apt_get[@]}" install -y "${packages[@]}"
 else
-  printf '%s\n' 'Required toolchains are already installed.'
+  printf '%s\n' 'Required system packages are already installed.'
 fi
 
-printf 'Go: %s\n' "$(go version)"
+go_version="1.26.5"
+go_archive="go${go_version}.linux-amd64.tar.gz"
+go_sha256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"
+go_prefix="$HOME/.local/share/alder"
+go_dir="$go_prefix/go${go_version}"
+go_link="$go_prefix/go"
+
+if [[ "$(uname -m)" != "x86_64" ]]; then
+  printf 'Unsupported orb architecture for pinned Go toolchain: %s\n' "$(uname -m)" >&2
+  exit 1
+fi
+
+installed_go=""
+if [[ -x "$go_dir/bin/go" ]]; then
+  installed_go="$($go_dir/bin/go version)"
+fi
+
+if [[ "$installed_go" != "go version go${go_version} linux/amd64" ]]; then
+  printf 'Installing official Go %s toolchain.\n' "$go_version"
+  tmp_dir="$(mktemp -d)"
+  cleanup() {
+    rm -rf "$tmp_dir"
+  }
+  trap cleanup EXIT
+
+  curl --fail --location --retry 3 \
+    --output "$tmp_dir/$go_archive" \
+    "https://go.dev/dl/$go_archive"
+  printf '%s  %s\n' "$go_sha256" "$tmp_dir/$go_archive" | sha256sum -c -
+  tar -C "$tmp_dir" -xzf "$tmp_dir/$go_archive"
+
+  mkdir -p "$go_prefix"
+  rm -rf "$go_dir"
+  mv "$tmp_dir/go" "$go_dir"
+fi
+
+ln -sfn "go${go_version}" "$go_link"
+
+profile_marker="# Alder repository Go toolchain"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >> "$HOME/.bash_profile" <<EOF
+
+$profile_marker
+if [[ "\${PWD}" == "$repo_root" || "\${PWD}" == "$repo_root/"* ]]; then
+  export GOROOT="$go_link"
+  case ":\${PATH}:" in
+    *":$go_link/bin:"*) ;;
+    *) export PATH="$go_link/bin:\${PATH}" ;;
+  esac
+fi
+EOF
+fi
+
+export GOROOT="$go_link"
+export PATH="$GOROOT/bin:$PATH"
+
+if [[ "$(go version)" != "go version go${go_version} linux/amd64" ]]; then
+  printf 'Pinned Go toolchain verification failed: %s\n' "$(go version)" >&2
+  exit 1
+fi
+
+printf 'Go: %s (%s)\n' "$(go version)" "$(command -v go)"
 printf 'C compiler: %s\n' "$(cc --version | sed -n '1p')"
 printf '%s\n' 'Alder orb setup complete.'

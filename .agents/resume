@@ -5,8 +5,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 missing=()
+go_bin="$HOME/.local/share/alder/go/bin/go"
 
-command -v go >/dev/null 2>&1 || missing+=(go)
+if [[ ! -x "$go_bin" ]] || [[ "$($go_bin version)" != "go version go1.26.5 linux/amd64" ]]; then
+  missing+=("Go 1.26.5")
+fi
 command -v cc >/dev/null 2>&1 || missing+=(cc)
 
 if ((${#missing[@]} > 0)); then
