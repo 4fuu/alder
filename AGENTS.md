@@ -1,5 +1,12 @@
 # Alder Repository Guidance
 
+## Repository Identity
+
+The repository is currently named `4fuu/alder` and was formerly named
+`4fuu/aster`. Existing remotes, links, or metadata that use `4fuu/aster` are
+valid historical references to the same project and must not be mistaken for a
+different repository. Prefer `4fuu/alder` for new references.
+
 ## Project Status
 
 Alder is in the design and bootstrap phase. Do not claim that a compiler, runtime, or language feature is usable unless executable code and tests demonstrate it.
