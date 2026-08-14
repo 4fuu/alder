@@ -1266,7 +1266,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         let checked_id = checked_type_for_syntax(appended, node_id)
         let canonical = __s0_buffer_get(CheckedTypeRec, appended.types, checked_id - 1)
         let child = __s0_buffer_get(U64, appended.type_args, canonical.first_arg - 1)
-        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_fail(d, appended, 10, syntax_diag_node(state, parse, node_id), 0, 0, 0) }
+        if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, child, 0, 0, boundary) { return check_type_detail_fail(d, appended, 10, syntax_diag_node(state, parse, node_id), child) }
         return Ok(CheckGood(appended))
     }
     if node.kind == 4 {
@@ -1854,6 +1854,16 @@ fn expr_token_type_fail(d: Domain, state: State, store: CheckStore, kind: U64, n
     let want = diagnostic_type(store, expected)
     let got = diagnostic_type(store, actual)
     let failed = try check_token_detail_fail(d, state, store, kind, node, want.kind, want.target, got.kind, got.target)
+    let bad = match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return Ok(ExprBad(bad))
+}
+
+fn expr_token_single_type_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec, checked_type: U64) -> Result(ExprOutcome, __s0_Error) {
+    let detail = diagnostic_type(store, checked_type)
+    let failed = try check_token_detail_fail(d, state, store, kind, node, detail.kind, detail.target, 0, 0)
     let bad = match failed {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -3194,8 +3204,8 @@ fn check_s0_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore
             let key = __s0_buffer_get(U64, current.type_args, map_type.first_arg - 1)
             let value = __s0_buffer_get(U64, current.type_args, map_type.first_arg)
             let type_node = __s0_buffer_get(SyntaxRec, parse.nodes, type_link.node - 1)
-            if !(try interpreted_map_key_ok(d, state, parse, current, empty_bindings, empty_ancestry, key, 0, 0, __s0_buffer_len(SymbolRec, current.symbols))) { return expr_token_fail(d, state, base, 12, type_node) }
-            if try interpreted_contains_reference(d, state, parse, current, empty_bindings, empty_ancestry, value, 0, 0, __s0_buffer_len(SymbolRec, current.symbols)) { return expr_token_fail(d, state, base, 13, type_node) }
+            if !(try interpreted_map_key_ok(d, state, parse, current, empty_bindings, empty_ancestry, key, 0, 0, __s0_buffer_len(SymbolRec, current.symbols))) { return expr_token_single_type_fail(d, state, current, 12, type_node, key) }
+            if try interpreted_contains_reference(d, state, parse, current, empty_bindings, empty_ancestry, value, 0, 0, __s0_buffer_len(SymbolRec, current.symbols)) { return expr_token_single_type_fail(d, state, current, 13, type_node, value) }
         }
         if identity != 8 && try interpreted_contains_reference(d, state, parse, current, empty_bindings, empty_ancestry, element, 0, 0, 0) {
             let type_node = __s0_buffer_get(SyntaxRec, parse.nodes, type_link.node - 1)
