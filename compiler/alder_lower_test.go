@@ -244,6 +244,126 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	checkLowerGolden(t, "lower-all.golden", first)
 	runLowerCgenBehavior(t, module, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
 	runMalformedLowerCompiler(t, exe)
+	runShortCircuitLowerConformance(t, exe)
+}
+
+func runShortCircuitLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"short.al": `import c observe: fn(U64, Bool) -> Bool
+fn short_collision(short_5: Bool, right: Bool) -> Bool { return short_5 && right }
+fn short_collision_again(short_5: Bool, right: Bool) -> Bool { return short_5 || right }
+fn short_single(left: Bool, right: Bool) -> Bool { return left && right }
+fn short_right_nested(left: Bool, middle: Bool, right: Bool) -> Bool { return left && (middle && right) }
+fn short_repeated_and(left: Bool, middle: Bool, right: Bool) -> Bool { return left && middle && right }
+fn short_explicit_and(left: Bool, middle: Bool, right: Bool) -> Bool { return (left && middle) && right }
+fn short_repeated_or(left: Bool, middle: Bool, right: Bool) -> Bool { return left || middle || right }
+fn short_mixed(left: Bool, middle: Bool, right: Bool) -> Bool { return left && middle || right }
+fn short_order_and() -> Bool {
+    return unsafe c { observe(1, true) } && unsafe c { observe(2, false) } && unsafe c { observe(3, true) }
+}
+fn short_order_or() -> Bool {
+    return unsafe c { observe(1, false) } || unsafe c { observe(2, true) } || unsafe c { observe(3, false) }
+}
+fn short_order_mixed() -> Bool {
+    return unsafe c { observe(1, true) } && unsafe c { observe(2, false) } || unsafe c { observe(3, true) }
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"short.al"})
+	if second := runLowerCompiler(t, exe, files, []string{"short.al"}); !bytes.Equal(first, second) {
+		t.Fatal("short-circuit MIR changed across fresh processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse short-circuit MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify short-circuit MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	functionID := func(name string) mir.FunctionId {
+		id, ok := module.Function(name)
+		if !ok {
+			t.Fatalf("short-circuit MIR has no function %q", name)
+		}
+		return id
+	}
+	collision := functionID("short_collision")
+	collisionAgain := functionID("short_collision_again")
+	single := functionID("short_single")
+	rightNested := functionID("short_right_nested")
+	repeatedAnd := functionID("short_repeated_and")
+	explicitAnd := functionID("short_explicit_and")
+	repeatedOr := functionID("short_repeated_or")
+	mixed := functionID("short_mixed")
+	orderAnd := functionID("short_order_and")
+	orderOr := functionID("short_order_or")
+	orderMixed := functionID("short_order_mixed")
+	if got := module.Functions[collision].Params[0].Name; got != "short_5" {
+		t.Fatalf("source parameter renamed: got %q", got)
+	}
+	blockParamNames := func(id mir.FunctionId) []string {
+		var names []string
+		for _, block := range module.Functions[id].Blocks {
+			for _, param := range block.Params {
+				names = append(names, param.Name)
+			}
+		}
+		return names
+	}
+	for _, id := range []mir.FunctionId{collision, collisionAgain, single} {
+		if got := blockParamNames(id); len(got) != 1 || got[0] != "__s0_short_5" {
+			t.Fatalf("single short-circuit join names = %v, want [__s0_short_5]", got)
+		}
+	}
+	if got := blockParamNames(repeatedAnd); len(got) != 2 || got[0] != "__s0_short_5" || got[1] != "__s0_short_8" {
+		t.Fatalf("repeated short-circuit join names = %v, want [__s0_short_5 __s0_short_8]", got)
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"short.al"})
+	if second := runResourceCgenCompiler(t, exe, files, []string{"short.al"}); !bytes.Equal(generated, second) {
+		t.Fatal("short-circuit C changed across fresh processes")
+	}
+	driver := fmt.Sprintf(`
+static uint64_t alder_test_observed;
+bool observe(uint64_t ordinal, bool value) { alder_test_observed = alder_test_observed * 10 + ordinal; return value; }
+int main(void) {
+  if (!alder_fn_short_collision_%d(true, true) || alder_fn_short_collision_%d(false, true)) return 10;
+  if (!alder_fn_short_collision_again_%d(false, true) || alder_fn_short_collision_again_%d(false, false)) return 11;
+  if (!alder_fn_short_single_%d(true, true) || alder_fn_short_single_%d(true, false)) return 1;
+  if (!alder_fn_short_right_nested_%d(true, true, true) || alder_fn_short_right_nested_%d(true, false, true)) return 2;
+  if (!alder_fn_short_repeated_and_%d(true, true, true) || alder_fn_short_repeated_and_%d(true, false, true)) return 3;
+  if (!alder_fn_short_explicit_and_%d(true, true, true) || alder_fn_short_explicit_and_%d(true, false, true)) return 4;
+  if (!alder_fn_short_repeated_or_%d(false, false, true) || alder_fn_short_repeated_or_%d(false, false, false)) return 5;
+  if (!alder_fn_short_mixed_%d(true, false, true) || alder_fn_short_mixed_%d(true, false, false)) return 6;
+  alder_test_observed = 0;
+  if (alder_fn_short_order_and_%d() || alder_test_observed != 12) return 7;
+  alder_test_observed = 0;
+  if (!alder_fn_short_order_or_%d() || alder_test_observed != 12) return 8;
+  alder_test_observed = 0;
+  if (!alder_fn_short_order_mixed_%d() || alder_test_observed != 123) return 9;
+  return 0;
+}
+`, collision, collision, collisionAgain, collisionAgain, single, single, rightNested, rightNested, repeatedAnd, repeatedAnd, explicitAnd, explicitAnd,
+		repeatedOr, repeatedOr, mixed, mixed, orderAnd, orderOr, orderMixed)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "short-circuit.c")
+	if err := os.WriteFile(file, append(generated, []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	program := filepath.Join(dir, "short-circuit.exe")
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("compile short-circuit C: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run short-circuit C: %v\n%s", err, output)
+	}
 }
 
 func runSyntheticValueNameCollisionConformance(t *testing.T, exe string) {
