@@ -135,6 +135,9 @@ type CheckedTypeRec {
     arg_count: U64
 }
 
+// Source annotation identity is the concrete declaration or replay owner plus
+// syntax. Canonical owner-zero types always have syntax zero and are not
+// annotated.
 type CheckedTypeAnnotationRec {
     owner: U64
     syntax: U64

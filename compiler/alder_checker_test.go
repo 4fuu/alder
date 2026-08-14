@@ -672,6 +672,82 @@ func runCheckerConformance(t *testing.T, exe string) {
 			t.Fatalf("generic body expression retained a nonconcrete type: %+v", expression)
 		}
 	}
+
+	replayText := "enum Mark { End }\n" +
+		"type Pair { left: U64\n right: U64 }\n" +
+		"fn first(T: type, b: __s0_Buffer(T)) -> T { return __s0_buffer_get(T, b, 0) }\n" +
+		"fn first_mark(b: __s0_Buffer(Mark)) -> Mark { return first(b) }\n" +
+		"fn first_pair(b: __s0_Buffer(Pair)) -> Pair { return first(b) }\n"
+	replayFiles := map[string]string{"owner-replay.al": replayText}
+	replayFirst := runAlderChecker(t, exe, replayFiles, []string{"owner-replay.al"}, false)
+	replaySecond := runAlderChecker(t, exe, replayFiles, []string{"owner-replay.al"}, false)
+	if replayFirst != replaySecond {
+		t.Fatal("owner-aware generic replay manifest changed across processes")
+	}
+	replay := parseCheckerManifest(t, replayFirst, replayFiles)
+	firstDeclaration := checkerSymbolByName(t, replay, replayFiles, "first")
+	mark := checkerSymbolByName(t, replay, replayFiles, "Mark")
+	pair := checkerSymbolByName(t, replay, replayFiles, "Pair")
+	operandStart := strings.Index(replayText, "__s0_buffer_get(T, b, 0)") + len("__s0_buffer_get(")
+	operandSyntax := 0
+	for _, span := range replay.spans {
+		if span.source == replay.sourceByPath["owner-replay.al"] && span.start == operandStart && span.end == operandStart+1 {
+			if operandSyntax != 0 {
+				t.Fatalf("explicit S0 type operand has multiple syntax records: %d and %d", operandSyntax, span.id)
+			}
+			operandSyntax = span.id
+		}
+	}
+	if operandSyntax == 0 {
+		t.Fatal("explicit S0 type operand has no syntax record")
+	}
+	wantInstances := map[int]string{mark.id: "Mark", pair.id: "Pair"}
+	seenInstances := make(map[int]bool)
+	for _, instance := range replay.instances {
+		if instance.declaration != firstDeclaration.id {
+			continue
+		}
+		if instance.argCount != 1 {
+			t.Fatalf("first replay owner %d has %d type arguments, want 1", instance.symbol, instance.argCount)
+		}
+		concreteID := replay.args[instance.firstArg-1].checkedType
+		concrete := replay.types[concreteID-1]
+		name, wanted := wantInstances[concrete.target]
+		if !wanted || concrete.kind != 7 {
+			t.Fatalf("first replay owner %d has unexpected concrete type %+v", instance.symbol, concrete)
+		}
+		seenInstances[concrete.target] = true
+		resolved := 0
+		for _, annotation := range replay.annotations {
+			if annotation.owner == instance.symbol && annotation.syntax == operandSyntax {
+				resolved = annotation.checkedType
+			}
+		}
+		if resolved != concreteID {
+			t.Fatalf("first(%s) owner %d resolved shared syntax %d to type %d, want %d", name, instance.symbol, operandSyntax, resolved, concreteID)
+		}
+		parameter := replay.types[checkerUse(t, replay, instance.symbol, 7, 0).checkedType-1]
+		parameterArgs := checkerDirectArgs(replay, parameter)
+		if parameter.kind != 13 || len(parameterArgs) != 1 || parameterArgs[0].checkedType != concreteID {
+			t.Fatalf("first(%s) owner %d synthesized the wrong buffer parameter: %+v args=%+v", name, instance.symbol, parameter, parameterArgs)
+		}
+		builtins := 0
+		for _, annotation := range replay.callAnnotations {
+			if annotation.owner == instance.symbol && annotation.builtin == 12 {
+				builtins++
+				if annotation.checkedType != concreteID {
+					t.Fatalf("first(%s) owner %d builtin result type=%d, want %d", name, instance.symbol, annotation.checkedType, concreteID)
+				}
+			}
+		}
+		if builtins != 1 {
+			t.Fatalf("first(%s) owner %d has %d buffer-get annotations, want 1", name, instance.symbol, builtins)
+		}
+	}
+	if len(seenInstances) != len(wantInstances) {
+		t.Fatalf("first concrete replay targets=%v, want Mark and Pair", seenInstances)
+	}
+
 	genericRejects := []struct {
 		name, text string
 		kind       int
