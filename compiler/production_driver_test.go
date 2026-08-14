@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,17 +11,46 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
 )
 
+type productionResult struct {
+	status int
+	stdout string
+	stderr string
+}
+
+type productionEnvelope struct {
+	Version     int `json:"version"`
+	Command     string
+	Success     bool
+	Diagnostics []struct {
+		Code     string
+		Severity string
+		Message  string
+		Range    struct {
+			Path               string
+			StartByte, EndByte int
+			Start, End         struct{ Line, Column int }
+		}
+		Related []struct {
+			Message string
+			Range   struct{ Path string }
+		}
+		Notes []string
+	}
+	Artifact *struct {
+		Kind, Content, Path string
+	}
+	Failure *struct{ Kind, Message string }
+}
+
 func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
 	}
-
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -29,6 +59,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	var sources []frontend.Source
 	for i, name := range compilerSourceManifest {
 		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
@@ -37,81 +68,139 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 		}
 		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
 	}
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
+	// Compile directly to C so this compiler-scale gate performs only the
+	// verification required by the service/backend contracts.
+	compiled, err := Compile(Request{Sources: sources, Emit: EmitC})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatalf("compile production root: result=%+v error=%v", compiled, err)
 	}
-	module, err := mir.Parse(compiled.Artifact.Text)
-	if err != nil {
-		t.Fatalf("parse production MIR: %v", err)
-	}
-	// Compile already verifies the production module before emitting this MIR.
-	// Parse the emitted form for C generation without repeating the expensive
-	// whole-module verifier over the compiler-sized graph.
-	generated, err := cgen.GenerateProgram(module)
-	if err != nil {
-		t.Fatalf("generate production C: %v", err)
-	}
 	dir := t.TempDir()
 	cfile := filepath.Join(dir, "compiler.c")
-	exe := filepath.Join(dir, "alder-compiler.exe")
-	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
+	exe := filepath.Join(dir, "alder1")
+	if err := os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
+	testProductionInjectedFailure(t, cc, root, cfile, dir, true, 3)
+	testProductionInjectedFailure(t, cc, root, cfile, dir, false, 3)
 
-	validFiles := map[string]string{
-		"z.al": "fn call(value: U64) -> U64 { return identity(value) }\nfn identity(value: U64) -> U64 { return value }\n",
-		"a.al": "type Box { value: U64 }\n",
+	valid := map[string]string{
+		"a/helper.al": "fn helper() -> I32 { return 7 }\n",
+		"z/main.al":   "fn main() -> I32 { return helper() }\n",
 	}
-	first, firstStatus := runProductionCompiler(t, exe, validFiles, []string{"z.al", "a.al"})
-	second, secondStatus := runProductionCompiler(t, exe, validFiles, []string{"a.al", "z.al"})
-	repeated, repeatedStatus := runProductionCompiler(t, exe, validFiles, []string{"z.al", "a.al"})
-	if firstStatus != 0 || secondStatus != 0 || repeatedStatus != 0 || first != second || first != repeated {
-		t.Fatalf("valid production run is not deterministic: status=%d/%d/%d", firstStatus, secondStatus, repeatedStatus)
+	check := runProductionCompiler(t, exe, valid, "check", "z/main.al", "a/helper.al")
+	if check != (productionResult{}) {
+		t.Fatalf("check emitted output or failed: %+v", check)
 	}
-	if !strings.HasPrefix(first, "mir 3\n") {
-		t.Fatalf("valid input did not reach MIR output:\n%s", first)
+	jsonCheck := runProductionCompiler(t, exe, valid, "check", "--format=json", "a/helper.al", "z/main.al")
+	checkEnvelope := decodeProductionEnvelope(t, jsonCheck.stdout)
+	if jsonCheck.status != 0 || jsonCheck.stderr != "" || !checkEnvelope.Success || checkEnvelope.Artifact != nil {
+		t.Fatalf("JSON check result: %+v envelope=%+v", jsonCheck, checkEnvelope)
 	}
-	produced, err := mir.Parse(first)
-	if err != nil {
-		t.Fatalf("parse production output MIR: %v", err)
-	}
-	if diagnostics := verify.Module(produced); len(diagnostics) != 0 {
-		t.Fatalf("independently verify production output MIR: %s", verify.Errors(diagnostics).String())
-	}
-	for _, name := range []string{"call", "identity"} {
-		if _, ok := produced.Function(name); !ok {
-			t.Fatalf("production output MIR has no %s function", name)
+
+	orders := [][]string{{"z/main.al", "a/helper.al"}, {"a/helper.al", "z/main.al"}, {"z/main.al", "a/helper.al"}}
+	var mirText string
+	for _, order := range orders {
+		args := append([]string{"compile", "--emit=mir"}, order...)
+		got := runProductionCompiler(t, exe, valid, args...)
+		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 3\n") {
+			t.Fatalf("MIR result for %v: %+v", order, got)
 		}
+		if mirText != "" && got.stdout != mirText {
+			t.Fatal("MIR changed with source permutation or repeat process")
+		}
+		mirText = got.stdout
+	}
+	module, err := mir.Parse(mirText)
+	if err != nil {
+		t.Fatalf("parse production MIR: %v", err)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("independently verify production MIR: %s", verify.Errors(diagnostics).String())
+	}
+	otherRoot := runProductionCompiler(t, exe, valid, "compile", "--emit=mir", "a/helper.al", "z/main.al")
+	if otherRoot.stdout != mirText {
+		t.Fatal("MIR changed across workspace roots")
+	}
+
+	jsonMIR := runProductionCompiler(t, exe, valid, "compile", "--format=json", "--emit=mir", "z/main.al", "a/helper.al")
+	mirEnvelope := decodeProductionEnvelope(t, jsonMIR.stdout)
+	if jsonMIR.status != 0 || jsonMIR.stderr != "" || mirEnvelope.Artifact == nil || mirEnvelope.Artifact.Kind != "mir" || mirEnvelope.Artifact.Content != mirText {
+		t.Fatalf("JSON MIR artifact separation: %+v envelope=%+v", jsonMIR, mirEnvelope)
+	}
+
+	cOutput := runProductionCompiler(t, exe, valid, "compile", "--emit=c", "z/main.al", "a/helper.al")
+	if cOutput.status != 0 || cOutput.stderr != "" || !strings.HasPrefix(cOutput.stdout, "/* Generated by the Alder C11 backend.") {
+		t.Fatalf("C result: %+v", cOutput)
+	}
+	compileAndRunProductionArtifact(t, cc, root, cOutput.stdout, 7)
+	jsonC := runProductionCompiler(t, exe, valid, "compile", "--format=json", "--emit=c", "-o", "out.c", "a/helper.al", "z/main.al")
+	cEnvelope := decodeProductionEnvelope(t, jsonC.stdout)
+	if jsonC.status != 0 || jsonC.stderr != "" || cEnvelope.Artifact == nil || cEnvelope.Artifact.Kind != "c" || cEnvelope.Artifact.Path != "out.c" || cEnvelope.Artifact.Content != "" {
+		t.Fatalf("JSON C file result: %+v envelope=%+v", jsonC, cEnvelope)
 	}
 
 	rejections := []struct {
-		name, text, prefix, diagnostic string
+		name, text, code string
 	}{
-		{"lex.al", ";", "ALDER-TOKEN-MANIFEST 1\n", "\nD LEX0001 "},
-		{"parse.al", "type Broken { value U64 }\n", "ALDER-PARSER-MANIFEST 1\n", "\nD SYN0001 "},
-		{"check.al", "type Broken { value: Missing }\n", "ALDER-CHECKER-MANIFEST 14\n", "\nD 4 "},
+		{"lex.al", ";\n", "LEX0001"},
+		{"parse.al", "type Broken { value U64 }\n", "SYN0001"},
+		{"check.al", "type Broken { value: Missing }\n", "SEM0001"},
 	}
 	for _, fixture := range rejections {
 		t.Run(fixture.name, func(t *testing.T) {
 			files := map[string]string{fixture.name: fixture.text}
-			one, oneStatus := runProductionCompiler(t, exe, files, []string{fixture.name})
-			two, twoStatus := runProductionCompiler(t, exe, files, []string{fixture.name})
-			if oneStatus != 1 || twoStatus != 1 || one != two {
-				t.Fatalf("phase failure is not deterministic: status=%d/%d", oneStatus, twoStatus)
+			human := runProductionCompiler(t, exe, files, "compile", "--emit=mir", fixture.name)
+			machine := runProductionCompiler(t, exe, files, "compile", "--format=json", "--emit=mir", fixture.name)
+			envelope := decodeProductionEnvelope(t, machine.stdout)
+			if human.status != 1 || human.stdout != "" || !strings.Contains(human.stderr, fixture.code) || machine.status != 1 || machine.stderr != "" || len(envelope.Diagnostics) != 1 || envelope.Diagnostics[0].Code != fixture.code || envelope.Artifact != nil {
+				t.Fatalf("diagnostic mismatch: human=%+v machine=%+v envelope=%+v", human, machine, envelope)
 			}
-			if !strings.HasPrefix(one, fixture.prefix) || !strings.Contains(one, fixture.diagnostic) || !strings.HasSuffix(one, "END\n") {
-				t.Fatalf("failure reached the wrong phase:\n%s", one)
-			}
-			if strings.HasPrefix(one, "mir ") {
-				t.Fatalf("source failure emitted MIR:\n%s", one)
+			if !strings.Contains(human.stderr, envelope.Diagnostics[0].Range.Path+":") || !strings.Contains(human.stderr, envelope.Diagnostics[0].Message) {
+				t.Fatalf("human/JSON disagreement: human=%q envelope=%+v", human.stderr, envelope)
 			}
 		})
 	}
+	duplicate := map[string]string{"a.al": "type clash { value: I64 }\n", "z.al": "fn clash() -> Unit { }\n"}
+	related := runProductionCompiler(t, exe, duplicate, "check", "--format=json", "z.al", "a.al")
+	relatedEnvelope := decodeProductionEnvelope(t, related.stdout)
+	if related.status != 1 || len(relatedEnvelope.Diagnostics) != 1 || relatedEnvelope.Diagnostics[0].Range.Path != "z.al" || len(relatedEnvelope.Diagnostics[0].Related) != 1 || relatedEnvelope.Diagnostics[0].Related[0].Range.Path != "a.al" {
+		t.Fatalf("primary/related ranges: %+v envelope=%+v", related, relatedEnvelope)
+	}
 
-	testProductionFailureStatus(t, cc, root, cfile, dir, "STORAGE_FAIL", 3)
-	testProductionFailureStatus(t, cc, root, cfile, dir, "OUTPUT_FAIL", 4)
+	backend := runProductionCompiler(t, exe, map[string]string{"library.al": "fn helper() -> I32 { return 0 }\n"}, "compile", "--emit=c", "library.al")
+	if backend.status != 4 || backend.stdout != "" || !strings.Contains(backend.stderr, "internal compiler failure") {
+		t.Fatalf("backend refusal emitted bytes or wrong class: %+v", backend)
+	}
+	for _, args := range [][]string{{}, {"bogus"}, {"check"}, {"check", "x.AL"}, {"check", "../x.al"}, {"check", "same.al", "same.al"}, {"compile", "--emit=nope", "x.al"}} {
+		got := runProductionCompiler(t, exe, nil, args...)
+		if got.status != 2 || got.stdout != "" {
+			t.Fatalf("malformed request %v: %+v", args, got)
+		}
+	}
+	missing := runProductionCompiler(t, exe, nil, "check", "missing.al")
+	if missing.status != 3 || missing.stdout != "" {
+		t.Fatalf("input I/O class: %+v", missing)
+	}
+	missingJSON := runProductionCompiler(t, exe, nil, "check", "--format=json", "missing.al")
+	missingEnvelope := decodeProductionEnvelope(t, missingJSON.stdout)
+	if missingJSON.status != 3 || missingJSON.stderr != "" || missingEnvelope.Failure == nil || missingEnvelope.Failure.Kind != "io" {
+		t.Fatalf("JSON input I/O class: %+v envelope=%+v", missingJSON, missingEnvelope)
+	}
+}
+
+func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
+	t.Helper()
+	decoder := json.NewDecoder(strings.NewReader(text))
+	var envelope productionEnvelope
+	if err := decoder.Decode(&envelope); err != nil {
+		t.Fatalf("decode JSON envelope %q: %v", text, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		t.Fatalf("more than one JSON envelope: %q", text)
+	}
+	return envelope
 }
 
 func compileGeneratedProgram(t *testing.T, cc, root, generated, host, output string, extra ...string) {
@@ -124,15 +213,93 @@ func compileGeneratedProgram(t *testing.T, cc, root, generated, host, output str
 	}
 }
 
-func runProductionCompiler(t *testing.T, exe string, files map[string]string, order []string) (string, int) {
+func compileAndRunProductionArtifact(t *testing.T, cc, root, generated string, want int) {
+	t.Helper()
+	dir := t.TempDir()
+	cfile := filepath.Join(dir, "program.c")
+	driver := filepath.Join(dir, "driver.c")
+	exe := filepath.Join(dir, "program")
+	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const driverText = `#include "alder_host.h"
+#include <stdint.h>
+int main(void) { int context = 0; return (int)alder_program_entry(&context); }
+`
+	if err := os.WriteFile(driver, []byte(driverText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict generated C compile: %v\n%s", err, output)
+	}
+	err := exec.Command(exe).Run()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != want {
+		t.Fatalf("generated program status: err=%v want=%d", err, want)
+	}
+}
+
+func testProductionInjectedFailure(t *testing.T, cc, root, generated, dir string, storage bool, want int) {
+	t.Helper()
+	name := "output"
+	setup := ""
+	command := 2
+	stdout := "false"
+	if storage {
+		name = "storage"
+		setup = "alder_runtime_test_fail_domain_alloc_after(0);"
+		command = 1
+		stdout = "true"
+	}
+	host := filepath.Join(dir, name+"_host.c")
+	exe := filepath.Join(dir, name+"_host")
+	source := fmt.Sprintf(`#include "alder_host.h"
+#include "alder.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+static const uint8_t text[] = "fn main() -> I32 { return 0 }\n";
+uint64_t alderhost_source_count(void) { return 1; }
+uint64_t alderhost_source_path_len(uint64_t source) { (void)source; return 7; }
+uint8_t alderhost_source_path_byte(uint64_t source, uint64_t offset) { (void)source; return (uint8_t)"main.al"[offset]; }
+uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint64_t)(sizeof(text) - 1); }
+uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return text[offset]; }
+uint64_t alderhost_command(void) { return %d; }
+bool alderhost_format_json(void) { return false; }
+uint64_t alderhost_output_path_len(void) { return 0; }
+uint8_t alderhost_output_path_byte(uint64_t offset) { (void)offset; return 0; }
+bool alderhost_output_mode(uint64_t mode) { (void)mode; return true; }
+bool alderhost_output_failed(void) { return %s; }
+bool alderhost_response_reset(void) { return true; }
+bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
+bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
+uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent) { double value = (double)significand; uint64_t bits = 0; while (exponent > 0) { value *= 10.0; exponent--; } while (exponent < 0) { value /= 10.0; exponent++; } if (negative != 0) { value = -value; } memcpy(&bits, &value, sizeof(bits)); return bits; }
+bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }
+int main(void) { int context = 0; %s return alder_program_entry(&context) == (int32_t)%d ? 0 : 1; }
+`, command, map[bool]string{true: "false", false: "true"}[storage], stdout, setup, want)
+	if err := os.WriteFile(host, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compileGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
+	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
+		t.Fatalf("injected %s failure: %v\n%s", name, err, output)
+	}
+}
+
+func runProductionCompiler(t *testing.T, exe string, files map[string]string, args ...string) productionResult {
 	t.Helper()
 	dir := t.TempDir()
 	for name, text := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(exe, order...)
+	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -146,46 +313,5 @@ func runProductionCompiler(t *testing.T, exe string, files map[string]string, or
 		}
 		status = exit.ExitCode()
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("unexpected stderr: %q", stderr.String())
-	}
-	return stdout.String(), status
-}
-
-func testProductionFailureStatus(t *testing.T, cc, root, generated, dir, mode string, want int) {
-	t.Helper()
-	host := filepath.Join(dir, strings.ToLower(mode)+"_host.c")
-	exe := filepath.Join(dir, strings.ToLower(mode)+".exe")
-	source := fmt.Sprintf(`#include "alder_host.h"
-#include "alder.h"
-#include <stdbool.h>
-#include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-static const uint8_t source_text[] = "type Good { value: U64 }\n";
-uint64_t alderhost_source_count(void) { return 1; }
-uint64_t alderhost_source_path_len(uint64_t source) { (void)source; return 7; }
-uint8_t alderhost_source_path_byte(uint64_t source, uint64_t offset) { (void)source; return (uint8_t)"good.al"[offset]; }
-uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint64_t)(sizeof(source_text) - 1); }
-uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return source_text[offset]; }
-bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
-bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
-uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent) { double value = (double)significand; uint64_t bits = 0; while (exponent > 0) { value *= 10.0; exponent--; } while (exponent < 0) { value /= 10.0; exponent++; } if (negative != 0) value = -value; memcpy(&bits, &value, sizeof(bits)); return bits; }
-bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }
-int main(void) {
-    int context = 0;
-    %s
-    return alder_program_entry(&context) == (int32_t)%d ? 0 : 1;
-}
-`, map[bool]string{true: "false", false: "true"}[mode == "OUTPUT_FAIL"], map[bool]string{true: "alder_runtime_test_fail_domain_alloc_after(0);", false: ""}[mode == "STORAGE_FAIL"], want)
-	if err := os.WriteFile(host, []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	compileGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
-	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
-		t.Fatalf("production %s status: %v\n%s", mode, err, output)
-	}
+	return productionResult{status: status, stdout: stdout.String(), stderr: stderr.String()}
 }

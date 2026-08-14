@@ -442,8 +442,8 @@ the failing signature check. Duplicate function names, including duplicate
 preserves the first failing phase diagnostics, sets `complete` false, and never
 repairs the store. This contract makes all verifier phases available;
 the Alder production source entry now uses its complete result as the sole MIR
-output gate. Public production C generation remains gated on the later backend
-work.
+output gate. The final M5.4 driver now routes verified source MIR through the
+existing complete-verifier and supported-operation-gated C generator.
 Because the frozen flat store contains no module header record,
 `mir_verify_module` receives the MIR format version alongside the store; the
 store's IDs, kinds, ownership, and type-part encoding remain unchanged.

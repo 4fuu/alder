@@ -347,6 +347,7 @@ func domainsMayAlias(info []domainInfo, a, b mir.ValueId) bool {
 
 func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []domainInfo {
 	info := make([]domainInfo, len(f.Values))
+	loadStores := aliasingStores(f)
 	paramEdges := make(map[mir.ValueId][]mir.ValueId)
 	for vi, v := range f.Values {
 		if v.Def.Kind == mir.ValueDefBlockParam {
@@ -364,7 +365,7 @@ func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect)
 	for changed {
 		changed = false
 		for vi := range info {
-			n := transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects)
+			n := transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects, loadStores)
 			if !sameInfo(n, info[vi]) {
 				info[vi] = n
 				changed = true
@@ -374,7 +375,7 @@ func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect)
 	return info
 }
 
-func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect) domainInfo {
+func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId) domainInfo {
 	v := &f.Values[vid]
 	var out domainInfo
 	merge := func(x mir.ValueId) {
@@ -435,13 +436,8 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		if in.Place.Kind == mir.PlaceDeref {
 			merge(in.Place.Deref)
 		}
-		for _, b := range f.Blocks {
-			for j := range b.Instrs {
-				s := &b.Instrs[j]
-				if s.Op == mir.OpStore && placesMayAlias(&in.Place, &s.Place) {
-					merge(s.StoreVal)
-				}
-			}
+		for _, stored := range loadStores[vid] {
+			merge(stored)
 		}
 	case mir.OpAggregateConstruct:
 		for _, x := range in.AggFields {

@@ -314,7 +314,7 @@ func TestAlderCoreConformance(t *testing.T) {
 	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
+	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe, "-DALDER_HOST_CONFORMANCE")
 
 	t.Run("checker", func(t *testing.T) {
 		if parallel {

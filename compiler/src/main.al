@@ -1,29 +1,51 @@
 fn storage_error() -> I32 {
-    let text = "alder compiler: storage failure\n"
-    var at: U64 = 0
-    while at < len(text) {
-        if !unsafe c { alderhost_stderr_byte(text[at]) } { return 3 }
-        at = at + 1
-    }
-    return 3
+    return driver_storage_error()
 }
 
-fn finish_verify(mir: MirStore, result: MirVerifyCompleteOutput) -> I32 {
-    if !result.complete { return 5 }
-    if !mir_print(mir) { return 4 }
+fn finish_cgen(generated: Bool) -> I32 {
+    if !generated {
+        if driver_output_failed() { return driver_failure(3, "io", "cannot write compiler output") }
+        return driver_internal_error()
+    }
+    if !driver_artifact_finish() { return driver_failure(3, "io", "cannot write compiler output") }
     return 0
 }
 
-fn run_verify(d: Domain, mir: MirStore) -> I32 {
-    return match mir_verify_complete(d, mir, 3, false) {
+fn run_cgen(d: Domain, mir: MirStore) -> I32 {
+    return match cgen_generate(d, mir, 3, true) {
         Err(error) => storage_error()
-        Ok(result) => finish_verify(mir, result)
+        Ok(generated) => finish_cgen(generated)
+    }
+}
+
+fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I32 {
+    if !result.complete { return driver_internal_error() }
+    if driver_command() == 1 { return driver_success_check() }
+    if driver_command() == 2 {
+        if !driver_artifact_start("mir") { return driver_failure(3, "io", "cannot write compiler output") }
+        if !mir_print(mir) {
+            if driver_output_failed() { return driver_failure(3, "io", "cannot write compiler output") }
+            return driver_internal_error()
+        }
+        if !driver_artifact_finish() { return driver_failure(3, "io", "cannot write compiler output") }
+        return 0
+    }
+    if !driver_artifact_start("c") { return driver_failure(3, "io", "cannot write compiler output") }
+    return run_cgen(d, mir)
+}
+
+fn run_verify(d: Domain, mir: MirStore) -> I32 {
+    var hosted = false
+    if driver_command() == 3 { hosted = true }
+    return match mir_verify_complete(d, mir, 3, hosted) {
+        Err(error) => storage_error()
+        Ok(result) => finish_verify(d, mir, result)
     }
 }
 
 fn finish_lower(d: Domain, result: LowerResult) -> I32 {
     return match result {
-        LowerBad => 5
+        LowerBad => driver_internal_error()
         LowerGood(mir) => run_verify(d, mir)
     }
 }
@@ -39,8 +61,7 @@ fn run_lower(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I
 }
 
 fn finish_check_bad(state: State, parse: ParseStore, store: CheckStore) -> I32 {
-    if !emit_check_manifest(state, parse, store) { return 4 }
-    return 1
+    return driver_check_diagnostic(state, store)
 }
 
 fn finish_check(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32 {
@@ -181,13 +202,11 @@ fn finish_parse(d: Domain, result: ParseResult) -> I32 {
 }
 
 fn finish_parse_failure(state: State, store: ParseStore) -> I32 {
-    if !emit_parse_manifest(state, store) { return 4 }
-    return 1
+    return driver_parse_diagnostic(state, store)
 }
 
 fn finish_lex_failure(state: State) -> I32 {
-    if !emit(state) { return 4 }
-    return 1
+    return driver_lex_diagnostic(state)
 }
 
 fn run_parse(d: Domain, state: State, store: ParseStore) -> I32 {

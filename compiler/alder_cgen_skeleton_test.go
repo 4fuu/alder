@@ -212,7 +212,7 @@ func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 			}
 			args = append(args, testCase)
 		}
-		cmd := exec.Command(exe, args...)
+		cmd := conformanceCommand(exe, args...)
 		cmd.Dir = dir
 		output, err := cmd.Output()
 		if err != nil {

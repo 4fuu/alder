@@ -3,7 +3,6 @@ package compiler
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1139,7 +1138,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 		if err := os.WriteFile(filepath.Join(dir, sentinel), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(exe, sentinel)
+		cmd := conformanceCommand(exe, sentinel)
 		cmd.Dir = dir
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout

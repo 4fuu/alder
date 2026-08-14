@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -76,7 +75,7 @@ func runMIRPrinterConformance(t *testing.T, exe string) {
 		if err := os.WriteFile(filepath.Join(dir, sentinel), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(exe, sentinel)
+		cmd := conformanceCommand(exe, sentinel)
 		cmd.Dir = dir
 		output, runErr := cmd.Output()
 		if runErr != nil {

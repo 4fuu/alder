@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,7 +178,7 @@ func runCgenBodyConformance(t *testing.T, cc, root, exe string) {
 				t.Fatal(err)
 			}
 		}
-		cmd := exec.Command(exe, "!alder-core-cgen", mode)
+		cmd := conformanceCommand(exe, "!alder-core-cgen", mode)
 		cmd.Dir = dir
 		output, err := cmd.Output()
 		if err != nil {
@@ -238,8 +237,8 @@ int32_t fixture_add_one(int32_t value) { return value + INT32_C(1); }
 	if err := os.WriteFile(driver, []byte(driverSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), program, driver)
-	if output, err := exec.Command(program).CombinedOutput(); err != nil {
+	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), program, "-DALDER_HOST_CONFORMANCE", driver)
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
 		t.Fatalf("scalar/CFG generated program: %v\n%s\n%s", err, output, first)
 	}
 }

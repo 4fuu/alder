@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/4fuu/alder/mir"
 )
@@ -15,8 +16,77 @@ func isTableType(m *mir.Module, t mir.TypeId) bool {
 	return m.ValidType(t) && m.Types[t].Kind == mir.TypeTable
 }
 
+func placeLocalRoot(p *mir.Place) (mir.LocalId, bool) {
+	if p == nil {
+		return 0, false
+	}
+	if p.Kind == mir.PlaceLocal {
+		return p.Local, true
+	}
+	if p.Kind == mir.PlaceField {
+		return placeLocalRoot(p.Base)
+	}
+	return 0, false
+}
+
+// aliasingStores computes the store values that may feed each load. Places are
+// immutable MIR structure, so every fixed-point analysis can share this work.
+func aliasingStores(f *mir.Function) [][]mir.ValueId {
+	type storedPlace struct {
+		value mir.ValueId
+		path  string
+		ok    bool
+	}
+	stores := make(map[mir.LocalId][]storedPlace)
+	var unknownStores []storedPlace
+	var allStores []storedPlace
+	for _, b := range f.Blocks {
+		for j := range b.Instrs {
+			s := &b.Instrs[j]
+			if s.Op == mir.OpStore {
+				path, ok := placePath(&s.Place)
+				stored := storedPlace{value: s.StoreVal, path: path, ok: ok}
+				allStores = append(allStores, stored)
+				if root, rootOK := placeLocalRoot(&s.Place); rootOK {
+					stores[root] = append(stores[root], stored)
+				} else {
+					unknownStores = append(unknownStores, stored)
+				}
+			}
+		}
+	}
+	result := make([][]mir.ValueId, len(f.Values))
+	for vi := range f.Values {
+		v := &f.Values[vi]
+		if v.Def.Kind != mir.ValueDefInstr {
+			continue
+		}
+		in := &f.Blocks[v.Def.Block].Instrs[v.Def.Instr]
+		if in.Op != mir.OpLoad {
+			continue
+		}
+		loadPath, loadOK := placePath(&in.Place)
+		var candidates []storedPlace
+		if root, rootOK := placeLocalRoot(&in.Place); rootOK {
+			candidates = append(candidates, unknownStores...)
+			candidates = append(candidates, stores[root]...)
+		} else {
+			candidates = allStores
+		}
+		for _, store := range candidates {
+			if !loadOK || !store.ok || loadPath == store.path ||
+				strings.HasPrefix(loadPath, store.path+".") ||
+				strings.HasPrefix(store.path, loadPath+".") {
+				result[vi] = append(result[vi], store.value)
+			}
+		}
+	}
+	return result
+}
+
 func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []tableOrigins {
 	info := make([]tableOrigins, len(f.Values))
+	loadStores := aliasingStores(f)
 	merge := func(dst tableOrigins, src tableOrigins) {
 		for o := range src {
 			dst[o] = true
@@ -56,13 +126,8 @@ func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) 
 					if root, ok := placeDerefRoot(&in.Place); ok {
 						add(root)
 					}
-					for _, b := range f.Blocks {
-						for j := range b.Instrs {
-							s := &b.Instrs[j]
-							if s.Op == mir.OpStore && placesMayAlias(&in.Place, &s.Place) {
-								add(s.StoreVal)
-							}
-						}
+					for _, stored := range loadStores[vi] {
+						add(stored)
 					}
 				case mir.OpAggregateConstruct:
 					for _, x := range in.AggFields {

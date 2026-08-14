@@ -283,7 +283,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 	if err := os.WriteFile(cf, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cf, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cf, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, compileErr := exec.Command(cc, args...).CombinedOutput(); compileErr != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", compileErr, output)
 	}
@@ -306,7 +306,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 		"O 1 2 1 0 0 0 0 10\nO 2 1 16 0 0 0 0 10\nO 3 3 1 0 0 1 0 0\nO 4 4 1 0 0 1 1 0\nO 5 5 1 0 0 1 1 0\nO 6 6 1 0 0 0 1 0\nO 7 7 6 0 0 1 1 0\nO 8 8 1 0 0 1 0 0\n" +
 		"X 1 1 0\nX 1 1 0\nX 1 1 2\nX 2 1 1 9\nX 3 2 1 1\nX 4 5 1 0 1\nX 4 5 1 0 1\nX 4 7 999 0 0\nX 5 9 999 2\nEND\n"
 	for i := 0; i < 2; i++ {
-		output, runErr := exec.Command(exe).CombinedOutput()
+		output, runErr := conformanceCommand(exe).CombinedOutput()
 		if runErr != nil {
 			t.Fatalf("run MIR core wrapper %d: %v\n%s", i, runErr, output)
 		}

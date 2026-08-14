@@ -2,7 +2,7 @@
 
 Design status: **Bootstrap-only contract**
 
-Availability: **Implemented by the Go Stage 0 frontend; the Alder-written frontend port is incomplete**
+Availability: **Implemented by the Go Stage 0 frontend and the current Alder-written M5.4 compiler slice**
 
 This document isolates the implemented bootstrap language from the Alder 1.0
 design. A rule in this file is not a permanent language decision unless a 1.0
@@ -15,10 +15,11 @@ There are currently two implementation profiles:
 - `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
   the current S0 syntax; its checker and sealed-manifest lowering cover the
   current M5.4 slices, and its complete-verifier-gated C generator covers the
-  scalar/CFG MIR slice. The production entry now emits MIR only after complete
-  V1–V10 verification. The resource, cleanup, table, and buffer backend slice
-  is still unavailable, so this is not yet a complete source-to-C production
-  pipeline.
+  current scalar/CFG and resource MIR slice. Its final explicit-source driver
+  implements the same `check` and `compile --emit=mir|c` request, diagnostic,
+  status, and output contract as the Go bootstrap. MIR and C bytes are emitted
+  only after complete V1–V10 verification; C generation also completes its
+  supported-operation preflight before writing.
 
 Neither profile is a usable Alder 1.0 compiler.
 
@@ -249,12 +250,13 @@ this document split, it contains:
   code/primary/related/note rendering independent of the eventual CLI envelope.
 
 The fixed production entry drives those implemented slices from source loading
-through checking. A failed source phase emits that phase's private manifest; a
-successful check derives canonical checked spans, lowers the checked model, and
-emits MIR 3 only when `mir_verify_complete` reports complete unhosted V1–V10
-verification. Malformed checked or lowered state and verifier rejection emit no
-MIR. This is a bootstrap integration contract, not public diagnostics or
-self-hosted compilation.
+through checking, lowering, and complete verification. Failed source phases
+produce stable human or version-1 JSON diagnostics derived from their canonical
+records; their private manifests remain conformance-test protocols only.
+`check` emits no artifact, while `compile` emits MIR or C according to the
+shared bootstrap CLI contract. Malformed checked/lowered state, verifier
+rejection, and C preflight rejection emit no artifact bytes. This remains a
+bootstrap subset, not an Alder 1.0 or fixed-point claim.
 
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the

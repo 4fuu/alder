@@ -47,9 +47,9 @@ preflight both complete before the output buffer is allocated. Invalid or
 unsupported MIR therefore returns false with zero output and is never repaired
 or rewritten.
 
-This is a production-shaped internal compiler-core generator, not yet a
-user-facing self-hosted source-to-C pipeline. The Alder source-to-MIR production
-entry is complete-verifier-gated. The shared-core resource fixture independently
+The final M5.4 Alder compiler driver exposes this generator through
+`compile --emit=c`; the source-to-C path remains complete-verifier-gated and
+zero-output on verifier or preflight rejection. The shared-core resource fixture independently
 lowers the existing Stage 0 domain, lexical-cleanup, fixed-map, and private-
 buffer bridge corpus, emits it through this path, and compiles and runs the
 result against the existing runtime ABI. The Go `cgen` package remains the
@@ -85,14 +85,15 @@ Null context or failed root initialization returns
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.
-Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
-`EXIT_FAILURE`.
+The compiler host preserves the S0 status classes: 0 success, 1 source
+diagnostics, 2 usage/request, 3 I/O/storage, and 4 internal/backend.
 
 The Alder declaration skeleton renders this adapter only for syntax
 conformance. `cgen_generate` emits the corresponding function bodies and its
 hosted output is linked and run by the scalar/CFG acceptance fixture.
 
-The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
+The narrow Stage 0 hosted ABI parses the documented `check`/`compile` request,
+then exposes its sorted explicit source snapshot
 through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and
 `alderhost_source_text_len`/`_byte`. The host sorts exact argument strings with
 `strcmp`, rejects duplicates, and loads every file in binary mode before entry;
@@ -105,7 +106,9 @@ and `alderhost_stderr_byte` write exactly one byte without a newline and return
 false outside an active invocation or on write failure. The invocation context
 layout remains private, is active only during `alder_program_entry`, and is
 valid under the single-threaded Stage 0 runtime contract. Inputs are freed and
-both output streams are flushed after entry. This host ABI is distinct from the
+both output streams are flushed after entry. Artifact files use same-directory
+replacement and are committed only after compiler and flush success. This host
+ABI is distinct from the
 generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
 ## Milestone 3 Lowering Contract

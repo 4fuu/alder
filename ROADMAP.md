@@ -426,17 +426,19 @@ and the required FFI bridge forms. Its MIR is independently parsed and
 verifier-gated in the fixed shared-core harness. Issue #21 wires the production
 entry from successful checking through canonical checked spans and unchanged
 lowering into the complete V1–V10 verifier; only its complete result authorizes
-textual MIR output. The #24 resource C backend remains deferred. These checks
-are preparatory: later Alder
+textual MIR output. Issue #24 supplies the complete-verifier and preflight-gated
+resource C backend slice. These checks are preparatory: later Alder
 1.0 forms, the full checker, and the complete frontend remain incomplete. Its
 current reverse-link and declaration-phase replay are recursive and are not yet
 an arbitrary-size stack contract. The token, parser, and checker manifests are
 private conformance protocols. The fixed production entry now loads its explicit
-host snapshot and runs the shared lexer, parser, and current checker in order,
-stopping at the first failed source phase and emitting that phase's private
-manifest. Successful checking lowers directly to MIR 3 and prints only after
-complete unhosted verification; malformed checked/lowered state and verifier
-rejection produce no MIR bytes.
+host snapshot and runs the shared lexer, parser, and current checker in order.
+Issue #25 replaces production private-manifest output with the shared
+explicit-source `check`/`compile --emit=mir|c` contract, stable human/version-1
+JSON diagnostics, faithful status classes, and atomic host output replacement.
+Successful checking lowers directly to MIR 3 and emits the requested artifact
+only after complete verification; malformed checked/lowered state, verifier
+rejection, and C preflight rejection produce no artifact bytes.
 This integration is execution evidence only; these slices do not open a second
 frontend, replace the M5.3 declaration spike yet, constitute a complete frontend,
 or satisfy any self-hosting claim. Grouping nodes follow the Go semantic AST and
@@ -497,10 +499,9 @@ checked failure, struct/enum/option/result and concrete-generic behavior, FFI,
 strict C11, process determinism, no nested C evaluation-order shortcut, and
 zero-output refusal. Both APIs call `mir_verify_complete` before allocating an
 output buffer and consume the verifier-returned hosted mode and external entry
-ID. Invalid MIR and the #24 domain/cleanup/table/buffer operation set are
-refused without repair. Source-to-MIR wiring is complete; the #24 resource-
-oriented backend operations still prevent a complete production source-to-C
-pipeline.
+ID. Invalid or unsupported MIR is refused without repair. The current #24
+domain/cleanup/table/buffer operation set is supported and the final driver
+wires the verified production source slice to this C path.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 

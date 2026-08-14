@@ -352,7 +352,7 @@ int main(void) {
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile lowered C: %v\n%s", err, output)
 	}
-	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
+	if output, err := conformanceCommand(exe).CombinedOutput(); err != nil {
 		t.Fatalf("run lowered C: %v\n%s", err, output)
 	}
 	for _, block := range module.Functions[sum].Blocks {
@@ -391,7 +391,7 @@ func runResourceCgenCompiler(t *testing.T, exe string, files map[string]string, 
 		}
 	}
 	args := append([]string{"!alder-core-cgen-resources"}, order...)
-	cmd := exec.Command(exe, args...)
+	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -439,7 +439,7 @@ func runMalformedLowerCompiler(t *testing.T, exe string) {
 					t.Fatal(err)
 				}
 			}
-			cmd := exec.Command(exe, mode, "bad.al")
+			cmd := conformanceCommand(exe, mode, "bad.al")
 			cmd.Dir = dir
 			if output, err := cmd.CombinedOutput(); err != nil || len(output) != 0 {
 				t.Fatalf("malformed checked model was not rejected with zero output: %v\n%s", err, output)
@@ -460,7 +460,7 @@ func runLowerCompiler(t *testing.T, exe string, files map[string]string, order [
 		}
 	}
 	args := append([]string{"!alder-core-lower"}, order...)
-	cmd := exec.Command(exe, args...)
+	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

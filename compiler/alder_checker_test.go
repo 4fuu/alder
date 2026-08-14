@@ -1272,7 +1272,7 @@ func runAlderChecker(t *testing.T, exe string, files map[string]string, order []
 			t.Fatal(e)
 		}
 	}
-	cmd := exec.Command(exe, append([]string{sentinel}, order...)...)
+	cmd := conformanceCommand(exe, append([]string{sentinel}, order...)...)
 	cmd.Dir = d
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
