@@ -15,6 +15,7 @@ import (
 
 func runLowerConformance(t *testing.T, exe string) {
 	t.Helper()
+	runSyntheticValueNameCollisionConformance(t, exe)
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -299,6 +300,35 @@ func checkIndexedPlaceLoadTypes(t *testing.T, exe string) {
 	}
 	if checked == 0 {
 		t.Fatal("domains MIR has no indexed checked-place root load")
+	}
+}
+
+func runSyntheticValueNameCollisionConformance(t *testing.T, exe string) {
+	t.Helper()
+	fixtures := []struct {
+		name   string
+		source string
+	}{
+		{name: "parameter", source: "fn collision(v2: U64) -> U64 { return 1 }\n"},
+		{name: "block-parameter-progress", source: "fn collision(v5: U64, flag: Bool) -> Bool { return !flag }\n"},
+		{name: "function-local", source: "fn first(v2: U64) -> U64 { return 1 }\nfn second(v2: U64) -> U64 { return 1 }\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run("synthetic-value-name-"+fixture.name, func(t *testing.T) {
+			files := map[string]string{"collision.al": fixture.source}
+			first := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			second := runLowerCompiler(t, exe, files, []string{"collision.al"})
+			if len(first) == 0 || !bytes.Equal(first, second) {
+				t.Fatal("collision lowering was empty or changed across fresh processes")
+			}
+			module, err := mir.Parse(string(first))
+			if err != nil {
+				t.Fatalf("parse collision MIR: %v\n%s", err, first)
+			}
+			if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+				t.Fatalf("verify collision MIR: %s\n%s", verify.Errors(diagnostics), first)
+			}
+		})
 	}
 }
 
