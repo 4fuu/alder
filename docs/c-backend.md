@@ -1,7 +1,7 @@
 # C11 Backend
 
-Status: Milestone 3 lowering contract with a working Go implementation; the
-Alder-written backend implements the M5.4 scalar/CFG slice
+Status: Milestone 3 lowering contract with working Go and Alder-written M5.4
+implementations
 
 The Alder backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Alder MIR. Its purpose is to validate Alder MIR semantics and provide a bootstrap path, not to make C the semantic definition of Alder.
 
@@ -34,11 +34,12 @@ failure and every unhosted result carries entry ID zero; duplicate `main`
 declarations are rejected earlier by V1's duplicate function-name rule.
 
 The Alder-written `cgen_generate(d, store, version, hosted)` entry implements
-the M5.4 scalar/CFG body slice directly over flat MIR 3. It lowers loads,
+the current M5.4 body path directly over flat MIR 3. It lowers loads,
 stores, field and checked-reference places, aggregate and enum-like values,
 scalar comparisons and conversions, checked integer and slice operations,
 direct and unsafe-import calls, block edges with staged parallel copies,
-branches, loops, switches, returns, typed failures, panic, and unreachable.
+branches, loops, switches, returns, typed failures, panic, unreachable, domains,
+allocation, supported domain copies, cleanup scopes, and generational tables.
 Every operand is read from an already materialized value in an explicitly
 ordered statement; generated calls never embed another call or checked
 operation in a C argument expression. Verification and the supported-operation
@@ -48,10 +49,11 @@ or rewritten.
 
 This is a production-shaped internal compiler-core generator, not yet a
 user-facing self-hosted source pipeline. The Alder source-to-MIR production
-wiring remains tracked by #21, while domain, cleanup, table, and bootstrap
-buffer lowering remain tracked by #24. Those operations are refused rather
-than partially emitted. The Go `cgen` package remains the complete active
-backend for those domains until the later M5.4 slices land.
+wiring remains tracked by #21. The shared-core resource fixture independently
+lowers the existing Stage 0 domain, lexical-cleanup, fixed-map, and private-
+buffer bridge corpus, emits it through this path, and compiles and runs the
+result against the existing runtime ABI. The Go `cgen` package remains the
+host implementation used outside this internal compiler-core path.
 
 The earlier declaration-only Alder backend lane remains as the focused
 `cgen_write_declaration_skeleton` conformance API. It exposes

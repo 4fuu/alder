@@ -81,6 +81,7 @@ fn main(d: Domain) -> I32 {
 	if host_path_is(0, "!alder-core-lower-bad-j") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad-gactive") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad-wduplicate") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-cgen-resources") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
@@ -120,7 +121,7 @@ func coreConformanceWrapper() string {
 	checker = strings.ReplaceAll(checker, " Ok(", "\n Ok(")
 	checker = strings.Replace(checker, "fn loaded(d: Domain,state: State) -> I32 { return match load_sources(d,state) {\n\n Err(e)=>3\n Ok(s)=>pi_nodes(d,s) } }", checkerSentinelLoader, 1)
 	checker = strings.Replace(checker, "fn checker_good(state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", "fn checker_good(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I32 {\n if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }\n if !emit_check_manifest(state, parse, store) { return 4 }\n return 0\n}", 1)
-	checker = strings.Replace(checker, "if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }", "if host_path_is(0, \"!alder-core-lower\") || host_path_is(0, \"!alder-core-lower-bad\") || host_path_is(0, \"!alder-core-lower-bad-k\") || host_path_is(0, \"!alder-core-lower-bad-m\") || host_path_is(0, \"!alder-core-lower-bad-w\") || host_path_is(0, \"!alder-core-lower-bad-x\") || host_path_is(0, \"!alder-core-lower-bad-g\") || host_path_is(0, \"!alder-core-lower-bad-v\") || host_path_is(0, \"!alder-core-lower-bad-h\") || host_path_is(0, \"!alder-core-lower-bad-q\") || host_path_is(0, \"!alder-core-lower-bad-l\") || host_path_is(0, \"!alder-core-lower-bad-e\") || host_path_is(0, \"!alder-core-lower-bad-ea\") || host_path_is(0, \"!alder-core-lower-bad-y\") || host_path_is(0, \"!alder-core-lower-bad-c\") || host_path_is(0, \"!alder-core-lower-bad-u\") || host_path_is(0, \"!alder-core-lower-bad-n\") || host_path_is(0, \"!alder-core-lower-bad-ca\") || host_path_is(0, \"!alder-core-lower-bad-eliteral\") || host_path_is(0, \"!alder-core-lower-bad-j\") || host_path_is(0, \"!alder-core-lower-bad-gactive\") || host_path_is(0, \"!alder-core-lower-bad-wduplicate\") { return lower_mode(d, state, parse, store) }", 1)
+	checker = strings.Replace(checker, "if host_path_is(0, \"!alder-core-lower\") { return lower_mode(d, state, parse, store) }", "if host_path_is(0, \"!alder-core-lower\") || host_path_is(0, \"!alder-core-cgen-resources\") || host_path_is(0, \"!alder-core-lower-bad\") || host_path_is(0, \"!alder-core-lower-bad-k\") || host_path_is(0, \"!alder-core-lower-bad-m\") || host_path_is(0, \"!alder-core-lower-bad-w\") || host_path_is(0, \"!alder-core-lower-bad-x\") || host_path_is(0, \"!alder-core-lower-bad-g\") || host_path_is(0, \"!alder-core-lower-bad-v\") || host_path_is(0, \"!alder-core-lower-bad-h\") || host_path_is(0, \"!alder-core-lower-bad-q\") || host_path_is(0, \"!alder-core-lower-bad-l\") || host_path_is(0, \"!alder-core-lower-bad-e\") || host_path_is(0, \"!alder-core-lower-bad-ea\") || host_path_is(0, \"!alder-core-lower-bad-y\") || host_path_is(0, \"!alder-core-lower-bad-c\") || host_path_is(0, \"!alder-core-lower-bad-u\") || host_path_is(0, \"!alder-core-lower-bad-n\") || host_path_is(0, \"!alder-core-lower-bad-ca\") || host_path_is(0, \"!alder-core-lower-bad-eliteral\") || host_path_is(0, \"!alder-core-lower-bad-j\") || host_path_is(0, \"!alder-core-lower-bad-gactive\") || host_path_is(0, \"!alder-core-lower-bad-wduplicate\") { return lower_mode(d, state, parse, store) }", 1)
 	checker = strings.Replace(checker, "fn checker_done(state: State, parse: ParseStore, result: CheckResult) -> I32", "fn checker_done(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32", 1)
 	checker = strings.Replace(checker, "CheckGood(store) => checker_good(state, parse, store)", "CheckGood(store) => checker_good(d, state, parse, store)", 1)
 	checker = strings.Replace(checker, "Ok(result) => checker_done(output.state, output.store, result)", "Ok(result) => checker_done(d, output.state, output.store, result)", 1)
@@ -135,6 +136,19 @@ func coreConformanceWrapper() string {
 fn lower_print(mir: MirStore) -> I32 {
     if mir_print(mir) { return 0 }
     return 5
+}
+fn lower_cgen_status(wrote: Bool) -> I32 {
+    if wrote { return 0 }
+    return 5
+}
+fn lower_emit(d: Domain, mir: MirStore) -> I32 {
+    if host_path_is(0, "!alder-core-cgen-resources") {
+        return match cgen_generate(d, mir, 3, false) {
+            Err(error) => 3
+            Ok(wrote) => lower_cgen_status(wrote)
+        }
+    }
+    return lower_print(mir)
 }
 fn lower_expect_bad(result: LowerResult) -> I32 { return match result {
     LowerBad => 0
@@ -220,7 +234,7 @@ fn lower_mode_spans(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec),
         Err(error) => 3
         Ok(result) => match result {
             LowerBad => 5
-            LowerGood(mir) => lower_print(mir)
+            LowerGood(mir) => lower_emit(d, mir)
         }
     }
 }

@@ -161,6 +161,162 @@ fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, main: U
     return cgen_put(d, out, "}\n")
 }
 
+fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    var wrote = false
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_cleanup_push() {
+            let count = mir_vcount_operands(store, mir_operand_instruction(), at + 1, 0)
+            out = try cgen_put(d, out, "typedef struct AlderCtx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " {\n")
+            var ordinal: U64 = 0
+            var field: U64 = 0
+            while ordinal < count {
+                let parameter = cgen_function_param(store, item.target, ordinal)
+                if parameter.param_type != mir_type_unit() {
+                    out = try cgen_put(d, out, "  ")
+                    out = try cgen_put_type(d, out, store, parameter.param_type)
+                    out = try cgen_put(d, out, " alder_f")
+                    out = try cgen_put_u64(d, out, field)
+                    out = try cgen_put(d, out, ";\n")
+                    field = field + 1
+                }
+                ordinal = ordinal + 1
+            }
+            if field == 0 { out = try cgen_put(d, out, "  uint8_t alder_empty;\n") }
+            out = try cgen_put(d, out, "} AlderCtx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, ";\nstatic ALDER_MAYBE_UNUSED void alder_cleanup_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, "(void *alder_ctx) {\n")
+            if field == 0 { out = try cgen_put(d, out, "  (void)alder_ctx;\n") } else { out = try cgen_put(d, out, "  AlderCtx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " *alder_c = (AlderCtx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " *)alder_ctx;\n") }
+            out = try cgen_put(d, out, "  ")
+            out = try cgen_emit_function_name(d, out, store, item.target)
+            out = try cgen_put(d, out, "(")
+            ordinal = 0
+            field = 0
+            var first = true
+            while ordinal < count {
+                let parameter = cgen_function_param(store, item.target, ordinal)
+                if parameter.param_type != mir_type_unit() {
+                    if !first { out = try cgen_put(d, out, ", ") }
+                    out = try cgen_put(d, out, "alder_c->alder_f")
+                    out = try cgen_put_u64(d, out, field)
+                    field = field + 1
+                    first = false
+                }
+                ordinal = ordinal + 1
+            }
+            out = try cgen_put(d, out, ");\n}\n")
+            wrote = true
+        }
+        at = at + 1
+    }
+    if wrote { out = try cgen_put(d, out, "\n") }
+    return Ok(out)
+}
+
+fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, type_id: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() {
+        out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(")
+        out = try cgen_put_type(d, out, store, item.elem)
+        out = try cgen_put(d, out, "), &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) {\n    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, _Alignof(")
+        out = try cgen_put_type(d, out, store, item.elem)
+        out = try cgen_put(d, out, "));\n    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n    alder_v.data = alder_p;\n  }\n")
+    }
+    if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
+        var ordinal: U64 = 0
+        var kind = mir_type_part_variant()
+        if item.kind == mir_type_kind_aggregate() { kind = mir_type_part_field() }
+        while ordinal < mir_type_part_count(store, type_id, kind) {
+            let child = cgen_type_part(store, type_id, kind, ordinal).part_type
+            if child != mir_type_unit() && !cgen_copy_trivial(store, child) {
+                if item.kind == mir_type_kind_enum() { out = try cgen_put(d, out, "  if (alder_v.alder_tag == (uint32_t)")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ") {\n  ") }
+                out = try cgen_put(d, out, "  alder_v.")
+                if item.kind == mir_type_kind_aggregate() { out = try cgen_put(d, out, "alder_f") } else { out = try cgen_put(d, out, "alder_u.alder_p") }
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, " = alder_copy_ty")
+                out = try cgen_put_u64(d, out, child - 1)
+                out = try cgen_put(d, out, "(alder_d, alder_v.")
+                if item.kind == mir_type_kind_aggregate() { out = try cgen_put(d, out, "alder_f") } else { out = try cgen_put(d, out, "alder_u.alder_p") }
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ");\n")
+                if item.kind == mir_type_kind_enum() { out = try cgen_put(d, out, "  }\n") }
+            }
+            ordinal = ordinal + 1
+        }
+    }
+    if item.kind == mir_type_kind_option() || item.kind == mir_type_kind_result() {
+        var ordinal: U64 = 0
+        while ordinal < 2 {
+            let child = cgen_variant_payload(store, type_id, ordinal)
+            if child != mir_type_unit() && !cgen_copy_trivial(store, child) {
+                out = try cgen_put(d, out, "  if (alder_v.alder_tag == (uint32_t)")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ") {\n    alder_v.alder_u.alder_p")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, " = alder_copy_ty")
+                out = try cgen_put_u64(d, out, child - 1)
+                out = try cgen_put(d, out, "(alder_d, alder_v.alder_u.alder_p")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ");\n  }\n")
+            }
+            ordinal = ordinal + 1
+        }
+    }
+    return cgen_put(d, out, "  return alder_v;\n}\n")
+}
+
+fn cgen_emit_copy_type(d: Domain, initial: CgenTypeState, store: MirStore, type_id: U64) -> Result(CgenTypeState, __s0_Error) {
+    if cgen_copy_trivial(store, type_id) || cgen_emitted(initial.emitted, type_id) { return Ok(initial) }
+    var state = initial
+    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
+        var ordinal: U64 = 0
+        var kind = mir_type_part_variant()
+        if item.kind == mir_type_kind_aggregate() { kind = mir_type_part_field() }
+        while ordinal < mir_type_part_count(store, type_id, kind) { state = try cgen_emit_copy_type(d, state, store, cgen_type_part(store, type_id, kind, ordinal).part_type)
+        ordinal = ordinal + 1 }
+    }
+    if item.kind == mir_type_kind_option() { state = try cgen_emit_copy_type(d, state, store, item.elem) }
+    if item.kind == mir_type_kind_result() { state = try cgen_emit_copy_type(d, state, store, item.ok_type)
+    state = try cgen_emit_copy_type(d, state, store, item.err_type) }
+    var out = try cgen_put(d, state.writer, "static ALDER_MAYBE_UNUSED ")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " alder_copy_ty")
+    out = try cgen_put_u64(d, out, type_id - 1)
+    out = try cgen_put(d, out, "(AlderDomain *alder_d, ")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " alder_v) {\n")
+    out = try cgen_emit_copy_helper_body(d, out, store, type_id)
+    let emitted = try __s0_buffer_append(U64, d, state.emitted, type_id)
+    return Ok(CgenTypeState(writer: out, emitted: emitted))
+}
+
+fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    let emitted = try __s0_buffer_new(U64, d)
+    var state = CgenTypeState(writer: initial, emitted: emitted)
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_copy_to_domain() { state = try cgen_emit_copy_type(d, state, store, cgen_value_type(store, item.function, item.b)) }
+        at = at + 1
+    }
+    if __s0_buffer_len(U64, state.emitted) > 0 { state.writer = try cgen_put(d, state.writer, "\n") }
+    return Ok(state.writer)
+}
+
 fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_writer_new(d)
     out = try cgen_put(d, out, "/* Generated by the Alder declaration-only C11 backend skeleton. */\n/* Production generation remains gated on MIR verifier V10. */\n#include \"alder.h\"\n")
@@ -183,6 +339,8 @@ fn cgen_build(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> 
     out = try cgen_emit_constants(d, out, store)
     out = try cgen_emit_functions(d, out, store)
     out = try cgen_emit_imports(d, out, store)
+    out = try cgen_emit_cleanup_sites(d, out, store)
+    out = try cgen_emit_copy_helpers(d, out, store)
     out = try cgen_emit_bodies(d, out, store)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, verified.entry) }
     return Ok(out)

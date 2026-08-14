@@ -1,5 +1,4 @@
-// Complete-verifier-gated MIR 3 body lowering for the M5.4 scalar/CFG slice.
-// Resource, cleanup, table, and buffer operations remain deliberately refused.
+// Complete-verifier-gated MIR 3 body lowering for the M5.4 backend.
 
 fn cgen_value_type(store: MirStore, function: U64, value: U64) -> U64 {
     var at: U64 = 0
@@ -151,14 +150,50 @@ fn cgen_variant_payload(store: MirStore, type_id: U64, ordinal: U64) -> U64 {
     return cgen_type_part(store, type_id, mir_type_part_variant(), ordinal).part_type
 }
 
+fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
+    if type_id <= mir_primitive_type_count() { return true }
+    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return false }
+    if item.kind == mir_type_kind_option() { return cgen_copy_trivial(store, item.elem) }
+    if item.kind == mir_type_kind_result() { return cgen_copy_trivial(store, item.ok_type) && cgen_copy_trivial(store, item.err_type) }
+    if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
+        var ordinal: U64 = 0
+        var kind = mir_type_part_variant()
+        if item.kind == mir_type_kind_aggregate() { kind = mir_type_part_field() }
+        while ordinal < mir_type_part_count(store, type_id, kind) {
+            let child = cgen_type_part(store, type_id, kind, ordinal).part_type
+            if !cgen_copy_trivial(store, child) { return false }
+            ordinal = ordinal + 1
+        }
+    }
+    return true
+}
+
+fn cgen_copy_supported(store: MirStore, type_id: U64) -> Bool {
+    if cgen_copy_trivial(store, type_id) || type_id <= mir_primitive_type_count() { return true }
+    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return cgen_copy_trivial(store, item.elem) }
+    if item.kind == mir_type_kind_option() { return cgen_copy_supported(store, item.elem) }
+    if item.kind == mir_type_kind_result() { return cgen_copy_supported(store, item.ok_type) && cgen_copy_supported(store, item.err_type) }
+    if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
+        var ordinal: U64 = 0
+        var kind = mir_type_part_variant()
+        if item.kind == mir_type_kind_aggregate() { kind = mir_type_part_field() }
+        while ordinal < mir_type_part_count(store, type_id, kind) {
+            let child = cgen_type_part(store, type_id, kind, ordinal).part_type
+            if !cgen_copy_supported(store, child) { return false }
+            ordinal = ordinal + 1
+        }
+    }
+    return true
+}
+
 fn cgen_supported(store: MirStore) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-        let op = __s0_buffer_get(MirInstrRec, store.instructions, at).op
-        var supported = op <= mir_op_aggregate_construct()
-        if op >= mir_op_int_add_checked() && op <= mir_op_enum_construct() { supported = true }
-        if op >= mir_op_int_eq() && op <= mir_op_ffi_call_unsafe() { supported = true }
-        if !supported { return false }
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op > mir_op_ffi_call_unsafe() { return false }
+        if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, item.function, item.b)) { return false }
         at = at + 1
     }
     return true
@@ -463,6 +498,133 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, instru
         }
         return Ok(out)
     }
+    if item.op == mir_op_domain_create() {
+        out = try cgen_put(d, out, "  if (!alder_domain_init(&alder_domain_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ")) { alder_runtime_panic(\"domain.create failed\"); }\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = &alder_domain_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        return cgen_put(d, out, ";\n")
+    }
+    if item.op == mir_op_domain_mark() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = alder_domain_mark(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_domain_reset() {
+        out = try cgen_put(d, out, "  if (!alder_domain_reset(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        return cgen_put(d, out, ")) { alder_runtime_panic(\"domain.reset failed\"); }\n")
+    }
+    if item.op == mir_op_domain_destroy() {
+        out = try cgen_put(d, out, "  alder_domain_destroy(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_alloc() || item.op == mir_op_alloc_checked() {
+        out = try cgen_put(d, out, "  uint64_t ")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ";\n  if (!alder_u64_mul_checked(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        out = try cgen_put(d, out, ", (uint64_t)sizeof(")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        out = try cgen_put(d, out, "), &")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ")) ")
+        if item.op == mir_op_alloc_checked() { out = try cgen_emit_checked_edge(d, out, store, instruction, item) } else { out = try cgen_put(d, out, "{ alder_runtime_panic(\"alloc: size overflow\"); }") }
+        out = try cgen_put(d, out, "\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, " > (uint64_t)SIZE_MAX) ")
+        if item.op == mir_op_alloc_checked() { out = try cgen_emit_checked_edge(d, out, store, instruction, item) } else { out = try cgen_put(d, out, "{ alder_runtime_panic(\"alloc: size exceeds size_t\"); }") }
+        out = try cgen_put(d, out, "\n  void *")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = alder_domain_alloc(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", (size_t)")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ", _Alignof(")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        out = try cgen_put(d, out, "));\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " == NULL) ")
+        if item.op == mir_op_alloc_checked() { out = try cgen_emit_checked_edge(d, out, store, instruction, item) } else { out = try cgen_put(d, out, "{ alder_runtime_panic(\"alloc: out of memory\"); }") }
+        out = try cgen_put(d, out, "\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderSlice){ ")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        return cgen_put(d, out, " };\n")
+    }
+    if item.op == mir_op_copy_to_domain() {
+        let type_id = cgen_value_type(store, item.function, item.b)
+        if type_id == mir_type_unit() { return Ok(out) }
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        if !cgen_copy_trivial(store, type_id) { out = try cgen_put(d, out, "alder_copy_ty")
+        out = try cgen_put_u64(d, out, type_id - 1)
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", ") }
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        if !cgen_copy_trivial(store, type_id) { out = try cgen_put(d, out, ")") }
+        return cgen_put(d, out, ";\n")
+    }
+    if item.op == mir_op_cleanup_scope_begin() {
+        out = try cgen_put(d, out, "  if (!alder_cleanup_scope_begin(&alder_scope_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        out = try cgen_put(d, out, ")) { alder_runtime_panic(\"cleanup.scope.begin failed\"); }\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = &alder_scope_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        return cgen_put(d, out, ";\n")
+    }
+    if item.op == mir_op_cleanup_push() {
+        let count = mir_vcount_operands(store, mir_operand_instruction(), instruction, 0)
+        var ordinal: U64 = 0
+        var field: U64 = 0
+        while ordinal < count {
+            let argument = cgen_operand(store, mir_operand_instruction(), instruction, 0, ordinal)
+            let parameter = cgen_function_param(store, item.target, ordinal)
+            if parameter.param_type != mir_type_unit() {
+                out = try cgen_put(d, out, "  alder_ctx_")
+                out = try cgen_put_u64(d, out, instruction - 1)
+                out = try cgen_put(d, out, ".alder_f")
+                out = try cgen_put_u64(d, out, field)
+                out = try cgen_put(d, out, " = ")
+                out = try cgen_put_value_read(d, out, store, item.function, argument.value)
+                out = try cgen_put(d, out, ";\n")
+                field = field + 1
+            }
+            ordinal = ordinal + 1
+        }
+        out = try cgen_put(d, out, "  if (!alder_cleanup_push(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", alder_cleanup_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        out = try cgen_put(d, out, ", &alder_ctx_")
+        out = try cgen_put_u64(d, out, instruction - 1)
+        out = try cgen_put(d, out, ", &")
+        out = try cgen_put_value(d, out, item.result)
+        return cgen_put(d, out, ")) { alder_runtime_panic(\"cleanup.push failed\"); }\n")
+    }
+    if item.op >= mir_op_cleanup_disarm() && item.op <= mir_op_cleanup_scope_end() {
+        out = try cgen_put(d, out, "  if (!alder_cleanup_")
+        if item.op == mir_op_cleanup_disarm() { out = try cgen_put(d, out, "disarm(") }
+        if item.op == mir_op_cleanup_scope_run() { out = try cgen_put(d, out, "run(") }
+        if item.op == mir_op_cleanup_scope_end() { out = try cgen_put(d, out, "end(") }
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ")) { alder_runtime_panic(\"cleanup contract violation\"); }\n")
+        return Ok(out)
+    }
     if item.op >= mir_op_int_add_checked() && item.op <= mir_op_int_shr_checked() { return cgen_emit_int_checked(d, out, store, instruction, item) }
     if item.op == mir_op_slice_len() {
         out = try cgen_put(d, out, "  ")
@@ -556,6 +718,77 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, instru
             out = try cgen_put(d, out, ";\n")
         }
         return Ok(out)
+    }
+    if item.op == mir_op_table_create() {
+        out = try cgen_put(d, out, "  void *")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = alder_domain_alloc(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", sizeof(AlderTable), _Alignof(AlderTable));\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " == NULL) { alder_runtime_panic(\"table.create: out of memory\"); }\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderTable *)")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, ";\n  *")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderTable){0};\n  if (!alder_table_init(")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", (uint64_t)sizeof(")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        out = try cgen_put(d, out, "), (uint64_t)_Alignof(")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        return cgen_put(d, out, "))) { alder_runtime_panic(\"table.create failed\"); }\n")
+    }
+    if item.op == mir_op_table_insert() {
+        let elem_type = cgen_value_type(store, item.function, item.b)
+        if elem_type == mir_type_unit() { out = try cgen_put(d, out, "  uint8_t ")
+        out = try cgen_put_tmp(d, out, item.result, "u")
+        out = try cgen_put(d, out, " = (uint8_t)0;\n") }
+        out = try cgen_put(d, out, "  if (!alder_table_insert(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", &")
+        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { out = try cgen_put_value(d, out, item.b) }
+        out = try cgen_put(d, out, ", &")
+        out = try cgen_put_value(d, out, item.result)
+        return cgen_put(d, out, ")) { alder_runtime_panic(\"table.insert failed\"); }\n")
+    }
+    if item.op == mir_op_table_lookup() || item.op == mir_op_table_lookup_mut() {
+        out = try cgen_put(d, out, "  void *")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ";\n  if (alder_table_lookup")
+        if item.op == mir_op_table_lookup_mut() { out = try cgen_put(d, out, "_mut") }
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        out = try cgen_put(d, out, ", &")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ")) {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1 = ")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, ";\n  } else {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        return cgen_put(d, out, ".alder_tag = (uint32_t)0;\n  }\n")
+    }
+    if item.op == mir_op_table_remove() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = alder_table_remove(")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, item.function, item.b)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_table_view_end() {
+        out = try cgen_put(d, out, "  (void)")
+        out = try cgen_put_value_read(d, out, store, item.function, item.a)
+        return cgen_put(d, out, ";\n")
     }
     if item.op >= mir_op_int_eq() && item.op <= mir_op_float_ge() {
         out = try cgen_put(d, out, "  ")
@@ -756,6 +989,28 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, func
     out = try cgen_emit_function_params(d, out, store, function)
     out = try cgen_put(d, out, ") {\n")
     var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let instruction = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if instruction.function == function && instruction.op == mir_op_domain_create() {
+            out = try cgen_put(d, out, "  AlderDomain alder_domain_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " = {0};\n")
+        }
+        if instruction.function == function && instruction.op == mir_op_cleanup_scope_begin() {
+            out = try cgen_put(d, out, "  AlderCleanupScope alder_scope_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " = {0};\n")
+        }
+        if instruction.function == function && instruction.op == mir_op_cleanup_push() {
+            out = try cgen_put(d, out, "  AlderCtx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " alder_ctx_")
+            out = try cgen_put_u64(d, out, at)
+            out = try cgen_put(d, out, " = {0};\n")
+        }
+        at = at + 1
+    }
+    at = 0
     while at < __s0_buffer_len(MirValueRec, store.values) {
         let value = __s0_buffer_get(MirValueRec, store.values, at)
         if value.function == function && value.def_kind != mir_value_def_function_param() && value.value_type != mir_type_unit() {

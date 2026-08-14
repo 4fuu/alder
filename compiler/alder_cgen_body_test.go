@@ -155,12 +155,17 @@ fn cgen_body_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Erro
 }
 
 fn cgen_unsupported_fixture(d: Domain, store: MirStore) -> Result(MirStore, __s0_Error) {
-    let handle = try mir_intern_type(d, store, mir_type_kind_domain_handle(), 0, 0, 0, try __s0_buffer_new(U64, d), 0)
-    let function = try mir_add_function(d, handle.store, "unsupported", mir_type_unit())
+    let parts = try __s0_buffer_new(U64, d)
+    let handle = try mir_intern_type(d, store, mir_type_kind_domain_handle(), 0, 0, 0, parts, 0)
+    let bytes = try mir_intern_type(d, handle.store, mir_type_kind_slice(), mir_type_u8(), 0, 0, parts, 0)
+    let nested = try mir_intern_type(d, bytes.store, mir_type_kind_slice(), bytes.type_id, 0, 0, parts, 0)
+    let function = try mir_add_function(d, nested.store, "unsupported", mir_type_unit())
     let domain = try mir_add_function_param(d, function.store, function.id, 0, "domain", handle.type_id)
-    let block = try mir_add_block(d, domain.store, function.id, 0, "entry")
-    let destroy = try mir_add_instruction(d, block.store, MirInstrRec(function: function.id, block: block.id, ordinal: 0, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
-    return Ok((try mir_add_terminator(d, destroy.store, MirTermRec(function: function.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
+    let value = try mir_add_function_param(d, domain.store, function.id, 1, "value", nested.type_id)
+    let block = try mir_add_block(d, value.store, function.id, 0, "entry")
+    let copied = try mir_add_value(d, block.store, function.id, "copied", nested.type_id, mir_value_def_instruction(), block.id, 1)
+    let copy = try mir_add_instruction(d, copied.store, MirInstrRec(function: function.id, block: block.id, ordinal: 0, op: mir_op_copy_to_domain(), result: copied.id, place: 0, type_op: 0, a: domain.id, b: value.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    return Ok((try mir_add_terminator(d, copy.store, MirTermRec(function: function.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 `
 
@@ -211,6 +216,9 @@ func runCgenBodyConformance(t *testing.T, cc, root, exe string) {
 	}
 	if got := run(t, "!cgen-body-invalid"); got != "" {
 		t.Fatalf("invalid MIR wrote %d bytes", len(got))
+	}
+	if verification := run(t, "!cgen-body-unsupported-verify"); verification != "V 98 0\n" {
+		t.Fatalf("unsupported copy fixture failed verifier:\n%s", verification)
 	}
 	if got := run(t, "!cgen-body-unsupported"); got != "" {
 		t.Fatalf("unsupported MIR wrote %d bytes", len(got))

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
 )
@@ -242,19 +241,19 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 		t.Fatalf("lowered MIR has no concrete identity instance\n%s", first)
 	}
 	checkLowerGolden(t, "lower-all.golden", first)
-	runLowerCgenBehavior(t, module)
+	runLowerCgenBehavior(t, module, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
 	runMalformedLowerCompiler(t, exe)
 }
 
-func runLowerCgenBehavior(t *testing.T, module *mir.Module) {
+func runLowerCgenBehavior(t *testing.T, module *mir.Module, coreExe string, files map[string]string, order []string) {
 	t.Helper()
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
 	}
-	generated, err := cgen.Generate(module)
-	if err != nil {
-		t.Fatal(err)
+	generated := runResourceCgenCompiler(t, coreExe, files, order)
+	if second := runResourceCgenCompiler(t, coreExe, files, order); !bytes.Equal(generated, second) {
+		t.Fatal("Alder-written resource C changed across processes")
 	}
 	functionID := func(name string) mir.FunctionId {
 		id, ok := module.Function(name)
@@ -340,7 +339,7 @@ int main(void) {
 		domainBridge, mapBridge, mapProbeBridge, mapStructuralBridge, bufferOOMRetry, ok, ok)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "lower-behavior.c")
-	if err := os.WriteFile(file, []byte(generated+driver), 0o644); err != nil {
+	if err := os.WriteFile(file, append(generated, []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	root, err := filepath.Abs("..")
@@ -361,6 +360,32 @@ int main(void) {
 		}
 	}
 	t.Fatal("slice-for lowering has no two-parameter edge for parallel-copy evidence")
+}
+
+func runResourceCgenCompiler(t *testing.T, exe string, files map[string]string, order []string) []byte {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "!alder-core-cgen-resources"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := append([]string{"!alder-core-cgen-resources"}, order...)
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run Alder resource C generator: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.Bytes(), stderr.Bytes())
+	}
+	if stderr.Len() != 0 || stdout.Len() == 0 {
+		t.Fatalf("Alder resource C generator produced invalid streams: stdout=%d stderr=%s", stdout.Len(), stderr.Bytes())
+	}
+	return stdout.Bytes()
 }
 
 func checkLowerGolden(t *testing.T, name string, got []byte) {
