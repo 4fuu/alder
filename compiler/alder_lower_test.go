@@ -228,6 +228,7 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify lowered MIR: %s\n%s", verify.Errors(diagnostics), first)
 	}
+	checkIndexedPlaceLoadTypes(t, exe)
 	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
 		if _, ok := module.Function(name); !ok {
 			t.Fatalf("lowered MIR has no function %q\n%s", name, first)
@@ -557,6 +558,62 @@ int main(void) {
 	}
 	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
 		t.Fatalf("run short-circuit C: %v\n%s", err, output)
+	}
+}
+
+func checkIndexedPlaceLoadTypes(t *testing.T, exe string) {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "e2e", "domains.al"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := runLowerCompiler(t, exe, map[string]string{"domains.al": string(src)}, []string{"domains.al"})
+	module, err := mir.Parse(string(text))
+	if err != nil {
+		t.Fatalf("parse domains MIR: %v\n%s", err, text)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify domains MIR: %s\n%s", verify.Errors(diagnostics), text)
+	}
+	checked := 0
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op != mir.OpSliceIndexChecked {
+					continue
+				}
+				storedThroughPlace := false
+				for _, candidateBlock := range function.Blocks {
+					for _, candidate := range candidateBlock.Instrs {
+						if candidate.Op == mir.OpStore && candidate.Place.Kind == mir.PlaceDeref && candidate.Place.Deref == instruction.Result {
+							storedThroughPlace = true
+						}
+					}
+				}
+				if !storedThroughPlace {
+					continue
+				}
+				value := function.Values[instruction.Slice]
+				if value.Def.Kind != mir.ValueDefInstr {
+					continue
+				}
+				load := function.Blocks[value.Def.Block].Instrs[value.Def.Instr]
+				if load.Op != mir.OpLoad || load.Place.Kind != mir.PlaceLocal {
+					continue
+				}
+				inferred, ok := module.PlaceType(function, &load.Place)
+				if !ok {
+					t.Fatalf("indexed root load has invalid place in %s", function.Name)
+				}
+				if stored := function.Values[load.Result].Type; stored != inferred {
+					t.Fatalf("indexed root load type in %s: stored %d, inferred %d", function.Name, stored, inferred)
+				}
+				checked++
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("domains MIR has no indexed checked-place root load")
 	}
 }
 
