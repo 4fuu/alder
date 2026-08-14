@@ -278,7 +278,8 @@ func runLowerCgenBehavior(t *testing.T, module *mir.Module, coreExe string, file
 	bufferOOMRetry := functionID("buffer_oom_retry")
 	maybeType := module.Functions[choose].Params[0].Type
 	resultType := module.Functions[propagate].Result
-	bufferResultType := module.Functions[bufferOOMRetry].Result
+	resultCType := generatedFunctionResultType(t, generated, "propagate", propagate)
+	bufferResultCType := generatedFunctionResultType(t, generated, "buffer_oom_retry", bufferOOMRetry)
 	none, _ := module.VariantIndex(maybeType, "None")
 	some, _ := module.VariantIndex(maybeType, "Some")
 	ok, _ := module.VariantIndex(resultType, "ok")
@@ -293,9 +294,9 @@ int main(void) {
   AlderSlice slice = {(void *)values, 3};
   AlderTy%d none = {0};
   AlderTy%d some = {0};
-  AlderTy%d success;
-  AlderTy%d failure;
-  AlderTy%d retried;
+  %s success;
+  %s failure;
+  %s retried;
   AlderDomain root = {0};
   none.alder_tag = %d;
   some.alder_tag = %d;
@@ -333,7 +334,7 @@ int main(void) {
   alder_domain_destroy(&root);
   return 0;
 }
-`, maybeType, maybeType, resultType, resultType, bufferResultType,
+`, maybeType, maybeType, resultCType, resultCType, bufferResultCType,
 		none, some, some, calculate, short, short, sum, choose, choose, propagate, propagate, ok, errVariant,
 		attempt, attempt, beforeUsing, beforeUsing, nestedCleanup, cleanupTry, cleanupTry,
 		domainBridge, mapBridge, mapProbeBridge, mapStructuralBridge, bufferOOMRetry, ok, ok)
@@ -360,6 +361,22 @@ int main(void) {
 		}
 	}
 	t.Fatal("slice-for lowering has no two-parameter edge for parallel-copy evidence")
+}
+
+func generatedFunctionResultType(t *testing.T, generated []byte, name string, id mir.FunctionId) string {
+	t.Helper()
+	needle := fmt.Sprintf(" alder_fn_%s_%d(", name, id)
+	for _, line := range strings.Split(string(generated), "\n") {
+		before, _, found := strings.Cut(line, needle)
+		if found {
+			fields := strings.Fields(before)
+			if len(fields) != 0 {
+				return fields[len(fields)-1]
+			}
+		}
+	}
+	t.Fatalf("generated C has no declaration for %s", name)
+	return ""
 }
 
 func runResourceCgenCompiler(t *testing.T, exe string, files map[string]string, order []string) []byte {

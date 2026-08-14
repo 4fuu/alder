@@ -24,7 +24,8 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_table_insert() || op == mir_op_table_lookup() || op == mir_op_table_lookup_mut() || op == mir_op_table_remove() { return 3 }
     if op == mir_op_table_view_end() { return 1 }
     if op >= mir_op_int_trunc() && op <= mir_op_float_from_int() { return 17 }
-    if op == mir_op_const_get() || op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
+    if op == mir_op_const_get() { return 64 }
+    if op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
     return 0
 }
 fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {

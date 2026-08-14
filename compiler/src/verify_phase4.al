@@ -261,8 +261,7 @@ fn mir_vphase4_initialization(d: Domain, store: MirStore, function: U64, initial
     while mir_vblock_index(store, function, block) != 0 { if mir_vseen_block(reach, block) { var position: U64 = 0
 while position < mir_vp4_instruction_count(store, function, block) { let iid = mir_vp4_instruction_at(store, function, block, position)
 let ins = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-if ins.op == mir_op_load() { let place = __s0_buffer_get(MirPlaceRec, store.places, ins.place - 1)
-if place.kind != mir_place_deref() { let ty = mir_vp4_place_type(store, function, ins.place)
+if ins.op == mir_op_load() { if mir_vp4_place_root(store, ins.place) != 0 { let ty = mir_vp4_place_type(store, function, ins.place)
 let suffix = try __s0_buffer_new(U64, d)
 if !(try mir_vp4_type_initialized(d, store, function, ins.place, ty, suffix, block, position)) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_dominance(), mir_vdiag_uninitialized_load(), function, block, iid, 0, ins.place, ty, 0, 0, 0, ins.place)) } } }
 position = position + 1 } }
