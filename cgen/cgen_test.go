@@ -49,6 +49,28 @@ func generateFixture(t *testing.T, name string) string {
 	return generatePath(t, goldenMirPath(name))
 }
 
+func TestRejectsMismatchedLoadResultTypeWithNoOutput(t *testing.T) {
+	m := mir.NewModule()
+	m.AddConst("source", mir.TypeI64, mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	f := m.AddFunction("bad_load", nil, mir.TypeUnit)
+	b := f.AddBlock("bb0", nil)
+	local := f.AddLocal("slot", mir.TypeI64)
+	source := f.AddValue("source", mir.TypeI64, mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+	b.AddInstr(mir.Instr{Op: mir.OpConstGet, Result: source, Const: "source", FailTarget: mir.NoBlock})
+	b.AddInstr(mir.Instr{Op: mir.OpStore, Result: mir.NoValue, Place: mir.Place{Kind: mir.PlaceLocal, Local: local}, StoreVal: source, FailTarget: mir.NoBlock})
+	loaded := f.AddValue("loaded", mir.TypeBool, mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 2})
+	b.AddInstr(mir.Instr{Op: mir.OpLoad, Result: loaded, Place: mir.Place{Kind: mir.PlaceLocal, Local: local}, FailTarget: mir.NoBlock})
+	b.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+
+	out, err := Generate(m)
+	if err == nil || !strings.Contains(err.Error(), "result type mismatch: stored bool, expected i64") {
+		t.Fatalf("mismatched load result was not rejected by V5: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("mismatched load result emitted C:\n%s", out)
+	}
+}
+
 // TestGolden pins the generated C for every golden fixture. Set
 // ALDER_UPDATE_GOLDEN=1 to regenerate the committed files.
 func TestGolden(t *testing.T) {
