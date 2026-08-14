@@ -42,6 +42,7 @@ go_sha256="5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053"
 go_prefix="$HOME/.local/share/alder"
 go_dir="$go_prefix/go${go_version}"
 go_link="$go_prefix/go"
+user_bin="$HOME/.local/bin"
 
 if [[ "$(uname -m)" != "x86_64" ]]; then
   printf 'Unsupported orb architecture for pinned Go toolchain: %s\n' "$(uname -m)" >&2
@@ -73,6 +74,9 @@ if [[ "$installed_go" != "go version go${go_version} linux/amd64" ]]; then
 fi
 
 ln -sfn "go${go_version}" "$go_link"
+mkdir -p "$user_bin"
+ln -sfn "$go_link/bin/go" "$user_bin/go"
+ln -sfn "$go_link/bin/gofmt" "$user_bin/gofmt"
 
 profile_marker="# Alder repository Go toolchain"
 if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
@@ -90,10 +94,12 @@ EOF
 fi
 
 export GOROOT="$go_link"
-export PATH="$GOROOT/bin:$PATH"
+export PATH="$user_bin:$GOROOT/bin:$PATH"
 
-if [[ "$(go version)" != "go version go${go_version} linux/amd64" ]]; then
-  printf 'Pinned Go toolchain verification failed: %s\n' "$(go version)" >&2
+if [[ "$(command -v go)" != "$user_bin/go" ]] ||
+  [[ "$(go version)" != "go version go${go_version} linux/amd64" ]]; then
+  printf 'Pinned Go toolchain PATH verification failed: %s (%s)\n' \
+    "$(go version 2>&1)" "$(command -v go || printf 'not found')" >&2
   exit 1
 fi
 
