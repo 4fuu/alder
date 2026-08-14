@@ -24,6 +24,17 @@ type LowerValueMapRec {
     value: U64
 }
 
+type LowerBridgeRec {
+    checked_type: U64
+    make_id: U64
+    len_id: U64
+    append_id: U64
+    get_id: U64
+    slice_id: U64
+    set_id: U64
+    remove_id: U64
+}
+
 type LowerState {
     mir: MirStore
     types: __s0_Buffer(LowerTypeMapRec)
@@ -31,6 +42,7 @@ type LowerState {
     imports: __s0_Buffer(LowerOwnerMapRec)
     bindings: __s0_Buffer(LowerBindingMapRec)
     values: __s0_Buffer(LowerValueMapRec)
+    bridges: __s0_Buffer(LowerBridgeRec)
     valid: Bool
 }
 
@@ -51,31 +63,55 @@ enum LowerResult {
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, valid: state.valid)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, valid: false)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: false)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, valid: state.valid)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, imports: state.imports, bindings: state.bindings, values: state.values, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: imports, bindings: state.bindings, values: state.values, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: bindings, values: state.values, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: bindings, values: state.values, bridges: state.bridges, valid: state.valid)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: values, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: values, bridges: state.bridges, valid: state.valid)
+}
+
+fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, imports: state.imports, bindings: state.bindings, values: state.values, bridges: bridges, valid: state.valid)
+}
+
+fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
+    var at: U64 = 0
+    while at < __s0_buffer_len(LowerBridgeRec, state.bridges) {
+        let item = __s0_buffer_get(LowerBridgeRec, state.bridges, at)
+        if item.checked_type == checked_type { return item }
+        at = at + 1
+    }
+    return LowerBridgeRec(checked_type: 0, make_id: 0, len_id: 0, append_id: 0, get_id: 0, slice_id: 0, set_id: 0, remove_id: 0)
+}
+
+fn lower_cleanup_scope_lookup(state: LowerState, binding: U64) -> U64 {
+    var at = __s0_buffer_len(LowerValueMapRec, state.values)
+    while at > 0 {
+        let item = __s0_buffer_get(LowerValueMapRec, state.values, at - 1)
+        if item.expression == binding { return item.value }
+        at = at - 1
+    }
+    return 0
 }
 
 fn lower_word(d: Domain, bytes: __s0_Buffer(U8), start: U64, end: U64) -> Result(String, __s0_Error) {
@@ -241,7 +277,36 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         let mapped = try __s0_buffer_append(LowerTypeMapRec, d, err_type.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
         return Ok(LowerStep(state: lower_with_types(lower_with_mir(err_type.state, built.store), mapped), id: built.type_id))
     }
-    // Map, Buffer, and all remaining storage/resource forms belong to #11.
+    if checked.kind == 13 {
+        if checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let elem = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+        let empty = try __s0_buffer_new(U64, d)
+        let data = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
+        let named = try mir_add_named_type(d, data.store, mir_type_kind_aggregate(), try lower_decimal_name(d, "__s0_Buffer_", checked_type))
+        var next = lower_with_mir(elem.state, named.store)
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), named.type_id, 0, "data", data.type_id))
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), named.type_id, 1, "len", mir_type_u64()))
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, next.types, LowerTypeMapRec(checked_type: checked_type, mir_type: named.type_id))
+        return Ok(LowerStep(state: lower_with_types(next, mapped), id: named.type_id))
+    }
+    if checked.kind == 11 {
+        if checked.arg_count != 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let key = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+        let value = try lower_type(d, source_state, store, key.state, __s0_buffer_get(U64, store.type_args, checked.first_arg))
+        let entry = try mir_add_named_type(d, value.state.mir, mir_type_kind_aggregate(), try lower_decimal_name(d, "MapEntry_", checked_type))
+        var next = lower_with_mir(value.state, entry.store)
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), entry.type_id, 0, "state", mir_type_u8()))
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), entry.type_id, 1, "hash", mir_type_u64()))
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), entry.type_id, 2, "key", key.id))
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), entry.type_id, 3, "value", value.id))
+        let empty = try __s0_buffer_new(U64, d)
+        let slots = try mir_intern_type(d, next.mir, mir_type_kind_safe_mut(), entry.type_id, 0, 0, empty, 0)
+        let named = try mir_add_named_type(d, slots.store, mir_type_kind_aggregate(), try lower_decimal_name(d, "Map_", checked_type))
+        next = lower_with_mir(next, named.store)
+        next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), named.type_id, 0, "slots", slots.type_id))
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, next.types, LowerTypeMapRec(checked_type: checked_type, mir_type: named.type_id))
+        return Ok(LowerStep(state: lower_with_types(next, mapped), id: named.type_id))
+    }
     return Ok(LowerStep(state: lower_invalid(state), id: 0))
 }
 
@@ -265,6 +330,23 @@ fn lower_type_bound(d: Domain, source_state: State, store: CheckStore, state: Lo
         at = at + 1
     }
     return Ok(LowerStep(state: lower_invalid(state), id: 0))
+}
+
+fn lower_bound_checked_type(store: CheckStore, checked_type: U64, declaration: U64, application: U64) -> U64 {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 6 { return checked_type }
+    let applied = __s0_buffer_get(CheckedTypeRec, store.types, application - 1)
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let parameter = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if parameter.owner == declaration {
+            if at + 1 == checked.target { return __s0_buffer_get(U64, store.type_args, applied.first_arg - 1 + ordinal) }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return 0
 }
 
 fn lower_named_parts(d: Domain, source_state: State, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
@@ -321,6 +403,132 @@ fn lower_use_count(store: CheckStore, owner: U64, role: U64) -> U64 {
         at = at + 1
     }
     return count
+}
+
+fn lower_add_helper_function(d: Domain, state: LowerState, name: String, result_type: U64, first_type: U64, second_type: U64, third_type: U64) -> Result(LowerStep, __s0_Error) {
+    let function = try mir_add_function(d, state.mir, name, result_type)
+    var current = lower_with_mir(state, function.store)
+    if first_type != 0 { current = lower_with_mir(current, (try mir_add_function_param(d, current.mir, function.id, 0, "a", first_type)).store) }
+    if second_type != 0 { current = lower_with_mir(current, (try mir_add_function_param(d, current.mir, function.id, 1, "b", second_type)).store) }
+    if third_type != 0 { current = lower_with_mir(current, (try mir_add_function_param(d, current.mir, function.id, 2, "c", third_type)).store) }
+    return Ok(LowerStep(state: current, id: function.id))
+}
+
+fn lower_bridge_type_used(store: CheckStore, checked_type: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if expression.kind == 18 && expression.annotation != 0 {
+            let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+            var candidate: U64 = 0
+            if annotation.builtin == 8 { candidate = expression.checked_type }
+            if annotation.builtin == 9 {
+                let result = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+                candidate = __s0_buffer_get(U64, store.type_args, result.first_arg - 1)
+            }
+            if annotation.builtin == 10 || annotation.builtin == 12 || annotation.builtin == 13 || annotation.builtin == 14 || annotation.builtin == 15 || annotation.builtin == 16 { candidate = lower_builtin_child_type(store, expression, 0) }
+            if annotation.builtin == 11 { candidate = lower_builtin_child_type(store, expression, 1) }
+            if candidate == checked_type { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+fn lower_bridge_declarations(d: Domain, source_state: State, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
+    var current = state
+    var checked_id: U64 = 1
+    while checked_id <= __s0_buffer_len(CheckedTypeRec, store.types) {
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_id - 1)
+        if (checked.kind == 11 || checked.kind == 13) && lower_bridge_type_used(store, checked_id) && lower_bridge_lookup(current, checked_id).checked_type == 0 {
+            let lowered = try lower_type(d, source_state, store, current, checked_id)
+            current = lowered.state
+            var bridge = LowerBridgeRec(checked_type: checked_id, make_id: 0, len_id: 0, append_id: 0, get_id: 0, slice_id: 0, set_id: 0, remove_id: 0)
+            if checked.kind == 13 {
+                let element_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+                let element = try lower_type(d, source_state, store, current, element_checked)
+                current = element.state
+                let error_checked = lower_checked_type_kind(store, 5, 0)
+                if error_checked == 0 { return Ok(lower_invalid(current)) }
+                let error_type = try lower_type(d, source_state, store, current, error_checked)
+                current = error_type.state
+                let result_checked = lower_result_type_for(store, checked_id, error_checked)
+                let slice_checked = lower_slice_type_for(store, element_checked)
+                if result_checked == 0 || slice_checked == 0 { return Ok(lower_invalid(current)) }
+                let result_type = try lower_type(d, source_state, store, current, result_checked)
+                let slice_type = try lower_type(d, source_state, store, result_type.state, slice_checked)
+                current = slice_type.state
+                let domain_type = try lower_domain_mir_type(d, current)
+                current = domain_type.state
+                let suffix = try lower_decimal_name(d, "buffer_new_", checked_id)
+                let make = try lower_add_helper_function(d, current, suffix, result_type.id, domain_type.id, 0, 0)
+                let length = try lower_add_helper_function(d, make.state, try lower_decimal_name(d, "buffer_len_", checked_id), mir_type_u64(), lowered.id, 0, 0)
+                let append = try lower_add_helper_function(d, length.state, try lower_decimal_name(d, "buffer_append_", checked_id), result_type.id, domain_type.id, lowered.id, element.id)
+                let get = try lower_add_helper_function(d, append.state, try lower_decimal_name(d, "buffer_get_", checked_id), element.id, lowered.id, mir_type_u64(), 0)
+                let sliced = try lower_add_helper_function(d, get.state, try lower_decimal_name(d, "buffer_slice_", checked_id), slice_type.id, lowered.id, 0, 0)
+                current = sliced.state
+                bridge = LowerBridgeRec(checked_type: checked_id, make_id: make.id, len_id: length.id, append_id: append.id, get_id: get.id, slice_id: sliced.id, set_id: 0, remove_id: 0)
+            }
+            if checked.kind == 11 {
+                let key_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+                let value_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg)
+                let key = try lower_type(d, source_state, store, current, key_checked)
+                let value = try lower_type(d, source_state, store, key.state, value_checked)
+                current = value.state
+                let empty = try __s0_buffer_new(U64, d)
+                let option = try mir_intern_type(d, current.mir, mir_type_kind_option(), value.id, 0, 0, empty, 0)
+                let domain = try lower_domain_mir_type(d, lower_with_mir(current, option.store))
+                let hash = try lower_add_helper_function(d, domain.state, try lower_decimal_name(d, "map_hash_", checked_id), mir_type_u64(), key.id, 0, 0)
+                let equal = try lower_add_helper_function(d, hash.state, try lower_decimal_name(d, "map_eq_", checked_id), mir_type_bool(), key.id, key.id, 0)
+                let make = try lower_add_helper_function(d, equal.state, try lower_decimal_name(d, "map_make_", checked_id), lowered.id, domain.id, 0, 0)
+                let get = try lower_add_helper_function(d, make.state, try lower_decimal_name(d, "map_get_", checked_id), option.type_id, lowered.id, key.id, 0)
+                let set = try lower_add_helper_function(d, get.state, try lower_decimal_name(d, "map_set_", checked_id), mir_type_bool(), lowered.id, key.id, value.id)
+                let removed = try lower_add_helper_function(d, set.state, try lower_decimal_name(d, "map_remove_", checked_id), mir_type_bool(), lowered.id, key.id, 0)
+                current = removed.state
+                bridge = LowerBridgeRec(checked_type: checked_id, make_id: make.id, len_id: hash.id, append_id: equal.id, get_id: get.id, slice_id: 0, set_id: set.id, remove_id: removed.id)
+            }
+            let bridges = try __s0_buffer_append(LowerBridgeRec, d, current.bridges, bridge)
+            current = lower_with_bridges(current, bridges)
+        }
+        checked_id = checked_id + 1
+    }
+    return Ok(current)
+}
+
+fn lower_checked_type_kind(store: CheckStore, kind: U64, target: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if item.kind == kind && item.target == target && item.arg_count == 0 { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_result_type_for(store: CheckStore, ok_type: U64, error_type: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if item.kind == 10 && item.arg_count == 2 && __s0_buffer_get(U64, store.type_args, item.first_arg - 1) == ok_type && __s0_buffer_get(U64, store.type_args, item.first_arg) == error_type { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_slice_type_for(store: CheckStore, element_type: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if item.kind == 8 && item.arg_count == 1 && __s0_buffer_get(U64, store.type_args, item.first_arg - 1) == element_type { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_domain_mir_type(d: Domain, state: LowerState) -> Result(LowerStep, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let typ = try mir_intern_type(d, state.mir, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    return Ok(LowerStep(state: lower_with_mir(state, typ.store), id: typ.type_id))
 }
 
 fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
@@ -387,7 +595,7 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
         }
         owner = owner + 1
     }
-    return Ok(current)
+    return lower_bridge_declarations(d, source_state, store, current)
 }
 
 fn lower_instruction_ordinal(mir: MirStore, function: U64, block: U64) -> U64 {
@@ -432,6 +640,16 @@ fn lower_block_count(mir: MirStore, function: U64) -> U64 {
     var at: U64 = 0
     while at < __s0_buffer_len(MirBlockRec, mir.blocks) {
         if __s0_buffer_get(MirBlockRec, mir.blocks, at).function == function { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+fn lower_local_count(mir: MirStore, function: U64) -> U64 {
+    var count: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirLocalRec, mir.locals) {
+        if __s0_buffer_get(MirLocalRec, mir.locals, at).function == function { count = count + 1 }
         at = at + 1
     }
     return count
@@ -487,6 +705,77 @@ fn lower_add_instr(d: Domain, state: LowerState, function: U64, block: U64, op: 
     let rec = MirInstrRec(function: function, block: active, ordinal: lower_instruction_ordinal(named.store, function, active), op: op, result: result, place: place, type_op: type_op, a: a, b: b, c: 0, target: target, name_start: named.start, name_end: named.end)
     let step = try mir_add_instruction(d, named.store, rec)
     return Ok(LowerStep(state: lower_with_mir(state, step.store), id: step.id))
+}
+
+fn lower_add_instr_three(d: Domain, state: LowerState, function: U64, block: U64, op: U64, result: U64, type_op: U64, a: U64, b: U64, c: U64, target: U64) -> Result(LowerStep, __s0_Error) {
+    let active = lower_open_block(state.mir, function, block)
+    let rec = MirInstrRec(function: function, block: active, ordinal: lower_instruction_ordinal(state.mir, function, active), op: op, result: result, place: 0, type_op: type_op, a: a, b: b, c: c, target: target, name_start: 0, name_end: 0)
+    let step = try mir_add_instruction(d, state.mir, rec)
+    return Ok(LowerStep(state: lower_with_mir(state, step.store), id: step.id))
+}
+
+fn lower_add_typed_result(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64) -> Result(LowerStep, __s0_Error) {
+    let active = lower_open_block(state.mir, function, block)
+    let value = try mir_add_value(d, state.mir, function, try lower_decimal_name(d, "v", __s0_buffer_len(MirValueRec, state.mir.values) + 1), type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(state.mir, function, active) + 1)
+    return Ok(LowerStep(state: lower_with_mir(state, value.store), id: value.id))
+}
+
+fn lower_helper_const(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64, value: I64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+    let name = try lower_decimal_name(d, "bridge_const_", suffix)
+    let constant = try mir_add_const(d, state.mir, name, type_id, mir_const_int(), 0, value, 0, "")
+    let result = try lower_add_typed_result(d, lower_with_mir(state, constant.store), function, block, type_id)
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+    return Ok(LowerStep(state: instruction.state, id: result.id))
+}
+
+fn lower_helper_bool(d: Domain, state: LowerState, function: U64, block: U64, value: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+    let name = try lower_decimal_name(d, "bridge_bool_", suffix)
+    let constant = try mir_add_const(d, state.mir, name, mir_type_bool(), mir_const_bool(), value, 0, 0, "")
+    let result = try lower_add_typed_result(d, lower_with_mir(state, constant.store), function, block, mir_type_bool())
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+    return Ok(LowerStep(state: instruction.state, id: result.id))
+}
+
+fn lower_helper_local_place(d: Domain, state: LowerState, function: U64, ordinal: U64, name: String, type_id: U64) -> Result(LowerStep, __s0_Error) {
+    let local = try mir_add_local(d, state.mir, function, ordinal, name, type_id)
+    let place = try mir_add_place(d, local.store, MirPlaceRec(function: function, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    return Ok(LowerStep(state: lower_with_mir(state, place.store), id: place.id))
+}
+
+fn lower_helper_field_place(d: Domain, state: LowerState, function: U64, base: U64, name: String) -> Result(LowerStep, __s0_Error) {
+    let named = try mir_append_name(d, state.mir, name)
+    let place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: base, field_start: named.start, field_end: named.end, deref_value: 0))
+    return Ok(LowerStep(state: lower_with_mir(state, place.store), id: place.id))
+}
+
+fn lower_helper_deref_place(d: Domain, state: LowerState, function: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    let place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: value))
+    return Ok(LowerStep(state: lower_with_mir(state, place.store), id: place.id))
+}
+
+fn lower_helper_load(d: Domain, state: LowerState, function: U64, block: U64, place: U64, type_id: U64) -> Result(LowerStep, __s0_Error) {
+    let result = try lower_add_typed_result(d, state, function, block, type_id)
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_load(), result.id, place, 0, 0, 0, 0, "")
+    return Ok(LowerStep(state: instruction.state, id: result.id))
+}
+
+fn lower_helper_construct_two(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64, first_name: String, first: U64, second_name: String, second: U64) -> Result(LowerStep, __s0_Error) {
+    let result = try lower_add_typed_result(d, state, function, block, type_id)
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_aggregate_construct(), result.id, 0, type_id, 0, 0, 0, "")
+    let first_operand = try lower_add_instr_operand(d, instruction.state, instruction.id, 0, first, mir_operand_aggregate_field(), first_name)
+    let second_operand = try lower_add_instr_operand(d, first_operand, instruction.id, 1, second, mir_operand_aggregate_field(), second_name)
+    return Ok(LowerStep(state: second_operand, id: result.id))
+}
+
+fn lower_helper_variant(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64, name: String, payload: U64) -> Result(LowerStep, __s0_Error) {
+    let result = try lower_add_typed_result(d, state, function, block, type_id)
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_enum_construct(), result.id, 0, type_id, payload, 0, 0, name)
+    return Ok(LowerStep(state: instruction.state, id: result.id))
+}
+
+fn lower_helper_return(d: Domain, state: LowerState, function: U64, block: U64, value: U64) -> Result(LowerState, __s0_Error) {
+    let term = try mir_add_terminator(d, state.mir, MirTermRec(function: function, block: block, kind: mir_term_return(), value: value, target: 0, then_block: 0, else_block: 0))
+    return Ok(lower_with_mir(state, term.store))
 }
 
 fn lower_add_instr_operand(d: Domain, state: LowerState, instruction: U64, ordinal: U64, value: U64, kind: U64, name: String) -> Result(LowerState, __s0_Error) {
@@ -630,7 +919,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         if binding.parameter != 0 { return Ok(LowerStep(state: state, id: binding.mir_id)) }
         let place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
-        let result = try lower_add_result(d, lower_with_mir(state, place.store), function, block, expression.checked_type, source_state, store)
+        let local = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
+        let local_type = try lower_local_type(d, source_state, store, lower_with_mir(state, place.store), owner, expression.parameter_use, local)
+        let result = try lower_add_typed_result(d, local_type.state, function, block, local_type.id)
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
         return Ok(LowerStep(state: instr.state, id: result.id))
     }
@@ -869,6 +1160,108 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         }
         return Ok(LowerStep(state: lower_invalid(current), id: 0))
     }
+    if expression.kind == 18 {
+        if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 16 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        var current = state
+        var args = try __s0_buffer_new(U64, d)
+        var ordinal: U64 = 0
+        while ordinal < expression.child_count {
+            let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+            let child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
+            current = child.state
+            args = try __s0_buffer_append(U64, d, args, child.id)
+            ordinal = ordinal + 1
+        }
+        if annotation.builtin == 1 {
+            let result = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+            let instr = try lower_add_instr(d, result.state, function, block, mir_op_slice_len(), result.id, 0, 0, __s0_buffer_get(U64, args, 0), 0, 0, "")
+            return Ok(LowerStep(state: instr.state, id: result.id))
+        }
+        if annotation.builtin == 2 {
+            let result = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+            let instr = try lower_add_instr_three(d, result.state, function, block, mir_op_slice_range_checked(), result.id, 0, __s0_buffer_get(U64, args, 0), __s0_buffer_get(U64, args, 1), __s0_buffer_get(U64, args, 2), panic_block)
+            return Ok(LowerStep(state: instr.state, id: result.id))
+        }
+        if annotation.builtin == 3 {
+            let checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+            let element = try lower_type(d, source_state, store, current, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+            let empty = try __s0_buffer_new(U64, d)
+            let reference = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+            let result = try lower_add_typed_result(d, lower_with_mir(element.state, reference.store), function, block, reference.type_id)
+            let instr = try lower_add_instr(d, result.state, function, block, mir_op_alloc(), result.id, 0, element.id, __s0_buffer_get(U64, args, 0), __s0_buffer_get(U64, args, 1), 0, "")
+            return Ok(LowerStep(state: instr.state, id: result.id))
+        }
+        if annotation.builtin == 4 || annotation.builtin == 5 {
+            let typ = try lower_type(d, source_state, store, current, expression.checked_type)
+            let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+            var op = mir_op_domain_create()
+            if annotation.builtin == 5 { op = mir_op_domain_mark() }
+            let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, __s0_buffer_get(U64, args, 0), 0, 0, "")
+            return Ok(LowerStep(state: instr.state, id: result.id))
+        }
+        if annotation.builtin == 6 || annotation.builtin == 7 {
+            var op = mir_op_domain_reset()
+            var second: U64 = 0
+            if annotation.builtin == 6 { second = __s0_buffer_get(U64, args, 1) }
+            if annotation.builtin == 7 { op = mir_op_domain_destroy() }
+            let instr = try lower_add_instr(d, current, function, block, op, 0, 0, 0, __s0_buffer_get(U64, args, 0), second, 0, "")
+            return Ok(LowerStep(state: instr.state, id: 0))
+        }
+        if annotation.builtin == 8 || (annotation.builtin >= 14 && annotation.builtin <= 16) {
+            var map_checked = lower_builtin_child_type(store, expression, 0)
+            if annotation.builtin == 8 { map_checked = expression.checked_type }
+            let bridge = lower_bridge_lookup(current, map_checked)
+            if bridge.checked_type == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            var target = bridge.make_id
+            if annotation.builtin == 14 { target = bridge.get_id }
+            if annotation.builtin == 15 { target = bridge.set_id }
+            if annotation.builtin == 16 { target = bridge.remove_id }
+            let result_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, target - 1).result_type
+            let result = try lower_add_typed_result(d, current, function, block, result_type)
+            let call = try lower_add_instr(d, result.state, function, block, mir_op_call(), result.id, 0, 0, 0, 0, target, "")
+            current = call.state
+            ordinal = 0
+            while ordinal < __s0_buffer_len(U64, args) {
+                current = try lower_add_instr_operand(d, current, call.id, ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+                ordinal = ordinal + 1
+            }
+            if annotation.builtin == 15 {
+                let active = lower_open_block(current.mir, function, block)
+                let ok = try lower_add_block(d, current, function, "bb_map_set_ok")
+                current = try lower_branch(d, ok.state, function, active, result.id, ok.id, panic_block)
+                return Ok(LowerStep(state: current, id: 0))
+            }
+            return Ok(LowerStep(state: current, id: result.id))
+        }
+        if annotation.builtin >= 9 && annotation.builtin <= 13 {
+            var buffer_checked = lower_builtin_child_type(store, expression, 0)
+            if annotation.builtin == 9 {
+                let result_checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+                buffer_checked = __s0_buffer_get(U64, store.type_args, result_checked.first_arg - 1)
+            }
+            if annotation.builtin == 11 { buffer_checked = lower_builtin_child_type(store, expression, 1) }
+            let bridge = lower_bridge_lookup(current, buffer_checked)
+            if bridge.checked_type == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            var target = bridge.make_id
+            if annotation.builtin == 10 { target = bridge.len_id }
+            if annotation.builtin == 11 { target = bridge.append_id }
+            if annotation.builtin == 12 { target = bridge.get_id }
+            if annotation.builtin == 13 { target = bridge.slice_id }
+            let result_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, target - 1).result_type
+            let result = try lower_add_typed_result(d, current, function, block, result_type)
+            let call = try lower_add_instr(d, result.state, function, block, mir_op_call(), result.id, 0, 0, 0, 0, target, "")
+            current = call.state
+            ordinal = 0
+            while ordinal < __s0_buffer_len(U64, args) {
+                current = try lower_add_instr_operand(d, current, call.id, ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+                ordinal = ordinal + 1
+            }
+            return Ok(LowerStep(state: current, id: result.id))
+        }
+        return Ok(LowerStep(state: lower_invalid(current), id: 0))
+    }
     if expression.kind >= 14 && expression.kind <= 17 {
         var name = "none"
         if expression.kind == 15 { name = "some" }
@@ -1000,20 +1393,11 @@ fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state:
             if exit_kind == 2 { applies = cleanup.return_exit != 0 }
             if exit_kind == 3 { applies = cleanup.try_exit != 0 }
             if !applies { return Ok(lower_invalid(current)) }
-            let callback = lower_owner_lookup(current.owners, cleanup.callback)
-            let binding = lower_binding_lookup(current, cleanup.binding)
-            if callback == 0 || binding.binding == 0 { return Ok(lower_invalid(current)) }
-            var value = binding.mir_id
-            if binding.parameter == 0 {
-                let local = __s0_buffer_get(LocalRec, store.locals, cleanup.binding - 1)
-                let place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
-                let loaded = try lower_add_result(d, lower_with_mir(current, place.store), function, block, local.checked_type, source_state, store)
-                let instruction = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
-                current = instruction.state
-                value = loaded.id
-            }
-            let call = try lower_add_instr(d, current, function, block, mir_op_call(), 0, 0, 0, 0, 0, callback, "")
-            current = try lower_add_instr_operand(d, call.state, call.id, 0, value, mir_operand_instruction(), "")
+            let scope = lower_cleanup_scope_lookup(current, cleanup.binding)
+            if scope == 0 { return Ok(lower_invalid(current)) }
+            let run = try lower_add_instr(d, current, function, block, mir_op_cleanup_scope_run(), 0, 0, 0, scope, 0, 0, "")
+            let ended = try lower_add_instr(d, run.state, function, block, mir_op_cleanup_scope_end(), 0, 0, 0, scope, 0, 0, "")
+            current = ended.state
         }
         environment = active.parent
     }
@@ -1208,9 +1592,46 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
     if statement.kind == 10 {
         let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
+        let empty = try __s0_buffer_new(U64, d)
+        let scope_type = try mir_intern_type(d, current.mir, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
+        let scope_value = try mir_add_value(d, scope_type.store, function, try lower_decimal_name(d, "cleanup_scope", statement.binding), scope_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(scope_type.store, function, active) + 1)
+        let begun = try lower_add_instr(d, lower_with_mir(current, scope_value.store), function, active, mir_op_cleanup_scope_begin(), scope_value.id, 0, 0, 0, 0, 0, "")
+        let cleanup_type = try mir_intern_type(d, begun.state.mir, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
+        let cleanup_value = try mir_add_value(d, cleanup_type.store, function, try lower_decimal_name(d, "cleanup_id", statement.binding), cleanup_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(cleanup_type.store, function, active) + 1)
+        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, statement.body - 1)
+        let callback = lower_owner_lookup(current.owners, cleanup.callback)
+        if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
+        let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, 0, 0, scope_value.id, 0, callback, "")
+        current = try lower_add_instr_operand(d, pushed.state, pushed.id, 0, value.id, mir_operand_instruction(), "")
+        let scopes = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: statement.binding, value: scope_value.id))
+        current = lower_with_values(current, scopes)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true))
+}
+
+fn lower_local_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, binding: U64, local: LocalRec) -> Result(LowerStep, __s0_Error) {
+    let ordinary = try lower_type(d, source_state, store, state, local.checked_type)
+    if local.kind != 2 { return Ok(ordinary) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
+        if statement.owner == owner && statement.binding == binding && (statement.kind == 1 || statement.kind == 2) {
+            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
+            if expression.kind == 18 && expression.annotation != 0 {
+                let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+                if annotation.kind == 5 && annotation.builtin == 3 {
+                    let checked = __s0_buffer_get(CheckedTypeRec, store.types, local.checked_type - 1)
+                    let element = try lower_type(d, source_state, store, ordinary.state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+                    let empty = try __s0_buffer_new(U64, d)
+                    let reference = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+                    return Ok(LowerStep(state: lower_with_mir(element.state, reference.store), id: reference.type_id))
+                }
+            }
+        }
+        at = at + 1
+    }
+    return Ok(ordinary)
 }
 
 fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
@@ -1223,7 +1644,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     while at < __s0_buffer_len(LocalRec, store.locals) {
         let local = __s0_buffer_get(LocalRec, store.locals, at)
         if local.owner == owner {
-            let typ = try lower_type(d, source_state, store, current, local.checked_type)
+            let typ = try lower_local_type(d, source_state, store, current, owner, at + 1, local)
             current = typ.state
             let name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
             if local.kind == 1 {
@@ -1288,7 +1709,791 @@ fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpa
         }
         owner = owner + 1
     }
+    var bridge_at: U64 = 0
+    while bridge_at < __s0_buffer_len(LowerBridgeRec, current.bridges) {
+        let bridge = __s0_buffer_get(LowerBridgeRec, current.bridges, bridge_at)
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, bridge.checked_type - 1)
+        if checked.kind == 13 { current = try lower_buffer_helpers(d, source_state, store, current, bridge.checked_type, bridge) }
+        if checked.kind == 11 {
+            current = try lower_map_hash_eq_bodies(d, source_state, store, current, bridge.checked_type, bridge)
+            current = try lower_map_make_body(d, source_state, store, current, bridge.checked_type, bridge)
+            current = try lower_map_get_body(d, source_state, store, current, bridge.checked_type, bridge)
+            current = try lower_map_set_body(d, source_state, store, current, bridge.checked_type, bridge)
+            current = try lower_map_remove_body(d, source_state, store, current, bridge.checked_type, bridge)
+        }
+        bridge_at = bridge_at + 1
+    }
     return Ok(current)
+}
+
+fn lower_map_set_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let key = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+    let map_type = try lower_type(d, source_state, store, key.state, checked_type)
+    let slots_type = lower_map_slots_type(map_type.state.mir, map_type.id)
+    var current = map_type.state
+    let entry = try mir_add_block(d, current.mir, bridge.set_id, 0, "bb0")
+    let loop = try mir_add_block(d, entry.store, bridge.set_id, 1, "bb_loop")
+    let probe = try mir_add_block(d, loop.store, bridge.set_id, 2, "bb_probe")
+    let occupied = try mir_add_block(d, probe.store, bridge.set_id, 3, "bb_occupied")
+    let nonoccupied = try mir_add_block(d, occupied.store, bridge.set_id, 4, "bb_nonoccupied")
+    let empty = try mir_add_block(d, nonoccupied.store, bridge.set_id, 5, "bb_empty")
+    let deleted = try mir_add_block(d, empty.store, bridge.set_id, 6, "bb_deleted")
+    let check = try mir_add_block(d, deleted.store, bridge.set_id, 7, "bb_check")
+    let write = try mir_add_block(d, check.store, bridge.set_id, 8, "bb_write")
+    let next = try mir_add_block(d, write.store, bridge.set_id, 9, "bb_next")
+    let insert_current = try mir_add_block(d, next.store, bridge.set_id, 10, "bb_insert_current")
+    let insert_deleted = try mir_add_block(d, insert_current.store, bridge.set_id, 11, "bb_insert_deleted")
+    let insert = try mir_add_block(d, insert_deleted.store, bridge.set_id, 12, "bb_insert")
+    let full = try mir_add_block(d, insert.store, bridge.set_id, 13, "bb_full")
+    let done = try mir_add_block(d, full.store, bridge.set_id, 14, "bb_done")
+    let failed = try mir_add_block(d, done.store, bridge.set_id, 15, "bb_failed")
+    let fail = try mir_add_block(d, failed.store, bridge.set_id, 16, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: bridge.set_id, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let index_param = try mir_add_block_param(d, fail_term.store, bridge.set_id, loop.id, 0, "index", mir_type_u64())
+    let probes_param = try mir_add_block_param(d, index_param.store, bridge.set_id, loop.id, 1, "probes", mir_type_u64())
+    let insert_param = try mir_add_block_param(d, probes_param.store, bridge.set_id, insert.id, 0, "insert_index", mir_type_u64())
+    current = lower_with_mir(current, insert_param.store)
+    let map_local = try lower_helper_local_place(d, current, bridge.set_id, 0, "map", map_type.id)
+    let map_stored = try lower_add_instr(d, map_local.state, bridge.set_id, entry.id, mir_op_store(), 0, map_local.id, 0, 1, 0, 0, "")
+    let deleted_local = try lower_helper_local_place(d, map_stored.state, bridge.set_id, 1, "first_deleted", mir_type_u64())
+    let slots_place = try lower_helper_field_place(d, deleted_local.state, bridge.set_id, map_local.id, "slots")
+    let slots = try lower_helper_load(d, slots_place.state, bridge.set_id, entry.id, slots_place.id, slots_type)
+    let hash = try lower_helper_call(d, slots.state, bridge.set_id, entry.id, bridge.len_id, mir_type_u64(), 2, 0, 0)
+    let cap = try lower_helper_const(d, hash.state, bridge.set_id, entry.id, mir_type_u64(), 16, checked_type * 100 + 60)
+    let zero = try lower_helper_const(d, cap.state, bridge.set_id, entry.id, mir_type_u64(), 0, checked_type * 100 + 61)
+    let one = try lower_helper_const(d, zero.state, bridge.set_id, entry.id, mir_type_u64(), 1, checked_type * 100 + 62)
+    let init_deleted = try lower_add_instr(d, one.state, bridge.set_id, entry.id, mir_op_store(), 0, deleted_local.id, 0, cap.id, 0, 0, "")
+    let quotient = try lower_add_typed_result(d, init_deleted.state, bridge.set_id, entry.id, mir_type_u64())
+    let divided = try lower_add_instr(d, quotient.state, bridge.set_id, entry.id, mir_op_int_div_checked(), quotient.id, 0, 0, hash.id, cap.id, fail.id, "")
+    let product = try lower_add_typed_result(d, divided.state, bridge.set_id, entry.id, mir_type_u64())
+    let multiplied = try lower_add_instr(d, product.state, bridge.set_id, entry.id, mir_op_int_mul_checked(), product.id, 0, 0, quotient.id, cap.id, fail.id, "")
+    let initial = try lower_add_typed_result(d, multiplied.state, bridge.set_id, entry.id, mir_type_u64())
+    let subtracted = try lower_add_instr(d, initial.state, bridge.set_id, entry.id, mir_op_int_sub_checked(), initial.id, 0, 0, hash.id, product.id, fail.id, "")
+    current = try lower_jump_two(d, subtracted.state, bridge.set_id, entry.id, loop.id, initial.id, zero.id)
+    let exhausted = try lower_add_typed_result(d, current, bridge.set_id, loop.id, mir_type_bool())
+    let exhausted_cmp = try lower_add_instr(d, exhausted.state, bridge.set_id, loop.id, mir_op_int_ge(), exhausted.id, 0, 0, probes_param.id, cap.id, 0, "")
+    current = try lower_branch(d, exhausted_cmp.state, bridge.set_id, loop.id, exhausted.id, full.id, probe.id)
+    let reference = try lower_add_typed_result(d, current, bridge.set_id, probe.id, slots_type)
+    let indexed = try lower_add_instr(d, reference.state, bridge.set_id, probe.id, mir_op_slice_index_checked(), reference.id, 0, 0, slots.id, index_param.id, fail.id, "")
+    let deref = try lower_helper_deref_place(d, indexed.state, bridge.set_id, reference.id)
+    let state_place = try lower_helper_field_place(d, deref.state, bridge.set_id, deref.id, "state")
+    let slot_state = try lower_helper_load(d, state_place.state, bridge.set_id, probe.id, state_place.id, mir_type_u8())
+    let occupied_const = try lower_helper_const(d, slot_state.state, bridge.set_id, probe.id, mir_type_u8(), 1, checked_type * 100 + 63)
+    let is_occupied = try lower_add_typed_result(d, occupied_const.state, bridge.set_id, probe.id, mir_type_bool())
+    let occupied_cmp = try lower_add_instr(d, is_occupied.state, bridge.set_id, probe.id, mir_op_int_eq(), is_occupied.id, 0, 0, slot_state.id, occupied_const.id, 0, "")
+    current = try lower_branch(d, occupied_cmp.state, bridge.set_id, probe.id, is_occupied.id, occupied.id, nonoccupied.id)
+    let empty_const = try lower_helper_const(d, current, bridge.set_id, nonoccupied.id, mir_type_u8(), 0, checked_type * 100 + 64)
+    let is_empty = try lower_add_typed_result(d, empty_const.state, bridge.set_id, nonoccupied.id, mir_type_bool())
+    let empty_cmp = try lower_add_instr(d, is_empty.state, bridge.set_id, nonoccupied.id, mir_op_int_eq(), is_empty.id, 0, 0, slot_state.id, empty_const.id, 0, "")
+    current = try lower_branch(d, empty_cmp.state, bridge.set_id, nonoccupied.id, is_empty.id, empty.id, deleted.id)
+    let first_deleted = try lower_helper_load(d, current, bridge.set_id, empty.id, deleted_local.id, mir_type_u64())
+    let no_deleted = try lower_add_typed_result(d, first_deleted.state, bridge.set_id, empty.id, mir_type_bool())
+    let no_deleted_cmp = try lower_add_instr(d, no_deleted.state, bridge.set_id, empty.id, mir_op_int_eq(), no_deleted.id, 0, 0, first_deleted.id, cap.id, 0, "")
+    current = try lower_branch(d, no_deleted_cmp.state, bridge.set_id, empty.id, no_deleted.id, insert_current.id, insert_deleted.id)
+    current = try lower_jump_value(d, current, bridge.set_id, insert_current.id, insert.id, index_param.id)
+    let selected_deleted = try lower_helper_load(d, current, bridge.set_id, insert_deleted.id, deleted_local.id, mir_type_u64())
+    current = try lower_jump_value(d, selected_deleted.state, bridge.set_id, insert_deleted.id, insert.id, selected_deleted.id)
+    let deleted_value = try lower_helper_load(d, current, bridge.set_id, deleted.id, deleted_local.id, mir_type_u64())
+    let deleted_unset = try lower_add_typed_result(d, deleted_value.state, bridge.set_id, deleted.id, mir_type_bool())
+    let deleted_cmp = try lower_add_instr(d, deleted_unset.state, bridge.set_id, deleted.id, mir_op_int_eq(), deleted_unset.id, 0, 0, deleted_value.id, cap.id, 0, "")
+    let record = try mir_add_block(d, deleted_cmp.state.mir, bridge.set_id, 17, "bb_record_deleted")
+    current = try lower_branch(d, lower_with_mir(deleted_cmp.state, record.store), bridge.set_id, deleted.id, deleted_unset.id, record.id, next.id)
+    let recorded = try lower_add_instr(d, current, bridge.set_id, record.id, mir_op_store(), 0, deleted_local.id, 0, index_param.id, 0, 0, "")
+    current = try lower_jump(d, recorded.state, bridge.set_id, record.id, next.id)
+    let hash_place = try lower_helper_field_place(d, current, bridge.set_id, deref.id, "hash")
+    let entry_hash = try lower_helper_load(d, hash_place.state, bridge.set_id, occupied.id, hash_place.id, mir_type_u64())
+    let same_hash = try lower_add_typed_result(d, entry_hash.state, bridge.set_id, occupied.id, mir_type_bool())
+    let hash_cmp = try lower_add_instr(d, same_hash.state, bridge.set_id, occupied.id, mir_op_int_eq(), same_hash.id, 0, 0, entry_hash.id, hash.id, 0, "")
+    current = try lower_branch(d, hash_cmp.state, bridge.set_id, occupied.id, same_hash.id, check.id, next.id)
+    let key_place = try lower_helper_field_place(d, current, bridge.set_id, deref.id, "key")
+    let entry_key = try lower_helper_load(d, key_place.state, bridge.set_id, check.id, key_place.id, key.id)
+    let same_key = try lower_helper_call(d, entry_key.state, bridge.set_id, check.id, bridge.append_id, mir_type_bool(), 2, entry_key.id, 0)
+    current = try lower_branch(d, same_key.state, bridge.set_id, check.id, same_key.id, write.id, next.id)
+    let value_place = try lower_helper_field_place(d, current, bridge.set_id, deref.id, "value")
+    let value_stored = try lower_add_instr(d, value_place.state, bridge.set_id, write.id, mir_op_store(), 0, value_place.id, 0, 3, 0, 0, "")
+    current = try lower_jump(d, value_stored.state, bridge.set_id, write.id, done.id)
+    let next_index = try lower_add_typed_result(d, current, bridge.set_id, next.id, mir_type_u64())
+    let index_added = try lower_add_instr(d, next_index.state, bridge.set_id, next.id, mir_op_int_add_checked(), next_index.id, 0, 0, index_param.id, one.id, fail.id, "")
+    let next_q = try lower_add_typed_result(d, index_added.state, bridge.set_id, next.id, mir_type_u64())
+    let next_div = try lower_add_instr(d, next_q.state, bridge.set_id, next.id, mir_op_int_div_checked(), next_q.id, 0, 0, next_index.id, cap.id, fail.id, "")
+    let next_p = try lower_add_typed_result(d, next_div.state, bridge.set_id, next.id, mir_type_u64())
+    let next_mul = try lower_add_instr(d, next_p.state, bridge.set_id, next.id, mir_op_int_mul_checked(), next_p.id, 0, 0, next_q.id, cap.id, fail.id, "")
+    let wrapped = try lower_add_typed_result(d, next_mul.state, bridge.set_id, next.id, mir_type_u64())
+    let wrapped_sub = try lower_add_instr(d, wrapped.state, bridge.set_id, next.id, mir_op_int_sub_checked(), wrapped.id, 0, 0, next_index.id, next_p.id, fail.id, "")
+    let next_probes = try lower_add_typed_result(d, wrapped_sub.state, bridge.set_id, next.id, mir_type_u64())
+    let probes_added = try lower_add_instr(d, next_probes.state, bridge.set_id, next.id, mir_op_int_add_checked(), next_probes.id, 0, 0, probes_param.id, one.id, fail.id, "")
+    current = try lower_jump_two(d, probes_added.state, bridge.set_id, next.id, loop.id, wrapped.id, next_probes.id)
+    let full_deleted = try lower_helper_load(d, current, bridge.set_id, full.id, deleted_local.id, mir_type_u64())
+    let no_full_deleted = try lower_add_typed_result(d, full_deleted.state, bridge.set_id, full.id, mir_type_bool())
+    let full_cmp = try lower_add_instr(d, no_full_deleted.state, bridge.set_id, full.id, mir_op_int_eq(), no_full_deleted.id, 0, 0, full_deleted.id, cap.id, 0, "")
+    current = try lower_branch(d, full_cmp.state, bridge.set_id, full.id, no_full_deleted.id, failed.id, insert_deleted.id)
+    let insert_ref = try lower_add_typed_result(d, current, bridge.set_id, insert.id, slots_type)
+    let insert_indexed = try lower_add_instr(d, insert_ref.state, bridge.set_id, insert.id, mir_op_slice_index_checked(), insert_ref.id, 0, 0, slots.id, insert_param.id, fail.id, "")
+    let insert_deref = try lower_helper_deref_place(d, insert_indexed.state, bridge.set_id, insert_ref.id)
+    let insert_state = try lower_helper_field_place(d, insert_deref.state, bridge.set_id, insert_deref.id, "state")
+    let inserted_occupied = try lower_helper_const(d, insert_state.state, bridge.set_id, insert.id, mir_type_u8(), 1, checked_type * 100 + 65)
+    let store_state = try lower_add_instr(d, inserted_occupied.state, bridge.set_id, insert.id, mir_op_store(), 0, insert_state.id, 0, inserted_occupied.id, 0, 0, "")
+    let insert_hash = try lower_helper_field_place(d, store_state.state, bridge.set_id, insert_deref.id, "hash")
+    let store_hash = try lower_add_instr(d, insert_hash.state, bridge.set_id, insert.id, mir_op_store(), 0, insert_hash.id, 0, hash.id, 0, 0, "")
+    let insert_key = try lower_helper_field_place(d, store_hash.state, bridge.set_id, insert_deref.id, "key")
+    let store_key = try lower_add_instr(d, insert_key.state, bridge.set_id, insert.id, mir_op_store(), 0, insert_key.id, 0, 2, 0, 0, "")
+    let insert_value = try lower_helper_field_place(d, store_key.state, bridge.set_id, insert_deref.id, "value")
+    let store_value = try lower_add_instr(d, insert_value.state, bridge.set_id, insert.id, mir_op_store(), 0, insert_value.id, 0, 3, 0, 0, "")
+    current = try lower_jump(d, store_value.state, bridge.set_id, insert.id, done.id)
+    let yes = try lower_helper_bool(d, current, bridge.set_id, done.id, 1, checked_type * 100 + 66)
+    current = try lower_helper_return(d, yes.state, bridge.set_id, done.id, yes.id)
+    let no = try lower_helper_bool(d, current, bridge.set_id, failed.id, 0, checked_type * 100 + 67)
+    return lower_helper_return(d, no.state, bridge.set_id, failed.id, no.id)
+}
+
+fn lower_buffer_new_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let element = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+    let buffer = try lower_type(d, source_state, store, element.state, checked_type)
+    let empty_types = try __s0_buffer_new(U64, d)
+    let data_type = try mir_intern_type(d, buffer.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty_types, 0)
+    var current = lower_with_mir(buffer.state, data_type.store)
+    let entry = try mir_add_block(d, current.mir, bridge.make_id, 0, "bb0")
+    let ok = try mir_add_block(d, entry.store, bridge.make_id, 1, "bb_ok")
+    let oom = try mir_add_block(d, ok.store, bridge.make_id, 2, "bb_oom")
+    current = lower_with_mir(current, oom.store)
+    let cap = try lower_helper_const(d, current, bridge.make_id, entry.id, mir_type_u64(), 8, checked_type * 100 + 1)
+    let data = try lower_add_typed_result(d, cap.state, bridge.make_id, entry.id, data_type.type_id)
+    let allocated = try lower_add_instr(d, data.state, bridge.make_id, entry.id, mir_op_alloc_checked(), data.id, 0, element.id, 1, cap.id, oom.id, "")
+    current = try lower_jump(d, allocated.state, bridge.make_id, entry.id, ok.id)
+    let result_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, bridge.make_id - 1).result_type
+    let result_rec = __s0_buffer_get(CheckedTypeRec, store.types, lower_result_type_for(store, checked_type, lower_checked_type_kind(store, 5, 0)) - 1)
+    let error_checked = __s0_buffer_get(U64, store.type_args, result_rec.first_arg)
+    let error_type = try lower_type(d, source_state, store, current, error_checked)
+    let error = try lower_helper_variant(d, error_type.state, bridge.make_id, oom.id, error_type.id, "OutOfMemory", 0)
+    let failed = try lower_helper_variant(d, error.state, bridge.make_id, oom.id, result_type, "err", error.id)
+    current = try lower_helper_return(d, failed.state, bridge.make_id, oom.id, failed.id)
+    let zero = try lower_helper_const(d, current, bridge.make_id, ok.id, mir_type_u64(), 0, checked_type * 100 + 2)
+    let aggregate = try lower_helper_construct_two(d, zero.state, bridge.make_id, ok.id, buffer.id, "data", data.id, "len", zero.id)
+    let success = try lower_helper_variant(d, aggregate.state, bridge.make_id, ok.id, result_type, "ok", aggregate.id)
+    return lower_helper_return(d, success.state, bridge.make_id, ok.id, success.id)
+}
+
+fn lower_buffer_len_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let buffer = try lower_type(d, source_state, store, state, checked_type)
+    let entry = try mir_add_block(d, buffer.state.mir, bridge.len_id, 0, "bb0")
+    let local = try lower_helper_local_place(d, lower_with_mir(buffer.state, entry.store), bridge.len_id, 0, "buffer", buffer.id)
+    let stored = try lower_add_instr(d, local.state, bridge.len_id, entry.id, mir_op_store(), 0, local.id, 0, 1, 0, 0, "")
+    let field = try lower_helper_field_place(d, stored.state, bridge.len_id, local.id, "len")
+    let length = try lower_helper_load(d, field.state, bridge.len_id, entry.id, field.id, mir_type_u64())
+    return lower_helper_return(d, length.state, bridge.len_id, entry.id, length.id)
+}
+
+fn lower_buffer_get_slice_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let element_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let element = try lower_type(d, source_state, store, state, element_checked)
+    let buffer = try lower_type(d, source_state, store, element.state, checked_type)
+    let empty_types = try __s0_buffer_new(U64, d)
+    let data_type = try mir_intern_type(d, buffer.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty_types, 0)
+    var current = lower_with_mir(buffer.state, data_type.store)
+    // get
+    let get_entry = try mir_add_block(d, current.mir, bridge.get_id, 0, "bb0")
+    let get_valid = try mir_add_block(d, get_entry.store, bridge.get_id, 1, "bb_valid")
+    let get_fail = try mir_add_block(d, get_valid.store, bridge.get_id, 2, "bb_fail")
+    let fail_term = try mir_add_terminator(d, get_fail.store, MirTermRec(function: bridge.get_id, block: get_fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    current = lower_with_mir(current, fail_term.store)
+    let get_local = try lower_helper_local_place(d, current, bridge.get_id, 0, "buffer", buffer.id)
+    let get_store = try lower_add_instr(d, get_local.state, bridge.get_id, get_entry.id, mir_op_store(), 0, get_local.id, 0, 1, 0, 0, "")
+    let get_len_place = try lower_helper_field_place(d, get_store.state, bridge.get_id, get_local.id, "len")
+    let get_len = try lower_helper_load(d, get_len_place.state, bridge.get_id, get_entry.id, get_len_place.id, mir_type_u64())
+    let inside = try lower_add_typed_result(d, get_len.state, bridge.get_id, get_entry.id, mir_type_bool())
+    let compared = try lower_add_instr(d, inside.state, bridge.get_id, get_entry.id, mir_op_int_lt(), inside.id, 0, 0, 2, get_len.id, 0, "")
+    current = try lower_branch(d, compared.state, bridge.get_id, get_entry.id, inside.id, get_valid.id, get_fail.id)
+    let get_data_place = try lower_helper_field_place(d, current, bridge.get_id, get_local.id, "data")
+    let get_data = try lower_helper_load(d, get_data_place.state, bridge.get_id, get_valid.id, get_data_place.id, data_type.type_id)
+    let get_ref = try lower_add_typed_result(d, get_data.state, bridge.get_id, get_valid.id, data_type.type_id)
+    let indexed = try lower_add_instr(d, get_ref.state, bridge.get_id, get_valid.id, mir_op_slice_index_checked(), get_ref.id, 0, 0, get_data.id, 2, get_fail.id, "")
+    let deref = try lower_helper_deref_place(d, indexed.state, bridge.get_id, get_ref.id)
+    let item = try lower_helper_load(d, deref.state, bridge.get_id, get_valid.id, deref.id, element.id)
+    current = try lower_helper_return(d, item.state, bridge.get_id, get_valid.id, item.id)
+    // slice
+    let slice_entry = try mir_add_block(d, current.mir, bridge.slice_id, 0, "bb0")
+    let slice_fail = try mir_add_block(d, slice_entry.store, bridge.slice_id, 1, "bb_fail")
+    let slice_fail_term = try mir_add_terminator(d, slice_fail.store, MirTermRec(function: bridge.slice_id, block: slice_fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    current = lower_with_mir(current, slice_fail_term.store)
+    let slice_local = try lower_helper_local_place(d, current, bridge.slice_id, 0, "buffer", buffer.id)
+    let slice_store = try lower_add_instr(d, slice_local.state, bridge.slice_id, slice_entry.id, mir_op_store(), 0, slice_local.id, 0, 1, 0, 0, "")
+    let slice_data_place = try lower_helper_field_place(d, slice_store.state, bridge.slice_id, slice_local.id, "data")
+    let slice_data = try lower_helper_load(d, slice_data_place.state, bridge.slice_id, slice_entry.id, slice_data_place.id, data_type.type_id)
+    let slice_len_place = try lower_helper_field_place(d, slice_data.state, bridge.slice_id, slice_local.id, "len")
+    let slice_len = try lower_helper_load(d, slice_len_place.state, bridge.slice_id, slice_entry.id, slice_len_place.id, mir_type_u64())
+    let zero = try lower_helper_const(d, slice_len.state, bridge.slice_id, slice_entry.id, mir_type_u64(), 0, checked_type * 100 + 3)
+    let slice_type = __s0_buffer_get(MirFunctionRec, zero.state.mir.functions, bridge.slice_id - 1).result_type
+    let slice_result = try lower_add_typed_result(d, zero.state, bridge.slice_id, slice_entry.id, slice_type)
+    let ranged = try lower_add_instr_three(d, slice_result.state, bridge.slice_id, slice_entry.id, mir_op_slice_range_checked(), slice_result.id, 0, slice_data.id, zero.id, slice_len.id, slice_fail.id)
+    return lower_helper_return(d, ranged.state, bridge.slice_id, slice_entry.id, slice_result.id)
+}
+
+fn lower_buffer_append_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let element_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let element = try lower_type(d, source_state, store, state, element_checked)
+    let buffer = try lower_type(d, source_state, store, element.state, checked_type)
+    let empty_types = try __s0_buffer_new(U64, d)
+    let data_type = try mir_intern_type(d, buffer.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty_types, 0)
+    var current = lower_with_mir(buffer.state, data_type.store)
+    let entry = try mir_add_block(d, current.mir, bridge.append_id, 0, "bb0")
+    let spare = try mir_add_block(d, entry.store, bridge.append_id, 1, "bb_spare")
+    let grow = try mir_add_block(d, spare.store, bridge.append_id, 2, "bb_grow")
+    let limit = try mir_add_block(d, grow.store, bridge.append_id, 3, "bb_limit")
+    let allocate = try mir_add_block(d, limit.store, bridge.append_id, 4, "bb_alloc")
+    let oom = try mir_add_block(d, allocate.store, bridge.append_id, 5, "bb_oom")
+    let copy = try mir_add_block(d, oom.store, bridge.append_id, 6, "bb_copy")
+    let copy_one = try mir_add_block(d, copy.store, bridge.append_id, 7, "bb_copy_one")
+    let finish = try mir_add_block(d, copy_one.store, bridge.append_id, 8, "bb_finish")
+    let fail = try mir_add_block(d, finish.store, bridge.append_id, 9, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: bridge.append_id, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    current = lower_with_mir(current, fail_term.store)
+    let copy_param = try mir_add_block_param(d, current.mir, bridge.append_id, copy.id, 0, "i", mir_type_u64())
+    current = lower_with_mir(current, copy_param.store)
+    let local = try lower_helper_local_place(d, current, bridge.append_id, 0, "buffer", buffer.id)
+    let stored = try lower_add_instr(d, local.state, bridge.append_id, entry.id, mir_op_store(), 0, local.id, 0, 2, 0, 0, "")
+    let data_place = try lower_helper_field_place(d, stored.state, bridge.append_id, local.id, "data")
+    let data = try lower_helper_load(d, data_place.state, bridge.append_id, entry.id, data_place.id, data_type.type_id)
+    let len_place = try lower_helper_field_place(d, data.state, bridge.append_id, local.id, "len")
+    let length = try lower_helper_load(d, len_place.state, bridge.append_id, entry.id, len_place.id, mir_type_u64())
+    let capacity = try lower_add_typed_result(d, length.state, bridge.append_id, entry.id, mir_type_u64())
+    let capacity_instr = try lower_add_instr(d, capacity.state, bridge.append_id, entry.id, mir_op_slice_len(), capacity.id, 0, 0, data.id, 0, 0, "")
+    let full = try lower_add_typed_result(d, capacity_instr.state, bridge.append_id, entry.id, mir_type_bool())
+    let full_instr = try lower_add_instr(d, full.state, bridge.append_id, entry.id, mir_op_int_eq(), full.id, 0, 0, length.id, capacity.id, 0, "")
+    let one = try lower_helper_const(d, full_instr.state, bridge.append_id, entry.id, mir_type_u64(), 1, checked_type * 100 + 4)
+    current = try lower_branch(d, one.state, bridge.append_id, entry.id, full.id, grow.id, spare.id)
+    let spare_ref = try lower_add_typed_result(d, current, bridge.append_id, spare.id, data_type.type_id)
+    let spare_index = try lower_add_instr(d, spare_ref.state, bridge.append_id, spare.id, mir_op_slice_index_checked(), spare_ref.id, 0, 0, data.id, length.id, fail.id, "")
+    let spare_deref = try lower_helper_deref_place(d, spare_index.state, bridge.append_id, spare_ref.id)
+    let spare_store = try lower_add_instr(d, spare_deref.state, bridge.append_id, spare.id, mir_op_store(), 0, spare_deref.id, 0, 3, 0, 0, "")
+    let spare_len = try lower_add_typed_result(d, spare_store.state, bridge.append_id, spare.id, mir_type_u64())
+    let spare_added = try lower_add_instr(d, spare_len.state, bridge.append_id, spare.id, mir_op_int_add_checked(), spare_len.id, 0, 0, length.id, one.id, fail.id, "")
+    let spare_buffer = try lower_helper_construct_two(d, spare_added.state, bridge.append_id, spare.id, buffer.id, "data", data.id, "len", spare_len.id)
+    let result_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, bridge.append_id - 1).result_type
+    let spare_ok = try lower_helper_variant(d, spare_buffer.state, bridge.append_id, spare.id, result_type, "ok", spare_buffer.id)
+    current = try lower_helper_return(d, spare_ok.state, bridge.append_id, spare.id, spare_ok.id)
+    let two = try lower_helper_const(d, current, bridge.append_id, grow.id, mir_type_u64(), 2, checked_type * 100 + 5)
+    let next_capacity = try lower_add_typed_result(d, two.state, bridge.append_id, grow.id, mir_type_u64())
+    let multiplied = try lower_add_instr(d, next_capacity.state, bridge.append_id, grow.id, mir_op_int_mul_checked(), next_capacity.id, 0, 0, capacity.id, two.id, limit.id, "")
+    current = try lower_jump(d, multiplied.state, bridge.append_id, grow.id, allocate.id)
+    let result_rec = __s0_buffer_get(CheckedTypeRec, store.types, lower_result_type_for(store, checked_type, lower_checked_type_kind(store, 5, 0)) - 1)
+    let error_checked = __s0_buffer_get(U64, store.type_args, result_rec.first_arg)
+    let error_type = try lower_type(d, source_state, store, current, error_checked)
+    let limit_error = try lower_helper_variant(d, error_type.state, bridge.append_id, limit.id, error_type.id, "Limit", 0)
+    let limit_result = try lower_helper_variant(d, limit_error.state, bridge.append_id, limit.id, result_type, "err", limit_error.id)
+    current = try lower_helper_return(d, limit_result.state, bridge.append_id, limit.id, limit_result.id)
+    let new_data = try lower_add_typed_result(d, current, bridge.append_id, allocate.id, data_type.type_id)
+    let new_alloc = try lower_add_instr(d, new_data.state, bridge.append_id, allocate.id, mir_op_alloc_checked(), new_data.id, 0, element.id, 1, next_capacity.id, oom.id, "")
+    let zero = try lower_helper_const(d, new_alloc.state, bridge.append_id, allocate.id, mir_type_u64(), 0, checked_type * 100 + 6)
+    current = try lower_jump_value(d, zero.state, bridge.append_id, allocate.id, copy.id, zero.id)
+    let oom_error = try lower_helper_variant(d, current, bridge.append_id, oom.id, error_type.id, "OutOfMemory", 0)
+    let oom_result = try lower_helper_variant(d, oom_error.state, bridge.append_id, oom.id, result_type, "err", oom_error.id)
+    current = try lower_helper_return(d, oom_result.state, bridge.append_id, oom.id, oom_result.id)
+    let copied = try lower_add_typed_result(d, current, bridge.append_id, copy.id, mir_type_bool())
+    let copy_done = try lower_add_instr(d, copied.state, bridge.append_id, copy.id, mir_op_int_ge(), copied.id, 0, 0, copy_param.id, length.id, 0, "")
+    current = try lower_branch(d, copy_done.state, bridge.append_id, copy.id, copied.id, finish.id, copy_one.id)
+    let old_ref = try lower_add_typed_result(d, current, bridge.append_id, copy_one.id, data_type.type_id)
+    let old_index = try lower_add_instr(d, old_ref.state, bridge.append_id, copy_one.id, mir_op_slice_index_checked(), old_ref.id, 0, 0, data.id, copy_param.id, fail.id, "")
+    let old_deref = try lower_helper_deref_place(d, old_index.state, bridge.append_id, old_ref.id)
+    let old_value = try lower_helper_load(d, old_deref.state, bridge.append_id, copy_one.id, old_deref.id, element.id)
+    let new_ref = try lower_add_typed_result(d, old_value.state, bridge.append_id, copy_one.id, data_type.type_id)
+    let new_index = try lower_add_instr(d, new_ref.state, bridge.append_id, copy_one.id, mir_op_slice_index_checked(), new_ref.id, 0, 0, new_data.id, copy_param.id, fail.id, "")
+    let new_deref = try lower_helper_deref_place(d, new_index.state, bridge.append_id, new_ref.id)
+    let copied_store = try lower_add_instr(d, new_deref.state, bridge.append_id, copy_one.id, mir_op_store(), 0, new_deref.id, 0, old_value.id, 0, 0, "")
+    let next_index = try lower_add_typed_result(d, copied_store.state, bridge.append_id, copy_one.id, mir_type_u64())
+    let next_added = try lower_add_instr(d, next_index.state, bridge.append_id, copy_one.id, mir_op_int_add_checked(), next_index.id, 0, 0, copy_param.id, one.id, fail.id, "")
+    current = try lower_jump_value(d, next_added.state, bridge.append_id, copy_one.id, copy.id, next_index.id)
+    let append_ref = try lower_add_typed_result(d, current, bridge.append_id, finish.id, data_type.type_id)
+    let append_index = try lower_add_instr(d, append_ref.state, bridge.append_id, finish.id, mir_op_slice_index_checked(), append_ref.id, 0, 0, new_data.id, length.id, fail.id, "")
+    let append_deref = try lower_helper_deref_place(d, append_index.state, bridge.append_id, append_ref.id)
+    let append_store = try lower_add_instr(d, append_deref.state, bridge.append_id, finish.id, mir_op_store(), 0, append_deref.id, 0, 3, 0, 0, "")
+    let final_len = try lower_add_typed_result(d, append_store.state, bridge.append_id, finish.id, mir_type_u64())
+    let final_added = try lower_add_instr(d, final_len.state, bridge.append_id, finish.id, mir_op_int_add_checked(), final_len.id, 0, 0, length.id, one.id, fail.id, "")
+    let final_buffer = try lower_helper_construct_two(d, final_added.state, bridge.append_id, finish.id, buffer.id, "data", new_data.id, "len", final_len.id)
+    let final_result = try lower_helper_variant(d, final_buffer.state, bridge.append_id, finish.id, result_type, "ok", final_buffer.id)
+    return lower_helper_return(d, final_result.state, bridge.append_id, finish.id, final_result.id)
+}
+
+fn lower_buffer_helpers(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let made = try lower_buffer_new_body(d, source_state, store, state, checked_type, bridge)
+    let length = try lower_buffer_len_body(d, source_state, store, made, checked_type, bridge)
+    let appended = try lower_buffer_append_body(d, source_state, store, length, checked_type, bridge)
+    return lower_buffer_get_slice_body(d, source_state, store, appended, checked_type, bridge)
+}
+
+fn lower_map_slots_type(mir: MirStore, map_type: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, mir.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, mir.type_parts, at)
+        if part.owner == map_type && part.kind == mir_type_part_field() && part.ordinal == 0 { return part.part_type }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_map_hash_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, function: U64, block: U64, value: U64, fail_block: U64) -> Result(LowerStep, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 {
+        if checked.target == 9 { return Ok(LowerStep(state: state, id: value)) }
+        if checked.target == 6 || checked.target == 7 || checked.target == 8 {
+            let converted = try lower_add_typed_result(d, state, function, block, mir_type_u64())
+            let instruction = try lower_add_instr(d, converted.state, function, block, mir_op_int_zext(), converted.id, 0, mir_type_u64(), value, 0, 0, "")
+            return Ok(LowerStep(state: instruction.state, id: converted.id))
+        }
+        if checked.target == 1 {
+            let join = try lower_add_block(d, state, function, "bb_hash_join")
+            let one_block = try lower_add_block(d, join.state, function, "bb_hash_one")
+            let zero_block = try lower_add_block(d, one_block.state, function, "bb_hash_zero")
+            let parameter = try mir_add_block_param(d, zero_block.state.mir, function, join.id, 0, try lower_decimal_name(d, "hash_", join.id), mir_type_u64())
+            var current = try lower_branch(d, lower_with_mir(zero_block.state, parameter.store), function, block, value, one_block.id, zero_block.id)
+            let one = try lower_helper_const(d, current, function, one_block.id, mir_type_u64(), 1, function * 10000 + checked_type * 100 + 900000070)
+            current = try lower_jump_value(d, one.state, function, one_block.id, join.id, one.id)
+            let zero = try lower_helper_const(d, current, function, zero_block.id, mir_type_u64(), 0, function * 10000 + checked_type * 100 + 900000071)
+            current = try lower_jump_value(d, zero.state, function, zero_block.id, join.id, zero.id)
+            return Ok(LowerStep(state: current, id: parameter.id))
+        }
+        return Ok(LowerStep(state: lower_invalid(state), id: 0))
+    }
+    if checked.kind == 7 && __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1).kind == 2 {
+        let lowered = try lower_type(d, source_state, store, state, checked_type)
+        let local = try lower_helper_local_place(d, lowered.state, function, lower_local_count(lowered.state.mir, function), "hash_key", lowered.id)
+        let stored = try lower_add_instr(d, local.state, function, block, mir_op_store(), 0, local.id, 0, value, 0, 0, "")
+        var current = stored.state
+        var accumulator: U64 = 0
+        var ordinal: U64 = 0
+        while ordinal < lower_use_count(store, checked.target, 1) {
+            let use_id = lower_use_by_role(store, checked.target, 1, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let field_type = try lower_type_bound(d, source_state, store, current, use.checked_type, checked.target, checked_type)
+            let name = try lower_source_word(d, source_state, use.source, use.name_start, use.name_end)
+            let place = try lower_helper_field_place(d, field_type.state, function, local.id, name)
+            let field = try lower_helper_load(d, place.state, function, block, place.id, field_type.id)
+            let hashed = try lower_map_hash_value(d, source_state, store, field.state, lower_bound_checked_type(store, use.checked_type, checked.target, checked_type), function, lower_open_block(field.state.mir, function, block), field.id, fail_block)
+            current = hashed.state
+            if accumulator == 0 { accumulator = hashed.id } else {
+                let added = try lower_add_typed_result(d, current, function, lower_open_block(current.mir, function, block), mir_type_u64())
+                let instruction = try lower_add_instr(d, added.state, function, block, mir_op_int_add_checked(), added.id, 0, 0, accumulator, hashed.id, fail_block, "")
+                current = instruction.state
+                accumulator = added.id
+            }
+            ordinal = ordinal + 1
+        }
+        if accumulator != 0 { return Ok(LowerStep(state: current, id: accumulator)) }
+        return lower_helper_const(d, current, function, block, mir_type_u64(), 0, function * 10000 + checked_type * 100 + 900000072)
+    }
+    if checked.kind == 7 && __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1).kind == 3 {
+        let join = try lower_add_block(d, state, function, "bb_hash_join")
+        let parameter = try mir_add_block_param(d, join.state.mir, function, join.id, 0, try lower_decimal_name(d, "hash_", join.id), mir_type_u64())
+        var current = lower_with_mir(join.state, parameter.store)
+        var variant_blocks = try __s0_buffer_new(U64, d)
+        let variant_count = lower_use_count(store, checked.target, 2)
+        var ordinal: U64 = 0
+        while ordinal < variant_count {
+            let variant_block = try lower_add_block(d, current, function, "bb_hash_variant")
+            current = variant_block.state
+            variant_blocks = try __s0_buffer_append(U64, d, variant_blocks, variant_block.id)
+            ordinal = ordinal + 1
+        }
+        let source_block = lower_open_block(current.mir, function, block)
+        let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value, target: 0, then_block: 0, else_block: 0))
+        current = lower_with_mir(current, term.store)
+        var payloads = try __s0_buffer_new(U64, d)
+        ordinal = 0
+        while ordinal < variant_count {
+            let use_id = lower_use_by_role(store, checked.target, 2, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let name = try lower_source_word(d, source_state, use.source, use.name_start, use.name_end)
+            var payload: U64 = 0
+            if use.checked_type != 0 {
+                let payload_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+                let payload_type = try lower_type(d, source_state, store, current, payload_checked)
+                let payload_value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "hash_payload", source_block * 100 + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
+                current = lower_with_mir(payload_type.state, payload_value.store)
+                payload = payload_value.id
+            }
+            payloads = try __s0_buffer_append(U64, d, payloads, payload)
+            let case = try lower_add_switch_case(d, current, term.id, ordinal, name, payload, __s0_buffer_get(U64, variant_blocks, ordinal))
+            current = case.state
+            ordinal = ordinal + 1
+        }
+        ordinal = 0
+        var tag_value: I64 = 0
+        while ordinal < variant_count {
+            let use_id = lower_use_by_role(store, checked.target, 2, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let variant_block = __s0_buffer_get(U64, variant_blocks, ordinal)
+            let tag = try lower_helper_const(d, current, function, variant_block, mir_type_u64(), tag_value, function * 10000 + checked_type * 100 + ordinal + 900000000)
+            current = tag.state
+            var hash = tag.id
+            if use.checked_type != 0 {
+                let payload_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+                let payload_hash = try lower_map_hash_value(d, source_state, store, current, payload_checked, function, variant_block, __s0_buffer_get(U64, payloads, ordinal), fail_block)
+                current = payload_hash.state
+                let active = lower_open_block(current.mir, function, variant_block)
+                let combined = try lower_add_typed_result(d, current, function, active, mir_type_u64())
+                let added = try lower_add_instr(d, combined.state, function, active, mir_op_int_add_checked(), combined.id, 0, 0, tag.id, payload_hash.id, fail_block, "")
+                current = added.state
+                hash = combined.id
+            }
+            current = try lower_jump_value(d, current, function, lower_open_block(current.mir, function, variant_block), join.id, hash)
+            ordinal = ordinal + 1
+            tag_value = tag_value + 1
+        }
+        return Ok(LowerStep(state: current, id: parameter.id))
+    }
+    return Ok(LowerStep(state: lower_invalid(state), id: 0))
+}
+
+fn lower_map_eq_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, function: U64, block: U64, left: U64, right: U64, equal_block: U64, different_block: U64) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 {
+        if checked.target == 1 {
+            let left_true = try lower_add_block(d, state, function, "bb_eq_left_true")
+            let left_false = try lower_add_block(d, left_true.state, function, "bb_eq_left_false")
+            var current = try lower_branch(d, left_false.state, function, block, left, left_true.id, left_false.id)
+            current = try lower_branch(d, current, function, left_true.id, right, equal_block, different_block)
+            return lower_branch(d, current, function, left_false.id, right, different_block, equal_block)
+        }
+        if checked.target >= 6 && checked.target <= 9 {
+            let result = try lower_add_typed_result(d, state, function, block, mir_type_bool())
+            let compared = try lower_add_instr(d, result.state, function, block, mir_op_int_eq(), result.id, 0, 0, left, right, 0, "")
+            return lower_branch(d, compared.state, function, block, result.id, equal_block, different_block)
+        }
+        return Ok(lower_invalid(state))
+    }
+    if checked.kind == 7 && __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1).kind == 2 {
+        let lowered = try lower_type(d, source_state, store, state, checked_type)
+        let left_ordinal = lower_local_count(lowered.state.mir, function)
+        let left_local = try lower_helper_local_place(d, lowered.state, function, left_ordinal, try lower_decimal_name(d, "eq_left_", left_ordinal), lowered.id)
+        let left_stored = try lower_add_instr(d, left_local.state, function, block, mir_op_store(), 0, left_local.id, 0, left, 0, 0, "")
+        let right_ordinal = lower_local_count(left_stored.state.mir, function)
+        let right_local = try lower_helper_local_place(d, left_stored.state, function, right_ordinal, try lower_decimal_name(d, "eq_right_", right_ordinal), lowered.id)
+        let right_stored = try lower_add_instr(d, right_local.state, function, block, mir_op_store(), 0, right_local.id, 0, right, 0, 0, "")
+        var current = right_stored.state
+        var active = block
+        var ordinal: U64 = 0
+        let field_count = lower_use_count(store, checked.target, 1)
+        while ordinal < field_count {
+            let use_id = lower_use_by_role(store, checked.target, 1, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let field_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+            let field_type = try lower_type(d, source_state, store, current, field_checked)
+            let name = try lower_source_word(d, source_state, use.source, use.name_start, use.name_end)
+            let left_place = try lower_helper_field_place(d, field_type.state, function, left_local.id, name)
+            let left_field = try lower_helper_load(d, left_place.state, function, active, left_place.id, field_type.id)
+            let right_place = try lower_helper_field_place(d, left_field.state, function, right_local.id, name)
+            let right_field = try lower_helper_load(d, right_place.state, function, active, right_place.id, field_type.id)
+            var next_block = equal_block
+            if ordinal + 1 < field_count {
+                let next = try lower_add_block(d, right_field.state, function, "bb_eq_field")
+                current = next.state
+                next_block = next.id
+            } else { current = right_field.state }
+            current = try lower_map_eq_value(d, source_state, store, current, field_checked, function, active, left_field.id, right_field.id, next_block, different_block)
+            active = next_block
+            ordinal = ordinal + 1
+        }
+        if field_count == 0 { return lower_jump(d, current, function, active, equal_block) }
+        return Ok(current)
+    }
+    if checked.kind == 7 && __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1).kind == 3 {
+        var current = state
+        var left_blocks = try __s0_buffer_new(U64, d)
+        let variant_count = lower_use_count(store, checked.target, 2)
+        var ordinal: U64 = 0
+        while ordinal < variant_count {
+            let variant_block = try lower_add_block(d, current, function, "bb_eq_variant")
+            current = variant_block.state
+            left_blocks = try __s0_buffer_append(U64, d, left_blocks, variant_block.id)
+            ordinal = ordinal + 1
+        }
+        let source_block = lower_open_block(current.mir, function, block)
+        let left_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: left, target: 0, then_block: 0, else_block: 0))
+        current = lower_with_mir(current, left_term.store)
+        var left_payloads = try __s0_buffer_new(U64, d)
+        ordinal = 0
+        while ordinal < variant_count {
+            let use_id = lower_use_by_role(store, checked.target, 2, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let name = try lower_source_word(d, source_state, use.source, use.name_start, use.name_end)
+            var payload: U64 = 0
+            if use.checked_type != 0 {
+                let payload_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+                let payload_type = try lower_type(d, source_state, store, current, payload_checked)
+                let payload_value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "eq_left_payload", source_block * 100 + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
+                current = lower_with_mir(payload_type.state, payload_value.store)
+                payload = payload_value.id
+            }
+            left_payloads = try __s0_buffer_append(U64, d, left_payloads, payload)
+            let case = try lower_add_switch_case(d, current, left_term.id, ordinal, name, payload, __s0_buffer_get(U64, left_blocks, ordinal))
+            current = case.state
+            ordinal = ordinal + 1
+        }
+        ordinal = 0
+        while ordinal < variant_count {
+            let use_id = lower_use_by_role(store, checked.target, 2, ordinal)
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            let name = try lower_source_word(d, source_state, use.source, use.name_start, use.name_end)
+            let left_block = __s0_buffer_get(U64, left_blocks, ordinal)
+            let compare = try lower_add_block(d, current, function, "bb_eq_payload")
+            current = compare.state
+            let right_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: left_block, kind: mir_term_switch(), value: right, target: 0, then_block: 0, else_block: 0))
+            current = lower_with_mir(current, right_term.store)
+            var right_payload: U64 = 0
+            if use.checked_type != 0 {
+                let payload_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+                let payload_type = try lower_type(d, source_state, store, current, payload_checked)
+                let payload_value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "eq_right_payload", left_block * 100 + ordinal), payload_type.id, mir_value_def_switch_case(), left_block, 1)
+                current = lower_with_mir(payload_type.state, payload_value.store)
+                right_payload = payload_value.id
+            }
+            let matching = try lower_add_switch_case(d, current, right_term.id, 0, name, right_payload, compare.id)
+            let fallback = try lower_add_switch_case(d, matching.state, right_term.id, 1, "", 0, different_block)
+            current = fallback.state
+            if use.checked_type == 0 {
+                current = try lower_jump(d, current, function, compare.id, equal_block)
+            } else {
+                let payload_checked = lower_bound_checked_type(store, use.checked_type, checked.target, checked_type)
+                current = try lower_map_eq_value(d, source_state, store, current, payload_checked, function, compare.id, __s0_buffer_get(U64, left_payloads, ordinal), right_payload, equal_block, different_block)
+            }
+            ordinal = ordinal + 1
+        }
+        return Ok(current)
+    }
+    return Ok(lower_invalid(state))
+}
+
+fn lower_map_hash_eq_bodies(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let key_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let key = try lower_type(d, source_state, store, state, key_checked)
+    var current = key.state
+    let hash_entry = try mir_add_block(d, current.mir, bridge.len_id, 0, "bb0")
+    let hash_fail = try mir_add_block(d, hash_entry.store, bridge.len_id, 1, "bb_fail")
+    let hash_fail_term = try mir_add_terminator(d, hash_fail.store, MirTermRec(function: bridge.len_id, block: hash_fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let hashed = try lower_map_hash_value(d, source_state, store, lower_with_mir(current, hash_fail_term.store), key_checked, bridge.len_id, hash_entry.id, 1, hash_fail.id)
+    current = try lower_helper_return(d, hashed.state, bridge.len_id, lower_open_block(hashed.state.mir, bridge.len_id, hash_entry.id), hashed.id)
+    let eq_entry = try mir_add_block(d, current.mir, bridge.append_id, 0, "bb0")
+    let eq_true = try mir_add_block(d, eq_entry.store, bridge.append_id, 1, "bb_true")
+    let eq_false = try mir_add_block(d, eq_true.store, bridge.append_id, 2, "bb_false")
+    current = lower_with_mir(current, eq_false.store)
+    current = try lower_map_eq_value(d, source_state, store, current, key_checked, bridge.append_id, eq_entry.id, 1, 2, eq_true.id, eq_false.id)
+    let truth = try lower_helper_bool(d, current, bridge.append_id, eq_true.id, 1, checked_type * 100 + 22)
+    current = try lower_helper_return(d, truth.state, bridge.append_id, eq_true.id, truth.id)
+    let falsity = try lower_helper_bool(d, current, bridge.append_id, eq_false.id, 0, checked_type * 100 + 23)
+    return lower_helper_return(d, falsity.state, bridge.append_id, eq_false.id, falsity.id)
+}
+
+fn lower_map_make_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let map_type = try lower_type(d, source_state, store, state, checked_type)
+    let slots_type = lower_map_slots_type(map_type.state.mir, map_type.id)
+    if slots_type == 0 { return Ok(lower_invalid(map_type.state)) }
+    let entry_type = __s0_buffer_get(MirTypeRec, map_type.state.mir.types, slots_type - 1).elem
+    var current = map_type.state
+    let entry = try mir_add_block(d, current.mir, bridge.make_id, 0, "bb0")
+    let loop = try mir_add_block(d, entry.store, bridge.make_id, 1, "bb_init")
+    let body = try mir_add_block(d, loop.store, bridge.make_id, 2, "bb_slot")
+    let done = try mir_add_block(d, body.store, bridge.make_id, 3, "bb_done")
+    let fail = try mir_add_block(d, done.store, bridge.make_id, 4, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: bridge.make_id, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let loop_param = try mir_add_block_param(d, fail_term.store, bridge.make_id, loop.id, 0, "i", mir_type_u64())
+    current = lower_with_mir(current, loop_param.store)
+    let cap = try lower_helper_const(d, current, bridge.make_id, entry.id, mir_type_u64(), 16, checked_type * 100 + 24)
+    let zero = try lower_helper_const(d, cap.state, bridge.make_id, entry.id, mir_type_u64(), 0, checked_type * 100 + 25)
+    let one = try lower_helper_const(d, zero.state, bridge.make_id, entry.id, mir_type_u64(), 1, checked_type * 100 + 26)
+    let slots = try lower_add_typed_result(d, one.state, bridge.make_id, entry.id, slots_type)
+    let allocated = try lower_add_instr(d, slots.state, bridge.make_id, entry.id, mir_op_alloc(), slots.id, 0, entry_type, 1, cap.id, 0, "")
+    let map_value = try lower_add_typed_result(d, allocated.state, bridge.make_id, entry.id, map_type.id)
+    let constructed = try lower_add_instr(d, map_value.state, bridge.make_id, entry.id, mir_op_aggregate_construct(), map_value.id, 0, map_type.id, 0, 0, 0, "")
+    current = try lower_add_instr_operand(d, constructed.state, constructed.id, 0, slots.id, mir_operand_aggregate_field(), "slots")
+    current = try lower_jump_value(d, current, bridge.make_id, entry.id, loop.id, zero.id)
+    let finished = try lower_add_typed_result(d, current, bridge.make_id, loop.id, mir_type_bool())
+    let compared = try lower_add_instr(d, finished.state, bridge.make_id, loop.id, mir_op_int_ge(), finished.id, 0, 0, loop_param.id, cap.id, 0, "")
+    current = try lower_branch(d, compared.state, bridge.make_id, loop.id, finished.id, done.id, body.id)
+    let reference = try lower_add_typed_result(d, current, bridge.make_id, body.id, slots_type)
+    let indexed = try lower_add_instr(d, reference.state, bridge.make_id, body.id, mir_op_slice_index_checked(), reference.id, 0, 0, slots.id, loop_param.id, fail.id, "")
+    let deref = try lower_helper_deref_place(d, indexed.state, bridge.make_id, reference.id)
+    let state_place = try lower_helper_field_place(d, deref.state, bridge.make_id, deref.id, "state")
+    let empty_state = try lower_helper_const(d, state_place.state, bridge.make_id, body.id, mir_type_u8(), 0, checked_type * 100 + 27)
+    let stored = try lower_add_instr(d, empty_state.state, bridge.make_id, body.id, mir_op_store(), 0, state_place.id, 0, empty_state.id, 0, 0, "")
+    let next = try lower_add_typed_result(d, stored.state, bridge.make_id, body.id, mir_type_u64())
+    let added = try lower_add_instr(d, next.state, bridge.make_id, body.id, mir_op_int_add_checked(), next.id, 0, 0, loop_param.id, one.id, fail.id, "")
+    current = try lower_jump_value(d, added.state, bridge.make_id, body.id, loop.id, next.id)
+    return lower_helper_return(d, current, bridge.make_id, done.id, map_value.id)
+}
+
+fn lower_helper_call(d: Domain, state: LowerState, function: U64, block: U64, target: U64, result_type: U64, first: U64, second: U64, third: U64) -> Result(LowerStep, __s0_Error) {
+    var result = LowerStep(state: state, id: 0)
+    if result_type != mir_type_unit() { result = try lower_add_typed_result(d, state, function, block, result_type) }
+    let instruction = try lower_add_instr(d, result.state, function, block, mir_op_call(), result.id, 0, 0, 0, 0, target, "")
+    var current = instruction.state
+    current = try lower_add_instr_operand(d, current, instruction.id, 0, first, mir_operand_instruction(), "")
+    if second != 0 { current = try lower_add_instr_operand(d, current, instruction.id, 1, second, mir_operand_instruction(), "") }
+    if third != 0 { current = try lower_add_instr_operand(d, current, instruction.id, 2, third, mir_operand_instruction(), "") }
+    return Ok(LowerStep(state: current, id: result.id))
+}
+
+fn lower_map_get_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let key = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+    let value = try lower_type(d, source_state, store, key.state, __s0_buffer_get(U64, store.type_args, checked.first_arg))
+    let map_type = try lower_type(d, source_state, store, value.state, checked_type)
+    let slots_type = lower_map_slots_type(map_type.state.mir, map_type.id)
+    var current = map_type.state
+    let entry = try mir_add_block(d, current.mir, bridge.get_id, 0, "bb0")
+    let loop = try mir_add_block(d, entry.store, bridge.get_id, 1, "bb_loop")
+    let probe = try mir_add_block(d, loop.store, bridge.get_id, 2, "bb_probe")
+    let occupied = try mir_add_block(d, probe.store, bridge.get_id, 3, "bb_occupied")
+    let nonoccupied = try mir_add_block(d, occupied.store, bridge.get_id, 4, "bb_nonoccupied")
+    let check = try mir_add_block(d, nonoccupied.store, bridge.get_id, 5, "bb_check")
+    let found = try mir_add_block(d, check.store, bridge.get_id, 6, "bb_found")
+    let next = try mir_add_block(d, found.store, bridge.get_id, 7, "bb_next")
+    let none = try mir_add_block(d, next.store, bridge.get_id, 8, "bb_none")
+    let fail = try mir_add_block(d, none.store, bridge.get_id, 9, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: bridge.get_id, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let index_param = try mir_add_block_param(d, fail_term.store, bridge.get_id, loop.id, 0, "index", mir_type_u64())
+    let probes_param = try mir_add_block_param(d, index_param.store, bridge.get_id, loop.id, 1, "probes", mir_type_u64())
+    current = lower_with_mir(current, probes_param.store)
+    let local = try lower_helper_local_place(d, current, bridge.get_id, 0, "map", map_type.id)
+    let stored = try lower_add_instr(d, local.state, bridge.get_id, entry.id, mir_op_store(), 0, local.id, 0, 1, 0, 0, "")
+    let slots_place = try lower_helper_field_place(d, stored.state, bridge.get_id, local.id, "slots")
+    let slots = try lower_helper_load(d, slots_place.state, bridge.get_id, entry.id, slots_place.id, slots_type)
+    let hash = try lower_helper_call(d, slots.state, bridge.get_id, entry.id, bridge.len_id, mir_type_u64(), 2, 0, 0)
+    let cap = try lower_helper_const(d, hash.state, bridge.get_id, entry.id, mir_type_u64(), 16, checked_type * 100 + 30)
+    let zero = try lower_helper_const(d, cap.state, bridge.get_id, entry.id, mir_type_u64(), 0, checked_type * 100 + 31)
+    let one = try lower_helper_const(d, zero.state, bridge.get_id, entry.id, mir_type_u64(), 1, checked_type * 100 + 32)
+    let quotient = try lower_add_typed_result(d, one.state, bridge.get_id, entry.id, mir_type_u64())
+    let divided = try lower_add_instr(d, quotient.state, bridge.get_id, entry.id, mir_op_int_div_checked(), quotient.id, 0, 0, hash.id, cap.id, fail.id, "")
+    let product = try lower_add_typed_result(d, divided.state, bridge.get_id, entry.id, mir_type_u64())
+    let multiplied = try lower_add_instr(d, product.state, bridge.get_id, entry.id, mir_op_int_mul_checked(), product.id, 0, 0, quotient.id, cap.id, fail.id, "")
+    let initial = try lower_add_typed_result(d, multiplied.state, bridge.get_id, entry.id, mir_type_u64())
+    let subtracted = try lower_add_instr(d, initial.state, bridge.get_id, entry.id, mir_op_int_sub_checked(), initial.id, 0, 0, hash.id, product.id, fail.id, "")
+    current = try lower_jump_two(d, subtracted.state, bridge.get_id, entry.id, loop.id, initial.id, zero.id)
+    let exhausted = try lower_add_typed_result(d, current, bridge.get_id, loop.id, mir_type_bool())
+    let exhausted_cmp = try lower_add_instr(d, exhausted.state, bridge.get_id, loop.id, mir_op_int_ge(), exhausted.id, 0, 0, probes_param.id, cap.id, 0, "")
+    current = try lower_branch(d, exhausted_cmp.state, bridge.get_id, loop.id, exhausted.id, none.id, probe.id)
+    let reference = try lower_add_typed_result(d, current, bridge.get_id, probe.id, slots_type)
+    let indexed = try lower_add_instr(d, reference.state, bridge.get_id, probe.id, mir_op_slice_index_checked(), reference.id, 0, 0, slots.id, index_param.id, fail.id, "")
+    let deref = try lower_helper_deref_place(d, indexed.state, bridge.get_id, reference.id)
+    let state_place = try lower_helper_field_place(d, deref.state, bridge.get_id, deref.id, "state")
+    let slot_state = try lower_helper_load(d, state_place.state, bridge.get_id, probe.id, state_place.id, mir_type_u8())
+    let occupied_const = try lower_helper_const(d, slot_state.state, bridge.get_id, probe.id, mir_type_u8(), 1, checked_type * 100 + 33)
+    let is_occupied = try lower_add_typed_result(d, occupied_const.state, bridge.get_id, probe.id, mir_type_bool())
+    let occupied_cmp = try lower_add_instr(d, is_occupied.state, bridge.get_id, probe.id, mir_op_int_eq(), is_occupied.id, 0, 0, slot_state.id, occupied_const.id, 0, "")
+    current = try lower_branch(d, occupied_cmp.state, bridge.get_id, probe.id, is_occupied.id, occupied.id, nonoccupied.id)
+    let empty_const = try lower_helper_const(d, current, bridge.get_id, nonoccupied.id, mir_type_u8(), 0, checked_type * 100 + 34)
+    let is_empty = try lower_add_typed_result(d, empty_const.state, bridge.get_id, nonoccupied.id, mir_type_bool())
+    let empty_cmp = try lower_add_instr(d, is_empty.state, bridge.get_id, nonoccupied.id, mir_op_int_eq(), is_empty.id, 0, 0, slot_state.id, empty_const.id, 0, "")
+    current = try lower_branch(d, empty_cmp.state, bridge.get_id, nonoccupied.id, is_empty.id, none.id, next.id)
+    let hash_place = try lower_helper_field_place(d, current, bridge.get_id, deref.id, "hash")
+    let entry_hash = try lower_helper_load(d, hash_place.state, bridge.get_id, occupied.id, hash_place.id, mir_type_u64())
+    let same_hash = try lower_add_typed_result(d, entry_hash.state, bridge.get_id, occupied.id, mir_type_bool())
+    let hash_cmp = try lower_add_instr(d, same_hash.state, bridge.get_id, occupied.id, mir_op_int_eq(), same_hash.id, 0, 0, entry_hash.id, hash.id, 0, "")
+    current = try lower_branch(d, hash_cmp.state, bridge.get_id, occupied.id, same_hash.id, check.id, next.id)
+    let key_place = try lower_helper_field_place(d, current, bridge.get_id, deref.id, "key")
+    let entry_key = try lower_helper_load(d, key_place.state, bridge.get_id, check.id, key_place.id, key.id)
+    let same_key = try lower_helper_call(d, entry_key.state, bridge.get_id, check.id, bridge.append_id, mir_type_bool(), 2, entry_key.id, 0)
+    current = try lower_branch(d, same_key.state, bridge.get_id, check.id, same_key.id, found.id, next.id)
+    let value_place = try lower_helper_field_place(d, current, bridge.get_id, deref.id, "value")
+    let entry_value = try lower_helper_load(d, value_place.state, bridge.get_id, found.id, value_place.id, value.id)
+    let option_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, bridge.get_id - 1).result_type
+    let some = try lower_helper_variant(d, entry_value.state, bridge.get_id, found.id, option_type, "some", entry_value.id)
+    current = try lower_helper_return(d, some.state, bridge.get_id, found.id, some.id)
+    let next_index = try lower_add_typed_result(d, current, bridge.get_id, next.id, mir_type_u64())
+    let index_added = try lower_add_instr(d, next_index.state, bridge.get_id, next.id, mir_op_int_add_checked(), next_index.id, 0, 0, index_param.id, one.id, fail.id, "")
+    let next_q = try lower_add_typed_result(d, index_added.state, bridge.get_id, next.id, mir_type_u64())
+    let next_div = try lower_add_instr(d, next_q.state, bridge.get_id, next.id, mir_op_int_div_checked(), next_q.id, 0, 0, next_index.id, cap.id, fail.id, "")
+    let next_p = try lower_add_typed_result(d, next_div.state, bridge.get_id, next.id, mir_type_u64())
+    let next_mul = try lower_add_instr(d, next_p.state, bridge.get_id, next.id, mir_op_int_mul_checked(), next_p.id, 0, 0, next_q.id, cap.id, fail.id, "")
+    let wrapped = try lower_add_typed_result(d, next_mul.state, bridge.get_id, next.id, mir_type_u64())
+    let wrapped_sub = try lower_add_instr(d, wrapped.state, bridge.get_id, next.id, mir_op_int_sub_checked(), wrapped.id, 0, 0, next_index.id, next_p.id, fail.id, "")
+    let next_probes = try lower_add_typed_result(d, wrapped_sub.state, bridge.get_id, next.id, mir_type_u64())
+    let probes_added = try lower_add_instr(d, next_probes.state, bridge.get_id, next.id, mir_op_int_add_checked(), next_probes.id, 0, 0, probes_param.id, one.id, fail.id, "")
+    current = try lower_jump_two(d, probes_added.state, bridge.get_id, next.id, loop.id, wrapped.id, next_probes.id)
+    let none_value = try lower_helper_variant(d, current, bridge.get_id, none.id, option_type, "none", 0)
+    return lower_helper_return(d, none_value.state, bridge.get_id, none.id, none_value.id)
+}
+
+fn lower_map_remove_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, bridge: LowerBridgeRec) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    let key = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+    let map_type = try lower_type(d, source_state, store, key.state, checked_type)
+    let slots_type = lower_map_slots_type(map_type.state.mir, map_type.id)
+    var current = map_type.state
+    let entry = try mir_add_block(d, current.mir, bridge.remove_id, 0, "bb0")
+    let loop = try mir_add_block(d, entry.store, bridge.remove_id, 1, "bb_loop")
+    let probe = try mir_add_block(d, loop.store, bridge.remove_id, 2, "bb_probe")
+    let occupied = try mir_add_block(d, probe.store, bridge.remove_id, 3, "bb_occupied")
+    let nonoccupied = try mir_add_block(d, occupied.store, bridge.remove_id, 4, "bb_nonoccupied")
+    let check = try mir_add_block(d, nonoccupied.store, bridge.remove_id, 5, "bb_check")
+    let found = try mir_add_block(d, check.store, bridge.remove_id, 6, "bb_found")
+    let next = try mir_add_block(d, found.store, bridge.remove_id, 7, "bb_next")
+    let absent = try mir_add_block(d, next.store, bridge.remove_id, 8, "bb_absent")
+    let fail = try mir_add_block(d, absent.store, bridge.remove_id, 9, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: bridge.remove_id, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let index_param = try mir_add_block_param(d, fail_term.store, bridge.remove_id, loop.id, 0, "index", mir_type_u64())
+    let probes_param = try mir_add_block_param(d, index_param.store, bridge.remove_id, loop.id, 1, "probes", mir_type_u64())
+    current = lower_with_mir(current, probes_param.store)
+    let local = try lower_helper_local_place(d, current, bridge.remove_id, 0, "map", map_type.id)
+    let stored = try lower_add_instr(d, local.state, bridge.remove_id, entry.id, mir_op_store(), 0, local.id, 0, 1, 0, 0, "")
+    let slots_place = try lower_helper_field_place(d, stored.state, bridge.remove_id, local.id, "slots")
+    let slots = try lower_helper_load(d, slots_place.state, bridge.remove_id, entry.id, slots_place.id, slots_type)
+    let hash = try lower_helper_call(d, slots.state, bridge.remove_id, entry.id, bridge.len_id, mir_type_u64(), 2, 0, 0)
+    let cap = try lower_helper_const(d, hash.state, bridge.remove_id, entry.id, mir_type_u64(), 16, checked_type * 100 + 50)
+    let zero = try lower_helper_const(d, cap.state, bridge.remove_id, entry.id, mir_type_u64(), 0, checked_type * 100 + 51)
+    let one = try lower_helper_const(d, zero.state, bridge.remove_id, entry.id, mir_type_u64(), 1, checked_type * 100 + 52)
+    let quotient = try lower_add_typed_result(d, one.state, bridge.remove_id, entry.id, mir_type_u64())
+    let divided = try lower_add_instr(d, quotient.state, bridge.remove_id, entry.id, mir_op_int_div_checked(), quotient.id, 0, 0, hash.id, cap.id, fail.id, "")
+    let product = try lower_add_typed_result(d, divided.state, bridge.remove_id, entry.id, mir_type_u64())
+    let multiplied = try lower_add_instr(d, product.state, bridge.remove_id, entry.id, mir_op_int_mul_checked(), product.id, 0, 0, quotient.id, cap.id, fail.id, "")
+    let initial = try lower_add_typed_result(d, multiplied.state, bridge.remove_id, entry.id, mir_type_u64())
+    let subtracted = try lower_add_instr(d, initial.state, bridge.remove_id, entry.id, mir_op_int_sub_checked(), initial.id, 0, 0, hash.id, product.id, fail.id, "")
+    current = try lower_jump_two(d, subtracted.state, bridge.remove_id, entry.id, loop.id, initial.id, zero.id)
+    let exhausted = try lower_add_typed_result(d, current, bridge.remove_id, loop.id, mir_type_bool())
+    let exhausted_cmp = try lower_add_instr(d, exhausted.state, bridge.remove_id, loop.id, mir_op_int_ge(), exhausted.id, 0, 0, probes_param.id, cap.id, 0, "")
+    current = try lower_branch(d, exhausted_cmp.state, bridge.remove_id, loop.id, exhausted.id, absent.id, probe.id)
+    let reference = try lower_add_typed_result(d, current, bridge.remove_id, probe.id, slots_type)
+    let indexed = try lower_add_instr(d, reference.state, bridge.remove_id, probe.id, mir_op_slice_index_checked(), reference.id, 0, 0, slots.id, index_param.id, fail.id, "")
+    let deref = try lower_helper_deref_place(d, indexed.state, bridge.remove_id, reference.id)
+    let state_place = try lower_helper_field_place(d, deref.state, bridge.remove_id, deref.id, "state")
+    let slot_state = try lower_helper_load(d, state_place.state, bridge.remove_id, probe.id, state_place.id, mir_type_u8())
+    let occupied_const = try lower_helper_const(d, slot_state.state, bridge.remove_id, probe.id, mir_type_u8(), 1, checked_type * 100 + 53)
+    let is_occupied = try lower_add_typed_result(d, occupied_const.state, bridge.remove_id, probe.id, mir_type_bool())
+    let occupied_cmp = try lower_add_instr(d, is_occupied.state, bridge.remove_id, probe.id, mir_op_int_eq(), is_occupied.id, 0, 0, slot_state.id, occupied_const.id, 0, "")
+    current = try lower_branch(d, occupied_cmp.state, bridge.remove_id, probe.id, is_occupied.id, occupied.id, nonoccupied.id)
+    let empty_const = try lower_helper_const(d, current, bridge.remove_id, nonoccupied.id, mir_type_u8(), 0, checked_type * 100 + 54)
+    let is_empty = try lower_add_typed_result(d, empty_const.state, bridge.remove_id, nonoccupied.id, mir_type_bool())
+    let empty_cmp = try lower_add_instr(d, is_empty.state, bridge.remove_id, nonoccupied.id, mir_op_int_eq(), is_empty.id, 0, 0, slot_state.id, empty_const.id, 0, "")
+    current = try lower_branch(d, empty_cmp.state, bridge.remove_id, nonoccupied.id, is_empty.id, absent.id, next.id)
+    let hash_place = try lower_helper_field_place(d, current, bridge.remove_id, deref.id, "hash")
+    let entry_hash = try lower_helper_load(d, hash_place.state, bridge.remove_id, occupied.id, hash_place.id, mir_type_u64())
+    let same_hash = try lower_add_typed_result(d, entry_hash.state, bridge.remove_id, occupied.id, mir_type_bool())
+    let hash_cmp = try lower_add_instr(d, same_hash.state, bridge.remove_id, occupied.id, mir_op_int_eq(), same_hash.id, 0, 0, entry_hash.id, hash.id, 0, "")
+    current = try lower_branch(d, hash_cmp.state, bridge.remove_id, occupied.id, same_hash.id, check.id, next.id)
+    let key_place = try lower_helper_field_place(d, current, bridge.remove_id, deref.id, "key")
+    let entry_key = try lower_helper_load(d, key_place.state, bridge.remove_id, check.id, key_place.id, key.id)
+    let same_key = try lower_helper_call(d, entry_key.state, bridge.remove_id, check.id, bridge.append_id, mir_type_bool(), 2, entry_key.id, 0)
+    current = try lower_branch(d, same_key.state, bridge.remove_id, check.id, same_key.id, found.id, next.id)
+    let deleted = try lower_helper_const(d, current, bridge.remove_id, found.id, mir_type_u8(), 2, checked_type * 100 + 55)
+    let marked = try lower_add_instr(d, deleted.state, bridge.remove_id, found.id, mir_op_store(), 0, state_place.id, 0, deleted.id, 0, 0, "")
+    let yes = try lower_helper_bool(d, marked.state, bridge.remove_id, found.id, 1, checked_type * 100 + 56)
+    current = try lower_helper_return(d, yes.state, bridge.remove_id, found.id, yes.id)
+    let next_index = try lower_add_typed_result(d, current, bridge.remove_id, next.id, mir_type_u64())
+    let index_added = try lower_add_instr(d, next_index.state, bridge.remove_id, next.id, mir_op_int_add_checked(), next_index.id, 0, 0, index_param.id, one.id, fail.id, "")
+    let next_q = try lower_add_typed_result(d, index_added.state, bridge.remove_id, next.id, mir_type_u64())
+    let next_div = try lower_add_instr(d, next_q.state, bridge.remove_id, next.id, mir_op_int_div_checked(), next_q.id, 0, 0, next_index.id, cap.id, fail.id, "")
+    let next_p = try lower_add_typed_result(d, next_div.state, bridge.remove_id, next.id, mir_type_u64())
+    let next_mul = try lower_add_instr(d, next_p.state, bridge.remove_id, next.id, mir_op_int_mul_checked(), next_p.id, 0, 0, next_q.id, cap.id, fail.id, "")
+    let wrapped = try lower_add_typed_result(d, next_mul.state, bridge.remove_id, next.id, mir_type_u64())
+    let wrapped_sub = try lower_add_instr(d, wrapped.state, bridge.remove_id, next.id, mir_op_int_sub_checked(), wrapped.id, 0, 0, next_index.id, next_p.id, fail.id, "")
+    let next_probes = try lower_add_typed_result(d, wrapped_sub.state, bridge.remove_id, next.id, mir_type_u64())
+    let probes_added = try lower_add_instr(d, next_probes.state, bridge.remove_id, next.id, mir_op_int_add_checked(), next_probes.id, 0, 0, probes_param.id, one.id, fail.id, "")
+    current = try lower_jump_two(d, probes_added.state, bridge.remove_id, next.id, loop.id, wrapped.id, next_probes.id)
+    let no = try lower_helper_bool(d, current, bridge.remove_id, absent.id, 0, checked_type * 100 + 57)
+    return lower_helper_return(d, no.state, bridge.remove_id, absent.id, no.id)
 }
 
 fn lower_environment_valid(store: CheckStore, owner: U64, environment: U64) -> Bool {
@@ -1312,6 +2517,62 @@ fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U
     let source_rec = __s0_buffer_get(SourceRec, source_state.sources, source)
     if end > source_rec.text_end - source_rec.text_start || (nonempty && start == end) { return false }
     return true
+}
+
+fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
+    if annotation.kind != 5 || annotation.target != 0 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 16 { return false }
+    var expected_count: U64 = 1
+    if annotation.builtin == 2 || annotation.builtin == 11 || annotation.builtin == 15 { expected_count = 3 }
+    if annotation.builtin == 3 || annotation.builtin == 6 || annotation.builtin == 12 || annotation.builtin == 14 || annotation.builtin == 16 { expected_count = 2 }
+    if expression.child_count != expected_count { return false }
+    let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+    let first_type = lower_builtin_child_type(store, expression, 0)
+    if first_type == 0 { return false }
+    let first = __s0_buffer_get(CheckedTypeRec, store.types, first_type - 1)
+    if annotation.builtin == 1 { return first.kind == 8 && result.kind == 1 && result.target == 9 }
+    if annotation.builtin == 2 {
+        let lo = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
+        let hi = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 2) - 1)
+        return first.kind == 8 && annotation.checked_type == first_type && lo.kind == 1 && lo.target == 9 && hi.kind == 1 && hi.target == 9
+    }
+    if annotation.builtin == 3 { return first.kind == 3 && result.kind == 8 && __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1).target == 9 }
+    if annotation.builtin == 4 { return first.kind == 3 && result.kind == 3 }
+    if annotation.builtin == 5 { return first.kind == 3 && result.kind == 4 }
+    if annotation.builtin == 6 { return first.kind == 3 && __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1).kind == 4 && result.kind == 1 && result.target == 12 }
+    if annotation.builtin == 7 { return first.kind == 3 && result.kind == 1 && result.target == 12 }
+    if annotation.builtin == 8 { return first.kind == 3 && result.kind == 11 }
+    if annotation.builtin >= 9 && annotation.builtin <= 13 {
+        var buffer_ordinal: U64 = 0
+        if annotation.builtin == 9 { buffer_ordinal = 99 }
+        if annotation.builtin == 11 { buffer_ordinal = 1 }
+        var buffer_type = result
+        if buffer_ordinal != 99 { buffer_type = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, buffer_ordinal) - 1) }
+        if annotation.builtin == 9 {
+            if first.kind != 3 || result.kind != 10 { return false }
+            buffer_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, result.first_arg - 1) - 1)
+        }
+        if buffer_type.kind != 13 { return false }
+        let element = __s0_buffer_get(U64, store.type_args, buffer_type.first_arg - 1)
+        if annotation.builtin == 10 { return result.kind == 1 && result.target == 9 }
+        if annotation.builtin == 11 { return lower_builtin_child_type(store, expression, 2) == element && result.kind == 10 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == lower_builtin_child_type(store, expression, 1) }
+        if annotation.builtin == 12 { return annotation.checked_type == element }
+        if annotation.builtin == 13 { return result.kind == 8 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element }
+        return true
+    }
+    if first.kind != 11 { return false }
+    let key = __s0_buffer_get(U64, store.type_args, first.first_arg - 1)
+    let value = __s0_buffer_get(U64, store.type_args, first.first_arg)
+    if lower_builtin_child_type(store, expression, 1) != key { return false }
+    if annotation.builtin == 14 { return result.kind == 9 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == value }
+    if annotation.builtin == 15 { return lower_builtin_child_type(store, expression, 2) == value && result.kind == 1 && result.target == 12 }
+    return result.kind == 1 && result.target == 1
+}
+
+fn lower_builtin_child_type(store: CheckStore, expression: CheckedExprRec, ordinal: U64) -> U64 {
+    if ordinal >= expression.child_count || expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return 0 }
+    let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+    if child == 0 || child > __s0_buffer_len(CheckedExprRec, store.expressions) { return 0 }
+    return __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).checked_type
 }
 
 fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
@@ -1464,9 +2725,14 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 4 || item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || !lower_type_concrete(store, item.checked_type) || item.builtin != 0 { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 5 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if item.kind == 5 {
+            if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 16 { return false }
+            at = at + 1
+        } else {
+        if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }
         let target = __s0_buffer_get(SymbolRec, store.symbols, item.target - 1)
         if item.kind == 1 {
             if !((target.kind == 12 && target.type_arity == 0) || target.kind == 13) { return false }
@@ -1493,12 +2759,13 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if result_type.kind != 7 || result_type.target != item.target { return false }
         } else { if item.variant_use != 0 { return false } }
         at = at + 1
+        }
     }
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 18 || item.kind == 0 || item.kind > 21 { return false }
+        if item.kind == 0 || item.kind > 21 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -1594,7 +2861,13 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
                 if lower_type_concrete(store, expected_type) && argument.checked_type != expected_type { return false }
                 argument_at = argument_at + 1
             }
-        } else { if item.annotation != 0 { return false } }
+        } else {
+            if item.kind == 18 {
+                if item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+                let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
+                if annotation.owner != item.owner || annotation.checked_type != item.checked_type || !lower_builtin_model_valid(store, annotation, item) { return false }
+            } else { if item.annotation != 0 { return false } }
+        }
         if item.kind == 12 {
             if item.child_count != 1 || item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(CheckedMatchRec, store.control.matches) { return false }
             let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.parameter_use - 1)
@@ -2073,17 +3346,24 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
 
 fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(LowerResult, __s0_Error) {
     if __s0_buffer_len(CheckDiagRec, store.diagnostics) != 0 { return Ok(LowerBad) }
-    if !lower_model_valid(source_state, store, spans) { return Ok(LowerBad) }
+    if !lower_model_valid(source_state, store, spans) {
+        return Ok(LowerBad)
+    }
     let mir = try mir_store_new(d)
     let types = try __s0_buffer_new(LowerTypeMapRec, d)
     let owners = try __s0_buffer_new(LowerOwnerMapRec, d)
     let imports = try __s0_buffer_new(LowerOwnerMapRec, d)
     let bindings = try __s0_buffer_new(LowerBindingMapRec, d)
     let values = try __s0_buffer_new(LowerValueMapRec, d)
-    var state = LowerState(mir: mir, types: types, owners: owners, imports: imports, bindings: bindings, values: values, valid: true)
+    let bridges = try __s0_buffer_new(LowerBridgeRec, d)
+    var state = LowerState(mir: mir, types: types, owners: owners, imports: imports, bindings: bindings, values: values, bridges: bridges, valid: true)
     state = try lower_declarations(d, source_state, store, state)
-    if !state.valid { return Ok(LowerBad) }
+    if !state.valid {
+        return Ok(LowerBad)
+    }
     state = try lower_functions(d, source_state, spans, store, state)
-    if !state.valid { return Ok(LowerBad) }
+    if !state.valid {
+        return Ok(LowerBad)
+    }
     return Ok(LowerGood(state.mir))
 }

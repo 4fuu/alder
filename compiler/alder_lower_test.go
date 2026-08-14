@@ -25,6 +25,15 @@ enum Maybe {
     None
     Some(value: U64)
 }
+type BridgeKey {
+    active: Bool
+    group: U8
+    code: U64
+}
+enum BridgeTag {
+    Empty
+    Value(value: BridgeKey)
+}
 fn identity(T: type, value: T) -> T { return value }
 fn make_pair(value: U64) -> Pair { return Pair(value: value) }
 fn make_some(value: U64) -> Maybe { return Some(value) }
@@ -95,10 +104,10 @@ fn before_using(bad: Bool) -> I32 {
     return 0
 }
 fn nested_cleanup() -> I32 {
+    using outer = 4 with close
     {
         using inner = 3 with close
     }
-    using outer = 4 with close
     return 0
 }
 fn cleanup_try(bad: Bool) -> Result(I64, I64) {
@@ -108,9 +117,106 @@ fn cleanup_try(bad: Bool) -> Result(I64, I64) {
     return Ok(try checked(10, divisor))
 }
 `,
+		"bridge.al": `import c test_clear_domain_alloc_failure: fn() -> Unit
+fn allocated_length(d: Domain) -> U64 {
+    let values = __s0_alloc(U64, d, 2)
+    return len(values)
+}
+fn domain_bridge(d: Domain) -> U64 {
+    let child = __s0_domain_create(d)
+    let count = allocated_length(child)
+    __s0_domain_reset(child, __s0_domain_mark(child))
+    __s0_domain_destroy(child)
+    return count
+}
+fn option_value(value: Option(U64), missing: U64) -> U64 {
+    return match value { None => missing
+        Some(item) => item }
+}
+fn map_bridge(d: Domain) -> I32 {
+    var values = __s0_map_create(Map(U64, U64), d)
+    Set(values, 1, 10)
+    Set(values, 17, 20)
+    if !Remove(values, 1) { return 1 }
+    Set(values, 33, 30)
+    let found: U64 = match Get(values, 33) {
+        None => 0
+        Some(value) => value
+    }
+    if found != 30 { return 2 }
+    return 0
+}
+fn map_probe_bridge(d: Domain) -> I32 {
+    var values = __s0_map_create(Map(U64, U64), d)
+    var index: U64 = 0
+    while index < 14 {
+        let key = index * 16 + 1
+        Set(values, key, index)
+        index = index + 1
+    }
+    Set(values, 81, 99)
+    let updated = option_value(Get(values, 81), 0)
+    if updated != 99 { return 1 }
+    if !Remove(values, 81) { return 2 }
+    if Remove(values, 81) { return 3 }
+    Set(values, 225, 77)
+    let reused = option_value(Get(values, 225), 0)
+    if reused != 77 { return 4 }
+    let retained = option_value(Get(values, 209), 99)
+    if retained != 13 { return 5 }
+    return 0
+}
+fn map_structural_bridge(d: Domain) -> I32 {
+    var records = __s0_map_create(Map(BridgeKey, U64), d)
+    Set(records, BridgeKey(active: true, group: 2, code: 9), 41)
+    let record = option_value(Get(records, BridgeKey(active: true, group: 2, code: 9)), 0)
+    if record != 41 { return 1 }
+    var variants = __s0_map_create(Map(BridgeTag, U64), d)
+    Set(variants, Value(BridgeKey(active: false, group: 3, code: 7)), 52)
+    let variant = option_value(Get(variants, Value(BridgeKey(active: false, group: 3, code: 7))), 0)
+    if variant != 52 { return 2 }
+    Set(variants, Empty, 63)
+    let empty = option_value(Get(variants, Empty), 0)
+    if empty != 63 { return 3 }
+    return 0
+}
+fn buffer_bridge(d: Domain) -> Result(U64, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let one = try __s0_buffer_append(U64, d, empty, 7)
+    let two = try __s0_buffer_append(U64, d, one, 9)
+    let view = __s0_buffer_slice(U64, two)
+    return Ok(__s0_buffer_get(U64, two, 0) + view[1] + __s0_buffer_len(U64, two))
+}
+fn clear_domain_failure() -> U64 {
+    unsafe c { test_clear_domain_alloc_failure() }
+    return 0
+}
+fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
+    let b0 = try __s0_buffer_new(U64, d)
+    let b1 = try __s0_buffer_append(U64, d, b0, 0)
+    let b2 = try __s0_buffer_append(U64, d, b1, 1)
+    let b3 = try __s0_buffer_append(U64, d, b2, 2)
+    let b4 = try __s0_buffer_append(U64, d, b3, 3)
+    let b5 = try __s0_buffer_append(U64, d, b4, 4)
+    let b6 = try __s0_buffer_append(U64, d, b5, 5)
+    let b7 = try __s0_buffer_append(U64, d, b6, 6)
+    let buffer = try __s0_buffer_append(U64, d, b7, 7)
+    let attempt: U64 = match __s0_buffer_append(U64, d, buffer, 8) {
+        Ok(grown) => __s0_buffer_len(U64, grown)
+        Err(error) => clear_domain_failure()
+    }
+    if attempt != 0 { return Ok(attempt) }
+    let old_view = __s0_buffer_slice(U64, buffer)
+    let before = __s0_buffer_len(U64, buffer) + __s0_buffer_get(U64, buffer, 0) + old_view[7]
+    if before != 15 { return Ok(0) }
+    let retried = try __s0_buffer_append(U64, d, buffer, 8)
+    let retried_view = __s0_buffer_slice(U64, retried)
+    return Ok(before + __s0_buffer_len(U64, retried) + __s0_buffer_get(U64, retried, 0) + retried_view[8])
+}
+`,
 	}
-	first := runLowerCompiler(t, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al"})
-	second := runLowerCompiler(t, exe, files, []string{"cleanup.al", "match_try.al", "control.al", "scalar.al", "types.al"})
+	first := runLowerCompiler(t, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
+	second := runLowerCompiler(t, exe, files, []string{"bridge.al", "cleanup.al", "match_try.al", "control.al", "scalar.al", "types.al"})
 	if !bytes.Equal(first, second) {
 		t.Fatal("lowered MIR changed across processes")
 	}
@@ -121,7 +227,7 @@ fn cleanup_try(bad: Bool) -> Result(I64, I64) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify lowered MIR: %s\n%s", verify.Errors(diagnostics), first)
 	}
-	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try"} {
+	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
 		if _, ok := module.Function(name); !ok {
 			t.Fatalf("lowered MIR has no function %q\n%s", name, first)
 		}
@@ -166,8 +272,14 @@ func runLowerCgenBehavior(t *testing.T, module *mir.Module) {
 	beforeUsing := functionID("before_using")
 	nestedCleanup := functionID("nested_cleanup")
 	cleanupTry := functionID("cleanup_try")
+	domainBridge := functionID("domain_bridge")
+	mapBridge := functionID("map_bridge")
+	mapProbeBridge := functionID("map_probe_bridge")
+	mapStructuralBridge := functionID("map_structural_bridge")
+	bufferOOMRetry := functionID("buffer_oom_retry")
 	maybeType := module.Functions[choose].Params[0].Type
 	resultType := module.Functions[propagate].Result
+	bufferResultType := module.Functions[bufferOOMRetry].Result
 	none, _ := module.VariantIndex(maybeType, "None")
 	some, _ := module.VariantIndex(maybeType, "Some")
 	ok, _ := module.VariantIndex(resultType, "ok")
@@ -175,7 +287,8 @@ func runLowerCgenBehavior(t *testing.T, module *mir.Module) {
 	driver := fmt.Sprintf(`
 static int64_t alder_test_cleanup;
 uint64_t foreign(uint64_t value) { return value; }
-void counter(int64_t value) { alder_test_cleanup += value; }
+void counter(int64_t value) { alder_test_cleanup = alder_test_cleanup * 10 + value; }
+void test_clear_domain_alloc_failure(void) { alder_runtime_test_clear_domain_alloc_failure(); }
 int main(void) {
   uint64_t values[3] = {1, 2, 3};
   AlderSlice slice = {(void *)values, 3};
@@ -183,6 +296,8 @@ int main(void) {
   AlderTy%d some = {0};
   AlderTy%d success;
   AlderTy%d failure;
+  AlderTy%d retried;
+  AlderDomain root = {0};
   none.alder_tag = %d;
   some.alder_tag = %d;
   some.alder_u.alder_p%d = 9;
@@ -194,17 +309,35 @@ int main(void) {
   failure = alder_fn_propagate_%d(0);
   if (success.alder_tag != %d || failure.alder_tag != %d) return 5;
   if (alder_fn_attempt_%d(false) != 0 || alder_test_cleanup != 5) return 6;
-  if (alder_fn_attempt_%d(true) != 7 || alder_test_cleanup != 10) return 7;
-  if (alder_fn_before_using_%d(true) != 1 || alder_test_cleanup != 10) return 8;
-  if (alder_fn_before_using_%d(false) != 0 || alder_test_cleanup != 12) return 9;
-  if (alder_fn_nested_cleanup_%d() != 0 || alder_test_cleanup != 19) return 10;
+  alder_test_cleanup = 0;
+  if (alder_fn_attempt_%d(true) != 7 || alder_test_cleanup != 5) return 7;
+  alder_test_cleanup = 0;
+  if (alder_fn_before_using_%d(true) != 1 || alder_test_cleanup != 0) return 8;
+  if (alder_fn_before_using_%d(false) != 0 || alder_test_cleanup != 2) return 9;
+  alder_test_cleanup = 0;
+  if (alder_fn_nested_cleanup_%d() != 0 || alder_test_cleanup != 34) return 10;
+  alder_test_cleanup = 0;
   (void)alder_fn_cleanup_try_%d(false);
-  if (alder_test_cleanup != 25) return 11;
+  if (alder_test_cleanup != 6) return 11;
+  alder_test_cleanup = 0;
   (void)alder_fn_cleanup_try_%d(true);
-  if (alder_test_cleanup != 31) return 12;
+  if (alder_test_cleanup != 6) return 12;
+  alder_test_cleanup = 0;
+  if (!alder_domain_init(&root, NULL)) return 13;
+  if (alder_fn_domain_bridge_%d(&root) != 2) return 14;
+  if (alder_fn_map_bridge_%d(&root) != 0) return 15;
+  if (alder_fn_map_probe_bridge_%d(&root) != 0) return 16;
+  if (alder_fn_map_structural_bridge_%d(&root) != 0) return 17;
+  alder_runtime_test_fail_domain_alloc_after(1);
+  retried = alder_fn_buffer_oom_retry_%d(&root);
+  if (retried.alder_tag != %d || retried.alder_u.alder_p%d != 32) return 18;
+  alder_domain_destroy(&root);
   return 0;
 }
-`, maybeType, maybeType, resultType, resultType, none, some, some, calculate, short, short, sum, choose, choose, propagate, propagate, ok, errVariant, attempt, attempt, beforeUsing, beforeUsing, nestedCleanup, cleanupTry, cleanupTry)
+`, maybeType, maybeType, resultType, resultType, bufferResultType,
+		none, some, some, calculate, short, short, sum, choose, choose, propagate, propagate, ok, errVariant,
+		attempt, attempt, beforeUsing, beforeUsing, nestedCleanup, cleanupTry, cleanupTry,
+		domainBridge, mapBridge, mapProbeBridge, mapStructuralBridge, bufferOOMRetry, ok, ok)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "lower-behavior.c")
 	if err := os.WriteFile(file, []byte(generated+driver), 0o644); err != nil {
@@ -215,7 +348,7 @@ int main(void) {
 		t.Fatal(err)
 	}
 	exe := filepath.Join(dir, "lower-behavior.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile lowered C: %v\n%s", err, output)
 	}

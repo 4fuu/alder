@@ -1,5 +1,16 @@
 mir 3
 
+type @BridgeKey {
+  active: bool
+  group: u8
+  code: u64
+}
+
+enum @__s0_Error {
+  OutOfMemory
+  Limit
+}
+
 enum @Maybe {
   None
   Some(u64)
@@ -9,71 +20,1221 @@ type @Pair {
   value: u64
 }
 
-const @lit3: i64 = 5
+enum @BridgeTag {
+  Empty
+  Value(@BridgeKey)
+}
 
-const @lit5: i32 = 7
+type @__s0_Buffer_24 {
+  data: safe_mut(u64)
+  len: u64
+}
 
-const @lit6: i32 = 0
+type @MapEntry_25 {
+  state: u8
+  hash: u64
+  key: u64
+  value: u64
+}
 
-const @lit8: i32 = 1
+type @Map_25 {
+  slots: safe_mut(@MapEntry_25)
+}
 
-const @lit9: i64 = 2
+type @MapEntry_27 {
+  state: u8
+  hash: u64
+  key: @BridgeKey
+  value: u64
+}
 
-const @lit10: i32 = 0
+type @Map_27 {
+  slots: safe_mut(@MapEntry_27)
+}
 
-const @lit11: i64 = 3
+type @MapEntry_30 {
+  state: u8
+  hash: u64
+  key: @BridgeTag
+  value: u64
+}
 
-const @lit12: i64 = 4
+type @Map_30 {
+  slots: safe_mut(@MapEntry_30)
+}
 
-const @lit13: i32 = 0
+const @lit2: u64 = 2
 
-const @lit14: i64 = 6
+const @lit24: u64 = 1
 
-const @lit15: i64 = 2
+const @lit25: u64 = 10
 
-const @lit17: i64 = 10
+const @lit28: u64 = 17
 
-const @lit18: i64 = 0
-
-const @lit22: i64 = 10
-
-const @lit29: u64 = 3
+const @lit29: u64 = 20
 
 const @lit32: u64 = 1
 
-const @lit35: u64 = 3
+const @lit.bool34: bool = true
 
-const @lit38: u64 = 0
+const @lit.bool35: bool = false
 
-const @lit.bool44: bool = false
+const @lit35: i32 = 1
 
-const @lit45: u64 = 0
+const @lit37: u64 = 33
 
-const @lit.int29: u64 = 0
+const @lit38: u64 = 30
 
-const @lit.int30: u64 = 1
+const @lit41: u64 = 33
 
-const @lit52: i64 = 0
+const @lit43: u64 = 0
 
-const @lit54: i64 = 1
+const @lit47: u64 = 30
 
-const @lit60: i64 = 10
+const @lit49: i32 = 2
 
-const @lit67: u64 = 0
+const @lit50: i32 = 0
 
-const @lit73: u64 = 0
+const @lit53: u64 = 0
 
-const @lit.bool78: bool = true
+const @lit55: u64 = 14
 
-const @lit.bool79: bool = false
+const @lit58: u64 = 16
 
-const @lit80: u64 = 3
+const @lit60: u64 = 1
 
-const @lit.float84: f64 = 1.5
+const @lit67: u64 = 1
+
+const @lit70: u64 = 81
+
+const @lit71: u64 = 99
+
+const @lit74: u64 = 81
+
+const @lit76: u64 = 0
+
+const @lit79: u64 = 99
+
+const @lit81: i32 = 1
+
+const @lit83: u64 = 81
+
+const @lit.bool85: bool = true
+
+const @lit.bool86: bool = false
+
+const @lit86: i32 = 2
+
+const @lit88: u64 = 81
+
+const @lit90: i32 = 3
+
+const @lit92: u64 = 225
+
+const @lit93: u64 = 77
+
+const @lit96: u64 = 225
+
+const @lit98: u64 = 0
+
+const @lit101: u64 = 77
+
+const @lit103: i32 = 4
+
+const @lit105: u64 = 209
+
+const @lit107: u64 = 99
+
+const @lit110: u64 = 13
+
+const @lit112: i32 = 5
+
+const @lit113: i32 = 0
+
+const @lit117: bool = true
+
+const @lit118: u8 = 2
+
+const @lit119: u64 = 9
+
+const @lit121: u64 = 41
+
+const @lit124: bool = true
+
+const @lit125: u8 = 2
+
+const @lit126: u64 = 9
+
+const @lit129: u64 = 0
+
+const @lit132: u64 = 41
+
+const @lit134: i32 = 1
+
+const @lit138: bool = false
+
+const @lit139: u8 = 3
+
+const @lit140: u64 = 7
+
+const @lit143: u64 = 52
+
+const @lit146: bool = false
+
+const @lit147: u8 = 3
+
+const @lit148: u64 = 7
+
+const @lit152: u64 = 0
+
+const @lit155: u64 = 52
+
+const @lit157: i32 = 2
+
+const @lit160: u64 = 63
+
+const @lit165: u64 = 0
+
+const @lit168: u64 = 63
+
+const @lit170: i32 = 3
+
+const @lit171: i32 = 0
+
+const @lit177: u64 = 7
+
+const @lit182: u64 = 9
+
+const @lit188: u64 = 0
+
+const @lit191: u64 = 1
+
+const @lit199: u64 = 0
+
+const @lit205: u64 = 0
+
+const @lit210: u64 = 1
+
+const @lit215: u64 = 2
+
+const @lit220: u64 = 3
+
+const @lit225: u64 = 4
+
+const @lit230: u64 = 5
+
+const @lit235: u64 = 6
+
+const @lit240: u64 = 7
+
+const @lit245: u64 = 8
+
+const @lit252: u64 = 0
+
+const @lit261: u64 = 0
+
+const @lit265: u64 = 7
+
+const @lit269: u64 = 15
+
+const @lit271: u64 = 0
+
+const @lit275: u64 = 8
+
+const @lit285: u64 = 0
+
+const @lit289: u64 = 8
+
+const @lit295: i64 = 5
+
+const @lit297: i32 = 7
+
+const @lit298: i32 = 0
+
+const @lit300: i32 = 1
+
+const @lit301: i64 = 2
+
+const @lit302: i32 = 0
+
+const @lit303: i64 = 4
+
+const @lit304: i64 = 3
+
+const @lit305: i32 = 0
+
+const @lit306: i64 = 6
+
+const @lit307: i64 = 2
+
+const @lit309: i64 = 10
+
+const @lit310: i64 = 0
+
+const @lit314: i64 = 10
+
+const @lit321: u64 = 3
+
+const @lit324: u64 = 1
+
+const @lit327: u64 = 3
+
+const @lit330: u64 = 0
+
+const @lit.bool336: bool = false
+
+const @lit337: u64 = 0
+
+const @lit.int110: u64 = 0
+
+const @lit.int111: u64 = 1
+
+const @lit344: i64 = 0
+
+const @lit346: i64 = 1
+
+const @lit352: i64 = 10
+
+const @lit359: u64 = 0
+
+const @lit365: u64 = 0
+
+const @lit.bool370: bool = true
+
+const @lit.bool371: bool = false
+
+const @lit372: u64 = 3
+
+const @lit.float376: f64 = 1.5
+
+const @bridge_const_2401: u64 = 8
+
+const @bridge_const_2402: u64 = 0
+
+const @bridge_const_2404: u64 = 1
+
+const @bridge_const_2405: u64 = 2
+
+const @bridge_const_2406: u64 = 0
+
+const @bridge_const_2403: u64 = 0
+
+const @bridge_bool_2522: bool = true
+
+const @bridge_bool_2523: bool = false
+
+const @bridge_const_2524: u64 = 16
+
+const @bridge_const_2525: u64 = 0
+
+const @bridge_const_2526: u64 = 1
+
+const @bridge_const_2527: u8 = 0
+
+const @bridge_const_2530: u64 = 16
+
+const @bridge_const_2531: u64 = 0
+
+const @bridge_const_2532: u64 = 1
+
+const @bridge_const_2533: u8 = 1
+
+const @bridge_const_2534: u8 = 0
+
+const @bridge_const_2560: u64 = 16
+
+const @bridge_const_2561: u64 = 0
+
+const @bridge_const_2562: u64 = 1
+
+const @bridge_const_2563: u8 = 1
+
+const @bridge_const_2564: u8 = 0
+
+const @bridge_const_2565: u8 = 1
+
+const @bridge_bool_2566: bool = true
+
+const @bridge_bool_2567: bool = false
+
+const @bridge_const_2550: u64 = 16
+
+const @bridge_const_2551: u64 = 0
+
+const @bridge_const_2552: u64 = 1
+
+const @bridge_const_2553: u8 = 1
+
+const @bridge_const_2554: u8 = 0
+
+const @bridge_const_2555: u8 = 2
+
+const @bridge_bool_2556: bool = true
+
+const @bridge_bool_2557: bool = false
+
+const @bridge_const_900370170: u64 = 1
+
+const @bridge_const_900370171: u64 = 0
+
+const @bridge_bool_2722: bool = true
+
+const @bridge_bool_2723: bool = false
+
+const @bridge_const_2724: u64 = 16
+
+const @bridge_const_2725: u64 = 0
+
+const @bridge_const_2726: u64 = 1
+
+const @bridge_const_2727: u8 = 0
+
+const @bridge_const_2730: u64 = 16
+
+const @bridge_const_2731: u64 = 0
+
+const @bridge_const_2732: u64 = 1
+
+const @bridge_const_2733: u8 = 1
+
+const @bridge_const_2734: u8 = 0
+
+const @bridge_const_2760: u64 = 16
+
+const @bridge_const_2761: u64 = 0
+
+const @bridge_const_2762: u64 = 1
+
+const @bridge_const_2763: u8 = 1
+
+const @bridge_const_2764: u8 = 0
+
+const @bridge_const_2765: u8 = 1
+
+const @bridge_bool_2766: bool = true
+
+const @bridge_bool_2767: bool = false
+
+const @bridge_const_2750: u64 = 16
+
+const @bridge_const_2751: u64 = 0
+
+const @bridge_const_2752: u64 = 1
+
+const @bridge_const_2753: u8 = 1
+
+const @bridge_const_2754: u8 = 0
+
+const @bridge_const_2755: u8 = 2
+
+const @bridge_bool_2756: bool = true
+
+const @bridge_bool_2757: bool = false
+
+const @bridge_const_900432900: u64 = 0
+
+const @bridge_const_900432901: u64 = 1
+
+const @bridge_const_900430170: u64 = 1
+
+const @bridge_const_900430171: u64 = 0
+
+const @bridge_bool_3022: bool = true
+
+const @bridge_bool_3023: bool = false
+
+const @bridge_const_3024: u64 = 16
+
+const @bridge_const_3025: u64 = 0
+
+const @bridge_const_3026: u64 = 1
+
+const @bridge_const_3027: u8 = 0
+
+const @bridge_const_3030: u64 = 16
+
+const @bridge_const_3031: u64 = 0
+
+const @bridge_const_3032: u64 = 1
+
+const @bridge_const_3033: u8 = 1
+
+const @bridge_const_3034: u8 = 0
+
+const @bridge_const_3060: u64 = 16
+
+const @bridge_const_3061: u64 = 0
+
+const @bridge_const_3062: u64 = 1
+
+const @bridge_const_3063: u8 = 1
+
+const @bridge_const_3064: u8 = 0
+
+const @bridge_const_3065: u8 = 1
+
+const @bridge_bool_3066: bool = true
+
+const @bridge_bool_3067: bool = false
+
+const @bridge_const_3050: u64 = 16
+
+const @bridge_const_3051: u64 = 0
+
+const @bridge_const_3052: u64 = 1
+
+const @bridge_const_3053: u8 = 1
+
+const @bridge_const_3054: u8 = 0
+
+const @bridge_const_3055: u8 = 2
+
+const @bridge_bool_3056: bool = true
+
+const @bridge_bool_3057: bool = false
+
+import @test_clear_domain_alloc_failure: fn() -> unit
 
 import @counter: fn(i64) -> unit
 
 import @foreign: fn(u64) -> u64
+
+fn @allocated_length(%d: domain_handle) -> u64 {
+  local %values: safe_mut(u64)
+
+bb0:
+  %v43 = const.get @lit2
+  %v44 = alloc %d, u64, %v43
+  store local %values, %v44
+  %v45 = load local %values
+  %v46 = slice.len %v45
+  return %v46
+
+bb_panic:
+  panic
+}
+
+fn @domain_bridge(%d: domain_handle) -> u64 {
+  local %child: domain_handle
+  local %count: u64
+
+bb0:
+  %v48 = domain.create %d
+  store local %child, %v48
+  %v49 = load local %child
+  %v50 = call @allocated_length(%v49)
+  store local %count, %v50
+  %v51 = load local %child
+  %v52 = load local %child
+  %v53 = domain.mark %v52
+  domain.reset %v51, %v53
+  %v54 = load local %child
+  domain.destroy %v54
+  %v55 = load local %count
+  return %v55
+
+bb_panic:
+  panic
+}
+
+fn @option_value(%value: option(u64), %missing: u64) -> u64 {
+  local %item: u64
+
+bb0:
+  switch %value {
+    none -> bb_match_arm3
+    some(%match_payload1) -> bb_match_arm4
+  }
+
+bb_panic:
+  panic
+
+bb_match_join2(%match: u64):
+  return %match
+
+bb_match_arm3:
+  jump bb_match_join2(%missing)
+
+bb_match_arm4:
+  jump bb_match_join2(%match_payload1)
+}
+
+fn @map_bridge(%d: domain_handle) -> i32 {
+  local %values: @Map_25
+  local %value: u64
+  local %found: u64
+
+bb0:
+  %v61 = call @map_make_25(%d)
+  store local %values, %v61
+  %v62 = load local %values
+  %v63 = const.get @lit24
+  %v64 = const.get @lit25
+  %v65 = call @map_set_25(%v62, %v63, %v64)
+  branch %v65, bb_map_set_ok2, bb_panic
+
+bb_panic:
+  panic
+
+bb_map_set_ok2:
+  %v66 = load local %values
+  %v67 = const.get @lit28
+  %v68 = const.get @lit29
+  %v69 = call @map_set_25(%v66, %v67, %v68)
+  branch %v69, bb_map_set_ok3, bb_panic
+
+bb_map_set_ok3:
+  %v70 = load local %values
+  %v71 = const.get @lit32
+  %v72 = call @map_remove_25(%v70, %v71)
+  branch %v72, bb_not_false5, bb_not_true4
+
+bb_not_true4:
+  %v74 = const.get @lit.bool34
+  jump bb_not_join6(%v74)
+
+bb_not_false5:
+  %v75 = const.get @lit.bool35
+  jump bb_not_join6(%v75)
+
+bb_not_join6(%not: bool):
+  branch %not, bb_then7, bb_else8
+
+bb_then7:
+  %v76 = const.get @lit35
+  return %v76
+
+bb_else8:
+  jump bb_join9
+
+bb_join9:
+  %v77 = load local %values
+  %v78 = const.get @lit37
+  %v79 = const.get @lit38
+  %v80 = call @map_set_25(%v77, %v78, %v79)
+  branch %v80, bb_map_set_ok10, bb_panic
+
+bb_map_set_ok10:
+  %v81 = load local %values
+  %v82 = const.get @lit41
+  %v83 = call @map_get_25(%v81, %v82)
+  switch %v83 {
+    none -> bb_match_arm12
+    some(%match_payload1) -> bb_match_arm13
+  }
+
+bb_match_join11(%match: u64):
+  store local %found, %match
+  %v87 = load local %found
+  %v88 = const.get @lit47
+  %v89 = int.ne %v87, %v88
+  branch %v89, bb_then14, bb_else15
+
+bb_match_arm12:
+  %v86 = const.get @lit43
+  jump bb_match_join11(%v86)
+
+bb_match_arm13:
+  jump bb_match_join11(%match_payload1)
+
+bb_then14:
+  %v90 = const.get @lit49
+  return %v90
+
+bb_else15:
+  jump bb_join16
+
+bb_join16:
+  %v91 = const.get @lit50
+  return %v91
+}
+
+fn @map_probe_bridge(%d: domain_handle) -> i32 {
+  local %values: @Map_25
+  local %index: u64
+  local %key: u64
+  local %updated: u64
+  local %reused: u64
+  local %retained: u64
+
+bb0:
+  %v93 = call @map_make_25(%d)
+  store local %values, %v93
+  %v94 = const.get @lit53
+  store local %index, %v94
+  jump bb_head2
+
+bb_panic:
+  panic
+
+bb_head2:
+  %v95 = load local %index
+  %v96 = const.get @lit55
+  %v97 = int.lt %v95, %v96
+  branch %v97, bb_body3, bb_join4
+
+bb_body3:
+  %v98 = load local %index
+  %v99 = const.get @lit58
+  %v100 = int.mul.checked %v98, %v99 else bb_panic
+  %v101 = const.get @lit60
+  %v102 = int.add.checked %v100, %v101 else bb_panic
+  store local %key, %v102
+  %v103 = load local %values
+  %v104 = load local %key
+  %v105 = load local %index
+  %v106 = call @map_set_25(%v103, %v104, %v105)
+  branch %v106, bb_map_set_ok5, bb_panic
+
+bb_join4:
+  %v110 = load local %values
+  %v111 = const.get @lit70
+  %v112 = const.get @lit71
+  %v113 = call @map_set_25(%v110, %v111, %v112)
+  branch %v113, bb_map_set_ok6, bb_panic
+
+bb_map_set_ok5:
+  %v107 = load local %index
+  %v108 = const.get @lit67
+  %v109 = int.add.checked %v107, %v108 else bb_panic
+  store local %index, %v109
+  jump bb_head2
+
+bb_map_set_ok6:
+  %v114 = load local %values
+  %v115 = const.get @lit74
+  %v116 = call @map_get_25(%v114, %v115)
+  %v117 = const.get @lit76
+  %v118 = call @option_value(%v116, %v117)
+  store local %updated, %v118
+  %v119 = load local %updated
+  %v120 = const.get @lit79
+  %v121 = int.ne %v119, %v120
+  branch %v121, bb_then7, bb_else8
+
+bb_then7:
+  %v122 = const.get @lit81
+  return %v122
+
+bb_else8:
+  jump bb_join9
+
+bb_join9:
+  %v123 = load local %values
+  %v124 = const.get @lit83
+  %v125 = call @map_remove_25(%v123, %v124)
+  branch %v125, bb_not_false11, bb_not_true10
+
+bb_not_true10:
+  %v127 = const.get @lit.bool85
+  jump bb_not_join12(%v127)
+
+bb_not_false11:
+  %v128 = const.get @lit.bool86
+  jump bb_not_join12(%v128)
+
+bb_not_join12(%not: bool):
+  branch %not, bb_then13, bb_else14
+
+bb_then13:
+  %v129 = const.get @lit86
+  return %v129
+
+bb_else14:
+  jump bb_join15
+
+bb_join15:
+  %v130 = load local %values
+  %v131 = const.get @lit88
+  %v132 = call @map_remove_25(%v130, %v131)
+  branch %v132, bb_then16, bb_else17
+
+bb_then16:
+  %v133 = const.get @lit90
+  return %v133
+
+bb_else17:
+  jump bb_join18
+
+bb_join18:
+  %v134 = load local %values
+  %v135 = const.get @lit92
+  %v136 = const.get @lit93
+  %v137 = call @map_set_25(%v134, %v135, %v136)
+  branch %v137, bb_map_set_ok19, bb_panic
+
+bb_map_set_ok19:
+  %v138 = load local %values
+  %v139 = const.get @lit96
+  %v140 = call @map_get_25(%v138, %v139)
+  %v141 = const.get @lit98
+  %v142 = call @option_value(%v140, %v141)
+  store local %reused, %v142
+  %v143 = load local %reused
+  %v144 = const.get @lit101
+  %v145 = int.ne %v143, %v144
+  branch %v145, bb_then20, bb_else21
+
+bb_then20:
+  %v146 = const.get @lit103
+  return %v146
+
+bb_else21:
+  jump bb_join22
+
+bb_join22:
+  %v147 = load local %values
+  %v148 = const.get @lit105
+  %v149 = call @map_get_25(%v147, %v148)
+  %v150 = const.get @lit107
+  %v151 = call @option_value(%v149, %v150)
+  store local %retained, %v151
+  %v152 = load local %retained
+  %v153 = const.get @lit110
+  %v154 = int.ne %v152, %v153
+  branch %v154, bb_then23, bb_else24
+
+bb_then23:
+  %v155 = const.get @lit112
+  return %v155
+
+bb_else24:
+  jump bb_join25
+
+bb_join25:
+  %v156 = const.get @lit113
+  return %v156
+}
+
+fn @map_structural_bridge(%d: domain_handle) -> i32 {
+  local %records: @Map_27
+  local %record: u64
+  local %variants: @Map_30
+  local %variant: u64
+  local %empty: u64
+
+bb0:
+  %v158 = call @map_make_27(%d)
+  store local %records, %v158
+  %v159 = load local %records
+  %v160 = const.get @lit117
+  %v161 = const.get @lit118
+  %v162 = const.get @lit119
+  %v163 = aggregate.construct @BridgeKey { active: %v160, group: %v161, code: %v162 }
+  %v164 = const.get @lit121
+  %v165 = call @map_set_27(%v159, %v163, %v164)
+  branch %v165, bb_map_set_ok2, bb_panic
+
+bb_panic:
+  panic
+
+bb_map_set_ok2:
+  %v166 = load local %records
+  %v167 = const.get @lit124
+  %v168 = const.get @lit125
+  %v169 = const.get @lit126
+  %v170 = aggregate.construct @BridgeKey { active: %v167, group: %v168, code: %v169 }
+  %v171 = call @map_get_27(%v166, %v170)
+  %v172 = const.get @lit129
+  %v173 = call @option_value(%v171, %v172)
+  store local %record, %v173
+  %v174 = load local %record
+  %v175 = const.get @lit132
+  %v176 = int.ne %v174, %v175
+  branch %v176, bb_then3, bb_else4
+
+bb_then3:
+  %v177 = const.get @lit134
+  return %v177
+
+bb_else4:
+  jump bb_join5
+
+bb_join5:
+  %v178 = call @map_make_30(%d)
+  store local %variants, %v178
+  %v179 = load local %variants
+  %v180 = const.get @lit138
+  %v181 = const.get @lit139
+  %v182 = const.get @lit140
+  %v183 = aggregate.construct @BridgeKey { active: %v180, group: %v181, code: %v182 }
+  %v184 = enum.construct @BridgeTag, Value, %v183
+  %v185 = const.get @lit143
+  %v186 = call @map_set_30(%v179, %v184, %v185)
+  branch %v186, bb_map_set_ok6, bb_panic
+
+bb_map_set_ok6:
+  %v187 = load local %variants
+  %v188 = const.get @lit146
+  %v189 = const.get @lit147
+  %v190 = const.get @lit148
+  %v191 = aggregate.construct @BridgeKey { active: %v188, group: %v189, code: %v190 }
+  %v192 = enum.construct @BridgeTag, Value, %v191
+  %v193 = call @map_get_30(%v187, %v192)
+  %v194 = const.get @lit152
+  %v195 = call @option_value(%v193, %v194)
+  store local %variant, %v195
+  %v196 = load local %variant
+  %v197 = const.get @lit155
+  %v198 = int.ne %v196, %v197
+  branch %v198, bb_then7, bb_else8
+
+bb_then7:
+  %v199 = const.get @lit157
+  return %v199
+
+bb_else8:
+  jump bb_join9
+
+bb_join9:
+  %v200 = load local %variants
+  %v201 = enum.construct @BridgeTag, Empty
+  %v202 = const.get @lit160
+  %v203 = call @map_set_30(%v200, %v201, %v202)
+  branch %v203, bb_map_set_ok10, bb_panic
+
+bb_map_set_ok10:
+  %v204 = load local %variants
+  %v205 = enum.construct @BridgeTag, Empty
+  %v206 = call @map_get_30(%v204, %v205)
+  %v207 = const.get @lit165
+  %v208 = call @option_value(%v206, %v207)
+  store local %empty, %v208
+  %v209 = load local %empty
+  %v210 = const.get @lit168
+  %v211 = int.ne %v209, %v210
+  branch %v211, bb_then11, bb_else12
+
+bb_then11:
+  %v212 = const.get @lit170
+  return %v212
+
+bb_else12:
+  jump bb_join13
+
+bb_join13:
+  %v213 = const.get @lit171
+  return %v213
+}
+
+fn @buffer_bridge(%d: domain_handle) -> result(u64, @__s0_Error) {
+  local %empty: @__s0_Buffer_24
+  local %one: @__s0_Buffer_24
+  local %two: @__s0_Buffer_24
+  local %view: slice(u64)
+
+bb0:
+  %v215 = call @buffer_new_24(%d)
+  switch %v215 {
+    ok(%try_ok174) -> bb_try_ok2
+    err(%try_err174) -> bb_try_err3
+  }
+
+bb_panic:
+  panic
+
+bb_try_ok2:
+  store local %empty, %try_ok174
+  %v219 = load local %empty
+  %v220 = const.get @lit177
+  %v221 = call @buffer_append_24(%d, %v219, %v220)
+  switch %v221 {
+    ok(%try_ok179) -> bb_try_ok4
+    err(%try_err179) -> bb_try_err5
+  }
+
+bb_try_err3:
+  %v218 = enum.construct result(u64, @__s0_Error), err, %try_err174
+  fail %v218
+
+bb_try_ok4:
+  store local %one, %try_ok179
+  %v225 = load local %one
+  %v226 = const.get @lit182
+  %v227 = call @buffer_append_24(%d, %v225, %v226)
+  switch %v227 {
+    ok(%try_ok184) -> bb_try_ok6
+    err(%try_err184) -> bb_try_err7
+  }
+
+bb_try_err5:
+  %v224 = enum.construct result(u64, @__s0_Error), err, %try_err179
+  fail %v224
+
+bb_try_ok6:
+  store local %two, %try_ok184
+  %v231 = load local %two
+  %v232 = call @buffer_slice_24(%v231)
+  store local %view, %v232
+  %v233 = load local %two
+  %v234 = const.get @lit188
+  %v235 = call @buffer_get_24(%v233, %v234)
+  %v236 = load local %view
+  %v237 = const.get @lit191
+  %v238 = slice.index.checked %v236, %v237 else bb_panic
+  %v239 = load deref %v238
+  %v240 = int.add.checked %v235, %v239 else bb_panic
+  %v241 = load local %two
+  %v242 = call @buffer_len_24(%v241)
+  %v243 = int.add.checked %v240, %v242 else bb_panic
+  %v244 = enum.construct result(u64, @__s0_Error), ok, %v243
+  return %v244
+
+bb_try_err7:
+  %v230 = enum.construct result(u64, @__s0_Error), err, %try_err184
+  fail %v230
+}
+
+fn @clear_domain_failure() -> u64 {
+bb0:
+  ffi.call.unsafe @test_clear_domain_alloc_failure()
+  %v245 = const.get @lit199
+  return %v245
+
+bb_panic:
+  panic
+}
+
+fn @buffer_oom_retry(%d: domain_handle) -> result(u64, @__s0_Error) {
+  local %b0: @__s0_Buffer_24
+  local %b1: @__s0_Buffer_24
+  local %b2: @__s0_Buffer_24
+  local %b3: @__s0_Buffer_24
+  local %b4: @__s0_Buffer_24
+  local %b5: @__s0_Buffer_24
+  local %b6: @__s0_Buffer_24
+  local %b7: @__s0_Buffer_24
+  local %buffer: @__s0_Buffer_24
+  local %grown: @__s0_Buffer_24
+  local %error: @__s0_Error
+  local %attempt: u64
+  local %old_view: slice(u64)
+  local %before: u64
+  local %retried: @__s0_Buffer_24
+  local %retried_view: slice(u64)
+
+bb0:
+  %v247 = call @buffer_new_24(%d)
+  switch %v247 {
+    ok(%try_ok202) -> bb_try_ok2
+    err(%try_err202) -> bb_try_err3
+  }
+
+bb_panic:
+  panic
+
+bb_try_ok2:
+  store local %b0, %try_ok202
+  %v251 = load local %b0
+  %v252 = const.get @lit205
+  %v253 = call @buffer_append_24(%d, %v251, %v252)
+  switch %v253 {
+    ok(%try_ok207) -> bb_try_ok4
+    err(%try_err207) -> bb_try_err5
+  }
+
+bb_try_err3:
+  %v250 = enum.construct result(u64, @__s0_Error), err, %try_err202
+  fail %v250
+
+bb_try_ok4:
+  store local %b1, %try_ok207
+  %v257 = load local %b1
+  %v258 = const.get @lit210
+  %v259 = call @buffer_append_24(%d, %v257, %v258)
+  switch %v259 {
+    ok(%try_ok212) -> bb_try_ok6
+    err(%try_err212) -> bb_try_err7
+  }
+
+bb_try_err5:
+  %v256 = enum.construct result(u64, @__s0_Error), err, %try_err207
+  fail %v256
+
+bb_try_ok6:
+  store local %b2, %try_ok212
+  %v263 = load local %b2
+  %v264 = const.get @lit215
+  %v265 = call @buffer_append_24(%d, %v263, %v264)
+  switch %v265 {
+    ok(%try_ok217) -> bb_try_ok8
+    err(%try_err217) -> bb_try_err9
+  }
+
+bb_try_err7:
+  %v262 = enum.construct result(u64, @__s0_Error), err, %try_err212
+  fail %v262
+
+bb_try_ok8:
+  store local %b3, %try_ok217
+  %v269 = load local %b3
+  %v270 = const.get @lit220
+  %v271 = call @buffer_append_24(%d, %v269, %v270)
+  switch %v271 {
+    ok(%try_ok222) -> bb_try_ok10
+    err(%try_err222) -> bb_try_err11
+  }
+
+bb_try_err9:
+  %v268 = enum.construct result(u64, @__s0_Error), err, %try_err217
+  fail %v268
+
+bb_try_ok10:
+  store local %b4, %try_ok222
+  %v275 = load local %b4
+  %v276 = const.get @lit225
+  %v277 = call @buffer_append_24(%d, %v275, %v276)
+  switch %v277 {
+    ok(%try_ok227) -> bb_try_ok12
+    err(%try_err227) -> bb_try_err13
+  }
+
+bb_try_err11:
+  %v274 = enum.construct result(u64, @__s0_Error), err, %try_err222
+  fail %v274
+
+bb_try_ok12:
+  store local %b5, %try_ok227
+  %v281 = load local %b5
+  %v282 = const.get @lit230
+  %v283 = call @buffer_append_24(%d, %v281, %v282)
+  switch %v283 {
+    ok(%try_ok232) -> bb_try_ok14
+    err(%try_err232) -> bb_try_err15
+  }
+
+bb_try_err13:
+  %v280 = enum.construct result(u64, @__s0_Error), err, %try_err227
+  fail %v280
+
+bb_try_ok14:
+  store local %b6, %try_ok232
+  %v287 = load local %b6
+  %v288 = const.get @lit235
+  %v289 = call @buffer_append_24(%d, %v287, %v288)
+  switch %v289 {
+    ok(%try_ok237) -> bb_try_ok16
+    err(%try_err237) -> bb_try_err17
+  }
+
+bb_try_err15:
+  %v286 = enum.construct result(u64, @__s0_Error), err, %try_err232
+  fail %v286
+
+bb_try_ok16:
+  store local %b7, %try_ok237
+  %v293 = load local %b7
+  %v294 = const.get @lit240
+  %v295 = call @buffer_append_24(%d, %v293, %v294)
+  switch %v295 {
+    ok(%try_ok242) -> bb_try_ok18
+    err(%try_err242) -> bb_try_err19
+  }
+
+bb_try_err17:
+  %v292 = enum.construct result(u64, @__s0_Error), err, %try_err237
+  fail %v292
+
+bb_try_ok18:
+  store local %buffer, %try_ok242
+  %v299 = load local %buffer
+  %v300 = const.get @lit245
+  %v301 = call @buffer_append_24(%d, %v299, %v300)
+  switch %v301 {
+    ok(%match_payload0) -> bb_match_arm21
+    err(%match_payload1) -> bb_match_arm22
+  }
+
+bb_try_err19:
+  %v298 = enum.construct result(u64, @__s0_Error), err, %try_err242
+  fail %v298
+
+bb_match_join20(%match: u64):
+  store local %attempt, %match
+  %v307 = load local %attempt
+  %v308 = const.get @lit252
+  %v309 = int.ne %v307, %v308
+  branch %v309, bb_then23, bb_else24
+
+bb_match_arm21:
+  %v305 = call @buffer_len_24(%match_payload0)
+  jump bb_match_join20(%v305)
+
+bb_match_arm22:
+  %v306 = call @clear_domain_failure()
+  jump bb_match_join20(%v306)
+
+bb_then23:
+  %v310 = load local %attempt
+  %v311 = enum.construct result(u64, @__s0_Error), ok, %v310
+  return %v311
+
+bb_else24:
+  jump bb_join25
+
+bb_join25:
+  %v312 = load local %buffer
+  %v313 = call @buffer_slice_24(%v312)
+  store local %old_view, %v313
+  %v314 = load local %buffer
+  %v315 = call @buffer_len_24(%v314)
+  %v316 = load local %buffer
+  %v317 = const.get @lit261
+  %v318 = call @buffer_get_24(%v316, %v317)
+  %v319 = int.add.checked %v315, %v318 else bb_panic
+  %v320 = load local %old_view
+  %v321 = const.get @lit265
+  %v322 = slice.index.checked %v320, %v321 else bb_panic
+  %v323 = load deref %v322
+  %v324 = int.add.checked %v319, %v323 else bb_panic
+  store local %before, %v324
+  %v325 = load local %before
+  %v326 = const.get @lit269
+  %v327 = int.ne %v325, %v326
+  branch %v327, bb_then26, bb_else27
+
+bb_then26:
+  %v328 = const.get @lit271
+  %v329 = enum.construct result(u64, @__s0_Error), ok, %v328
+  return %v329
+
+bb_else27:
+  jump bb_join28
+
+bb_join28:
+  %v330 = load local %buffer
+  %v331 = const.get @lit275
+  %v332 = call @buffer_append_24(%d, %v330, %v331)
+  switch %v332 {
+    ok(%try_ok277) -> bb_try_ok29
+    err(%try_err277) -> bb_try_err30
+  }
+
+bb_try_ok29:
+  store local %retried, %try_ok277
+  %v336 = load local %retried
+  %v337 = call @buffer_slice_24(%v336)
+  store local %retried_view, %v337
+  %v338 = load local %before
+  %v339 = load local %retried
+  %v340 = call @buffer_len_24(%v339)
+  %v341 = int.add.checked %v338, %v340 else bb_panic
+  %v342 = load local %retried
+  %v343 = const.get @lit285
+  %v344 = call @buffer_get_24(%v342, %v343)
+  %v345 = int.add.checked %v341, %v344 else bb_panic
+  %v346 = load local %retried_view
+  %v347 = const.get @lit289
+  %v348 = slice.index.checked %v346, %v347 else bb_panic
+  %v349 = load deref %v348
+  %v350 = int.add.checked %v345, %v349 else bb_panic
+  %v351 = enum.construct result(u64, @__s0_Error), ok, %v350
+  return %v351
+
+bb_try_err30:
+  %v335 = enum.construct result(u64, @__s0_Error), err, %try_err277
+  fail %v335
+}
 
 fn @close(%value: i64) {
 bb0:
@@ -88,27 +1249,29 @@ fn @attempt(%bad: bool) -> i32 {
   local %handle: i64
 
 bb0:
-  %v3 = const.get @lit3
-  store local %handle, %v3
+  %v354 = const.get @lit295
+  store local %handle, %v354
+  %cleanup_scope50 = cleanup.scope.begin
+  %cleanup_id50 = cleanup.push %cleanup_scope50, @close, (%v354)
   branch %bad, bb_then2, bb_else3
 
 bb_panic:
   panic
 
 bb_then2:
-  %v4 = const.get @lit5
-  %v5 = load local %handle
-  call @close(%v5)
-  return %v4
+  %v357 = const.get @lit297
+  cleanup.scope.run %cleanup_scope50
+  cleanup.scope.end %cleanup_scope50
+  return %v357
 
 bb_else3:
   jump bb_join4
 
 bb_join4:
-  %v6 = const.get @lit6
-  %v7 = load local %handle
-  call @close(%v7)
-  return %v6
+  %v358 = const.get @lit298
+  cleanup.scope.run %cleanup_scope50
+  cleanup.scope.end %cleanup_scope50
+  return %v358
 }
 
 fn @before_using(%bad: bool) -> i32 {
@@ -121,36 +1284,42 @@ bb_panic:
   panic
 
 bb_then2:
-  %v9 = const.get @lit8
-  return %v9
+  %v360 = const.get @lit300
+  return %v360
 
 bb_else3:
   jump bb_join4
 
 bb_join4:
-  %v10 = const.get @lit9
-  store local %handle, %v10
-  %v11 = const.get @lit10
-  %v12 = load local %handle
-  call @close(%v12)
-  return %v11
+  %v361 = const.get @lit301
+  store local %handle, %v361
+  %cleanup_scope52 = cleanup.scope.begin
+  %cleanup_id52 = cleanup.push %cleanup_scope52, @close, (%v361)
+  %v364 = const.get @lit302
+  cleanup.scope.run %cleanup_scope52
+  cleanup.scope.end %cleanup_scope52
+  return %v364
 }
 
 fn @nested_cleanup() -> i32 {
-  local %inner: i64
   local %outer: i64
+  local %inner: i64
 
 bb0:
-  %v13 = const.get @lit11
-  store local %inner, %v13
-  %v14 = load local %inner
-  call @close(%v14)
-  %v15 = const.get @lit12
-  store local %outer, %v15
-  %v16 = const.get @lit13
-  %v17 = load local %outer
-  call @close(%v17)
-  return %v16
+  %v365 = const.get @lit303
+  store local %outer, %v365
+  %cleanup_scope53 = cleanup.scope.begin
+  %cleanup_id53 = cleanup.push %cleanup_scope53, @close, (%v365)
+  %v368 = const.get @lit304
+  store local %inner, %v368
+  %cleanup_scope54 = cleanup.scope.begin
+  %cleanup_id54 = cleanup.push %cleanup_scope54, @close, (%v368)
+  cleanup.scope.run %cleanup_scope54
+  cleanup.scope.end %cleanup_scope54
+  %v371 = const.get @lit305
+  cleanup.scope.run %cleanup_scope53
+  cleanup.scope.end %cleanup_scope53
+  return %v371
 
 bb_panic:
   panic
@@ -161,59 +1330,61 @@ fn @cleanup_try(%bad: bool) -> result(i64, i64) {
   local %divisor: i64
 
 bb0:
-  %v19 = const.get @lit14
-  store local %handle, %v19
-  %v20 = const.get @lit15
-  store local %divisor, %v20
+  %v373 = const.get @lit306
+  store local %handle, %v373
+  %cleanup_scope56 = cleanup.scope.begin
+  %cleanup_id56 = cleanup.push %cleanup_scope56, @close, (%v373)
+  %v376 = const.get @lit307
+  store local %divisor, %v376
   branch %bad, bb_then2, bb_else3
 
 bb_panic:
   panic
 
 bb_then2:
-  %v21 = const.get @lit17
-  %v22 = const.get @lit18
-  %v23 = call @checked(%v21, %v22)
-  switch %v23 {
-    ok(%try_ok20) -> bb_try_ok5
-    err(%try_err20) -> bb_try_err6
+  %v377 = const.get @lit309
+  %v378 = const.get @lit310
+  %v379 = call @checked(%v377, %v378)
+  switch %v379 {
+    ok(%try_ok312) -> bb_try_ok5
+    err(%try_err312) -> bb_try_err6
   }
 
 bb_else3:
   jump bb_join4
 
 bb_join4:
-  %v30 = const.get @lit22
-  %v31 = load local %divisor
-  %v32 = call @checked(%v30, %v31)
-  switch %v32 {
-    ok(%try_ok25) -> bb_try_ok7
-    err(%try_err25) -> bb_try_err8
+  %v384 = const.get @lit314
+  %v385 = load local %divisor
+  %v386 = call @checked(%v384, %v385)
+  switch %v386 {
+    ok(%try_ok317) -> bb_try_ok7
+    err(%try_err317) -> bb_try_err8
   }
 
 bb_try_ok5:
-  %v28 = enum.construct result(i64, i64), ok, %try_ok20
-  %v29 = load local %handle
-  call @close(%v29)
-  return %v28
+  %v383 = enum.construct result(i64, i64), ok, %try_ok312
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  return %v383
 
 bb_try_err6:
-  %v26 = enum.construct result(i64, i64), err, %try_err20
-  %v27 = load local %handle
-  call @close(%v27)
-  fail %v26
+  %v382 = enum.construct result(i64, i64), err, %try_err312
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  fail %v382
 
 bb_try_ok7:
-  %v37 = enum.construct result(i64, i64), ok, %try_ok25
-  %v38 = load local %handle
-  call @close(%v38)
-  return %v37
+  %v390 = enum.construct result(i64, i64), ok, %try_ok317
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  return %v390
 
 bb_try_err8:
-  %v35 = enum.construct result(i64, i64), err, %try_err25
-  %v36 = load local %handle
-  call @close(%v36)
-  fail %v35
+  %v389 = enum.construct result(i64, i64), err, %try_err317
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  fail %v389
 }
 
 fn @calculate(%value: u64) -> u64 {
@@ -228,35 +1399,35 @@ bb_panic:
   panic
 
 bb_head2:
-  %v40 = load local %next
-  %v41 = const.get @lit29
-  %v42 = int.lt %v40, %v41
-  branch %v42, bb_body3, bb_join4
+  %v392 = load local %next
+  %v393 = const.get @lit321
+  %v394 = int.lt %v392, %v393
+  branch %v394, bb_body3, bb_join4
 
 bb_body3:
-  %v43 = load local %next
-  %v44 = const.get @lit32
-  %v45 = int.add.checked %v43, %v44 else bb_panic
-  store local %next, %v45
+  %v395 = load local %next
+  %v396 = const.get @lit324
+  %v397 = int.add.checked %v395, %v396 else bb_panic
+  store local %next, %v397
   jump bb_head2
 
 bb_join4:
-  %v46 = load local %next
-  %v47 = const.get @lit35
-  %v48 = int.eq %v46, %v47
-  branch %v48, bb_then5, bb_else6
+  %v398 = load local %next
+  %v399 = const.get @lit327
+  %v400 = int.eq %v398, %v399
+  branch %v400, bb_then5, bb_else6
 
 bb_then5:
-  %v49 = load local %next
-  return %v49
+  %v401 = load local %next
+  return %v401
 
 bb_else6:
-  %v50 = const.get @lit38
-  %v51 = call @identity21(%v50)
-  store local %fallback, %v51
-  %v52 = load local %fallback
-  %v53 = ffi.call.unsafe @foreign(%v52)
-  return %v53
+  %v402 = const.get @lit330
+  %v403 = call @identity33(%v402)
+  store local %fallback, %v403
+  %v404 = load local %fallback
+  %v405 = ffi.call.unsafe @foreign(%v404)
+  return %v405
 
 bb_join7:
   unreachable
@@ -273,8 +1444,8 @@ bb_short2:
   jump bb_short_join4(%right)
 
 bb_short_const3:
-  %v57 = const.get @lit.bool44
-  jump bb_short_join4(%v57)
+  %v409 = const.get @lit.bool336
+  jump bb_short_join4(%v409)
 
 bb_short_join4(%short: bool):
   return %short
@@ -285,82 +1456,82 @@ fn @sum(%values: slice(u64)) -> u64 {
   local %value: u64
 
 bb0:
-  %v59 = const.get @lit45
-  store local %total, %v59
-  %v60 = slice.len %values
-  %v61 = const.get @lit.int29
-  jump bb_for_head2(%v61, %values)
+  %v411 = const.get @lit337
+  store local %total, %v411
+  %v412 = slice.len %values
+  %v413 = const.get @lit.int110
+  jump bb_for_head2(%v413, %values)
 
 bb_panic:
   panic
 
 bb_for_head2(%index: u64, %sequence: slice(u64)):
-  %v64 = int.lt %index, %v60
-  branch %v64, bb_for_body3, bb_for_join4
+  %v416 = int.lt %index, %v412
+  branch %v416, bb_for_body3, bb_for_join4
 
 bb_for_body3:
   %for_ref = slice.index.checked %sequence, %index else bb_panic
-  %v66 = load deref %for_ref
-  store local %value, %v66
-  %v67 = load local %total
-  %v68 = load local %value
-  %v69 = int.add.checked %v67, %v68 else bb_panic
-  store local %total, %v69
-  %v70 = const.get @lit.int30
-  %v71 = int.add.checked %index, %v70 else bb_panic
-  jump bb_for_head2(%v71, %sequence)
+  %v418 = load deref %for_ref
+  store local %value, %v418
+  %v419 = load local %total
+  %v420 = load local %value
+  %v421 = int.add.checked %v419, %v420 else bb_panic
+  store local %total, %v421
+  %v422 = const.get @lit.int111
+  %v423 = int.add.checked %index, %v422 else bb_panic
+  jump bb_for_head2(%v423, %sequence)
 
 bb_for_join4:
-  %v72 = load local %total
-  return %v72
+  %v424 = load local %total
+  return %v424
 }
 
 fn @checked(%n: i64, %d: i64) -> result(i64, i64) {
 bb0:
-  %v75 = const.get @lit52
-  %v76 = int.eq %d, %v75
-  branch %v76, bb_then2, bb_else3
+  %v427 = const.get @lit344
+  %v428 = int.eq %d, %v427
+  branch %v428, bb_then2, bb_else3
 
 bb_panic:
   panic
 
 bb_then2:
-  %v77 = const.get @lit54
-  %v78 = enum.construct result(i64, i64), err, %v77
-  return %v78
+  %v429 = const.get @lit346
+  %v430 = enum.construct result(i64, i64), err, %v429
+  return %v430
 
 bb_else3:
   jump bb_join4
 
 bb_join4:
-  %v79 = int.div.checked %n, %d else bb_panic
-  %v80 = enum.construct result(i64, i64), ok, %v79
-  return %v80
+  %v431 = int.div.checked %n, %d else bb_panic
+  %v432 = enum.construct result(i64, i64), ok, %v431
+  return %v432
 }
 
 fn @propagate(%d: i64) -> result(i64, i64) {
   local %q: i64
 
 bb0:
-  %v82 = const.get @lit60
-  %v83 = call @checked(%v82, %d)
-  switch %v83 {
-    ok(%try_ok63) -> bb_try_ok2
-    err(%try_err63) -> bb_try_err3
+  %v434 = const.get @lit352
+  %v435 = call @checked(%v434, %d)
+  switch %v435 {
+    ok(%try_ok355) -> bb_try_ok2
+    err(%try_err355) -> bb_try_err3
   }
 
 bb_panic:
   panic
 
 bb_try_ok2:
-  store local %q, %try_ok63
-  %v87 = load local %q
-  %v88 = enum.construct result(i64, i64), ok, %v87
-  return %v88
+  store local %q, %try_ok355
+  %v439 = load local %q
+  %v440 = enum.construct result(i64, i64), ok, %v439
+  return %v440
 
 bb_try_err3:
-  %v86 = enum.construct result(i64, i64), err, %try_err63
-  fail %v86
+  %v438 = enum.construct result(i64, i64), err, %try_err355
+  fail %v438
 }
 
 fn @choose(%value: @Maybe) -> u64 {
@@ -379,8 +1550,8 @@ bb_match_join2(%match: u64):
   return %match
 
 bb_match_arm3:
-  %v92 = const.get @lit67
-  jump bb_match_join2(%v92)
+  %v444 = const.get @lit359
+  jump bb_match_join2(%v444)
 
 bb_match_arm4:
   jump bb_match_join2(%match_payload1)
@@ -388,54 +1559,54 @@ bb_match_arm4:
 
 fn @scalar(%pair: @Pair, %values: slice(u64), %flag: bool) -> u64 {
   local %called: u64
-  local %field_tmp71: @Pair
+  local %field_tmp363: @Pair
 
 bb0:
-  store local %field_tmp71, %pair
-  %v96 = load field(local %field_tmp71, value)
-  %v97 = const.get @lit73
-  %v98 = slice.index.checked %values, %v97 else bb_panic
-  %v99 = load deref %v98
-  %v100 = int.add.checked %v96, %v99 else bb_panic
-  %v101 = call @identity21(%v100)
-  store local %called, %v101
+  store local %field_tmp363, %pair
+  %v448 = load field(local %field_tmp363, value)
+  %v449 = const.get @lit365
+  %v450 = slice.index.checked %values, %v449 else bb_panic
+  %v451 = load deref %v450
+  %v452 = int.add.checked %v448, %v451 else bb_panic
+  %v453 = call @identity33(%v452)
+  store local %called, %v453
   branch %flag, bb_not_false3, bb_not_true2
 
 bb_panic:
   panic
 
 bb_not_true2:
-  %v103 = const.get @lit.bool78
-  jump bb_not_join4(%v103)
+  %v455 = const.get @lit.bool370
+  jump bb_not_join4(%v455)
 
 bb_not_false3:
-  %v104 = const.get @lit.bool79
-  jump bb_not_join4(%v104)
+  %v456 = const.get @lit.bool371
+  jump bb_not_join4(%v456)
 
 bb_not_join4(%not: bool):
   branch %not, bb_then5, bb_else6
 
 bb_then5:
-  %v105 = load local %called
-  %v106 = const.get @lit80
-  %v107 = int.div.checked %v105, %v106 else bb_panic
-  %v108 = int.mul.checked %v107, %v106 else bb_panic
-  %v109 = int.sub.checked %v105, %v108 else bb_panic
-  return %v109
+  %v457 = load local %called
+  %v458 = const.get @lit372
+  %v459 = int.div.checked %v457, %v458 else bb_panic
+  %v460 = int.mul.checked %v459, %v458 else bb_panic
+  %v461 = int.sub.checked %v457, %v460 else bb_panic
+  return %v461
 
 bb_else6:
   jump bb_join7
 
 bb_join7:
-  %v110 = load local %called
-  %v111 = ffi.call.unsafe @foreign(%v110)
-  return %v111
+  %v462 = load local %called
+  %v463 = ffi.call.unsafe @foreign(%v462)
+  return %v463
 }
 
 fn @floating() -> f64 {
 bb0:
-  %v112 = const.get @lit.float84
-  return %v112
+  %v464 = const.get @lit.float376
+  return %v464
 
 bb_panic:
   panic
@@ -443,8 +1614,8 @@ bb_panic:
 
 fn @make_pair(%value: u64) -> @Pair {
 bb0:
-  %v114 = aggregate.construct @Pair { value: %value }
-  return %v114
+  %v466 = aggregate.construct @Pair { value: %value }
+  return %v466
 
 bb_panic:
   panic
@@ -452,17 +1623,1094 @@ bb_panic:
 
 fn @make_some(%value: u64) -> @Maybe {
 bb0:
-  %v116 = enum.construct @Maybe, Some, %value
-  return %v116
+  %v468 = enum.construct @Maybe, Some, %value
+  return %v468
 
 bb_panic:
   panic
 }
 
-fn @identity21(%value: u64) -> u64 {
+fn @identity33(%value: u64) -> u64 {
 bb0:
   return %value
 
 bb_panic:
+  panic
+}
+
+fn @buffer_new_24(%a: domain_handle) -> result(@__s0_Buffer_24, @__s0_Error) {
+bb0:
+  %v470 = const.get @bridge_const_2401
+  %v471 = alloc.checked %a, u64, %v470 else bb_oom
+  jump bb_ok
+
+bb_ok:
+  %v474 = const.get @bridge_const_2402
+  %v475 = aggregate.construct @__s0_Buffer_24 { data: %v471, len: %v474 }
+  %v476 = enum.construct result(@__s0_Buffer_24, @__s0_Error), ok, %v475
+  return %v476
+
+bb_oom:
+  %v472 = enum.construct @__s0_Error, OutOfMemory
+  %v473 = enum.construct result(@__s0_Buffer_24, @__s0_Error), err, %v472
+  return %v473
+}
+
+fn @buffer_len_24(%a: @__s0_Buffer_24) -> u64 {
+  local %buffer: @__s0_Buffer_24
+
+bb0:
+  store local %buffer, %a
+  %v477 = load field(local %buffer, len)
+  return %v477
+}
+
+fn @buffer_append_24(%a: domain_handle, %b: @__s0_Buffer_24, %c: u64) -> result(@__s0_Buffer_24, @__s0_Error) {
+  local %buffer: @__s0_Buffer_24
+
+bb0:
+  store local %buffer, %b
+  %v479 = load field(local %buffer, data)
+  %v480 = load field(local %buffer, len)
+  %v481 = slice.len %v479
+  %v482 = int.eq %v480, %v481
+  %v483 = const.get @bridge_const_2404
+  branch %v482, bb_grow, bb_spare
+
+bb_spare:
+  %v484 = slice.index.checked %v479, %v480 else bb_fail
+  store deref %v484, %c
+  %v485 = int.add.checked %v480, %v483 else bb_fail
+  %v486 = aggregate.construct @__s0_Buffer_24 { data: %v479, len: %v485 }
+  %v487 = enum.construct result(@__s0_Buffer_24, @__s0_Error), ok, %v486
+  return %v487
+
+bb_grow:
+  %v488 = const.get @bridge_const_2405
+  %v489 = int.mul.checked %v481, %v488 else bb_limit
+  jump bb_alloc
+
+bb_limit:
+  %v490 = enum.construct @__s0_Error, Limit
+  %v491 = enum.construct result(@__s0_Buffer_24, @__s0_Error), err, %v490
+  return %v491
+
+bb_alloc:
+  %v492 = alloc.checked %a, u64, %v489 else bb_oom
+  %v493 = const.get @bridge_const_2406
+  jump bb_copy(%v493)
+
+bb_oom:
+  %v494 = enum.construct @__s0_Error, OutOfMemory
+  %v495 = enum.construct result(@__s0_Buffer_24, @__s0_Error), err, %v494
+  return %v495
+
+bb_copy(%i: u64):
+  %v496 = int.ge %i, %v480
+  branch %v496, bb_finish, bb_copy_one
+
+bb_copy_one:
+  %v497 = slice.index.checked %v479, %i else bb_fail
+  %v498 = load deref %v497
+  %v499 = slice.index.checked %v492, %i else bb_fail
+  store deref %v499, %v498
+  %v500 = int.add.checked %i, %v483 else bb_fail
+  jump bb_copy(%v500)
+
+bb_finish:
+  %v501 = slice.index.checked %v492, %v480 else bb_fail
+  store deref %v501, %c
+  %v502 = int.add.checked %v480, %v483 else bb_fail
+  %v503 = aggregate.construct @__s0_Buffer_24 { data: %v492, len: %v502 }
+  %v504 = enum.construct result(@__s0_Buffer_24, @__s0_Error), ok, %v503
+  return %v504
+
+bb_fail:
+  panic
+}
+
+fn @buffer_get_24(%a: @__s0_Buffer_24, %b: u64) -> u64 {
+  local %buffer: @__s0_Buffer_24
+
+bb0:
+  store local %buffer, %a
+  %v505 = load field(local %buffer, len)
+  %v506 = int.lt %b, %v505
+  branch %v506, bb_valid, bb_fail
+
+bb_valid:
+  %v507 = load field(local %buffer, data)
+  %v508 = slice.index.checked %v507, %b else bb_fail
+  %v509 = load deref %v508
+  return %v509
+
+bb_fail:
+  panic
+}
+
+fn @buffer_slice_24(%a: @__s0_Buffer_24) -> slice(u64) {
+  local %buffer: @__s0_Buffer_24
+
+bb0:
+  store local %buffer, %a
+  %v510 = load field(local %buffer, data)
+  %v511 = load field(local %buffer, len)
+  %v512 = const.get @bridge_const_2403
+  %v513 = slice.range.checked %v510, %v512, %v511 else bb_fail
+  return %v513
+
+bb_fail:
+  panic
+}
+
+fn @map_hash_25(%a: u64) -> u64 {
+bb0:
+  return %a
+
+bb_fail:
+  panic
+}
+
+fn @map_eq_25(%a: u64, %b: u64) -> bool {
+bb0:
+  %v514 = int.eq %a, %b
+  branch %v514, bb_true, bb_false
+
+bb_true:
+  %v515 = const.get @bridge_bool_2522
+  return %v515
+
+bb_false:
+  %v516 = const.get @bridge_bool_2523
+  return %v516
+}
+
+fn @map_make_25(%a: domain_handle) -> @Map_25 {
+bb0:
+  %v518 = const.get @bridge_const_2524
+  %v519 = const.get @bridge_const_2525
+  %v520 = const.get @bridge_const_2526
+  %v521 = alloc %a, @MapEntry_25, %v518
+  %v522 = aggregate.construct @Map_25 { slots: %v521 }
+  jump bb_init(%v519)
+
+bb_init(%i: u64):
+  %v523 = int.ge %i, %v518
+  branch %v523, bb_done, bb_slot
+
+bb_slot:
+  %v524 = slice.index.checked %v521, %i else bb_fail
+  %v525 = const.get @bridge_const_2527
+  store field(deref %v524, state), %v525
+  %v526 = int.add.checked %i, %v520 else bb_fail
+  jump bb_init(%v526)
+
+bb_done:
+  return %v522
+
+bb_fail:
+  panic
+}
+
+fn @map_get_25(%a: @Map_25, %b: u64) -> option(u64) {
+  local %map: @Map_25
+
+bb0:
+  store local %map, %a
+  %v529 = load field(local %map, slots)
+  %v530 = call @map_hash_25(%b)
+  %v531 = const.get @bridge_const_2530
+  %v532 = const.get @bridge_const_2531
+  %v533 = const.get @bridge_const_2532
+  %v534 = int.div.checked %v530, %v531 else bb_fail
+  %v535 = int.mul.checked %v534, %v531 else bb_fail
+  %v536 = int.sub.checked %v530, %v535 else bb_fail
+  jump bb_loop(%v536, %v532)
+
+bb_loop(%index: u64, %probes: u64):
+  %v537 = int.ge %probes, %v531
+  branch %v537, bb_none, bb_probe
+
+bb_probe:
+  %v538 = slice.index.checked %v529, %index else bb_fail
+  %v539 = load field(deref %v538, state)
+  %v540 = const.get @bridge_const_2533
+  %v541 = int.eq %v539, %v540
+  branch %v541, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v544 = load field(deref %v538, hash)
+  %v545 = int.eq %v544, %v530
+  branch %v545, bb_check, bb_next
+
+bb_nonoccupied:
+  %v542 = const.get @bridge_const_2534
+  %v543 = int.eq %v539, %v542
+  branch %v543, bb_none, bb_next
+
+bb_check:
+  %v546 = load field(deref %v538, key)
+  %v547 = call @map_eq_25(%b, %v546)
+  branch %v547, bb_found, bb_next
+
+bb_found:
+  %v548 = load field(deref %v538, value)
+  %v549 = enum.construct option(u64), some, %v548
+  return %v549
+
+bb_next:
+  %v550 = int.add.checked %index, %v533 else bb_fail
+  %v551 = int.div.checked %v550, %v531 else bb_fail
+  %v552 = int.mul.checked %v551, %v531 else bb_fail
+  %v553 = int.sub.checked %v550, %v552 else bb_fail
+  %v554 = int.add.checked %probes, %v533 else bb_fail
+  jump bb_loop(%v553, %v554)
+
+bb_none:
+  %v555 = enum.construct option(u64), none
+  return %v555
+
+bb_fail:
+  panic
+}
+
+fn @map_set_25(%a: @Map_25, %b: u64, %c: u64) -> bool {
+  local %map: @Map_25
+  local %first_deleted: u64
+
+bb0:
+  store local %map, %a
+  %v559 = load field(local %map, slots)
+  %v560 = call @map_hash_25(%b)
+  %v561 = const.get @bridge_const_2560
+  %v562 = const.get @bridge_const_2561
+  %v563 = const.get @bridge_const_2562
+  store local %first_deleted, %v561
+  %v564 = int.div.checked %v560, %v561 else bb_fail
+  %v565 = int.mul.checked %v564, %v561 else bb_fail
+  %v566 = int.sub.checked %v560, %v565 else bb_fail
+  jump bb_loop(%v566, %v562)
+
+bb_loop(%index: u64, %probes: u64):
+  %v567 = int.ge %probes, %v561
+  branch %v567, bb_full, bb_probe
+
+bb_probe:
+  %v568 = slice.index.checked %v559, %index else bb_fail
+  %v569 = load field(deref %v568, state)
+  %v570 = const.get @bridge_const_2563
+  %v571 = int.eq %v569, %v570
+  branch %v571, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v579 = load field(deref %v568, hash)
+  %v580 = int.eq %v579, %v560
+  branch %v580, bb_check, bb_next
+
+bb_nonoccupied:
+  %v572 = const.get @bridge_const_2564
+  %v573 = int.eq %v569, %v572
+  branch %v573, bb_empty, bb_deleted
+
+bb_empty:
+  %v574 = load local %first_deleted
+  %v575 = int.eq %v574, %v561
+  branch %v575, bb_insert_current, bb_insert_deleted
+
+bb_deleted:
+  %v577 = load local %first_deleted
+  %v578 = int.eq %v577, %v561
+  branch %v578, bb_record_deleted, bb_next
+
+bb_check:
+  %v581 = load field(deref %v568, key)
+  %v582 = call @map_eq_25(%b, %v581)
+  branch %v582, bb_write, bb_next
+
+bb_write:
+  store field(deref %v568, value), %c
+  jump bb_done
+
+bb_next:
+  %v583 = int.add.checked %index, %v563 else bb_fail
+  %v584 = int.div.checked %v583, %v561 else bb_fail
+  %v585 = int.mul.checked %v584, %v561 else bb_fail
+  %v586 = int.sub.checked %v583, %v585 else bb_fail
+  %v587 = int.add.checked %probes, %v563 else bb_fail
+  jump bb_loop(%v586, %v587)
+
+bb_insert_current:
+  jump bb_insert(%index)
+
+bb_insert_deleted:
+  %v576 = load local %first_deleted
+  jump bb_insert(%v576)
+
+bb_insert(%insert_index: u64):
+  %v590 = slice.index.checked %v559, %insert_index else bb_fail
+  %v591 = const.get @bridge_const_2565
+  store field(deref %v590, state), %v591
+  store field(deref %v590, hash), %v560
+  store field(deref %v590, key), %b
+  store field(deref %v590, value), %c
+  jump bb_done
+
+bb_full:
+  %v588 = load local %first_deleted
+  %v589 = int.eq %v588, %v561
+  branch %v589, bb_failed, bb_insert_deleted
+
+bb_done:
+  %v592 = const.get @bridge_bool_2566
+  return %v592
+
+bb_failed:
+  %v593 = const.get @bridge_bool_2567
+  return %v593
+
+bb_fail:
+  panic
+
+bb_record_deleted:
+  store local %first_deleted, %index
+  jump bb_next
+}
+
+fn @map_remove_25(%a: @Map_25, %b: u64) -> bool {
+  local %map: @Map_25
+
+bb0:
+  store local %map, %a
+  %v596 = load field(local %map, slots)
+  %v597 = call @map_hash_25(%b)
+  %v598 = const.get @bridge_const_2550
+  %v599 = const.get @bridge_const_2551
+  %v600 = const.get @bridge_const_2552
+  %v601 = int.div.checked %v597, %v598 else bb_fail
+  %v602 = int.mul.checked %v601, %v598 else bb_fail
+  %v603 = int.sub.checked %v597, %v602 else bb_fail
+  jump bb_loop(%v603, %v599)
+
+bb_loop(%index: u64, %probes: u64):
+  %v604 = int.ge %probes, %v598
+  branch %v604, bb_absent, bb_probe
+
+bb_probe:
+  %v605 = slice.index.checked %v596, %index else bb_fail
+  %v606 = load field(deref %v605, state)
+  %v607 = const.get @bridge_const_2553
+  %v608 = int.eq %v606, %v607
+  branch %v608, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v611 = load field(deref %v605, hash)
+  %v612 = int.eq %v611, %v597
+  branch %v612, bb_check, bb_next
+
+bb_nonoccupied:
+  %v609 = const.get @bridge_const_2554
+  %v610 = int.eq %v606, %v609
+  branch %v610, bb_absent, bb_next
+
+bb_check:
+  %v613 = load field(deref %v605, key)
+  %v614 = call @map_eq_25(%b, %v613)
+  branch %v614, bb_found, bb_next
+
+bb_found:
+  %v615 = const.get @bridge_const_2555
+  store field(deref %v605, state), %v615
+  %v616 = const.get @bridge_bool_2556
+  return %v616
+
+bb_next:
+  %v617 = int.add.checked %index, %v600 else bb_fail
+  %v618 = int.div.checked %v617, %v598 else bb_fail
+  %v619 = int.mul.checked %v618, %v598 else bb_fail
+  %v620 = int.sub.checked %v617, %v619 else bb_fail
+  %v621 = int.add.checked %probes, %v600 else bb_fail
+  jump bb_loop(%v620, %v621)
+
+bb_absent:
+  %v622 = const.get @bridge_bool_2557
+  return %v622
+
+bb_fail:
+  panic
+}
+
+fn @map_hash_27(%a: @BridgeKey) -> u64 {
+  local %hash_key: @BridgeKey
+
+bb0:
+  store local %hash_key, %a
+  %v623 = load field(local %hash_key, active)
+  branch %v623, bb_hash_one3, bb_hash_zero4
+
+bb_fail:
+  panic
+
+bb_hash_join2(%hash_3: u64):
+  %v627 = load field(local %hash_key, group)
+  %v628 = int.zext %v627, u64
+  %v629 = int.add.checked %hash_3, %v628 else bb_fail
+  %v630 = load field(local %hash_key, code)
+  %v631 = int.add.checked %v629, %v630 else bb_fail
+  return %v631
+
+bb_hash_one3:
+  %v625 = const.get @bridge_const_900370170
+  jump bb_hash_join2(%v625)
+
+bb_hash_zero4:
+  %v626 = const.get @bridge_const_900370171
+  jump bb_hash_join2(%v626)
+}
+
+fn @map_eq_27(%a: @BridgeKey, %b: @BridgeKey) -> bool {
+  local %eq_left_0: @BridgeKey
+  local %eq_right_1: @BridgeKey
+
+bb0:
+  store local %eq_left_0, %a
+  store local %eq_right_1, %b
+  %v632 = load field(local %eq_left_0, active)
+  %v633 = load field(local %eq_right_1, active)
+  branch %v632, bb_eq_left_true4, bb_eq_left_false5
+
+bb_true:
+  %v640 = const.get @bridge_bool_2722
+  return %v640
+
+bb_false:
+  %v641 = const.get @bridge_bool_2723
+  return %v641
+
+bb_eq_field3:
+  %v634 = load field(local %eq_left_0, group)
+  %v635 = load field(local %eq_right_1, group)
+  %v636 = int.eq %v634, %v635
+  branch %v636, bb_eq_field6, bb_false
+
+bb_eq_left_true4:
+  branch %v633, bb_eq_field3, bb_false
+
+bb_eq_left_false5:
+  branch %v633, bb_false, bb_eq_field3
+
+bb_eq_field6:
+  %v637 = load field(local %eq_left_0, code)
+  %v638 = load field(local %eq_right_1, code)
+  %v639 = int.eq %v637, %v638
+  branch %v639, bb_true, bb_false
+}
+
+fn @map_make_27(%a: domain_handle) -> @Map_27 {
+bb0:
+  %v643 = const.get @bridge_const_2724
+  %v644 = const.get @bridge_const_2725
+  %v645 = const.get @bridge_const_2726
+  %v646 = alloc %a, @MapEntry_27, %v643
+  %v647 = aggregate.construct @Map_27 { slots: %v646 }
+  jump bb_init(%v644)
+
+bb_init(%i: u64):
+  %v648 = int.ge %i, %v643
+  branch %v648, bb_done, bb_slot
+
+bb_slot:
+  %v649 = slice.index.checked %v646, %i else bb_fail
+  %v650 = const.get @bridge_const_2727
+  store field(deref %v649, state), %v650
+  %v651 = int.add.checked %i, %v645 else bb_fail
+  jump bb_init(%v651)
+
+bb_done:
+  return %v647
+
+bb_fail:
+  panic
+}
+
+fn @map_get_27(%a: @Map_27, %b: @BridgeKey) -> option(u64) {
+  local %map: @Map_27
+
+bb0:
+  store local %map, %a
+  %v654 = load field(local %map, slots)
+  %v655 = call @map_hash_27(%b)
+  %v656 = const.get @bridge_const_2730
+  %v657 = const.get @bridge_const_2731
+  %v658 = const.get @bridge_const_2732
+  %v659 = int.div.checked %v655, %v656 else bb_fail
+  %v660 = int.mul.checked %v659, %v656 else bb_fail
+  %v661 = int.sub.checked %v655, %v660 else bb_fail
+  jump bb_loop(%v661, %v657)
+
+bb_loop(%index: u64, %probes: u64):
+  %v662 = int.ge %probes, %v656
+  branch %v662, bb_none, bb_probe
+
+bb_probe:
+  %v663 = slice.index.checked %v654, %index else bb_fail
+  %v664 = load field(deref %v663, state)
+  %v665 = const.get @bridge_const_2733
+  %v666 = int.eq %v664, %v665
+  branch %v666, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v669 = load field(deref %v663, hash)
+  %v670 = int.eq %v669, %v655
+  branch %v670, bb_check, bb_next
+
+bb_nonoccupied:
+  %v667 = const.get @bridge_const_2734
+  %v668 = int.eq %v664, %v667
+  branch %v668, bb_none, bb_next
+
+bb_check:
+  %v671 = load field(deref %v663, key)
+  %v672 = call @map_eq_27(%b, %v671)
+  branch %v672, bb_found, bb_next
+
+bb_found:
+  %v673 = load field(deref %v663, value)
+  %v674 = enum.construct option(u64), some, %v673
+  return %v674
+
+bb_next:
+  %v675 = int.add.checked %index, %v658 else bb_fail
+  %v676 = int.div.checked %v675, %v656 else bb_fail
+  %v677 = int.mul.checked %v676, %v656 else bb_fail
+  %v678 = int.sub.checked %v675, %v677 else bb_fail
+  %v679 = int.add.checked %probes, %v658 else bb_fail
+  jump bb_loop(%v678, %v679)
+
+bb_none:
+  %v680 = enum.construct option(u64), none
+  return %v680
+
+bb_fail:
+  panic
+}
+
+fn @map_set_27(%a: @Map_27, %b: @BridgeKey, %c: u64) -> bool {
+  local %map: @Map_27
+  local %first_deleted: u64
+
+bb0:
+  store local %map, %a
+  %v684 = load field(local %map, slots)
+  %v685 = call @map_hash_27(%b)
+  %v686 = const.get @bridge_const_2760
+  %v687 = const.get @bridge_const_2761
+  %v688 = const.get @bridge_const_2762
+  store local %first_deleted, %v686
+  %v689 = int.div.checked %v685, %v686 else bb_fail
+  %v690 = int.mul.checked %v689, %v686 else bb_fail
+  %v691 = int.sub.checked %v685, %v690 else bb_fail
+  jump bb_loop(%v691, %v687)
+
+bb_loop(%index: u64, %probes: u64):
+  %v692 = int.ge %probes, %v686
+  branch %v692, bb_full, bb_probe
+
+bb_probe:
+  %v693 = slice.index.checked %v684, %index else bb_fail
+  %v694 = load field(deref %v693, state)
+  %v695 = const.get @bridge_const_2763
+  %v696 = int.eq %v694, %v695
+  branch %v696, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v704 = load field(deref %v693, hash)
+  %v705 = int.eq %v704, %v685
+  branch %v705, bb_check, bb_next
+
+bb_nonoccupied:
+  %v697 = const.get @bridge_const_2764
+  %v698 = int.eq %v694, %v697
+  branch %v698, bb_empty, bb_deleted
+
+bb_empty:
+  %v699 = load local %first_deleted
+  %v700 = int.eq %v699, %v686
+  branch %v700, bb_insert_current, bb_insert_deleted
+
+bb_deleted:
+  %v702 = load local %first_deleted
+  %v703 = int.eq %v702, %v686
+  branch %v703, bb_record_deleted, bb_next
+
+bb_check:
+  %v706 = load field(deref %v693, key)
+  %v707 = call @map_eq_27(%b, %v706)
+  branch %v707, bb_write, bb_next
+
+bb_write:
+  store field(deref %v693, value), %c
+  jump bb_done
+
+bb_next:
+  %v708 = int.add.checked %index, %v688 else bb_fail
+  %v709 = int.div.checked %v708, %v686 else bb_fail
+  %v710 = int.mul.checked %v709, %v686 else bb_fail
+  %v711 = int.sub.checked %v708, %v710 else bb_fail
+  %v712 = int.add.checked %probes, %v688 else bb_fail
+  jump bb_loop(%v711, %v712)
+
+bb_insert_current:
+  jump bb_insert(%index)
+
+bb_insert_deleted:
+  %v701 = load local %first_deleted
+  jump bb_insert(%v701)
+
+bb_insert(%insert_index: u64):
+  %v715 = slice.index.checked %v684, %insert_index else bb_fail
+  %v716 = const.get @bridge_const_2765
+  store field(deref %v715, state), %v716
+  store field(deref %v715, hash), %v685
+  store field(deref %v715, key), %b
+  store field(deref %v715, value), %c
+  jump bb_done
+
+bb_full:
+  %v713 = load local %first_deleted
+  %v714 = int.eq %v713, %v686
+  branch %v714, bb_failed, bb_insert_deleted
+
+bb_done:
+  %v717 = const.get @bridge_bool_2766
+  return %v717
+
+bb_failed:
+  %v718 = const.get @bridge_bool_2767
+  return %v718
+
+bb_fail:
+  panic
+
+bb_record_deleted:
+  store local %first_deleted, %index
+  jump bb_next
+}
+
+fn @map_remove_27(%a: @Map_27, %b: @BridgeKey) -> bool {
+  local %map: @Map_27
+
+bb0:
+  store local %map, %a
+  %v721 = load field(local %map, slots)
+  %v722 = call @map_hash_27(%b)
+  %v723 = const.get @bridge_const_2750
+  %v724 = const.get @bridge_const_2751
+  %v725 = const.get @bridge_const_2752
+  %v726 = int.div.checked %v722, %v723 else bb_fail
+  %v727 = int.mul.checked %v726, %v723 else bb_fail
+  %v728 = int.sub.checked %v722, %v727 else bb_fail
+  jump bb_loop(%v728, %v724)
+
+bb_loop(%index: u64, %probes: u64):
+  %v729 = int.ge %probes, %v723
+  branch %v729, bb_absent, bb_probe
+
+bb_probe:
+  %v730 = slice.index.checked %v721, %index else bb_fail
+  %v731 = load field(deref %v730, state)
+  %v732 = const.get @bridge_const_2753
+  %v733 = int.eq %v731, %v732
+  branch %v733, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v736 = load field(deref %v730, hash)
+  %v737 = int.eq %v736, %v722
+  branch %v737, bb_check, bb_next
+
+bb_nonoccupied:
+  %v734 = const.get @bridge_const_2754
+  %v735 = int.eq %v731, %v734
+  branch %v735, bb_absent, bb_next
+
+bb_check:
+  %v738 = load field(deref %v730, key)
+  %v739 = call @map_eq_27(%b, %v738)
+  branch %v739, bb_found, bb_next
+
+bb_found:
+  %v740 = const.get @bridge_const_2755
+  store field(deref %v730, state), %v740
+  %v741 = const.get @bridge_bool_2756
+  return %v741
+
+bb_next:
+  %v742 = int.add.checked %index, %v725 else bb_fail
+  %v743 = int.div.checked %v742, %v723 else bb_fail
+  %v744 = int.mul.checked %v743, %v723 else bb_fail
+  %v745 = int.sub.checked %v742, %v744 else bb_fail
+  %v746 = int.add.checked %probes, %v725 else bb_fail
+  jump bb_loop(%v745, %v746)
+
+bb_absent:
+  %v747 = const.get @bridge_bool_2757
+  return %v747
+
+bb_fail:
+  panic
+}
+
+fn @map_hash_30(%a: @BridgeTag) -> u64 {
+  local %hash_key: @BridgeKey
+
+bb0:
+  switch %a {
+    Empty -> bb_hash_variant3
+    Value(%hash_payload101) -> bb_hash_variant4
+  }
+
+bb_fail:
+  panic
+
+bb_hash_join2(%hash_3: u64):
+  return %hash_3
+
+bb_hash_variant3:
+  %v750 = const.get @bridge_const_900432900
+  jump bb_hash_join2(%v750)
+
+bb_hash_variant4:
+  %v751 = const.get @bridge_const_900432901
+  store local %hash_key, %hash_payload101
+  %v752 = load field(local %hash_key, active)
+  branch %v752, bb_hash_one6, bb_hash_zero7
+
+bb_hash_join5(%hash_6: u64):
+  %v756 = load field(local %hash_key, group)
+  %v757 = int.zext %v756, u64
+  %v758 = int.add.checked %hash_6, %v757 else bb_fail
+  %v759 = load field(local %hash_key, code)
+  %v760 = int.add.checked %v758, %v759 else bb_fail
+  %v761 = int.add.checked %v751, %v760 else bb_fail
+  jump bb_hash_join2(%v761)
+
+bb_hash_one6:
+  %v754 = const.get @bridge_const_900430170
+  jump bb_hash_join5(%v754)
+
+bb_hash_zero7:
+  %v755 = const.get @bridge_const_900430171
+  jump bb_hash_join5(%v755)
+}
+
+fn @map_eq_30(%a: @BridgeTag, %b: @BridgeTag) -> bool {
+  local %eq_left_0: @BridgeKey
+  local %eq_right_1: @BridgeKey
+
+bb0:
+  switch %a {
+    Empty -> bb_eq_variant3
+    Value(%eq_left_payload101) -> bb_eq_variant4
+  }
+
+bb_true:
+  %v772 = const.get @bridge_bool_3022
+  return %v772
+
+bb_false:
+  %v773 = const.get @bridge_bool_3023
+  return %v773
+
+bb_eq_variant3:
+  switch %b {
+    Empty -> bb_eq_payload5
+    default -> bb_false
+  }
+
+bb_eq_variant4:
+  switch %b {
+    Value(%eq_right_payload501) -> bb_eq_payload6
+    default -> bb_false
+  }
+
+bb_eq_payload5:
+  jump bb_true
+
+bb_eq_payload6:
+  store local %eq_left_0, %eq_left_payload101
+  store local %eq_right_1, %eq_right_payload501
+  %v764 = load field(local %eq_left_0, active)
+  %v765 = load field(local %eq_right_1, active)
+  branch %v764, bb_eq_left_true8, bb_eq_left_false9
+
+bb_eq_field7:
+  %v766 = load field(local %eq_left_0, group)
+  %v767 = load field(local %eq_right_1, group)
+  %v768 = int.eq %v766, %v767
+  branch %v768, bb_eq_field10, bb_false
+
+bb_eq_left_true8:
+  branch %v765, bb_eq_field7, bb_false
+
+bb_eq_left_false9:
+  branch %v765, bb_false, bb_eq_field7
+
+bb_eq_field10:
+  %v769 = load field(local %eq_left_0, code)
+  %v770 = load field(local %eq_right_1, code)
+  %v771 = int.eq %v769, %v770
+  branch %v771, bb_true, bb_false
+}
+
+fn @map_make_30(%a: domain_handle) -> @Map_30 {
+bb0:
+  %v775 = const.get @bridge_const_3024
+  %v776 = const.get @bridge_const_3025
+  %v777 = const.get @bridge_const_3026
+  %v778 = alloc %a, @MapEntry_30, %v775
+  %v779 = aggregate.construct @Map_30 { slots: %v778 }
+  jump bb_init(%v776)
+
+bb_init(%i: u64):
+  %v780 = int.ge %i, %v775
+  branch %v780, bb_done, bb_slot
+
+bb_slot:
+  %v781 = slice.index.checked %v778, %i else bb_fail
+  %v782 = const.get @bridge_const_3027
+  store field(deref %v781, state), %v782
+  %v783 = int.add.checked %i, %v777 else bb_fail
+  jump bb_init(%v783)
+
+bb_done:
+  return %v779
+
+bb_fail:
+  panic
+}
+
+fn @map_get_30(%a: @Map_30, %b: @BridgeTag) -> option(u64) {
+  local %map: @Map_30
+
+bb0:
+  store local %map, %a
+  %v786 = load field(local %map, slots)
+  %v787 = call @map_hash_30(%b)
+  %v788 = const.get @bridge_const_3030
+  %v789 = const.get @bridge_const_3031
+  %v790 = const.get @bridge_const_3032
+  %v791 = int.div.checked %v787, %v788 else bb_fail
+  %v792 = int.mul.checked %v791, %v788 else bb_fail
+  %v793 = int.sub.checked %v787, %v792 else bb_fail
+  jump bb_loop(%v793, %v789)
+
+bb_loop(%index: u64, %probes: u64):
+  %v794 = int.ge %probes, %v788
+  branch %v794, bb_none, bb_probe
+
+bb_probe:
+  %v795 = slice.index.checked %v786, %index else bb_fail
+  %v796 = load field(deref %v795, state)
+  %v797 = const.get @bridge_const_3033
+  %v798 = int.eq %v796, %v797
+  branch %v798, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v801 = load field(deref %v795, hash)
+  %v802 = int.eq %v801, %v787
+  branch %v802, bb_check, bb_next
+
+bb_nonoccupied:
+  %v799 = const.get @bridge_const_3034
+  %v800 = int.eq %v796, %v799
+  branch %v800, bb_none, bb_next
+
+bb_check:
+  %v803 = load field(deref %v795, key)
+  %v804 = call @map_eq_30(%b, %v803)
+  branch %v804, bb_found, bb_next
+
+bb_found:
+  %v805 = load field(deref %v795, value)
+  %v806 = enum.construct option(u64), some, %v805
+  return %v806
+
+bb_next:
+  %v807 = int.add.checked %index, %v790 else bb_fail
+  %v808 = int.div.checked %v807, %v788 else bb_fail
+  %v809 = int.mul.checked %v808, %v788 else bb_fail
+  %v810 = int.sub.checked %v807, %v809 else bb_fail
+  %v811 = int.add.checked %probes, %v790 else bb_fail
+  jump bb_loop(%v810, %v811)
+
+bb_none:
+  %v812 = enum.construct option(u64), none
+  return %v812
+
+bb_fail:
+  panic
+}
+
+fn @map_set_30(%a: @Map_30, %b: @BridgeTag, %c: u64) -> bool {
+  local %map: @Map_30
+  local %first_deleted: u64
+
+bb0:
+  store local %map, %a
+  %v816 = load field(local %map, slots)
+  %v817 = call @map_hash_30(%b)
+  %v818 = const.get @bridge_const_3060
+  %v819 = const.get @bridge_const_3061
+  %v820 = const.get @bridge_const_3062
+  store local %first_deleted, %v818
+  %v821 = int.div.checked %v817, %v818 else bb_fail
+  %v822 = int.mul.checked %v821, %v818 else bb_fail
+  %v823 = int.sub.checked %v817, %v822 else bb_fail
+  jump bb_loop(%v823, %v819)
+
+bb_loop(%index: u64, %probes: u64):
+  %v824 = int.ge %probes, %v818
+  branch %v824, bb_full, bb_probe
+
+bb_probe:
+  %v825 = slice.index.checked %v816, %index else bb_fail
+  %v826 = load field(deref %v825, state)
+  %v827 = const.get @bridge_const_3063
+  %v828 = int.eq %v826, %v827
+  branch %v828, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v836 = load field(deref %v825, hash)
+  %v837 = int.eq %v836, %v817
+  branch %v837, bb_check, bb_next
+
+bb_nonoccupied:
+  %v829 = const.get @bridge_const_3064
+  %v830 = int.eq %v826, %v829
+  branch %v830, bb_empty, bb_deleted
+
+bb_empty:
+  %v831 = load local %first_deleted
+  %v832 = int.eq %v831, %v818
+  branch %v832, bb_insert_current, bb_insert_deleted
+
+bb_deleted:
+  %v834 = load local %first_deleted
+  %v835 = int.eq %v834, %v818
+  branch %v835, bb_record_deleted, bb_next
+
+bb_check:
+  %v838 = load field(deref %v825, key)
+  %v839 = call @map_eq_30(%b, %v838)
+  branch %v839, bb_write, bb_next
+
+bb_write:
+  store field(deref %v825, value), %c
+  jump bb_done
+
+bb_next:
+  %v840 = int.add.checked %index, %v820 else bb_fail
+  %v841 = int.div.checked %v840, %v818 else bb_fail
+  %v842 = int.mul.checked %v841, %v818 else bb_fail
+  %v843 = int.sub.checked %v840, %v842 else bb_fail
+  %v844 = int.add.checked %probes, %v820 else bb_fail
+  jump bb_loop(%v843, %v844)
+
+bb_insert_current:
+  jump bb_insert(%index)
+
+bb_insert_deleted:
+  %v833 = load local %first_deleted
+  jump bb_insert(%v833)
+
+bb_insert(%insert_index: u64):
+  %v847 = slice.index.checked %v816, %insert_index else bb_fail
+  %v848 = const.get @bridge_const_3065
+  store field(deref %v847, state), %v848
+  store field(deref %v847, hash), %v817
+  store field(deref %v847, key), %b
+  store field(deref %v847, value), %c
+  jump bb_done
+
+bb_full:
+  %v845 = load local %first_deleted
+  %v846 = int.eq %v845, %v818
+  branch %v846, bb_failed, bb_insert_deleted
+
+bb_done:
+  %v849 = const.get @bridge_bool_3066
+  return %v849
+
+bb_failed:
+  %v850 = const.get @bridge_bool_3067
+  return %v850
+
+bb_fail:
+  panic
+
+bb_record_deleted:
+  store local %first_deleted, %index
+  jump bb_next
+}
+
+fn @map_remove_30(%a: @Map_30, %b: @BridgeTag) -> bool {
+  local %map: @Map_30
+
+bb0:
+  store local %map, %a
+  %v853 = load field(local %map, slots)
+  %v854 = call @map_hash_30(%b)
+  %v855 = const.get @bridge_const_3050
+  %v856 = const.get @bridge_const_3051
+  %v857 = const.get @bridge_const_3052
+  %v858 = int.div.checked %v854, %v855 else bb_fail
+  %v859 = int.mul.checked %v858, %v855 else bb_fail
+  %v860 = int.sub.checked %v854, %v859 else bb_fail
+  jump bb_loop(%v860, %v856)
+
+bb_loop(%index: u64, %probes: u64):
+  %v861 = int.ge %probes, %v855
+  branch %v861, bb_absent, bb_probe
+
+bb_probe:
+  %v862 = slice.index.checked %v853, %index else bb_fail
+  %v863 = load field(deref %v862, state)
+  %v864 = const.get @bridge_const_3053
+  %v865 = int.eq %v863, %v864
+  branch %v865, bb_occupied, bb_nonoccupied
+
+bb_occupied:
+  %v868 = load field(deref %v862, hash)
+  %v869 = int.eq %v868, %v854
+  branch %v869, bb_check, bb_next
+
+bb_nonoccupied:
+  %v866 = const.get @bridge_const_3054
+  %v867 = int.eq %v863, %v866
+  branch %v867, bb_absent, bb_next
+
+bb_check:
+  %v870 = load field(deref %v862, key)
+  %v871 = call @map_eq_30(%b, %v870)
+  branch %v871, bb_found, bb_next
+
+bb_found:
+  %v872 = const.get @bridge_const_3055
+  store field(deref %v862, state), %v872
+  %v873 = const.get @bridge_bool_3056
+  return %v873
+
+bb_next:
+  %v874 = int.add.checked %index, %v857 else bb_fail
+  %v875 = int.div.checked %v874, %v855 else bb_fail
+  %v876 = int.mul.checked %v875, %v855 else bb_fail
+  %v877 = int.sub.checked %v874, %v876 else bb_fail
+  %v878 = int.add.checked %probes, %v857 else bb_fail
+  jump bb_loop(%v877, %v878)
+
+bb_absent:
+  %v879 = const.get @bridge_bool_3057
+  return %v879
+
+bb_fail:
   panic
 }
