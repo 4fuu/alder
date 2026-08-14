@@ -906,8 +906,9 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, instru
     }
     if item.op == mir_op_call() || item.op == mir_op_ffi_call_unsafe() {
         out = try cgen_put(d, out, "  ")
-        var result_type = __s0_buffer_get(MirFunctionRec, store.functions, item.target - 1).result_type
-        if item.op == mir_op_ffi_call_unsafe() { result_type = __s0_buffer_get(MirImportRec, store.imports, item.target - 1).result_type }
+        var result_type: U64 = 0
+        if item.op == mir_op_call() { result_type = __s0_buffer_get(MirFunctionRec, store.functions, item.target - 1).result_type }
+        else { result_type = __s0_buffer_get(MirImportRec, store.imports, item.target - 1).result_type }
         if result_type != mir_type_unit() { out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = ") }
         if item.op == mir_op_call() { out = try cgen_emit_function_name(d, out, store, item.target) } else { out = try cgen_put(d, out, "(")
