@@ -1287,7 +1287,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let scrutinee = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.scrutinee, environment, panic_block)
         let join = try lower_add_block(d, scrutinee.state, function, "bb_match_join")
         let result_type = try lower_type(d, source_state, store, join.state, checked.checked_type)
-        let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, "match", result_type.id)
+        let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_match_join", join.id), result_type.id)
         var current = lower_with_mir(result_type.state, join_param.store)
         var arm_blocks = try __s0_buffer_new(U64, d)
         var ordinal: U64 = 0
@@ -1309,7 +1309,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             if arm.binding != 0 {
                 let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
                 let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
-                let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "match_payload", ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
+                let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__s0_match_payload", checked.first_arm + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
                 current = lower_with_mir(payload_type.state, value.store)
                 binding_value = value.id
                 let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1))
