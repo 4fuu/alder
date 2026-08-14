@@ -1447,8 +1447,8 @@ bb_short_const3:
   %v409 = const.get @lit.bool336
   jump bb_short_join4(%v409)
 
-bb_short_join4(%short: bool):
-  return %short
+bb_short_join4(%short_5: bool):
+  return %short_5
 }
 
 fn @sum(%values: slice(u64)) -> u64 {
