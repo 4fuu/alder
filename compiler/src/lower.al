@@ -707,7 +707,8 @@ fn lower_result_name_taken(mir: MirStore, function: U64, name: String) -> Bool {
     return false
 }
 
-fn lower_result_name(d: Domain, mir: MirStore, function: U64) -> Result(String, __s0_Error) {
+fn lower_result_name(d: Domain, mir: MirStore, function: U64, preferred: String) -> Result(String, __s0_Error) {
+    if len(preferred) != 0 && !lower_result_name_taken(mir, function, preferred) { return Ok(preferred) }
     var suffix = __s0_buffer_len(MirValueRec, mir.values) + 1
     var name = try lower_decimal_name(d, "v", suffix)
     while lower_result_name_taken(mir, function, name) {
@@ -721,7 +722,7 @@ fn lower_add_result(d: Domain, state: LowerState, function: U64, block: U64, che
     let typ = try lower_type(d, source_state, store, state, checked_type)
     if !typ.state.valid { return Ok(typ) }
     let active = lower_open_block(typ.state.mir, function, block)
-    let name = try lower_result_name(d, typ.state.mir, function)
+    let name = try lower_result_name(d, typ.state.mir, function, "")
     let value = try mir_add_value(d, typ.state.mir, function, name, typ.id, mir_value_def_instruction(), active, lower_instruction_ordinal(typ.state.mir, function, active) + 1)
     return Ok(LowerStep(state: lower_with_mir(typ.state, value.store), id: value.id))
 }
@@ -744,7 +745,7 @@ fn lower_add_instr_three(d: Domain, state: LowerState, function: U64, block: U64
 
 fn lower_add_typed_result(d: Domain, state: LowerState, function: U64, block: U64, type_id: U64) -> Result(LowerStep, __s0_Error) {
     let active = lower_open_block(state.mir, function, block)
-    let value = try mir_add_value(d, state.mir, function, try lower_result_name(d, state.mir, function), type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(state.mir, function, active) + 1)
+    let value = try mir_add_value(d, state.mir, function, try lower_result_name(d, state.mir, function, ""), type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(state.mir, function, active) + 1)
     return Ok(LowerStep(state: lower_with_mir(state, value.store), id: value.id))
 }
 
@@ -1008,7 +1009,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let element = try lower_type(d, source_state, store, index.state, expression.checked_type)
         let empty = try __s0_buffer_new(U64, d)
         let reference = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
-        let ref_value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function), reference.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(reference.store, function, active) + 1)
+        let ref_value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(reference.store, function, active) + 1)
         let indexed = try lower_add_instr(d, lower_with_mir(element.state, ref_value.store), function, active, mir_op_slice_index_checked(), ref_value.id, 0, 0, base.id, index.id, panic_block, "")
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let result = try lower_add_result(d, lower_with_mir(indexed.state, place.store), function, active, expression.checked_type, source_state, store)
@@ -1485,7 +1486,7 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let elem = try lower_type(d, source_state, store, index.state, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
-        let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function), ref_type.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(ref_type.store, function, block) + 1)
+        let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, ""), ref_type.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(ref_type.store, function, block) + 1)
         let indexed = try lower_add_instr(d, lower_with_mir(elem.state, result.store), function, block, mir_op_slice_index_checked(), result.id, 0, 0, loaded.id, index.id, panic_block, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: result.id))
         current = lower_with_mir(indexed.state, deref.store)
@@ -1609,7 +1610,7 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
         let elem = try lower_type(d, source_state, store, current, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
-        let ref_value = try mir_add_value(d, ref_type.store, function, "for_ref", ref_type.type_id, mir_value_def_instruction(), body.id, lower_instruction_ordinal(ref_type.store, function, body.id) + 1)
+        let ref_value = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, "for_ref"), ref_type.type_id, mir_value_def_instruction(), body.id, lower_instruction_ordinal(ref_type.store, function, body.id) + 1)
         let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, sequence_param.id, index_param.id, panic_block, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
@@ -1630,10 +1631,10 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
         let empty = try __s0_buffer_new(U64, d)
         let scope_type = try mir_intern_type(d, current.mir, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
-        let scope_value = try mir_add_value(d, scope_type.store, function, try lower_decimal_name(d, "cleanup_scope", statement.binding), scope_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(scope_type.store, function, active) + 1)
+        let scope_value = try mir_add_value(d, scope_type.store, function, try lower_result_name(d, scope_type.store, function, try lower_decimal_name(d, "cleanup_scope", statement.binding)), scope_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(scope_type.store, function, active) + 1)
         let begun = try lower_add_instr(d, lower_with_mir(current, scope_value.store), function, active, mir_op_cleanup_scope_begin(), scope_value.id, 0, 0, 0, 0, 0, "")
         let cleanup_type = try mir_intern_type(d, begun.state.mir, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
-        let cleanup_value = try mir_add_value(d, cleanup_type.store, function, try lower_decimal_name(d, "cleanup_id", statement.binding), cleanup_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(cleanup_type.store, function, active) + 1)
+        let cleanup_value = try mir_add_value(d, cleanup_type.store, function, try lower_result_name(d, cleanup_type.store, function, try lower_decimal_name(d, "cleanup_id", statement.binding)), cleanup_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(cleanup_type.store, function, active) + 1)
         let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, statement.body - 1)
         let callback = lower_owner_lookup(current.owners, cleanup.callback)
         if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
