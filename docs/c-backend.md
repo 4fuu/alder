@@ -1,7 +1,7 @@
 # C11 Backend
 
-Status: Milestone 3 lowering contract with a working Go implementation; Alder
-declaration skeleton available, production Alder generation gated
+Status: Milestone 3 lowering contract with a working Go implementation; the
+Alder-written backend implements the M5.4 scalar/CFG slice
 
 The Alder backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Alder MIR. Its purpose is to validate Alder MIR semantics and provide a bootstrap path, not to make C the semantic definition of Alder.
 
@@ -26,26 +26,44 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
-The Alder-written flat-MIR verifier now exposes
+The Alder-written flat-MIR verifier exposes
 `mir_verify_complete(d, store, version, hosted)`. Its `complete == true` result
 is the required gate for any Alder-written C generator before it writes bytes;
 hosted success also carries the verified 1-based entry function ID. Every
 failure and every unhosted result carries entry ID zero; duplicate `main`
-declarations are rejected earlier by V1's duplicate function-name rule. Public
-Alder-written production generation is not available yet: source lowering is
-tracked by #21, and the declaration-only Cgen skeleton does not emit bodies.
+declarations are rejected earlier by V1's duplicate function-name rule.
 
-The declaration-only Alder backend lane exposes
+The Alder-written `cgen_generate(d, store, version, hosted)` entry implements
+the M5.4 scalar/CFG body slice directly over flat MIR 3. It lowers loads,
+stores, field and checked-reference places, aggregate and enum-like values,
+scalar comparisons and conversions, checked integer and slice operations,
+direct and unsafe-import calls, block edges with staged parallel copies,
+branches, loops, switches, returns, typed failures, panic, and unreachable.
+Every operand is read from an already materialized value in an explicitly
+ordered statement; generated calls never embed another call or checked
+operation in a C argument expression. Verification and the supported-operation
+preflight both complete before the output buffer is allocated. Invalid or
+unsupported MIR therefore returns false with zero output and is never repaired
+or rewritten.
+
+This is a production-shaped internal compiler-core generator, not yet a
+user-facing self-hosted source pipeline. The Alder source-to-MIR production
+wiring remains tracked by #21, while domain, cleanup, table, and bootstrap
+buffer lowering remain tracked by #24. Those operations are refused rather
+than partially emitted. The Go `cgen` package remains the complete active
+backend for those domains until the later M5.4 slices land.
+
+The earlier declaration-only Alder backend lane remains as the focused
+`cgen_write_declaration_skeleton` conformance API. It exposes
 `cgen_write_declaration_skeleton(d, store, version, hosted)`. Before allocating
 its output buffer it calls `mir_verify_complete`; only `complete == true`
 proceeds. Emission consumes the returned `hosted` and external 1-based `entry`
 fields rather than independently authorizing the caller's request. The complete
 skeleton is buffered before stdout and contains headers, stable type layouts,
 constant storage, import prototypes, internal function declarations, and the
-optional verified hosted entry adapter. It does not emit function bodies and is
-not a production generator. In particular, there is intentionally no public
-`cgen_generate` entry. Every rejection is zero-output and never sanitizes or
-repairs an invalid store.
+optional verified hosted entry adapter. It still does not emit function bodies
+and is not itself a production generator. Every rejection is zero-output and
+never sanitizes or repairs an invalid store.
 
 ## Generated program entry
 
@@ -68,10 +86,9 @@ is linked as a separate translation unit and does not depend on the Go runtime.
 Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
 `EXIT_FAILURE`.
 
-The Alder declaration skeleton can render this adapter for conformance, but its
-internal function declarations have no bodies. It is therefore strict-C syntax
-evidence only and cannot be linked as a generated program before body lowering
-and a separate production-generation entry land.
+The Alder declaration skeleton renders this adapter only for syntax
+conformance. `cgen_generate` emits the corresponding function bodies and its
+hosted output is linked and run by the scalar/CFG acceptance fixture.
 
 The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
 through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and
