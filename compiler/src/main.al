@@ -61,7 +61,7 @@ fn run_lower(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I
 }
 
 fn finish_check_bad(state: State, parse: ParseStore, store: CheckStore) -> I32 {
-    return driver_check_diagnostic(state, store)
+    return driver_check_diagnostic(state, parse, store)
 }
 
 fn finish_check(d: Domain, state: State, parse: ParseStore, result: CheckResult) -> I32 {
@@ -197,7 +197,7 @@ fn finish_parse(d: Domain, result: ParseResult) -> I32 {
     return match result {
         ParseGood(output) => init_check_symbols(d, output)
         ParseBad(output) => finish_parse_failure(output.state, output.store)
-        ParseLexBad(output) => finish_lex_failure(output.state)
+        ParseLexBad(output) => finish_lex_failure(output.state, output.store)
     }
 }
 
@@ -205,8 +205,8 @@ fn finish_parse_failure(state: State, store: ParseStore) -> I32 {
     return driver_parse_diagnostic(state, store)
 }
 
-fn finish_lex_failure(state: State) -> I32 {
-    return driver_lex_diagnostic(state)
+fn finish_lex_failure(state: State, store: ParseStore) -> I32 {
+    return driver_lex_diagnostic(state, store)
 }
 
 fn run_parse(d: Domain, state: State, store: ParseStore) -> I32 {

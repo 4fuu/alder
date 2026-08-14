@@ -425,6 +425,15 @@ type CheckDiagRec {
     related_source: U64
     related_start: U64
     related_end: U64
+    detail_a: U64
+    detail_b: U64
+    detail_c: U64
+    detail_d: U64
+}
+
+type DiagnosticTypeRec {
+    kind: U64
+    target: U64
 }
 
 type State {
