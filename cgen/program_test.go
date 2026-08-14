@@ -155,7 +155,7 @@ func TestProgramSeparateTranslationUnits(t *testing.T) {
 						}
 					}
 					exe := filepath.Join(dir, "program.exe")
-					args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join("..", "runtime", "c"), "-I", filepath.Join("..", "bootstrap"), gen, driver, filepath.Join("..", "runtime", "c", "alder.c"), "-o", exe}
+					args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join("..", "runtime", "c"), "-I", filepath.Join("..", "bootstrap"), gen, driver, filepath.Join("..", "runtime", "c", "alder.c"), "-o", exe}
 					if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("compile: %v\n%s", err, output)
 					}

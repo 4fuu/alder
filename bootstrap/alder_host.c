@@ -642,14 +642,20 @@ static int alderhost_parse_conformance(int argc, char **argv,
     context->command = UINT64_C(2);
     context->sources = (struct AlderHostSource *)calloc(
         count != 0 ? count : (size_t)1, sizeof(*context->sources));
-    if (context->sources == NULL || !alderhost_size_to_u64(count, &context->source_count)) {
-        return 3;
+    if (context->sources == NULL) {
+        (void)fputs("alder host: cannot allocate source list\n", stderr);
+        return EXIT_FAILURE;
+    }
+    if (!alderhost_size_to_u64(count, &context->source_count)) {
+        (void)fputs("alder host: too many sources\n", stderr);
+        return EXIT_FAILURE;
     }
     for (i = 0; i < count; i++) {
         context->sources[i].path = argv[i + (size_t)1];
         if (!alderhost_size_to_u64(strlen(context->sources[i].path),
                                    &context->sources[i].path_len)) {
-            return 3;
+            (void)fputs("alder host: source path too large\n", stderr);
+            return EXIT_FAILURE;
         }
     }
     if (count > (size_t)1) {
@@ -659,7 +665,9 @@ static int alderhost_parse_conformance(int argc, char **argv,
     for (i = 1; i < count; i++) {
         if (strcmp(context->sources[i - (size_t)1].path,
                    context->sources[i].path) == 0) {
-            return 2;
+            (void)fprintf(stderr, "alder host: duplicate source: %s\n",
+                          context->sources[i].path);
+            return EXIT_FAILURE;
         }
     }
     return 0;
@@ -672,6 +680,10 @@ static bool alderhost_load(struct AlderHostSource *source) {
     size_t length = 0;
     size_t capacity = 0;
     if (file == NULL) {
+#ifdef ALDER_HOST_CONFORMANCE
+        (void)fprintf(stderr, "alder host: cannot open source: %s\n",
+                      source->path);
+#endif
         return false;
     }
     for (;;) {
@@ -683,12 +695,20 @@ static bool alderhost_load(struct AlderHostSource *source) {
             uint8_t *grown;
             if (next < capacity || next > SIZE_MAX - (size_t)1 ||
                 !alderhost_size_to_u64(next, &represented)) {
+#ifdef ALDER_HOST_CONFORMANCE
+                (void)fprintf(stderr, "alder host: source too large: %s\n",
+                              source->path);
+#endif
                 free(data);
                 (void)fclose(file);
                 return false;
             }
             grown = (uint8_t *)realloc(data, next);
             if (grown == NULL) {
+#ifdef ALDER_HOST_CONFORMANCE
+                (void)fprintf(stderr, "alder host: cannot load source: %s\n",
+                              source->path);
+#endif
                 free(data);
                 (void)fclose(file);
                 return false;
@@ -701,6 +721,10 @@ static bool alderhost_load(struct AlderHostSource *source) {
         length += got;
         if (got < available) {
             if (ferror(file) != 0) {
+#ifdef ALDER_HOST_CONFORMANCE
+                (void)fprintf(stderr, "alder host: cannot read source: %s\n",
+                              source->path);
+#endif
                 free(data);
                 (void)fclose(file);
                 return false;
@@ -709,10 +733,18 @@ static bool alderhost_load(struct AlderHostSource *source) {
         }
     }
     if (fclose(file) != 0) {
+#ifdef ALDER_HOST_CONFORMANCE
+        (void)fprintf(stderr, "alder host: cannot read source: %s\n",
+                      source->path);
+#endif
         free(data);
         return false;
     }
     if (!alderhost_size_to_u64(length, &source->text_len)) {
+#ifdef ALDER_HOST_CONFORMANCE
+        (void)fprintf(stderr, "alder host: source too large: %s\n",
+                      source->path);
+#endif
         free(data);
         return false;
     }
@@ -729,7 +761,11 @@ int main(int argc, char **argv) {
     if (_setmode(_fileno(stdout), _O_BINARY) == -1 ||
         _setmode(_fileno(stderr), _O_BINARY) == -1) {
         (void)fputs("alder host: cannot configure binary output\n", stderr);
+#ifdef ALDER_HOST_CONFORMANCE
+        return EXIT_FAILURE;
+#else
         return 3;
+#endif
     }
 #endif
 #ifdef ALDER_HOST_CONFORMANCE
@@ -744,15 +780,26 @@ int main(int argc, char **argv) {
     }
     for (i = 0; i < context.source_count; i++) {
         if (!alderhost_load(&context.sources[(size_t)i])) {
+#ifdef ALDER_HOST_CONFORMANCE
+            alderhost_cleanup(&context);
+            return EXIT_FAILURE;
+#else
             alderhost_cleanup(&context);
             return alderhost_fail(context.command, context.json, 3, "io",
                                   "cannot read input file");
+#endif
         }
     }
     alderhost_active_context = &context;
     status = (int)alder_program_entry((void *)&context);
     alderhost_active_context = NULL;
 
+#ifdef ALDER_HOST_CONFORMANCE
+    flush_ok = fflush(stdout) == 0;
+    flush_ok = fflush(stderr) == 0 && flush_ok;
+    alderhost_cleanup(&context);
+    return status == 0 && flush_ok ? EXIT_SUCCESS : EXIT_FAILURE;
+#else
     if (status != 0 && !context.response_started) {
         context.response_len = 0;
         if (status == 3 && context.output_failed) {
@@ -796,4 +843,5 @@ int main(int argc, char **argv) {
         return 4;
     }
     return status;
+#endif
 }
