@@ -1035,7 +1035,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let constant_block = try lower_add_block(d, right_block.state, function, "bb_short_const")
             let join = try lower_add_block(d, constant_block.state, function, "bb_short_join")
             let result_type = try lower_type(d, source_state, store, join.state, expression.checked_type)
-            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, "short", result_type.id)
+            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "short_", join.id), result_type.id)
             var current = lower_with_mir(result_type.state, param.store)
             let source_block = lower_open_block(current.mir, function, block)
             if expression.operator == 16 { current = try lower_branch(d, current, function, source_block, left.id, right_block.id, constant_block.id) }
