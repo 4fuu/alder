@@ -232,6 +232,11 @@ fn lower_mode(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> 
 }
 
 func TestAlderCoreConformance(t *testing.T) {
+	parallel := os.Getenv("UPDATE_GOLDEN") == ""
+	if parallel {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -297,10 +302,40 @@ func TestAlderCoreConformance(t *testing.T) {
 	}
 	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
 
-	t.Run("checker", func(t *testing.T) { runCheckerConformance(t, exe) })
-	t.Run("lower", func(t *testing.T) { runLowerConformance(t, exe) })
-	t.Run("cgen-skeleton", func(t *testing.T) { runCgenSkeletonConformance(t, cc, root, exe) })
-	t.Run("cgen-scalar-cfg", func(t *testing.T) { runCgenBodyConformance(t, cc, root, exe) })
-	t.Run("printer", func(t *testing.T) { runMIRPrinterConformance(t, exe) })
-	t.Run("verifier-v1-v10", func(t *testing.T) { runMIRVerifierConformance(t, exe) })
+	t.Run("checker", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runCheckerConformance(t, exe)
+	})
+	t.Run("lower", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runLowerConformance(t, exe)
+	})
+	t.Run("cgen-skeleton", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runCgenSkeletonConformance(t, cc, root, exe)
+	})
+	t.Run("cgen-scalar-cfg", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runCgenBodyConformance(t, cc, root, exe)
+	})
+	t.Run("printer", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runMIRPrinterConformance(t, exe)
+	})
+	t.Run("verifier-v1-v10", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runMIRVerifierConformance(t, exe)
+	})
 }

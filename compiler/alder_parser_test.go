@@ -169,6 +169,10 @@ END
 `
 
 func TestAlderParserConformanceEndToEnd(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")

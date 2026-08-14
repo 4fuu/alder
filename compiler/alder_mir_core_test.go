@@ -232,6 +232,10 @@ fn main(d: Domain) -> I32 { return match mir_store_new(d) {
 `
 
 func TestAlderMIRCoreConformance(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
