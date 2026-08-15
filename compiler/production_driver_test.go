@@ -162,6 +162,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 			}
 		})
 	}
+	testProductionInvalidEscapeFacts(t, exe)
 	duplicate := map[string]string{"a.al": "type clash { value: I64 }\n", "z.al": "fn clash() -> Unit { }\n"}
 	related := runProductionCompiler(t, exe, duplicate, "check", "--format=json", "z.al", "a.al")
 	relatedEnvelope := decodeProductionEnvelope(t, related.stdout)
@@ -187,6 +188,73 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	missingEnvelope := decodeProductionEnvelope(t, missingJSON.stdout)
 	if missingJSON.status != 3 || missingJSON.stderr != "" || missingEnvelope.Failure == nil || missingEnvelope.Failure.Kind != "io" {
 		t.Fatalf("JSON input I/O class: %+v envelope=%+v", missingJSON, missingEnvelope)
+	}
+}
+
+func testProductionInvalidEscapeFacts(t *testing.T, exe string) {
+	t.Helper()
+	fixtures := []struct {
+		name, text string
+	}{
+		{"earlier-valid.al", `let s = "a\nb\q"` + "\n"},
+		// Two adjacent escaped backslashes precede the invalid escape.
+		{"repeated-escapes.al", `let s = "\\\\\q"` + "\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			source := frontend.Source{ID: 1, Path: fixture.name, Text: fixture.text}
+			_, diagnostics, err := frontend.CompileSource(source)
+			if err != nil || len(diagnostics) != 1 {
+				t.Fatalf("Go diagnostic oracle: diagnostics=%+v error=%v", diagnostics, err)
+			}
+			want := diagnostics[0]
+			if want.Message != `invalid escape \q` {
+				t.Fatalf("Go diagnostic oracle message = %q", want.Message)
+			}
+			startLine, startColumn := source.LineColumn(want.Primary.Start)
+			endLine, endColumn := source.LineColumn(want.Primary.End)
+			wantHuman := fmt.Sprintf("%s:%d:%d: %s[%s]: %s\n", source.Path, startLine, startColumn, want.Severity, want.Code, want.Message)
+			var firstHuman, firstJSON string
+			for attempt := 0; attempt < 3; attempt++ {
+				root := t.TempDir()
+				files := map[string]string{fixture.name: fixture.text}
+				human := runProductionCompilerAtRoot(t, exe, root, files, "compile", "--emit=mir", "-o", "out.mir", fixture.name)
+				if human.status != 1 || human.stdout != "" || human.stderr != wantHuman {
+					t.Fatalf("human diagnostic mismatch: got=%+v want stderr=%q", human, wantHuman)
+				}
+				assertProductionArtifactAbsent(t, root)
+
+				machine := runProductionCompilerAtRoot(t, exe, root, files, "compile", "--format=json", "--emit=mir", "-o", "out.mir", fixture.name)
+				envelope := decodeProductionEnvelope(t, machine.stdout)
+				if machine.status != 1 || machine.stderr != "" || envelope.Version != 1 || envelope.Command != "compile" || envelope.Success || envelope.Artifact != nil || envelope.Failure != nil || len(envelope.Diagnostics) != 1 {
+					t.Fatalf("JSON diagnostic protocol mismatch: result=%+v envelope=%+v", machine, envelope)
+				}
+				got := envelope.Diagnostics[0]
+				if got.Code != string(want.Code) || got.Severity != string(want.Severity) || got.Message != want.Message ||
+					got.Range.Path != source.Path || got.Range.StartByte != want.Primary.Start || got.Range.EndByte != want.Primary.End ||
+					got.Range.Start.Line != startLine || got.Range.Start.Column != startColumn || got.Range.End.Line != endLine || got.Range.End.Column != endColumn ||
+					len(got.Related) != len(want.Related) || len(got.Notes) != len(want.Notes) {
+					t.Fatalf("decoded JSON diagnostic mismatch: got=%+v want=%+v", got, want)
+				}
+				assertProductionArtifactAbsent(t, root)
+				if attempt == 0 {
+					firstHuman, firstJSON = human.stderr, machine.stdout
+				} else if human.stderr != firstHuman || machine.stdout != firstJSON {
+					t.Fatal("invalid-escape diagnostics changed across fresh processes or workspace roots")
+				}
+			}
+		})
+	}
+}
+
+func assertProductionArtifactAbsent(t *testing.T, root string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(root, "out.mir")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected compilation left output artifact: %v", err)
+	}
+	temps, err := filepath.Glob(filepath.Join(root, "out.mir.alder-tmp-*"))
+	if err != nil || len(temps) != 0 {
+		t.Fatalf("rejected compilation left temporary artifacts: paths=%v error=%v", temps, err)
 	}
 }
 
@@ -377,7 +445,11 @@ int main(void) { int context = 0; %s return alder_program_entry(&context) == (in
 
 func runProductionCompiler(t *testing.T, exe string, files map[string]string, args ...string) productionResult {
 	t.Helper()
-	dir := t.TempDir()
+	return runProductionCompilerAtRoot(t, exe, t.TempDir(), files, args...)
+}
+
+func runProductionCompilerAtRoot(t *testing.T, exe, dir string, files map[string]string, args ...string) productionResult {
+	t.Helper()
 	for name, text := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

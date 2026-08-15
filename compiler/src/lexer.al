@@ -59,8 +59,8 @@ fn add_token(d: Domain, state: State, source_id: U64, kind: U64, keyword: U64, s
     return Ok(State(paths: state.paths, texts: state.texts, values: values, sources: state.sources, tokens: tokens, diagnostics: state.diagnostics))
 }
 
-fn fail_lex(d: Domain, state: State, kind: U64, source: U64, start: U64, end: U64) -> Result(LexResult, __s0_Error) {
-    let diag = LexDiagRec(kind: kind, source: source, start: start, end: end)
+fn fail_lex(d: Domain, state: State, kind: U64, source: U64, start: U64, end: U64, detail_start: U64) -> Result(LexResult, __s0_Error) {
+    let diag = LexDiagRec(kind: kind, source: source, start: start, end: end, detail_start: detail_start)
     let diagnostics = try __s0_buffer_append(LexDiagRec, d, state.diagnostics, diag)
     return Ok(Bad(State(paths: state.paths, texts: state.texts, values: state.values, sources: state.sources, tokens: state.tokens, diagnostics: diagnostics)))
 }
@@ -131,7 +131,7 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                 pos = pos + 1
                             }
                         }
-                        if !closed { return fail_lex(d, state, 6, source_id, comment_start, comment_start + 1) }
+                        if !closed { return fail_lex(d, state, 6, source_id, comment_start, comment_start + 1, 0) }
                     } else {
                         skipping = false
                     }
@@ -167,7 +167,7 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                         if pos < length && (text_byte(state, source, pos) == 43 || text_byte(state, source, pos) == 45) { pos = pos + 1 }
                         let exponent_start = pos
                         while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
-                        if exponent_start == pos { return fail_lex(d, state, 3, source_id, start, start + 1) }
+                        if exponent_start == pos { return fail_lex(d, state, 3, source_id, start, start + 1, 0) }
                     }
                     let value_start = __s0_buffer_len(U8, state.values)
                     let values = try copy_value(d, state.values, state, source, start, pos)
@@ -180,14 +180,14 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                         var closed = false
                         while pos < length && !closed {
                             let item = text_byte(state, source, pos)
-                            if item == 10 { return fail_lex(d, state, 5, source_id, start, start + 1) }
+                            if item == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
                             if item == 34 {
                                 pos = pos + 1
                                 closed = true
                             } else {
                                 if item == 92 {
                                     pos = pos + 1
-                                    if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, start, start + 1) }
+                                    if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
                                     let escape = text_byte(state, source, pos)
                                     var decoded: U8 = 0
                                     let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48
@@ -197,7 +197,7 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                     if escape == 92 { decoded = 92 }
                                     if escape == 34 { decoded = 34 }
                                     if escape == 48 { decoded = 0 }
-                                    if !valid { return fail_lex(d, state, 4, source_id, start, start + 1) }
+                                    if !valid { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
                                     values = try __s0_buffer_append(U8, d, values, decoded)
                                     pos = pos + 1
                                 } else {
@@ -206,11 +206,11 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                 }
                             }
                         }
-                        if !closed { return fail_lex(d, state, 5, source_id, start, start + 1) }
+                        if !closed { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
                         state = try add_token(d, state, source_id, 4, 0, start, pos, leading, values, value_start)
                     } else {
                         if c == 59 {
-                            return fail_lex(d, state, 1, source_id, start, start + 1)
+                            return fail_lex(d, state, 1, source_id, start, start + 1, 0)
                         } else {
                             if punctuation(c) {
                                 pos = pos + 1
@@ -219,7 +219,7 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                 let values = try copy_value(d, state.values, state, source, start, pos)
                                 state = try add_token(d, state, source_id, 5, 0, start, pos, leading, values, value_start)
                             } else {
-                                return fail_lex(d, state, 2, source_id, start, unexpected_end(state, source, start, length))
+                                return fail_lex(d, state, 2, source_id, start, unexpected_end(state, source, start, length), 0)
                             }
                         }
                     }
