@@ -40,7 +40,7 @@ A function contains:
 
 Mutable language variables lower to explicit places and stores. Pure computed temporaries are single-assignment values. Alder has no MIR `move` operation that invalidates a source value.
 
-Values are defined by function parameters, block parameters, instruction results, and switch case payload bindings. A value may be used only where its definition dominates the use (see Verifier Phases). Calls and FFI calls whose result type is `unit` may be left unbound; every other producing operation must bind its result.
+Values are defined by function parameters, block parameters, instruction results, and switch case payload bindings. Textual value names must be unique within a function; the same name may be used in different functions. A value may be used only where its definition dominates the use (see Verifier Phases). Calls and FFI calls whose result type is `unit` may be left unbound; every other producing operation must bind its result.
 
 ## Generic Boundary
 

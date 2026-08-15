@@ -71,6 +71,10 @@ fn cgen_run(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
         return Ok(7) }
         if host_path_is(1, "!cgen-body") { if try cgen_generate(d, try cgen_body_fixture(d, store), 3, true) { return Ok(0) }
         return Ok(7) }
+        if host_path_is(1, "!cgen-ffi-result-verify") { if emit_verification(97, try mir_verify_module(d, try cgen_ffi_result_fixture(d, store), 3)) { return Ok(0) }
+        return Ok(7) }
+        if host_path_is(1, "!cgen-ffi-result") { if try cgen_generate(d, try cgen_ffi_result_fixture(d, store), 3, true) { return Ok(0) }
+        return Ok(7) }
         if host_path_is(1, "!cgen-body-invalid") { let malformed = try mir_add_const(d, try cgen_body_fixture(d, store), "bad", 999, mir_const_int(), 0, 1, 0, "")
         return Ok(cgen_rejected(try cgen_generate(d, malformed.store, 3, true))) }
         if host_path_is(1, "!cgen-body-unsupported-verify") { if emit_verification(98, try mir_verify_module(d, try cgen_unsupported_fixture(d, store), 3)) { return Ok(0) }

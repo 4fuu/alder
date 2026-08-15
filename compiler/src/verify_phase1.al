@@ -177,6 +177,11 @@ scan = scan + 1 }
         if !mir_vfunction_exists(store, v.function) || v.def_kind > mir_value_def_switch_case() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, v.def_kind, 0)) }
         if v.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), v.function, v.block, 0, 0, 0, 0, at + 1, expected, v.ordinal, 0)) }
         if !mir_vname_valid(store, v.name_start, v.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
+        scan = 0
+        while scan < at { let prior = __s0_buffer_get(MirValueRec, store.values, scan)
+if prior.function == v.function && mir_vname_equal(store, v.name_start, v.name_end, prior.name_start, prior.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, scan + 1))
+scan = at }
+scan = scan + 1 }
         if v.def_kind != mir_value_def_function_param() && mir_vblock_index(store, v.function, v.block) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, v.block)) }
         var reciprocal: U64 = 0
         if v.def_kind == mir_value_def_function_param() || v.def_kind == mir_value_def_block_param() { var pi: U64 = 0
