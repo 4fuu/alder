@@ -22,12 +22,14 @@ type TokenRec {
 
 // Lexical diagnostic kinds retain the stable LEX0001 message variant:
 // 1 semicolon, 2 unexpected character, 3 invalid exponent, 4 invalid escape,
-// 5 unterminated string, and 6 unterminated block comment.
+// 5 unterminated string, and 6 unterminated block comment. For kind 4,
+// detail_start is the exact offending backslash byte; it is zero otherwise.
 type LexDiagRec {
     kind: U64
     source: U64
     start: U64
     end: U64
+    detail_start: U64
 }
 
 // Parser syntax kinds are stable for the current M5.4 parser slices:
