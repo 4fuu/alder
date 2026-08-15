@@ -168,6 +168,30 @@ func TestAPIRejections(t *testing.T) {
 	}
 }
 
+func TestDuplicateLocalNames(t *testing.T) {
+	duplicate := mir.NewModule()
+	f := duplicate.AddFunction("f", nil, mir.TypeUnit)
+	f.AddLocal("slot", mir.TypeU64)
+	f.AddLocal("slot", mir.TypeU64)
+	f.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	const want = "fn @f: duplicate local name %slot"
+	if got := Errors(Module(duplicate)).String(); got != want {
+		t.Fatalf("duplicate local diagnostics = %q, want %q", got, want)
+	} else if repeat := Errors(Module(duplicate)).String(); repeat != got {
+		t.Fatalf("duplicate local diagnostics changed: %q then %q", got, repeat)
+	}
+
+	reused := mir.NewModule()
+	for _, name := range []string{"first", "second"} {
+		fn := reused.AddFunction(name, nil, mir.TypeUnit)
+		fn.AddLocal("shared", mir.TypeU64)
+		fn.AddBlock("entry", nil).SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	}
+	if errs := Module(reused); len(errs) != 0 {
+		t.Fatalf("cross-function local-name reuse rejected:\n%s", Errors(errs).String())
+	}
+}
+
 func TestAllocCheckedResultUnavailableOnFailure(t *testing.T) {
 	m := mir.NewModule()
 	f := m.AddFunction("f", []mir.Param{

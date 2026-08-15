@@ -121,6 +121,27 @@ fn cross_function_value_names_fixture(d: Domain, initial: MirStore) -> Result(Mi
     return Ok(second_term.store)
 }
 
+fn duplicate_local_name_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let function = try mir_add_function(d, initial, "duplicate_locals", mir_type_unit())
+    let first = try mir_add_local(d, function.store, function.id, 0, "slot", mir_type_u64())
+    let second = try mir_add_local(d, first.store, function.id, 1, "slot", mir_type_u64())
+    let block = try mir_add_block(d, second.store, function.id, 0, "entry")
+    let term = try mir_add_terminator(d, block.store, MirTermRec(function: function.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(term.store)
+}
+
+fn cross_function_local_names_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
+    let first = try mir_add_function(d, initial, "first", mir_type_unit())
+    let first_local = try mir_add_local(d, first.store, first.id, 0, "shared", mir_type_u64())
+    let first_block = try mir_add_block(d, first_local.store, first.id, 0, "entry")
+    let first_term = try mir_add_terminator(d, first_block.store, MirTermRec(function: first.id, block: first_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    let second = try mir_add_function(d, first_term.store, "second", mir_type_unit())
+    let second_local = try mir_add_local(d, second.store, second.id, 0, "shared", mir_type_u64())
+    let second_block = try mir_add_block(d, second_local.store, second.id, 0, "entry")
+    let second_term = try mir_add_terminator(d, second_block.store, MirTermRec(function: second.id, block: second_block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(second_term.store)
+}
+
 fn call_fixture(d: Domain, initial: MirStore, result_type: U64, bind: Bool, ffi: Bool) -> Result(MirStore, __s0_Error) {
     var store = initial
     var target: U64 = 1
@@ -975,7 +996,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     var duplicate_locals = try __s0_buffer_append(MirLocalRec, d, local_name.store.locals, MirLocalRec(function: 1, ordinal: 0, name_start: local_name.start, name_end: local_name.end, local_type: mir_type_u64()))
     duplicate_locals = try __s0_buffer_append(MirLocalRec, d, duplicate_locals, MirLocalRec(function: 1, ordinal: 0, name_start: local_name.start, name_end: local_name.end, local_type: mir_type_u64()))
     let duplicate_local = try mir_verify_module(d, mir_with_locals(local_name.store, duplicate_locals), 3)
-    if !expect_verification(24, duplicate_local, mir_vdiag(1, mir_vdiag_bad_ordinal(), 1, 0, 0, 0, 0, 0, 2, 1, 0, 0)) { return Ok(false) }
+    if !emit_verification(24, duplicate_local) { return Ok(false) }
 
     let orphan_base = try minimal(d, try mir_store_new(d), mir_type_unit(), false)
     let orphan_operands = try __s0_buffer_append(MirOperandRec, d, orphan_base.operands, MirOperandRec(kind: mir_operand_instruction(), owner: 99, ordinal: 0, edge: 0, value: 0, target: 0, operand_type: 0, name_start: 0, name_end: 0))
@@ -1143,6 +1164,13 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if rejected_values.complete { if mir_print(duplicate_values) { return Ok(false) } }
 	if try cgen_generate(d, duplicate_values, 3, false) { return Ok(false) }
 	if !expect_complete(93, try mir_verify_complete(d, try cross_function_value_names_fixture(d, try mir_store_new(d)), 3, false), true, false, 0, 0, 0) { return Ok(false) }
+	let same_name_locals = try duplicate_local_name_fixture(d, try mir_store_new(d))
+	if !expect_verification(94, try mir_verify_module(d, same_name_locals, 3), mir_vdiag(1, mir_vdiag_duplicate_name(), 1, 0, 0, 0, 0, 0, 2, 0, 0, 1)) { return Ok(false) }
+	let rejected_locals = try mir_verify_complete(d, same_name_locals, 3, false)
+	if !expect_complete(95, rejected_locals, false, false, 0, 1, mir_vdiag_duplicate_name()) { return Ok(false) }
+	if rejected_locals.complete { if mir_print(same_name_locals) { return Ok(false) } }
+	if try cgen_generate(d, same_name_locals, 3, false) { return Ok(false) }
+	if !expect_complete(96, try mir_verify_complete(d, try cross_function_local_names_fixture(d, try mir_store_new(d)), 3, false), true, false, 0, 0, 0) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1163,12 +1191,12 @@ fn main(d: Domain) -> I32 {
 `
 
 func runMIRVerifierConformance(t *testing.T, exe string) {
-	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nE 24 1 7\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 60 0 1 0 0\nC 61 0 1 1 1\nC 62 0 1 1 1\nC 63 1 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nC 64 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\nC 65 1 0 1 0\nD 10 70 0 0 0 0 0 0 0 1 0 0\nC 66 1 0 1 0\nD 1 5 2 0 0 0 0 0 2 0 0 1\nC 67 1 0 1 1\nD 10 72 1 0 0 0 0 1 1 5 1 1\nC 68 1 0 1 1\nD 10 73 1 0 0 0 0 0 1 1 2 1\nC 69 1 0 1 0\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 70 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\n"
+	want := "V 0 0\nV 1 1\nD 1 2 0 0 0 0 0 0 0 12 0 0\nV 2 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nV 3 1\nD 3 25 1 1 0 0 0 0 0 0 1 0\nV 4 1\nD 1 1 0 0 0 0 0 0 0 1 99 3\nE 5 1 9\nE 6 1 14\nE 7 2 16\nE 8 2 17\nE 9 2 20\nE 10 2 22\nE 11 2 23\nE 12 3 36\nV 13 0\nV 14 0\nV 15 0\nE 16 1 12\nE 17 3 28\nE 18 3 27\nE 19 3 32\nE 20 3 30\nE 21 3 35\nE 22 3 31\nE 23 3 34\nV 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 25 1 6\nE 26 2 21\nE 27 2 18\nE 28 3 26\nE 29 1 11\nE 30 4 37\nE 31 4 38\nV 32 0\nE 33 4 37\nE 34 5 40\nE 35 5 41\nE 36 5 44\nE 37 5 43\nE 38 5 45\nV 39 0\nE 40 6 49\nV 41 0\nE 42 7 57\nE 43 6 49\nE 44 6 49\nE 45 6 49\nV 46 0\nE 47 6 49\nV 48 0\nE 49 6 49\nV 50 0\nV 51 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 52 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\nV 53 2\nD 1 9 1 1 0 0 0 0 1 1 0 0\nD 1 9 1 2 0 0 0 0 2 1 0 0\nV 54 0\nV 55 1\nD 9 67 2 1 2 0 3 13 0 0 0 2\nV 56 1\nD 9 67 1 1 2 0 0 13 0 0 0 2\nV 57 1\nD 9 67 1 1 0 1 3 13 0 0 0 2\nV 58 1\nD 9 67 1 1 2 0 0 14 0 0 0 2\nV 59 1\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 60 0 1 0 0\nC 61 0 1 1 1\nC 62 0 1 1 1\nC 63 1 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nC 64 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\nC 65 1 0 1 0\nD 10 70 0 0 0 0 0 0 0 1 0 0\nC 66 1 0 1 0\nD 1 5 2 0 0 0 0 0 2 0 0 1\nC 67 1 0 1 1\nD 10 72 1 0 0 0 0 1 1 5 1 1\nC 68 1 0 1 1\nD 10 73 1 0 0 0 0 0 1 1 2 1\nC 69 1 0 1 0\nD 2 21 1 0 0 0 0 999 1 0 0 999\nC 70 1 0 0 0\nD 10 69 1 1 1 0 0 13 0 0 10 13\n"
 	want = strings.ReplaceAll(want, "C 67 1 0 1 1\n", "C 67 1 0 1 0\n")
 	want = strings.ReplaceAll(want, "C 68 1 0 1 1\n", "C 68 1 0 1 0\n")
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 3\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 93 0 1 0 0\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 93 0 1 0 0\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
