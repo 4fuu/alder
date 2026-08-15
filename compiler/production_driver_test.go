@@ -490,7 +490,7 @@ func runProductionCompilerAtRoot(t *testing.T, exe, dir string, files map[string
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
 	tmp := filepath.Join(dir, "tmp")
-	if err := os.Mkdir(tmp, 0o755); err != nil {
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
