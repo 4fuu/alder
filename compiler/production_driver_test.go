@@ -122,6 +122,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if otherRoot.stdout != mirText {
 		t.Fatal("MIR changed across workspace roots")
 	}
+	testProductionLocalNameUniqueness(t, cc, root, exe)
 
 	jsonMIR := runProductionCompiler(t, exe, valid, "compile", "--format=json", "--emit=mir", "z/main.al", "a/helper.al")
 	mirEnvelope := decodeProductionEnvelope(t, jsonMIR.stdout)
@@ -255,6 +256,93 @@ func assertProductionArtifactAbsent(t *testing.T, root string) {
 	if err != nil || len(temps) != 0 {
 		t.Fatalf("rejected compilation left temporary artifacts: paths=%v error=%v", temps, err)
 	}
+}
+
+func testProductionLocalNameUniqueness(t *testing.T, cc, root, exe string) {
+	t.Helper()
+	files := map[string]string{"locals.al": `enum Choice {
+    Left(value: U64)
+    Right(value: U64)
+}
+fn repeated(value: Choice) -> U64 {
+    {
+        let unique: U64 = match value {
+            Left(v) => v
+            Right(v) => v
+        }
+        return unique
+    }
+}
+fn separate(value: Choice) -> U64 {
+    return match value {
+        Left(v) => v
+        Right(other) => other
+    }
+}
+fn main() -> I32 {
+    if repeated(Left(7)) != 7 { return 1 }
+    if repeated(Right(8)) != 8 { return 2 }
+    if separate(Left(9)) != 9 { return 3 }
+    return 7
+}
+`}
+	first := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "locals.al")
+	second := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "locals.al")
+	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 3\n") || first.stdout != second.stdout {
+		t.Fatalf("source-local MIR result is empty, failed, or nondeterministic: first=%+v second=%+v", first, second)
+	}
+	module, err := mir.Parse(first.stdout)
+	if err != nil {
+		t.Fatalf("parse source-local MIR: %v\n%s", err, first.stdout)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify source-local MIR through V1-V10: %s\n%s", verify.Errors(diagnostics).String(), first.stdout)
+	}
+	repeatedID, ok := module.Function("repeated")
+	if !ok {
+		t.Fatal("source-local MIR has no repeated function")
+	}
+	repeated := module.Functions[repeatedID]
+	wantNames := []string{"v", "__s0_local_1", "unique"}
+	if len(repeated.Locals) != len(wantNames) {
+		t.Fatalf("repeated locals = %+v, want names %v", repeated.Locals, wantNames)
+	}
+	for i, want := range wantNames {
+		if repeated.Locals[i].Name != want {
+			t.Fatalf("repeated local %d name = %q, want %q", i, repeated.Locals[i].Name, want)
+		}
+	}
+	separateID, ok := module.Function("separate")
+	if !ok {
+		t.Fatal("source-local MIR has no separate function")
+	}
+	separate := module.Functions[separateID]
+	if len(separate.Locals) != 2 || separate.Locals[0].Name != "v" || separate.Locals[1].Name != "other" {
+		t.Fatalf("same source name in separate function was changed: %+v", separate.Locals)
+	}
+	uses := make([]int, len(repeated.Locals))
+	for _, block := range repeated.Blocks {
+		for _, instruction := range block.Instrs {
+			if instruction.Op == mir.OpLoad || instruction.Op == mir.OpStore {
+				place := instruction.Place
+				for place.Kind == mir.PlaceField {
+					place = *place.Base
+				}
+				if place.Kind == mir.PlaceLocal && int(place.Local) < len(uses) {
+					uses[place.Local]++
+				}
+			}
+		}
+	}
+	if uses[2] == 0 {
+		t.Fatalf("ordinary local declarations and references are not linked: use counts %v", uses)
+	}
+	cOutput := runProductionCompiler(t, exe, files, "compile", "--emit=c", "locals.al")
+	cRepeat := runProductionCompiler(t, exe, files, "compile", "--emit=c", "locals.al")
+	if cOutput.status != 0 || cOutput.stderr != "" || cOutput.stdout != cRepeat.stdout {
+		t.Fatalf("source-local C result failed or was nondeterministic: first=%+v second=%+v", cOutput, cRepeat)
+	}
+	compileAndRunProductionArtifact(t, cc, root, cOutput.stdout, 7)
 }
 
 func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
