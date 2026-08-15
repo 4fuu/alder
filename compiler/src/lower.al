@@ -873,6 +873,16 @@ fn lower_add_switch_case(d: Domain, state: LowerState, term: U64, ordinal: U64, 
     return Ok(LowerStep(state: lower_with_mir(state, step.store), id: step.id))
 }
 
+fn lower_digits_equal(bytes: __s0_Buffer(U8), start: U64, end: U64, digits: String) -> Bool {
+    if end < start || end - start != len(digits) { return false }
+    var at: U64 = 0
+    while at < len(digits) {
+        if __s0_buffer_get(U8, bytes, start + at) != digits[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
 fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expression: CheckedExprRec) -> I64 {
     if expression.syntax == 0 || expression.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return 0 }
     let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
@@ -885,6 +895,9 @@ fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expr
         negative = true
         at = at + 1
     }
+    // I64 minimum cannot be accumulated as a positive I64; the checker already
+    // accepted this exact digit string under a negative sign.
+    if negative && lower_digits_equal(source_state.texts, at, end, "9223372036854775808") { return -9223372036854775808 }
     while at < end {
         let byte = __s0_buffer_get(U8, source_state.texts, at)
         value = value * 10

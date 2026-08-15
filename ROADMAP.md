@@ -513,8 +513,11 @@ stack). `TestAlderProductionDriverEndToEnd` and
 buffer e2e programs (including match on `Result(__s0_Buffer(T), __s0_Error)`
 without a source `[T]`), and the reject corpus (human prefix plus related
 ranges) emit verified MIR/C or stable diagnostics. Buffer helpers intern
-Result and slice MIR types when the check store has no source `[T]`. M5.5
-stays planned until the alder1→alder2 fixed point is measured.
+Result and slice MIR types when the check store has no source `[T]`. I64
+minimum literals no longer panic in `lower_parse_i64`. M5.5 stays planned:
+alder1 can check the small corpus, but `compiler/src` still does not finish
+inside 20 minutes because the Alder verifier uses per-query BFS dominance
+and linear ID scans.
 
 #### Bootstrap execution policy
 

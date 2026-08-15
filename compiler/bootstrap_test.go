@@ -87,6 +87,10 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	}
 	exe := buildAlder1(t, cc, root)
 	noGo := noGoEnv(t, cc)
+	t.Run("i64-min", func(t *testing.T) {
+		files := map[string]string{"i64min.al": "fn main() -> I32 {\n    if -9223372036854775808 == -9223372036854775807 - 1 { return 0 }\n    return 1\n}\n"}
+		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "i64min.al", "", 0)
+	})
 	t.Run("s0-error-limit", func(t *testing.T) {
 		files := map[string]string{"limit.al": "fn f() -> Result(U64, __s0_Error) { return Err(Limit) }\nfn main() -> I32 { return 0 }\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "limit.al", "", 0)
@@ -350,6 +354,35 @@ func noGoEnv(t *testing.T, cc string) []string {
 		t.Fatalf("constructed PATH still contains a go executable:\n%s", output)
 	}
 	return out
+}
+
+func TestAlder1CompilesCompilerSource(t *testing.T) {
+	if os.Getenv("ALDER_BOOTSTRAP_SELFCOMPILE") == "" {
+		t.Skip("set ALDER_BOOTSTRAP_SELFCOMPILE=1 to run alder1 on compiler/src")
+	}
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe := buildAlder1(t, cc, root)
+	noGo := noGoEnv(t, cc)
+	files := make(map[string]string, len(compilerSourceManifest))
+	checkArgs := []string{"check"}
+	for _, name := range compilerSourceManifest {
+		files[name] = readBootstrapFixture(t, root, filepath.Join("compiler", "src", name))
+		checkArgs = append(checkArgs, name)
+	}
+	check := runAlder1(t, exe, noGo, files, checkArgs...)
+	if check.status != 0 {
+		t.Fatalf("alder1 check of compiler/src failed: %+v", check)
+	}
 }
 
 func readBootstrapFixture(t *testing.T, root, rel string) string {
