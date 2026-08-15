@@ -10,7 +10,10 @@ type pointCFG struct {
 	boundary [][]int
 	edge     map[pointEdge]int
 	preds    [][]int
-	dom      [][]bool
+	entry    int
+	idom     []int
+	domIn    []int
+	domOut   []int
 }
 
 type pointEdge struct {
@@ -61,42 +64,127 @@ func buildPointCFG(f *mir.Function) *pointCFG {
 			}
 		}
 	}
-	n := len(g.preds)
-	g.dom = make([][]bool, n)
-	entry := g.boundary[0][0]
-	for i := 0; i < n; i++ {
-		g.dom[i] = make([]bool, n)
-		if i == entry {
-			g.dom[i][i] = true
-		} else {
-			for j := 0; j < n; j++ {
-				g.dom[i][j] = true
-			}
+	g.entry = g.boundary[0][0]
+	g.idom = computeIdoms(g.preds, g.entry)
+	g.indexDominatorTree()
+	return g
+}
+
+// computeIdoms returns the immediate dominator of each node using the
+// Cooper/Harvey/Kennedy iterative algorithm. Unreachable nodes keep idom -1;
+// the entry dominates itself.
+func computeIdoms(preds [][]int, entry int) []int {
+	n := len(preds)
+	succ := make([][]int, n)
+	for v, ps := range preds {
+		for _, p := range ps {
+			succ[p] = append(succ[p], v)
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for v := 0; v < n; v++ {
-			if v == entry {
-				continue
+	seen := make([]bool, n)
+	rpo := make([]int, 0, n)
+	var dfs func(int)
+	dfs = func(v int) {
+		seen[v] = true
+		for _, s := range succ[v] {
+			if !seen[s] {
+				dfs(s)
 			}
-			next := make([]bool, n)
-			if len(g.preds[v]) > 0 {
-				copy(next, g.dom[g.preds[v][0]])
-				for _, p := range g.preds[v][1:] {
-					for j := range next {
-						next[j] = next[j] && g.dom[p][j]
-					}
+		}
+		rpo = append(rpo, v)
+	}
+	dfs(entry)
+	for i, j := 0, len(rpo)-1; i < j; i, j = i+1, j-1 {
+		rpo[i], rpo[j] = rpo[j], rpo[i]
+	}
+	rpoIndex := make([]int, n)
+	for i := range rpoIndex {
+		rpoIndex[i] = -1
+	}
+	for i, v := range rpo {
+		rpoIndex[v] = i
+	}
+	idom := make([]int, n)
+	for i := range idom {
+		idom[i] = -1
+	}
+	idom[entry] = entry
+	changed := true
+	for changed {
+		changed = false
+		for _, b := range rpo[1:] {
+			newIdom := -1
+			for _, p := range preds[b] {
+				if idom[p] < 0 {
+					continue
+				}
+				if newIdom < 0 {
+					newIdom = p
+				} else {
+					newIdom = intersectIdom(p, newIdom, idom, rpoIndex)
 				}
 			}
-			next[v] = true
-			if !equalBools(next, g.dom[v]) {
-				g.dom[v] = next
+			if newIdom >= 0 && idom[b] != newIdom {
+				idom[b] = newIdom
 				changed = true
 			}
 		}
 	}
-	return g
+	return idom
+}
+
+func intersectIdom(b1, b2 int, idom, rpoIndex []int) int {
+	for b1 != b2 {
+		for rpoIndex[b1] > rpoIndex[b2] {
+			b1 = idom[b1]
+		}
+		for rpoIndex[b2] > rpoIndex[b1] {
+			b2 = idom[b2]
+		}
+	}
+	return b1
+}
+
+// indexDominatorTree assigns Euler-tour in/out times so dominates is O(1).
+func (g *pointCFG) indexDominatorTree() {
+	n := len(g.idom)
+	children := make([][]int, n)
+	for v, p := range g.idom {
+		if p >= 0 && v != p {
+			children[p] = append(children[p], v)
+		}
+	}
+	g.domIn = make([]int, n)
+	g.domOut = make([]int, n)
+	stamp := 0
+	var dfs func(int)
+	dfs = func(v int) {
+		stamp++
+		g.domIn[v] = stamp
+		for _, c := range children[v] {
+			dfs(c)
+		}
+		g.domOut[v] = stamp
+	}
+	if g.entry >= 0 && g.entry < n && g.idom[g.entry] >= 0 {
+		dfs(g.entry)
+	}
+}
+
+// dominates reports whether def dominates use. Unreachable nodes are treated
+// as dominating only themselves, matching the previous dataflow result for
+// nodes with no predecessors.
+func (g *pointCFG) dominates(use, def int) bool {
+	if use == def {
+		return true
+	}
+	if use < 0 || def < 0 || use >= len(g.domIn) || def >= len(g.domIn) {
+		return false
+	}
+	if g.domIn[use] == 0 || g.domIn[def] == 0 {
+		return false
+	}
+	return g.domIn[def] <= g.domIn[use] && g.domOut[use] <= g.domOut[def]
 }
 
 // successors returns every block that can follow b: terminator targets and

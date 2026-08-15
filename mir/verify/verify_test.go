@@ -195,6 +195,26 @@ func TestAllocCheckedResultUnavailableOnFailure(t *testing.T) {
 	}
 }
 
+func TestPointCFGDominatesUsesImmediateDominators(t *testing.T) {
+	preds := [][]int{
+		nil,    // 0 entry
+		{0},    // 1
+		{1},    // 2 success after checked op
+		{1},    // 3 failure edge
+		{2, 3}, // 4 join
+		nil,    // 5 unreachable
+	}
+	g := &pointCFG{preds: preds, entry: 0}
+	g.idom = computeIdoms(preds, 0)
+	g.indexDominatorTree()
+	if !g.dominates(2, 0) || !g.dominates(3, 1) || g.dominates(3, 2) {
+		t.Fatalf("idom query failed: idom=%v in=%v out=%v", g.idom, g.domIn, g.domOut)
+	}
+	if !g.dominates(5, 5) || g.dominates(4, 5) || g.dominates(5, 0) {
+		t.Fatal("unreachable node must dominate only itself")
+	}
+}
+
 func TestMalformedTypeAndPlaceAPIRejections(t *testing.T) {
 	t.Run("missing primitive type table", func(t *testing.T) {
 		errs := Module(&mir.Module{FormatVersion: 1})

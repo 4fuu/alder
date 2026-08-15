@@ -33,12 +33,12 @@ func phase4Dominance(m *mir.Module) []Error {
 			case mir.ValueDefFuncParam:
 				// Always available.
 			case mir.ValueDefBlockParam:
-				if !g.dom[useNode][g.boundary[v.Def.Block][0]] {
+				if !g.dominates(useNode, g.boundary[v.Def.Block][0]) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefInstr:
 				// A checked result exists only at the success boundary after it.
-				if !g.dom[useNode][g.boundary[v.Def.Block][v.Def.Instr+1]] {
+				if !g.dominates(useNode, g.boundary[v.Def.Block][v.Def.Instr+1]) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefSwitchCase:
@@ -54,7 +54,7 @@ func phase4Dominance(m *mir.Module) []Error {
 					continue
 				}
 				defNode := g.edge[pointEdge{v.Def.Block, edgeSwitch, v.Def.Case}]
-				if !g.dom[useNode][defNode] {
+				if !g.dominates(useNode, defNode) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			}

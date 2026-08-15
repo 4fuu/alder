@@ -33,8 +33,7 @@ type resourceState struct {
 	invalidMarks map[mir.ValueId]bool
 }
 
-func phase6Domains(m *mir.Module) []Error {
-	effects := computeFunctionEffects(m)
+func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis) []Error {
 	var errs []Error
 	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
@@ -42,8 +41,12 @@ func phase6Domains(m *mir.Module) []Error {
 		}
 		info := computeDomainInfo(m, f, effects)
 		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi])...)
-		cleanup, _ := analyzeCleanupFunction(m, f)
-		ins := solveResourceStates(m, f, info, effects, cleanup)
+		var cleanup *cleanupAnalysis
+		if fi < len(cleanups) {
+			cleanup = cleanups[fi]
+		}
+		cfg := buildPointCFG(f)
+		ins := solveResourceStates(m, f, info, effects, cleanup, cfg)
 		reach := reachable(f)
 		for bi, b := range f.Blocks {
 			if !reach[bi] {
@@ -61,7 +64,7 @@ func phase6Domains(m *mir.Module) []Error {
 					}
 				}
 				if in.Op == mir.OpCleanupScopeRun {
-					errs = append(errs, checkAndApplyCleanupRun(m, f, mir.BlockId(bi), ii, info, effects, cleanup, &st)...)
+					errs = append(errs, checkAndApplyCleanupRun(m, f, mir.BlockId(bi), ii, info, effects, cleanup, cfg, &st)...)
 				} else {
 					for _, v := range instructionUses(in) {
 						if valueInvalid(info, v, st) {
@@ -75,7 +78,7 @@ func phase6Domains(m *mir.Module) []Error {
 					if in.Op == mir.OpDomainReset && !markMatches(info, f, in.Mark, in.Domain) {
 						errs = append(errs, Error{Loc: loc, Msg: "reset mark does not correspond to the domain"})
 					}
-					applyResourceEffect(m, f, mir.BlockId(bi), ii, in, info, effects, cleanup, &st)
+					applyResourceEffect(m, f, mir.BlockId(bi), ii, in, info, effects, cleanup, cfg, &st)
 				}
 			}
 			if (b.Term.Kind == mir.TermReturn || b.Term.Kind == mir.TermFail) && b.Term.Result != mir.NoValue {
@@ -91,7 +94,7 @@ func phase6Domains(m *mir.Module) []Error {
 	return errs
 }
 
-func solveResourceStates(m *mir.Module, f *mir.Function, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis) []resourceState {
+func solveResourceStates(m *mir.Module, f *mir.Function, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, cfg *pointCFG) []resourceState {
 	in := make([]resourceState, len(f.Blocks))
 	seen := make([]bool, len(f.Blocks))
 	seen[0] = true
@@ -121,7 +124,7 @@ func solveResourceStates(m *mir.Module, f *mir.Function, info []domainInfo, effe
 			if x.FailTarget != mir.NoBlock {
 				add(x.FailTarget, st)
 			}
-			applyResourceEffect(m, f, bi, ii, x, info, effects, cleanup, &st)
+			applyResourceEffect(m, f, bi, ii, x, info, effects, cleanup, cfg, &st)
 		}
 		switch b.Term.Kind {
 		case mir.TermJump:
@@ -138,9 +141,9 @@ func solveResourceStates(m *mir.Module, f *mir.Function, info []domainInfo, effe
 	return in
 }
 
-func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, in *mir.Instr, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, st *resourceState) {
+func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, in *mir.Instr, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, cfg *pointCFG, st *resourceState) {
 	kill := func(v mir.ValueId, reset bool, mark mir.ValueId) {
-		applyDomainInvalidation(m, f, info, v, reset, mark, st)
+		applyDomainInvalidation(m, f, info, v, reset, mark, cfg, st)
 	}
 	switch in.Op {
 	case mir.OpDomainCreate:
@@ -178,7 +181,7 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 		for _, entries := range sets {
 			branch := cloneResource(*st)
 			for i := len(entries) - 1; i >= 0; i-- {
-				applyCleanupEntryEffect(m, f, info, effects, entries[i], &branch)
+				applyCleanupEntryEffect(m, f, info, effects, entries[i], cfg, &branch)
 			}
 			mergeResource(&merged, branch)
 		}
@@ -186,18 +189,18 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 	}
 }
 
-func applyCleanupEntryEffect(m *mir.Module, f *mir.Function, info []domainInfo, effects []functionEffect, e cleanupEntry, st *resourceState) {
+func applyCleanupEntryEffect(m *mir.Module, f *mir.Function, info []domainInfo, effects []functionEffect, e cleanupEntry, cfg *pointCFG, st *resourceState) {
 	if int(e.Callback) >= len(effects) {
 		return
 	}
 	for p, yes := range effects[e.Callback].destroys {
 		if yes && p < len(e.Args) {
-			applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, st)
+			applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, cfg, st)
 		}
 	}
 	for p, yes := range effects[e.Callback].resets {
 		if yes && p < len(e.Args) {
-			applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, st)
+			applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, cfg, st)
 		}
 	}
 }
@@ -214,7 +217,7 @@ func clearProducedRoots(info []domainInfo, result mir.ValueId, bi mir.BlockId, i
 	}
 }
 
-func checkAndApplyCleanupRun(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, st *resourceState) []Error {
+func checkAndApplyCleanupRun(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int, info []domainInfo, effects []functionEffect, cleanup *cleanupAnalysis, cfg *pointCFG, st *resourceState) []Error {
 	loc := locInstr(f, f.Blocks[bi], ii, &f.Blocks[bi].Instrs[ii])
 	var errs []Error
 	seenErrors := make(map[string]bool)
@@ -249,11 +252,11 @@ func checkAndApplyCleanupRun(m *mir.Module, f *mir.Function, bi mir.BlockId, ii 
 						seenErrors[msg] = true
 					}
 				}
-				applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, &branch)
+				applyDomainInvalidation(m, f, info, e.Args[p], false, mir.NoValue, cfg, &branch)
 			}
 			for p, yes := range effect.resets {
 				if yes && p < len(e.Args) {
-					applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, &branch)
+					applyDomainInvalidation(m, f, info, e.Args[p], true, mir.NoValue, cfg, &branch)
 				}
 			}
 		}
@@ -265,16 +268,17 @@ func checkAndApplyCleanupRun(m *mir.Module, f *mir.Function, bi mir.BlockId, ii 
 	return errs
 }
 
-func applyDomainInvalidation(m *mir.Module, f *mir.Function, info []domainInfo, v mir.ValueId, reset bool, mark mir.ValueId, st *resourceState) {
+func applyDomainInvalidation(m *mir.Module, f *mir.Function, info []domainInfo, v mir.ValueId, reset bool, mark mir.ValueId, cfg *pointCFG, st *resourceState) {
 	if int(v) >= len(info) {
 		return
 	}
 	ensureResource(st)
+	roots := allRoots(info)
 	if !reset {
 		for d := range info[v].deps {
 			st.dead[d] = true
 		}
-		for r := range allRoots(info) {
+		for r := range roots {
 			if rootInDomain(info, r, v) {
 				st.invalid[r] = true
 			}
@@ -283,8 +287,8 @@ func applyDomainInvalidation(m *mir.Module, f *mir.Function, info []domainInfo, 
 		return
 	}
 	md := markPoint(f, mark)
-	for r := range allRoots(info) {
-		if rootInDomain(info, r, v) && rootAfterMark(f, r, md) {
+	for r := range roots {
+		if rootInDomain(info, r, v) && rootAfterMark(cfg, r, md) {
 			st.invalid[r] = true
 		}
 	}
@@ -348,19 +352,7 @@ func domainsMayAlias(info []domainInfo, a, b mir.ValueId) bool {
 func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []domainInfo {
 	info := make([]domainInfo, len(f.Values))
 	loadStores := aliasingStores(f)
-	paramEdges := make(map[mir.ValueId][]mir.ValueId)
-	for vi, v := range f.Values {
-		if v.Def.Kind == mir.ValueDefBlockParam {
-			for _, p := range f.Blocks {
-				for _, a := range allEdgeArgsTo(p, v.Def.Block) {
-					if v.Def.Param >= len(a) {
-						continue
-					}
-					paramEdges[mir.ValueId(vi)] = append(paramEdges[mir.ValueId(vi)], a[v.Def.Param])
-				}
-			}
-		}
-	}
+	paramEdges := incomingEdgeArgs(f)
 	changed := true
 	for changed {
 		changed = false
@@ -620,6 +612,50 @@ func funcParamIndex(f *mir.Function, v mir.ValueId) int {
 	return len(f.Params)
 }
 
+func incomingEdgeArgs(f *mir.Function) map[mir.ValueId][]mir.ValueId {
+	out := make(map[mir.ValueId][]mir.ValueId)
+	params := make([][]mir.ValueId, len(f.Blocks))
+	for i, b := range f.Blocks {
+		params[i] = make([]mir.ValueId, len(b.Params))
+	}
+	for vi, v := range f.Values {
+		if v.Def.Kind == mir.ValueDefBlockParam && int(v.Def.Block) < len(params) && v.Def.Param < len(params[v.Def.Block]) {
+			params[v.Def.Block][v.Def.Param] = mir.ValueId(vi)
+		}
+	}
+	add := func(target mir.BlockId, args []mir.ValueId) {
+		if int(target) >= len(params) {
+			return
+		}
+		for i, src := range args {
+			if i >= len(params[target]) {
+				break
+			}
+			dst := params[target][i]
+			out[dst] = append(out[dst], src)
+		}
+	}
+	for _, b := range f.Blocks {
+		for i := range b.Instrs {
+			if t := b.Instrs[i].FailTarget; t != mir.NoBlock {
+				add(t, b.Instrs[i].FailArgs)
+			}
+		}
+		switch b.Term.Kind {
+		case mir.TermJump:
+			add(b.Term.Target, b.Term.Args)
+		case mir.TermBranch:
+			add(b.Term.Then, b.Term.ThenArgs)
+			add(b.Term.Else, b.Term.ElseArgs)
+		case mir.TermSwitch:
+			for _, c := range b.Term.Cases {
+				add(c.Target, c.Args)
+			}
+		}
+	}
+	return out
+}
+
 func allEdgeArgsTo(b *mir.Block, target mir.BlockId) [][]mir.ValueId {
 	var out [][]mir.ValueId
 	for i := range b.Instrs {
@@ -866,15 +902,14 @@ func markMatches(info []domainInfo, f *mir.Function, mark, domain mir.ValueId) b
 	}
 	return true
 }
-func rootAfterMark(f *mir.Function, r domainRoot, m defKey) bool {
+func rootAfterMark(g *pointCFG, r domainRoot, m defKey) bool {
 	if m.blk == mir.NoBlock {
 		return true
 	}
-	g := buildPointCFG(f)
-	if int(m.blk) >= len(g.boundary) || int(r.allocBlk) >= len(g.boundary) {
+	if g == nil || int(m.blk) >= len(g.boundary) || int(r.allocBlk) >= len(g.boundary) {
 		return true
 	}
-	return g.dom[g.boundary[r.allocBlk][r.allocIn]][g.boundary[m.blk][m.in+1]]
+	return g.dominates(g.boundary[r.allocBlk][r.allocIn], g.boundary[m.blk][m.in+1])
 }
 func placesMayAlias(a, b *mir.Place) bool {
 	ka, oka := placePath(a)

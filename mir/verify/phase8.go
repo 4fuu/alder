@@ -87,6 +87,7 @@ func aliasingStores(f *mir.Function) [][]mir.ValueId {
 func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []tableOrigins {
 	info := make([]tableOrigins, len(f.Values))
 	loadStores := aliasingStores(f)
+	edges := incomingEdgeArgs(f)
 	merge := func(dst tableOrigins, src tableOrigins) {
 		for o := range src {
 			dst[o] = true
@@ -108,12 +109,8 @@ func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) 
 					next[tableOrigin{param: funcParamIndex(f, mir.ValueId(vi)), block: -1, instr: -1}] = true
 				}
 			case mir.ValueDefBlockParam:
-				for _, p := range f.Blocks {
-					for _, a := range allEdgeArgsTo(p, v.Def.Block) {
-						if v.Def.Param < len(a) {
-							add(a[v.Def.Param])
-						}
-					}
+				for _, a := range edges[mir.ValueId(vi)] {
+					add(a)
 				}
 			case mir.ValueDefSwitchCase:
 				add(f.Blocks[v.Def.Block].Term.Value)
@@ -179,16 +176,18 @@ func originsOverlap(a, b tableOrigins) bool {
 	return false
 }
 
-func phase8Tables(m *mir.Module) []Error {
-	effects := computeFunctionEffects(m)
+func phase8Tables(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis) []Error {
 	var errs []Error
-	for _, f := range m.Functions {
+	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
 		info := computeTableInfo(m, f, effects)
 		uses := collectUses(f)
-		cleanup, _ := analyzeCleanupFunction(m, f)
+		var cleanup *cleanupAnalysis
+		if fi < len(cleanups) {
+			cleanup = cleanups[fi]
+		}
 		// Returning a local/new table is deliberately represented by a stable call
 		// site origin. This is conservative (different executions may alias only
 		// with themselves) but never drops identity.

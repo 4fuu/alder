@@ -11,7 +11,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 // EmitKind selects the requested output. EmitNone performs checking only.
@@ -104,9 +103,8 @@ func Compile(req Request) (Result, error) {
 	if len(diagnostics) != 0 {
 		return Result{Diagnostics: frontend.SortDiagnosticsBySource(diagnostics, sources)}, nil
 	}
-	if errs := verify.Module(m); len(errs) != 0 {
-		return Result{}, internalError("frontend emitted invalid MIR", fmt.Errorf("%s", verify.Errors(errs).String()))
-	}
+	// frontend.CompileSources already ran the complete verifier. EmitC
+	// re-checks at the backend gate; EmitMIR trusts that frontend result.
 	result := Result{Diagnostics: []frontend.Diagnostic{}}
 	switch req.Emit {
 	case EmitNone:
