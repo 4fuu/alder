@@ -248,6 +248,10 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	runMalformedLowerCompiler(t, exe)
 	runMatchNameConformance(t, exe)
 	runShortCircuitLowerConformance(t, exe)
+	runNotNameConformance(t, exe)
+	runLongChainLowerConformance(t, exe)
+	runContinuationLowerConformance(t, exe)
+	runErrorConstructorLowerConformance(t, exe)
 }
 
 func checkMatchValueNames(t *testing.T, module *mir.Module, functionName string, wantJoins, wantPayloads int) {
@@ -1066,4 +1070,440 @@ func runLowerCompiler(t *testing.T, exe string, files map[string]string, order [
 		t.Fatalf("lower compiler wrote stderr: %s", stderr.Bytes())
 	}
 	return stdout.Bytes()
+}
+
+func runNotNameConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"double_not.al": `fn double_not_a(value: Bool) -> Bool { return !!value }
+fn double_not_b(value: Bool) -> Bool { return !!value }
+`,
+		"not_source.al": `fn not_source(not: Bool, flag: Bool) -> Bool { return !not || !flag }
+`,
+	}
+	first := runLowerCompiler(t, exe, files, []string{"double_not.al", "not_source.al"})
+	second := runLowerCompiler(t, exe, files, []string{"double_not.al", "not_source.al"})
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("unary-not lowering produced empty MIR")
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("unary-not MIR changed across fresh processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse unary-not MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify unary-not MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	for _, name := range []string{"double_not_a", "double_not_b", "not_source"} {
+		if _, ok := module.Function(name); !ok {
+			t.Fatalf("lowered MIR has no function %q", name)
+		}
+	}
+	notSource, ok := module.Function("not_source")
+	if !ok {
+		t.Fatalf("lowered MIR has no function %q", "not_source")
+	}
+	if got := module.Functions[notSource].Params[0].Name; got != "not" {
+		t.Fatalf("source parameter renamed: got %q", got)
+	}
+	joins := 0
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			for _, param := range block.Params {
+				if param.Name == "not" {
+					t.Fatalf("unary-not join retained colliding param name %q", param.Name)
+				}
+				if strings.HasPrefix(param.Name, "__s0_not_join") {
+					joins++
+				}
+			}
+		}
+	}
+	// Six unary nots (two per function) produce six isolated join params.
+	if joins != 6 {
+		t.Fatalf("unary-not join names = %d, want 6", joins)
+	}
+	truths, falsities := 0, 0
+	constNames := map[string]bool{}
+	for _, constant := range module.Constants {
+		switch {
+		case strings.HasPrefix(constant.Name, "__s0_not_true_"):
+			truths++
+		case strings.HasPrefix(constant.Name, "__s0_not_false_"):
+			falsities++
+		}
+		if strings.HasPrefix(constant.Name, "__s0_not_") {
+			if constNames[constant.Name] {
+				t.Fatalf("duplicate unary-not constant name %q", constant.Name)
+			}
+			constNames[constant.Name] = true
+		}
+	}
+	if truths != 6 || falsities != 6 {
+		t.Fatalf("unary-not constants: truths=%d falsities=%d, want 6 and 6", truths, falsities)
+	}
+	// The not-source function must also parse and verify independently of the
+	// double-not functions.
+	sourceOnly := runLowerCompiler(t, exe, map[string]string{"not_source.al": files["not_source.al"]}, []string{"not_source.al"})
+	sourceModule, err := mir.Parse(string(sourceOnly))
+	if err != nil {
+		t.Fatalf("parse not-source MIR: %v\n%s", err, sourceOnly)
+	}
+	if diagnostics := verify.Module(sourceModule); len(diagnostics) != 0 {
+		t.Fatalf("verify not-source MIR: %s\n%s", verify.Errors(diagnostics), sourceOnly)
+	}
+	sourceID, ok := sourceModule.Function("not_source")
+	if !ok {
+		t.Fatalf("lowered MIR has no function %q", "not_source")
+	}
+	if got := sourceModule.Functions[sourceID].Params[0].Name; got != "not" {
+		t.Fatalf("source parameter renamed: got %q", got)
+	}
+	for _, function := range sourceModule.Functions {
+		for _, block := range function.Blocks {
+			for _, param := range block.Params {
+				if param.Name == "not" {
+					t.Fatalf("unary-not join retained colliding param name %q", param.Name)
+				}
+			}
+		}
+	}
+}
+
+func runLongChainLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	// A straight-line root-block chain of 24 lets, 24 assignments, and a
+	// return exercises the iterative statement-chain walk: the former
+	// link.next recursion paid a call frame per link and exhausted on
+	// chains this long.
+	var body strings.Builder
+	body.WriteString("fn long_chain(seed: U64) -> U64 {\n")
+	body.WriteString("    var total = seed\n")
+	for i := 0; i < 24; i++ {
+		fmt.Fprintf(&body, "    let step_%d = total + %d\n", i, i+1)
+		fmt.Fprintf(&body, "    total = step_%d * 2\n", i)
+	}
+	body.WriteString("    return total\n")
+	body.WriteString("}\n")
+	files := map[string]string{"longchain.al": body.String()}
+	first := runLowerCompiler(t, exe, files, []string{"longchain.al"})
+	second := runLowerCompiler(t, exe, files, []string{"longchain.al"})
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("long statement chain lowering produced empty MIR")
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("long statement chain MIR changed across fresh processes")
+	}
+	for run, output := range [][]byte{first, second} {
+		parsed, err := mir.Parse(string(output))
+		if err != nil {
+			t.Fatalf("parse long chain MIR run %d: %v\n%s", run, err, output)
+		}
+		if diagnostics := verify.Module(parsed); len(diagnostics) != 0 {
+			t.Fatalf("verify long chain MIR run %d: %s\n%s", run, verify.Errors(diagnostics), output)
+		}
+		if _, ok := parsed.Function("long_chain"); !ok {
+			t.Fatalf("long chain MIR run %d has no long_chain function\n%s", run, output)
+		}
+	}
+}
+
+func runContinuationLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"continuations.al": `fn checked(n: I64, d: I64) -> Result(I64, I64) {
+    if d == 0 {
+        return Err(1)
+    }
+    return Ok(n / d)
+}
+
+enum Which {
+    First
+    Second
+}
+
+type Indexed {
+    value: U64
+    mark: U64
+}
+
+fn sequential_try(d: Domain) -> Result(U64, __s0_Error) {
+    let first = try __s0_buffer_new(U64, d)
+    let second = try __s0_buffer_append(U64, d, first, 7)
+    let third = try __s0_buffer_append(U64, d, second, 9)
+    return Ok(__s0_buffer_len(U64, third))
+}
+
+fn double(d: Domain) -> Result(Result(U64, __s0_Error), __s0_Error) {
+    return Ok(Ok(5))
+}
+
+fn nested_try(d: Domain) -> Result(U64, __s0_Error) {
+    let value = try try double(d)
+    return Ok(value)
+}
+
+fn try_of_match(d: Domain) -> Result(U64, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let grown = try match __s0_buffer_append(U64, d, empty, 7) {
+        Ok(value) => Ok(__s0_buffer_len(U64, value))
+        Err(error) => Err(error)
+    }
+    return Ok(grown)
+}
+
+fn arm_assign_try(d: Domain, b: __s0_Buffer(U64), bad: Bool) -> Result(U64, __s0_Error) {
+    var value: U64 = 0
+    if bad {
+        value = try __s0_buffer_append(U64, d, b, 9)
+    } else {
+        value = try __s0_buffer_append(U64, d, b, 8)
+    }
+    return Ok(value)
+}
+
+fn arm_assign_checked(bad: Bool) -> Result(I64, I64) {
+    var value: I64 = 0
+    if bad {
+        value = try checked(10, 0)
+    } else {
+        value = try checked(10, 2)
+    }
+    return Ok(value)
+}
+
+fn arm_assign_match(d: Domain, flag: Bool) -> Result(U64, __s0_Error) {
+    var result: U64 = 0
+    if flag {
+        result = match __s0_buffer_new(U64, d) {
+            Ok(value) => 1
+            Err(error) => 2
+        }
+    }
+    return Ok(result)
+}
+
+fn index_by_match(source: [U64], which: Which) -> U64 {
+    var local = source
+    local[match which {
+        First => 0
+        Second => 1
+    }] = 9
+    return local[0] + local[1]
+}
+
+fn field_by_match(source: [Indexed], which: Which) -> U64 {
+    var local = source
+    local[match which {
+        First => 0
+        Second => 1
+    }].value = 9
+    return local[0].value + local[1].value
+}
+`,
+	}
+	first := runLowerCompiler(t, exe, files, []string{"continuations.al"})
+	second := runLowerCompiler(t, exe, files, []string{"continuations.al"})
+	if len(first) == 0 || !bytes.Equal(first, second) {
+		t.Fatal("continuation lowering was empty or changed across fresh processes")
+	}
+	var module *mir.Module
+	for run, output := range [][]byte{first, second} {
+		parsed, err := mir.Parse(string(output))
+		if err != nil {
+			t.Fatalf("parse continuation MIR run %d: %v\n%s", run, err, output)
+		}
+		if diagnostics := verify.Module(parsed); len(diagnostics) != 0 {
+			t.Fatalf("verify continuation MIR run %d: %s\n%s", run, verify.Errors(diagnostics), output)
+		}
+		if run == 0 {
+			module = parsed
+		}
+	}
+	for _, name := range []string{"sequential_try", "double", "nested_try", "try_of_match", "arm_assign_try", "arm_assign_checked", "arm_assign_match", "index_by_match", "field_by_match"} {
+		if _, ok := module.Function(name); !ok {
+			t.Fatalf("continuation MIR has no function %q\n%s", name, first)
+		}
+	}
+	// #90: a try switch must land on the operand's continuation, never on a
+	// freshly added bb_try_err block (which carries only the fail terminator).
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			if block.Term.Kind == mir.TermSwitch && strings.HasPrefix(block.Name, "bb_try_err") {
+				t.Fatalf("try switch placed on err block %s in %s", block.Name, function.Name)
+			}
+		}
+	}
+	// #90 nested try: the outer try continues on the inner try's ok block.
+	checkSwitchOnPrefixedBlock(t, module, "nested_try", "bb_try_ok")
+	// #90 try-of-match: the try continues on the match join.
+	checkSwitchOnPrefixedBlock(t, module, "try_of_match", "bb_match_join")
+	// #111: the assignment store lands on the continuation block, which then
+	// jumps to the enclosing join instead of leaving two terminators on the
+	// arm block.
+	for _, name := range []string{"arm_assign_try", "arm_assign_checked"} {
+		checkTryAssignStoreContinuation(t, module, name)
+	}
+	checkMatchAssignStoreContinuation(t, module, "arm_assign_match")
+	// #116: slice_index_checked results are owned by the block that contains
+	// the instruction, even when the index eval terminated the requested block.
+	checkSliceIndexOwnership(t, module)
+
+	accept, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", "buffer.al"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := runLowerCompiler(t, exe, map[string]string{"buffer.al": string(accept)}, []string{"buffer.al"})
+	if len(buffer) == 0 {
+		t.Fatal("accept/buffer.al lowering was empty")
+	}
+	parsed, err := mir.Parse(string(buffer))
+	if err != nil {
+		t.Fatalf("parse buffer MIR: %v\n%s", err, buffer)
+	}
+	if diagnostics := verify.Module(parsed); len(diagnostics) != 0 {
+		t.Fatalf("verify buffer MIR: %s\n%s", verify.Errors(diagnostics), buffer)
+	}
+	if _, ok := parsed.Function("build"); !ok {
+		t.Fatalf("buffer MIR has no build function\n%s", buffer)
+	}
+}
+
+func checkSwitchOnPrefixedBlock(t *testing.T, module *mir.Module, functionName, prefix string) {
+	t.Helper()
+	id, ok := module.Function(functionName)
+	if !ok {
+		t.Fatalf("continuation MIR has no function %q", functionName)
+	}
+	for _, block := range module.Functions[id].Blocks {
+		if block.Term.Kind == mir.TermSwitch && strings.HasPrefix(block.Name, prefix) {
+			return
+		}
+	}
+	t.Fatalf("%s has no switch on a %s* block", functionName, prefix)
+}
+
+func checkTryAssignStoreContinuation(t *testing.T, module *mir.Module, functionName string) {
+	t.Helper()
+	id, ok := module.Function(functionName)
+	if !ok {
+		t.Fatalf("continuation MIR has no function %q", functionName)
+	}
+	f := module.Functions[id]
+	found := false
+	for _, block := range f.Blocks {
+		if block.Term.Kind != mir.TermSwitch {
+			continue
+		}
+		for _, c := range block.Term.Cases {
+			if c.Variant != "ok" {
+				continue
+			}
+			found = true
+			target := f.Blocks[c.Target]
+			hasStore := false
+			for _, in := range target.Instrs {
+				if in.Op == mir.OpStore {
+					hasStore = true
+				}
+			}
+			if !hasStore {
+				t.Fatalf("%s try ok continuation %s contains no store", functionName, target.Name)
+			}
+			if target.Term.Kind != mir.TermJump {
+				t.Fatalf("%s try ok continuation %s ends with %s, want jump", functionName, target.Name, target.Term.Kind)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("%s has no try switch", functionName)
+	}
+}
+
+func checkMatchAssignStoreContinuation(t *testing.T, module *mir.Module, functionName string) {
+	t.Helper()
+	id, ok := module.Function(functionName)
+	if !ok {
+		t.Fatalf("continuation MIR has no function %q", functionName)
+	}
+	for _, block := range module.Functions[id].Blocks {
+		if !strings.HasPrefix(block.Name, "bb_match_join") {
+			continue
+		}
+		hasStore := false
+		for _, in := range block.Instrs {
+			if in.Op == mir.OpStore {
+				hasStore = true
+			}
+		}
+		if !hasStore {
+			t.Fatalf("%s match join %s contains no store", functionName, block.Name)
+		}
+		if block.Term.Kind != mir.TermJump {
+			t.Fatalf("%s match join %s ends with %s, want jump", functionName, block.Name, block.Term.Kind)
+		}
+		return
+	}
+	t.Fatalf("%s has no match join block", functionName)
+}
+
+func checkSliceIndexOwnership(t *testing.T, module *mir.Module) {
+	t.Helper()
+	for _, function := range module.Functions {
+		for bi, block := range function.Blocks {
+			for _, in := range block.Instrs {
+				if in.Op != mir.OpSliceIndexChecked || in.Result == mir.NoValue {
+					continue
+				}
+				def := function.Values[in.Result].Def
+				if def.Kind != mir.ValueDefInstr || int(def.Block) != bi {
+					t.Fatalf("slice_index_checked ownership mismatch in %s: instruction block %d, value def %+v", function.Name, bi, def)
+				}
+			}
+		}
+	}
+}
+
+// Issue #79: Err(Limit)/Err(OutOfMemory) are payload-free S0 error
+// constructors. The checker records them as kind-6 call annotations and the
+// lowering emits a payload-free enum.construct of the named __s0_Error variant.
+func runErrorConstructorLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"err_construct.al": "fn fail() -> Result(U64, __s0_Error) { return Err(Limit) }\nfn fail_oom() -> Result(U64, __s0_Error) { return Err(OutOfMemory) }\n",
+	}
+	first := runLowerCompiler(t, exe, files, []string{"err_construct.al"})
+	second := runLowerCompiler(t, exe, files, []string{"err_construct.al"})
+	if len(first) == 0 || !bytes.Equal(first, second) {
+		t.Fatal("S0 error constructor lowering changed across fresh processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered MIR: %v", err)
+	}
+	for _, tc := range []struct {
+		function, variant string
+	}{
+		{function: "fail", variant: "Limit"},
+		{function: "fail_oom", variant: "OutOfMemory"},
+	} {
+		id, ok := module.Function(tc.function)
+		if !ok {
+			t.Fatalf("lowered MIR has no function %q", tc.function)
+		}
+		found := false
+		for _, block := range module.Functions[id].Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op == mir.OpEnumConstruct && instruction.Variant == tc.variant && instruction.Payload == mir.NoValue {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s did not lower a payload-free enum.construct of %q", tc.function, tc.variant)
+		}
+	}
 }

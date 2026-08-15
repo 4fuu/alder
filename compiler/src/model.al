@@ -218,12 +218,14 @@ type CheckedExprChildRec {
 }
 
 // Call annotation kinds: 1 direct user function, 2 direct C import, 3 concrete
-// struct constructor, 4 concrete enum variant, and 5 S0 builtin. target is the SymbolRec ID
+// struct constructor, 4 concrete enum variant, 5 S0 builtin, and 6 payload-free
+// S0 error constructor (OutOfMemory or Limit). target is the SymbolRec ID
 // of a concrete function instance for kind 1, a declaration for kinds 2..3,
 // and the owning enum SymbolRec ID for kind 4. variant_use is
 // zero except for kind 4, where it is the stable role-2 DeclTypeUseRec ID.
 // checked_type is the concrete function/import result or constructed type.
-// builtin is zero for kinds 1..4 and a stable builtin identity for kind 5.
+// builtin is zero for kinds 1..4, a stable builtin identity for kind 5,
+// and 5 OutOfMemory or 6 Limit for kind 6.
 type CallAnnotationRec {
     owner: U64
     kind: U64

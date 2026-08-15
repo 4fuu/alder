@@ -187,6 +187,10 @@ static bool alderhost_artifact_open(struct AlderHostContext *context) {
         }
         errno = 0;
         context->artifact = fopen(context->artifact_temp, "wbx");
+        if (context->artifact == NULL && errno != EEXIST) {
+            errno = 0;
+            context->artifact = fopen(context->artifact_temp, "wb");
+        }
         if (context->artifact != NULL) {
             return true;
         }

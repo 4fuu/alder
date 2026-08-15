@@ -505,6 +505,18 @@ wires the verified production source slice to this C path.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
+Current alder1 evidence on this tree: `alder0` compiles the fixed
+`compiler/src` manifest to C; GCC links `alder1` (Windows hosts use a 32 MiB
+stack). `TestAlderProductionDriverEndToEnd` and
+`TestAlder1SelfHostingCapableCorpus` run that executable with Go absent from
+`PATH`. Shared accept fixtures, `Err(Limit)`/`Err(OutOfMemory)`, option/e2e
+programs that do not match on `Result(__s0_Buffer(T), __s0_Error)`, and the
+reject corpus (human prefix plus related ranges) emit verified MIR/C or stable
+diagnostics. The remaining #26 hole is match-on-buffer-Result: alder1
+fail-shuts with an internal error on `frontend/testdata/e2e/buffer.al` and any
+equivalent `match` of `__s0_buffer_new`/`append` results, while `try` on those
+same Results still lowers. M5.5 stays planned until that hole is closed.
+
 #### Bootstrap execution policy
 
 M5.4 advances by the smallest checker/lowering slices that make the compiler

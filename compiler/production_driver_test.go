@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -81,7 +82,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	object := compileGeneratedObject(t, cc, root, cfile)
-	linkGeneratedProgram(t, cc, root, object, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
+	linkGeneratedProgram(t, cc, root, object, filepath.Join(root, "bootstrap", "alder_host.c"), exe, alder1LinkFlags()...)
 	testProductionInjectedFailure(t, cc, root, object, dir, true, 3)
 	testProductionInjectedFailure(t, cc, root, object, dir, false, 3)
 
@@ -390,6 +391,13 @@ func compileGeneratedObject(t *testing.T, cc, root, generated string) string {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}
 	return object
+}
+
+func alder1LinkFlags() []string {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	return []string{"-Wl,--stack,33554432"}
 }
 
 func linkGeneratedProgram(t *testing.T, cc, root, object, host, output string, extra ...string) {

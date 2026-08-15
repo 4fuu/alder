@@ -265,6 +265,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 		t.Fatalf("checked match records changed: matches=%+v arms=%+v tries=%+v diagnostics=%+v", matchTry.matches, matchTry.matchArms, matchTry.tries, matchTry.diagnostics)
 	}
 	runMatchTryCheckerConformance(t, exe)
+	runCheckerShadowingConformance(t, exe)
+	runOwnerReplayAndErrorConstructors(t, exe)
 	cleanupText := "fn close(value: U64) -> Unit { return }\n" +
 		"fn make() -> Result(U64, __s0_Error) { return Ok(2) }\n" +
 		"fn f(flag: Bool, seed: U64) -> Result(U64, __s0_Error) {\n using outer = seed with close\n { using inner = seed with close\n  let made = try make()\n  while flag {} }\n return Ok(outer)\n}\n"
@@ -1073,6 +1075,212 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// Duplicate checking precedes reserved-name checking in collect_symbols, but
 	// no two-declaration fixture can reach it: the first reserved declaration is
 	// rejected immediately. The ordering is therefore pinned by code review.
+}
+
+// Shadowing is lexical: a name bound inside a completed block, loop, or using
+// statement is out of scope again in a sibling block, matching the Stage 0 Go
+// frontend's cloned block environments (checkBlock rejects only names already
+// in the active environment). Issue #110 replaced the owner-wide
+// local_declared scan with active-environment lookup at the let/var, using,
+// and for-loop binders.
+func runCheckerShadowingConformance(t *testing.T, exe string) {
+	t.Helper()
+	accepts := []struct {
+		name, text string
+	}{
+		{name: "sibling-let-reuse.al", text: "fn f() -> U64 {\n { let x: U64 = 1 }\n { let x: U64 = 2\n  return x }\n}\n"},
+		{name: "sequential-let-reuse.al", text: "fn f() -> U64 {\n { let x: U64 = 1 }\n let x: U64 = 2\n return x }\n"},
+		{name: "sibling-var-reuse.al", text: "fn f() -> U64 {\n { var x: U64 = 1 }\n { var x: U64 = 2\n  x = 3\n  return x }\n}\n"},
+		{name: "sibling-for-reuse.al", text: "fn f(values: [U64]) -> U64 {\n for item in values {}\n for item in values {}\n return 0 }\n"},
+		{name: "sibling-using-reuse.al", text: "fn close(value: U64) -> Unit { return }\nfn f(seed: U64) -> U64 {\n { using item = seed with close }\n { using item = seed with close\n  return item }\n}\n"},
+	}
+	for _, tc := range accepts {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name: tc.text}
+			manifest := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{tc.name}, false), files)
+			if len(manifest.spans) == 0 || len(manifest.diagnostics) != 0 {
+				t.Fatalf("sibling reuse was not accepted with a complete manifest: spans=%d diagnostics=%+v", len(manifest.spans), manifest.diagnostics)
+			}
+		})
+	}
+	rejects := []struct {
+		name, text, marker string
+		last               bool
+	}{
+		{name: "reuse-nested-shadow.al", text: "fn f() -> U64 { let x: U64 = 1\n { let x: U64 = 2\n  return x } }\n", marker: "let", last: true},
+		{name: "reuse-for-param.al", text: "fn f(values: [U64], item: U64) -> Unit { for item in values {} }\n", marker: "for"},
+		{name: "reuse-body-local-duplicate.al", text: "fn f() -> U64 { let seen: U64 = 1\n let seen: U64 = 2\n return 5 }\n", marker: "let", last: true},
+		{name: "reuse-body-nested-shadow.al", text: "fn f(value: U64) -> U64 { { let value: U64 = 1 }\n return value }\n", marker: "let"},
+		{name: "reuse-using-duplicate.al", text: "fn close(value: U64) -> Unit { return }\nfn f(value: U64) -> Unit { using value = value with close }\n", marker: "using"},
+	}
+	for _, tc := range rejects {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name: tc.text}
+			cm := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{tc.name}, true), files)
+			if len(cm.diagnostics) != 1 {
+				t.Fatalf("diagnostics=%d", len(cm.diagnostics))
+			}
+			start := strings.LastIndex(tc.text, tc.marker)
+			if !tc.last {
+				start = strings.Index(tc.text, tc.marker)
+			}
+			assertCheckerDiagnostic(t, cm, 27, tc.name, start, start+len(tc.marker), "", -1, -1)
+		})
+	}
+}
+
+// Issue #107 pins owner-scoped type annotations: a generic declaration's
+// explicit syntax is replayed under every concrete instance, so the same
+// syntax ID carries a different checked type per owner. Issue #79 pins the
+// payload-free S0 error constructors OutOfMemory and Limit, accepted only
+// under an expected __s0_Error type.
+func runOwnerReplayAndErrorConstructors(t *testing.T, exe string) {
+	t.Helper()
+	t.Run("owner-replay", func(t *testing.T) {
+		text := "type Mark { value: U64 }\n" +
+			"type Pair(T: type) { value: T }\n" +
+			"fn first(T: type, b: __s0_Buffer(T)) -> T { return __s0_buffer_get(T, b, 0) }\n" +
+			"fn use_mark(b: __s0_Buffer(Mark)) -> Mark { return first(b) }\n" +
+			"fn use_pair(b: __s0_Buffer(Pair(U64))) -> Pair(U64) { return first(b) }\n"
+		files := map[string]string{"replay.al": text}
+		one := runAlderChecker(t, exe, files, []string{"replay.al"}, false)
+		two := runAlderChecker(t, exe, files, []string{"replay.al"}, false)
+		if one != two {
+			t.Fatal("owner replay manifest changed across processes")
+		}
+		manifest := parseCheckerManifest(t, one, files)
+		if len(manifest.diagnostics) != 0 {
+			t.Fatalf("owner replay was rejected: %+v", manifest.diagnostics)
+		}
+		firstDecl := checkerSymbolByName(t, manifest, files, "first")
+		var owners []int
+		for _, instance := range manifest.instances {
+			if instance.declaration == firstDecl.id {
+				owners = append(owners, instance.id)
+			}
+		}
+		if len(owners) != 2 {
+			t.Fatalf("first instances=%d, want Mark and Pair owners: %+v", len(owners), manifest.instances)
+		}
+		instanceOf := map[int]checkerInstance{}
+		for _, instance := range manifest.instances {
+			instanceOf[instance.id] = instance
+		}
+		args := make([]int, len(owners))
+		for i, owner := range owners {
+			instance := instanceOf[owner]
+			if instance.declaration != firstDecl.id || instance.argCount != 1 {
+				t.Fatalf("first instance %+v is not a single-argument specialization", instance)
+			}
+			args[i] = manifest.args[instance.firstArg-1].checkedType
+		}
+		if args[0] == args[1] {
+			t.Fatalf("first instances share one type argument %v, want Mark and Pair", args)
+		}
+		for _, id := range args {
+			if !checkedManifestTypeConcrete(manifest, id) {
+				t.Fatalf("first instance type argument is not concrete: %d", id)
+			}
+		}
+		// The explicit T syntax is a single shared node: both instance owners
+		// annotate it, and each annotation must resolve to that owner's
+		// concrete type rather than the first owner's.
+		var shared []int
+		for _, annotation := range manifest.annotations {
+			if annotation.owner == owners[0] {
+				for _, other := range manifest.annotations {
+					if other.owner == owners[1] && other.syntax == annotation.syntax {
+						shared = append(shared, annotation.syntax)
+					}
+				}
+			}
+		}
+		if len(shared) != 1 {
+			t.Fatalf("instance owners share %d type syntaxes, want the explicit T node", len(shared))
+		}
+		resolved := map[int]int{}
+		for _, annotation := range manifest.annotations {
+			if (annotation.owner == owners[0] || annotation.owner == owners[1]) && annotation.syntax == shared[0] {
+				resolved[annotation.owner] = annotation.checkedType
+			}
+		}
+		if len(resolved) != 2 || resolved[owners[0]] == resolved[owners[1]] {
+			t.Fatalf("shared T syntax resolved per owner: %v", resolved)
+		}
+		for _, id := range resolved {
+			if !checkedManifestTypeConcrete(manifest, id) {
+				t.Fatalf("replayed T annotation is not concrete: %d", id)
+			}
+		}
+		// The __s0_Buffer(T) runtime parameter specializes per owner too.
+		markParam := checkerUse(t, manifest, owners[0], 7, 0)
+		pairParam := checkerUse(t, manifest, owners[1], 7, 0)
+		if markParam.syntax != pairParam.syntax || markParam.checkedType == pairParam.checkedType {
+			t.Fatalf("Buffer(T) params did not specialize per owner: %+v %+v", markParam, pairParam)
+		}
+		for _, id := range []int{markParam.checkedType, pairParam.checkedType} {
+			if !checkedManifestTypeConcrete(manifest, id) {
+				t.Fatalf("instance Buffer param is not concrete: %d", id)
+			}
+		}
+	})
+	t.Run("s0-error-constructors", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, ident string
+			builtin     int
+		}{
+			{name: "err-limit.al", ident: "Limit", builtin: 6},
+			{name: "err-oom.al", ident: "OutOfMemory", builtin: 5},
+		} {
+			text := "fn f() -> Result(U64, __s0_Error) { return Err(" + tc.ident + ") }\n"
+			files := map[string]string{tc.name: text}
+			one := runAlderChecker(t, exe, files, []string{tc.name}, false)
+			two := runAlderChecker(t, exe, files, []string{tc.name}, false)
+			if one != two {
+				t.Fatalf("%s manifest changed across fresh roots", tc.name)
+			}
+			manifest := parseCheckerManifest(t, one, files)
+			if len(manifest.diagnostics) != 0 {
+				t.Fatalf("%s was rejected: %+v", tc.name, manifest.diagnostics)
+			}
+			var annotations []checkerCallAnnotation
+			for _, annotation := range manifest.callAnnotations {
+				if annotation.kind == 6 {
+					annotations = append(annotations, annotation)
+				}
+			}
+			if len(annotations) != 1 {
+				t.Fatalf("%s kind-6 annotations=%d, want 1", tc.name, len(annotations))
+			}
+			annotation := annotations[0]
+			if annotation.builtin != tc.builtin || annotation.target != 0 || annotation.variantUse != 0 || manifest.types[annotation.checkedType-1].kind != 5 {
+				t.Fatalf("%s kind-6 annotation=%+v, want builtin %d target 0 on a kind-5 checked type", tc.name, annotation, tc.builtin)
+			}
+			matches := 0
+			for _, expression := range manifest.expressions {
+				if expression.kind == 10 && expression.annotation == annotation.id && expression.childCount == 0 && expression.checkedType == annotation.checkedType {
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Fatalf("%s kind-10 payload-free expressions=%d, want 1", tc.name, matches)
+			}
+		}
+	})
+	t.Run("s0-error-rejects", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, text string
+		}{
+			{name: "err-unknown.al", text: "fn f() -> Result(U64, __s0_Error) { return Err(Unknown) }\n"},
+			{name: "err-wrong-type.al", text: "fn f() -> U64 { return Limit }\n"},
+		} {
+			files := map[string]string{tc.name: tc.text}
+			manifest := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{tc.name}, true), files)
+			if len(manifest.diagnostics) != 1 || manifest.diagnostics[0].kind != 18 {
+				t.Fatalf("%s diagnostics=%+v, want one kind-18 unknown-name failure", tc.name, manifest.diagnostics)
+			}
+		}
+	})
 }
 
 func runMatchTryCheckerConformance(t *testing.T, exe string) {
@@ -2007,7 +2215,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 16
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 16 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2017,6 +2225,9 @@ func validateCheckerManifest(m checkerManifest) error {
 		if validType && (annotation.kind == 3 || annotation.kind == 4) {
 			checked := m.types[annotation.checkedType-1]
 			validType = checked.kind == 7 && checked.target == annotation.target
+		}
+		if validType && annotation.kind == 6 {
+			validType = m.types[annotation.checkedType-1].kind == 5
 		}
 		if validType && (annotation.kind == 1 || annotation.kind == 2) {
 			resultRole, resultType := 6, 0
@@ -2034,8 +2245,8 @@ func validateCheckerManifest(m checkerManifest) error {
 			validType = resultType == annotation.checkedType
 		}
 		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
-		validBuiltin := annotation.kind == 5 && annotation.builtin != 0 || annotation.kind != 5 && annotation.builtin == 0
-		if annotation.id != i+1 || !validOwner || annotation.kind < 1 || annotation.kind > 5 || !validTarget || !validType || !validVariant || !validBuiltin {
+		validBuiltin := annotation.kind == 5 && annotation.builtin != 0 || annotation.kind == 6 && (annotation.builtin == 5 || annotation.builtin == 6) || annotation.kind != 5 && annotation.kind != 6 && annotation.builtin == 0
+		if annotation.id != i+1 || !validOwner || annotation.kind < 1 || annotation.kind > 6 || !validTarget || !validType || !validVariant || !validBuiltin {
 			return fmt.Errorf("invalid call annotation %+v", annotation)
 		}
 	}

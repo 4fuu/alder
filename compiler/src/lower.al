@@ -922,9 +922,9 @@ fn lower_float_bits(source_state: State, spans: __s0_Buffer(CheckedSpanRec), exp
     return unsafe c { alderhost_decimal_f64_bits(negative, significand, exponent - fraction) }
 }
 
-fn lower_bool_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, value: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_bool_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, value: U64, prefix: String, suffix: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
-    let name = try lower_decimal_name(d, "lit.bool", suffix)
+    let name = try lower_decimal_name(d, prefix, suffix)
     let constant = try mir_add_const(d, typ.state.mir, name, typ.id, mir_const_bool(), value, 0, 0, "")
     let result = try lower_add_result(d, lower_with_mir(typ.state, constant.store), function, block, checked_type, source_state, store)
     let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
@@ -1050,12 +1050,16 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let false_block = try lower_add_block(d, true_block.state, function, "bb_not_false")
             let join = try lower_add_block(d, false_block.state, function, "bb_not_join")
             let typ = try lower_type(d, source_state, store, join.state, expression.checked_type)
-            let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, "not", typ.id)
+            let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_not_join", join.id), typ.id)
             var current = lower_with_mir(typ.state, param.store)
             current = try lower_branch(d, current, function, source_block, left.id, false_block.id, true_block.id)
-            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, expression_id)
+            // Constants are module-scoped, so key unary Boolean constants by the
+            // store-const count rather than expression ids: nested or adjacent
+            // unaries reuse the same expression_id offsets and would collide.
+            let bool_suffix = __s0_buffer_len(MirConstRec, current.mir.constants) + 1
+            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, "__s0_not_true_", bool_suffix)
             current = try lower_jump_value(d, truth.state, function, true_block.id, join.id, truth.id)
-            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, expression_id + 1)
+            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, "__s0_not_false_", bool_suffix)
             current = try lower_jump_value(d, falsity.state, function, false_block.id, join.id, falsity.id)
             return Ok(LowerStep(state: current, id: param.id))
         }
@@ -1075,7 +1079,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = try lower_jump_value(d, right.state, function, lower_open_block(right.state.mir, function, right_block.id), join.id, right.id)
             var constant_value: U64 = 0
             if expression.operator == 17 { constant_value = 1 }
-            let constant = try lower_bool_value(d, source_state, store, current, function, constant_block.id, expression.checked_type, constant_value, expression_id)
+            let constant = try lower_bool_value(d, source_state, store, current, function, constant_block.id, expression.checked_type, constant_value, "lit.bool", expression_id)
             current = try lower_jump_value(d, constant.state, function, constant_block.id, join.id, constant.id)
             return Ok(LowerStep(state: current, id: param.id))
         }
@@ -1186,6 +1190,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             var payload: U64 = 0
             if expression.child_count == 1 { payload = __s0_buffer_get(U64, args, 0) }
             let instr = try lower_add_instr(d, current, function, block, mir_op_enum_construct(), result, 0, result_type.id, payload, 0, 0, name)
+            return Ok(LowerStep(state: instr.state, id: result))
+        }
+        if annotation.kind == 6 {
+            if expression.child_count != 0 || annotation.target != 0 || annotation.variant_use != 0 || (annotation.builtin != 5 && annotation.builtin != 6) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            var name = "OutOfMemory"
+            if annotation.builtin == 6 { name = "Limit" }
+            let instr = try lower_add_instr(d, current, function, block, mir_op_enum_construct(), result, 0, result_type.id, 0, 0, 0, name)
             return Ok(LowerStep(state: instr.state, id: result))
         }
         return Ok(LowerStep(state: lower_invalid(current), id: 0))
@@ -1364,11 +1375,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1)
         if checked.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let value = try lower_expression(d, source_state, spans, store, state, owner, function, block, checked.expression, environment, panic_block)
+        let source_block = lower_open_block(value.state.mir, function, block)
         let ok_block = try lower_add_block(d, value.state, function, "bb_try_ok")
         let err_block = try lower_add_block(d, ok_block.state, function, "bb_try_err")
         let ok_type = try lower_type(d, source_state, store, err_block.state, checked.ok_type)
         let err_type = try lower_type(d, source_state, store, ok_type.state, checked.error_type)
-        let source_block = lower_open_block(err_type.state.mir, function, block)
         let ok_value = try mir_add_value(d, err_type.state.mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
         let err_value = try mir_add_value(d, ok_value.store, function, try lower_decimal_name(d, "try_err", expression_id), err_type.id, mir_value_def_switch_case(), source_block, 2)
         let term = try mir_add_terminator(d, err_value.store, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))
@@ -1434,22 +1445,61 @@ fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state:
     return Ok(current)
 }
 
-fn lower_chain_environment(store: CheckStore, owner: U64, link_id: U64, initial: U64) -> U64 {
-    if link_id == 0 || link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return initial }
-    let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
-    var environment = lower_chain_environment(store, owner, link.next, initial)
-    if link.statement == 0 || link.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return environment }
-    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
-    if statement.owner != owner || statement.environment != environment { return environment }
-    if statement.kind == 1 || statement.kind == 2 || statement.kind == 10 {
-        var at: U64 = 0
-        while at < __s0_buffer_len(EnvironmentRec, store.environments) {
-            let candidate = __s0_buffer_get(EnvironmentRec, store.environments, at)
-            if candidate.owner == owner && candidate.parent == environment && candidate.binding == statement.binding { return at + 1 }
-            at = at + 1
-        }
+// Statement chains are reverse-stored: .next points at the prior source
+// statement, so the chain head is the last statement in source order.
+// Integer walks replace both recursion and a loop-carried collect buffer:
+// `__s0_buffer_new` is a function-local domain allocation, and carrying that
+// handle across a while backedge is rejected by MIR Phase 6.
+fn lower_chain_len(store: CheckStore, link_id: U64) -> U64 {
+    var count: U64 = 0
+    var current_id = link_id
+    while current_id != 0 {
+        if current_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return 0 }
+        count = count + 1
+        current_id = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, current_id - 1).next
     }
-    return environment
+    return count
+}
+
+fn lower_chain_nth(store: CheckStore, link_id: U64, skip: U64) -> U64 {
+    var current_id = link_id
+    var at: U64 = 0
+    while at < skip {
+        if current_id == 0 || current_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return 0 }
+        current_id = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, current_id - 1).next
+        at = at + 1
+    }
+    return current_id
+}
+
+fn lower_chain_environment(d: Domain, store: CheckStore, owner: U64, link_id: U64, initial: U64) -> Result(U64, __s0_Error) {
+    var environment = initial
+    var at = lower_chain_len(store, link_id)
+    while at > 0 {
+        let walked_id = lower_chain_nth(store, link_id, at - 1)
+        if walked_id != 0 && walked_id <= __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+            let walked_link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, walked_id - 1)
+            if walked_link.statement != 0 && walked_link.statement <= __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, walked_link.statement - 1)
+                if statement.owner == owner && statement.environment == environment {
+                    if statement.kind == 1 || statement.kind == 2 || statement.kind == 10 {
+                        var found: U64 = 0
+                        var search_at: U64 = 0
+                        while search_at < __s0_buffer_len(EnvironmentRec, store.environments) {
+                            if found == 0 {
+                                let candidate = __s0_buffer_get(EnvironmentRec, store.environments, search_at)
+                                if candidate.owner == owner && candidate.parent == environment && candidate.binding == statement.binding { found = search_at + 1 }
+                            }
+                            search_at = search_at + 1
+                        }
+                        if found != 0 { environment = found }
+                    }
+                }
+            }
+        }
+        at = at - 1
+    }
+    return Ok(environment)
 }
 
 fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, place_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
@@ -1483,12 +1533,13 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let loaded = try lower_add_typed_result(d, current, function, block, root_mir_type)
         let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, root.id, 0, 0, 0, 0, "")
         let index = try lower_expression(d, source_state, spans, store, load.state, owner, function, block, checked.index, environment, panic_block)
+        let active = lower_open_block(index.state.mir, function, block)
         let elem_checked = __s0_buffer_get(U64, store.type_args, root_type.first_arg - 1)
         let elem = try lower_type(d, source_state, store, index.state, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
-        let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, ""), ref_type.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(ref_type.store, function, block) + 1)
-        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, result.store), function, block, mir_op_slice_index_checked(), result.id, 0, 0, loaded.id, index.id, panic_block, "")
+        let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, ""), ref_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(ref_type.store, function, active) + 1)
+        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, result.store), function, active, mir_op_slice_index_checked(), result.id, 0, 0, loaded.id, index.id, panic_block, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: result.id))
         current = lower_with_mir(indexed.state, deref.store)
         if checked.kind == 3 { return Ok(LowerStep(state: current, id: deref.id)) }
@@ -1507,21 +1558,14 @@ fn lower_block_statements(d: Domain, source_state: State, spans: __s0_Buffer(Che
     if body.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
     let flow = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, body.statements, panic_block)
     if flow.terminated { return Ok(flow) }
-    let exit_environment = lower_chain_environment(store, owner, body.statements, body.environment)
+    let exit_environment = try lower_chain_environment(d, store, owner, body.statements, body.environment)
     let cleaned = try lower_cleanup_exits(d, source_state, store, flow.state, owner, function, flow.block, exit_environment, body.environment, 1)
     return Ok(LowerFlowStep(state: cleaned, block: flow.block, terminated: false))
 }
 
-fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
-    if link_id == 0 { return Ok(LowerFlowStep(state: state, block: block, terminated: false)) }
-    if link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
-    let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
-    let prior = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, link.next, panic_block)
-    var current = prior.state
-    var active = prior.block
-    if prior.terminated { return Ok(prior) }
-    if !current.valid || link.statement == 0 || link.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
-    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
+fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, statement: CheckedStatementRec, link: CheckedStatementLinkRec, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+    var current = state
+    var active = block
     if statement.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
     if statement.kind == 1 || statement.kind == 2 {
         let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
@@ -1532,6 +1576,7 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
     if statement.kind == 3 {
         let place = try lower_checked_place(d, source_state, spans, store, current, owner, function, active, statement.place, statement.environment, panic_block)
         let value = try lower_expression(d, source_state, spans, store, place.state, owner, function, active, statement.expression, statement.environment, panic_block)
+        active = lower_open_block(value.state.mir, function, active)
         let instr = try lower_add_instr(d, value.state, function, active, mir_op_store(), 0, place.id, 0, value.id, 0, 0, "")
         return Ok(LowerFlowStep(state: instr.state, block: active, terminated: false))
     }
@@ -1549,8 +1594,9 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
     }
     if statement.kind == 5 {
         let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
-        active = lower_open_block(lowered.state.mir, function, active)
-        return Ok(LowerFlowStep(state: lowered.state, block: active, terminated: false))
+        current = lowered.state
+        active = lower_open_block(current.mir, function, active)
+        return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     if statement.kind == 6 {
         return lower_block_statements(d, source_state, spans, store, current, owner, function, active, statement.body, panic_block)
@@ -1646,6 +1692,38 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true))
+}
+
+fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+    var current = state
+    var active = block
+    var at = lower_chain_len(store, link_id)
+    var stopped: U64 = 0
+    var last: LowerFlowStep = LowerFlowStep(state: state, block: block, terminated: false)
+    while at > 0 {
+        let walked_id = lower_chain_nth(store, link_id, at - 1)
+        var next = last
+        if walked_id == 0 || walked_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+            next = LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)
+        }
+        if walked_id != 0 && walked_id <= __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+            let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, walked_id - 1)
+            if !current.valid || link.statement == 0 || link.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                next = LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)
+            }
+            if current.valid && link.statement != 0 && link.statement <= __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
+                next = try lower_one_statement(d, source_state, spans, store, current, owner, function, active, statement, link, panic_block)
+            }
+        }
+        last = next
+        current = next.state
+        active = next.block
+        if next.terminated { stopped = 1 }
+        if stopped == 0 { at = at - 1 }
+        if stopped != 0 { at = 0 }
+    }
+    return Ok(last)
 }
 
 fn lower_local_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, binding: U64, local: LocalRec) -> Result(LowerStep, __s0_Error) {
@@ -2774,9 +2852,15 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 5 || !lower_type_concrete(store, item.checked_type) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 6 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if item.kind == 6 {
+            if item.target != 0 || item.variant_use != 0 || (item.builtin != 5 && item.builtin != 6) { return false }
+            let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if checked_type.kind != 5 { return false }
+            at = at + 1
+        } else {
         if item.kind == 5 {
             if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 16 { return false }
             at = at + 1
@@ -2808,6 +2892,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if result_type.kind != 7 || result_type.target != item.target { return false }
         } else { if item.variant_use != 0 { return false } }
         at = at + 1
+        }
         }
     }
     at = 0
@@ -2878,7 +2963,15 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if item.kind == 9 { annotation_kind = 3 }
             if item.kind == 10 { annotation_kind = 4 }
             if item.kind == 11 { annotation_kind = 2 }
+            if item.kind == 10 && annotation.kind == 6 {
+                annotation_kind = 6
+            }
             if annotation.owner != item.owner || annotation.checked_type != item.checked_type || annotation.kind != annotation_kind { return false }
+            if annotation.kind == 6 {
+                if item.child_count != 0 || (annotation.builtin != 5 && annotation.builtin != 6) { return false }
+                let error_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+                if error_type.kind != 5 { return false }
+            } else {
             var argument_role: U64 = 0
             if annotation.kind == 1 {
                 argument_role = 5
@@ -2909,6 +3002,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
                 let argument = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + argument_at).expression - 1)
                 if lower_type_concrete(store, expected_type) && argument.checked_type != expected_type { return false }
                 argument_at = argument_at + 1
+            }
             }
         } else {
             if item.kind == 18 {

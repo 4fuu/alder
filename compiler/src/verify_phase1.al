@@ -141,6 +141,11 @@ scan = scan + 1 }
         if !mir_vfunction_exists(store, item.function) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         if item.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), item.function, 0, 0, 0, 0, 0, at + 1, expected, item.ordinal, 0)) }
         if !mir_vname_valid(store, item.name_start, item.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
+        scan = 0
+        while scan < at { let prior = __s0_buffer_get(MirLocalRec, store.locals, scan)
+if prior.function == item.function && mir_vname_equal(store, item.name_start, item.name_end, prior.name_start, prior.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, scan + 1))
+scan = at }
+scan = scan + 1 }
         at = at + 1
     }
     return Ok(out)
