@@ -47,6 +47,8 @@ fn run_print(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
     let fixture = try printer_fixture(d, store)
     let duplicate_term = try mir_add_terminator(d, fixture, MirTermRec(function: 1, block: 1, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
     if mir_print(duplicate_term.store) { return Ok(7) }
+    let unterminated = try mir_add_block(d, fixture, 1, 1, "open")
+    if mir_print(unterminated.store) { return Ok(9) }
     let wrong_owner = try mir_add_operand(d, fixture, MirOperandRec(kind: mir_operand_instruction(), owner: 999, ordinal: 0, edge: 0, value: 0, target: 0, operand_type: 0, name_start: 0, name_end: 0))
     if mir_print(wrong_owner.store) { return Ok(8) }
     if mir_print(fixture) { return Ok(0) }
