@@ -1477,13 +1477,32 @@ fn lower_block_statements(d: Domain, source_state: State, spans: __s0_Buffer(Che
 fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
     if link_id == 0 { return Ok(LowerFlowStep(state: state, block: block, terminated: false)) }
     if link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
-    let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
-    let prior = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, link.next, panic_block)
-    var current = prior.state
-    var active = prior.block
-    if prior.terminated { return Ok(prior) }
-    if !current.valid || link.statement == 0 || link.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
-    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
+    var statements = try __s0_buffer_new(U64, d)
+    var link = link_id
+    while link != 0 {
+        if link > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
+        let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1)
+        statements = try __s0_buffer_append(U64, d, statements, item.statement)
+        link = item.next
+    }
+    var current = state
+    var active = block
+    var at = __s0_buffer_len(U64, statements)
+    while at != 0 {
+        at = at - 1
+        let flow = try lower_statement(d, source_state, spans, store, current, owner, function, active, __s0_buffer_get(U64, statements, at), panic_block)
+        current = flow.state
+        active = flow.block
+        if flow.terminated { return Ok(flow) }
+    }
+    return Ok(LowerFlowStep(state: current, block: active, terminated: false))
+}
+
+fn lower_statement(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, statement_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+    var current = state
+    var active = block
+    if !current.valid || statement_id == 0 || statement_id > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
+    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_id - 1)
     if statement.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
     if statement.kind == 1 || statement.kind == 2 {
         let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
@@ -1558,7 +1577,7 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
         // slice.len always returns canonical U64 (checked type 9 in the sealed primitive prefix).
         let length_value = try lower_add_result(d, sequence.state, function, active, 9, source_state, store)
         let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, sequence.id, 0, 0, "")
-        let zero_value = try lower_int_value(d, source_state, store, length_instr.state, function, active, 0, link.statement)
+        let zero_value = try lower_int_value(d, source_state, store, length_instr.state, function, active, 0, statement_id)
         let head = try lower_add_block(d, zero_value.state, function, "bb_for_head")
         let body = try lower_add_block(d, head.state, function, "bb_for_body")
         let join = try lower_add_block(d, body.state, function, "bb_for_join")
@@ -1582,7 +1601,7 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
         let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
         if !body_flow.terminated {
-            let one = try lower_int_value(d, source_state, store, current, function, body_flow.block, 1, link.statement + 1)
+            let one = try lower_int_value(d, source_state, store, current, function, body_flow.block, 1, statement_id + 1)
             let next = try lower_add_result(d, one.state, function, body_flow.block, 9, source_state, store)
             let added = try lower_add_instr(d, next.state, function, body_flow.block, mir_op_int_add_checked(), next.id, 0, 0, index_param.id, one.id, panic_block, "")
             current = try lower_jump_two(d, added.state, function, lower_open_block(added.state.mir, function, body_flow.block), head.id, next.id, sequence_param.id)

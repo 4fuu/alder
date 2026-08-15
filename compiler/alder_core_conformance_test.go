@@ -290,7 +290,7 @@ func TestAlderCoreConformance(t *testing.T) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify core conformance MIR: %s", verify.Errors(diagnostics).String())
 	}
-	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
+	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots", "lower_statement_chain"} {
 		id, ok := module.Function(name)
 		if !ok {
 			t.Fatalf("core conformance MIR has no %s function", name)

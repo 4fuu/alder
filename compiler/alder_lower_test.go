@@ -68,6 +68,14 @@ fn sum(values: [U64]) -> U64 {
     }
     return total
 }
+fn empty() -> Unit {}
+fn one() -> U64 { return 1 }
+fn ordered() -> U64 {
+    var value: U64 = 1
+    value = value + 2
+    value = value * 3
+    return value
+}
 `,
 		"match_try.al": `fn checked(n: I64, d: I64) -> Result(I64, I64) {
     if d == 0 {
@@ -226,7 +234,7 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify lowered MIR: %s\n%s", verify.Errors(diagnostics), first)
 	}
-	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
+	for _, name := range []string{"make_pair", "make_some", "scalar", "floating", "calculate", "short", "sum", "empty", "one", "ordered", "checked", "propagate", "choose", "close", "attempt", "before_using", "nested_cleanup", "cleanup_try", "domain_bridge", "option_value", "map_bridge", "map_probe_bridge", "map_structural_bridge", "buffer_bridge", "clear_domain_failure", "buffer_oom_retry"} {
 		if _, ok := module.Function(name); !ok {
 			t.Fatalf("lowered MIR has no function %q\n%s", name, first)
 		}
@@ -265,6 +273,9 @@ func runLowerCgenBehavior(t *testing.T, module *mir.Module, coreExe string, file
 	calculate := functionID("calculate")
 	short := functionID("short")
 	sum := functionID("sum")
+	empty := functionID("empty")
+	one := functionID("one")
+	ordered := functionID("ordered")
 	choose := functionID("choose")
 	propagate := functionID("propagate")
 	attempt := functionID("attempt")
@@ -304,6 +315,8 @@ int main(void) {
   if (alder_fn_calculate_%d(0) != 3) return 1;
   if (!alder_fn_short_%d(true, true) || alder_fn_short_%d(true, false)) return 2;
   if (alder_fn_sum_%d(slice) != 6) return 3;
+  alder_fn_empty_%d();
+  if (alder_fn_one_%d() != 1 || alder_fn_ordered_%d() != 9) return 19;
   if (alder_fn_choose_%d(none) != 0 || alder_fn_choose_%d(some) != 9) return 4;
   success = alder_fn_propagate_%d(2);
   failure = alder_fn_propagate_%d(0);
@@ -335,7 +348,7 @@ int main(void) {
   return 0;
 }
 `, maybeType, maybeType, resultCType, resultCType, bufferResultCType,
-		none, some, some, calculate, short, short, sum, choose, choose, propagate, propagate, ok, errVariant,
+		none, some, some, calculate, short, short, sum, empty, one, ordered, choose, choose, propagate, propagate, ok, errVariant,
 		attempt, attempt, beforeUsing, beforeUsing, nestedCleanup, cleanupTry, cleanupTry,
 		domainBridge, mapBridge, mapProbeBridge, mapStructuralBridge, bufferOOMRetry, ok, ok)
 	dir := t.TempDir()
