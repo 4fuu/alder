@@ -60,6 +60,7 @@ type LowerFlowStep {
 enum LowerResult {
     LowerGood(value: MirStore)
     LowerBad
+    LowerModelBad
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
@@ -423,12 +424,30 @@ fn lower_bridge_type_used(store: CheckStore, checked_type: U64) -> Bool {
             var candidate: U64 = 0
             if annotation.builtin == 8 { candidate = expression.checked_type }
             if annotation.builtin == 9 {
-                let result = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
-                candidate = __s0_buffer_get(U64, store.type_args, result.first_arg - 1)
+                var result_id = annotation.checked_type
+                if expression.checked_type != 0 { result_id = expression.checked_type }
+                if result_id != 0 && result_id <= __s0_buffer_len(CheckedTypeRec, store.types) {
+                    let result = __s0_buffer_get(CheckedTypeRec, store.types, result_id - 1)
+                    if result.kind == 10 && result.arg_count == 2 { candidate = __s0_buffer_get(U64, store.type_args, result.first_arg - 1) }
+                }
             }
             if annotation.builtin == 10 || annotation.builtin == 12 || annotation.builtin == 13 || annotation.builtin == 14 || annotation.builtin == 15 || annotation.builtin == 16 { candidate = lower_builtin_child_type(store, expression, 0) }
             if annotation.builtin == 11 { candidate = lower_builtin_child_type(store, expression, 1) }
             if candidate == checked_type { return true }
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedTryRec, store.control.tries) {
+        if __s0_buffer_get(CheckedTryRec, store.control.tries, at).ok_type == checked_type { return true }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedMatchRec, store.control.matches) {
+        let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, at)
+        if checked.scrutinee_type != 0 && checked.scrutinee_type <= __s0_buffer_len(CheckedTypeRec, store.types) {
+            let scrutinee = __s0_buffer_get(CheckedTypeRec, store.types, checked.scrutinee_type - 1)
+            if scrutinee.kind == 10 && scrutinee.arg_count == 2 && __s0_buffer_get(U64, store.type_args, scrutinee.first_arg - 1) == checked_type { return true }
         }
         at = at + 1
     }
@@ -452,20 +471,38 @@ fn lower_bridge_declarations(d: Domain, source_state: State, store: CheckStore, 
                 if error_checked == 0 { return Ok(lower_invalid(current)) }
                 let error_type = try lower_type(d, source_state, store, current, error_checked)
                 current = error_type.state
+                var result_type_id: U64 = 0
                 let result_checked = lower_result_type_for(store, checked_id, error_checked)
+                if result_checked != 0 {
+                    let result_type = try lower_type(d, source_state, store, current, result_checked)
+                    current = result_type.state
+                    result_type_id = result_type.id
+                } else {
+                    let empty_result_args = try __s0_buffer_new(U64, d)
+                    let result_type = try mir_intern_type(d, current.mir, mir_type_kind_result(), 0, lowered.id, error_type.id, empty_result_args, 0)
+                    current = lower_with_mir(current, result_type.store)
+                    result_type_id = result_type.type_id
+                }
+                var slice_type_id: U64 = 0
                 let slice_checked = lower_slice_type_for(store, element_checked)
-                if result_checked == 0 || slice_checked == 0 { return Ok(lower_invalid(current)) }
-                let result_type = try lower_type(d, source_state, store, current, result_checked)
-                let slice_type = try lower_type(d, source_state, store, result_type.state, slice_checked)
-                current = slice_type.state
+                if slice_checked != 0 {
+                    let slice_type = try lower_type(d, source_state, store, current, slice_checked)
+                    current = slice_type.state
+                    slice_type_id = slice_type.id
+                } else {
+                    let empty_slice_args = try __s0_buffer_new(U64, d)
+                    let slice_type = try mir_intern_type(d, current.mir, mir_type_kind_slice(), element.id, 0, 0, empty_slice_args, 0)
+                    current = lower_with_mir(current, slice_type.store)
+                    slice_type_id = slice_type.type_id
+                }
                 let domain_type = try lower_domain_mir_type(d, current)
                 current = domain_type.state
                 let suffix = try lower_decimal_name(d, "buffer_new_", checked_id)
-                let make = try lower_add_helper_function(d, current, suffix, result_type.id, domain_type.id, 0, 0)
+                let make = try lower_add_helper_function(d, current, suffix, result_type_id, domain_type.id, 0, 0)
                 let length = try lower_add_helper_function(d, make.state, try lower_decimal_name(d, "buffer_len_", checked_id), mir_type_u64(), lowered.id, 0, 0)
-                let append = try lower_add_helper_function(d, length.state, try lower_decimal_name(d, "buffer_append_", checked_id), result_type.id, domain_type.id, lowered.id, element.id)
+                let append = try lower_add_helper_function(d, length.state, try lower_decimal_name(d, "buffer_append_", checked_id), result_type_id, domain_type.id, lowered.id, element.id)
                 let get = try lower_add_helper_function(d, append.state, try lower_decimal_name(d, "buffer_get_", checked_id), element.id, lowered.id, mir_type_u64(), 0)
-                let sliced = try lower_add_helper_function(d, get.state, try lower_decimal_name(d, "buffer_slice_", checked_id), slice_type.id, lowered.id, 0, 0)
+                let sliced = try lower_add_helper_function(d, get.state, try lower_decimal_name(d, "buffer_slice_", checked_id), slice_type_id, lowered.id, 0, 0)
                 current = sliced.state
                 bridge = LowerBridgeRec(checked_type: checked_id, make_id: make.id, len_id: length.id, append_id: append.id, get_id: get.id, slice_id: sliced.id, set_id: 0, remove_id: 0)
             }
@@ -1990,8 +2027,8 @@ fn lower_buffer_new_body(d: Domain, source_state: State, store: CheckStore, stat
     let allocated = try lower_add_instr(d, data.state, bridge.make_id, entry.id, mir_op_alloc_checked(), data.id, 0, element.id, 1, cap.id, oom.id, "")
     current = try lower_jump(d, allocated.state, bridge.make_id, entry.id, ok.id)
     let result_type = __s0_buffer_get(MirFunctionRec, current.mir.functions, bridge.make_id - 1).result_type
-    let result_rec = __s0_buffer_get(CheckedTypeRec, store.types, lower_result_type_for(store, checked_type, lower_checked_type_kind(store, 5, 0)) - 1)
-    let error_checked = __s0_buffer_get(U64, store.type_args, result_rec.first_arg)
+    let error_checked = lower_checked_type_kind(store, 5, 0)
+    if error_checked == 0 { return Ok(lower_invalid(current)) }
     let error_type = try lower_type(d, source_state, store, current, error_checked)
     let error = try lower_helper_variant(d, error_type.state, bridge.make_id, oom.id, error_type.id, "OutOfMemory", 0)
     let failed = try lower_helper_variant(d, error.state, bridge.make_id, oom.id, result_type, "err", error.id)
@@ -2106,8 +2143,8 @@ fn lower_buffer_append_body(d: Domain, source_state: State, store: CheckStore, s
     let next_capacity = try lower_add_typed_result(d, two.state, bridge.append_id, grow.id, mir_type_u64())
     let multiplied = try lower_add_instr(d, next_capacity.state, bridge.append_id, grow.id, mir_op_int_mul_checked(), next_capacity.id, 0, 0, capacity.id, two.id, limit.id, "")
     current = try lower_jump(d, multiplied.state, bridge.append_id, grow.id, allocate.id)
-    let result_rec = __s0_buffer_get(CheckedTypeRec, store.types, lower_result_type_for(store, checked_type, lower_checked_type_kind(store, 5, 0)) - 1)
-    let error_checked = __s0_buffer_get(U64, store.type_args, result_rec.first_arg)
+    let error_checked = lower_checked_type_kind(store, 5, 0)
+    if error_checked == 0 { return Ok(lower_invalid(current)) }
     let error_type = try lower_type(d, source_state, store, current, error_checked)
     let limit_error = try lower_helper_variant(d, error_type.state, bridge.append_id, limit.id, error_type.id, "Limit", 0)
     let limit_result = try lower_helper_variant(d, limit_error.state, bridge.append_id, limit.id, result_type, "err", limit_error.id)
@@ -3490,7 +3527,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
 fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(LowerResult, __s0_Error) {
     if __s0_buffer_len(CheckDiagRec, store.diagnostics) != 0 { return Ok(LowerBad) }
     if !lower_model_valid(source_state, store, spans) {
-        return Ok(LowerBad)
+        return Ok(LowerModelBad)
     }
     let mir = try mir_store_new(d)
     let types = try __s0_buffer_new(LowerTypeMapRec, d)

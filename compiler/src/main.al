@@ -19,7 +19,7 @@ fn run_cgen(d: Domain, mir: MirStore) -> I32 {
 }
 
 fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I32 {
-    if !result.complete { return driver_internal_error() }
+    if !result.complete { return driver_failure(4, "internal", "internal compiler failure: verification refused") }
     if driver_command() == 1 { return driver_success_check() }
     if driver_command() == 2 {
         if !driver_artifact_start("mir") { return driver_failure(3, "io", "cannot write compiler output") }
@@ -45,7 +45,8 @@ fn run_verify(d: Domain, mir: MirStore) -> I32 {
 
 fn finish_lower(d: Domain, result: LowerResult) -> I32 {
     return match result {
-        LowerBad => driver_internal_error()
+        LowerBad => driver_failure(4, "internal", "internal compiler failure: lowering refused")
+        LowerModelBad => driver_failure(4, "internal", "internal compiler failure: lowering model refused")
         LowerGood(mir) => run_verify(d, mir)
     }
 }

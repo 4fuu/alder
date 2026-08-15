@@ -91,6 +91,14 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 		files := map[string]string{"limit.al": "fn f() -> Result(U64, __s0_Error) { return Err(Limit) }\nfn main() -> I32 { return 0 }\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "limit.al", "", 0)
 	})
+	t.Run("buffer-new-without-slice", func(t *testing.T) {
+		files := map[string]string{"noslice.al": "fn make(d: Domain) -> Result(__s0_Buffer(U64), __s0_Error) {\n    let b = try __s0_buffer_new(U64, d)\n    return Ok(b)\n}\nfn main() -> I32 { return 0 }\n"}
+		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "noslice.al", "", 0)
+	})
+	t.Run("buffer-match-result", func(t *testing.T) {
+		files := map[string]string{"matchbuf.al": "fn take(b: __s0_Buffer(U64)) -> I32 { return 0 }\nfn main(d: Domain) -> I32 {\n    return match __s0_buffer_new(U64, d) {\n        Err(error) => 1\n        Ok(b) => take(b)\n    }\n}\n"}
+		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "matchbuf.al", "", 0)
+	})
 
 	for _, name := range bootstrapAcceptFixtures {
 		name := name
