@@ -412,6 +412,18 @@ fn short_repeated_and(left: Bool, middle: Bool, right: Bool) -> Bool { return le
 fn short_explicit_and(left: Bool, middle: Bool, right: Bool) -> Bool { return (left && middle) && right }
 fn short_repeated_or(left: Bool, middle: Bool, right: Bool) -> Bool { return left || middle || right }
 fn short_mixed(left: Bool, middle: Bool, right: Bool) -> Bool { return left && middle || right }
+fn not_single(value: Bool) -> Bool { return !value }
+fn not_and(left: Bool, right: Bool) -> Bool { return !(left && right) }
+fn not_or(left: Bool, right: Bool) -> Bool { return !(left || right) }
+fn not_deep(left: Bool, middle: Bool, right: Bool) -> Bool { return !(left && (middle || right)) }
+fn not_repeated(left: Bool, middle: Bool, right: Bool) -> Bool { return !(left && middle && right) }
+fn not_match(value: Bool) -> Bool {
+    let selected: Option(Bool) = Some(value)
+    return !(match selected {
+        None => false
+        Some(item) => item
+    })
+}
 fn short_order_and() -> Bool {
     return unsafe c { observe(1, true) } && unsafe c { observe(2, false) } && unsafe c { observe(3, true) }
 }
@@ -421,17 +433,30 @@ fn short_order_or() -> Bool {
 fn short_order_mixed() -> Bool {
     return unsafe c { observe(1, true) } && unsafe c { observe(2, false) } || unsafe c { observe(3, true) }
 }
+fn not_order() -> Bool {
+    return !(unsafe c { observe(1, true) } && unsafe c { observe(2, false) } && unsafe c { observe(3, true) })
+}
 `}
 	first := runLowerCompiler(t, exe, files, []string{"short.al"})
-	if second := runLowerCompiler(t, exe, files, []string{"short.al"}); !bytes.Equal(first, second) {
+	second := runLowerCompiler(t, exe, files, []string{"short.al"})
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatal("logical lowering produced empty MIR")
+	}
+	if !bytes.Equal(first, second) {
 		t.Fatal("short-circuit MIR changed across fresh processes")
 	}
-	module, err := mir.Parse(string(first))
-	if err != nil {
-		t.Fatalf("parse short-circuit MIR: %v\n%s", err, first)
-	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify short-circuit MIR: %s\n%s", verify.Errors(diagnostics), first)
+	var module *mir.Module
+	for run, output := range [][]byte{first, second} {
+		parsed, err := mir.Parse(string(output))
+		if err != nil {
+			t.Fatalf("parse logical MIR run %d: %v\n%s", run, err, output)
+		}
+		if diagnostics := verify.Module(parsed); len(diagnostics) != 0 {
+			t.Fatalf("verify logical MIR run %d: %s\n%s", run, verify.Errors(diagnostics), output)
+		}
+		if run == 0 {
+			module = parsed
+		}
 	}
 	functionID := func(name string) mir.FunctionId {
 		id, ok := module.Function(name)
@@ -448,9 +473,16 @@ fn short_order_mixed() -> Bool {
 	explicitAnd := functionID("short_explicit_and")
 	repeatedOr := functionID("short_repeated_or")
 	mixed := functionID("short_mixed")
+	notSingle := functionID("not_single")
+	notAnd := functionID("not_and")
+	notOr := functionID("not_or")
+	notDeep := functionID("not_deep")
+	notRepeated := functionID("not_repeated")
+	notMatch := functionID("not_match")
 	orderAnd := functionID("short_order_and")
 	orderOr := functionID("short_order_or")
 	orderMixed := functionID("short_order_mixed")
+	notOrder := functionID("not_order")
 	if got := module.Functions[collision].Params[0].Name; got != "short_5" {
 		t.Fatalf("source parameter renamed: got %q", got)
 	}
@@ -487,16 +519,25 @@ int main(void) {
   if (!alder_fn_short_explicit_and_%d(true, true, true) || alder_fn_short_explicit_and_%d(true, false, true)) return 4;
   if (!alder_fn_short_repeated_or_%d(false, false, true) || alder_fn_short_repeated_or_%d(false, false, false)) return 5;
   if (!alder_fn_short_mixed_%d(true, false, true) || alder_fn_short_mixed_%d(true, false, false)) return 6;
+  if (alder_fn_not_single_%d(true) || !alder_fn_not_single_%d(false)) return 12;
+  if (alder_fn_not_and_%d(true, true) || !alder_fn_not_and_%d(true, false)) return 13;
+  if (!alder_fn_not_or_%d(false, false) || alder_fn_not_or_%d(false, true)) return 14;
+  if (alder_fn_not_deep_%d(true, false, true) || !alder_fn_not_deep_%d(true, false, false)) return 15;
+  if (alder_fn_not_repeated_%d(true, true, true) || !alder_fn_not_repeated_%d(true, false, true)) return 16;
+  if (alder_fn_not_match_%d(true) || !alder_fn_not_match_%d(false)) return 18;
   alder_test_observed = 0;
   if (alder_fn_short_order_and_%d() || alder_test_observed != 12) return 7;
   alder_test_observed = 0;
   if (!alder_fn_short_order_or_%d() || alder_test_observed != 12) return 8;
   alder_test_observed = 0;
   if (!alder_fn_short_order_mixed_%d() || alder_test_observed != 123) return 9;
+  alder_test_observed = 0;
+  if (!alder_fn_not_order_%d() || alder_test_observed != 12) return 17;
   return 0;
 }
 `, collision, collision, collisionAgain, collisionAgain, single, single, rightNested, rightNested, repeatedAnd, repeatedAnd, explicitAnd, explicitAnd,
-		repeatedOr, repeatedOr, mixed, mixed, orderAnd, orderOr, orderMixed)
+		repeatedOr, repeatedOr, mixed, mixed, notSingle, notSingle, notAnd, notAnd, notOr, notOr, notDeep, notDeep, notRepeated, notRepeated,
+		notMatch, notMatch, orderAnd, orderOr, orderMixed, notOrder)
 	dir := t.TempDir()
 	file := filepath.Join(dir, "short-circuit.c")
 	if err := os.WriteFile(file, append(generated, []byte(driver)...), 0o644); err != nil {
@@ -944,6 +985,7 @@ func runResourceCgenCompiler(t *testing.T, exe string, files map[string]string, 
 	args := append([]string{"!alder-core-cgen-resources"}, order...)
 	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), "TMPDIR="+t.TempDir())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1013,6 +1055,7 @@ func runLowerCompiler(t *testing.T, exe string, files map[string]string, order [
 	args := append([]string{"!alder-core-lower"}, order...)
 	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), "TMPDIR="+t.TempDir())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

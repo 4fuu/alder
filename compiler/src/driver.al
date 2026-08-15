@@ -165,19 +165,13 @@ fn driver_out_function_for_body(state: State, parse: ParseStore, source: U64, st
     return out_string("<unknown>")
 }
 
-fn driver_out_lex_message(state: State, kind: U64, source: U64, start: U64, json: Bool) -> Bool {
+fn driver_out_lex_message(state: State, kind: U64, source: U64, detail_start: U64, json: Bool) -> Bool {
     if kind == 1 { return out_string("semicolons are not supported") }
     if kind == 2 { return out_string("unexpected character") }
     if kind == 3 { return out_string("invalid exponent") }
     if kind == 4 {
         if !out_string("invalid escape ") { return false }
-        let rec = __s0_buffer_get(SourceRec, state.sources, source)
-        var at = start + 1
-        while at + 1 < rec.text_end - rec.text_start {
-            if text_byte(state, rec, at) == 92 { return driver_out_source_text(state, source, at, at + 2, json) }
-            at = at + 1
-        }
-        return false
+        return driver_out_source_text(state, source, detail_start, detail_start + 2, json)
     }
     if kind == 5 { return out_string("unterminated string") }
     return out_string("unterminated block comment")
@@ -304,7 +298,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
 }
 
 fn driver_out_message(state: State, parse: ParseStore, phase: U64, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
-    if phase == 1 { return driver_out_lex_message(state, kind, source, start, json) }
+    if phase == 1 { return driver_out_lex_message(state, kind, source, detail_a, json) }
     if phase == 2 { return driver_out_parse_message(kind) }
     return driver_out_check_message(state, parse, kind, source, start, end, detail_a, detail_b, detail_c, detail_d, json)
 }
@@ -343,7 +337,7 @@ fn driver_diagnostic(state: State, parse: ParseStore, phase: U64, kind: U64, sou
 
 fn driver_lex_diagnostic(state: State, parse: ParseStore) -> I32 {
     let rec = __s0_buffer_get(LexDiagRec, state.diagnostics, 0)
-    return driver_diagnostic(state, parse, 1, rec.kind, rec.source, rec.start, rec.end, 0, 0, 0, 0, 0, 0, 0)
+    return driver_diagnostic(state, parse, 1, rec.kind, rec.source, rec.start, rec.end, 0, 0, 0, rec.detail_start, 0, 0, 0)
 }
 
 fn driver_parse_diagnostic(state: State, store: ParseStore) -> I32 {
