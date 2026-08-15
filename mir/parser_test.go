@@ -226,6 +226,7 @@ var invalidParseTests = []struct {
 	{"unknown type", "mir 1\nfn @f(%x: @Nope) {\nbb0:\n  return\n}\n", "unknown type @Nope"},
 	{"unknown value", "mir 1\nconst @k: i64 = 1\nfn @f() {\nbb0:\n  %y = const.get @k\n  %z = int.add.checked %x, %y else bb0\n  return\n}\n", "unknown value %x"},
 	{"duplicate value", "mir 1\nconst @k: i64 = 1\nfn @f() {\nbb0:\n  %a = const.get @k\n  %a = const.get @k\n  return\n}\n", "duplicate value %a"},
+	{"duplicate local", "mir 1\nfn @f() {\n  local %slot: i64\n  local %slot: i64\nbb0:\n  return\n}\n", "duplicate local %slot"},
 	{"unknown local", "mir 1\nfn @f() {\nbb0:\n  %v = load local %nope\n  return\n}\n", "unknown local %nope"},
 	{"unknown block", "mir 1\nfn @f() {\nbb0:\n  jump bb_nope\n}\n", "unknown block"},
 	{"unknown function", "mir 1\nfn @f() {\nbb0:\n  %x = call @nope()\n  return\n}\n", "unknown function @nope"},
