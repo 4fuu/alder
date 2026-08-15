@@ -419,6 +419,9 @@ type EnvironmentRec {
 // contract. kind is the stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.
+// Type-bearing details are 1-based DiagnosticTypeRec roots: detail_a for a
+// single type, and detail_a/detail_b for an expected/actual pair. Other detail
+// layouts remain selected by kind.
 type CheckDiagRec {
     kind: U64
     source: U64
@@ -433,9 +436,21 @@ type CheckDiagRec {
     detail_d: U64
 }
 
+// Diagnostic types are a model-owned snapshot, separate from semantic checked
+// types so complete facts survive failed-body rollback. Kinds mirror
+// CheckedTypeRec. target identifies a primitive; source/name_start/name_end
+// own nominal or type-parameter spelling. Children name their parent root and
+// zero-based ordinal, representing applied declared types and every recursively
+// composed S0 type without retaining temporary CheckedTypeRec IDs.
 type DiagnosticTypeRec {
     kind: U64
     target: U64
+    source: U64
+    name_start: U64
+    name_end: U64
+    arg_count: U64
+    parent: U64
+    ordinal: U64
 }
 
 type State {

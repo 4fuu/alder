@@ -188,12 +188,17 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     return out_string("invalid source syntax")
 }
 
-fn driver_out_diagnostic_type(kind: U64, target: U64) -> Bool {
-    if kind == 8 {
-        if !out(91) || !driver_out_diagnostic_type(1, target) { return false }
-        return out(93)
+fn driver_diagnostic_type_child(store: CheckStore, parent: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(DiagnosticTypeRec, store.diagnostic_types) {
+        let fact = __s0_buffer_get(DiagnosticTypeRec, store.diagnostic_types, at)
+        if fact.parent == parent && fact.ordinal == ordinal { return at + 1 }
+        at = at + 1
     }
-    if kind != 1 { return out_string("<unknown>") }
+    return 0
+}
+
+fn driver_out_primitive_type(target: U64) -> Bool {
     if target == 1 { return out_string("Bool") }
     if target == 2 { return out_string("I8") }
     if target == 3 { return out_string("I16") }
@@ -205,7 +210,41 @@ fn driver_out_diagnostic_type(kind: U64, target: U64) -> Bool {
     if target == 9 { return out_string("U64") }
     if target == 10 { return out_string("F32") }
     if target == 11 { return out_string("F64") }
+    if target != 12 { return false }
     return out_string("Unit")
+}
+
+fn driver_out_diagnostic_type(state: State, store: CheckStore, diagnostic_type: U64, json: Bool) -> Bool {
+    if diagnostic_type == 0 || diagnostic_type > __s0_buffer_len(DiagnosticTypeRec, store.diagnostic_types) { return false }
+    let fact = __s0_buffer_get(DiagnosticTypeRec, store.diagnostic_types, diagnostic_type - 1)
+    if fact.kind == 8 {
+        let child = driver_diagnostic_type_child(store, diagnostic_type, 0)
+        if fact.arg_count != 1 || child == 0 || !out(91) || !driver_out_diagnostic_type(state, store, child, json) { return false }
+        return out(93)
+    }
+    if fact.kind == 1 { if !driver_out_primitive_type(fact.target) { return false } }
+    if fact.kind == 3 { if !out_string("Domain") { return false } }
+    if fact.kind == 4 { if !out_string("DomainMark") { return false } }
+    if fact.kind == 5 { if !out_string("__s0_Error") { return false } }
+    if fact.kind == 6 || fact.kind == 7 {
+        if fact.name_end <= fact.name_start || !driver_out_source_text(state, fact.source, fact.name_start, fact.name_end, json) { return false }
+    }
+    if fact.kind == 9 { if !out_string("Option") { return false } }
+    if fact.kind == 10 { if !out_string("Result") { return false } }
+    if fact.kind == 11 { if !out_string("Map") { return false } }
+    if fact.kind == 12 { if !out_string("Ptr") { return false } }
+    if fact.kind == 13 { if !out_string("__s0_Buffer") { return false } }
+    if fact.kind != 1 && fact.kind != 3 && fact.kind != 4 && fact.kind != 5 && fact.kind != 6 && fact.kind != 7 && fact.kind != 9 && fact.kind != 10 && fact.kind != 11 && fact.kind != 12 && fact.kind != 13 { return false }
+    if fact.arg_count == 0 { return true }
+    if !out(40) { return false }
+    var ordinal: U64 = 0
+    while ordinal < fact.arg_count {
+        if ordinal != 0 && !out_string(", ") { return false }
+        let child = driver_diagnostic_type_child(store, diagnostic_type, ordinal)
+        if child == 0 || !driver_out_diagnostic_type(state, store, child, json) { return false }
+        ordinal = ordinal + 1
+    }
+    return out(41)
 }
 
 fn driver_out_message_quote(json: Bool) -> Bool {
@@ -224,7 +263,7 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
     return (left == 2 || left == 3) && (right == 2 || right == 3)
 }
 
-fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
+fn driver_out_check_message(state: State, parse: ParseStore, store: CheckStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }
@@ -244,25 +283,25 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return driver_out_message_quote(json) }
     if kind == 9 { if !out_string("type ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" participates in a value-type cycle") }
-    if kind == 10 { if !out_string("slice element type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 10 { if !out_string("slice element type ") || !driver_out_diagnostic_type(state, store, detail_a, json) { return false }
         return out_string(" contains a slice or reference (M4 restriction)") }
-    if kind == 12 { if !out_string("Map key type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 12 { if !out_string("Map key type ") || !driver_out_diagnostic_type(state, store, detail_a, json) { return false }
         return out_string(" is not supported (unsigned integers, Bool, and structs/enums of those only)") }
-    if kind == 13 { if !out_string("Map value type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 13 { if !out_string("Map value type ") || !driver_out_diagnostic_type(state, store, detail_a, json) { return false }
         return out_string(" must be copy-trivial (no slices, references, maps, or domain handles)") }
     if kind == 15 { if !out_string("import ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(": parameter type must be a primitive or Ptr(primitive)") }
     if kind == 18 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }
         return driver_out_message_quote(json) }
-    if kind == 19 { if !out_string("return: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 19 { if !out_string("return: type mismatch: expected ") || !driver_out_diagnostic_type(state, store, detail_a, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, store, detail_b, json) }
     if kind == 21 { if !out_string("literal ") || !driver_out_source_text(state, source, start, end, json) { return false }
         if !out_string(" is out of range for ") { return false }
-        return driver_out_diagnostic_type(detail_a, detail_b) }
+        return driver_out_diagnostic_type(state, store, detail_a, json) }
     if kind == 22 { if !out_string("binding name ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" is reserved") }
-    if kind == 23 { if !out_string("binding: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 23 { if !out_string("binding: type mismatch: expected ") || !driver_out_diagnostic_type(state, store, detail_a, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, store, detail_b, json) }
     if kind == 25 { if !driver_out_message_quote(json) || !out_string("Unit") || !driver_out_message_quote(json) { return false }
         return out_string(" is a type, not a value") }
     if kind == 26 { return out_string("domain marks cannot be bound; use them directly (the current MIR profile requires the reset mark to be the direct domain.mark result)") }
@@ -284,12 +323,12 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 79 { if !out_string("match is not exhaustive: variant ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, detail_a, detail_b, json) || !driver_out_message_quote(json) || !out_string(" of ") || !driver_out_source_text(state, source, detail_c, detail_d, json) { return false }
         return out_string(" is not covered") }
     if kind == 80 { return out_string("try requires a function returning Result") }
-    if kind == 82 { if !out_string("try error type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not match function error type ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
-    if kind == 84 { if !out_string("index: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
-    if kind == 85 { if !out_string("cleanup function parameter: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 82 { if !out_string("try error type ") || !driver_out_diagnostic_type(state, store, detail_a, json) || !out_string(" does not match function error type ") { return false }
+        return driver_out_diagnostic_type(state, store, detail_b, json) }
+    if kind == 84 { if !out_string("index: type mismatch: expected ") || !driver_out_diagnostic_type(state, store, detail_a, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, store, detail_b, json) }
+    if kind == 85 { if !out_string("cleanup function parameter: type mismatch: expected ") || !driver_out_diagnostic_type(state, store, detail_a, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, store, detail_b, json) }
     if kind == 87 { return out_string("source form is outside the supported S0 contract") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
@@ -298,7 +337,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
 fn driver_out_message(state: State, parse: ParseStore, phase: U64, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if phase == 1 { return driver_out_lex_message(state, kind, source, detail_a, json) }
     if phase == 2 { return driver_out_parse_message(kind) }
-    return driver_out_check_message(state, parse, kind, source, start, end, detail_a, detail_b, detail_c, detail_d, json)
+    return false
 }
 
 fn driver_out_code(phase: U64) -> Bool {
@@ -343,9 +382,31 @@ fn driver_parse_diagnostic(state: State, store: ParseStore) -> I32 {
     return driver_diagnostic(state, store, 2, rec.kind, rec.source, rec.start, rec.end, 0, 0, 0, 0, 0, 0, 0)
 }
 
+fn driver_emit_human_check_diagnostic(state: State, parse: ParseStore, store: CheckStore, rec: CheckDiagRec) -> Bool {
+    if !driver_select(1) || !driver_out_human_range(state, rec.source, rec.start) || !out_string(": error[SEM0001]: ") || !driver_out_check_message(state, parse, store, rec.kind, rec.source, rec.start, rec.end, rec.detail_a, rec.detail_b, rec.detail_c, rec.detail_d, false) || !out(10) { return false }
+    if rec.related_start != 0 || rec.related_end != 0 {
+        if !driver_out_human_range(state, rec.related_source, rec.related_start) || !out_string(": related: first ") || !driver_out_declaration_kind(rec.detail_b) || !out_string(" declaration of \"") || !driver_out_node_name(state, parse, rec.source, rec.start, rec.end, false) || !out_string("\" is here\n") { return false }
+    }
+    return true
+}
+
+fn driver_emit_json_check_diagnostic(state: State, parse: ParseStore, store: CheckStore, rec: CheckDiagRec) -> Bool {
+    if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"") { return false }
+    if driver_command() == 1 { if !out_string("check") { return false } } else { if !out_string("compile") { return false } }
+    if !out_string("\",\"success\":false,\"diagnostics\":[{\"code\":\"SEM0001\",\"severity\":\"error\",\"message\":\"") || !driver_out_check_message(state, parse, store, rec.kind, rec.source, rec.start, rec.end, rec.detail_a, rec.detail_b, rec.detail_c, rec.detail_d, true) || !out_string("\",\"range\":") || !driver_out_range(state, rec.source, rec.start, rec.end) || !out_string(",\"related\":[") { return false }
+    if rec.related_start != 0 || rec.related_end != 0 {
+        if !out_string("{\"message\":\"first ") || !driver_out_declaration_kind(rec.detail_b) || !out_string(" declaration of ") || !driver_out_message_quote(true) || !driver_out_node_name(state, parse, rec.source, rec.start, rec.end, true) || !driver_out_message_quote(true) || !out_string(" is here\",\"range\":") || !driver_out_range(state, rec.related_source, rec.related_start, rec.related_end) || !out(125) { return false }
+    }
+    return out_string("],\"notes\":[]}]}\n")
+}
+
 fn driver_check_diagnostic(state: State, parse: ParseStore, store: CheckStore) -> I32 {
     let rec = __s0_buffer_get(CheckDiagRec, store.diagnostics, 0)
-    return driver_diagnostic(state, parse, 3, rec.kind, rec.source, rec.start, rec.end, rec.related_source, rec.related_start, rec.related_end, rec.detail_a, rec.detail_b, rec.detail_c, rec.detail_d)
+    var wrote = false
+    if driver_json() { wrote = driver_emit_json_check_diagnostic(state, parse, store, rec) }
+    else { wrote = driver_emit_human_check_diagnostic(state, parse, store, rec) }
+    if !wrote { return 3 }
+    return 1
 }
 
 fn driver_failure(status: U64, kind: String, message: String) -> I32 {

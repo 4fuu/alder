@@ -163,6 +163,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 		})
 	}
 	testProductionInvalidEscapeFacts(t, exe)
+	testProductionDynamicMismatchTypeFacts(t, exe)
 	duplicate := map[string]string{"a.al": "type clash { value: I64 }\n", "z.al": "fn clash() -> Unit { }\n"}
 	related := runProductionCompiler(t, exe, duplicate, "check", "--format=json", "z.al", "a.al")
 	relatedEnvelope := decodeProductionEnvelope(t, related.stdout)
@@ -188,6 +189,67 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	missingEnvelope := decodeProductionEnvelope(t, missingJSON.stdout)
 	if missingJSON.status != 3 || missingJSON.stderr != "" || missingEnvelope.Failure == nil || missingEnvelope.Failure.Kind != "io" {
 		t.Fatalf("JSON input I/O class: %+v envelope=%+v", missingJSON, missingEnvelope)
+	}
+}
+
+func testProductionDynamicMismatchTypeFacts(t *testing.T, exe string) {
+	t.Helper()
+	fixtures := []struct {
+		name, text string
+	}{
+		{"bool.al", "fn f() -> Unit { let value: I64 = true\n return }\n"},
+		{"nominal.al", "type Box { value: U64 }\nfn f(value: Box) -> I64 { return value }\n"},
+		{"applied.al", "type Box(T: type) { value: T }\nfn f(value: Box(Option(U64))) -> I64 { return value }\n"},
+		{"option.al", "fn f(value: Option(U64)) -> I64 { return value }\n"},
+		{"result.al", "fn f(value: Result(U64, __s0_Error)) -> I64 { return value }\n"},
+		{"map.al", "fn f(value: Map(U64, U8)) -> I64 { return value }\n"},
+		{"nested-actual.al", "type Box(T: type) { value: T }\nfn f(value: Result(Map(U64, Box(Option(U8))), Option([U8]))) -> I64 { return value }\n"},
+		{"nested-expected.al", "type Box(T: type) { value: T }\nfn f() -> Result(Map(U64, Box(Option(U8))), Option([U8])) { return false }\n"},
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			source := frontend.Source{ID: 1, Path: fixture.name, Text: fixture.text}
+			_, diagnostics, err := frontend.CompileSource(source)
+			if err != nil || len(diagnostics) != 1 {
+				t.Fatalf("Go diagnostic oracle: diagnostics=%+v error=%v", diagnostics, err)
+			}
+			want := diagnostics[0]
+			if !strings.Contains(want.Message, "type mismatch: expected ") || strings.Contains(want.Message, "<unknown") {
+				t.Fatalf("Go diagnostic oracle did not produce a complete dynamic mismatch: %+v", want)
+			}
+			startLine, startColumn := source.LineColumn(want.Primary.Start)
+			endLine, endColumn := source.LineColumn(want.Primary.End)
+			wantHuman := fmt.Sprintf("%s:%d:%d: %s[%s]: %s\n", source.Path, startLine, startColumn, want.Severity, want.Code, want.Message)
+			var firstHuman, firstJSON string
+			for attempt := 0; attempt < 2; attempt++ {
+				root := t.TempDir()
+				files := map[string]string{fixture.name: fixture.text}
+				human := runProductionCompilerAtRoot(t, exe, root, files, "compile", "--emit=mir", "-o", "out.mir", fixture.name)
+				if human.status != 1 || human.stdout != "" || human.stderr != wantHuman || strings.Contains(human.stderr, "<unknown") {
+					t.Fatalf("human diagnostic mismatch: got=%+v want stderr=%q", human, wantHuman)
+				}
+				assertProductionArtifactAbsent(t, root)
+
+				machine := runProductionCompilerAtRoot(t, exe, root, files, "compile", "--format=json", "--emit=mir", "-o", "out.mir", fixture.name)
+				envelope := decodeProductionEnvelope(t, machine.stdout)
+				if machine.status != 1 || machine.stderr != "" || envelope.Version != 1 || envelope.Command != "compile" || envelope.Success || envelope.Artifact != nil || envelope.Failure != nil || len(envelope.Diagnostics) != 1 {
+					t.Fatalf("JSON diagnostic protocol mismatch: result=%+v envelope=%+v", machine, envelope)
+				}
+				got := envelope.Diagnostics[0]
+				if got.Code != string(want.Code) || got.Severity != string(want.Severity) || got.Message != want.Message || strings.Contains(got.Message, "<unknown") ||
+					got.Range.Path != source.Path || got.Range.StartByte != want.Primary.Start || got.Range.EndByte != want.Primary.End ||
+					got.Range.Start.Line != startLine || got.Range.Start.Column != startColumn || got.Range.End.Line != endLine || got.Range.End.Column != endColumn ||
+					len(got.Related) != len(want.Related) || len(got.Notes) != len(want.Notes) {
+					t.Fatalf("decoded JSON diagnostic mismatch: got=%+v want=%+v", got, want)
+				}
+				assertProductionArtifactAbsent(t, root)
+				if attempt == 0 {
+					firstHuman, firstJSON = human.stderr, machine.stdout
+				} else if human.stderr != firstHuman || machine.stdout != firstJSON {
+					t.Fatal("dynamic mismatch diagnostics changed across fresh processes or workspace roots")
+				}
+			}
+		})
 	}
 }
 

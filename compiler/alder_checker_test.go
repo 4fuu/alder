@@ -20,7 +20,23 @@ fn checker_good(state: State, parse: ParseStore, store: CheckStore) -> I32 {
  if !emit_check_manifest(state, parse, store) { return 4 }
  return 0
 }
+fn emit_diagnostic_type_facts(store: CheckStore) -> Bool {
+ if !out_string("ALDER-DIAGNOSTIC-TYPES 1\n") { return false }
+ let diagnostic = __s0_buffer_get(CheckDiagRec, store.diagnostics, 0)
+ if !out_string("D ") || !out_u64(diagnostic.kind) || !out(32) || !out_u64(diagnostic.detail_a) || !out(32) || !out_u64(diagnostic.detail_b) || !out(10) { return false }
+ var at: U64 = 0
+ while at < __s0_buffer_len(DiagnosticTypeRec, store.diagnostic_types) {
+  let fact = __s0_buffer_get(DiagnosticTypeRec, store.diagnostic_types, at)
+  if !out_string("F ") || !out_u64(at + 1) || !out(32) || !out_u64(fact.kind) || !out(32) || !out_u64(fact.target) || !out(32) || !out_u64(fact.source) || !out(32) || !out_u64(fact.name_start) || !out(32) || !out_u64(fact.name_end) || !out(32) || !out_u64(fact.arg_count) || !out(32) || !out_u64(fact.parent) || !out(32) || !out_u64(fact.ordinal) || !out(10) { return false }
+  at = at + 1
+ }
+ return out_string("END\n")
+}
 fn checker_bad(state: State, parse: ParseStore, store: CheckStore) -> I32 {
+ if host_path_is(0, "!alder-core-diagnostic-types") {
+  if !emit_diagnostic_type_facts(store) { return 4 }
+  return 1
+ }
  if !emit_check_manifest(state, parse, store) { return 4 }
  return 1
 }
@@ -45,7 +61,7 @@ fn checker_parsed(d: Domain, result: ParseResult, store: CheckStore) -> I32 { re
  ParseBad(output) => checker_parse_bad(output.state, output.store)
  ParseLexBad(output) => checker_lex_bad(output.state)
 } }
-fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b)) } } } } } } } } } } }
+fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(DiagnosticTypeRec, d) { Err(e) => 3 Ok(diagnostic_types) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostic_types: diagnostic_types, diagnostics: b)) } } } } } } } } } } } }
 fn ci_returns(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec)) -> I32 { return match __s0_buffer_new(CheckedReturnRec, d) { Err(e) => 3 Ok(b) => ci_diag(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,children,b) } }
 fn ci_children(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec)) -> I32 { return match __s0_buffer_new(CheckedExprChildRec, d) { Err(e) => 3 Ok(b) => ci_returns(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,b) } }
 fn ci_calls(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec)) -> I32 { return match __s0_buffer_new(CallAnnotationRec, d) { Err(e) => 3 Ok(b) => ci_children(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,b) } }
@@ -1073,6 +1089,166 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// Duplicate checking precedes reserved-name checking in collect_symbols, but
 	// no two-declaration fixture can reach it: the first reserved declaration is
 	// rejected immediately. The ordering is therefore pinned by code review.
+	runDiagnosticTypeFactConformance(t, exe)
+}
+
+type diagnosticTypeFact struct {
+	id, kind, target, source, nameStart, nameEnd, argCount, parent, ordinal int
+}
+
+type diagnosticTypeFactManifest struct {
+	kind, expected, actual int
+	facts                  []diagnosticTypeFact
+}
+
+func runDiagnosticTypeFactConformance(t *testing.T, exe string) {
+	t.Helper()
+	t.Run("dynamic-mismatch-type-facts", func(t *testing.T) {
+		cases := []struct {
+			name, text, expected, actual string
+			kind                         int
+		}{
+			{"19-return", "fn f(value: I64) -> U64 { return value }\n", "U64", "I64", 19},
+			{"23-binding-bool", "fn f() -> Unit { let value: I64 = true\n return }\n", "I64", "Bool", 23},
+			{"24-assignment", "fn f(value: I64) -> Unit { var target: U64 = 1\n target = value\n return }\n", "U64", "I64", 24},
+			{"29-logical-not", "fn f(value: I64) -> Bool { return !value }\n", "Bool", "I64", 29},
+			{"34-shift-count", "fn f(a: I64, b: U64) -> I64 { return a << b }\n", "I64", "U64", 34},
+			{"35-comparison", "fn f(a: I64, b: U64) -> Bool { return a == b }\n", "I64", "U64", 35},
+			{"38-operand", "fn f(a: I64, b: U64) -> I64 { return a + b }\n", "I64", "U64", 38},
+			{"42-call-argument", "fn take(value: Option(U64)) -> Unit { return }\nfn f() -> Unit { take(false)\n return }\n", "Option(U64)", "Bool", 42},
+			{"50-variant-payload", "enum Choice { Value(value: Result(U64, U8)) }\nfn f() -> Choice { return Value(false) }\n", "Result(U64, U8)", "Bool", 50},
+			{"55-import-argument", "import c foreign: fn(U64) -> U64\nfn f() -> U64 { return unsafe c { foreign(false) } }\n", "U64", "Bool", 55},
+			{"58-inference-conflict", "fn wrap(T: type, value: T) -> Option(T) { return Some(value) }\nfn f() -> I64 { return wrap(1) }\n", "Option(T)", "I64", 58},
+			{"63-place-index", "fn f(values: [U64], index: I64) -> Unit { values[index] = 1\n return }\n", "U64", "I64", 63},
+			{"65-condition", "fn f(value: I64) -> Unit { while value {}\n return }\n", "Bool", "I64", 65},
+			{"77-match-arm", "fn f(value: Option(U64)) -> U64 { return match value { None => 0\n Some(item) => true } }\n", "U64", "Bool", 77},
+			{"82-try-error", "fn f(value: Result(U64, U8)) -> Result(U64, __s0_Error) { return Ok(try value) }\n", "U8", "__s0_Error", 82},
+			{"84-expression-index", "fn f(values: [U64], index: I64) -> U64 { return values[index] }\n", "U64", "I64", 84},
+			{"85-cleanup", "fn close(value: I64) -> Unit { return }\nfn f() -> Unit { using value = \"a\" with close\n return }\n", "[U8]", "I64", 85},
+			{"nominal", "type Box { value: U64 }\nfn f(value: Box) -> I64 { return value }\n", "I64", "Box", 19},
+			{"applied-nominal", "type Box(T: type) { value: T }\nfn f(value: Box(Option(U64))) -> I64 { return value }\n", "I64", "Box(Option(U64))", 19},
+			{"option", "fn f(value: Option(U64)) -> I64 { return value }\n", "I64", "Option(U64)", 19},
+			{"result", "fn f(value: Result(U64, __s0_Error)) -> I64 { return value }\n", "I64", "Result(U64, __s0_Error)", 19},
+			{"map", "fn f(value: Map(U64, U8)) -> I64 { return value }\n", "I64", "Map(U64, U8)", 19},
+			{"slice", "type Box(T: type) { value: T }\nfn f(value: [Box(Option(U64))]) -> I64 { return value }\n", "I64", "[Box(Option(U64))]", 19},
+			{"ptr", "fn f(value: Ptr(U8)) -> I64 { return value }\n", "I64", "Ptr(U8)", 19},
+			{"buffer", "fn f(value: __s0_Buffer(U64)) -> I64 { return value }\n", "I64", "__s0_Buffer(U64)", 19},
+			{"domain", "fn f(value: Domain) -> I64 { return value }\n", "I64", "Domain", 19},
+			{"domain-mark", "fn f(value: DomainMark) -> I64 { return value }\n", "I64", "DomainMark", 19},
+			{"s0-error", "fn f(value: __s0_Error) -> I64 { return value }\n", "I64", "__s0_Error", 19},
+			{"nested-actual", "type Box(T: type) { value: T }\nfn f(value: Result(Map(U64, Box(Option(U8))), Option([U8]))) -> I64 { return value }\n", "I64", "Result(Map(U64, Box(Option(U8))), Option([U8]))", 19},
+			{"nested-expected", "type Box(T: type) { value: T }\nfn f() -> Result(Map(U64, Box(Option(U8))), Option([U8])) { return false }\n", "Result(Map(U64, Box(Option(U8))), Option([U8]))", "Bool", 19},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				files := map[string]string{tc.name + ".al": tc.text}
+				first := runAlderCheckerWithSentinel(t, exe, "!alder-core-diagnostic-types", files, []string{tc.name + ".al"}, true)
+				second := runAlderCheckerWithSentinel(t, exe, "!alder-core-diagnostic-types", files, []string{tc.name + ".al"}, true)
+				if first != second {
+					t.Fatal("diagnostic type facts changed across fresh checker processes")
+				}
+				manifest := parseDiagnosticTypeFactManifest(t, first)
+				if manifest.kind != tc.kind {
+					t.Fatalf("diagnostic kind=%d, want %d", manifest.kind, tc.kind)
+				}
+				if got := renderDiagnosticTypeFact(t, manifest, manifest.expected, tc.text, make(map[int]bool)); got != tc.expected {
+					t.Fatalf("expected type fact rendered %q, want %q\n%s", got, tc.expected, first)
+				}
+				if got := renderDiagnosticTypeFact(t, manifest, manifest.actual, tc.text, make(map[int]bool)); got != tc.actual {
+					t.Fatalf("actual type fact rendered %q, want %q\n%s", got, tc.actual, first)
+				}
+			})
+		}
+	})
+}
+
+func parseDiagnosticTypeFactManifest(t *testing.T, text string) diagnosticTypeFactManifest {
+	t.Helper()
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if len(lines) < 4 || lines[0] != "ALDER-DIAGNOSTIC-TYPES 1" || lines[len(lines)-1] != "END" {
+		t.Fatalf("invalid diagnostic type fact envelope:\n%s", text)
+	}
+	var manifest diagnosticTypeFactManifest
+	if _, err := fmt.Sscanf(lines[1], "D %d %d %d", &manifest.kind, &manifest.expected, &manifest.actual); err != nil || manifest.expected == 0 || manifest.actual == 0 {
+		t.Fatalf("invalid diagnostic type roots %q: %v", lines[1], err)
+	}
+	for lineNumber, line := range lines[2 : len(lines)-1] {
+		var fact diagnosticTypeFact
+		if _, err := fmt.Sscanf(line, "F %d %d %d %d %d %d %d %d %d", &fact.id, &fact.kind, &fact.target, &fact.source, &fact.nameStart, &fact.nameEnd, &fact.argCount, &fact.parent, &fact.ordinal); err != nil {
+			t.Fatalf("invalid diagnostic type fact line %d %q: %v", lineNumber+3, line, err)
+		}
+		if fact.id != len(manifest.facts)+1 {
+			t.Fatalf("noncanonical diagnostic type fact ID %d", fact.id)
+		}
+		manifest.facts = append(manifest.facts, fact)
+	}
+	return manifest
+}
+
+func renderDiagnosticTypeFact(t *testing.T, manifest diagnosticTypeFactManifest, root int, source string, active map[int]bool) string {
+	t.Helper()
+	if root <= 0 || root > len(manifest.facts) || active[root] {
+		t.Fatalf("invalid or cyclic diagnostic type root %d", root)
+	}
+	active[root] = true
+	defer delete(active, root)
+	fact := manifest.facts[root-1]
+	name := map[int]string{1: "Bool", 2: "I8", 3: "I16", 4: "I32", 5: "I64", 6: "U8", 7: "U16", 8: "U32", 9: "U64", 10: "F32", 11: "F64", 12: "Unit"}[fact.target]
+	switch fact.kind {
+	case 3:
+		name = "Domain"
+	case 4:
+		name = "DomainMark"
+	case 5:
+		name = "__s0_Error"
+	case 6, 7:
+		if fact.source != 0 || fact.nameStart < 0 || fact.nameEnd <= fact.nameStart || fact.nameEnd > len(source) {
+			t.Fatalf("invalid source-owned type name fact %+v", fact)
+		}
+		name = source[fact.nameStart:fact.nameEnd]
+	case 8:
+		name = "[]"
+	case 9:
+		name = "Option"
+	case 10:
+		name = "Result"
+	case 11:
+		name = "Map"
+	case 12:
+		name = "Ptr"
+	case 13:
+		name = "__s0_Buffer"
+	}
+	if name == "" {
+		t.Fatalf("unrenderable diagnostic type fact %+v", fact)
+	}
+	children := make([]string, fact.argCount)
+	seen := make([]bool, fact.argCount)
+	for _, candidate := range manifest.facts {
+		if candidate.parent != root {
+			continue
+		}
+		if candidate.ordinal < 0 || candidate.ordinal >= fact.argCount || seen[candidate.ordinal] {
+			t.Fatalf("invalid diagnostic type child %+v for root %+v", candidate, fact)
+		}
+		seen[candidate.ordinal] = true
+		children[candidate.ordinal] = renderDiagnosticTypeFact(t, manifest, candidate.id, source, active)
+	}
+	for ordinal, found := range seen {
+		if !found {
+			t.Fatalf("diagnostic type root %d lacks child %d", root, ordinal)
+		}
+	}
+	if fact.kind == 8 {
+		if len(children) != 1 {
+			t.Fatalf("slice fact has %d children", len(children))
+		}
+		return "[" + children[0] + "]"
+	}
+	if len(children) != 0 {
+		name += "(" + strings.Join(children, ", ") + ")"
+	}
+	return name
 }
 
 func runMatchTryCheckerConformance(t *testing.T, exe string) {
@@ -1261,9 +1437,12 @@ func checkerOwnersBlocks(v []checkerBlock) []int {
 }
 
 func runAlderChecker(t *testing.T, exe string, files map[string]string, order []string, fail bool) string {
+	return runAlderCheckerWithSentinel(t, exe, "!alder-core-checker", files, order, fail)
+}
+
+func runAlderCheckerWithSentinel(t *testing.T, exe, sentinel string, files map[string]string, order []string, fail bool) string {
 	t.Helper()
 	d := t.TempDir()
-	const sentinel = "!alder-core-checker"
 	if err := os.WriteFile(filepath.Join(d, sentinel), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}

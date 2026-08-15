@@ -59,6 +59,7 @@ fn host_path_is(source: U64, word: String) -> Bool {
 fn main(d: Domain) -> I32 {
     if unsafe c { alderhost_source_count() } == 0 { return 2 }
     if host_path_is(0, "!alder-core-checker") { return checker_mode(d) }
+	if host_path_is(0, "!alder-core-diagnostic-types") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad") { return checker_mode(d) }
 	if host_path_is(0, "!alder-core-lower-bad-k") { return checker_mode(d) }
@@ -161,7 +162,7 @@ fn lower_bad_done(result: Result(LowerResult, __s0_Error)) -> I32 { return match
 fn lower_bad_blocks(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, blocks: __s0_Buffer(CheckedBlockRec)) -> I32 {
     return match __s0_buffer_append(CheckedBlockRec, d, blocks, CheckedBlockRec(owner: 999, syntax: 1, environment: 0, statements: 0, guaranteed_return: 0)) {
         Err(error) => 3
-        Ok(bad_blocks) => lower_bad_done(lower_checked(d, state, spans, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: CheckedControlStore(blocks: bad_blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: store.control.places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups), diagnostics: store.diagnostics)))
+        Ok(bad_blocks) => lower_bad_done(lower_checked(d, state, spans, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, diagnostic_types: store.diagnostic_types, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: CheckedControlStore(blocks: bad_blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: store.control.places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups), diagnostics: store.diagnostics)))
     }
 }
 fn lower_bad_control(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(I32, __s0_Error) {
@@ -184,7 +185,7 @@ fn lower_bad_control(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec)
         arms = try __s0_buffer_append(CheckedMatchArmRec, d, arms, CheckedMatchArmRec(owner: second.owner, syntax: second.syntax, checked_match: second.checked_match, variant_use: first.variant_use, variant_kind: first.variant_kind, binding: first.binding, environment: first.environment, body: second.body))
         control = CheckedControlStore(blocks: control.blocks, statement_links: control.statement_links, statements: control.statements, places: control.places, matches: control.matches, match_arms: arms, tries: control.tries, cleanups: control.cleanups)
     }
-    return Ok(lower_bad_done(lower_checked(d, state, spans, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: control, diagnostics: store.diagnostics))))
+    return Ok(lower_bad_done(lower_checked(d, state, spans, CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, diagnostic_types: store.diagnostic_types, type_annotations: store.type_annotations, uses: store.uses, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: control, diagnostics: store.diagnostics))))
 }
 fn lower_bad_family(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(I32, __s0_Error) {
     var symbols = store.symbols
@@ -212,7 +213,7 @@ fn lower_bad_family(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec),
         types = try __s0_buffer_append(CheckedTypeRec, d, types, CheckedTypeRec(kind: 8, syntax: 0, target: 0, first_arg: __s0_buffer_len(U64, type_args), arg_count: 1))
     }
     if host_path_is(0, "!alder-core-lower-bad-eliteral") { expressions = try __s0_buffer_append(CheckedExprRec, d, expressions, CheckedExprRec(owner: 1, syntax: 1, kind: 2, checked_type: 9, parameter_use: 0, bool_value: 1, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: 4, site_syntax: 1)) }
-    let bad = CheckStore(symbols: symbols, type_params: store.type_params, types: types, type_args: type_args, type_annotations: store.type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: control, diagnostics: store.diagnostics)
+    let bad = CheckStore(symbols: symbols, type_params: store.type_params, types: types, type_args: type_args, diagnostic_types: store.diagnostic_types, type_annotations: store.type_annotations, uses: uses, locals: locals, environments: environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: control, diagnostics: store.diagnostics)
     return Ok(lower_bad_done(lower_checked(d, state, spans, bad)))
 }
 fn lower_mode_spans(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> I32 {
