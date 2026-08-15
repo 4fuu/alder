@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/4fuu/alder/frontend"
 )
 
 const checkerWrapper = `
@@ -70,6 +72,125 @@ fn li_values(d: Domain,p: __s0_Buffer(U8),t: __s0_Buffer(U8)) -> I32 { return ma
 fn li_texts(d: Domain,p: __s0_Buffer(U8)) -> I32 { return match __s0_buffer_new(U8,d) { Err(e)=>3 Ok(b)=>li_values(d,p,b) } }
 fn main(d: Domain) -> I32 { return match __s0_buffer_new(U8,d) { Err(e)=>3 Ok(b)=>li_texts(d,b) } }
 `
+
+const localScopeReuseSource = `enum Choice {
+    Left(value: U64)
+    Right(value: U64)
+}
+fn close(value: U64) -> Unit { return }
+fn ordinary_siblings(flag: Bool) -> U64 {
+    var total: U64 = 0
+    {
+        var reused: U64 = 1
+        reused = 2
+        total = total + reused
+    }
+    {
+        var reused: U64 = 3
+        reused = 4
+        total = total + reused
+    }
+    if flag { return total }
+    return 0
+}
+fn loop_then_local(values: [U8]) -> U8 {
+    var total: U8 = 0
+    for item in values { total = total + item }
+    {
+        let item: U8 = 1
+        return total + item
+    }
+}
+fn using_then_local(seed: U64) -> U64 {
+    {
+        using resource = seed with close
+        let observed: U64 = resource
+    }
+    {
+        let resource: U64 = seed + 1
+        return resource
+    }
+}
+fn match_then_local(value: Choice) -> U64 {
+    let first: U64 = match value {
+        Left(item) => item
+        Right(item) => item
+    }
+    {
+        let item: U64 = first + 1
+        return item
+    }
+}
+fn main() -> I32 {
+    if ordinary_siblings(true) != 6 { return 1 }
+    if loop_then_local("ab") != 196 { return 5 }
+    if using_then_local(5) != 6 { return 2 }
+    if match_then_local(Left(7)) != 8 { return 3 }
+    if match_then_local(Right(8)) != 9 { return 4 }
+    return 7
+}
+`
+
+type localScopeRejectCase struct {
+	name, text, marker, message string
+	last                        bool
+	alderKind                   int
+}
+
+var localScopeRejectCases = []localScopeRejectCase{
+	{
+		name:      "same-active-scope",
+		text:      "fn f() -> U64 { let value: U64 = 1\n let value: U64 = 2\n return value }\n",
+		marker:    "let",
+		message:   `name "value" is already bound in this function`,
+		last:      true,
+		alderKind: 27,
+	},
+	{
+		name:      "nested-enclosing-local",
+		text:      "fn f() -> U64 { let value: U64 = 1\n { let value: U64 = 2 }\n return value }\n",
+		marker:    "let",
+		message:   `name "value" is already bound in this function`,
+		last:      true,
+		alderKind: 27,
+	},
+	{
+		name:      "nested-parameter",
+		text:      "fn f(value: U64) -> U64 { { let value: U64 = 2 }\n return value }\n",
+		marker:    "let",
+		message:   `name "value" is already bound in this function`,
+		alderKind: 27,
+	},
+	{
+		name:      "loop-enclosing-parameter",
+		text:      "fn f(values: [U64], item: U64) -> U64 { for item in values {}\n return item }\n",
+		marker:    "for",
+		message:   `name "item" is already bound in this function`,
+		alderKind: 27,
+	},
+	{
+		name:      "using-enclosing-parameter",
+		text:      "fn close(value: U64) -> Unit { return }\nfn f(resource: U64) -> Unit { using resource = resource with close\n return }\n",
+		marker:    "using",
+		message:   `name "resource" is already bound in this function`,
+		alderKind: 27,
+	},
+	{
+		name:      "match-enclosing-parameter",
+		text:      "fn f(value: Option(U64), item: U64) -> U64 { return match value { None => item\n Some(item) => item } }\n",
+		marker:    "match",
+		message:   `name "item" is already bound in this function`,
+		alderKind: 76,
+	},
+}
+
+func localScopeRejectRange(test localScopeRejectCase) (int, int) {
+	start := strings.Index(test.text, test.marker)
+	if test.last {
+		start = strings.LastIndex(test.text, test.marker)
+	}
+	return start, start + len(test.marker)
+}
 
 type checkerSource struct {
 	id, length int
@@ -233,6 +354,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 			}
 		})
 	}
+	runLocalScopeCheckerConformance(t, exe)
 	good := map[string]string{
 		"a space.al": "import c foreign: fn(U64, Ptr(U8),) -> I32\n" +
 			"type Box(T: type) { value: T }\n" +
@@ -1073,6 +1195,123 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// Duplicate checking precedes reserved-name checking in collect_symbols, but
 	// no two-declaration fixture can reach it: the first reserved declaration is
 	// rejected immediately. The ordering is therefore pinned by code review.
+}
+
+func runLocalScopeCheckerConformance(t *testing.T, exe string) {
+	t.Helper()
+	t.Run("local-scope-parity-acceptance", func(t *testing.T) {
+		source := frontend.Source{ID: 1, Path: "scope.al", Text: localScopeReuseSource}
+		firstGo, err := Compile(Request{Sources: []frontend.Source{source}, Emit: EmitMIR})
+		if err != nil || len(firstGo.Diagnostics) != 0 || firstGo.Artifact == nil {
+			t.Fatalf("Go Stage 0 rejected local reuse: result=%+v error=%v", firstGo, err)
+		}
+		secondGo, err := Compile(Request{Sources: []frontend.Source{source}, Emit: EmitMIR})
+		if err != nil || len(secondGo.Diagnostics) != 0 || secondGo.Artifact == nil || firstGo.Artifact.Text != secondGo.Artifact.Text {
+			t.Fatalf("Go Stage 0 local reuse was not deterministic: first=%+v second=%+v error=%v", firstGo, secondGo, err)
+		}
+
+		files := map[string]string{"scope.al": localScopeReuseSource}
+		first := runAlderChecker(t, exe, files, []string{"scope.al"}, false)
+		second := runAlderChecker(t, exe, files, []string{"scope.al"}, false)
+		if first != second {
+			t.Fatal("Alder checker local-scope manifest changed across fresh processes")
+		}
+		manifest := parseCheckerManifest(t, first, files)
+		if len(manifest.diagnostics) != 0 {
+			t.Fatalf("Alder checker rejected local reuse: %+v", manifest.diagnostics)
+		}
+
+		assertReferences := func(functionName, sourceName string, want int, wantPlaces bool) []int {
+			owner := checkerSymbolByName(t, manifest, files, functionName)
+			var ids []int
+			for _, local := range manifest.locals {
+				if local.owner == owner.id && checkerSourceText(manifest, files, local.source, local.nameStart, local.nameEnd) == sourceName {
+					ids = append(ids, local.id)
+				}
+			}
+			if len(ids) != want {
+				t.Fatalf("%s local %q IDs = %v, want %d distinct bindings", functionName, sourceName, ids, want)
+			}
+			for _, id := range ids {
+				expressionReference := false
+				placeReference := false
+				for _, expression := range manifest.expressions {
+					if expression.owner == owner.id && expression.parameterUse == id {
+						expressionReference = true
+					}
+				}
+				for _, place := range manifest.places {
+					if place.owner == owner.id && place.root == id {
+						placeReference = true
+					}
+				}
+				if !expressionReference || wantPlaces && !placeReference {
+					t.Fatalf("%s binding %d references: expression=%v place=%v", functionName, id, expressionReference, placeReference)
+				}
+			}
+			return ids
+		}
+		assertReferences("ordinary_siblings", "reused", 2, true)
+		loopIDs := assertReferences("loop_then_local", "item", 2, false)
+		usingIDs := assertReferences("using_then_local", "resource", 2, false)
+		matchIDs := assertReferences("match_then_local", "item", 3, false)
+
+		seenLoop, seenCleanup, seenMatch := make(map[int]bool), make(map[int]bool), make(map[int]bool)
+		for _, statement := range manifest.statements {
+			if statement.kind == 9 {
+				seenLoop[statement.binding] = true
+			}
+		}
+		for _, cleanup := range manifest.cleanups {
+			seenCleanup[cleanup.binding] = true
+		}
+		for _, arm := range manifest.matchArms {
+			if arm.binding != 0 {
+				seenMatch[arm.binding] = true
+			}
+		}
+		if !seenLoop[loopIDs[0]] || seenLoop[loopIDs[1]] {
+			t.Fatalf("loop/local reuse ownership changed: IDs=%v loop-bindings=%v", loopIDs, seenLoop)
+		}
+		if !seenCleanup[usingIDs[0]] || seenCleanup[usingIDs[1]] {
+			t.Fatalf("using/local reuse ownership changed: IDs=%v cleanup-bindings=%v", usingIDs, seenCleanup)
+		}
+		for _, id := range matchIDs[:2] {
+			if !seenMatch[id] {
+				t.Fatalf("match payload binding %d is not owned by its arm", id)
+			}
+		}
+		if seenMatch[matchIDs[2]] {
+			t.Fatalf("ordinary post-match binding %d became a match payload", matchIDs[2])
+		}
+	})
+
+	for _, test := range localScopeRejectCases {
+		test := test
+		t.Run("local-scope-parity-reject-"+test.name, func(t *testing.T) {
+			start, end := localScopeRejectRange(test)
+			source := frontend.Source{ID: 1, Path: test.name + ".al", Text: test.text}
+			result, err := Compile(Request{Sources: []frontend.Source{source}, Emit: EmitMIR})
+			if err != nil || len(result.Diagnostics) != 1 || result.Artifact != nil {
+				t.Fatalf("Go Stage 0 rejection status/artifact: result=%+v error=%v", result, err)
+			}
+			diagnostic := result.Diagnostics[0]
+			if diagnostic.Code != frontend.CodeSemantic || diagnostic.Primary != (frontend.Span{Source: 1, Start: start, End: end}) || diagnostic.Message != test.message {
+				t.Fatalf("Go Stage 0 rejection changed: got=%+v want-range=[%d,%d) want-message=%q", diagnostic, start, end, test.message)
+			}
+
+			files := map[string]string{source.Path: source.Text}
+			first := runAlderChecker(t, exe, files, []string{source.Path}, true)
+			second := runAlderChecker(t, exe, files, []string{source.Path}, true)
+			if first != second {
+				t.Fatal("Alder checker rejection changed across fresh processes")
+			}
+			manifest := parseCheckerManifest(t, first, files)
+			assertCheckerDiagnostic(t, manifest, test.alderKind, source.Path, start, end, "", -1, -1)
+			owner := checkerSymbolByName(t, manifest, files, "f")
+			assertNoCheckerBodyForOwner(t, manifest, owner.id)
+		})
+	}
 }
 
 func runMatchTryCheckerConformance(t *testing.T, exe string) {

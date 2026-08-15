@@ -1775,16 +1775,6 @@ fn local_lookup(store: CheckStore, owner: U64, node: SyntaxRec, state: State) ->
     return 0
 }
 
-fn local_declared(store: CheckStore, owner: U64, node: SyntaxRec, state: State) -> Bool {
-    var at: U64 = 0
-    while at < __s0_buffer_len(LocalRec, store.locals) {
-        let local = __s0_buffer_get(LocalRec, store.locals, at)
-        if local.owner == owner && same_name(state, node.source, node.name_start, node.name_end, local.source, local.name_start, local.name_end) { return true }
-        at = at + 1
-    }
-    return false
-}
-
 fn body_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(BodyStep, __s0_Error) {
     let failed = try check_fail(d, store, kind, node, 0, 0, 0)
     let bad = match failed {
@@ -1954,6 +1944,14 @@ fn match_arms_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     }))
 }
 
+fn match_arms_detail_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec, detail_a: U64, detail_b: U64) -> Result(MatchArmOutcome, __s0_Error) {
+    let failed = try check_token_detail_fail(d, state, store, kind, node, detail_a, detail_b, 0, 0)
+    return Ok(MatchArmsBad(match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }))
+}
+
 fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, link_id: U64, scrutinee_type: U64, expected: U64, checked_match: U64, match_node: SyntaxRec) -> Result(MatchArmOutcome, __s0_Error) {
     let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
     if link.next == 0 { return Ok(MatchArmsGood(MatchArmValueRec(store: store, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false))) }
@@ -2019,7 +2017,7 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
         let binding_node_id = __s0_buffer_get(SyntaxLinkRec, parse.links, binding_link - 1).node
         let binding_node = __s0_buffer_get(SyntaxRec, parse.nodes, binding_node_id - 1)
         if reserved_value_name(state, current, binding_node) { return match_arms_fail(d, state, current, 75, match_node) }
-        if local_lookup(current, owner, binding_node, state) != 0 { return match_arms_fail(d, state, current, 76, match_node) }
+        if local_lookup(current, owner, binding_node, state) != 0 || function_use(current, owner, 5, binding_node, state) != 0 { return match_arms_detail_fail(d, state, current, 76, match_node, binding_node.name_start, binding_node.name_end) }
         let locals = try __s0_buffer_append(LocalRec, d, current.locals, LocalRec(owner: owner, kind: 2, syntax: binding_node_id, source: binding_node.source, name_start: binding_node.name_start, name_end: binding_node.name_end, mutable: 0, checked_type: payload_type))
         binding = __s0_buffer_len(LocalRec, locals)
         let environments = try __s0_buffer_append(EnvironmentRec, d, current.environments, EnvironmentRec(owner: owner, parent: entry, binding: binding))
@@ -4009,7 +4007,7 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
         if annotation_syntax == 0 { return body_token_fail(d, state, next, 26, statement) }
         return body_fail(d, next, 26, diag_node)
     }
-    if local_declared(ostore, owner, statement, state) || function_use(ostore, owner, 5, statement, state) != 0 { return body_token_fail(d, state, next, 27, statement) }
+    if local_lookup(ostore, owner, statement, state) != 0 || function_use(ostore, owner, 5, statement, state) != 0 { return body_token_fail(d, state, next, 27, statement) }
     var mutable: U64 = 0
     var statement_kind: U64 = 1
     if statement.kind == 16 {
@@ -4166,7 +4164,7 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
     if !(try expression_type_equal(d, state, parse, current, initializer.checked_type, parameter)) { return body_token_type_fail(d, state, current, 85, statement, initializer.checked_type, parameter) }
     let result_type = __s0_buffer_get(CheckedTypeRec, current.types, result - 1)
     if result_type.kind != 1 || result_type.target != 12 { return body_fail(d, current, 86, cleanup_node) }
-    if local_declared(current, owner, statement, state) || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, current, 27, statement) }
+    if local_lookup(current, owner, statement, state) != 0 || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, current, 27, statement) }
     let locals = try __s0_buffer_append(LocalRec, d, current.locals, LocalRec(owner: owner, kind: 2, syntax: statement_id, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: 0, checked_type: initializer.checked_type))
     let binding = __s0_buffer_len(LocalRec, locals)
     let environments = try __s0_buffer_append(EnvironmentRec, d, current.environments, EnvironmentRec(owner: owner, parent: environment, binding: binding))
@@ -4355,7 +4353,7 @@ fn check_body_event(d: Domain, state: State, parse: ParseStore, events: __s0_Buf
     if sequence_draft.deferred { return body_token_fail(d, state, current, 87, sequence) }
     let sequence_type = __s0_buffer_get(CheckedTypeRec, current.types, sequence_draft.checked_type - 1)
     if sequence_type.kind != 8 { return body_token_fail(d, state, store, 66, statement) }
-    if local_declared(current, owner, statement, state) || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, store, 27, statement) }
+    if local_lookup(current, owner, statement, state) != 0 || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, store, 27, statement) }
     let element = __s0_buffer_get(U64, current.type_args, sequence_type.first_arg - 1)
     let locals = try __s0_buffer_append(LocalRec, d, current.locals, LocalRec(owner: owner, kind: 2, syntax: event.syntax, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: 0, checked_type: element))
     let binding = __s0_buffer_len(LocalRec, locals)

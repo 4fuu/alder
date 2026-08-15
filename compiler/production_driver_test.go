@@ -123,6 +123,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 		t.Fatal("MIR changed across workspace roots")
 	}
 	testProductionLocalNameUniqueness(t, cc, root, exe)
+	testProductionLocalScopeContract(t, cc, root, exe)
 
 	jsonMIR := runProductionCompiler(t, exe, valid, "compile", "--format=json", "--emit=mir", "z/main.al", "a/helper.al")
 	mirEnvelope := decodeProductionEnvelope(t, jsonMIR.stdout)
@@ -275,6 +276,102 @@ fn main() -> I32 {
 		t.Fatalf("source-local C result failed or was nondeterministic: first=%+v second=%+v", cOutput, cRepeat)
 	}
 	compileAndRunProductionArtifact(t, cc, root, cOutput.stdout, 7)
+}
+
+func testProductionLocalScopeContract(t *testing.T, cc, root, exe string) {
+	t.Helper()
+	files := map[string]string{"scope.al": localScopeReuseSource}
+	first := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "scope.al")
+	second := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "scope.al")
+	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 3\n") || first.stdout != second.stdout {
+		t.Fatalf("local-scope MIR failed or changed across fresh roots: first=%+v second=%+v", first, second)
+	}
+	module, err := mir.Parse(first.stdout)
+	if err != nil {
+		t.Fatalf("independently parse local-scope MIR: %v\n%s", err, first.stdout)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("complete V1-V10 verification of local-scope MIR: %s\n%s", verify.Errors(diagnostics).String(), first.stdout)
+	}
+
+	placeUses := func(name string) (*mir.Function, []int) {
+		id, ok := module.Function(name)
+		if !ok {
+			t.Fatalf("local-scope MIR has no function %q", name)
+		}
+		function := module.Functions[id]
+		uses := make([]int, len(function.Locals))
+		names := make(map[string]bool, len(function.Locals))
+		for _, local := range function.Locals {
+			if names[local.Name] {
+				t.Fatalf("function %s retained duplicate MIR local name %q", name, local.Name)
+			}
+			names[local.Name] = true
+		}
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op != mir.OpLoad && instruction.Op != mir.OpStore {
+					continue
+				}
+				place := instruction.Place
+				for place.Kind == mir.PlaceField {
+					place = *place.Base
+				}
+				if place.Kind == mir.PlaceLocal && int(place.Local) < len(uses) {
+					uses[place.Local]++
+				}
+			}
+		}
+		return function, uses
+	}
+	for _, test := range []struct {
+		name       string
+		usedLocals []int
+	}{
+		{"ordinary_siblings", []int{0, 1, 2}},
+		{"loop_then_local", []int{0, 1, 2}},
+		{"using_then_local", []int{0, 1, 2}},
+		{"match_then_local", []int{2, 3}},
+	} {
+		function, uses := placeUses(test.name)
+		for _, local := range test.usedLocals {
+			if local >= len(function.Locals) || uses[local] == 0 {
+				t.Fatalf("%s LocalId %d is not referenced by its intended places: locals=%+v uses=%v", test.name, local, function.Locals, uses)
+			}
+		}
+		if test.name == "match_then_local" && (len(uses) != 4 || uses[0] != 0 || uses[1] != 0) {
+			t.Fatalf("match payload bindings stopped lowering through synthetic values: locals=%+v uses=%v", function.Locals, uses)
+		}
+	}
+
+	firstC := runProductionCompiler(t, exe, files, "compile", "--emit=c", "scope.al")
+	secondC := runProductionCompiler(t, exe, files, "compile", "--emit=c", "scope.al")
+	if firstC.status != 0 || firstC.stderr != "" || firstC.stdout != secondC.stdout {
+		t.Fatalf("local-scope C failed or changed across fresh roots: first=%+v second=%+v", firstC, secondC)
+	}
+	compileAndRunProductionArtifact(t, cc, root, firstC.stdout, 7)
+
+	for _, test := range localScopeRejectCases {
+		test := test
+		t.Run("local-scope-reject-"+test.name, func(t *testing.T) {
+			path := test.name + ".al"
+			rejectFiles := map[string]string{path: test.text}
+			firstReject := runProductionCompiler(t, exe, rejectFiles, "compile", "--format=json", "--emit=mir", path)
+			secondReject := runProductionCompiler(t, exe, rejectFiles, "compile", "--format=json", "--emit=mir", path)
+			if firstReject.status != 1 || firstReject.stderr != "" || firstReject.stdout != secondReject.stdout {
+				t.Fatalf("production rejection status or determinism changed: first=%+v second=%+v", firstReject, secondReject)
+			}
+			envelope := decodeProductionEnvelope(t, firstReject.stdout)
+			start, end := localScopeRejectRange(test)
+			if envelope.Success || envelope.Artifact != nil || len(envelope.Diagnostics) != 1 {
+				t.Fatalf("production rejection emitted an artifact or wrong diagnostic count: %+v", envelope)
+			}
+			diagnostic := envelope.Diagnostics[0]
+			if diagnostic.Code != "SEM0001" || diagnostic.Severity != "error" || diagnostic.Message != test.message || diagnostic.Range.Path != path || diagnostic.Range.StartByte != start || diagnostic.Range.EndByte != end {
+				t.Fatalf("production rejection changed: got=%+v want-range=%s:[%d,%d) want-message=%q", diagnostic, path, start, end, test.message)
+			}
+		})
+	}
 }
 
 func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
