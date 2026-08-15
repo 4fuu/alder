@@ -10,7 +10,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 // coreConformanceSourceManifest is the exact fixed union closure for the
@@ -278,17 +277,9 @@ func TestAlderCoreConformance(t *testing.T) {
 	// determinism at the shared Compile-to-CompileSources canonicalization
 	// boundary. Checker and production argv permutations plus repeated printer
 	// and verifier processes retain executable-level determinism coverage here.
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitMIR})
-	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		t.Fatalf("compile core closure: result=%+v error=%v", compiled, err)
-	}
-
-	module, err := mir.Parse(compiled.Artifact.Text)
-	if err != nil {
-		t.Fatalf("parse core conformance MIR: %v", err)
-	}
-	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
-		t.Fatalf("verify core conformance MIR: %s", verify.Errors(diagnostics).String())
+	module, diagnostics, err := frontend.CompileSources(sources)
+	if err != nil || module == nil || len(diagnostics) != 0 {
+		t.Fatalf("compile core closure: module=%v diagnostics=%v error=%v", module, diagnostics, err)
 	}
 	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
@@ -304,7 +295,7 @@ func TestAlderCoreConformance(t *testing.T) {
 		}
 	}
 
-	generated, err := cgen.GenerateProgram(module)
+	generated, err := cgen.GenerateProgramTrusted(module)
 	if err != nil {
 		t.Fatalf("generate core conformance C: %v", err)
 	}

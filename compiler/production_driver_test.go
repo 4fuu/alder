@@ -80,9 +80,10 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if err := os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
-	testProductionInjectedFailure(t, cc, root, cfile, dir, true, 3)
-	testProductionInjectedFailure(t, cc, root, cfile, dir, false, 3)
+	object := compileGeneratedObject(t, cc, root, cfile)
+	linkGeneratedProgram(t, cc, root, object, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
+	testProductionInjectedFailure(t, cc, root, object, dir, true, 3)
+	testProductionInjectedFailure(t, cc, root, object, dir, false, 3)
 
 	valid := map[string]string{
 		"a/helper.al": "fn helper() -> I32 { return 7 }\n",
@@ -381,14 +382,29 @@ func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
 	return envelope
 }
 
-func compileGeneratedProgram(t *testing.T, cc, root, generated, host, output string, extra ...string) {
+func compileGeneratedObject(t *testing.T, cc, root, generated string) string {
 	t.Helper()
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
-	args = append(args, extra...)
-	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), generated, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
+	object := generated + ".o"
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", generated, "-o", object}
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}
+	return object
+}
+
+func linkGeneratedProgram(t *testing.T, cc, root, object, host, output string, extra ...string) {
+	t.Helper()
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args = append(args, extra...)
+	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), object, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
+	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
+	}
+}
+
+func compileGeneratedProgram(t *testing.T, cc, root, generated, host, output string, extra ...string) {
+	t.Helper()
+	linkGeneratedProgram(t, cc, root, compileGeneratedObject(t, cc, root, generated), host, output, extra...)
 }
 
 func compileAndRunProductionArtifact(t *testing.T, cc, root, generated string, want int) {
@@ -465,7 +481,7 @@ int main(void) { int context = 0; %s return alder_program_entry(&context) == (in
 	if err := os.WriteFile(host, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	compileGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
+	linkGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
 	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
 		t.Fatalf("injected %s failure: %v\n%s", name, err, output)
 	}

@@ -69,7 +69,9 @@ never sanitizes or repairs an invalid store.
 
 ## Generated program entry
 
-`cgen.GenerateProgram` is the explicit hosted-program path; generic
+`cgen.GenerateProgram` is the explicit hosted-program path and the
+verified-only gate for untrusted MIR. `cgen.GenerateProgramTrusted` is the
+same lowering for a module the caller already verified. Generic
 `cgen.Generate` remains a translation-unit generator and requires no `main`.
 For Stage 0 only, a program has exactly one MIR function named `main`, returning
 `i32`, with either no parameters or one `domain_handle` parameter. These are

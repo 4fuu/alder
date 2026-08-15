@@ -59,6 +59,19 @@ func GenerateProgram(m *mir.Module) (string, error) {
 	if err := verifyInput(m); err != nil {
 		return "", err
 	}
+	return generateProgram(m)
+}
+
+// GenerateProgramTrusted lowers a module the caller already ran through
+// verify.Module. Public GenerateProgram remains the verified-only gate.
+func GenerateProgramTrusted(m *mir.Module) (string, error) {
+	if m == nil {
+		return "", fmt.Errorf("cgen: nil module")
+	}
+	return generateProgram(m)
+}
+
+func generateProgram(m *mir.Module) (string, error) {
 	mainID := mir.NoFunction
 	for i, f := range m.Functions {
 		if f != nil && f.Name == "main" {

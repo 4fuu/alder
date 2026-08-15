@@ -103,8 +103,9 @@ func Compile(req Request) (Result, error) {
 	if len(diagnostics) != 0 {
 		return Result{Diagnostics: frontend.SortDiagnosticsBySource(diagnostics, sources)}, nil
 	}
-	// frontend.CompileSources already ran the complete verifier. EmitC
-	// re-checks at the backend gate; EmitMIR trusts that frontend result.
+	// frontend.CompileSources already ran the complete verifier. EmitMIR
+	// and EmitC both trust that result; GenerateProgram remains the
+	// verified-only gate for untrusted MIR.
 	result := Result{Diagnostics: []frontend.Diagnostic{}}
 	switch req.Emit {
 	case EmitNone:
@@ -112,7 +113,7 @@ func Compile(req Request) (Result, error) {
 	case EmitMIR:
 		result.Artifact = &Artifact{Kind: EmitMIR, Text: mir.Print(m)}
 	case EmitC:
-		text, err := cgen.GenerateProgram(m)
+		text, err := cgen.GenerateProgramTrusted(m)
 		if err != nil {
 			var entryError *cgen.ProgramEntryError
 			if errors.As(err, &entryError) {
