@@ -108,6 +108,17 @@ type MatchArmValueRec {
     first_arm: U64
     arm_count: U64
     wildcard: Bool
+    arms: __s0_Buffer(MatchArmDraftRec)
+}
+
+type MatchArmDraftRec {
+    owner: U64
+    syntax: U64
+    variant_use: U64
+    variant_kind: U64
+    binding: U64
+    environment: U64
+    body: U64
 }
 
 enum MatchArmOutcome {
@@ -1972,10 +1983,10 @@ fn expression_operator(state: State, node: SyntaxRec) -> U64 {
     return 0
 }
 
-fn match_variant_seen(store: CheckStore, first: U64, count: U64, variant_use: U64, variant_kind: U64) -> Bool {
+fn match_variant_seen(arms: __s0_Buffer(MatchArmDraftRec), first: U64, count: U64, variant_use: U64, variant_kind: U64) -> Bool {
     var at: U64 = 0
     while at < count {
-        let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, first - 1 + at)
+        let arm = __s0_buffer_get(MatchArmDraftRec, arms, first - 1 + at)
         if arm.variant_use == variant_use && arm.variant_kind == variant_kind { return true }
         at = at + 1
     }
@@ -2000,14 +2011,14 @@ fn match_arms_type_fail(d: Domain, state: State, store: CheckStore, kind: U64, n
     }))
 }
 
-fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, link_id: U64, scrutinee_type: U64, expected: U64, checked_match: U64, match_node: SyntaxRec) -> Result(MatchArmOutcome, __s0_Error) {
+fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, link_id: U64, scrutinee_type: U64, expected: U64, drafts: __s0_Buffer(MatchArmDraftRec), match_node: SyntaxRec) -> Result(MatchArmOutcome, __s0_Error) {
     let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
-    if link.next == 0 { return Ok(MatchArmsGood(MatchArmValueRec(store: store, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false))) }
-    let prior_outcome = try check_match_arm_links(d, state, parse, base, store, owner, link.next, scrutinee_type, expected, checked_match, match_node)
+    if link.next == 0 { return Ok(MatchArmsGood(MatchArmValueRec(store: store, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false, arms: drafts))) }
+    let prior_outcome = try check_match_arm_links(d, state, parse, base, store, owner, link.next, scrutinee_type, expected, drafts, match_node)
     let prior = match prior_outcome {
         MatchArmsGood(value) => value
-        MatchArmsBad(value) => MatchArmValueRec(store: value, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false)
-        MatchArmsDefer => MatchArmValueRec(store: store, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false)
+        MatchArmsBad(value) => MatchArmValueRec(store: value, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false, arms: drafts)
+        MatchArmsDefer => MatchArmValueRec(store: store, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false, arms: drafts)
     }
     if match prior_outcome {
         MatchArmsGood(value) => false
@@ -2051,7 +2062,7 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
             if concrete.kind == 5 && node_word(state, arm, "Limit") { variant_kind = 6 }
             if variant_kind == 0 { return match_arms_fail(d, state, prior.store, 71, match_node) }
         }
-        if match_variant_seen(prior.store, prior.first_arm, prior.arm_count, variant_use, variant_kind) { return match_arms_fail(d, state, prior.store, 72, match_node) }
+        if match_variant_seen(prior.arms, prior.first_arm, prior.arm_count, variant_use, variant_kind) { return match_arms_fail(d, state, prior.store, 72, match_node) }
     }
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, arm.children - 1)
     var current = prior.store
@@ -2090,15 +2101,13 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
     if draft.deferred { return Ok(MatchArmsDefer) }
     if prior.arm_type != 0 && !(try expression_type_equal(d, state, parse, current, prior.arm_type, draft.checked_type)) { return match_arms_type_fail(d, state, current, 77, body_node, prior.arm_type, draft.checked_type) }
     let arm_environment = current_environment(current, owner)
-    let arms = try __s0_buffer_append(CheckedMatchArmRec, d, current.control.match_arms, CheckedMatchArmRec(owner: owner, syntax: link.node, checked_match: checked_match, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: draft.expression))
-    let control = CheckedControlStore(blocks: current.control.blocks, statement_links: current.control.statement_links, statements: current.control.statements, places: current.control.places, matches: current.control.matches, match_arms: arms, tries: current.control.tries, cleanups: current.control.cleanups)
-    current = with_control(current, control)
+    let next_drafts = try __s0_buffer_append(MatchArmDraftRec, d, prior.arms, MatchArmDraftRec(owner: owner, syntax: link.node, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: draft.expression))
     if binding != 0 { current = try restore_environment(d, current, owner, entry) }
     var arm_type = prior.arm_type
     if arm_type == 0 { arm_type = draft.checked_type }
     var first = prior.first_arm
-    if first == 0 { first = __s0_buffer_len(CheckedMatchArmRec, arms) }
-    return Ok(MatchArmsGood(MatchArmValueRec(store: current, arm_type: arm_type, first_arm: first, arm_count: prior.arm_count + 1, wildcard: prior.wildcard || variant_kind == 7)))
+    if first == 0 { first = __s0_buffer_len(MatchArmDraftRec, next_drafts) }
+    return Ok(MatchArmsGood(MatchArmValueRec(store: current, arm_type: arm_type, first_arm: first, arm_count: prior.arm_count + 1, wildcard: prior.wildcard || variant_kind == 7, arms: next_drafts)))
 }
 
 fn append_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, checked_type: U64, reference: U64, bool_value: U64, left: U64, right: U64, operator: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
@@ -3692,12 +3701,12 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         let scrutinee_type = __s0_buffer_get(CheckedTypeRec, current.types, scrutinee.checked_type - 1)
         if scrutinee_type.kind != 5 && scrutinee_type.kind != 7 && scrutinee_type.kind != 9 && scrutinee_type.kind != 10 { return expr_token_fail(d, state, base, 70, expression) }
         if arm_head.next == 0 { return expr_token_fail(d, state, base, 78, expression) }
-        let match_id = __s0_buffer_len(CheckedMatchRec, current.control.matches) + 1
-        let checked_arms = try check_match_arm_links(d, state, parse, base, current, owner, expression.children, scrutinee.checked_type, expected, match_id, expression)
+        let drafts = try __s0_buffer_new(MatchArmDraftRec, d)
+        let checked_arms = try check_match_arm_links(d, state, parse, base, current, owner, expression.children, scrutinee.checked_type, expected, drafts, expression)
         let arms = match checked_arms {
             MatchArmsGood(value) => value
-            MatchArmsBad(value) => MatchArmValueRec(store: value, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false)
-            MatchArmsDefer => MatchArmValueRec(store: current, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false)
+            MatchArmsBad(value) => MatchArmValueRec(store: value, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false, arms: drafts)
+            MatchArmsDefer => MatchArmValueRec(store: current, arm_type: 0, first_arm: 0, arm_count: 0, wildcard: false, arms: drafts)
         }
         if match checked_arms {
             MatchArmsGood(value) => false
@@ -3728,7 +3737,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                 var variant_at: U64 = 0
                 while variant_at < __s0_buffer_len(DeclTypeUseRec, arms.store.uses) {
                     let declared = __s0_buffer_get(DeclTypeUseRec, arms.store.uses, variant_at)
-                    if declared.owner == scrutinee_type.target && declared.role == 2 && !match_variant_seen(arms.store, arms.first_arm, arms.arm_count, variant_at + 1, 0) { covered = false
+                    if declared.owner == scrutinee_type.target && declared.role == 2 && !match_variant_seen(arms.arms, arms.first_arm, arms.arm_count, variant_at + 1, 0) { covered = false
                         if missing == 0 { missing = variant_at + 1 } }
                     variant_at = variant_at + 1
                 }
@@ -3745,8 +3754,17 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             }
             if !covered { return expr_token_fail(d, state, base, 79, expression) }
         }
-        let matches = try __s0_buffer_append(CheckedMatchRec, d, arms.store.control.matches, CheckedMatchRec(owner: owner, syntax: expression_id, scrutinee: scrutinee.expression, scrutinee_type: scrutinee.checked_type, checked_type: arms.arm_type, first_arm: arms.first_arm, arm_count: arms.arm_count))
-        let control = CheckedControlStore(blocks: arms.store.control.blocks, statement_links: arms.store.control.statement_links, statements: arms.store.control.statements, places: arms.store.control.places, matches: matches, match_arms: arms.store.control.match_arms, tries: arms.store.control.tries, cleanups: arms.store.control.cleanups)
+        let match_id = __s0_buffer_len(CheckedMatchRec, arms.store.control.matches) + 1
+        let first_arm = __s0_buffer_len(CheckedMatchArmRec, arms.store.control.match_arms) + 1
+        var persisted_arms = arms.store.control.match_arms
+        var arm_at: U64 = 0
+        while arm_at < arms.arm_count {
+            let arm = __s0_buffer_get(MatchArmDraftRec, arms.arms, arms.first_arm - 1 + arm_at)
+            persisted_arms = try __s0_buffer_append(CheckedMatchArmRec, d, persisted_arms, CheckedMatchArmRec(owner: arm.owner, syntax: arm.syntax, checked_match: match_id, variant_use: arm.variant_use, variant_kind: arm.variant_kind, binding: arm.binding, environment: arm.environment, body: arm.body))
+            arm_at = arm_at + 1
+        }
+        let matches = try __s0_buffer_append(CheckedMatchRec, d, arms.store.control.matches, CheckedMatchRec(owner: owner, syntax: expression_id, scrutinee: scrutinee.expression, scrutinee_type: scrutinee.checked_type, checked_type: arms.arm_type, first_arm: first_arm, arm_count: arms.arm_count))
+        let control = CheckedControlStore(blocks: arms.store.control.blocks, statement_links: arms.store.control.statement_links, statements: arms.store.control.statements, places: arms.store.control.places, matches: matches, match_arms: persisted_arms, tries: arms.store.control.tries, cleanups: arms.store.control.cleanups)
         return append_expression(d, with_control(arms.store, control), owner, expression_id, 12, arms.arm_type, match_id, 0, scrutinee.expression, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 31 {
