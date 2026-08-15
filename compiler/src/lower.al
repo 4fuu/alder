@@ -922,9 +922,9 @@ fn lower_float_bits(source_state: State, spans: __s0_Buffer(CheckedSpanRec), exp
     return unsafe c { alderhost_decimal_f64_bits(negative, significand, exponent - fraction) }
 }
 
-fn lower_bool_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, value: U64, suffix: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_bool_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
-    let name = try lower_decimal_name(d, "lit.bool", suffix)
+    let name = try lower_decimal_name(d, "lit.bool", __s0_buffer_len(MirConstRec, typ.state.mir.constants) + 1)
     let constant = try mir_add_const(d, typ.state.mir, name, typ.id, mir_const_bool(), value, 0, 0, "")
     let result = try lower_add_result(d, lower_with_mir(typ.state, constant.store), function, block, checked_type, source_state, store)
     let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
@@ -1053,9 +1053,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, "not", typ.id)
             var current = lower_with_mir(typ.state, param.store)
             current = try lower_branch(d, current, function, source_block, left.id, false_block.id, true_block.id)
-            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, expression_id)
+            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1)
             current = try lower_jump_value(d, truth.state, function, true_block.id, join.id, truth.id)
-            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, expression_id + 1)
+            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0)
             current = try lower_jump_value(d, falsity.state, function, false_block.id, join.id, falsity.id)
             return Ok(LowerStep(state: current, id: param.id))
         }
@@ -1075,7 +1075,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = try lower_jump_value(d, right.state, function, lower_open_block(right.state.mir, function, right_block.id), join.id, right.id)
             var constant_value: U64 = 0
             if expression.operator == 17 { constant_value = 1 }
-            let constant = try lower_bool_value(d, source_state, store, current, function, constant_block.id, expression.checked_type, constant_value, expression_id)
+            let constant = try lower_bool_value(d, source_state, store, current, function, constant_block.id, expression.checked_type, constant_value)
             current = try lower_jump_value(d, constant.state, function, constant_block.id, join.id, constant.id)
             return Ok(LowerStep(state: current, id: param.id))
         }

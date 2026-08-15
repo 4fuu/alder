@@ -75,9 +75,9 @@ const @lit29: u64 = 20
 
 const @lit32: u64 = 1
 
-const @lit.bool34: bool = true
+const @lit.bool7: bool = true
 
-const @lit.bool35: bool = false
+const @lit.bool8: bool = false
 
 const @lit35: i32 = 1
 
@@ -119,9 +119,9 @@ const @lit81: i32 = 1
 
 const @lit83: u64 = 81
 
-const @lit.bool85: bool = true
+const @lit.bool29: bool = true
 
-const @lit.bool86: bool = false
+const @lit.bool30: bool = false
 
 const @lit86: i32 = 2
 
@@ -281,7 +281,7 @@ const @lit327: u64 = 3
 
 const @lit330: u64 = 0
 
-const @lit.bool336: bool = false
+const @lit.bool110: bool = false
 
 const @lit337: u64 = 0
 
@@ -299,9 +299,9 @@ const @lit359: u64 = 0
 
 const @lit365: u64 = 0
 
-const @lit.bool370: bool = true
+const @lit.bool119: bool = true
 
-const @lit.bool371: bool = false
+const @lit.bool120: bool = false
 
 const @lit372: u64 = 3
 
@@ -590,11 +590,11 @@ bb_map_set_ok3:
   branch %v72, bb_not_false5, bb_not_true4
 
 bb_not_true4:
-  %v74 = const.get @lit.bool34
+  %v74 = const.get @lit.bool7
   jump bb_not_join6(%v74)
 
 bb_not_false5:
-  %v75 = const.get @lit.bool35
+  %v75 = const.get @lit.bool8
   jump bb_not_join6(%v75)
 
 bb_not_join6(%not: bool):
@@ -726,11 +726,11 @@ bb_join9:
   branch %v125, bb_not_false11, bb_not_true10
 
 bb_not_true10:
-  %v127 = const.get @lit.bool85
+  %v127 = const.get @lit.bool29
   jump bb_not_join12(%v127)
 
 bb_not_false11:
-  %v128 = const.get @lit.bool86
+  %v128 = const.get @lit.bool30
   jump bb_not_join12(%v128)
 
 bb_not_join12(%not: bool):
@@ -1444,7 +1444,7 @@ bb_short2:
   jump bb_short_join4(%right)
 
 bb_short_const3:
-  %v409 = const.get @lit.bool336
+  %v409 = const.get @lit.bool110
   jump bb_short_join4(%v409)
 
 bb_short_join4(%__s0_short_5: bool):
@@ -1576,11 +1576,11 @@ bb_panic:
   panic
 
 bb_not_true2:
-  %v455 = const.get @lit.bool370
+  %v455 = const.get @lit.bool119
   jump bb_not_join4(%v455)
 
 bb_not_false3:
-  %v456 = const.get @lit.bool371
+  %v456 = const.get @lit.bool120
   jump bb_not_join4(%v456)
 
 bb_not_join4(%not: bool):

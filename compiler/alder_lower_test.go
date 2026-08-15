@@ -247,6 +247,7 @@ fn buffer_oom_retry(d: Domain) -> Result(U64, __s0_Error) {
 	runLowerCgenBehavior(t, module, exe, files, []string{"types.al", "scalar.al", "control.al", "match_try.al", "cleanup.al", "bridge.al"})
 	runMalformedLowerCompiler(t, exe)
 	runMatchNameConformance(t, exe)
+	runUnaryBooleanConstantConformance(t, exe)
 	runShortCircuitLowerConformance(t, exe)
 }
 
@@ -558,6 +559,75 @@ int main(void) {
 	}
 	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
 		t.Fatalf("run short-circuit C: %v\n%s", err, output)
+	}
+}
+
+func runUnaryBooleanConstantConformance(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"unary-constants.al": `fn double(value: Bool) -> Bool { return !!value }
+fn deeper(value: Bool) -> Bool { return !!!!value }
+fn repeated(left: Bool, right: Bool) -> Bool {
+    let first: Bool = !left
+    let second: Bool = !right
+    return first && second
+}
+fn nearby(value: Bool) -> Bool {
+    let yes: Bool = true
+    let no: Bool = false
+    return (!!value && yes) || no
+}
+fn separate_first(value: Bool) -> Bool { return !value }
+fn separate_second(value: Bool) -> Bool { return !value }
+fn bool_literal() -> Bool { return true }
+fn int_literal() -> U64 { return 42 }
+fn float_literal() -> F64 { return 1.5 }
+fn string_literal() -> String { return "nearby" }
+`}
+	first := runLowerCompiler(t, exe, files, []string{"unary-constants.al"})
+	second := runLowerCompiler(t, exe, files, []string{"unary-constants.al"})
+	if len(first) == 0 || !bytes.Equal(first, second) {
+		t.Fatal("raw nested-unary MIR was empty or changed across fresh processes")
+	}
+	for run, output := range [][]byte{first, second} {
+		names := make(map[string]struct{})
+		constants := 0
+		synthetic, truth, falsity := 0, 0, 0
+		for _, line := range strings.Split(string(output), "\n") {
+			if !strings.HasPrefix(line, "const @") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 5 {
+				t.Fatalf("raw nested-unary MIR run %d has malformed constant line %q", run, line)
+			}
+			constants++
+			name := strings.TrimSuffix(strings.TrimPrefix(fields[1], "@"), ":")
+			if _, exists := names[name]; exists {
+				t.Fatalf("raw nested-unary MIR run %d retained duplicate constant @%s", run, name)
+			}
+			names[name] = struct{}{}
+			if !strings.HasPrefix(name, "lit.bool") {
+				continue
+			}
+			synthetic++
+			if want := fmt.Sprintf("lit.bool%d", constants); name != want {
+				t.Fatalf("raw synthetic Boolean identity = @%s, want append ordinal @%s", name, want)
+			}
+			if fields[2] != "bool" || fields[3] != "=" || fields[4] != "true" && fields[4] != "false" {
+				t.Fatalf("raw synthetic Boolean constant @%s has malformed type/value facts: %q", name, line)
+			}
+			if fields[4] == "true" {
+				truth++
+			} else {
+				falsity++
+			}
+		}
+		if constants != 33 || synthetic != 27 || truth != 13 || falsity != 14 {
+			t.Fatalf("raw nested-unary constant inventory run %d: all=%d synthetic=%d true=%d false=%d, want 33/27/13/14", run, constants, synthetic, truth, falsity)
+		}
+		if _, err := mir.Parse(string(output)); err == nil || !strings.Contains(err.Error(), "duplicate value %not") || strings.Contains(err.Error(), "duplicate constant") {
+			t.Fatalf("raw nested-unary next parser fact run %d = %v, want only known #119 duplicate %%not", run, err)
+		}
 	}
 }
 
