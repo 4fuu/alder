@@ -1672,6 +1672,16 @@ fn lower_local_type(d: Domain, source_state: State, store: CheckStore, state: Lo
     return Ok(ordinary)
 }
 
+fn lower_local_name_seen(source_state: State, store: CheckStore, owner: U64, binding: U64, local: LocalRec) -> Bool {
+    var at: U64 = 0
+    while at + 1 < binding {
+        let prior = __s0_buffer_get(LocalRec, store.locals, at)
+        if prior.owner == owner && prior.kind != 1 && same_name(source_state, local.source, local.name_start, local.name_end, prior.source, prior.name_start, prior.name_end) { return true }
+        at = at + 1
+    }
+    return false
+}
+
 fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(lower_invalid(state)) }
@@ -1684,7 +1694,8 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         if local.owner == owner {
             let typ = try lower_local_type(d, source_state, store, current, owner, at + 1, local)
             current = typ.state
-            let name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
+            var name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
+            if local.kind != 1 && lower_local_name_seen(source_state, store, owner, at + 1, local) { name = try lower_decimal_name(d, "__s0_local_", local_ordinal) }
             if local.kind == 1 {
                 let parameter = try mir_add_function_param(d, current.mir, function, param_ordinal, name, typ.id)
                 current = lower_with_mir(current, parameter.store)
