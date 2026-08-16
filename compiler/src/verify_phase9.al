@@ -15,14 +15,14 @@ fn mir_v9_use_allowed(store: MirStore, function: U64, use: MirVP4Use) -> Bool {
     return false
 }
 
-fn mir_v9_function(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_v9_function(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
-    let uses = try mir_vp4_collect_uses(d, store, function)
+    let uses = try mir_vp4_collect_uses(d, store, indexes, function)
         var at: U64 = 0
         while at < __s0_buffer_len(MirVP4Use, uses) {
             let use = __s0_buffer_get(MirVP4Use, uses, at)
-            let type_id = mir_v5_value_type(store, function, use.value)
-            if try mir_v6_type_contains(d, store, type_id, mir_type_kind_raw_ptr()) {
+            let type_id = mir_v5_value_type(store, indexes, function, use.value)
+            if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) {
                 if !mir_v9_use_allowed(store, function, use) {
                     out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_pointers(), mir_vdiag_raw_boundary(), function, use.block, use.instruction, use.terminator, use.operand, type_id, 0, 0, 0, use.value))
                 }
@@ -32,10 +32,10 @@ fn mir_v9_function(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDia
     return Ok(out)
 }
 
-fn mir_vphase9(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase9(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
 var function: U64 = 1
-    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v9_function(d, store, out, function)
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v9_function(d, store, indexes, out, function)
 function = function + 1 }
     return Ok(out)
 }

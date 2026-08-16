@@ -1,56 +1,63 @@
-fn mir_vappend_type_children(d: Domain, store: MirStore, work: __s0_Buffer(U64), id: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn mir_vappend_type_children(d: Domain, store: MirStore, indexes: MirVIndexes, work: __s0_Buffer(U64), id: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
     if !mir_vtype_exists(store, id) { return Ok(work) }
     var out = work
     let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
     if t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { out = try __s0_buffer_append(U64, d, out, t.elem) }
     if t.kind == mir_type_kind_result() { out = try __s0_buffer_append(U64, d, out, t.ok_type)
 out = try __s0_buffer_append(U64, d, out, t.err_type) }
-    if t.kind == mir_type_kind_function() { var p: U64 = 0
-while p < __s0_buffer_len(MirTypePartRec, store.type_parts) { let part = __s0_buffer_get(MirTypePartRec, store.type_parts, p)
-if part.owner == id && part.kind == mir_type_part_function_param() { out = try __s0_buffer_append(U64, d, out, part.part_type) }
+    // Function parameter parts are the owner's type-part list filtered to the
+    // function-parameter kind; the index list is in ascending store order.
+    if t.kind == mir_type_kind_function() { let count = mir_vindex_type_part_count(indexes, id)
+var p: U64 = 0
+while p < count { let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, p) - 1)
+if part.kind == mir_type_part_function_param() { out = try __s0_buffer_append(U64, d, out, part.part_type) }
 p = p + 1 }
 out = try __s0_buffer_append(U64, d, out, t.result_type) }
-    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() { var p: U64 = 0
-while p < __s0_buffer_len(MirTypePartRec, store.type_parts) { let part = __s0_buffer_get(MirTypePartRec, store.type_parts, p)
-if part.owner == id { out = try __s0_buffer_append(U64, d, out, part.part_type) }
+    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() { let count = mir_vindex_type_part_count(indexes, id)
+var p: U64 = 0
+while p < count { out = try __s0_buffer_append(U64, d, out, __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, p) - 1).part_type)
 p = p + 1 } }
     return Ok(out)
 }
-fn mir_vtype_has_forbidden(d: Domain, store: MirStore, root: U64) -> Result(U64, __s0_Error) {
+fn mir_vtype_has_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(U64, __s0_Error) {
     var work = try __s0_buffer_new(U64, d)
-    var seen = try __s0_buffer_new(U64, d)
     work = try __s0_buffer_append(U64, d, work, root)
+    // O(1) visited probe instead of a linear seen scan; the type graph is
+    // dense enough on the self-compile corpus that the scan dominated phase 2.
+    let tcount = __s0_buffer_len(MirTypeRec, store.types)
+    var seen = __s0_alloc(U64, d, tcount + 1)
+    var z: U64 = 0
+    while z <= tcount { seen[z] = 0
+        z = z + 1 }
     var at: U64 = 0
     while at < __s0_buffer_len(U64, work) {
         let id = __s0_buffer_get(U64, work, at)
-var known = false
-var s: U64 = 0
-        while s < __s0_buffer_len(U64, seen) { if __s0_buffer_get(U64, seen, s) == id { known = true }
-s = s + 1 }
-        if !known && mir_vtype_exists(store, id) {
-            seen = try __s0_buffer_append(U64, d, seen, id)
+        if id >= 1 && id <= tcount && seen[id] == 0 {
+            seen[id] = 1
             let kind = mir_vtype_kind(store, id)
             if kind == mir_type_kind_table_view() || kind == mir_type_kind_table_mut_view() || kind == mir_type_kind_cleanup_scope() || kind == mir_type_kind_cleanup_id() { return Ok(kind + 1) }
-            work = try mir_vappend_type_children(d, store, work, id)
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
         }
         at = at + 1
     }
     return Ok(0)
 }
-fn mir_vtype_cycles(d: Domain, store: MirStore, root: U64) -> Result(Bool, __s0_Error) {
+fn mir_vtype_cycles(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
     var work = try __s0_buffer_new(U64, d)
-    var seen = try __s0_buffer_new(U64, d)
-    work = try mir_vappend_type_children(d, store, work, root)
+    work = try mir_vappend_type_children(d, store, indexes, work, root)
+    let tcount = __s0_buffer_len(MirTypeRec, store.types)
+    var seen = __s0_alloc(U64, d, tcount + 1)
+    var z: U64 = 0
+    while z <= tcount { seen[z] = 0
+        z = z + 1 }
     var at: U64 = 0
     while at < __s0_buffer_len(U64, work) {
         let id = __s0_buffer_get(U64, work, at)
         if id == root { return Ok(true) }
-        var known = false
-var s: U64 = 0
-        while s < __s0_buffer_len(U64, seen) { if __s0_buffer_get(U64, seen, s) == id { known = true }
-s = s + 1 }
-        if !known && mir_vtype_exists(store, id) { seen = try __s0_buffer_append(U64, d, seen, id)
-work = try mir_vappend_type_children(d, store, work, id) }
+        if id >= 1 && id <= tcount && seen[id] == 0 {
+            seen[id] = 1
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
+        }
         at = at + 1
     }
     return Ok(false)
@@ -83,22 +90,27 @@ var at: U64 = 0
 at = at + 1 }
     return fraction % divisor == 0
 }
-fn mir_vdecl_type(d: Domain, store: MirStore, out: __s0_Buffer(MirVerifyDiagRec), function: U64, block: U64, declaration: U64, type_id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vdecl_type(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), function: U64, block: U64, declaration: U64, type_id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
     if !mir_vtype_exists(store, type_id) { return mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_bad_signature(), function, block, 0, 0, 0, type_id, declaration, 0, 0, type_id)) }
-    let forbidden = try mir_vtype_has_forbidden(d, store, type_id)
+    let forbidden = try mir_vtype_has_forbidden(d, store, indexes, type_id)
     if forbidden != 0 { result = try mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_ephemeral_type(), function, block, 0, 0, 0, type_id, declaration, 0, forbidden - 1, type_id)) }
     return Ok(result)
 }
-fn mir_vphase2(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase2(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_types()
     var at: U64 = 0
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let id = at + 1
 let t = __s0_buffer_get(MirTypeRec, store.types, at)
-        if try mir_vtype_cycles(d, store, id) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_type_cycle(), 0, 0, 0, 0, 0, id, id, 0, 0, id)) }
-        if t.kind == mir_type_kind_enum() && mir_vcount_type_parts(store, id, mir_type_part_variant()) == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_empty_enum(), 0, 0, 0, 0, 0, id, id, 1, 0, 0)) }
+        if try mir_vtype_cycles(d, store, indexes, id) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_type_cycle(), 0, 0, 0, 0, 0, id, id, 0, 0, id)) }
+        if t.kind == mir_type_kind_enum() { let part_total = mir_vindex_type_part_count(indexes, id)
+var variant_count: U64 = 0
+var pv: U64 = 0
+while pv < part_total { if __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, pv) - 1).kind == mir_type_part_variant() { variant_count = variant_count + 1 }
+pv = pv + 1 }
+if variant_count == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_empty_enum(), 0, 0, 0, 0, 0, id, id, 1, 0, 0)) } }
         if (t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view()) && !mir_vtype_exists(store, t.elem) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.elem)) }
         if t.kind == mir_type_kind_result() && (!mir_vtype_exists(store, t.ok_type) || !mir_vtype_exists(store, t.err_type)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.ok_type)) }
         if t.kind == mir_type_kind_function() && !mir_vtype_exists(store, t.result_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_signature(), 0, 0, 0, 0, 0, id, id, 0, 0, t.result_type)) }
@@ -123,7 +135,7 @@ if q.owner == p.owner && q.kind == p.kind && mir_vname_equal(store, p.name_start
 scan = at }
 scan = scan + 1 }
         }
-        out = try mir_vdecl_type(d, store, out, 0, 0, at + 1, p.part_type)
+        out = try mir_vdecl_type(d, store, indexes, out, 0, 0, at + 1, p.part_type)
         at = at + 1
     }
     // Constants retain exact bit-level payloads.
@@ -143,24 +155,24 @@ if c.const_type == mir_type_f32() { valid = valid && mir_vfloat_exact_f32(c.floa
     // Import and function signatures, locals, parameters, and block parameters.
     at = 0
     while at < __s0_buffer_len(MirImportRec, store.imports) { let item = __s0_buffer_get(MirImportRec, store.imports, at)
-out = try mir_vdecl_type(d, store, out, 0, 0, at + 1, item.result_type)
+out = try mir_vdecl_type(d, store, indexes, out, 0, 0, at + 1, item.result_type)
 at = at + 1 }
     at = 0
     while at < __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, at)
-out = try mir_vdecl_type(d, store, out, at + 1, 0, at + 1, item.result_type)
+out = try mir_vdecl_type(d, store, indexes, out, at + 1, 0, at + 1, item.result_type)
 if mir_vtype_kind(store, item.result_type) == mir_type_kind_domain_handle() || mir_vtype_kind(store, item.result_type) == mir_type_kind_domain_mark() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_domain_result(), at + 1, 0, 0, 0, 0, item.result_type, at + 1, 0, 0, 0)) }
 at = at + 1 }
     at = 0
     while at < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, at)
-if o.kind == mir_operand_import_param() { out = try mir_vdecl_type(d, store, out, 0, 0, at + 1, o.operand_type) }
+if o.kind == mir_operand_import_param() { out = try mir_vdecl_type(d, store, indexes, out, 0, 0, at + 1, o.operand_type) }
 at = at + 1 }
     at = 0
     while at < __s0_buffer_len(MirParamRec, store.params) { let p = __s0_buffer_get(MirParamRec, store.params, at)
-out = try mir_vdecl_type(d, store, out, p.function, p.block, at + 1, p.param_type)
+out = try mir_vdecl_type(d, store, indexes, out, p.function, p.block, at + 1, p.param_type)
 at = at + 1 }
     at = 0
     while at < __s0_buffer_len(MirLocalRec, store.locals) { let l = __s0_buffer_get(MirLocalRec, store.locals, at)
-out = try mir_vdecl_type(d, store, out, l.function, 0, at + 1, l.local_type)
+out = try mir_vdecl_type(d, store, indexes, out, l.function, 0, at + 1, l.local_type)
 at = at + 1 }
     return Ok(out)
 }

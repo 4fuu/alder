@@ -11,14 +11,33 @@ fn cgen_import_param(store: MirStore, owner: U64, ordinal: U64) -> MirOperandRec
     return __s0_buffer_get(MirOperandRec, store.operands, 0)
 }
 
-fn cgen_function_param(store: MirStore, owner: U64, ordinal: U64) -> MirParamRec {
+fn cgen_function_param(store: MirStore, indexes: MirVIndexes, owner: U64, ordinal: U64) -> MirParamRec {
+    let count = mir_vindex_param_count(indexes, owner)
     var at: U64 = 0
-    while at < __s0_buffer_len(MirParamRec, store.params) {
-        let item = __s0_buffer_get(MirParamRec, store.params, at)
-        if item.kind == mir_param_function() && item.function == owner && item.ordinal == ordinal { return item }
+    while at < count {
+        let id = mir_vindex_param(indexes, owner, at)
+        if id != 0 {
+            let item = __s0_buffer_get(MirParamRec, store.params, id - 1)
+            if item.kind == mir_param_function() && item.ordinal == ordinal { return item }
+        }
         at = at + 1
     }
     return __s0_buffer_get(MirParamRec, store.params, 0)
+}
+
+fn cgen_function_param_count(store: MirStore, indexes: MirVIndexes, function: U64) -> U64 {
+    let count = mir_vindex_param_count(indexes, function)
+    var total: U64 = 0
+    var at: U64 = 0
+    while at < count {
+        let id = mir_vindex_param(indexes, function, at)
+        if id != 0 {
+            let item = __s0_buffer_get(MirParamRec, store.params, id - 1)
+            if item.kind == mir_param_function() { total = total + 1 }
+        }
+        at = at + 1
+    }
+    return total
 }
 
 fn cgen_emit_function_name(d: Domain, initial: CgenWriter, store: MirStore, function: U64) -> Result(CgenWriter, __s0_Error) {
@@ -29,13 +48,13 @@ fn cgen_emit_function_name(d: Domain, initial: CgenWriter, store: MirStore, func
     return cgen_put_u64(d, out, function - 1)
 }
 
-fn cgen_emit_function_params(d: Domain, initial: CgenWriter, store: MirStore, function: U64) -> Result(CgenWriter, __s0_Error) {
+fn cgen_emit_function_params(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(CgenWriter, __s0_Error) {
     var out = initial
-    let count = mir_param_group_count(store, mir_param_function(), function, 0)
+    let count = cgen_function_param_count(store, indexes, function)
     var ordinal: U64 = 0
     var wrote = false
     while ordinal < count {
-        let item = cgen_function_param(store, function, ordinal)
+        let item = cgen_function_param(store, indexes, function, ordinal)
         if item.param_type != mir_type_unit() {
             if wrote { out = try cgen_put(d, out, ", ") }
             out = try cgen_put_type(d, out, store, item.param_type)
@@ -128,7 +147,7 @@ fn cgen_emit_imports(d: Domain, initial: CgenWriter, store: MirStore) -> Result(
     return Ok(out)
 }
 
-fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
     while at < __s0_buffer_len(MirFunctionRec, store.functions) {
@@ -138,7 +157,7 @@ fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
         out = try cgen_put(d, out, " ")
         out = try cgen_emit_function_name(d, out, store, at + 1)
         out = try cgen_put(d, out, "(")
-        out = try cgen_emit_function_params(d, out, store, at + 1)
+        out = try cgen_emit_function_params(d, out, store, indexes, at + 1)
         out = try cgen_put(d, out, ");\n")
         at = at + 1
     }
@@ -146,9 +165,9 @@ fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
     return Ok(out)
 }
 
-fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, main: U64) -> Result(CgenWriter, __s0_Error) {
+fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, main: U64) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, initial, "int32_t alder_program_entry(void *host_context) {\n  if (host_context == NULL) { return ALDER_PROGRAM_FAILURE_STATUS; }\n")
-    let count = mir_param_group_count(store, mir_param_function(), main, 0)
+    let count = cgen_function_param_count(store, indexes, main)
     if count == 0 {
         out = try cgen_put(d, out, "  return ")
         out = try cgen_emit_function_name(d, out, store, main)
@@ -161,21 +180,21 @@ fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, main: U
     return cgen_put(d, out, "}\n")
 }
 
-fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
     var wrote = false
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
         if item.op == mir_op_cleanup_push() {
-            let count = mir_vcount_operands(store, mir_operand_instruction(), at + 1, 0)
+            let count = cgen_operand_count(store, indexes, mir_operand_instruction(), at + 1, 0)
             out = try cgen_put(d, out, "typedef struct AlderCtx_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " {\n")
             var ordinal: U64 = 0
             var field: U64 = 0
             while ordinal < count {
-                let parameter = cgen_function_param(store, item.target, ordinal)
+                let parameter = cgen_function_param(store, indexes, item.target, ordinal)
                 if parameter.param_type != mir_type_unit() {
                     out = try cgen_put(d, out, "  ")
                     out = try cgen_put_type(d, out, store, parameter.param_type)
@@ -204,7 +223,7 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore) -> R
             field = 0
             var first = true
             while ordinal < count {
-                let parameter = cgen_function_param(store, item.target, ordinal)
+                let parameter = cgen_function_param(store, indexes, item.target, ordinal)
                 if parameter.param_type != mir_type_unit() {
                     if !first { out = try cgen_put(d, out, ", ") }
                     out = try cgen_put(d, out, "alder_c->alder_f")
@@ -304,13 +323,13 @@ fn cgen_emit_copy_type(d: Domain, initial: CgenTypeState, store: MirStore, type_
     return Ok(CgenTypeState(writer: out, emitted: emitted))
 }
 
-fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     let emitted = try __s0_buffer_new(U64, d)
     var state = CgenTypeState(writer: initial, emitted: emitted)
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op == mir_op_copy_to_domain() { state = try cgen_emit_copy_type(d, state, store, cgen_value_type(store, item.function, item.b)) }
+        if item.op == mir_op_copy_to_domain() { state = try cgen_emit_copy_type(d, state, store, cgen_value_type(store, indexes, item.function, item.b)) }
         at = at + 1
     }
     if __s0_buffer_len(U64, state.emitted) > 0 { state.writer = try cgen_put(d, state.writer, "\n") }
@@ -322,27 +341,28 @@ fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVeri
     out = try cgen_put(d, out, "/* Generated by the Alder declaration-only C11 backend skeleton. */\n/* Production generation remains gated on MIR verifier V10. */\n#include \"alder.h\"\n")
     if verified.hosted { out = try cgen_put(d, out, "#include \"alder_host.h\"\n") }
     out = try cgen_put(d, out, "#include <float.h>\n#include <string.h>\n\n")
+    let indexes = try mir_vindex_build(d, store)
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
-    out = try cgen_emit_functions(d, out, store)
+    out = try cgen_emit_functions(d, out, store, indexes)
     out = try cgen_emit_imports(d, out, store)
-    if verified.hosted { out = try cgen_emit_host_entry(d, out, store, verified.entry) }
+    if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
     return Ok(out)
 }
 
-fn cgen_build(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
+fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_writer_new(d)
     out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n/* Source: complete-verifier-gated Alder MIR 3. */\n#include \"alder.h\"\n")
     if verified.hosted { out = try cgen_put(d, out, "#include \"alder_host.h\"\n") }
     out = try cgen_put(d, out, "#include <float.h>\n#include <string.h>\n\n")
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
-    out = try cgen_emit_functions(d, out, store)
+    out = try cgen_emit_functions(d, out, store, indexes)
     out = try cgen_emit_imports(d, out, store)
-    out = try cgen_emit_cleanup_sites(d, out, store)
-    out = try cgen_emit_copy_helpers(d, out, store)
+    out = try cgen_emit_cleanup_sites(d, out, store, indexes)
+    out = try cgen_emit_copy_helpers(d, out, store, indexes)
     out = try cgen_emit_bodies(d, out, store)
-    if verified.hosted { out = try cgen_emit_host_entry(d, out, store, verified.entry) }
+    if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
     return Ok(out)
 }
 
@@ -350,8 +370,10 @@ fn cgen_build(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> 
 // operation preflight both finish before the output buffer is allocated.
 fn cgen_generate(d: Domain, store: MirStore, version: U64, hosted: Bool) -> Result(Bool, __s0_Error) {
     let verified = try mir_verify_complete(d, store, version, hosted)
-    if !verified.complete || !cgen_supported(store) { return Ok(false) }
-    let writer = try cgen_build(d, store, verified)
+    if !verified.complete { return Ok(false) }
+    let indexes = try mir_vindex_build(d, store)
+    if !cgen_supported(store, indexes) { return Ok(false) }
+    let writer = try cgen_build(d, store, indexes, verified)
     return Ok(cgen_flush(writer))
 }
 

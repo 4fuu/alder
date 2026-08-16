@@ -42,17 +42,17 @@ fn mir_v10_external_name(store: MirStore, start: U64, end: U64) -> Bool {
     if mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while") { return false }
     return !mir_v10_header_name(store, start, end)
 }
-fn mir_v10_forbidden_element(d: Domain, store: MirStore, type_id: U64) -> Result(U64, __s0_Error) {
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_domain_handle()) { return Ok(mir_type_kind_domain_handle()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_domain_mark()) { return Ok(mir_type_kind_domain_mark()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_cleanup_scope()) { return Ok(mir_type_kind_cleanup_scope()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_cleanup_id()) { return Ok(mir_type_kind_cleanup_id()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_table_view()) { return Ok(mir_type_kind_table_view()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_table_mut_view()) { return Ok(mir_type_kind_table_mut_view()) }
-    if try mir_v6_type_contains(d, store, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
+fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) { return Ok(mir_type_kind_domain_handle()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) { return Ok(mir_type_kind_domain_mark()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_scope()) { return Ok(mir_type_kind_cleanup_scope()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_id()) { return Ok(mir_type_kind_cleanup_id()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_view()) { return Ok(mir_type_kind_table_view()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_mut_view()) { return Ok(mir_type_kind_table_mut_view()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
     return Ok(0)
 }
-fn mir_vphase10(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
 var import_id: U64 = 1
     while import_id <= __s0_buffer_len(MirImportRec, store.imports) { let item = __s0_buffer_get(MirImportRec, store.imports, import_id - 1)
@@ -60,14 +60,26 @@ if !mir_v10_external_name(store, item.name_start, item.name_end) { out = try mir
 import_id = import_id + 1 }
     var iid: U64 = 1
     while iid <= __s0_buffer_len(MirInstrRec, store.instructions) { let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_table_create() { let forbidden = try mir_v10_forbidden_element(d, store, x.type_op)
+if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_table_create() { let forbidden = try mir_v10_forbidden_element(d, store, indexes, x.type_op)
 if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_backend_element_type(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, forbidden, x.type_op)) } }
 iid = iid + 1 }
     return Ok(out)
 }
 
+fn mir_v10_param_count(store: MirStore, indexes: MirVIndexes, function: U64) -> U64 {
+    let count = mir_vindex_param_count(indexes, function)
+    var want: U64 = 0
+    var at: U64 = 0
+    while at < count {
+        if __s0_buffer_get(MirParamRec, store.params, mir_vindex_param(indexes, function, at) - 1).kind == mir_param_function() { want = want + 1 }
+        at = at + 1
+    }
+    return want
+}
+
 fn mir_v10_entry(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirVerifyCompleteOutput, __s0_Error) {
     var out = initial
+    let indexes = try mir_vindex_build(d, store)
 var entry: U64 = 0
 var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
@@ -77,9 +89,9 @@ function = function + 1 }
 return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: true, entry: 0)) }
     let item = __s0_buffer_get(MirFunctionRec, store.functions, entry - 1)
     if item.result_type != mir_type_i32() { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_result(), entry, 0, 0, 0, 0, item.result_type, entry, mir_type_i32(), item.result_type, entry)) }
-    let count = mir_vcount_params(store, entry, 0, mir_param_function())
+    let count = mir_v10_param_count(store, indexes, entry)
     var signature = count == 0
-    if count == 1 { signature = mir_vtype_kind(store, mir_v5_param_type(store, entry, 0, mir_param_function(), 0)) == mir_type_kind_domain_handle() }
+    if count == 1 { signature = mir_vtype_kind(store, mir_v5_param_type(store, indexes, entry, 0, mir_param_function(), 0)) == mir_type_kind_domain_handle() }
     if !signature { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_signature(), entry, 0, 0, 0, 0, 0, entry, 1, count, entry)) }
     let complete = __s0_buffer_len(MirVerifyDiagRec, out) == 0
     if !complete { entry = 0 }

@@ -514,10 +514,15 @@ buffer e2e programs (including match on `Result(__s0_Buffer(T), __s0_Error)`
 without a source `[T]`), and the reject corpus (human prefix plus related
 ranges) emit verified MIR/C or stable diagnostics. Buffer helpers intern
 Result and slice MIR types when the check store has no source `[T]`. I64
-minimum literals no longer panic in `lower_parse_i64`. M5.5 stays planned:
-alder1 can check the small corpus, but `compiler/src` still does not finish
-inside 20 minutes because the Alder verifier uses per-query BFS dominance
-and linear ID scans.
+minimum literals no longer panic in `lower_parse_i64`. The Alder verifier
+and cgen now build per-function dense indexes (`MirVIndexes`) and Cooper/
+Harvey/Kennedy idoms for availability; the small corpus still passes. M5.5
+is not measured yet: `ALDER_BOOTSTRAP_SELFCOMPILE=1` `TestAlder1CompilesCompilerSource`
+still does not finish inside 45 minutes on the full 28-file `compiler/src`
+set. A 27-file `alder1 check` that fails at typecheck (missing
+`mir_verify_complete`) returns in 6s; the complete 28-file path does not.
+Remaining work is the Alder checker intern/lookup tables and confirming
+the full verify+cgen pipeline terminates on compiler-scale MIR.
 
 #### Bootstrap execution policy
 

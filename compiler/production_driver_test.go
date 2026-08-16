@@ -383,10 +383,12 @@ func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
 	return envelope
 }
 
-func compileGeneratedObject(t *testing.T, cc, root, generated string) string {
+func compileGeneratedObject(t *testing.T, cc, root, generated string, extra ...string) string {
 	t.Helper()
 	object := generated + ".o"
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", generated, "-o", object}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args = append(args, extra...)
+	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", generated, "-o", object)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}
@@ -398,6 +400,13 @@ func alder1LinkFlags() []string {
 		return nil
 	}
 	return []string{"-Wl,--stack,33554432"}
+}
+
+// alder1OptimizeFlags is used only for the large self-hosted compiler
+// binaries. Generated C trips -Wmaybe-uninitialized under -O2; the warning
+// is a false positive on MIR temporaries and is suppressed here only.
+func alder1OptimizeFlags() []string {
+	return []string{"-O2", "-Wno-maybe-uninitialized"}
 }
 
 func linkGeneratedProgram(t *testing.T, cc, root, object, host, output string, extra ...string) {
