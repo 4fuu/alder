@@ -2752,7 +2752,118 @@ fn lower_builtin_child_type(store: CheckStore, expression: CheckedExprRec, ordin
     return __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).checked_type
 }
 
-fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
+fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
+    // Ownership is validated below in stable record order. Build dense counts
+    // once instead of rediscovering each owner with nested whole-table scans.
+    let expression_count = __s0_buffer_len(CheckedExprRec, store.expressions)
+    let child_count = __s0_buffer_len(CheckedExprChildRec, store.expression_children)
+    let annotation_count = __s0_buffer_len(CallAnnotationRec, store.call_annotations)
+    let place_count = __s0_buffer_len(CheckedPlaceRec, store.control.places)
+    let statement_count = __s0_buffer_len(CheckedStatementRec, store.control.statements)
+    let link_count = __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links)
+    let block_count = __s0_buffer_len(CheckedBlockRec, store.control.blocks)
+    let symbol_count = __s0_buffer_len(SymbolRec, store.symbols)
+    let match_count = __s0_buffer_len(CheckedMatchRec, store.control.matches)
+    let arm_count = __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms)
+    let try_count = __s0_buffer_len(CheckedTryRec, store.control.tries)
+    var expression_owners = __s0_alloc(U64, d, expression_count + 1)
+    var child_starts = __s0_alloc(U64, d, child_count + 1)
+    var child_ends = __s0_alloc(U64, d, child_count + 1)
+    var annotation_owners = __s0_alloc(U64, d, annotation_count + 1)
+    var place_owners = __s0_alloc(U64, d, place_count + 1)
+    var statement_owners = __s0_alloc(U64, d, statement_count + 1)
+    var link_owners = __s0_alloc(U64, d, link_count + 1)
+    var block_parents = __s0_alloc(U64, d, block_count + 1)
+    var owner_roots = __s0_alloc(U64, d, symbol_count + 1)
+    var match_owners = __s0_alloc(U64, d, match_count + 1)
+    var arm_starts = __s0_alloc(U64, d, arm_count + 1)
+    var arm_ends = __s0_alloc(U64, d, arm_count + 1)
+    var try_owners = __s0_alloc(U64, d, try_count + 1)
+    var count_at: U64 = 0
+    while count_at <= expression_count { expression_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= child_count { child_starts[count_at] = 0
+    child_ends[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= annotation_count { annotation_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= place_count { place_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= statement_count { statement_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= link_count { link_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= block_count { block_parents[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= symbol_count { owner_roots[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= match_count { match_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= arm_count { arm_starts[count_at] = 0
+    arm_ends[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at <= try_count { try_owners[count_at] = 0
+    count_at = count_at + 1 }
+    count_at = 0
+    while count_at < expression_count {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, count_at)
+        if expression.site_kind != 0 { expression_owners[count_at + 1] = expression_owners[count_at + 1] + 1 }
+        if expression.annotation >= 1 && expression.annotation <= annotation_count { annotation_owners[expression.annotation] = annotation_owners[expression.annotation] + 1 }
+        if expression.kind == 12 && expression.parameter_use >= 1 && expression.parameter_use <= match_count { match_owners[expression.parameter_use] = match_owners[expression.parameter_use] + 1 }
+        if expression.kind == 13 && expression.parameter_use >= 1 && expression.parameter_use <= try_count { try_owners[expression.parameter_use] = try_owners[expression.parameter_use] + 1 }
+        if expression.child_count != 0 && expression.first_child != 0 && expression.child_count <= child_count && expression.first_child - 1 <= child_count - expression.child_count {
+            let first = expression.first_child - 1
+            child_starts[first] = child_starts[first] + 1
+            child_ends[first + expression.child_count] = child_ends[first + expression.child_count] + 1
+        }
+        count_at = count_at + 1
+    }
+    count_at = 0
+    while count_at < child_count {
+        let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, count_at).expression
+        if child >= 1 && child <= expression_count { expression_owners[child] = expression_owners[child] + 1 }
+        count_at = count_at + 1
+    }
+    count_at = 0
+    while count_at < arm_count {
+        let body = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, count_at).body
+        if body >= 1 && body <= expression_count { expression_owners[body] = expression_owners[body] + 1 }
+        count_at = count_at + 1
+    }
+    count_at = 0
+    while count_at < match_count {
+        let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, count_at)
+        if checked_match.arm_count != 0 && checked_match.first_arm != 0 && checked_match.arm_count <= arm_count && checked_match.first_arm - 1 <= arm_count - checked_match.arm_count {
+            let first = checked_match.first_arm - 1
+            arm_starts[first] = arm_starts[first] + 1
+            arm_ends[first + checked_match.arm_count] = arm_ends[first + checked_match.arm_count] + 1
+        }
+        count_at = count_at + 1
+    }
+    count_at = 0
+    while count_at < statement_count {
+        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, count_at)
+        if statement.place >= 1 && statement.place <= place_count { place_owners[statement.place] = place_owners[statement.place] + 1 }
+        if statement.body >= 1 && statement.body <= block_count && statement.kind != 10 { block_parents[statement.body] = block_parents[statement.body] + 1 }
+        if statement.alternative >= 1 && statement.alternative <= block_count { block_parents[statement.alternative] = block_parents[statement.alternative] + 1 }
+        count_at = count_at + 1
+    }
+    count_at = 0
+    while count_at < link_count {
+        let statement = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, count_at).statement
+        if statement >= 1 && statement <= statement_count { statement_owners[statement] = statement_owners[statement] + 1 }
+        count_at = count_at + 1
+    }
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedSpanRec, spans) {
         let item = __s0_buffer_get(CheckedSpanRec, spans, at)
@@ -3112,26 +3223,16 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         at = at + 1
     }
     at = 0
+    var active_child_owners: U64 = 0
     while at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
-        var child_owners: U64 = 0
-        var expression_at: U64 = 0
-        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
-            if expression.child_count != 0 && at + 1 >= expression.first_child && at + 1 < expression.first_child + expression.child_count { child_owners = child_owners + 1 }
-            expression_at = expression_at + 1
-        }
-        if child_owners != 1 { return false }
+        active_child_owners = active_child_owners + child_starts[at]
+        active_child_owners = active_child_owners - child_ends[at]
+        if active_child_owners != 1 { return false }
         at = at + 1
     }
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
-        var annotation_owners: U64 = 0
-        var expression_at: U64 = 0
-        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-            if __s0_buffer_get(CheckedExprRec, store.expressions, expression_at).annotation == at + 1 { annotation_owners = annotation_owners + 1 }
-            expression_at = expression_at + 1
-        }
-        if annotation_owners != 1 { return false }
+        if annotation_owners[at + 1] != 1 { return false }
         at = at + 1
     }
     at = 0
@@ -3159,13 +3260,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
             if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
         }
         if (item.kind == 1 || item.kind == 3) && item.field != 0 { return false }
-        var place_owners: U64 = 0
-        var statement_at: U64 = 0
-        while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
-            if __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at).place == at + 1 { place_owners = place_owners + 1 }
-            statement_at = statement_at + 1
-        }
-        if place_owners != 1 { return false }
+        if place_owners[at + 1] != 1 { return false }
         at = at + 1
     }
     at = 0
@@ -3180,20 +3275,22 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         at = at + 1
     }
     at = 0
+    while at < block_count {
+        let link = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at).statements
+        if link != 0 { link_owners[link] = link_owners[link] + 1 }
+        at = at + 1
+    }
+    at = link_count
+    while at != 0 {
+        let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at - 1)
+        if item.next != 0 { link_owners[item.next] = link_owners[item.next] + link_owners[at] }
+        at = at - 1
+    }
+    at = 0
     while at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
         let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at)
         if item.statement == 0 || item.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) || item.next > at { return false }
-        var link_owners: U64 = 0
-        var block_at: U64 = 0
-        while block_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
-            var link = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_at).statements
-            while link != 0 {
-                if link == at + 1 { link_owners = link_owners + 1 }
-                link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1).next
-            }
-            block_at = block_at + 1
-        }
-        if link_owners != 1 { return false }
+        if link_owners[at + 1] != 1 { return false }
         at = at + 1
     }
     at = 0
@@ -3202,13 +3299,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.kind == 0 || item.kind > 10 || !lower_environment_valid(store, item.owner, item.environment) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
-        var statement_owners: U64 = 0
-        var link_at: U64 = 0
-        while link_at < __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
-            if __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_at).statement == at + 1 { statement_owners = statement_owners + 1 }
-            link_at = link_at + 1
-        }
-        if statement_owners != 1 { return false }
+        if statement_owners[at + 1] != 1 { return false }
         var expression_site: U64 = 0
         var needs_expression = false
         var needs_binding = false
@@ -3301,39 +3392,20 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         at = at + 1
     }
     at = 0
+    while at < block_count {
+        let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
+        if block.owner >= 1 && block.owner <= symbol_count && block_parents[at + 1] == 0 { owner_roots[block.owner] = owner_roots[block.owner] + 1 }
+        at = at + 1
+    }
+    at = 0
     while at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
         let item = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_environment_valid(store, item.owner, item.environment) || item.statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) || item.guaranteed_return > 1 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
-        var parent_count: U64 = 0
-        var statement_at: U64 = 0
-        while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
-            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
-            if statement.body == at + 1 && statement.kind != 10 { parent_count = parent_count + 1 }
-            if statement.alternative == at + 1 { parent_count = parent_count + 1 }
-            statement_at = statement_at + 1
-        }
+        let parent_count = block_parents[at + 1]
         if parent_count > 1 { return false }
-        if parent_count == 0 {
-            var owner_roots: U64 = 0
-            var root_at: U64 = 0
-            while root_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
-                let candidate = __s0_buffer_get(CheckedBlockRec, store.control.blocks, root_at)
-                if candidate.owner == item.owner {
-                    var candidate_parents: U64 = 0
-                    statement_at = 0
-                    while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
-                        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
-                        if (statement.body == root_at + 1 && statement.kind != 10) || statement.alternative == root_at + 1 { candidate_parents = candidate_parents + 1 }
-                        statement_at = statement_at + 1
-                    }
-                    if candidate_parents == 0 { owner_roots = owner_roots + 1 }
-                }
-                root_at = root_at + 1
-            }
-            if owner_roots != 1 { return false }
-        }
+        if parent_count == 0 && owner_roots[item.owner] != 1 { return false }
         var link = item.statements
         while link != 0 {
             let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1).statement - 1)
@@ -3346,23 +3418,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let owner = __s0_buffer_get(SymbolRec, store.symbols, at)
         if (owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13 {
-            var root_count: U64 = 0
-            var block_at: U64 = 0
-            while block_at < __s0_buffer_len(CheckedBlockRec, store.control.blocks) {
-                let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_at)
-                if block.owner == at + 1 {
-                    var parent_count: U64 = 0
-                    var statement_at: U64 = 0
-                    while statement_at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
-                        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_at)
-                        if (statement.body == block_at + 1 && statement.kind != 10) || statement.alternative == block_at + 1 { parent_count = parent_count + 1 }
-                        statement_at = statement_at + 1
-                    }
-                    if parent_count == 0 { root_count = root_count + 1 }
-                }
-                block_at = block_at + 1
-            }
-            if root_count != 1 { return false }
+            if owner_roots[at + 1] != 1 { return false }
         }
         at = at + 1
     }
@@ -3374,14 +3430,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         let scrutinee = __s0_buffer_get(CheckedExprRec, store.expressions, item.scrutinee - 1)
         if scrutinee.owner != item.owner || scrutinee.checked_type != item.scrutinee_type { return false }
-        var match_owners: U64 = 0
-        var expression_at: U64 = 0
-        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
-            if expression.kind == 12 && expression.parameter_use == at + 1 { match_owners = match_owners + 1 }
-            expression_at = expression_at + 1
-        }
-        if match_owners != 1 { return false }
+        if match_owners[at + 1] != 1 { return false }
         var ordinal: U64 = 0
         while ordinal < item.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal)
@@ -3397,20 +3446,16 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         at = at + 1
     }
     at = 0
+    var active_arm_owners: U64 = 0
     while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
         let item = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || item.body == 0 || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
         let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.checked_match - 1)
         let body = __s0_buffer_get(CheckedExprRec, store.expressions, item.body - 1)
         if checked_match.owner != item.owner || body.owner != item.owner || body.checked_type != checked_match.checked_type { return false }
-        var arm_owners: U64 = 0
-        var match_at: U64 = 0
-        while match_at < __s0_buffer_len(CheckedMatchRec, store.control.matches) {
-            let candidate = __s0_buffer_get(CheckedMatchRec, store.control.matches, match_at)
-            if candidate.arm_count != 0 && at + 1 >= candidate.first_arm && at + 1 < candidate.first_arm + candidate.arm_count { arm_owners = arm_owners + 1 }
-            match_at = match_at + 1
-        }
-        if arm_owners != 1 { return false }
+        active_arm_owners = active_arm_owners + arm_starts[at]
+        active_arm_owners = active_arm_owners - arm_ends[at]
+        if active_arm_owners != 1 { return false }
         let scrutinee_type = __s0_buffer_get(CheckedTypeRec, store.types, checked_match.scrutinee_type - 1)
         var payload_type: U64 = 0
         if item.variant_kind == 0 {
@@ -3457,14 +3502,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
         let expression = __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1)
         let result = __s0_buffer_get(CheckedTypeRec, store.types, item.result_type - 1)
         if expression.owner != item.owner || expression.checked_type != item.result_type || result.kind != 10 || __s0_buffer_get(U64, store.type_args, result.first_arg - 1) != item.ok_type || __s0_buffer_get(U64, store.type_args, result.first_arg) != item.error_type { return false }
-        var try_owners: U64 = 0
-        var expression_at: U64 = 0
-        while expression_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-            let candidate = __s0_buffer_get(CheckedExprRec, store.expressions, expression_at)
-            if candidate.kind == 13 && candidate.parameter_use == at + 1 { try_owners = try_owners + 1 }
-            expression_at = expression_at + 1
-        }
-        if try_owners != 1 { return false }
+        if try_owners[at + 1] != 1 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         var result_role: U64 = 6
         if owner.kind == 13 { result_role = 8 }
@@ -3518,20 +3556,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
     }
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-        var expression_owners: U64 = 0
-        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
-        if expression.site_kind != 0 { expression_owners = expression_owners + 1 }
-        var child_at: U64 = 0
-        while child_at < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
-            if __s0_buffer_get(CheckedExprChildRec, store.expression_children, child_at).expression == at + 1 { expression_owners = expression_owners + 1 }
-            child_at = child_at + 1
-        }
-        var arm_at: U64 = 0
-        while arm_at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
-            if __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, arm_at).body == at + 1 { expression_owners = expression_owners + 1 }
-            arm_at = arm_at + 1
-        }
-        if expression_owners != 1 { return false }
+        if expression_owners[at + 1] != 1 { return false }
         at = at + 1
     }
     return true
@@ -3539,7 +3564,7 @@ fn lower_model_valid(source_state: State, store: CheckStore, spans: __s0_Buffer(
 
 fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore) -> Result(LowerResult, __s0_Error) {
     if __s0_buffer_len(CheckDiagRec, store.diagnostics) != 0 { return Ok(LowerBad) }
-    if !lower_model_valid(source_state, store, spans) {
+    if !lower_model_valid(d, source_state, store, spans) {
         return Ok(LowerModelBad)
     }
     let mir = try mir_store_new(d)

@@ -17,11 +17,11 @@ type functionEffect struct {
 }
 
 func computeFunctionEffects(m *mir.Module) []functionEffect {
-	effects, _, _ := computeFunctionEffectsWithCleanup(m)
+	effects, _, _, _ := computeFunctionEffectsWithCleanup(m)
 	return effects
 }
 
-func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*cleanupAnalysis, []Error) {
+func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*cleanupAnalysis, [][]domainInfo, []Error) {
 	out := make([]functionEffect, len(m.Functions))
 	for i, f := range m.Functions {
 		if f != nil {
@@ -36,11 +36,13 @@ func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*clea
 		}
 	}
 	cleanups := make([]*cleanupAnalysis, len(m.Functions))
+	domainInfos := make([][]domainInfo, len(m.Functions))
 	var cleanupErrs []Error
 	for i, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
+		domainInfos[i] = make([]domainInfo, len(f.Values))
 		a, es := analyzeCleanupFunction(m, f)
 		cleanups[i] = a
 		cleanupErrs = append(cleanupErrs, es...)
@@ -51,7 +53,8 @@ func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*clea
 			if f == nil || len(f.Blocks) == 0 {
 				continue
 			}
-			info := computeDomainInfo(m, f, out)
+			info := domainInfos[fi]
+			updateDomainInfo(m, f, out, info)
 			tables := computeTableInfo(m, f, out)
 			cleanup := cleanups[fi]
 			e := &out[fi]
@@ -141,7 +144,7 @@ func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*clea
 			}
 		}
 	}
-	return out, cleanups, cleanupErrs
+	return out, cleanups, domainInfos, cleanupErrs
 }
 
 func addTableParamDeps(dst []bool, info []tableOrigins, v mir.ValueId) bool {

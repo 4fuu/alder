@@ -33,13 +33,13 @@ type resourceState struct {
 	invalidMarks map[mir.ValueId]bool
 }
 
-func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis) []Error {
+func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis, domainInfos [][]domainInfo) []Error {
 	var errs []Error
 	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
-		info := computeDomainInfo(m, f, effects)
+		info := domainInfos[fi]
 		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi])...)
 		var cleanup *cleanupAnalysis
 		if fi < len(cleanups) {
@@ -349,81 +349,81 @@ func domainsMayAlias(info []domainInfo, a, b mir.ValueId) bool {
 	return false
 }
 
-func computeDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []domainInfo {
-	info := make([]domainInfo, len(f.Values))
+// updateDomainInfo advances an analysis to the fixed point for the current
+// function effects. Both the effects and domain facts are monotonic, so effect
+// inference can retain this state instead of rebuilding every set from scratch
+// on each interprocedural pass.
+func updateDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect, info []domainInfo) {
 	loadStores := aliasingStores(f)
 	paramEdges := incomingEdgeArgs(f)
 	changed := true
 	for changed {
 		changed = false
 		for vi := range info {
-			n := transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects, loadStores)
-			if !sameInfo(n, info[vi]) {
-				info[vi] = n
+			if transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects, loadStores, &info[vi]) {
 				changed = true
 			}
 		}
 	}
-	return info
 }
 
-func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId) domainInfo {
+func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId, out *domainInfo) bool {
 	v := &f.Values[vid]
-	var out domainInfo
+	changed := false
 	merge := func(x mir.ValueId) {
 		if int(x) < len(info) {
-			mergeInfo(&out, info[x])
+			changed = mergeInfo(out, info[x]) || changed
 		}
 	}
 	if v.Def.Kind == mir.ValueDefFuncParam {
 		pindex := funcParamIndex(f, vid)
-		out.params = map[int]bool{pindex: true}
+		changed = addParam(out, pindex) || changed
 		if typeContainsRef(m, v.Type) {
 			for p, x := range f.Params {
 				if containsKind(m, x.Type, mir.TypeDomainHandle) {
-					addDep(&out, defKey{blk: mir.NoBlock, in: p})
+					changed = addDep(out, defKey{blk: mir.NoBlock, in: p}) || changed
 				}
 			}
-			out.roots = map[domainRoot]bool{{handle: vid, param: pindex}: true}
+			changed = addRoot(out, domainRoot{handle: vid, param: pindex}) || changed
 		}
 		if containsKind(m, v.Type, mir.TypeDomainHandle) {
-			addDep(&out, defKey{blk: mir.NoBlock, in: pindex})
+			changed = addDep(out, defKey{blk: mir.NoBlock, in: pindex}) || changed
 		}
-		return out
+		return changed
 	}
 	if v.Def.Kind == mir.ValueDefBlockParam {
 		for _, a := range edges[vid] {
 			merge(a)
 		}
-		return out
+		return changed
 	}
 	if v.Def.Kind == mir.ValueDefSwitchCase {
 		if int(v.Def.Block) < len(f.Blocks) {
 			merge(f.Blocks[v.Def.Block].Term.Value)
 		}
-		return out
+		return changed
 	}
 	if v.Def.Kind != mir.ValueDefInstr || int(v.Def.Block) >= len(f.Blocks) {
-		return out
+		return changed
 	}
 	in := &f.Blocks[v.Def.Block].Instrs[v.Def.Instr]
 	switch in.Op {
 	case mir.OpDomainCreate:
 		if int(in.Domain) < len(info) {
 			for d := range info[in.Domain].deps {
-				addParent(&out, d)
+				changed = addParent(out, d) || changed
 			}
 			for d := range info[in.Domain].parents {
-				addParent(&out, d)
+				changed = addParent(out, d) || changed
 			}
 		}
-		addDep(&out, defKey{v.Def.Block, v.Def.Instr})
+		changed = addDep(out, defKey{v.Def.Block, v.Def.Instr}) || changed
 	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
 		merge(in.Domain)
 		if in.Op == mir.OpCopyToDomain {
 			merge(in.CopyVal)
 		}
-		addRoot(&out, domainRoot{handle: in.Domain, allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1})
+		changed = addRoot(out, domainRoot{handle: in.Domain, allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1}) || changed
 	case mir.OpLoad:
 		if in.Place.Kind == mir.PlaceDeref {
 			merge(in.Place.Deref)
@@ -454,12 +454,12 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 			for p, yes := range e.resultAlloc {
 				if yes && p < len(in.Args) {
 					merge(in.Args[p])
-					addRoot(&out, domainRoot{handle: in.Args[p], allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1})
+					changed = addRoot(out, domainRoot{handle: in.Args[p], allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1}) || changed
 				}
 			}
 		}
 	}
-	return out
+	return changed
 }
 
 func instructionUses(in *mir.Instr) []mir.ValueId { return instrValueOperands(in) }
@@ -481,66 +481,61 @@ func typeRequiresLocalStore(m *mir.Module, t mir.TypeId) bool {
 	}
 	return false
 }
-func addDep(i *domainInfo, d defKey) {
+func addDep(i *domainInfo, d defKey) bool {
 	if i.deps == nil {
 		i.deps = map[defKey]bool{}
 	}
+	if i.deps[d] {
+		return false
+	}
 	i.deps[d] = true
+	return true
 }
-func addParent(i *domainInfo, d defKey) {
+func addParent(i *domainInfo, d defKey) bool {
 	if i.parents == nil {
 		i.parents = map[defKey]bool{}
 	}
+	if i.parents[d] {
+		return false
+	}
 	i.parents[d] = true
+	return true
 }
-func addRoot(i *domainInfo, r domainRoot) {
+func addRoot(i *domainInfo, r domainRoot) bool {
 	if i.roots == nil {
 		i.roots = map[domainRoot]bool{}
 	}
-	i.roots[r] = true
-}
-func mergeInfo(a *domainInfo, b domainInfo) {
-	for x := range b.deps {
-		addDep(a, x)
-	}
-	for x := range b.parents {
-		addParent(a, x)
-	}
-	for x := range b.roots {
-		addRoot(a, x)
-	}
-	if len(b.params) > 0 && a.params == nil {
-		a.params = map[int]bool{}
-	}
-	for x := range b.params {
-		a.params[x] = true
-	}
-}
-func sameInfo(a, b domainInfo) bool {
-	if len(a.deps) != len(b.deps) || len(a.parents) != len(b.parents) || len(a.roots) != len(b.roots) || len(a.params) != len(b.params) {
+	if i.roots[r] {
 		return false
 	}
-	for x := range a.deps {
-		if !b.deps[x] {
-			return false
-		}
-	}
-	for x := range a.parents {
-		if !b.parents[x] {
-			return false
-		}
-	}
-	for x := range a.roots {
-		if !b.roots[x] {
-			return false
-		}
-	}
-	for x := range a.params {
-		if !b.params[x] {
-			return false
-		}
-	}
+	i.roots[r] = true
 	return true
+}
+func addParam(i *domainInfo, p int) bool {
+	if i.params == nil {
+		i.params = map[int]bool{}
+	}
+	if i.params[p] {
+		return false
+	}
+	i.params[p] = true
+	return true
+}
+func mergeInfo(a *domainInfo, b domainInfo) bool {
+	changed := false
+	for x := range b.deps {
+		changed = addDep(a, x) || changed
+	}
+	for x := range b.parents {
+		changed = addParent(a, x) || changed
+	}
+	for x := range b.roots {
+		changed = addRoot(a, x) || changed
+	}
+	for x := range b.params {
+		changed = addParam(a, x) || changed
+	}
+	return changed
 }
 func allRoots(info []domainInfo) map[domainRoot]bool {
 	r := map[domainRoot]bool{}

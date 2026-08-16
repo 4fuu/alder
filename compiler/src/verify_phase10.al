@@ -66,20 +66,29 @@ iid = iid + 1 }
     return Ok(out)
 }
 
-fn mir_v10_param_count(store: MirStore, indexes: MirVIndexes, function: U64) -> U64 {
-    let count = mir_vindex_param_count(indexes, function)
+fn mir_v10_param_count(store: MirStore, function: U64) -> U64 {
     var want: U64 = 0
     var at: U64 = 0
-    while at < count {
-        if __s0_buffer_get(MirParamRec, store.params, mir_vindex_param(indexes, function, at) - 1).kind == mir_param_function() { want = want + 1 }
+    while at < __s0_buffer_len(MirParamRec, store.params) {
+        let item = __s0_buffer_get(MirParamRec, store.params, at)
+        if item.kind == mir_param_function() && item.function == function { want = want + 1 }
         at = at + 1
     }
     return want
 }
 
+fn mir_v10_param_type(store: MirStore, function: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirParamRec, store.params) {
+        let item = __s0_buffer_get(MirParamRec, store.params, at)
+        if item.kind == mir_param_function() && item.function == function && item.ordinal == ordinal { return item.param_type }
+        at = at + 1
+    }
+    return 0
+}
+
 fn mir_v10_entry(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirVerifyCompleteOutput, __s0_Error) {
     var out = initial
-    let indexes = try mir_vindex_build(d, store)
 var entry: U64 = 0
 var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
@@ -89,9 +98,9 @@ function = function + 1 }
 return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: true, entry: 0)) }
     let item = __s0_buffer_get(MirFunctionRec, store.functions, entry - 1)
     if item.result_type != mir_type_i32() { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_result(), entry, 0, 0, 0, 0, item.result_type, entry, mir_type_i32(), item.result_type, entry)) }
-    let count = mir_v10_param_count(store, indexes, entry)
+    let count = mir_v10_param_count(store, entry)
     var signature = count == 0
-    if count == 1 { signature = mir_vtype_kind(store, mir_v5_param_type(store, indexes, entry, 0, mir_param_function(), 0)) == mir_type_kind_domain_handle() }
+    if count == 1 { signature = mir_vtype_kind(store, mir_v10_param_type(store, entry, 0)) == mir_type_kind_domain_handle() }
     if !signature { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_signature(), entry, 0, 0, 0, 0, 0, entry, 1, count, entry)) }
     let complete = __s0_buffer_len(MirVerifyDiagRec, out) == 0
     if !complete { entry = 0 }

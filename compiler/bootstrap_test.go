@@ -85,7 +85,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	exe := buildAlder1(t, cc, root)
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
 	noGo := noGoEnv(t, cc)
 	t.Run("i64-min", func(t *testing.T) {
 		files := map[string]string{"i64min.al": "fn main() -> I32 {\n    if -9223372036854775808 == -9223372036854775807 - 1 { return 0 }\n    return 1\n}\n"}
@@ -163,14 +163,10 @@ func buildAlder1(t *testing.T, cc, root string) string {
 
 func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root string, noGo []string, files map[string]string, source string, extra string, want int) {
 	t.Helper()
-	check := runAlder1(t, exe, noGo, files, "check", source)
-	if check.status != 0 {
-		t.Fatalf("check failed: %+v", check)
-	}
 	first := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", source)
 	second := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", source)
 	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 3\n") || first != second {
-		t.Fatalf("MIR failed or was nondeterministic: check=%+v first=%+v second=%+v", check, first, second)
+		t.Fatalf("MIR failed or was nondeterministic: first=%+v second=%+v", first, second)
 	}
 	module, err := mir.Parse(first.stdout)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/4fuu/alder/frontend"
@@ -48,6 +49,81 @@ type productionEnvelope struct {
 	Failure *struct{ Kind, Message string }
 }
 
+type sharedProductionBuildResult struct {
+	dir, object, exe string
+	err              error
+}
+
+var (
+	sharedProductionBuildOnce sync.Once
+	sharedProductionBuild     sharedProductionBuildResult
+)
+
+// TestMain keeps the ordinary tests' shared compiler executable alive until
+// every parallel package test has finished, without caching between go test
+// processes.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if sharedProductionBuild.dir != "" {
+		_ = os.RemoveAll(sharedProductionBuild.dir)
+	}
+	os.Exit(code)
+}
+
+func getSharedProductionBuild(t *testing.T, cc, root string) (object, exe, dir string) {
+	t.Helper()
+	sharedProductionBuildOnce.Do(func() {
+		sharedProductionBuild = buildSharedProductionCompiler(cc, root)
+	})
+	if sharedProductionBuild.err != nil {
+		t.Fatalf("build shared production compiler: %v", sharedProductionBuild.err)
+	}
+	return sharedProductionBuild.object, sharedProductionBuild.exe, sharedProductionBuild.dir
+}
+
+func buildSharedProductionCompiler(cc, root string) sharedProductionBuildResult {
+	result := sharedProductionBuildResult{}
+	dir, err := os.MkdirTemp("", "alder-production-test-")
+	if err != nil {
+		result.err = err
+		return result
+	}
+	result.dir = dir
+	var sources []frontend.Source
+	for i, name := range compilerSourceManifest {
+		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
+		if readErr != nil {
+			result.err = readErr
+			return result
+		}
+		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
+	}
+	compiled, compileErr := Compile(Request{Sources: sources, Emit: EmitC})
+	if compileErr != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
+		result.err = fmt.Errorf("compile production root: result=%+v error=%v", compiled, compileErr)
+		return result
+	}
+	cfile := filepath.Join(dir, "compiler.c")
+	result.object = cfile + ".o"
+	result.exe = filepath.Join(dir, "alder1")
+	if err = os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
+		result.err = err
+		return result
+	}
+	strict := strictC11Flags()
+	compileArgs := append(append([]string{}, strict...), "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", cfile, "-o", result.object)
+	if output, commandErr := exec.Command(cc, compileArgs...).CombinedOutput(); commandErr != nil {
+		result.err = fmt.Errorf("strict C11 compile: %w\n%s", commandErr, output)
+		return result
+	}
+	linkArgs := append(append([]string{}, strict...), alder1LinkFlags()...)
+	linkArgs = append(linkArgs, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), result.object, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", result.exe)
+	if output, commandErr := exec.Command(cc, linkArgs...).CombinedOutput(); commandErr != nil {
+		result.err = fmt.Errorf("strict C11 link: %w\n%s", commandErr, output)
+	}
+	return result
+}
+
 func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -61,28 +137,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var sources []frontend.Source
-	for i, name := range compilerSourceManifest {
-		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
-	}
-	// Compile directly to C so this compiler-scale gate performs only the
-	// verification required by the service/backend contracts.
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitC})
-	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		t.Fatalf("compile production root: result=%+v error=%v", compiled, err)
-	}
-	dir := t.TempDir()
-	cfile := filepath.Join(dir, "compiler.c")
-	exe := filepath.Join(dir, "alder1")
-	if err := os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	object := compileGeneratedObject(t, cc, root, cfile)
-	linkGeneratedProgram(t, cc, root, object, filepath.Join(root, "bootstrap", "alder_host.c"), exe, alder1LinkFlags()...)
+	object, exe, dir := getSharedProductionBuild(t, cc, root)
 	testProductionInjectedFailure(t, cc, root, object, dir, true, 3)
 	testProductionInjectedFailure(t, cc, root, object, dir, false, 3)
 
@@ -386,13 +441,17 @@ func decodeProductionEnvelope(t *testing.T, text string) productionEnvelope {
 func compileGeneratedObject(t *testing.T, cc, root, generated string, extra ...string) string {
 	t.Helper()
 	object := generated + ".o"
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args := strictC11Flags()
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", generated, "-o", object)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}
 	return object
+}
+
+func strictC11Flags() []string {
+	return []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
 }
 
 func alder1LinkFlags() []string {
@@ -411,7 +470,7 @@ func alder1OptimizeFlags() []string {
 
 func linkGeneratedProgram(t *testing.T, cc, root, object, host, output string, extra ...string) {
 	t.Helper()
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args := strictC11Flags()
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), object, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {

@@ -11,8 +11,8 @@ fn finish_cgen(generated: Bool) -> I32 {
     return 0
 }
 
-fn run_cgen(d: Domain, mir: MirStore) -> I32 {
-    return match cgen_generate(d, mir, 3, true) {
+fn run_cgen(d: Domain, mir: MirStore, verified: MirVerifyCompleteOutput) -> I32 {
+    return match cgen_generate_verified(d, mir, verified) {
         Err(error) => storage_error()
         Ok(generated) => finish_cgen(generated)
     }
@@ -31,7 +31,7 @@ fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I
         return 0
     }
     if !driver_artifact_start("c") { return driver_failure(3, "io", "cannot write compiler output") }
-    return run_cgen(d, mir)
+    return run_cgen(d, mir, result)
 }
 
 fn run_verify(d: Domain, mir: MirStore) -> I32 {

@@ -61,8 +61,8 @@ func Module(m *mir.Module) []Error {
 	}
 	errs = append(errs, phase4Dominance(m)...)
 	errs = append(errs, phase5Typing(m)...)
-	effects, cleanups, cleanupErrs := computeFunctionEffectsWithCleanup(m)
-	errs = append(errs, phase6Domains(m, effects, cleanups)...)
+	effects, cleanups, domainInfos, cleanupErrs := computeFunctionEffectsWithCleanup(m)
+	errs = append(errs, phase6Domains(m, effects, cleanups, domainInfos)...)
 	errs = append(errs, cleanupErrs...)
 	errs = append(errs, phase8Tables(m, effects, cleanups)...)
 	errs = append(errs, phase9Pointers(m)...)

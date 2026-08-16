@@ -366,15 +366,20 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     return Ok(out)
 }
 
-// Production entry for the scalar/CFG slice. Verification and the unsupported
-// operation preflight both finish before the output buffer is allocated.
-fn cgen_generate(d: Domain, store: MirStore, version: U64, hosted: Bool) -> Result(Bool, __s0_Error) {
-    let verified = try mir_verify_complete(d, store, version, hosted)
+// Internal production entry for an already verified module. The unsupported
+// operation preflight still finishes before the output buffer is allocated.
+fn cgen_generate_verified(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> Result(Bool, __s0_Error) {
     if !verified.complete { return Ok(false) }
     let indexes = try mir_vindex_build(d, store)
     if !cgen_supported(store, indexes) { return Ok(false) }
     let writer = try cgen_build(d, store, indexes, verified)
     return Ok(cgen_flush(writer))
+}
+
+// Direct callers retain the complete verification gate.
+fn cgen_generate(d: Domain, store: MirStore, version: U64, hosted: Bool) -> Result(Bool, __s0_Error) {
+    let verified = try mir_verify_complete(d, store, version, hosted)
+    return cgen_generate_verified(d, store, verified)
 }
 
 // Retained declaration-only conformance API. Complete V1-V10 authorization
