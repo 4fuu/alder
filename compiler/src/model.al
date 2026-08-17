@@ -195,9 +195,12 @@ type DeclTypeUseRec {
 // ownership deterministic even where no separate checked statement record yet
 // exists. Literal text stays in its token; range is proven against full-width
 // decimal bounds, including U64 maximum and signed minima. These records remain
-// structurally complete on CheckBad.
+// structurally complete on CheckBad. owner_previous links to the preceding
+// expression for the same owner and is an internal lookup index, not manifest
+// output.
 type CheckedExprRec {
     owner: U64
+    owner_previous: U64
     syntax: U64
     kind: U64
     checked_type: U64

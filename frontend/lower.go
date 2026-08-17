@@ -209,7 +209,7 @@ func (l *lowerer) mapType(t *Type) mir.TypeId {
 	return id
 }
 
-type bufferHelpers struct{ newID, lenID, appendID, getID, sliceID mir.FunctionId }
+type bufferHelpers struct{ newID, lenID, appendID, getID, setID, sliceID mir.FunctionId }
 
 func (l *lowerer) s0ErrorType() mir.TypeId {
 	const key = "__s0_Error"
@@ -248,11 +248,13 @@ func (l *lowerer) bufferHelpersFor(t *Type) *bufferHelpers {
 	h.lenID = add("len", []mir.Param{{Name: "b", Type: bt}}, mir.TypeU64)
 	h.appendID = add("append", []mir.Param{{Name: "d", Type: l.m.DomainHandle()}, {Name: "b", Type: bt}, {Name: "v", Type: et}}, rt)
 	h.getID = add("get", []mir.Param{{Name: "b", Type: bt}, {Name: "i", Type: mir.TypeU64}}, et)
+	h.setID = add("set", []mir.Param{{Name: "b", Type: bt}, {Name: "i", Type: mir.TypeU64}, {Name: "v", Type: et}}, mir.TypeUnit)
 	h.sliceID = add("slice", []mir.Param{{Name: "b", Type: bt}}, l.m.Slice(et))
 	l.bufferCache[key] = h
 	l.lowerBufferNew(h, t, bt, et, errt, rt)
 	l.lowerBufferLen(h, t, bt)
 	l.lowerBufferAppend(h, t, bt, et, errt, rt)
+	l.lowerBufferSet(h, t, bt, et)
 	l.lowerBufferGetSlice(h, t, bt, et)
 	return h
 }
@@ -371,6 +373,26 @@ func (l *lowerer) lowerBufferAppend(h *bufferHelpers, t *Type, bt, et, errt, rt 
 	nn := b.res(mir.TypeU64)
 	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: nn, A: lenv, B: one, FailTarget: panic})
 	b.ret(l.bufferOK(b, rt, l.bufferAgg(b, bt, nd, nn)))
+}
+
+func (l *lowerer) lowerBufferSet(h *bufferHelpers, t *Type, bt, et mir.TypeId) {
+	b := l.newFB(l.m.Functions[h.setID])
+	b.result = prim(pUnit)
+	b.start("bb0")
+	loc := b.f.AddLocal(b.localName("b"), bt)
+	b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: loc}, 0)
+	base := mir.Place{Kind: mir.PlaceLocal, Local: loc}
+	data := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &base, Field: "data"}, l.m.SafeMut(et))
+	ln := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &base, Field: "len"}, mir.TypeU64)
+	inside := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntLt, Result: inside, A: 1, B: ln})
+	valid, _ := b.addBlock("bb_valid", nil)
+	b.branch(inside, blkID(b.f, valid), b.panicBlock())
+	b.setCur(valid)
+	ref := b.res(l.m.SafeMut(et))
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: data, Index: 1, FailTarget: b.panicBlock()})
+	b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, 2)
+	b.ret(mir.NoValue)
 }
 
 func (l *lowerer) lowerBufferGetSlice(h *bufferHelpers, t *Type, bt, et mir.TypeId) {
@@ -1816,7 +1838,7 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 		id := b.res(b.l.m.SafeMut(b.l.ty(elemTy)))
 		b.emit(mir.Instr{Op: mir.OpAlloc, Result: id, Domain: args[0], Count: args[1], TypeOp: b.l.ty(elemTy)})
 		return id, nil
-	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice":
+	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice":
 		var bt *Type
 		switch name {
 		case "__s0_buffer_new":
@@ -1830,7 +1852,11 @@ func (b *fb) builtinCall(x *Call, name string) (mir.ValueId, error) {
 			return mir.NoValue, fmt.Errorf("internal: %s has no concrete buffer type", name)
 		}
 		h := b.l.bufferHelpersFor(bt)
-		callee := map[string]mir.FunctionId{"__s0_buffer_new": h.newID, "__s0_buffer_len": h.lenID, "__s0_buffer_append": h.appendID, "__s0_buffer_get": h.getID, "__s0_buffer_slice": h.sliceID}[name]
+		callee := map[string]mir.FunctionId{"__s0_buffer_new": h.newID, "__s0_buffer_len": h.lenID, "__s0_buffer_append": h.appendID, "__s0_buffer_get": h.getID, "__s0_buffer_set": h.setID, "__s0_buffer_slice": h.sliceID}[name]
+		if b.l.m.Functions[callee].Result == mir.TypeUnit {
+			b.emit(mir.Instr{Op: mir.OpCall, Result: mir.NoValue, Callee: callee, Args: args})
+			return mir.NoValue, nil
+		}
 		id := b.res(b.l.m.Functions[callee].Result)
 		b.emit(mir.Instr{Op: mir.OpCall, Result: id, Callee: callee, Args: args})
 		return id, nil

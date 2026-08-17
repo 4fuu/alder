@@ -247,19 +247,20 @@ fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVeri
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase3(d, store, indexes, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase4(d, store, indexes, diagnostics)
+    let uses = try mir_vp4_use_inventory_build(d, store, indexes)
+    diagnostics = try mir_vphase4_with_uses(d, store, indexes, uses, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase5(d, store, indexes, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     let cleanup = try mir_v7_analyze(d, store, indexes, try __s0_buffer_new(MirVerifyDiagRec, d))
     let provenance = try mir_v6_compute(d, store, indexes, cleanup)
-    diagnostics = try mir_vphase6_with(d, store, indexes, diagnostics, cleanup, provenance)
+    diagnostics = try mir_vphase6_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = cleanup.diagnostics
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase8_with(d, store, indexes, diagnostics, cleanup, provenance)
+    diagnostics = try mir_vphase8_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase9(d, store, indexes, diagnostics)
+    diagnostics = try mir_vphase9_with_uses(d, store, indexes, uses, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     diagnostics = try mir_vphase10(d, store, indexes, diagnostics)
     return Ok(MirVerifyOutput(diagnostics: diagnostics))

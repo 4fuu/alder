@@ -19,11 +19,15 @@ multi-source global compilation subset with generics, records, unary-payload
 enums, `match`, slices/bridge `String`, `Option`/`Result`, temporary map/storage/
 cleanup facilities, and direct C symbols inside `unsafe c`.
 
-Milestone 5.4 is active: `compiler/src/*.al` contains the Alder port of the
-current S0 compiler slice, including its final explicit-source driver and host
-protocol. The port now drives checking through complete MIR verification and
-the supported verified-MIR-to-C11 backend slice. Fixed-point bootstrap and the
-1.0 language remain incomplete. See [Alder S0](docs/s0-language.md) and
+Milestones 5.4 and 5.5 are complete: `compiler/src/*.al` contains the
+Alder-written S0 compiler, including its explicit-source driver, complete MIR
+verification, and verified-MIR-to-C11 backend slice. The committed
+`bootstrap/alder.c` regenerates byte-identically from the fixed compiler source
+inventory using only a system C11 compiler and common POSIX-host utilities; Go
+and a preinstalled Alder compiler are not used. This is a reproducible source
+bootstrap for S0, not completion of the Alder 1.0 language. See
+[Alder S0](docs/s0-language.md), the
+[bootstrap inventory](bootstrap/compiler-source-inventory.md), and
 [Roadmap](ROADMAP.md) for the exact boundary and evidence.
 
 ## Bootstrap CLI
@@ -46,14 +50,30 @@ internal/backend failures. C program output uses the separately linked
 This is bootstrap infrastructure for the documented S0 subset, not a production
 compiler or claim that the full language is implemented.
 
+## Reproducing the source bootstrap
+
+On a POSIX host with a C11 compiler and common command-line utilities, verify
+the committed fixed point from the explicit, digest-pinned 28-file compiler
+inventory:
+
+```sh
+bootstrap/regenerate.sh
+```
+
+The command builds the committed C bootstrap, recompiles the compiler sources,
+and requires byte-for-byte equality with `bootstrap/alder.c`. It performs no
+network access and does not invoke Go or another installed Alder compiler. The
+measured Linux/GCC run needs about 2.5 GiB of memory. See the
+[compiler source inventory](bootstrap/compiler-source-inventory.md) for the
+format, tool overrides, and intentional `--write` workflow.
+
 ## Current Priority
 
 Implementation follows the shortest safe path:
 
-- finish the Alder-written compiler core through the existing verified
-  MIR-to-C11 path;
-- establish repeatable fixed-point source bootstrap without Go;
-- then implement the already documented Alder 1.0 gates in dependency order:
+- preserve the reproducible Alder source bootstrap and verified MIR-to-C11
+  path;
+- implement the already documented Alder 1.0 gates in dependency order:
   modules/builds, complete language/memory model, C bindings and standard
   library, async runtime, tooling, Git packages, xmake integration, and release
   qualification.

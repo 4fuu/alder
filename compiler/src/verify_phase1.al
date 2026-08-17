@@ -106,6 +106,7 @@ fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(Mir
     var out = initial
     let phase = mir_verify_phase_integrity()
     let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    let constants = try mir_vindex_build_constants(d, store)
     // Per-function block segments: counting sort by function preserving store
     // order inside each segment. Only the missing-block probe uses them.
     let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
@@ -172,11 +173,8 @@ prior = prior + 1 }
     while at < __s0_buffer_len(MirConstRec, store.constants) {
         let item = __s0_buffer_get(MirConstRec, store.constants, at)
         if !mir_vname_valid(store, item.name_start, item.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
-        var prior: U64 = 0
-        while prior < at { let p = __s0_buffer_get(MirConstRec, store.constants, prior)
-if mir_vname_equal(store, item.name_start, item.name_end, p.name_start, p.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, prior + 1))
-prior = at }
-prior = prior + 1 }
+        let prior = mir_vindex_const_slots(store, constants.slots, item.name_start, item.name_end)
+        if prior != 0 && prior != at + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, prior)) }
         at = at + 1
     }
     at = 0
@@ -361,53 +359,7 @@ fn mir_vphase1_locals(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
         seen[sz] = 0
         sz = sz + 1
     }
-    // Per-function local segments for duplicate-name checks.
-    var l_counts = __s0_alloc(U64, d, function_count + 1)
-    var lz: U64 = 0
-    while lz <= function_count {
-        l_counts[lz] = 0
-        lz = lz + 1
-    }
-    var lat: U64 = 0
-    while lat < local_total {
-        let lf = __s0_buffer_get(MirLocalRec, store.locals, lat).function
-        if lf >= 1 && lf <= function_count { l_counts[lf] = l_counts[lf] + 1 }
-        lat = lat + 1
-    }
-    var l_starts = __s0_alloc(U64, d, function_count + 1)
-    lz = 0
-    while lz <= function_count {
-        l_starts[lz] = 0
-        lz = lz + 1
-    }
-    var l_running: U64 = 0
-    var lg: U64 = 1
-    while lg <= function_count {
-        l_starts[lg] = l_running
-        l_running = l_running + l_counts[lg]
-        lg = lg + 1
-    }
-    var l_ids = __s0_alloc(U64, d, l_running)
-    lz = 0
-    while lz < l_running {
-        l_ids[lz] = 0
-        lz = lz + 1
-    }
-    var l_cursor = __s0_alloc(U64, d, function_count + 1)
-    lz = 0
-    while lz <= function_count {
-        l_cursor[lz] = 0
-        lz = lz + 1
-    }
-    lat = 0
-    while lat < local_total {
-        let lf = __s0_buffer_get(MirLocalRec, store.locals, lat).function
-        if lf >= 1 && lf <= function_count {
-            l_ids[l_starts[lf] + l_cursor[lf]] = lat + 1
-            l_cursor[lf] = l_cursor[lf] + 1
-        }
-        lat = lat + 1
-    }
+    let local_names = try mir_vindex_build_local_names(d, store)
     var at: U64 = 0
     at = 0
     while at < local_total {
@@ -424,24 +376,8 @@ scan = scan + 1 }
         if !mir_vfunction_exists(store, item.function) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         if item.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), item.function, 0, 0, 0, 0, 0, at + 1, expected, item.ordinal, 0)) }
         if !mir_vname_valid(store, item.name_start, item.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
-        var dup: U64 = 0
-        if item.function >= 1 && item.function <= function_count {
-            let lcount = l_counts[item.function]
-            var lk: U64 = 0
-            while lk < lcount && dup == 0 {
-                let lid = l_ids[l_starts[item.function] + lk]
-                if lid < at + 1 {
-                    let prior = __s0_buffer_get(MirLocalRec, store.locals, lid - 1)
-                    if mir_vname_equal(store, item.name_start, item.name_end, prior.name_start, prior.name_end) { dup = lid }
-                }
-                lk = lk + 1
-            }
-        } else {
-            var scan: U64 = 0
-            while scan < at && dup == 0 { let prior = __s0_buffer_get(MirLocalRec, store.locals, scan)
-if prior.function == item.function && mir_vname_equal(store, item.name_start, item.name_end, prior.name_start, prior.name_end) { dup = scan + 1 }
-scan = scan + 1 }
-        }
+        var dup = mir_vindex_local_name(store, local_names, item.function, item.name_start, item.name_end)
+        if dup == at + 1 { dup = 0 }
         if dup != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, dup)) }
         at = at + 1
     }
@@ -483,58 +419,12 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     let phase = mir_verify_phase_integrity()
     let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
     let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_names = try mir_vindex_build_value_names(d, store)
     var seen = __s0_alloc(U64, d, function_count + 1)
     var sz: U64 = 0
     while sz <= function_count {
         seen[sz] = 0
         sz = sz + 1
-    }
-    // Per-function value segments for duplicate-name checks.
-    var v_counts = __s0_alloc(U64, d, function_count + 1)
-    var vz: U64 = 0
-    while vz <= function_count {
-        v_counts[vz] = 0
-        vz = vz + 1
-    }
-    var vat: U64 = 0
-    while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
-        if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
-        vat = vat + 1
-    }
-    var v_starts = __s0_alloc(U64, d, function_count + 1)
-    vz = 0
-    while vz <= function_count {
-        v_starts[vz] = 0
-        vz = vz + 1
-    }
-    var v_running: U64 = 0
-    var vg: U64 = 1
-    while vg <= function_count {
-        v_starts[vg] = v_running
-        v_running = v_running + v_counts[vg]
-        vg = vg + 1
-    }
-    var v_ids = __s0_alloc(U64, d, v_running)
-    vz = 0
-    while vz < v_running {
-        v_ids[vz] = 0
-        vz = vz + 1
-    }
-    var v_cursor = __s0_alloc(U64, d, function_count + 1)
-    vz = 0
-    while vz <= function_count {
-        v_cursor[vz] = 0
-        vz = vz + 1
-    }
-    vat = 0
-    while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
-        if vf >= 1 && vf <= function_count {
-            v_ids[v_starts[vf] + v_cursor[vf]] = vat + 1
-            v_cursor[vf] = v_cursor[vf] + 1
-        }
-        vat = vat + 1
     }
     // Dense ordinal block positions for block-reference presence.
     let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
@@ -771,25 +661,8 @@ scan = scan + 1 }
         if !mir_vfunction_exists(store, v.function) || v.def_kind > mir_value_def_switch_case() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, v.def_kind, 0)) }
         if v.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), v.function, v.block, 0, 0, 0, 0, at + 1, expected, v.ordinal, 0)) }
         if !mir_vname_valid(store, v.name_start, v.name_end, false) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
-        var dup: U64 = 0
-        if v.function >= 1 && v.function <= function_count {
-            let vcount = v_counts[v.function]
-            var vk: U64 = 0
-            while vk < vcount && dup == 0 {
-                let vid = v_ids[v_starts[v.function] + vk]
-                if vid < at + 1 {
-                    let prior = __s0_buffer_get(MirValueRec, store.values, vid - 1)
-                    if mir_vname_equal(store, v.name_start, v.name_end, prior.name_start, prior.name_end) { dup = vid }
-                }
-                vk = vk + 1
-            }
-        } else {
-            var scan: U64 = 0
-            while scan < at && dup == 0 { let prior = __s0_buffer_get(MirValueRec, store.values, scan)
-if prior.function == v.function && mir_vname_equal(store, v.name_start, v.name_end, prior.name_start, prior.name_end) { dup = scan + 1 }
-scan = scan + 1 }
-        }
-        if dup != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, dup)) }
+        let dup = mir_vindex_value_name(store, value_names, v.function, v.name_start, v.name_end)
+        if dup != 0 && dup != at + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, 0, dup)) }
         var block_ok = v.def_kind == mir_value_def_function_param()
         if !block_ok {
             if v.function >= 1 && v.function <= function_count && v.block >= 1 && v.block <= b_counts[v.function] {

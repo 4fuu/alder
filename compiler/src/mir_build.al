@@ -229,10 +229,18 @@ fn mir_add_function(d: Domain, store: MirStore, name: String, result_type: U64) 
 fn mir_add_value(d: Domain, store: MirStore, function: U64, name: String, value_type: U64, def_kind: U64, block: U64, item: U64) -> Result(MirBuildStep, __s0_Error) {
     let named = try mir_append_name(d, store, name)
     var ordinal: U64 = 0
-    var at: U64 = 0
-    while at < __s0_buffer_len(MirValueRec, named.store.values) {
-        if __s0_buffer_get(MirValueRec, named.store.values, at).function == function { ordinal = ordinal + 1 }
-        at = at + 1
+    let total = __s0_buffer_len(MirValueRec, named.store.values)
+    var grouped = false
+    if total != 0 {
+        let previous = __s0_buffer_get(MirValueRec, named.store.values, total - 1)
+        if previous.function == function { ordinal = previous.ordinal + 1
+            grouped = true }
+    }
+    if !grouped { var at: U64 = 0
+        while at < total {
+            if __s0_buffer_get(MirValueRec, named.store.values, at).function == function { ordinal = ordinal + 1 }
+            at = at + 1
+        }
     }
     let rec = MirValueRec(function: function, ordinal: ordinal, name_start: named.start, name_end: named.end, value_type: value_type, def_kind: def_kind, block: block, item: item)
     let values = try __s0_buffer_append(MirValueRec, d, named.store.values, rec)

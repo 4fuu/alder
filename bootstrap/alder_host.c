@@ -12,6 +12,10 @@
 #include <io.h>
 #endif
 
+#if defined(ALDER_HOST_LARGE_STACK) && defined(__linux__)
+#include <sys/resource.h>
+#endif
+
 struct AlderHostSource {
     const char *path;
     uint64_t path_len;
@@ -37,6 +41,26 @@ struct AlderHostContext {
 };
 
 static struct AlderHostContext *alderhost_active_context;
+
+static bool alderhost_configure_stack(void) {
+#if defined(ALDER_HOST_LARGE_STACK) && defined(__linux__)
+    const rlim_t wanted = (rlim_t)UINT64_C(67108864);
+    struct rlimit limit;
+    if (getrlimit(RLIMIT_STACK, &limit) != 0) {
+        return false;
+    }
+    if (limit.rlim_cur >= wanted) {
+        return true;
+    }
+    if (limit.rlim_max != RLIM_INFINITY && limit.rlim_max < wanted) {
+        return false;
+    }
+    limit.rlim_cur = wanted;
+    return setrlimit(RLIMIT_STACK, &limit) == 0;
+#else
+    return true;
+#endif
+}
 
 static bool alderhost_size_to_u64(size_t value, uint64_t *out) {
 #if SIZE_MAX > UINT64_MAX
@@ -761,6 +785,10 @@ int main(int argc, char **argv) {
     uint64_t i;
     int status;
     bool flush_ok = true;
+    if (!alderhost_configure_stack()) {
+        (void)fputs("alder host: cannot configure compiler stack\n", stderr);
+        return 3;
+    }
 #ifdef _WIN32
     if (_setmode(_fileno(stdout), _O_BINARY) == -1 ||
         _setmode(_fileno(stderr), _O_BINARY) == -1) {

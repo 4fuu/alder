@@ -152,6 +152,17 @@ func TestInventoryVerifierValidAndPathIndependent(t *testing.T) {
 	}
 }
 
+func TestCommittedCompilerSourceInventory(t *testing.T) {
+	exe := compileInventoryVerifier(t)
+	root := filepath.Join("..", "..")
+	manifest := filepath.Join("..", "compiler-sources.manifest")
+	result := runInventory(t, exe, manifest, root)
+	want := inventoryResult{status: 0, stdout: "alder inventory: ok\n"}
+	if result != want {
+		t.Fatalf("committed inventory result = %+v, want %+v", result, want)
+	}
+}
+
 func TestInventoryVerifierRejectsInvalidInventories(t *testing.T) {
 	exe := compileInventoryVerifier(t)
 	dataA := []byte("alpha\n")

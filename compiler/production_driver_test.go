@@ -455,10 +455,14 @@ func strictC11Flags() []string {
 }
 
 func alder1LinkFlags() []string {
-	if runtime.GOOS != "windows" {
+	switch runtime.GOOS {
+	case "windows":
+		return []string{"-Wl,--stack,33554432"}
+	case "linux":
+		return []string{"-DALDER_HOST_LARGE_STACK"}
+	default:
 		return nil
 	}
-	return []string{"-Wl,--stack,33554432"}
 }
 
 // alder1OptimizeFlags is used only for the large self-hosted compiler

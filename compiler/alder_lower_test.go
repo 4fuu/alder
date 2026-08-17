@@ -185,6 +185,7 @@ fn buffer_bridge(d: Domain) -> Result(U64, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let one = try __s0_buffer_append(U64, d, empty, 7)
     let two = try __s0_buffer_append(U64, d, one, 9)
+    __s0_buffer_set(U64, two, 0, 11)
     let view = __s0_buffer_slice(U64, two)
     return Ok(__s0_buffer_get(U64, two, 0) + view[1] + __s0_buffer_len(U64, two))
 }
@@ -1248,21 +1249,22 @@ fn nested_try(d: Domain) -> Result(U64, __s0_Error) {
 
 fn try_of_match(d: Domain) -> Result(U64, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
-    let grown = try match __s0_buffer_append(U64, d, empty, 7) {
+    let attempted: Result(U64, __s0_Error) = match __s0_buffer_append(U64, d, empty, 7) {
         Ok(value) => Ok(__s0_buffer_len(U64, value))
         Err(error) => Err(error)
     }
+    let grown = try attempted
     return Ok(grown)
 }
 
 fn arm_assign_try(d: Domain, b: __s0_Buffer(U64), bad: Bool) -> Result(U64, __s0_Error) {
-    var value: U64 = 0
+    var value = b
     if bad {
         value = try __s0_buffer_append(U64, d, b, 9)
     } else {
         value = try __s0_buffer_append(U64, d, b, 8)
     }
-    return Ok(value)
+    return Ok(__s0_buffer_len(U64, value))
 }
 
 fn arm_assign_checked(bad: Bool) -> Result(I64, I64) {

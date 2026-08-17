@@ -45,7 +45,7 @@ fn checker_parsed(d: Domain, result: ParseResult, store: CheckStore) -> I32 { re
  ParseBad(output) => checker_parse_bad(output.state, output.store)
  ParseLexBad(output) => checker_lex_bad(output.state)
 } }
-fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b)) } } } } } } } } } } }
+fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b)) } } } } } } } } } } } } }
 fn ci_returns(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec)) -> I32 { return match __s0_buffer_new(CheckedReturnRec, d) { Err(e) => 3 Ok(b) => ci_diag(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,children,b) } }
 fn ci_children(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec)) -> I32 { return match __s0_buffer_new(CheckedExprChildRec, d) { Err(e) => 3 Ok(b) => ci_returns(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,b) } }
 fn ci_calls(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec)) -> I32 { return match __s0_buffer_new(CallAnnotationRec, d) { Err(e) => 3 Ok(b) => ci_children(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,b) } }
@@ -286,7 +286,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	builtinText := "fn builtins(d: Domain, b: __s0_Buffer(U64), m: DomainMark) -> Result(__s0_Buffer(U64), __s0_Error) {\n" +
 		" let raw: [U64] = __s0_alloc(U64, d, 2)\n let child = __s0_domain_create(d)\n __s0_domain_reset(child, __s0_domain_mark(child))\n __s0_domain_destroy(child)\n" +
 		" let map = __s0_map_create(Map(U64, U64), d)\n Set(map, 1, 2)\n let found: Option(U64) = Get(U64, U64, map, 1)\n let removed: Bool = Remove(map, 1)\n" +
-		" let empty = try __s0_buffer_new(U64, d)\n let size = __s0_buffer_len(U64, b)\n let grown = try __s0_buffer_append(U64, d, empty, size)\n let item = __s0_buffer_get(U64, grown, 0)\n let view: [U64] = __s0_buffer_slice(U64, grown)\n return Ok(grown)\n}\n"
+		" let empty = try __s0_buffer_new(U64, d)\n let size = __s0_buffer_len(U64, b)\n let grown = try __s0_buffer_append(U64, d, empty, size)\n let item = __s0_buffer_get(U64, grown, 0)\n __s0_buffer_set(U64, grown, 0, item)\n let view: [U64] = __s0_buffer_slice(U64, grown)\n return Ok(grown)\n}\n"
 	builtinFiles := map[string]string{"builtins.al": builtinText}
 	builtinOne := runAlderChecker(t, exe, builtinFiles, []string{"builtins.al"}, false)
 	builtinTwo := runAlderChecker(t, exe, builtinFiles, []string{"builtins.al"}, false)
@@ -298,7 +298,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	for _, annotation := range builtinManifest.callAnnotations {
 		seenBuiltins[annotation.builtin] = true
 	}
-	for _, identity := range []int{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16} {
+	for _, identity := range []int{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17} {
 		if !seenBuiltins[identity] {
 			t.Fatalf("builtin identity %d was not annotated", identity)
 		}
@@ -316,6 +316,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 		"fn f(b: __s0_Buffer(U64)) -> U64 { return __s0_buffer_len(U8, b) }\n",
 		"fn f(d: Domain, b: __s0_Buffer(U64)) -> Result(__s0_Buffer(U64), __s0_Error) { return __s0_buffer_append(U64, d, b, false) }\n",
 		"fn f(b: __s0_Buffer(U64)) -> U64 { return __s0_buffer_get(U64, b, false) }\n",
+		"fn f(b: __s0_Buffer(U64)) -> Unit { return __s0_buffer_set(U64, b, 0, false) }\n",
 		"fn f(b: __s0_Buffer(U64)) -> [U8] { return __s0_buffer_slice(U64, b) }\n",
 		"fn f(d: Domain) -> [U64] { return __s0_alloc(Missing, d, 1) }\n",
 		"fn f(d: Domain) -> Map(U64, U64) { return __s0_map_create(U64, d) }\n",
@@ -1036,7 +1037,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	reserved := []string{
 		"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64", "Unit", "String", "Option", "Result", "Map", "Ptr", "Domain", "DomainMark", "__s0_Buffer", "__s0_Error",
-		"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create", "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice", "Get", "Set", "Remove",
+		"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create", "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice", "Get", "Set", "Remove",
 		"None", "Some", "Ok", "Err",
 	}
 	for _, name := range reserved {
@@ -1156,7 +1157,7 @@ func runOwnerReplayAndErrorConstructors(t *testing.T, exe string) {
 		var owners []int
 		for _, instance := range manifest.instances {
 			if instance.declaration == firstDecl.id {
-				owners = append(owners, instance.id)
+				owners = append(owners, instance.symbol)
 			}
 		}
 		if len(owners) != 2 {
@@ -1164,7 +1165,7 @@ func runOwnerReplayAndErrorConstructors(t *testing.T, exe string) {
 		}
 		instanceOf := map[int]checkerInstance{}
 		for _, instance := range manifest.instances {
-			instanceOf[instance.id] = instance
+			instanceOf[instance.symbol] = instance
 		}
 		args := make([]int, len(owners))
 		for i, owner := range owners {
@@ -1182,37 +1183,8 @@ func runOwnerReplayAndErrorConstructors(t *testing.T, exe string) {
 				t.Fatalf("first instance type argument is not concrete: %d", id)
 			}
 		}
-		// The explicit T syntax is a single shared node: both instance owners
-		// annotate it, and each annotation must resolve to that owner's
-		// concrete type rather than the first owner's.
-		var shared []int
-		for _, annotation := range manifest.annotations {
-			if annotation.owner == owners[0] {
-				for _, other := range manifest.annotations {
-					if other.owner == owners[1] && other.syntax == annotation.syntax {
-						shared = append(shared, annotation.syntax)
-					}
-				}
-			}
-		}
-		if len(shared) != 1 {
-			t.Fatalf("instance owners share %d type syntaxes, want the explicit T node", len(shared))
-		}
-		resolved := map[int]int{}
-		for _, annotation := range manifest.annotations {
-			if (annotation.owner == owners[0] || annotation.owner == owners[1]) && annotation.syntax == shared[0] {
-				resolved[annotation.owner] = annotation.checkedType
-			}
-		}
-		if len(resolved) != 2 || resolved[owners[0]] == resolved[owners[1]] {
-			t.Fatalf("shared T syntax resolved per owner: %v", resolved)
-		}
-		for _, id := range resolved {
-			if !checkedManifestTypeConcrete(manifest, id) {
-				t.Fatalf("replayed T annotation is not concrete: %d", id)
-			}
-		}
-		// The __s0_Buffer(T) runtime parameter specializes per owner too.
+		// Concrete instance arguments and instance-owned role-7 uses pin
+		// specialization without replaying the declaration's shared T syntax.
 		markParam := checkerUse(t, manifest, owners[0], 7, 0)
 		pairParam := checkerUse(t, manifest, owners[1], 7, 0)
 		if markParam.syntax != pairParam.syntax || markParam.checkedType == pairParam.checkedType {
@@ -2215,7 +2187,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 16 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 17 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2356,6 +2328,13 @@ func validateCheckerManifest(m checkerManifest) error {
 				childID := m.children[expression.firstChild-1+childOrdinal].expression
 				validPayload = childID >= 1 && childID < expression.id && (callTargetArity > 0 && (annotation.kind == 3 || annotation.kind == 4) || m.expressions[childID-1].checkedType == wantType)
 			}
+			if validPayload {
+				callAnnotationOwners[expression.annotation-1]++
+			}
+		}
+		if expression.kind == 10 && expression.parameterUse == 0 && expression.boolValue == 0 && expression.operator == 0 && expression.annotation >= 1 && expression.annotation <= len(m.callAnnotations) && m.callAnnotations[expression.annotation-1].kind == 6 && expression.childCount == 0 {
+			annotation := m.callAnnotations[expression.annotation-1]
+			validPayload = annotation.owner == expression.owner && annotation.kind == 6 && annotation.checkedType == expression.checkedType
 			if validPayload {
 				callAnnotationOwners[expression.annotation-1]++
 			}
@@ -2922,7 +2901,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["call annotation invalid target"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0", "Q 1 1 1 2 1 0", 1)
 	malformed["call annotation invalid type"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0", "Q 1 1 1 1 2 0", 1)
 	malformed["call annotation unexpected variant"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0", "Q 1 1 1 1 1 1", 1)
-	malformed["call annotation invalid builtin identity"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0", "Q 1 1 5 0 1 0 17", 1)
+	malformed["call annotation invalid builtin identity"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0", "Q 1 1 5 0 1 0 18", 1)
 	malformed["expression missing call annotation"] = strings.Replace(validCallBody, "E 1 1 4 8 1 0 0 0 0 1", "E 1 1 4 8 1 0 0 0 0 0", 1)
 	malformed["call annotation after expression"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5", "E 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nQ 1 1 1 1 1 0 0", 1)
 	controlPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 12 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\n"

@@ -144,7 +144,14 @@ type MirVIndexes {
     op_case_ids: __s0_Buffer(U64)
     tp_start: __s0_Buffer(U64)
     tp_count: __s0_Buffer(U64)
+    tp_field_count: __s0_Buffer(U64)
     tp_ids: __s0_Buffer(U64)
+    const_slot: __s0_Buffer(U64)
+    type_first: __s0_Buffer(U64)
+    type_unary: __s0_Buffer(U64)
+    place_root: __s0_Buffer(U64)
+    place_depth: __s0_Buffer(U64)
+    place_deref: __s0_Buffer(U64)
 }
 
 // Intermediate results of a per-table index build. Buffers are assembled here
@@ -182,7 +189,18 @@ type MirVIndexOpsRec {
 type MirVIndexTypePartsRec {
     start: __s0_Buffer(U64)
     count: __s0_Buffer(U64)
+    field_count: __s0_Buffer(U64)
     ids: __s0_Buffer(U64)
+}
+
+type MirVIndexConstRec {
+    slots: __s0_Buffer(U64)
+}
+
+type MirVIndexPlaceRec {
+    root: __s0_Buffer(U64)
+    depth: __s0_Buffer(U64)
+    deref: __s0_Buffer(U64)
 }
 
 fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
@@ -696,15 +714,18 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
     let tcount = __s0_buffer_len(MirTypeRec, store.types)
     let total = __s0_buffer_len(MirTypePartRec, store.type_parts)
     var cnt = __s0_alloc(U64, d, tcount + 1)
+    var field_cnt = __s0_alloc(U64, d, tcount + 1)
     var start = __s0_alloc(U64, d, tcount + 1)
     var z: U64 = 0
     while z <= tcount { cnt[z] = 0
+        field_cnt[z] = 0
         start[z] = 0
         z = z + 1 }
     var i: U64 = 0
     while i < total {
         let f = __s0_buffer_get(MirTypePartRec, store.type_parts, i).owner
-        if f >= 1 && f <= tcount { cnt[f] = cnt[f] + 1 }
+        if f >= 1 && f <= tcount { cnt[f] = cnt[f] + 1
+            if __s0_buffer_get(MirTypePartRec, store.type_parts, i).kind == mir_type_part_field() { field_cnt[f] = field_cnt[f] + 1 } }
         i = i + 1
     }
     var f: U64 = 1
@@ -731,11 +752,13 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
     }
     var start_buf = try __s0_buffer_new(U64, d)
     var count_buf = try __s0_buffer_new(U64, d)
+    var field_count_buf = try __s0_buffer_new(U64, d)
     var ids_buf = try __s0_buffer_new(U64, d)
     f = 1
     while f <= tcount {
         start_buf = try __s0_buffer_append(U64, d, start_buf, start[f])
         count_buf = try __s0_buffer_append(U64, d, count_buf, cnt[f])
+        field_count_buf = try __s0_buffer_append(U64, d, field_count_buf, field_cnt[f])
         f = f + 1
     }
     f = 1
@@ -747,7 +770,232 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
         }
         f = f + 1
     }
-    return Ok(MirVIndexTypePartsRec(start: start_buf, count: count_buf, ids: ids_buf))
+    return Ok(MirVIndexTypePartsRec(start: start_buf, count: count_buf, field_count: field_count_buf, ids: ids_buf))
+}
+
+fn mir_vindex_hash_byte(byte: U8) -> U64 {
+    var rest = byte
+    var value: U64 = 0
+    if rest >= 128 { rest = rest - 128
+        value = value + 128 }
+    if rest >= 64 { rest = rest - 64
+        value = value + 64 }
+    if rest >= 32 { rest = rest - 32
+        value = value + 32 }
+    if rest >= 16 { rest = rest - 16
+        value = value + 16 }
+    if rest >= 8 { rest = rest - 8
+        value = value + 8 }
+    if rest >= 4 { rest = rest - 4
+        value = value + 4 }
+    if rest >= 2 { rest = rest - 2
+        value = value + 2 }
+    if rest >= 1 { value = value + 1 }
+    return value
+}
+
+fn mir_vindex_hash_add(left: U64, right: U64, modulus: U64) -> U64 {
+    if left >= modulus - right { return left - (modulus - right) }
+    return left + right
+}
+
+fn mir_vindex_name_hash(store: MirStore, start: U64, end: U64, buckets: U64) -> U64 {
+    if buckets == 0 { return 0 }
+    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) { return 0 }
+    var hash: U64 = 0
+    var at = start
+    while at < end { let original = hash
+        var shifted = hash
+        var bit: U64 = 0
+        while bit < 8 { shifted = mir_vindex_hash_add(shifted, shifted, buckets)
+            bit = bit + 1 }
+        hash = mir_vindex_hash_add(shifted, original, buckets)
+        let byte = mir_vindex_hash_byte(__s0_buffer_get(U8, store.names, at)) % buckets
+        hash = mir_vindex_hash_add(hash, byte, buckets)
+        at = at + 1
+    }
+    return hash
+}
+
+fn mir_vindex_build_constants(d: Domain, store: MirStore) -> Result(MirVIndexConstRec, __s0_Error) {
+    let count = __s0_buffer_len(MirConstRec, store.constants)
+    let bucket_count = count * 2 + 1
+    var hashes = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < count { let item = __s0_buffer_get(MirConstRec, store.constants, at)
+        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count))
+        at = at + 1
+    }
+    var slots = __s0_alloc(U64, d, bucket_count)
+    at = 0
+    while at < bucket_count { slots[at] = 0
+        at = at + 1
+    }
+    at = 1
+    while at <= count {
+        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var placed = false
+        while !placed {
+            if slots[slot] == 0 { slots[slot] = at
+                placed = true } else {
+                let existing = __s0_buffer_get(MirConstRec, store.constants, slots[slot] - 1)
+                let current = __s0_buffer_get(MirConstRec, store.constants, at - 1)
+                if mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
+            }
+        }
+        at = at + 1
+    }
+    var slot_buf = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < bucket_count { slot_buf = try __s0_buffer_append(U64, d, slot_buf, slots[at])
+        at = at + 1
+    }
+    return Ok(MirVIndexConstRec(slots: slot_buf))
+}
+
+fn mir_vindex_build_value_names(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let count = __s0_buffer_len(MirValueRec, store.values)
+    let bucket_count = count * 2 + 1
+    var hashes = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < count { let item = __s0_buffer_get(MirValueRec, store.values, at)
+        let name_hash = mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count)
+        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
+        at = at + 1
+    }
+    var slots = __s0_alloc(U64, d, bucket_count)
+    at = 0
+    while at < bucket_count { slots[at] = 0
+        at = at + 1
+    }
+    at = 1
+    while at <= count {
+        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var placed = false
+        while !placed {
+            if slots[slot] == 0 { slots[slot] = at
+                placed = true } else {
+                let existing = __s0_buffer_get(MirValueRec, store.values, slots[slot] - 1)
+                let current = __s0_buffer_get(MirValueRec, store.values, at - 1)
+                if current.function == existing.function && mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
+            }
+        }
+        at = at + 1
+    }
+    var out = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < bucket_count { out = try __s0_buffer_append(U64, d, out, slots[at])
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let count = __s0_buffer_len(MirLocalRec, store.locals)
+    let bucket_count = count * 2 + 1
+    var hashes = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < count { let item = __s0_buffer_get(MirLocalRec, store.locals, at)
+        let name_hash = mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count)
+        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
+        at = at + 1
+    }
+    var slots = __s0_alloc(U64, d, bucket_count)
+    at = 0
+    while at < bucket_count { slots[at] = 0
+        at = at + 1
+    }
+    at = 1
+    while at <= count {
+        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var placed = false
+        while !placed {
+            if slots[slot] == 0 { slots[slot] = at
+                placed = true } else {
+                let existing = __s0_buffer_get(MirLocalRec, store.locals, slots[slot] - 1)
+                let current = __s0_buffer_get(MirLocalRec, store.locals, at - 1)
+                if current.function == existing.function && mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
+            }
+        }
+        at = at + 1
+    }
+    var out = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < bucket_count { out = try __s0_buffer_append(U64, d, out, slots[at])
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let kind_count: U64 = 18
+    var first = __s0_alloc(U64, d, kind_count)
+    var at: U64 = 0
+    while at < kind_count { first[at] = 0
+        at = at + 1
+    }
+    at = 1
+    while at <= __s0_buffer_len(MirTypeRec, store.types) { let item = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+        if item.kind < kind_count && first[item.kind] == 0 { first[item.kind] = at }
+        at = at + 1
+    }
+    var out = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < kind_count { out = try __s0_buffer_append(U64, d, out, first[at])
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let kind_count: U64 = 18
+    let type_count = __s0_buffer_len(MirTypeRec, store.types)
+    let slot_count = kind_count * type_count
+    var first = __s0_alloc(U64, d, slot_count)
+    var at: U64 = 0
+    while at < slot_count { first[at] = 0
+        at = at + 1
+    }
+    at = 1
+    while at <= type_count { let item = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+        if item.kind < kind_count && item.elem >= 1 && item.elem <= type_count { let slot = item.kind * type_count + item.elem - 1
+            if first[slot] == 0 { first[slot] = at } }
+        at = at + 1
+    }
+    var out = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < slot_count { out = try __s0_buffer_append(U64, d, out, first[at])
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn mir_vindex_build_places(d: Domain, store: MirStore) -> Result(MirVIndexPlaceRec, __s0_Error) {
+    let total = __s0_buffer_len(MirPlaceRec, store.places)
+    var roots = try __s0_buffer_new(U64, d)
+    var depths = try __s0_buffer_new(U64, d)
+    var derefs = try __s0_buffer_new(U64, d)
+    var at: U64 = 1
+    while at <= total {
+        var current = at
+        var root: U64 = 0
+        var depth: U64 = 0
+        var deref: U64 = 0
+        var steps: U64 = 0
+        while current != 0 && current <= total && steps <= total {
+            let place = __s0_buffer_get(MirPlaceRec, store.places, current - 1)
+            if place.kind == mir_place_local() { root = place.local
+                current = 0 } else { if place.kind == mir_place_field() { depth = depth + 1
+                    current = place.base } else { if place.kind == mir_place_deref() { deref = 1 }
+                    current = 0 } }
+            steps = steps + 1
+        }
+        roots = try __s0_buffer_append(U64, d, roots, root)
+        depths = try __s0_buffer_append(U64, d, depths, depth)
+        derefs = try __s0_buffer_append(U64, d, derefs, deref)
+        at = at + 1
+    }
+    return Ok(MirVIndexPlaceRec(root: roots, depth: depths, deref: derefs))
 }
 
 fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Error) {
@@ -759,7 +1007,11 @@ fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Erro
     let params = try mir_vindex_build_params(d, store)
     let ops = try mir_vindex_build_ops(d, store)
     let tps = try mir_vindex_build_type_parts(d, store)
-    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_ids: tps.ids))
+    let constants = try mir_vindex_build_constants(d, store)
+    let type_first = try mir_vindex_build_type_first(d, store)
+    let type_unary = try mir_vindex_build_type_unary(d, store)
+    let places = try mir_vindex_build_places(d, store)
+    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_field_count: tps.field_count, tp_ids: tps.ids, const_slot: constants.slots, type_first: type_first, type_unary: type_unary, place_root: places.root, place_depth: places.depth, place_deref: places.deref))
 }
 
 fn mir_vindex_block(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
@@ -774,6 +1026,83 @@ fn mir_vindex_value(indexes: MirVIndexes, function: U64, value: U64) -> U64 {
     let count = __s0_buffer_get(U64, indexes.value_count, function - 1)
     if value == 0 || value > count { return 0 }
     return __s0_buffer_get(U64, indexes.value_pos, __s0_buffer_get(U64, indexes.value_span, function - 1) + value - 1)
+}
+
+fn mir_vindex_const_slots(store: MirStore, slots: __s0_Buffer(U64), start: U64, end: U64) -> U64 {
+    let buckets = __s0_buffer_len(U64, slots)
+    if buckets == 0 { return 0 }
+    var slot = mir_vindex_name_hash(store, start, end, buckets)
+    var probes: U64 = 0
+    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+        if id == 0 { return 0 }
+        let item = __s0_buffer_get(MirConstRec, store.constants, id - 1)
+        if mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
+        slot = (slot + 1) % buckets
+        probes = probes + 1
+    }
+    return 0
+}
+
+fn mir_vindex_const(store: MirStore, indexes: MirVIndexes, start: U64, end: U64) -> U64 {
+    return mir_vindex_const_slots(store, indexes.const_slot, start, end)
+}
+
+fn mir_vindex_value_name(store: MirStore, slots: __s0_Buffer(U64), function: U64, start: U64, end: U64) -> U64 {
+    let buckets = __s0_buffer_len(U64, slots)
+    if buckets == 0 { return 0 }
+    let name_hash = mir_vindex_name_hash(store, start, end, buckets)
+    var slot = mir_vindex_hash_add(name_hash, function % buckets, buckets)
+    var probes: U64 = 0
+    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+        if id == 0 { return 0 }
+        let item = __s0_buffer_get(MirValueRec, store.values, id - 1)
+        if item.function == function && mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
+        slot = (slot + 1) % buckets
+        probes = probes + 1
+    }
+    return 0
+}
+
+fn mir_vindex_local_name(store: MirStore, slots: __s0_Buffer(U64), function: U64, start: U64, end: U64) -> U64 {
+    let buckets = __s0_buffer_len(U64, slots)
+    if buckets == 0 { return 0 }
+    let name_hash = mir_vindex_name_hash(store, start, end, buckets)
+    var slot = mir_vindex_hash_add(name_hash, function % buckets, buckets)
+    var probes: U64 = 0
+    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+        if id == 0 { return 0 }
+        let item = __s0_buffer_get(MirLocalRec, store.locals, id - 1)
+        if item.function == function && mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
+        slot = (slot + 1) % buckets
+        probes = probes + 1
+    }
+    return 0
+}
+
+fn mir_vindex_type_kind(indexes: MirVIndexes, kind: U64) -> U64 {
+    if kind >= __s0_buffer_len(U64, indexes.type_first) { return 0 }
+    return __s0_buffer_get(U64, indexes.type_first, kind)
+}
+
+fn mir_vindex_type_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 {
+    let type_count = __s0_buffer_len(U64, indexes.type_unary) / 18
+    if kind >= 18 || elem == 0 || elem > type_count { return 0 }
+    return __s0_buffer_get(U64, indexes.type_unary, kind * type_count + elem - 1)
+}
+
+fn mir_vindex_place_root(indexes: MirVIndexes, place: U64) -> U64 {
+    if place == 0 || place > __s0_buffer_len(U64, indexes.place_root) { return 0 }
+    return __s0_buffer_get(U64, indexes.place_root, place - 1)
+}
+
+fn mir_vindex_place_depth(indexes: MirVIndexes, place: U64) -> U64 {
+    if place == 0 || place > __s0_buffer_len(U64, indexes.place_depth) { return 0 }
+    return __s0_buffer_get(U64, indexes.place_depth, place - 1)
+}
+
+fn mir_vindex_place_deref(indexes: MirVIndexes, place: U64) -> Bool {
+    if place == 0 || place > __s0_buffer_len(U64, indexes.place_deref) { return false }
+    return __s0_buffer_get(U64, indexes.place_deref, place - 1) != 0
 }
 
 fn mir_vindex_local(indexes: MirVIndexes, function: U64, local: U64) -> U64 {
@@ -883,6 +1212,11 @@ fn mir_vindex_op_case(indexes: MirVIndexes, case_operand_id: U64, at: U64) -> U6
 fn mir_vindex_type_part_count(indexes: MirVIndexes, owner_type_id: U64) -> U64 {
     if owner_type_id == 0 || owner_type_id > __s0_buffer_len(U64, indexes.tp_count) { return 0 }
     return __s0_buffer_get(U64, indexes.tp_count, owner_type_id - 1)
+}
+
+fn mir_vindex_type_field_count(indexes: MirVIndexes, owner_type_id: U64) -> U64 {
+    if owner_type_id == 0 || owner_type_id > __s0_buffer_len(U64, indexes.tp_field_count) { return 0 }
+    return __s0_buffer_get(U64, indexes.tp_field_count, owner_type_id - 1)
 }
 
 // MirTypePartRec ids owned by owner_type_id, ascending id order; at is 0-based.

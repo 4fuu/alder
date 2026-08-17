@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -389,6 +390,53 @@ func TestAlder1CompilesCompilerSource(t *testing.T) {
 	c3 := runAlder1(t, alder2, noGo, files, compileArgs...)
 	if c3.status != 0 || c3.stderr != "" || c3.stdout != c2.stdout {
 		t.Fatalf("fixed point failed: c3=%+v c2_len=%d", c3, len(c2.stdout))
+	}
+}
+
+func TestCommittedSourceBootstrap(t *testing.T) {
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, err := os.ReadFile(filepath.Join(root, "bootstrap", "compiler-sources.order"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := "ALDER-COMPILER-ORDER 1\n"
+	for _, name := range compilerSourceManifest {
+		wantOrder += "compiler/src/" + name + "\n"
+	}
+	if string(order) != wantOrder {
+		t.Fatal("committed compiler source order differs from compilerSourceManifest")
+	}
+	inventory, err := os.ReadFile(filepath.Join(root, "bootstrap", "compiler-sources.manifest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(inventory), "\n")
+	if len(lines) != len(compilerSourceManifest)+3 || lines[0] != "ALDER-COMPILER-SOURCES 1" || lines[len(lines)-1] != "" {
+		t.Fatal("committed compiler source inventory has an unexpected entry count or framing")
+	}
+	inventoried := make(map[string]bool, len(compilerSourceManifest))
+	for _, line := range lines[1 : len(lines)-2] {
+		fields := strings.Split(line, " ")
+		if len(fields) != 3 || inventoried[fields[2]] {
+			t.Fatal("committed compiler source inventory has a malformed or duplicate entry")
+		}
+		inventoried[fields[2]] = true
+	}
+	for _, name := range compilerSourceManifest {
+		if !inventoried["compiler/src/"+name] {
+			t.Fatalf("committed compiler source inventory is missing %s", name)
+		}
+	}
+	bootstrap, err := os.ReadFile(filepath.Join(root, "bootstrap", "alder.c"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(bootstrap)
+	if got, want := fmt.Sprintf("%x", digest), "074f6a96f80e935dc033f9bc883fb987d49a87bf87cdda3b0af6c37a91f78ea6"; got != want {
+		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }
 

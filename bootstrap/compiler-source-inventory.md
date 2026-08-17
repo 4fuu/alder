@@ -1,14 +1,10 @@
 # Compiler Source Inventory v1
 
-This document defines the canonical compiler-source inventory prepared for the
-M5.5 source-bootstrap handoff. The inventory verifier is available now as
-`bootstrap/inventory_verify.c`; this preparation does not activate or complete
-M5.5 and makes no self-hosting claim.
-
-No production `bootstrap/compiler-sources.manifest` is committed yet. The M5.4
-handoff generates that file and its digests only when the production compiler
-source set is frozen. Until then, the explicit source lists in the M5.4
-conformance harnesses remain authoritative.
+This document defines the canonical compiler-source inventory used by the M5.5
+source bootstrap. `bootstrap/compiler-sources.manifest` commits the byte length
+and SHA-256 digest of every compiler input, while
+`bootstrap/compiler-sources.order` commits their compilation order. The
+standalone verifier is `bootstrap/inventory_verify.c`.
 
 ## Byte format
 
@@ -62,4 +58,30 @@ command usage.
 `alder-inventory-verify --self-test` checks the embedded byte-oriented SHA-256
 against the published empty-string, `abc`, and 448-bit multi-block FIPS 180
 test vectors. The implementation has no third-party dependency and is intended
-to be invoked directly by the later M5.5 regeneration harness.
+to be invoked directly by the M5.5 regeneration harness.
+
+## Source-bootstrap regeneration
+
+From the repository root, verify that the committed compiler is its own
+regeneration result with:
+
+```sh
+bootstrap/regenerate.sh
+```
+
+The script validates the source inventory, checks that the order file names
+every inventoried source exactly once, builds `bootstrap/alder.c` with the host
+shim and C runtime, and asks that compiler to regenerate itself. It exits
+successfully only when the regenerated C is byte-identical to the committed
+artifact. `bootstrap/regenerate.sh --write` replaces the artifact and is
+reserved for an intentional bootstrap update after reviewing the resulting
+diff and updating its pinned test digest.
+
+Regeneration requires a POSIX shell, a C11 compiler, and common host utilities
+(`awk`, `cmp`, `dirname`, `mktemp`, `mv`, `rm`, and `uname`). It does not invoke
+Go, access the network, scan for source files, or require an installed Alder
+compiler. `CC` must name one executable; set it, `BOOTSTRAP_CFLAGS`, or
+`BOOTSTRAP_LDFLAGS` only when the host toolchain requires an override. The
+measured Linux/GCC fixed-point run peaks near 2.5 GiB of memory; the Linux host
+shim raises the compiler process's stack soft limit to 64 MiB when the
+committed compiler is built by this harness.

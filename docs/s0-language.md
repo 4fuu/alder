@@ -2,7 +2,7 @@
 
 Design status: **Bootstrap-only contract**
 
-Availability: **Implemented by the Go Stage 0 frontend and the current Alder-written M5.4 compiler slice**
+Availability: **Implemented by the Go Stage 0 frontend and the source-bootstrapped Alder compiler**
 
 This document isolates the implemented bootstrap language from the Alder 1.0
 design. A rule in this file is not a permanent language decision unless a 1.0
@@ -12,10 +12,10 @@ There are currently two implementation profiles:
 
 - the Go `frontend` package implements the complete Milestone 4 S0 pipeline to
   verified MIR and C11;
-- `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
-  the current S0 syntax; its checker and sealed-manifest lowering cover the
-  current M5.4 slices, and its complete-verifier-gated C generator covers the
-  current scalar/CFG and resource MIR slice. Its final explicit-source driver
+- `compiler/src/*.al` is the source-bootstrapped Alder implementation. Its
+  lexer and parser cover the current S0 syntax; its checker and lowering cover
+  the sealed S0 boundary, and its complete-verifier-gated C generator covers
+  the current scalar/CFG and resource MIR slice. Its explicit-source driver
   implements the same `check` and `compile --emit=mir|c` request, diagnostic,
   status, and output contract as the Go bootstrap. MIR and C bytes are emitted
   only after complete V1–V10 verification; C generation also completes its
@@ -173,6 +173,7 @@ __s0_buffer_new
 __s0_buffer_len
 __s0_buffer_append
 __s0_buffer_get
+__s0_buffer_set
 __s0_buffer_slice
 ```
 
@@ -181,8 +182,10 @@ compiler code. They are reserved and must not appear in public 1.0 APIs.
 
 `__s0_Buffer(T)` is a growable plain-value bootstrap buffer with recoverable
 initial/growth allocation failure. It is not persistent value-semantic
-`Vec(T)`. The fixed map has capacity 16 and deliberately narrow key/value
-rules. Neither may be standardized by accident.
+`Vec(T)`. `__s0_buffer_set(T, buffer, index, value)` mutates the shared backing
+slot in place and panics on an out-of-range index; aliases observe the write.
+The fixed map has capacity 16 and deliberately narrow key/value rules. Neither
+may be standardized by accident.
 
 `using name = expression with CleanupFn` reflects the current MIR callback
 bridge. It runs cleanup in reverse order on normal exit, return, failed `try`,
@@ -256,7 +259,10 @@ records; their private manifests remain conformance-test protocols only.
 `check` emits no artifact, while `compile` emits MIR or C according to the
 shared bootstrap CLI contract. Malformed checked/lowered state, verifier
 rejection, and C preflight rejection emit no artifact bytes. This remains a
-bootstrap subset, not an Alder 1.0 or fixed-point claim.
+bootstrap subset, not an Alder 1.0 claim. Its fixed-point source-bootstrap
+evidence and regeneration procedure are recorded in the
+[Roadmap](../ROADMAP.md) and
+[compiler source inventory](../bootstrap/compiler-source-inventory.md).
 
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the
@@ -300,13 +306,12 @@ types, instance signatures, and checked instance bodies are concrete at this
 boundary. Stable annotations retain declaration/variant IDs and canonical
 checked types without introducing MIR identities.
 
-Every concrete checked S0 body now has exactly one root block, including an
+Every concrete checked S0 body has exactly one root block, including an
 empty `Unit` body. A syntax form outside this supported S0 contract receives one
 stable boundary diagnostic; it no longer causes partial body records to be
-silently discarded as a successful check. Later Alder 1.0 expressions, MIR
-construction, verifier/backend ports, and self-hosted execution are still
-incomplete. Consult [Roadmap](../ROADMAP.md) and executable tests for the exact
-latest slice.
+silently discarded as a successful check. Later Alder 1.0 expressions and
+language facilities remain incomplete. Consult [Roadmap](../ROADMAP.md) and
+executable tests for the exact implemented boundary.
 
 ## Removal gates
 

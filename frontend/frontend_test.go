@@ -677,6 +677,16 @@ fn main(d: Domain) -> I32 {
 			want: "expected U64, got I64",
 		},
 		{
+			name: "set non-u64 index",
+			src:  `fn bad(b: __s0_Buffer(U64), i: I64) -> Unit { __s0_buffer_set(U64, b, i, 1) }`,
+			want: "expected U64, got I64",
+		},
+		{
+			name: "set mismatched value",
+			src:  `fn bad(b: __s0_Buffer(U64)) -> Unit { __s0_buffer_set(U64, b, 0, false) }`,
+			want: "expected U64, got Bool",
+		},
+		{
 			name: "non-domain allocation",
 			src: `
 fn main(d: Bool) -> I32 {

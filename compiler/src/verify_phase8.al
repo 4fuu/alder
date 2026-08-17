@@ -99,9 +99,8 @@ fn mir_v8_mutates(store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV
     if x.op == mir_op_cleanup_scope_run() { return mir_v8_cleanup_mutates(store, indexes, facts, cleanup, effects, function, iid, table) }
     return false
 }
-fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
-    let uses = try mir_vp4_collect_uses(d, store, indexes, function)
     var value: U64 = 1
         while mir_vindex_value(indexes, function, value) != 0 { let vi = mir_vindex_value(indexes, function, value)
             let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
@@ -109,8 +108,11 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0
             if iid != 0 { let lookup = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
                 if lookup.op == mir_op_table_lookup() || lookup.op == mir_op_table_lookup_mut() { var consumers: U64 = 0
                     var end_instruction: U64 = 0
+                    let use_start = __s0_buffer_get(U64, inventory.value_start, vi - 1)
+                    let use_count = __s0_buffer_get(U64, inventory.value_count, vi - 1)
                     var ui: U64 = 0
-                    while ui < __s0_buffer_len(MirVP4Use, uses) { let use = __s0_buffer_get(MirVP4Use, uses, ui)
+                    while ui < use_count { let use_id = __s0_buffer_get(U64, inventory.value_use_ids, use_start + ui)
+                        let use = __s0_buffer_get(MirVP4Use, inventory.uses, use_id - 1)
                         if use.value == value { if use.instruction != 0 { let consumer = __s0_buffer_get(MirInstrRec, store.instructions, use.instruction - 1)
                                 if consumer.op == mir_op_enum_payload_checked() && mir_vname_word(store, consumer.name_start, consumer.name_end, "some") { consumers = consumers + 1
                                     end_instruction = use.instruction } }
@@ -156,10 +158,13 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0
                 var end_id: U64 = 0
                 var ui2: U64 = 0
                 var prior_use: U64 = 0
-                while ui2 < __s0_buffer_len(MirVP4Use, uses) { let site = __s0_buffer_get(MirVP4Use, uses, ui2)
+                let view_use_start = __s0_buffer_get(U64, inventory.value_start, vi - 1)
+                let view_use_count = __s0_buffer_get(U64, inventory.value_count, vi - 1)
+                while ui2 < view_use_count { let site_id = __s0_buffer_get(U64, inventory.value_use_ids, view_use_start + ui2)
+                    let site = __s0_buffer_get(MirVP4Use, inventory.uses, site_id - 1)
                     if site.value == value { var duplicate = false
-                        if prior_use != 0 { duplicate = mir_v8_same_use(__s0_buffer_get(MirVP4Use, uses, prior_use - 1), site) }
-                        prior_use = ui2 + 1
+                        if prior_use != 0 { duplicate = mir_v8_same_use(__s0_buffer_get(MirVP4Use, inventory.uses, prior_use - 1), site) }
+                        prior_use = site_id
                         if !duplicate { if site.block != region { out = try mir_v8_diag(d, out, mir_vdiag_table_view_region(), function, site.block, site.instruction, site.terminator, value) }
                             if site.instruction != 0 { let use = __s0_buffer_get(MirInstrRec, store.instructions, site.instruction - 1)
                                 if use.op == mir_op_table_view_end() { if ends != 0 { out = try mir_v8_diag(d, out, mir_vdiag_table_view_end_count(), function, use.block, site.instruction, 0, value) }
@@ -178,11 +183,11 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0
     return Ok(out)
 }
 
-fn mir_vphase8_with(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase8_with(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
 let effects = try mir_v8_compute_effects(d, store, indexes, provenance.facts, cleanup)
 var function: U64 = 1
-    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v8_function(d, store, indexes, provenance.facts, cleanup, effects, out, function)
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v8_function(d, store, indexes, inventory, provenance.facts, cleanup, effects, out, function)
 function = function + 1 }
     return Ok(out)
 }
@@ -190,4 +195,5 @@ function = function + 1 }
 fn mir_vphase8(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
 let cleanup = try mir_v7_analyze(d, store, indexes, initial)
 let provenance = try mir_v6_compute(d, store, indexes, cleanup)
-return mir_vphase8_with(d, store, indexes, initial, cleanup, provenance) }
+let inventory = try mir_vp4_use_inventory_build(d, store, indexes)
+return mir_vphase8_with(d, store, indexes, inventory, initial, cleanup, provenance) }

@@ -93,11 +93,20 @@ fn check_composites(d: Domain) -> I32 {
     }
 }
 
+fn check_set(d: Domain, b: __s0_Buffer(U64)) -> I32 {
+    let alias = b
+    __s0_buffer_set(U64, b, 64, 99)
+    if __s0_buffer_get(U64, alias, 64) != 99 { return 21 }
+    __s0_buffer_set(U64, alias, 64, 64)
+    if __s0_buffer_get(U64, b, 64) != 64 { return 22 }
+    return check_composites(d)
+}
+
 fn check(d: Domain, b: __s0_Buffer(U64), i: U64) -> I32 {
     if __s0_buffer_len(U64, b) != 65 { return 1 }
     let s = __s0_buffer_slice(U64, b)
     if len(s) != 65 { return 2 }
-    if i == 65 { return check_composites(d) }
+    if i == 65 { return check_set(d, b) }
     if __s0_buffer_get(U64, b, i) != i { return 3 }
     if s[i] != i { return 4 }
     return check(d, b, i + 1)

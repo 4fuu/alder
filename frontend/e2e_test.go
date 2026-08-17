@@ -244,6 +244,21 @@ fn main(d: Domain) -> I32 {
 `,
 		},
 		{
+			name: "buffer_empty_set",
+			src: `
+fn write_empty(b: __s0_Buffer(U64)) -> I32 {
+    __s0_buffer_set(U64, b, 0, 7)
+    return 0
+}
+fn main(d: Domain) -> I32 {
+    return match __s0_buffer_new(U64, d) {
+        Err(error) => 1
+        Ok(empty) => write_empty(empty)
+    }
+}
+`,
+		},
+		{
 			name: "buffer_one_past_get",
 			src: `
 fn read_one_past(b: __s0_Buffer(U64)) -> I32 {

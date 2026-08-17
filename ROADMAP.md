@@ -342,7 +342,7 @@ Exit-criteria evidence:
 
 ### Milestone 5.4: Self-Hosted Compiler Core
 
-Status: **active**
+Status: **complete**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
 current source model, lossless lexer, syntactically complete current S0 parser,
@@ -427,34 +427,32 @@ verifier-gated in the fixed shared-core harness. Issue #21 wires the production
 entry from successful checking through canonical checked spans and unchanged
 lowering into the complete V1–V10 verifier; only its complete result authorizes
 textual MIR output. Issue #24 supplies the complete-verifier and preflight-gated
-resource C backend slice. These checks are preparatory: later Alder
-1.0 forms, the full checker, and the complete frontend remain incomplete. Its
-current reverse-link and declaration-phase replay are recursive and are not yet
-an arbitrary-size stack contract. The token, parser, and checker manifests are
-private conformance protocols. The fixed production entry now loads its explicit
-host snapshot and runs the shared lexer, parser, and current checker in order.
+resource C backend slice. Later Alder 1.0 forms and language facilities remain
+incomplete. Some reverse-link and declaration-phase traversals are recursive
+and are not an arbitrary-size stack contract. The token, parser, and checker
+manifests are private conformance protocols. The fixed production entry loads
+its explicit host snapshot and runs the shared lexer, parser, and checker in
+order.
 Issue #25 replaces production private-manifest output with the shared
 explicit-source `check`/`compile --emit=mir|c` contract, stable human/version-1
 JSON diagnostics, faithful status classes, and atomic host output replacement.
 Successful checking lowers directly to MIR 3 and emits the requested artifact
 only after complete verification; malformed checked/lowered state, verifier
-rejection, and C preflight rejection produce no artifact bytes.
-This integration is execution evidence only; these slices do not open a second
-frontend, replace the M5.3 declaration spike yet, constitute a complete frontend,
-or satisfy any self-hosting claim. Grouping nodes follow the Go semantic AST and
-are erased; the lossless token stream retains their delimiters.
+rejection, and C preflight rejection produce no artifact bytes. This S0
+implementation does not open a second frontend or constitute the complete
+Alder 1.0 frontend. Grouping nodes follow the Go semantic AST and are erased;
+the lossless token stream retains their delimiters.
 
 The independent MIR model pins its MIR 3 numeric, 1-based ID, flattened
 ownership, ordinal, reciprocal-link, named-type-part, and import-signature
 encoding contract with an Alder-generated conformance manifest and malformed
 raw-record fixtures. An Alder textual printer now validates that independent
 store before emitting canonical, source-independent MIR 3 bytes; malformed
-stores are rejected without partial output. The current sealed S0 lowering
-slice remains incomplete for resource/domain operations and is not wired as a
-production pipeline. Checker, textual-printer, and verifier V1–V10 conformance
-share one fixed source closure and executable while retaining independent mode
-assertions; the complete production root remains an independent end-to-end
-gate.
+stores are rejected without partial output. The sealed S0 lowering slice covers
+the current resource/domain operations and is wired into the production
+pipeline. Checker, textual-printer, and verifier V1–V10 conformance share one
+fixed source closure and executable while retaining independent mode assertions;
+the complete production root remains an independent end-to-end gate.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
@@ -505,24 +503,21 @@ wires the verified production source slice to this C path.
 
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
 
-Current alder1 evidence on this tree: `alder0` compiles the fixed
-`compiler/src` manifest to C; GCC links `alder1` (Windows hosts use a 32 MiB
-stack). `TestAlderProductionDriverEndToEnd` and
-`TestAlder1SelfHostingCapableCorpus` run that executable with Go absent from
-`PATH`. Shared accept fixtures, `Err(Limit)`/`Err(OutOfMemory)`, option and
-buffer e2e programs (including match on `Result(__s0_Buffer(T), __s0_Error)`
-without a source `[T]`), and the reject corpus (human prefix plus related
-ranges) emit verified MIR/C or stable diagnostics. Buffer helpers intern
-Result and slice MIR types when the check store has no source `[T]`. I64
-minimum literals no longer panic in `lower_parse_i64`. The Alder verifier
-and cgen now build per-function dense indexes (`MirVIndexes`) and Cooper/
-Harvey/Kennedy idoms for availability; the small corpus still passes. M5.5
-is not measured yet: `ALDER_BOOTSTRAP_SELFCOMPILE=1` `TestAlder1CompilesCompilerSource`
-still does not finish inside 45 minutes on the full 28-file `compiler/src`
-set. A 27-file `alder1 check` that fails at typecheck (missing
-`mir_verify_complete`) returns in 6s; the complete 28-file path does not.
-Remaining work is the Alder checker intern/lookup tables and confirming
-the full verify+cgen pipeline terminates on compiler-scale MIR.
+Exit-criteria evidence on the fixed 28-file source root:
+
+- `alder0` emits the compiler C and GCC links `alder1`; the ordinary production
+  and S0 conformance suites run that executable with Go absent from `PATH`;
+- the internal mutable buffer-slot operation supports deterministic dense
+  compiler indexes without changing emitted semantic table identities;
+- checker and verifier indexes remove the compiler-scale repeated-scan and
+  Phase 6 dataflow nontermination blockers while preserving first-record
+  lookup semantics, stable diagnostics, and table-order output;
+- a native `alder1 check` of all 28 sources completes in 168.55 seconds on the
+  measured Linux/GCC host, and `alder1` emits the next compiler C in 182.68
+  seconds, with approximately 2.5 GiB peak memory;
+- `ALDER_BOOTSTRAP_SELFCOMPILE=1 go test ./compiler -run
+  '^TestAlder1CompilesCompilerSource$' -count=1` passes the complete source,
+  verification, C generation, native build, and next-stage execution path.
 
 #### Bootstrap execution policy
 
@@ -538,7 +533,7 @@ semantic correctness counterexample to be declared complete.
 
 ### Milestone 5.5: Fixed Point and Source Bootstrap
 
-Status: **planned**
+Status: **complete**
 
 Run `alder1 -> C2 -> alder2 -> C3` and require `C2 == C3` byte-for-byte. Commit
 an auditable `bootstrap/alder.c`, compiler-source manifest and digests, runtime,
@@ -549,6 +544,23 @@ installation.
 Only after this gate is the Go bootstrap compiler frozen except for correctness
 and bootstrap maintenance. This is a reproducible **source** bootstrap claim;
 bit-identical native binaries require a separately pinned native toolchain.
+
+Exit-criteria evidence:
+
+- `alder1 -> C2 -> alder2 -> C3` completes for the fixed 28-source compiler
+  root, and `C2` and `C3` are byte-identical with SHA-256
+  `074f6a96f80e935dc033f9bc883fb987d49a87bf87cdda3b0af6c37a91f78ea6`;
+- `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
+  ordinary compiler test;
+- `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
+  digests, while `bootstrap/compiler-sources.order` records the exact source
+  order without directory discovery; ordinary tests validate both contracts;
+- `bootstrap/regenerate.sh` verifies the inventory, builds the committed C
+  compiler with the runtime and host shim, regenerates the C from the explicit
+  source order, and requires byte-identical output;
+- the regeneration harness runs from a clean source archive with a system C11
+  compiler and common POSIX-host utilities, without Go in the build path,
+  network access, or a prior Alder installation.
 
 ## Alder 1.0 Implementation Gates
 

@@ -475,14 +475,8 @@ fn cgen_emit_call_args(d: Domain, initial: CgenWriter, store: MirStore, indexes:
     return Ok(out)
 }
 
-fn cgen_const_id(store: MirStore, start: U64, end: U64) -> U64 {
-    var at: U64 = 0
-    while at < __s0_buffer_len(MirConstRec, store.constants) {
-        let item = __s0_buffer_get(MirConstRec, store.constants, at)
-        if mir_vname_equal(store, item.name_start, item.name_end, start, end) { return at + 1 }
-        at = at + 1
-    }
-    return 0
+fn cgen_const_id(store: MirStore, indexes: MirVIndexes, start: U64, end: U64) -> U64 {
+    return mir_vindex_const(store, indexes, start, end)
 }
 
 fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
@@ -904,7 +898,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         return cgen_put(d, out, ";\n")
     }
     if item.op == mir_op_const_get() {
-        let constant_id = cgen_const_id(store, item.name_start, item.name_end)
+        let constant_id = cgen_const_id(store, indexes, item.name_start, item.name_end)
         let constant = __s0_buffer_get(MirConstRec, store.constants, constant_id - 1)
         if constant.const_type == mir_type_unit() { return Ok(out) }
         if constant.kind == mir_const_string() {
