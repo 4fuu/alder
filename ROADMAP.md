@@ -562,6 +562,28 @@ Exit-criteria evidence:
   compiler and common POSIX-host utilities, without Go in the build path,
   network access, or a prior Alder installation.
 
+#### Go bootstrap retention and retirement policy
+
+The Go implementation remains in the main tree through Milestone 11 as a
+bootstrap-maintenance path, independent MIR/verifier/C-generation oracle, and
+test harness. Milestones 6–11 implement new source-language and tooling
+features only in the Alder-written compiler; they must not grow a parallel Go
+frontend. Go changes during this period are limited to correctness fixes,
+fixed-point/bootstrap maintenance, keeping independent oracles compatible with
+versioned compiler boundaries, and migrating existing tests to non-Go
+infrastructure.
+
+Go retirement begins only after the Milestone 11 `alder test` gate passes and a
+non-Go harness continuously covers the existing acceptance/rejection and golden
+fixtures, source-to-C execution, malformed MIR verification, C backend/runtime
+behavior, strict C11 and sanitizer checks, host/inventory failure paths,
+cross-process and source-order determinism, and C2/C3 fixed-point comparison.
+Before the first deletion, preserve the final Go bootstrap on an archival
+branch or tag. Remove Go packages incrementally only after equivalent non-Go
+coverage is active; remove `go.mod`, Go lifecycle setup, and the last Go source
+only when a clean archive can build, regenerate, and run the complete test
+matrix with no Go executable available.
+
 ## Alder 1.0 Implementation Gates
 
 M5.5 produces a trustworthy compiler bootstrap, not the full language. Every
