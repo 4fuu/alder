@@ -2,7 +2,7 @@
 
 Design status: **Bootstrap-only contract**
 
-Availability: **Implemented by the Go Stage 0 frontend; the Alder-written frontend port is incomplete**
+Availability: **Implemented by the Go Stage 0 frontend and the source-bootstrapped Alder compiler**
 
 This document isolates the implemented bootstrap language from the Alder 1.0
 design. A rule in this file is not a permanent language decision unless a 1.0
@@ -12,8 +12,14 @@ There are currently two implementation profiles:
 
 - the Go `frontend` package implements the complete Milestone 4 S0 pipeline to
   verified MIR and C11;
-- `compiler/src/*.al` is the in-progress Alder port. Its lexer and parser cover
-  the current S0 syntax, while its checker and lowering are still partial.
+- `compiler/src/*.al` is the source-bootstrapped Alder implementation. Its
+  lexer and parser cover the current S0 syntax; its checker and lowering cover
+  the sealed S0 boundary, and its complete-verifier-gated C generator covers
+  the current scalar/CFG and resource MIR slice. Its explicit-source driver
+  implements the same `check` and `compile --emit=mir|c` request, diagnostic,
+  status, and output contract as the Go bootstrap. MIR and C bytes are emitted
+  only after complete V1–V10 verification; C generation also completes its
+  supported-operation preflight before writing.
 
 Neither profile is a usable Alder 1.0 compiler.
 
@@ -167,6 +173,7 @@ __s0_buffer_new
 __s0_buffer_len
 __s0_buffer_append
 __s0_buffer_get
+__s0_buffer_set
 __s0_buffer_slice
 ```
 
@@ -175,13 +182,22 @@ compiler code. They are reserved and must not appear in public 1.0 APIs.
 
 `__s0_Buffer(T)` is a growable plain-value bootstrap buffer with recoverable
 initial/growth allocation failure. It is not persistent value-semantic
-`Vec(T)`. The fixed map has capacity 16 and deliberately narrow key/value
-rules. Neither may be standardized by accident.
+`Vec(T)`. `__s0_buffer_set(T, buffer, index, value)` mutates the shared backing
+slot in place and panics on an out-of-range index; aliases observe the write.
+The fixed map has capacity 16 and deliberately narrow key/value rules. Neither
+may be standardized by accident.
 
 `using name = expression with CleanupFn` reflects the current MIR callback
 bridge. It runs cleanup in reverse order on normal exit, return, failed `try`,
 and checked failure in the detecting function. The 1.0 form is
 `using name = expression`, selected by `Cleanup`.
+
+The Alder-written S0 checker now resolves `CleanupFn` as a nongeneric user
+function with exactly one runtime parameter whose concrete type exactly equals
+the initializer type and whose result is `Unit`. The binding is lexical. A
+cleanup may contain nested blocks and loops, and nested cleanups are supported
+outside loops; declaring a cleanup while already inside a loop remains rejected
+because that scope could begin repeatedly while active.
 
 ## Failure behavior
 
@@ -217,26 +233,85 @@ this document split, it contains:
   unsafe calls;
 - declaration collection and a growing checker for names, generic type shapes,
   aggregate members, representation cycles/restrictions, import/function
-  signatures, and initial function bodies made of annotated let/var bindings,
-  plain-identifier assignments, and one closing return over parameter or local
-  identifiers, Boolean literals, integer literals, and decoded string
-  literals;
-- private deterministic manifests used by Go conformance tests.
+  signatures, lexical blocks, assignments, and synchronous `if`/`while`/slice
+  `for` control flow. Binding initializers, assignment right-hand sides,
+  conditions, sequences, indices, and returns accept recursively nested S0 unary
+  and binary operators over parameter/local identifiers, Boolean literals,
+  integer literals, and decoded string literals, plus direct calls with
+  all-or-none explicit or inferred generic arguments, generic record
+  constructors, expected-type generic enum variants, and direct
+  imported calls inside `unsafe c`. Checked bodies also retain exhaustive enum,
+  `Option`, and `Result` matches (including expression statements), concrete
+  builtin constructors, and exact-error-type `try` records;
+- deterministic concrete function specialization closure. Instances are keyed
+  by declaration ID and ordered canonical concrete type IDs, registered before
+  body checking, and checked in first-discovery FIFO order. Same-instance and
+  finite concrete mutual recursion are accepted; specialization-expanding
+  active polymorphic recursion is rejected;
+- private deterministic manifest v14 records used by Go conformance tests. It
+  includes a canonical source-span table and stable checker diagnostic
+  code/primary/related/note rendering independent of the eventual CLI envelope.
+
+The fixed production entry drives those implemented slices from source loading
+through checking, lowering, and complete verification. Failed source phases
+produce stable human or version-1 JSON diagnostics derived from their canonical
+records; their private manifests remain conformance-test protocols only.
+`check` emits no artifact, while `compile` emits MIR or C according to the
+shared bootstrap CLI contract. Malformed checked/lowered state, verifier
+rejection, and C preflight rejection emit no artifact bytes. This remains a
+bootstrap subset, not an Alder 1.0 claim. Its fixed-point source-bootstrap
+evidence and regeneration procedure are recorded in the
+[Roadmap](../ROADMAP.md) and
+[compiler source inventory](../bootstrap/compiler-source-inventory.md).
 
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the
 `I64` minimum instead of inheriting Stage 0's signed host-storage limit.
 String literal results accept `String` and its `[U8]` semantic form alike.
-Bodies with unannotated bindings, compound expressions, calls, control flow,
-or a missing/non-final return defer to later slices without emitting records.
-Unannotated bindings specifically wait on canonical structure-deduplicated
-type identity: current checked-type records are syntax-anchored, so an
-inferred literal type has no record to reference yet.
+The operator slice covers unary `-` and `!`, checked integer arithmetic and
+shifts, integer/float comparison and equality, and short-circuit Boolean
+operators with the Go Stage 0 operand rules. Direct calls support concrete and
+generic user functions, generic records, variants resolved through a concrete
+expected enum, unary-payload inference through declared generic enums, and one
+direct C-import root in `unsafe c`; record fields are checked and stored in
+declaration order. Explicit type arguments are all-or-none and use the same
+postfix call tree as runtime arguments. Checked places cover mutable locals and
+struct fields plus slice indices and indexed struct fields; roots and fields
+retain stable semantic IDs, and concrete generic field types are substituted
+before checking the right-hand side. Lexical environments do not leak block,
+branch, loop, or `for` element bindings. Non-`Unit` functions must return on
+every path, statements after a guaranteed return are rejected before their
+contents, and conservative loops fall through. `using` cleanup facts cover
+lexical fallthrough, return, and failed `try`. Current lowering walks the
+checked site environment to run only active callbacks, exactly once in reverse
+lexical order, on those exits. The declaration is rejected anywhere under a
+loop.
+Unannotated let/var bindings infer scalar types from supported literals,
+identifiers, and unary/binary expressions.
 
-General body checking, other literals/expressions, inference, monomorphization,
-MIR construction, verifier/backend ports, and self-hosted execution are still
-incomplete. Consult [Roadmap](../ROADMAP.md) and executable tests for the exact
-latest slice.
+The checked model interns types by kind, semantic target, and ordered canonical
+argument IDs. Primitive targets are fixed, repeated applications share one
+canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
+separate annotations retain each source spelling. Concrete checked bodies use
+stable parameter/local binding IDs, a persistent lexical-environment chain,
+postorder expression records, flattened ordered child ranges, and private block,
+statement-link, statement, and assignment-place records. The Alder lowering
+package consumes these records with canonical Z spans and source bytes, never
+parser nodes, links, or kinds. It emits the current scalar, call, aggregate,
+place, and structured-control MIR slice or rejects the model without output;
+it does not infer types or repair CFG. Generic
+function signatures and bodies are owned by stable concrete instance IDs;
+direct call targets name those instances. Aggregate applications, expression
+types, instance signatures, and checked instance bodies are concrete at this
+boundary. Stable annotations retain declaration/variant IDs and canonical
+checked types without introducing MIR identities.
+
+Every concrete checked S0 body has exactly one root block, including an
+empty `Unit` body. A syntax form outside this supported S0 contract receives one
+stable boundary diagnostic; it no longer causes partial body records to be
+silently discarded as a successful check. Later Alder 1.0 expressions and
+language facilities remain incomplete. Consult [Roadmap](../ROADMAP.md) and
+executable tests for the exact implemented boundary.
 
 ## Removal gates
 

@@ -66,7 +66,7 @@ const (
 // cross source-level bindings.
 var builtinFnNames = []string{
 	"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create",
-	"__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice",
+	"__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice",
 	"Get", "Set", "Remove",
 }
 
@@ -2087,8 +2087,8 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 		k.noteCall(x, rt, &callAnn{kind: callBuiltin, builtin: name})
 		return rt, nil
 
-	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_slice":
-		want := map[string]int{"__s0_buffer_new": 2, "__s0_buffer_len": 2, "__s0_buffer_append": 4, "__s0_buffer_get": 3, "__s0_buffer_slice": 2}[name]
+	case "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice":
+		want := map[string]int{"__s0_buffer_new": 2, "__s0_buffer_len": 2, "__s0_buffer_append": 4, "__s0_buffer_get": 3, "__s0_buffer_set": 4, "__s0_buffer_slice": 2}[name]
 		if err := expect(want); err != nil {
 			return nil, err
 		}
@@ -2128,13 +2128,22 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 					return nil, k.mismatch(args[3].exprPos(), "buffer value", ta, vt)
 				}
 			}
-			if name == "__s0_buffer_get" {
+			if name == "__s0_buffer_get" || name == "__s0_buffer_set" {
 				it, err := k.checkExpr(args[2], prim(pU64))
 				if err != nil {
 					return nil, err
 				}
 				if !typeEqual(it, prim(pU64)) {
 					return nil, k.mismatch(args[2].exprPos(), "buffer index", prim(pU64), it)
+				}
+			}
+			if name == "__s0_buffer_set" {
+				vt, err := k.checkExpr(args[3], ta)
+				if err != nil {
+					return nil, err
+				}
+				if !typeEqual(vt, ta) {
+					return nil, k.mismatch(args[3].exprPos(), "buffer value", ta, vt)
 				}
 			}
 		}
@@ -2146,6 +2155,8 @@ func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
 			rt = prim(pU64)
 		case "__s0_buffer_get":
 			rt = ta
+		case "__s0_buffer_set":
+			rt = prim(pUnit)
 		default:
 			rt = &Type{kind: tSlice, elem: ta}
 		}

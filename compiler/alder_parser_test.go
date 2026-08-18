@@ -169,6 +169,10 @@ END
 `
 
 func TestAlderParserConformanceEndToEnd(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -234,7 +238,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, output)
 	}
@@ -297,6 +301,27 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		if !seenKinds[kind] {
 			t.Fatalf("function/expression manifest does not exercise syntax kind %d\n%s", kind, functionManifest)
 		}
+	}
+	moduleSource := "module acme.main\n" +
+		"import acme.compiler.token\n" +
+		"import acme.compiler.syntax as tree\n" +
+		"pub import acme.api { Request, Response }\n" +
+		"pub type Exported { value: U64 }\n" +
+		"pub fn entry() -> I32 { return 0 }\n"
+	moduleFiles := map[string]string{"module.al": moduleSource}
+	moduleManifest := runAlderParser(t, exe, moduleFiles, []string{"module.al"}, false)
+	moduleTree := validateParserManifest(t, moduleManifest, moduleFiles)
+	moduleKinds := make(map[int]bool)
+	for _, node := range moduleTree.nodes {
+		moduleKinds[node.kind] = true
+	}
+	for kind := 40; kind <= 46; kind++ {
+		if !moduleKinds[kind] {
+			t.Fatalf("module manifest does not exercise syntax kind %d\n%s", kind, moduleManifest)
+		}
+	}
+	if repeat := runAlderParser(t, exe, moduleFiles, []string{"module.al"}, false); repeat != moduleManifest {
+		t.Fatal("module parser manifest changed across processes")
 	}
 	if again := runAlderParser(t, exe, files, []string{"b.al", "a.al", "z-empty.al"}, false); again != first {
 		t.Fatal("repeat parser process output changed")
@@ -449,7 +474,7 @@ func runAlderParser(t *testing.T, exe string, files map[string]string, order []s
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(exe, order...)
+	cmd := conformanceCommand(exe, order...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -649,7 +674,18 @@ func validateParserManifest(t *testing.T, manifest string, sourceTexts map[strin
 		}
 	}
 	if len(reachableNodes) != len(nodes) || len(ownedLinks) != len(links) {
-		t.Fatalf("unreachable parser arena records: nodes %d/%d links %d/%d", len(reachableNodes), len(nodes), len(ownedLinks), len(links))
+		var missingNodes, missingLinks []int
+		for id := 1; id <= len(nodes); id++ {
+			if !reachableNodes[id] {
+				missingNodes = append(missingNodes, id)
+			}
+		}
+		for id := 1; id <= len(links); id++ {
+			if ownedLinks[id] == 0 {
+				missingLinks = append(missingLinks, id)
+			}
+		}
+		t.Fatalf("unreachable parser arena records: nodes %d/%d %v links %d/%d %v", len(reachableNodes), len(nodes), missingNodes, len(ownedLinks), len(links), missingLinks)
 	}
 	return parserManifest{sourceTexts: sourceTexts, roots: roots, nodes: nodes, links: links}
 }
@@ -709,6 +745,16 @@ func validParserNodeToken(node parserManifestNode, tokenText string) bool {
 		return node.tokenStart == node.start && ((tokenText == "_" && node.nameStart == 0 && node.nameEnd == 0) || nameToken)
 	case 39:
 		return nameToken
+	case 40:
+		return node.tokenStart == node.start && tokenText == "module" && node.nameStart > node.tokenEnd
+	case 41, 42:
+		return node.tokenStart == node.start && tokenText == "import" && node.nameStart > node.tokenEnd
+	case 43, 44:
+		return nameToken
+	case 45:
+		return node.tokenStart == node.start && tokenText == "pub" && node.nameStart > node.tokenEnd
+	case 46:
+		return node.tokenStart == node.nameStart && node.tokenEnd <= node.nameEnd
 	default:
 		return false
 	}

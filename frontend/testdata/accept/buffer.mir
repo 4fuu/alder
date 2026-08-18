@@ -204,6 +204,25 @@ bb_fail:
   panic
 }
 
+fn @buffer.set.U64(%b: @__s0_Buffer.c1.U64, %i: u64, %v: u64) {
+  local %b: @__s0_Buffer.c1.U64
+
+bb0:
+  store local %b, %b
+  %v0 = load field(local %b, data)
+  %v1 = load field(local %b, len)
+  %v2 = int.lt %i, %v1
+  branch %v2, bb_valid, bb_fail
+
+bb_valid:
+  %v3 = slice.index.checked %v0, %i else bb_fail
+  store deref %v3, %v
+  return
+
+bb_fail:
+  panic
+}
+
 fn @buffer.slice.U64(%b: @__s0_Buffer.c1.U64) -> slice(u64) {
   local %b: @__s0_Buffer.c1.U64
 

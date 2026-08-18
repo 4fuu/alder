@@ -1,6 +1,7 @@
 # C11 Backend
 
-Status: Milestone 3 lowering contract with a working Go implementation
+Status: Milestone 3 lowering contract with working Go and Alder-written M5.4
+implementations
 
 The Alder backend (`cgen` package) emits conservative, portable, inspectable C11 from verified Alder MIR. Its purpose is to validate Alder MIR semantics and provide a bootstrap path, not to make C the semantic definition of Alder.
 
@@ -25,9 +26,52 @@ Clang or GCC
 
 Only verified MIR may reach code generation: `cgen.Generate` runs the full verifier and refuses invalid modules with the verifier diagnostics. The backend must not silently repair invalid domain, cleanup, type, or table-view behavior.
 
+The Alder-written flat-MIR verifier exposes
+`mir_verify_complete(d, store, version, hosted)`. Its `complete == true` result
+is the required gate for any Alder-written C generator before it writes bytes;
+hosted success also carries the verified 1-based entry function ID. Every
+failure and every unhosted result carries entry ID zero; duplicate `main`
+declarations are rejected earlier by V1's duplicate function-name rule.
+
+The Alder-written `cgen_generate(d, store, version, hosted)` entry implements
+the current M5.4 body path directly over flat MIR 3. It lowers loads,
+stores, field and checked-reference places, aggregate and enum-like values,
+scalar comparisons and conversions, checked integer and slice operations,
+direct and unsafe-import calls, block edges with staged parallel copies,
+branches, loops, switches, returns, typed failures, panic, unreachable, domains,
+allocation, supported domain copies, cleanup scopes, and generational tables.
+Every operand is read from an already materialized value in an explicitly
+ordered statement; generated calls never embed another call or checked
+operation in a C argument expression. Verification and the supported-operation
+preflight both complete before the output buffer is allocated. Invalid or
+unsupported MIR therefore returns false with zero output and is never repaired
+or rewritten.
+
+The final M5.4 Alder compiler driver exposes this generator through
+`compile --emit=c`; the source-to-C path remains complete-verifier-gated and
+zero-output on verifier or preflight rejection. The shared-core resource fixture independently
+lowers the existing Stage 0 domain, lexical-cleanup, fixed-map, and private-
+buffer bridge corpus, emits it through this path, and compiles and runs the
+result against the existing runtime ABI. The Go `cgen` package remains the
+host implementation used outside this internal compiler-core path.
+
+The earlier declaration-only Alder backend lane remains as the focused
+`cgen_write_declaration_skeleton` conformance API. It exposes
+`cgen_write_declaration_skeleton(d, store, version, hosted)`. Before allocating
+its output buffer it calls `mir_verify_complete`; only `complete == true`
+proceeds. Emission consumes the returned `hosted` and external 1-based `entry`
+fields rather than independently authorizing the caller's request. The complete
+skeleton is buffered before stdout and contains headers, stable type layouts,
+constant storage, import prototypes, internal function declarations, and the
+optional verified hosted entry adapter. It still does not emit function bodies
+and is not itself a production generator. Every rejection is zero-output and
+never sanitizes or repairs an invalid store.
+
 ## Generated program entry
 
-`cgen.GenerateProgram` is the explicit hosted-program path; generic
+`cgen.GenerateProgram` is the explicit hosted-program path and the
+verified-only gate for untrusted MIR. `cgen.GenerateProgramTrusted` is the
+same lowering for a module the caller already verified. Generic
 `cgen.Generate` remains a translation-unit generator and requires no `main`.
 For Stage 0 only, a program has exactly one MIR function named `main`, returning
 `i32`, with either no parameters or one `domain_handle` parameter. These are
@@ -43,10 +87,15 @@ Null context or failed root initialization returns
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.
-Status zero maps to `EXIT_SUCCESS`, and every nonzero status maps to
-`EXIT_FAILURE`.
+The compiler host preserves the S0 status classes: 0 success, 1 source
+diagnostics, 2 usage/request, 3 I/O/storage, and 4 internal/backend.
 
-The narrow Stage 0 hosted ABI exposes the explicit `argv[1:]` source snapshot
+The Alder declaration skeleton renders this adapter only for syntax
+conformance. `cgen_generate` emits the corresponding function bodies and its
+hosted output is linked and run by the scalar/CFG acceptance fixture.
+
+The narrow Stage 0 hosted ABI parses the documented `check`/`compile` request,
+then exposes its sorted explicit source snapshot
 through `alderhost_source_count`, `alderhost_source_path_len`/`_byte`, and
 `alderhost_source_text_len`/`_byte`. The host sorts exact argument strings with
 `strcmp`, rejects duplicates, and loads every file in binary mode before entry;
@@ -59,7 +108,9 @@ and `alderhost_stderr_byte` write exactly one byte without a newline and return
 false outside an active invocation or on write failure. The invocation context
 layout remains private, is active only during `alder_program_entry`, and is
 valid under the single-threaded Stage 0 runtime contract. Inputs are freed and
-both output streams are flushed after entry. This host ABI is distinct from the
+both output streams are flushed after entry. Artifact files use same-directory
+replacement and are committed only after compiler and flush success. This host
+ABI is distinct from the
 generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
 ## Milestone 3 Lowering Contract

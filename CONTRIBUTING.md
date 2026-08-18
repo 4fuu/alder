@@ -79,6 +79,16 @@ Before submitting C runtime changes, additionally run:
 - `go test ./cgen -count=1` must pass (golden generated-C fixtures, strict-warning compilation of every golden, compile-and-run behavior fixtures, verified-only gate, and cross-process determinism);
 - `go test ./frontend -count=1` must pass (pinned printed-MIR goldens, pinned rejection diagnostics, end-to-end source-to-C11 compile-and-run programs, and in-process and cross-process determinism).
 
+Before submitting a compiler-source or source-bootstrap change, additionally
+run `bootstrap/regenerate.sh`. It verifies the committed compiler-source
+digests and compilation order, builds the committed C bootstrap with the host
+shim and runtime, regenerates the compiler without Go or network access, and
+requires byte-identical C output. It also requires the common host utilities
+listed in `bootstrap/compiler-source-inventory.md`. Use
+`bootstrap/regenerate.sh --write` only for an intentional reviewed bootstrap
+update; then update the pinned `bootstrap/alder.c` digest in the compiler test.
+The measured Linux/GCC run requires about 2.5 GiB of memory.
+
 These are the canonical build, format, and test commands; keep them synchronized with `AGENTS.md`.
 
 ## C Runtime and Backend Standards

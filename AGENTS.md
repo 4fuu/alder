@@ -80,4 +80,8 @@ Canonical C checks (run before committing runtime changes; keep the flag set syn
 - `go test ./cgen -count=1` pins the generated-C goldens, compiles every golden under the strict warning set, runs the compile-and-run behavior fixtures, and checks generation determinism across processes;
 - `go test ./frontend -count=1` pins the printed-MIR goldens and rejection diagnostics, runs the end-to-end source-to-C11 programs, and checks compilation determinism across processes.
 
+Canonical source-bootstrap check (run before committing compiler-source or bootstrap-artifact changes; keep synchronized with `CONTRIBUTING.md`):
+
+- `bootstrap/regenerate.sh` must validate the source inventory and reproduce `bootstrap/alder.c` byte-for-byte using only the committed source bootstrap, runtime, host shim, system C11 compiler, and common POSIX-host utilities.
+
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.

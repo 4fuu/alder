@@ -33,12 +33,12 @@ func phase4Dominance(m *mir.Module) []Error {
 			case mir.ValueDefFuncParam:
 				// Always available.
 			case mir.ValueDefBlockParam:
-				if !g.dom[useNode][g.boundary[v.Def.Block][0]] {
+				if !g.dominates(useNode, g.boundary[v.Def.Block][0]) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefInstr:
 				// A checked result exists only at the success boundary after it.
-				if !g.dom[useNode][g.boundary[v.Def.Block][v.Def.Instr+1]] {
+				if !g.dominates(useNode, g.boundary[v.Def.Block][v.Def.Instr+1]) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			case mir.ValueDefSwitchCase:
@@ -54,7 +54,7 @@ func phase4Dominance(m *mir.Module) []Error {
 					continue
 				}
 				defNode := g.edge[pointEdge{v.Def.Block, edgeSwitch, v.Def.Case}]
-				if !g.dom[useNode][defNode] {
+				if !g.dominates(useNode, defNode) {
 					errs = append(errs, availabilityError(f, u, v))
 				}
 			}
@@ -69,7 +69,6 @@ func phase4Dominance(m *mir.Module) []Error {
 // converge downward by predecessor intersection. The empty entry state still
 // prevents a loop backedge from initializing its own first iteration.
 func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []Error {
-	type initSet map[string]bool
 	n := len(g.preds)
 	succ := make([][]int, n)
 	for v, ps := range g.preds {
@@ -91,22 +90,48 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 			}
 		}
 	}
-	afterStore := make(map[int]*mir.Place)
-	for bi, b := range f.Blocks {
+	leafIndex := make(map[string]int)
+	// Track only leaves that a load can observe. The full local universe can be
+	// enormous in compiler-generated functions, while leaves that are never
+	// loaded cannot affect this analysis or any diagnostic.
+	for _, b := range f.Blocks {
 		for i := range b.Instrs {
-			if b.Instrs[i].Op == mir.OpStore {
-				afterStore[g.boundary[bi][i+1]] = &b.Instrs[i].Place
+			in := &b.Instrs[i]
+			if in.Op != mir.OpLoad {
+				continue
+			}
+			key, keyOK := localPlaceKey(&in.Place)
+			t, typeOK := m.PlaceType(f, &in.Place)
+			if keyOK && typeOK {
+				indexInitializedLeaves(m, t, key, leafIndex)
 			}
 		}
 	}
-	universe := make(initSet)
-	for i, local := range f.Locals {
-		addInitializedLeaves(m, local.Type, fmt.Sprintf("%d", i), universe)
+	words := (len(leafIndex) + 63) / 64
+	universe := make([]uint64, words)
+	for i := 0; i < len(leafIndex); i++ {
+		universe[i/64] |= uint64(1) << uint(i%64)
 	}
-	state := make([]initSet, n)
+	afterStore := make(map[int][]uint64)
+	for bi, b := range f.Blocks {
+		for i := range b.Instrs {
+			in := &b.Instrs[i]
+			if in.Op != mir.OpStore {
+				continue
+			}
+			key, keyOK := localPlaceKey(&in.Place)
+			t, typeOK := m.PlaceType(f, &in.Place)
+			if keyOK && typeOK {
+				bits := make([]uint64, words)
+				setInitializedLeafBits(m, t, key, leafIndex, bits)
+				afterStore[g.boundary[bi][i+1]] = bits
+			}
+		}
+	}
+	state := make([][]uint64, n)
 	for v := 0; v < n; v++ {
 		if reach[v] && v != entry {
-			state[v] = cloneInitSet(universe)
+			state[v] = append([]uint64(nil), universe...)
 		}
 	}
 	for changed := true; changed; {
@@ -115,32 +140,35 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 			if !reach[v] || v == entry {
 				continue
 			}
-			var next initSet
+			var next []uint64
+			havePred := false
 			for _, p := range g.preds[v] {
 				if !reach[p] {
 					continue
 				}
-				if next == nil {
-					next = cloneInitSet(state[p])
+				if !havePred {
+					next = make([]uint64, words)
+					copy(next, state[p])
+					havePred = true
 				} else {
-					for k := range next {
-						if !state[p][k] {
-							delete(next, k)
+					for i := range next {
+						if i < len(state[p]) {
+							next[i] &= state[p][i]
+						} else {
+							next[i] = 0
 						}
 					}
 				}
 			}
-			if place := afterStore[v]; place != nil {
-				if key, ok := localPlaceKey(place); ok {
-					if t, typeOK := m.PlaceType(f, place); typeOK {
-						if next == nil {
-							next = make(initSet)
-						}
-						addInitializedLeaves(m, t, key, next)
-					}
+			if added := afterStore[v]; added != nil {
+				if next == nil {
+					next = make([]uint64, words)
+				}
+				for i := range next {
+					next[i] |= added[i]
 				}
 			}
-			if !equalInitSet(next, state[v]) {
+			if !equalInitBits(next, state[v]) {
 				state[v] = next
 				changed = true
 			}
@@ -158,7 +186,7 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 			}
 			key, ok := localPlaceKey(&in.Place)
 			t, typeOK := m.PlaceType(f, &in.Place)
-			if ok && typeOK && !initializedLeaves(m, t, key, state[g.boundary[bi][i]]) {
+			if ok && typeOK && !initializedLeafBits(m, t, key, leafIndex, state[g.boundary[bi][i]]) {
 				errs = append(errs, Error{Loc: locInstr(f, b, i, in), Msg: "load from local place that is not definitely initialized"})
 			}
 		}
@@ -166,20 +194,52 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 	return errs
 }
 
-func cloneInitSet(src map[string]bool) map[string]bool {
-	dst := make(map[string]bool, len(src))
-	for k := range src {
-		dst[k] = true
+func indexInitializedLeaves(m *mir.Module, t mir.TypeId, key string, indexes map[string]int) {
+	ty := &m.Types[t]
+	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
+		if _, ok := indexes[key]; !ok {
+			indexes[key] = len(indexes)
+		}
+		return
 	}
-	return dst
+	for _, field := range ty.Fields {
+		indexInitializedLeaves(m, field.Type, key+"\x00"+field.Name, indexes)
+	}
 }
 
-func equalInitSet(a, b map[string]bool) bool {
+func setInitializedLeafBits(m *mir.Module, t mir.TypeId, key string, indexes map[string]int, bits []uint64) {
+	ty := &m.Types[t]
+	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
+		if i, ok := indexes[key]; ok {
+			bits[i/64] |= uint64(1) << uint(i%64)
+		}
+		return
+	}
+	for _, field := range ty.Fields {
+		setInitializedLeafBits(m, field.Type, key+"\x00"+field.Name, indexes, bits)
+	}
+}
+
+func initializedLeafBits(m *mir.Module, t mir.TypeId, key string, indexes map[string]int, bits []uint64) bool {
+	ty := &m.Types[t]
+	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
+		i, ok := indexes[key]
+		return !ok || i/64 < len(bits) && bits[i/64]&(uint64(1)<<uint(i%64)) != 0
+	}
+	for _, field := range ty.Fields {
+		if !initializedLeafBits(m, field.Type, key+"\x00"+field.Name, indexes, bits) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalInitBits(a, b []uint64) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for k := range a {
-		if !b[k] {
+	for i := range a {
+		if a[i] != b[i] {
 			return false
 		}
 	}
@@ -201,14 +261,16 @@ func localPlaceKey(p *mir.Place) (string, bool) {
 	}
 }
 
-func addInitializedLeaves(m *mir.Module, t mir.TypeId, key string, set map[string]bool) {
+func addInitializedLeaves(m *mir.Module, t mir.TypeId, key string, set, filter map[string]bool) {
 	ty := &m.Types[t]
 	if ty.Kind != mir.TypeAggregate || len(ty.Fields) == 0 {
-		set[key] = true
+		if filter == nil || filter[key] {
+			set[key] = true
+		}
 		return
 	}
 	for _, field := range ty.Fields {
-		addInitializedLeaves(m, field.Type, key+"\x00"+field.Name, set)
+		addInitializedLeaves(m, field.Type, key+"\x00"+field.Name, set, filter)
 	}
 }
 

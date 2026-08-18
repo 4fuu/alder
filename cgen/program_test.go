@@ -39,6 +39,10 @@ func TestGenerateProgramContract(t *testing.T) {
 	if err != nil || got != again {
 		t.Fatalf("program output is not deterministic: %v", err)
 	}
+	trusted, err := GenerateProgramTrusted(m)
+	if err != nil || trusted != got {
+		t.Fatalf("trusted program output diverged from verified path: %v", err)
+	}
 	if strings.Contains(generic, "alder_program_entry") {
 		t.Fatal("generic Generate emitted a program entry")
 	}
@@ -155,7 +159,7 @@ func TestProgramSeparateTranslationUnits(t *testing.T) {
 						}
 					}
 					exe := filepath.Join(dir, "program.exe")
-					args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join("..", "runtime", "c"), "-I", filepath.Join("..", "bootstrap"), gen, driver, filepath.Join("..", "runtime", "c", "alder.c"), "-o", exe}
+					args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join("..", "runtime", "c"), "-I", filepath.Join("..", "bootstrap"), gen, driver, filepath.Join("..", "runtime", "c", "alder.c"), "-o", exe}
 					if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("compile: %v\n%s", err, output)
 					}

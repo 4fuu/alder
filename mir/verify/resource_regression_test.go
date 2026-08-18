@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -763,6 +764,87 @@ done:
   return %result
 }
 `)
+	})
+
+	t.Run("failure edge closes block parameter cycle", func(t *testing.T) {
+		requireRejectedWith(t, `mir 3
+fn @f(%root: domain_handle, %n: i64) {
+entry:
+  jump header(%root)
+header(%parent: domain_handle):
+  %sum = int.add.checked %n, %n else body
+  return
+body:
+  %child = domain.create %parent
+  jump header(%child)
+}
+`, "block parameter %parent carries a function-local domain handle or reference across a backedge")
+	})
+}
+
+func TestManyBlockParametersReachability(t *testing.T) {
+	const (
+		blocks = 24
+		params = 12
+	)
+	fixture := func(cyclic bool) string {
+		var text strings.Builder
+		text.WriteString("mir 1\nfn @f(%root: domain_handle) {\nentry:\n  %local = domain.create %root\n  jump b0(")
+		for i := 0; i < params; i++ {
+			if i > 0 {
+				text.WriteString(", ")
+			}
+			text.WriteString("%local")
+		}
+		text.WriteString(")\n")
+		for bi := 0; bi < blocks; bi++ {
+			fmt.Fprintf(&text, "b%d(", bi)
+			for pi := 0; pi < params; pi++ {
+				if pi > 0 {
+					text.WriteString(", ")
+				}
+				fmt.Fprintf(&text, "%%p%d_%d: domain_handle", bi, pi)
+			}
+			text.WriteString("):\n")
+			if bi+1 < blocks || cyclic {
+				target := bi + 1
+				if target == blocks {
+					target = 0
+				}
+				fmt.Fprintf(&text, "  jump b%d(", target)
+				for pi := 0; pi < params; pi++ {
+					if pi > 0 {
+						text.WriteString(", ")
+					}
+					fmt.Fprintf(&text, "%%p%d_%d", bi, pi)
+				}
+				text.WriteString(")\n")
+			} else {
+				fmt.Fprintf(&text, "  domain.destroy %%p%d_0\n  return\n", bi)
+			}
+		}
+		text.WriteString("}\n")
+		return text.String()
+	}
+
+	t.Run("acyclic", func(t *testing.T) {
+		requireAccepted(t, fixture(false))
+	})
+
+	t.Run("cyclic", func(t *testing.T) {
+		errs := verifyText(t, fixture(true))
+		if len(errs) != blocks*params {
+			t.Fatalf("got %d diagnostics, want %d\n%s", len(errs), blocks*params, errs.String())
+		}
+		for bi := 0; bi < blocks; bi++ {
+			for pi := 0; pi < params; pi++ {
+				index := bi*params + pi
+				want := fmt.Sprintf("fn @f: block b%d: block parameter %%p%d_%d carries a function-local domain handle or reference across a backedge", bi, bi, pi)
+				if errs[index].String() != want {
+					t.Fatalf("diagnostic %d mismatch\ngot:  %s\nwant: %s", index, errs[index].String(), want)
+				}
+			}
+		}
 	})
 }
 

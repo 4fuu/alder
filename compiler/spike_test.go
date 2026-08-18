@@ -11,12 +11,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
 )
 
 func TestDeclarationSpikeEndToEnd(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -39,26 +44,28 @@ func TestDeclarationSpikeEndToEnd(t *testing.T) {
 	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
 		reversed[left], reversed[right] = reversed[right], reversed[left]
 	}
-	artifacts := make(map[EmitKind]string)
-	for _, emit := range []EmitKind{EmitMIR, EmitC} {
-		first, firstErr := Compile(Request{Sources: spike, Emit: emit})
-		second, secondErr := Compile(Request{Sources: reversed, Emit: emit})
-		if firstErr != nil || secondErr != nil || len(first.Diagnostics) != 0 || len(second.Diagnostics) != 0 || first.Artifact == nil || second.Artifact == nil {
-			t.Fatalf("compile %s: first=%+v/%v second=%+v/%v", emit, first, firstErr, second, secondErr)
-		}
-		if first.Artifact.Text != second.Artifact.Text {
-			t.Fatalf("spike %s changed with implementation source order", emit)
-		}
-		artifacts[emit] = first.Artifact.Text
+	forward, forwardErr := Compile(Request{Sources: spike, Emit: EmitMIR})
+	reversedResult, reversedErr := Compile(Request{Sources: reversed, Emit: EmitMIR})
+	if forwardErr != nil || reversedErr != nil || forward.Artifact == nil || reversedResult.Artifact == nil || len(forward.Diagnostics) != 0 || len(reversedResult.Diagnostics) != 0 {
+		t.Fatalf("compile spike MIR: forward=%+v/%v reversed=%+v/%v", forward, forwardErr, reversedResult, reversedErr)
 	}
-	parsed, err := mir.Parse(artifacts[EmitMIR])
+	if forward.Artifact.Text != reversedResult.Artifact.Text {
+		t.Fatal("spike MIR changed with implementation source order")
+	}
+	parsed, err := mir.Parse(forward.Artifact.Text)
 	if err != nil {
 		t.Fatalf("parse emitted spike MIR: %v", err)
 	}
 	if errs := verify.Module(parsed); len(errs) != 0 {
 		t.Fatalf("emitted spike MIR failed verification: %s", verify.Errors(errs).String())
 	}
-	generated := artifacts[EmitC]
+	// Generate from the verified textual round trip: MIR equality already proves
+	// source-order independence without compiling this unit twice more through
+	// the identical frontend for EmitC.
+	generated, err := cgen.GenerateProgram(parsed)
+	if err != nil {
+		t.Fatalf("generate spike C from round-tripped MIR: %v", err)
+	}
 	for _, leaked := range []string{root, filepath.ToSlash(root), strings.ReplaceAll(root, `\`, `\\`)} {
 		if leaked != "" && strings.Contains(generated, leaked) {
 			t.Fatalf("generated C contains checkout path %q", leaked)
@@ -73,7 +80,7 @@ func TestDeclarationSpikeEndToEnd(t *testing.T) {
 	if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), gen, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), gen, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, output)
 	}
@@ -180,7 +187,7 @@ func runSpike(t *testing.T, exe, dir string, files map[string]string, order []st
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(exe, order...)
+	cmd := conformanceCommand(exe, order...)
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

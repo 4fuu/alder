@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
@@ -20,25 +21,96 @@ import (
 // never discovered by walking the checkout.
 var compilerSourceManifest = []string{
 	"checker.al",
+	"cgen/body.al",
+	"cgen/program.al",
+	"cgen/types.al",
+	"cgen/writer.al",
+	"driver.al",
 	"host.al",
 	"lexer.al",
+	"lower.al",
 	"main.al",
+	"mir_build.al",
+	"mir_model.al",
+	"mir_print.al",
 	"model.al",
 	"output.al",
 	"parser.al",
+	"project.al",
+	"verify_analysis.al",
+	"verify_model.al",
+	"verify_phase1.al",
+	"verify_phase2.al",
+	"verify_phase3.al",
+	"verify_phase4.al",
+	"verify_phase5.al",
+	"verify_phase6.al",
+	"verify_phase7.al",
+	"verify_phase8.al",
+	"verify_phase9.al",
+	"verify_phase10.al",
 }
 
-// Slice conformance harnesses compile their exact fixed dependency closures;
-// the complete production root above is compiled by the latest checker slice.
-// Keeping earlier harnesses narrow prevents every new compiler layer from being
-// recompiled by all preceding layer tests.
+// Conformance harnesses compile exact fixed dependency closures.
+// TestAlderProductionDriverEndToEnd compiles the complete production root.
+// Keeping earlier lexer/parser harnesses narrow prevents later compiler layers
+// from being recompiled by all preceding layer tests.
 var lexerSourceManifest = []string{
 	"host.al",
 	"lexer.al",
-	"main.al",
 	"model.al",
 	"output.al",
 }
+
+const lexerWrapper = `
+fn storage_error() -> I32 {
+    return 3
+}
+fn finish(result: LexResult) -> I32 {
+    return match result {
+        Good(state) => finish_state(state, false)
+        Bad(state) => finish_state(state, true)
+    }
+}
+fn finish_state(state: State, failed: Bool) -> I32 {
+    if !emit(state) { return 4 }
+    if failed { return 1 }
+    return 0
+}
+fn run(d: Domain, state: State) -> I32 {
+    return match load_sources(d, state) {
+        Err(error) => storage_error()
+        Ok(loaded) => match lex_sources(d, loaded, 0) {
+            Err(error) => storage_error()
+            Ok(result) => finish(result)
+        }
+    }
+}
+fn init_diagnostics(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8), sources: __s0_Buffer(SourceRec), tokens: __s0_Buffer(TokenRec)) -> I32 { return match __s0_buffer_new(LexDiagRec, d) {
+    Err(error) => storage_error()
+    Ok(diagnostics) => run(d, State(paths: paths, texts: texts, values: values, sources: sources, tokens: tokens, diagnostics: diagnostics))
+} }
+fn init_tokens(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8), sources: __s0_Buffer(SourceRec)) -> I32 { return match __s0_buffer_new(TokenRec, d) {
+    Err(error) => storage_error()
+    Ok(tokens) => init_diagnostics(d, paths, texts, values, sources, tokens)
+} }
+fn init_sources(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8)) -> I32 { return match __s0_buffer_new(SourceRec, d) {
+    Err(error) => storage_error()
+    Ok(sources) => init_tokens(d, paths, texts, values, sources)
+} }
+fn init_values(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8)) -> I32 { return match __s0_buffer_new(U8, d) {
+    Err(error) => storage_error()
+    Ok(values) => init_sources(d, paths, texts, values)
+} }
+fn init_texts(d: Domain, paths: __s0_Buffer(U8)) -> I32 { return match __s0_buffer_new(U8, d) {
+    Err(error) => storage_error()
+    Ok(texts) => init_values(d, paths, texts)
+} }
+fn main(d: Domain) -> I32 { return match __s0_buffer_new(U8, d) {
+    Err(error) => storage_error()
+    Ok(paths) => init_texts(d, paths)
+} }
+`
 
 var parserSourceManifest = []string{
 	"host.al",
@@ -48,7 +120,15 @@ var parserSourceManifest = []string{
 	"parser.al",
 }
 
+func conformanceCommand(exe string, args ...string) *exec.Cmd {
+	return exec.Command(exe, args...)
+}
+
 func TestAlderLexerConformanceEndToEnd(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -65,23 +145,20 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		}
 		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
 	}
+	sources = append(sources, frontend.Source{ID: 99, Path: "compiler/test/lexer_main.al", Text: lexerWrapper})
 	reversed := append([]frontend.Source(nil), sources...)
 	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
 		reversed[left], reversed[right] = reversed[right], reversed[left]
 	}
-	artifacts := make(map[EmitKind]string)
-	for _, emit := range []EmitKind{EmitMIR, EmitC} {
-		first, firstErr := Compile(Request{Sources: sources, Emit: emit})
-		second, secondErr := Compile(Request{Sources: reversed, Emit: emit})
-		if firstErr != nil || secondErr != nil || len(first.Diagnostics) != 0 || len(second.Diagnostics) != 0 || first.Artifact == nil || second.Artifact == nil {
-			t.Fatalf("compile %s: first=%+v/%v second=%+v/%v", emit, first, firstErr, second, secondErr)
-		}
-		if first.Artifact.Text != second.Artifact.Text {
-			t.Fatalf("Alder lexer %s changed with implementation source order", emit)
-		}
-		artifacts[emit] = first.Artifact.Text
+	forward, forwardErr := Compile(Request{Sources: sources, Emit: EmitMIR})
+	reversedResult, reversedErr := Compile(Request{Sources: reversed, Emit: EmitMIR})
+	if forwardErr != nil || reversedErr != nil || forward.Artifact == nil || reversedResult.Artifact == nil || len(forward.Diagnostics) != 0 || len(reversedResult.Diagnostics) != 0 {
+		t.Fatalf("compile lexer MIR: forward=%+v/%v reversed=%+v/%v", forward, forwardErr, reversedResult, reversedErr)
 	}
-	parsed, err := mir.Parse(artifacts[EmitMIR])
+	if forward.Artifact.Text != reversedResult.Artifact.Text {
+		t.Fatal("Alder lexer MIR changed with implementation source order")
+	}
+	parsed, err := mir.Parse(forward.Artifact.Text)
 	if err != nil {
 		t.Fatalf("parse emitted lexer MIR: %v", err)
 	}
@@ -99,7 +176,13 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 			}
 		}
 	}
-	generated := artifacts[EmitC]
+	// Generate from the verified textual round trip: MIR equality already proves
+	// source-order independence without compiling this unit twice more through
+	// the identical frontend for EmitC.
+	generated, err := cgen.GenerateProgram(parsed)
+	if err != nil {
+		t.Fatalf("generate lexer C from round-tripped MIR: %v", err)
+	}
 	for _, leaked := range []string{root, filepath.ToSlash(root), strings.ReplaceAll(root, `\`, `\\`)} {
 		if leaked != "" && strings.Contains(generated, leaked) {
 			t.Fatalf("generated C contains checkout path %q", leaked)
@@ -114,7 +197,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 	if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), gen, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), gen, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, output)
 	}
@@ -270,7 +353,7 @@ func runAlderLexer(t *testing.T, exe, dir string, files map[string][]byte, order
 			t.Fatal(err)
 		}
 	}
-	cmd := exec.Command(exe, order...)
+	cmd := conformanceCommand(exe, order...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

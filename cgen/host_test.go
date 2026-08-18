@@ -40,7 +40,7 @@ func buildHost(t *testing.T, cc, stub string) string {
 		t.Fatal(err)
 	}
 	exe := filepath.Join(dir, "host.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join("..", "bootstrap"), filepath.Join("..", "bootstrap", "alder_host.c"), stubPath, "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join("..", "bootstrap"), filepath.Join("..", "bootstrap", "alder_host.c"), stubPath, "-o", exe}
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile hosted ABI: %v\n%s", err, out)
 	}

@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/4fuu/alder/mir"
 )
@@ -15,8 +16,78 @@ func isTableType(m *mir.Module, t mir.TypeId) bool {
 	return m.ValidType(t) && m.Types[t].Kind == mir.TypeTable
 }
 
+func placeLocalRoot(p *mir.Place) (mir.LocalId, bool) {
+	if p == nil {
+		return 0, false
+	}
+	if p.Kind == mir.PlaceLocal {
+		return p.Local, true
+	}
+	if p.Kind == mir.PlaceField {
+		return placeLocalRoot(p.Base)
+	}
+	return 0, false
+}
+
+// aliasingStores computes the store values that may feed each load. Places are
+// immutable MIR structure, so every fixed-point analysis can share this work.
+func aliasingStores(f *mir.Function) [][]mir.ValueId {
+	type storedPlace struct {
+		value mir.ValueId
+		path  string
+		ok    bool
+	}
+	stores := make(map[mir.LocalId][]storedPlace)
+	var unknownStores []storedPlace
+	var allStores []storedPlace
+	for _, b := range f.Blocks {
+		for j := range b.Instrs {
+			s := &b.Instrs[j]
+			if s.Op == mir.OpStore {
+				path, ok := placePath(&s.Place)
+				stored := storedPlace{value: s.StoreVal, path: path, ok: ok}
+				allStores = append(allStores, stored)
+				if root, rootOK := placeLocalRoot(&s.Place); rootOK {
+					stores[root] = append(stores[root], stored)
+				} else {
+					unknownStores = append(unknownStores, stored)
+				}
+			}
+		}
+	}
+	result := make([][]mir.ValueId, len(f.Values))
+	for vi := range f.Values {
+		v := &f.Values[vi]
+		if v.Def.Kind != mir.ValueDefInstr {
+			continue
+		}
+		in := &f.Blocks[v.Def.Block].Instrs[v.Def.Instr]
+		if in.Op != mir.OpLoad {
+			continue
+		}
+		loadPath, loadOK := placePath(&in.Place)
+		var candidates []storedPlace
+		if root, rootOK := placeLocalRoot(&in.Place); rootOK {
+			candidates = append(candidates, unknownStores...)
+			candidates = append(candidates, stores[root]...)
+		} else {
+			candidates = allStores
+		}
+		for _, store := range candidates {
+			if !loadOK || !store.ok || loadPath == store.path ||
+				strings.HasPrefix(loadPath, store.path+".") ||
+				strings.HasPrefix(store.path, loadPath+".") {
+				result[vi] = append(result[vi], store.value)
+			}
+		}
+	}
+	return result
+}
+
 func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) []tableOrigins {
 	info := make([]tableOrigins, len(f.Values))
+	loadStores := aliasingStores(f)
+	edges := incomingEdgeArgs(f)
 	merge := func(dst tableOrigins, src tableOrigins) {
 		for o := range src {
 			dst[o] = true
@@ -38,12 +109,8 @@ func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) 
 					next[tableOrigin{param: funcParamIndex(f, mir.ValueId(vi)), block: -1, instr: -1}] = true
 				}
 			case mir.ValueDefBlockParam:
-				for _, p := range f.Blocks {
-					for _, a := range allEdgeArgsTo(p, v.Def.Block) {
-						if v.Def.Param < len(a) {
-							add(a[v.Def.Param])
-						}
-					}
+				for _, a := range edges[mir.ValueId(vi)] {
+					add(a)
 				}
 			case mir.ValueDefSwitchCase:
 				add(f.Blocks[v.Def.Block].Term.Value)
@@ -56,13 +123,8 @@ func computeTableInfo(m *mir.Module, f *mir.Function, effects []functionEffect) 
 					if root, ok := placeDerefRoot(&in.Place); ok {
 						add(root)
 					}
-					for _, b := range f.Blocks {
-						for j := range b.Instrs {
-							s := &b.Instrs[j]
-							if s.Op == mir.OpStore && placesMayAlias(&in.Place, &s.Place) {
-								add(s.StoreVal)
-							}
-						}
+					for _, stored := range loadStores[vi] {
+						add(stored)
 					}
 				case mir.OpAggregateConstruct:
 					for _, x := range in.AggFields {
@@ -114,16 +176,18 @@ func originsOverlap(a, b tableOrigins) bool {
 	return false
 }
 
-func phase8Tables(m *mir.Module) []Error {
-	effects := computeFunctionEffects(m)
+func phase8Tables(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis) []Error {
 	var errs []Error
-	for _, f := range m.Functions {
+	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
 		}
 		info := computeTableInfo(m, f, effects)
 		uses := collectUses(f)
-		cleanup, _ := analyzeCleanupFunction(m, f)
+		var cleanup *cleanupAnalysis
+		if fi < len(cleanups) {
+			cleanup = cleanups[fi]
+		}
 		// Returning a local/new table is deliberately represented by a stable call
 		// site origin. This is conservative (different executions may alias only
 		// with themselves) but never drops identity.

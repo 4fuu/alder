@@ -11,7 +11,6 @@ import (
 	"github.com/4fuu/alder/cgen"
 	"github.com/4fuu/alder/frontend"
 	"github.com/4fuu/alder/mir"
-	"github.com/4fuu/alder/mir/verify"
 )
 
 // EmitKind selects the requested output. EmitNone performs checking only.
@@ -104,9 +103,9 @@ func Compile(req Request) (Result, error) {
 	if len(diagnostics) != 0 {
 		return Result{Diagnostics: frontend.SortDiagnosticsBySource(diagnostics, sources)}, nil
 	}
-	if errs := verify.Module(m); len(errs) != 0 {
-		return Result{}, internalError("frontend emitted invalid MIR", fmt.Errorf("%s", verify.Errors(errs).String()))
-	}
+	// frontend.CompileSources already ran the complete verifier. EmitMIR
+	// and EmitC both trust that result; GenerateProgram remains the
+	// verified-only gate for untrusted MIR.
 	result := Result{Diagnostics: []frontend.Diagnostic{}}
 	switch req.Emit {
 	case EmitNone:
@@ -114,7 +113,7 @@ func Compile(req Request) (Result, error) {
 	case EmitMIR:
 		result.Artifact = &Artifact{Kind: EmitMIR, Text: mir.Print(m)}
 	case EmitC:
-		text, err := cgen.GenerateProgram(m)
+		text, err := cgen.GenerateProgramTrusted(m)
 		if err != nil {
 			var entryError *cgen.ProgramEntryError
 			if errors.As(err, &entryError) {

@@ -342,7 +342,7 @@ Exit-criteria evidence:
 
 ### Milestone 5.4: Self-Hosted Compiler Core
 
-Status: **active**
+Status: **complete**
 
 `compiler/src/*.al` is the fixed, explicit production compiler source root. Its
 current source model, lossless lexer, syntactically complete current S0 parser,
@@ -364,31 +364,95 @@ memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
 rejects duplicate or reserved function runtime parameter names before body
-checking. Its body slice checks a
-nongeneric body whose complete shape is zero or more annotated let/var
-bindings and plain-identifier assignments followed by one top-level return: a
+checking. Its body slice checks concrete function instances compositionally
+across lexical blocks, assignments, `if`/`else`, `while`, and slice `for`: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
 fit the declared integer type, and a string literal requires `String` or
-its `[U8]` semantic form. Binding order mirrors the Go checker: reserved
+its `[U8]` semantic form. Binding initializers, assignment right-hand sides,
+and returns recursively check unary `-`/`!`, checked integer arithmetic and
+shifts, integer/float comparison and equality, and short-circuit Bool operators
+with the Go Stage 0 operand rules. Binding order mirrors the Go checker: reserved
 names, annotation resolution, initializer mismatch, Unit/DomainMark
-rejection, then duplicates; parameters are immutable assignment targets.
+rejection, then duplicates; parameters are immutable direct assignment targets,
+while immutable slice bindings retain reference-style indexed mutation. Block,
+branch, loop, and `for` bindings do not escape. Assignment roots use stable local
+IDs, fields use declaration ordinals after concrete generic substitution, and
+indices require `U64` and the existing copy-trivial element restriction.
 Integer bounds compare canonical decimal
 digit text against per-type bounds, preserving every `U64` value and the `I64`
 minimum rather than inheriting Stage 0's signed host-storage limit. Stable
-tagged expression, local-binding, and return records retain parameter, local,
-Bool-payload, and result-use relationships;
-unsupported body shapes and expression forms outside this slice remain
-deferred, and a deferred body discards its partial records. These checks
-are preparatory: general body checking, other literals, locals, calls, control
-flow, missing-return analysis, inference, monomorphization, MIR lowering, the
-full checker, and the complete frontend remain incomplete. Its
-current reverse-link and declaration-phase replay are recursive and are not yet
-an arbitrary-size stack contract. The token, parser, and checker manifests are
-private conformance protocols; these slices do not open a second frontend,
-replace the M5.3 declaration spike yet, constitute a complete
-frontend, or satisfy any self-hosting claim. Grouping nodes follow the Go
-semantic AST and are erased; the lossless token stream retains their delimiters.
+postorder tagged-expression, local-binding, return, lexical-block, ordered-
+statement, and assignment-place records retain parameter, local, Bool-payload,
+child, operator, statement-site, scope, concrete type, and result-use relationships.
+Unannotated bindings infer scalar types from supported literals, identifiers,
+and unary/binary expressions. Checked types are canonical structure-deduplicated
+DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
+spellings live on annotations. Stable parameter/local binding IDs, persistent
+environment chains, and flattened ordered expression-child ranges establish the
+body model. Direct user calls now support all-or-none explicit type arguments,
+structural inference from runtime arguments and expected results, generic record
+construction, expected generic enum variants, and declared-enum unary-payload
+inference. Concrete function instances are keyed by declaration ID plus ordered
+canonical type IDs, registered before body checking, and processed in stable
+first-discovery FIFO order. Calls share instances, same-instance and finite
+concrete mutual recursion close normally, and active specialization-expanding
+polymorphic recursion is rejected. Instance signatures, bodies, expression
+types, aggregate applications, and user-call targets are concrete; stable
+private-manifest instance IDs expose that backend-facing boundary. Concrete C
+imports inside `unsafe c` retain their prior contract. Record children use
+declaration-field order. Issue #7 adds callback `using` resolution,
+exact concrete callback signatures, lexical bindings, nested cleanup scopes,
+and lowering-facing normal/return/`try` exit facts without MIR CFG IDs. `using`
+under a loop is rejected while loops nested beneath an active cleanup remain
+valid. Non-`Unit` paths must return, loops conservatively fall
+through, both `if` branches must return to guarantee return, and unreachable
+statements are rejected before checking their contents. Issue #8 seals this S0
+boundary: every concrete owner has one root block (including empty `Unit`
+bodies), unsupported body syntax is one deterministic source failure rather
+than silent record discard, and private manifest v14 carries canonical syntax
+spans plus stable diagnostic codes, related ranges, and notes. Issues #9 and
+#10 add the first Alder-owned lowering package over that sealed boundary. It
+consumes only canonical concrete records plus Z spans and source bytes, rejects
+malformed ownership and edges before output, and emits exact MIR for the
+current scalar/call/aggregate/place slice and structured
+`if`/loop/short-circuit/`match`/typed-`try` CFG. Active `using` cleanups are
+selected from lexical environment chains and emitted in reverse order on scope
+fallthrough, return, and failed `try`. Issue #11 adds the manifest-v14
+bridge-to-MIR slice: domain create/mark/reset/destroy and allocation, active
+lexical cleanup exactly once in reverse order, fixed 16-slot `Map` structural
+hash/equality and probe helpers, private buffers with recoverable OOM retry,
+and the required FFI bridge forms. Its MIR is independently parsed and
+verifier-gated in the fixed shared-core harness. Issue #21 wires the production
+entry from successful checking through canonical checked spans and unchanged
+lowering into the complete V1–V10 verifier; only its complete result authorizes
+textual MIR output. Issue #24 supplies the complete-verifier and preflight-gated
+resource C backend slice. Later Alder 1.0 forms and language facilities remain
+incomplete. Some reverse-link and declaration-phase traversals are recursive
+and are not an arbitrary-size stack contract. The token, parser, and checker
+manifests are private conformance protocols. The fixed production entry loads
+its explicit host snapshot and runs the shared lexer, parser, and checker in
+order.
+Issue #25 replaces production private-manifest output with the shared
+explicit-source `check`/`compile --emit=mir|c` contract, stable human/version-1
+JSON diagnostics, faithful status classes, and atomic host output replacement.
+Successful checking lowers directly to MIR 3 and emits the requested artifact
+only after complete verification; malformed checked/lowered state, verifier
+rejection, and C preflight rejection produce no artifact bytes. This S0
+implementation does not open a second frontend or constitute the complete
+Alder 1.0 frontend. Grouping nodes follow the Go semantic AST and are erased;
+the lossless token stream retains their delimiters.
+
+The independent MIR model pins its MIR 3 numeric, 1-based ID, flattened
+ownership, ordinal, reciprocal-link, named-type-part, and import-signature
+encoding contract with an Alder-generated conformance manifest and malformed
+raw-record fixtures. An Alder textual printer now validates that independent
+store before emitting canonical, source-independent MIR 3 bytes; malformed
+stores are rejected without partial output. The sealed S0 lowering slice covers
+the current resource/domain operations and is wired into the production
+pipeline. Checker, textual-printer, and verifier V1–V10 conformance share one
+fixed source closure and executable while retaining independent mode assertions;
+the complete production root remains an independent end-to-end gate.
 
 Port lexing, parsing, checking, inference, monomorphization, MIR construction,
 all ten verifier phases, diagnostics, and C11 generation to Alder. The Go
@@ -396,7 +460,64 @@ compiler (`alder0`) produces C for the Alder compiler; a system C compiler
 builds `alder1`. `alder1` must compile the shared corpus without Go in `PATH`
 and without skipping or repairing MIR verification.
 
+The independent Alder MIR consumer now provides all ten verifier phases for raw
+MIR stores: integrity and reciprocal-ID checks, type/layout/declaration checks,
+CFG target, switch, reachability, and edge-arity checks, plus point-level
+dominance, checked-failure-edge availability, use-def, and definite local
+initialization, followed by complete current-opcode operand, result, place,
+projection, edge, call/import-call, aggregate, enum, checked-failure, and
+terminator typing. Phase 6 adds domain identity and strict ancestry, allocation
+provenance, path-sensitive reset/destroy state, interprocedural lifetime
+effects, loop-carried resource rules, and safe-reference escape/use and
+dereference-store rejection. Its stable numeric diagnostics are separate from
+source diagnostics, and orchestration stops after the first failing phase.
+Phase 7 adds path-sensitive cleanup scope and registration-stack identity,
+checked-failure and multiexit handling, exactly-once execution, and repeatable
+per-iteration lifecycles. Its path-specific active registration sets feed Phase
+6 callback-argument validation, LIFO resource effects, and whole-module
+function-effect summaries. Phase 8 validates table identity, lookup consumption,
+view regions, aliasing, and mutation effects using those provenance and cleanup
+facts. Phase 9 confines recursively raw-pointer-bearing values to explicit
+unsafe FFI and function boundaries. Phase 10 validates conservative C11 element
+types and external names. `mir_verify_complete` adds the hosted `main` contract
+and returns the sole positive complete-verifier gate. The production source-to-
+MIR path now consumes that complete result as its only output authorization;
+the raw verified-MIR scalar/CFG generator is described below.
+
+The independent Alder C-backend lane consumes those flat MIR 3 records
+directly. Its retained declaration conformance API emits portable headers,
+dependency-first type layouts, stable numeric names, constants, C import
+prototypes, internal declarations, and the temporary hosted adapter. The
+production-shaped `cgen_generate` entry additionally emits the complete M5.4
+scalar/CFG body slice: ordered scalar and checked operations, places and
+assignments, aggregates and enum-like values, direct and unsafe-import calls,
+parallel-copy block edges, branches, loops, switches, and typed return/fail
+control flow. Hand-built MIR fixtures pin a runtime backedge swap cycle,
+checked failure, struct/enum/option/result and concrete-generic behavior, FFI,
+strict C11, process determinism, no nested C evaluation-order shortcut, and
+zero-output refusal. Both APIs call `mir_verify_complete` before allocating an
+output buffer and consume the verifier-returned hosted mode and external entry
+ID. Invalid or unsupported MIR is refused without repair. The current #24
+domain/cleanup/table/buffer operation set is supported and the final driver
+wires the verified production source slice to this C path.
+
 This gate may claim only **self-hosting-capable**, not repeatable self-hosting.
+
+Exit-criteria evidence on the fixed 28-file source root:
+
+- `alder0` emits the compiler C and GCC links `alder1`; the ordinary production
+  and S0 conformance suites run that executable with Go absent from `PATH`;
+- the internal mutable buffer-slot operation supports deterministic dense
+  compiler indexes without changing emitted semantic table identities;
+- checker and verifier indexes remove the compiler-scale repeated-scan and
+  Phase 6 dataflow nontermination blockers while preserving first-record
+  lookup semantics, stable diagnostics, and table-order output;
+- a native `alder1 check` of all 28 sources completes in 168.55 seconds on the
+  measured Linux/GCC host, and `alder1` emits the next compiler C in 182.68
+  seconds, with approximately 2.5 GiB peak memory;
+- `ALDER_BOOTSTRAP_SELFCOMPILE=1 go test ./compiler -run
+  '^TestAlder1CompilesCompilerSource$' -count=1` passes the complete source,
+  verification, C generation, native build, and next-stage execution path.
 
 #### Bootstrap execution policy
 
@@ -412,7 +533,7 @@ semantic correctness counterexample to be declared complete.
 
 ### Milestone 5.5: Fixed Point and Source Bootstrap
 
-Status: **planned**
+Status: **complete**
 
 Run `alder1 -> C2 -> alder2 -> C3` and require `C2 == C3` byte-for-byte. Commit
 an auditable `bootstrap/alder.c`, compiler-source manifest and digests, runtime,
@@ -424,6 +545,45 @@ Only after this gate is the Go bootstrap compiler frozen except for correctness
 and bootstrap maintenance. This is a reproducible **source** bootstrap claim;
 bit-identical native binaries require a separately pinned native toolchain.
 
+Exit-criteria evidence:
+
+- `alder1 -> C2 -> alder2 -> C3` completes for the current 29-source compiler
+  root, and `C2` and `C3` are byte-identical with SHA-256
+  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`;
+- `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
+  ordinary compiler test;
+- `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
+  digests, while `bootstrap/compiler-sources.order` records the exact source
+  order without directory discovery; ordinary tests validate both contracts;
+- `bootstrap/regenerate.sh` verifies the inventory, builds the committed C
+  compiler with the runtime and host shim, regenerates the C from the explicit
+  source order, and requires byte-identical output;
+- the regeneration harness runs from a clean source archive with a system C11
+  compiler and common POSIX-host utilities, without Go in the build path,
+  network access, or a prior Alder installation.
+
+#### Go bootstrap retention and retirement policy
+
+The Go implementation remains in the main tree through Milestone 11 as a
+bootstrap-maintenance path, independent MIR/verifier/C-generation oracle, and
+test harness. Milestones 6–11 implement new source-language and tooling
+features only in the Alder-written compiler; they must not grow a parallel Go
+frontend. Go changes during this period are limited to correctness fixes,
+fixed-point/bootstrap maintenance, keeping independent oracles compatible with
+versioned compiler boundaries, and migrating existing tests to non-Go
+infrastructure.
+
+Go retirement begins only after the Milestone 11 `alder test` gate passes and a
+non-Go harness continuously covers the existing acceptance/rejection and golden
+fixtures, source-to-C execution, malformed MIR verification, C backend/runtime
+behavior, strict C11 and sanitizer checks, host/inventory failure paths,
+cross-process and source-order determinism, and C2/C3 fixed-point comparison.
+Before the first deletion, preserve the final Go bootstrap on an archival
+branch or tag. Remove Go packages incrementally only after equivalent non-Go
+coverage is active; remove `go.mod`, Go lifecycle setup, and the last Go source
+only when a clean archive can build, regenerate, and run the complete test
+matrix with no Go executable available.
+
 ## Alder 1.0 Implementation Gates
 
 M5.5 produces a trustworthy compiler bootstrap, not the full language. Every
@@ -433,7 +593,7 @@ only through the documented design-decision process.
 
 ## Milestone 6: Local Modules and Deterministic Build Graph
 
-Status: **planned after self-hosting**
+Status: **complete**
 
 Implement the one-file/one-module mapping, required `module`, explicit imports,
 private-by-default visibility, `pub`/re-export, cycle rejection, manifest v1,
@@ -447,6 +607,30 @@ Exit requires local multi-module `check`, `build`, `run`, and test-plan
 construction without network access; path/order permutations must produce
 identical graphs, diagnostics, MIR, and C. The compiler core still receives only
 explicit sources and never scans the filesystem.
+
+Exit-criteria evidence:
+
+- the Alder-written compiler owns manifest parsing, exact-import module-closure
+  construction, visibility and import resolution, stable module-qualified
+  lowering, and versioned build-plan construction; the C host performs only
+  requested local I/O, atomic output replacement, native tool invocation, and
+  direct process execution;
+- project-mode acceptance and rejection tests cover canonical module paths,
+  namespace and selected imports, aliases, selected re-exports,
+  private-by-default visibility, public-signature leakage, duplicate and
+  missing modules, cycles, collisions, and isolation from unimported files;
+- production-driver tests exercise local `check`, `build`, `run`, JSON check and
+  test-plan output, binary and library targets, debug/release selection, host
+  triple validation, canonical output paths, argument/status forwarding, and
+  failed-build preservation of prior artifacts;
+- repeated fresh processes, workspace-root changes, and source-order
+  permutations produce identical build plans, diagnostics, MIR, and generated
+  C; snapshots enumerate only exact requested paths and are sorted before the
+  compiler consumes them;
+- `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
+  Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 29-source
+  compiler root. The committed fixed-point C has SHA-256
+  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`.
 
 ## Milestone 7: Complete 1.0 Language and Memory Model
 
