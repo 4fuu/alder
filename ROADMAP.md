@@ -632,30 +632,52 @@ Exit-criteria evidence:
   compiler root. The committed fixed-point C has SHA-256
   `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`.
 
-## Milestone 7: Complete 1.0 Language and Memory Model
+## Milestone 7: Core Values, Views, and Inferred Storage
 
 Status: **planned after local modules; may be sliced in dependency order**
 
-Implement the remaining source semantics in [Syntax](docs/syntax.md),
-[Language Semantics](docs/language-semantics.md),
-[Memory and Resources](docs/memory-and-resources.md), and
-[Traits and Closures](docs/traits-and-closures.md): owned UTF-8 `String` and
-`Bytes`, fixed arrays, ordinary `Vec`/ordered `Map`/`Set`, mutable slices,
-inherent methods, static coherent traits, safe closures, inferred storage,
-affine owners, `Cleanup`/`AsyncCleanup`, and the source `Table(T)`/`T.Id`
-surface.
+Implement the foundational source semantics from [Syntax](docs/syntax.md),
+[Language Semantics](docs/language-semantics.md), and
+[Memory and Resources](docs/memory-and-resources.md): copyable, affine, and
+scoped-capability type categories; owner borrowing and transfer; inherent
+methods; owned UTF-8 `String` and arbitrary `Bytes`; fixed arrays; ordinary
+`Vec`; immutable and mutable slices; and inferred hierarchical storage with a
+safe outer-domain retention fallback.
 
 Exit requires focused acceptance/rejection tests for value independence,
-owner transfer, view escape/overlap, storage retention fallback, cross-domain
-copies, cleanup on every normal control exit, table staleness, trait coherence,
-closure capture, generic monomorphization, and compiler-scale layered DAGs. The
-public language and generated MIR/C may no longer expose `__s0_*`, `Domain`,
-`DomainMark`, fixed S0 Map/Buffer, `String = [U8]`, or callback-bearing bootstrap
-cleanup forms.
+owner transfer and illegal drop/overwrite, mutable and immutable view
+escape/overlap/invalidation, storage retention fallback, cross-domain copies,
+collection growth and mutation independence, and generic monomorphization.
+Generated MIR/C must preserve deterministic evaluation and value behavior, and
+the public language may no longer expose `String = [U8]` or explicit bootstrap
+storage as the way to construct ordinary values.
+
+## Milestone 7.5: Static Abstraction, Resources, and Identity
+
+Status: **planned after core values, views, and inferred storage**
+
+Complete the remaining 1.0 language and memory model from
+[Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md),
+[Memory and Resources](docs/memory-and-resources.md), and
+[Traits and Closures](docs/traits-and-closures.md): static coherent traits and
+constraints, safe closures and function values, ordered `Map`/`Set`, affine
+resource composition, compiler-recognized `Cleanup`/`AsyncCleanup`, and the
+source `Table(T)`/`T.Id` surface. `AsyncCleanup` receives its complete suspended
+execution and cancellation behavior with the async runtime in Milestone 9;
+this milestone establishes its type, affinity, and scope rules without
+introducing async execution early.
+
+Exit requires focused acceptance/rejection tests for trait coherence and
+static dispatch, closure capture and escape, deterministic ordered
+collections, cleanup on every normal synchronous control exit, table
+staleness and overlapping access, resource composition, generic
+monomorphization, and compiler-scale layered DAGs. The public language and
+generated MIR/C may no longer expose `__s0_*`, `Domain`, `DomainMark`, fixed S0
+Map/Buffer, or callback-bearing bootstrap cleanup forms.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **planned after the 1.0 resource/type model**
+Status: **planned after Milestone 7.5 completes the 1.0 resource/type model**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
