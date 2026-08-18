@@ -40,6 +40,9 @@ fn keyword_id(state: State, source: SourceRec, start: U64, end: U64) -> U64 {
     if source_word(state, source, start, end, "true") { return 17 }
     if source_word(state, source, start, end, "false") { return 18 }
     if source_word(state, source, start, end, "unsafe") { return 19 }
+    if source_word(state, source, start, end, "module") { return 20 }
+    if source_word(state, source, start, end, "pub") { return 21 }
+    if source_word(state, source, start, end, "as") { return 22 }
     return 0
 }
 

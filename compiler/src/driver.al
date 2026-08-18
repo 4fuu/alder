@@ -291,6 +291,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 85 { if !out_string("cleanup function parameter: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
         return driver_out_diagnostic_type(detail_c, detail_d) }
     if kind == 87 { return out_string("source form is outside the supported S0 contract") }
+    if kind == 88 { return out_string("public declaration signature exposes a private type") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }
@@ -356,6 +357,8 @@ fn driver_failure(status: U64, kind: String, message: String) -> I32 {
     } else {
         if !driver_select(1) || !out_string("alder: ") || !out_string(message) || !out(10) { return 3 }
     }
+    if status == 1 { return 1 }
+    if status == 2 { return 2 }
     if status == 3 { return 3 }
     return 4
 }

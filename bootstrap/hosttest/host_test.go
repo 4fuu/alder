@@ -57,6 +57,69 @@ int32_t alder_program_entry(void *host_context) {
 }
 `
 
+const projectStubEntry = `#include "alder_host.h"
+#include <stdint.h>
+#include <stdio.h>
+
+static uint64_t request(const char *path) {
+    size_t at;
+    if (!alderhost_source_request_reset()) { return UINT64_C(0); }
+    for (at = 0; path[at] != '\0'; at++) {
+        if (!alderhost_source_request_byte((uint8_t)(unsigned char)path[at])) { return UINT64_C(0); }
+    }
+    return alderhost_source_request_finish();
+}
+
+int32_t alder_program_entry(void *host_context) {
+    uint64_t first;
+    FILE *file;
+    (void)host_context;
+    if (!alderhost_project_mode() || alderhost_project_action() != UINT64_C(1) ||
+        alderhost_manifest_len() != UINT64_C(9) || alderhost_manifest_byte(UINT64_C(0)) != (uint8_t)'[' ||
+        alderhost_source_count() != UINT64_C(0)) { return (int32_t)4; }
+    first = request("src/main.al");
+    if (first != UINT64_C(1) || alderhost_source_count() != UINT64_C(1) ||
+        alderhost_source_text_byte(UINT64_C(0), UINT64_C(0)) != (uint8_t)'A') { return (int32_t)4; }
+    file = fopen("src/main.al", "wb");
+    if (file == NULL || fputc('B', file) == EOF || fclose(file) != 0) { return (int32_t)3; }
+    if (request("src/main.al") != first || alderhost_source_text_byte(UINT64_C(0), UINT64_C(0)) != (uint8_t)'A') { return (int32_t)4; }
+    if (request("/x.al") != UINT64_C(0) || request("a//b.al") != UINT64_C(0) ||
+        request("a/./b.al") != UINT64_C(0) || request("a/../b.al") != UINT64_C(0) ||
+        request("a\\b.al") != UINT64_C(0) || request("x.AL") != UINT64_C(0)) { return (int32_t)4; }
+    return (int32_t)0;
+}
+`
+
+const projectBuildStubEntry = `#include "alder_host.h"
+#include <stddef.h>
+#include <stdint.h>
+
+static bool path(uint64_t kind, const char *text) {
+    size_t at;
+    if (!alderhost_project_output_reset(kind)) { return false; }
+    for (at = 0; text[at] != '\0'; at++) {
+        if (!alderhost_project_output_byte((uint8_t)(unsigned char)text[at])) { return false; }
+    }
+    return alderhost_project_output_finish();
+}
+
+int32_t alder_program_entry(void *host_context) {
+    const char generated[] = "#include \"alder_host.h\"\n#include <stdint.h>\n#include <stdio.h>\nint32_t alder_program_entry(void *p){(void)p;puts(\"program output\");return 7;}\n";
+    size_t at;
+    (void)host_context;
+    if (alderhost_project_action() != UINT64_C(2) && alderhost_project_action() != UINT64_C(3)) {
+        return alderhost_project_output_reset(UINT64_C(1)) ? (int32_t)4 : (int32_t)0;
+    }
+    if (!path(UINT64_C(1), "build/native/dev/demo/generated.c") ||
+        !path(UINT64_C(2), "build/native/dev/demo/demo") ||
+        !alderhost_output_mode(UINT64_C(2))) { return (int32_t)4; }
+    for (at = 0; at < sizeof(generated) - (size_t)1; at++) {
+        if (!alderhost_stdout_byte((uint8_t)(unsigned char)generated[at])) { return (int32_t)3; }
+    }
+    return (int32_t)0;
+}
+`
+
 type result struct {
 	status int
 	stdout string
@@ -64,6 +127,10 @@ type result struct {
 }
 
 func compileHost(t *testing.T) string {
+	return compileHostWithStub(t, stubEntry)
+}
+
+func compileHostWithStub(t *testing.T, entry string) string {
 	t.Helper()
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
@@ -75,7 +142,7 @@ func compileHost(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	if err := os.WriteFile(stub, []byte(stubEntry), 0o644); err != nil {
+	if err := os.WriteFile(stub, []byte(entry), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	args := []string{
@@ -86,6 +153,88 @@ func compileHost(t *testing.T) string {
 		t.Fatalf("strict host compile: %v\n%s", err, output)
 	}
 	return exe
+}
+
+func compileNativeHost(t *testing.T) string {
+	t.Helper()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "stub.c")
+	exe := filepath.Join(dir, "alder1")
+	if err := os.WriteFile(stub, []byte(projectBuildStubEntry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+		"-I", filepath.Join(repo, "bootstrap"),
+		`-DALDER_HOST_CC="` + cc + `"`,
+		`-DALDER_HOST_RUNTIME_C="` + filepath.Join(repo, "runtime", "c", "alder.c") + `"`,
+		`-DALDER_HOST_INCLUDE_DIR="` + filepath.Join(repo, "bootstrap") + `"`,
+		stub, filepath.Join(repo, "bootstrap", "alder_host.c"), "-o", exe}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict native host compile: %v\n%s", err, output)
+	}
+	return exe
+}
+
+func TestProjectBuildRunAndActionGating(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test fixture path quoting is POSIX-only")
+	}
+	exe := compileNativeHost(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "alder.toml"), []byte("[package]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, exe, dir, "check"); got != (result{}) {
+		t.Fatalf("check invoked toolchain ABI: %+v", got)
+	}
+	if got := run(t, exe, dir, "test-plan", "--format=json"); got != (result{}) {
+		t.Fatalf("test-plan invoked toolchain ABI or mixed JSON: %+v", got)
+	}
+	jsonBuild := run(t, exe, dir, "build", "--format=json")
+	if jsonBuild.status != 2 || jsonBuild.stderr != "" ||
+		!strings.Contains(jsonBuild.stdout, `"success":false`) {
+		t.Fatalf("JSON build rejection: %+v", jsonBuild)
+	}
+	if got := run(t, exe, dir, "build"); got != (result{}) {
+		t.Fatalf("build: %+v", got)
+	}
+	generated := filepath.Join(dir, "build", "native", "dev", "demo", "generated.c")
+	binary := filepath.Join(dir, "build", "native", "dev", "demo", "demo")
+	if _, err := os.Stat(generated); err != nil {
+		t.Fatalf("generated C not retained: %v", err)
+	}
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("binary not retained: %v", err)
+	}
+	got := run(t, exe, dir, "run")
+	if got.status != 7 || got.stdout != "program output\n" || got.stderr != "" {
+		t.Fatalf("run propagation: %+v", got)
+	}
+}
+
+func TestProjectManifestAndExactSourceRequests(t *testing.T) {
+	exe := compileHostWithStub(t, projectStubEntry)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "alder.toml"), []byte("[package]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source(t, filepath.Join(dir, "src"), "main.al", "A")
+	source(t, filepath.Join(dir, "src"), "unrequested.al", "must not be read")
+	got := run(t, exe, dir, "check")
+	if got != (result{}) {
+		t.Fatalf("project check: %+v", got)
+	}
 }
 
 func run(t *testing.T, exe, dir string, args ...string) result {

@@ -248,7 +248,7 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         if symbol.kind != 2 && symbol.kind != 3 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let base = try lower_source_word(d, source_state, symbol.source, symbol.name_start, symbol.name_end)
         var name = base
-        if checked.arg_count != 0 { name = try lower_decimal_name(d, base, checked_type) }
+        if symbol.module_source != 0 || checked.arg_count != 0 { name = try lower_decimal_name(d, base, checked_type) }
         var kind = mir_type_kind_aggregate()
         if symbol.kind == 3 { kind = mir_type_kind_enum() }
         let built = try mir_add_named_type(d, state.mir, kind, name)
@@ -640,7 +640,12 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             current = result_type.state
             let base = try lower_source_word(d, source_state, symbol.source, symbol.name_start, symbol.name_end)
             var name = base
-            if symbol.kind == 13 { name = try lower_decimal_name(d, base, owner) }
+            var entry = false
+            if symbol.module_source != 0 && symbol.source + 1 == host_project_entry_source() {
+                let rec = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
+                entry = source_word(source_state, rec, symbol.name_start, symbol.name_end, "main")
+            }
+            if symbol.kind == 13 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
             let owners = try __s0_buffer_append(LowerOwnerMapRec, d, current.owners, LowerOwnerMapRec(owner: owner, mir_id: function.id))

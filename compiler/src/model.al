@@ -7,7 +7,8 @@ type SourceRec {
 
 // Token kinds mirror the Go Stage 0 lexer: 0 EOF, 1 identifier/keyword,
 // 2 integer, 3 float, 4 decoded string, and 5 punctuation. Keyword IDs are the
-// declaration-order IDs 1..19 in frontend/lexer.go; zero means not a keyword.
+// IDs 1..19 retain the frozen Go Stage 0 order. Alder-owned M6 keywords use
+// 20 `module`, 21 `pub`, and 22 `as`; zero means not a keyword.
 type TokenRec {
     source: U64
     kind: U64
@@ -40,7 +41,12 @@ type LexDiagRec {
 // statement, 20 integer, 21 float, 22 string, 23 bool, 24 identifier,
 // 25 unary, 26 binary, 27 call, 28 named argument, 29 field, 30 index, and
 // 31 try, 32 if, 33 while, 34 for, 35 using, 36 unsafe-c, 37 match,
-// 38 match arm, and 39 match binding. Function children are parameters, result,
+// 38 match arm, 39 match binding, 40 module declaration, 41 module import,
+// 42 public module import, 43 selected import name, 44 import alias,
+// 45 public declaration wrapper, and 46 module path. Module/import names retain their complete
+// dotted path span. Import children are selected names or one alias; a public
+// declaration wrapper has its declaration as its sole child.
+// Function children are parameters, result,
 // then body; binding children are optional type then initializer; assignment
 // children are target then value. If children are condition, then block, then
 // optional else block; while children are condition then body; for children are
@@ -112,6 +118,10 @@ type SymbolRec {
     first_instance_arg: U64
     instance_arg_count: U64
     discovery_parent: U64
+    // M6 module ownership and visibility. module_source is zero in the legacy
+    // explicit-source mode and source+1 for declarations in a module file.
+    module_source: U64
+    public: Bool
 }
 
 type TypeParamRec {

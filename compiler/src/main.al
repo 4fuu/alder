@@ -36,7 +36,7 @@ fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I
 
 fn run_verify(d: Domain, mir: MirStore) -> I32 {
     var hosted = false
-    if driver_command() == 3 { hosted = true }
+    if driver_command() == 3 && (!project_mode() || project_binary()) { hosted = true }
     return match mir_verify_complete(d, mir, 3, hosted) {
         Err(error) => storage_error()
         Ok(result) => finish_verify(d, mir, result)
@@ -293,9 +293,14 @@ fn init_texts(d: Domain, paths: __s0_Buffer(U8)) -> I32 {
     }
 }
 
-fn main(d: Domain) -> I32 {
+fn project_compile_prepared(d: Domain) -> I32 {
     return match __s0_buffer_new(U8, d) {
         Err(error) => storage_error()
         Ok(paths) => init_texts(d, paths)
     }
+}
+
+fn main(d: Domain) -> I32 {
+    if project_mode() { return project_prepare(d) }
+    return project_compile_prepared(d)
 }

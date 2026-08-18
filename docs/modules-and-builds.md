@@ -2,7 +2,15 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Not implemented; S0 accepts one explicit global source set**
+Availability: **Milestone 6 local modules and deterministic local builds are implemented; package fetching, native providers, and later 1.0 tooling remain gated**
+
+The implemented Milestone 6 slice covers one local package, `bin` and `lib`
+targets, `debug` and `release` profiles, the current host triple, exact-import
+source closure, and project `check`, `build`, `run`, and versioned `test-plan`
+construction. It deliberately rejects workspace/dependency/lockfile and native
+provider sections, custom profiles, cross compilation, and later CLI surfaces;
+those remain owned by Milestones 7–13. Explicit `.al` arguments retain the S0
+global-source compatibility mode.
 
 This document defines one deterministic project model from source import to
 native link. Language modules, Alder packages, and native C/C++ providers are

@@ -547,9 +547,9 @@ bit-identical native binaries require a separately pinned native toolchain.
 
 Exit-criteria evidence:
 
-- `alder1 -> C2 -> alder2 -> C3` completes for the fixed 28-source compiler
+- `alder1 -> C2 -> alder2 -> C3` completes for the current 29-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `074f6a96f80e935dc033f9bc883fb987d49a87bf87cdda3b0af6c37a91f78ea6`;
+  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -593,7 +593,7 @@ only through the documented design-decision process.
 
 ## Milestone 6: Local Modules and Deterministic Build Graph
 
-Status: **planned after self-hosting**
+Status: **complete**
 
 Implement the one-file/one-module mapping, required `module`, explicit imports,
 private-by-default visibility, `pub`/re-export, cycle rejection, manifest v1,
@@ -607,6 +607,30 @@ Exit requires local multi-module `check`, `build`, `run`, and test-plan
 construction without network access; path/order permutations must produce
 identical graphs, diagnostics, MIR, and C. The compiler core still receives only
 explicit sources and never scans the filesystem.
+
+Exit-criteria evidence:
+
+- the Alder-written compiler owns manifest parsing, exact-import module-closure
+  construction, visibility and import resolution, stable module-qualified
+  lowering, and versioned build-plan construction; the C host performs only
+  requested local I/O, atomic output replacement, native tool invocation, and
+  direct process execution;
+- project-mode acceptance and rejection tests cover canonical module paths,
+  namespace and selected imports, aliases, selected re-exports,
+  private-by-default visibility, public-signature leakage, duplicate and
+  missing modules, cycles, collisions, and isolation from unimported files;
+- production-driver tests exercise local `check`, `build`, `run`, JSON check and
+  test-plan output, binary and library targets, debug/release selection, host
+  triple validation, canonical output paths, argument/status forwarding, and
+  failed-build preservation of prior artifacts;
+- repeated fresh processes, workspace-root changes, and source-order
+  permutations produce identical build plans, diagnostics, MIR, and generated
+  C; snapshots enumerate only exact requested paths and are sorted before the
+  compiler consumes them;
+- `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
+  Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 29-source
+  compiler root. The committed fixed-point C has SHA-256
+  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`.
 
 ## Milestone 7: Complete 1.0 Language and Memory Model
 

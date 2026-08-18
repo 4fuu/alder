@@ -15,6 +15,7 @@ compiler/src/mir_print.al
 compiler/src/model.al
 compiler/src/output.al
 compiler/src/parser.al
+compiler/src/project.al
 compiler/src/verify_analysis.al
 compiler/src/verify_model.al
 compiler/src/verify_phase1.al

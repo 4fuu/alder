@@ -828,15 +828,51 @@ fn symbol_arity(parse: ParseStore, node: SyntaxRec) -> U64 {
 }
 
 fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
+    let imports = try validate_import_bindings(d, state, parse, initial)
+    if match imports {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(imports) }
     var store = initial
     var root_at: U64 = 0
     while root_at < __s0_buffer_len(U64, parse.roots) {
-        let node_id = __s0_buffer_get(U64, parse.roots, root_at)
-        let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+        var node_id = __s0_buffer_get(U64, parse.roots, root_at)
+        var node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+        if node.kind == 40 || node.kind == 41 || node.kind == 42 {
+            root_at = root_at + 1
+        } else {
+        if node.kind == 45 {
+            let declaration = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+            node_id = declaration.node
+            node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+        }
+        var module_source: U64 = 0
+        var public = false
+        var scan: U64 = 0
+        while scan < __s0_buffer_len(U64, parse.roots) {
+            let root_id = __s0_buffer_get(U64, parse.roots, scan)
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+            if root.source == node.source && root.kind == 40 { module_source = node.source + 1 }
+            if root.source == node.source && root.kind == 45 {
+                let wrapped = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
+                if wrapped.node == node_id { public = true }
+            }
+            if root.source == node.source && (root.kind == 41 || root.kind == 42) {
+                var binding_at: U64 = 0
+                while binding_at < import_binding_count(parse, root) {
+                    let imported_node = import_binding_at(state, parse, root, binding_at)
+                    if same_name(state, node.source, node.name_start, node.name_end, imported_node.source, imported_node.name_start, imported_node.name_end) {
+                        return check_token_related_fail(d, state, store, 1, node, imported_node)
+                    }
+                    binding_at = binding_at + 1
+                }
+            }
+            scan = scan + 1
+        }
         var previous: U64 = 0
         while previous < __s0_buffer_len(SymbolRec, store.symbols) {
             let first = __s0_buffer_get(SymbolRec, store.symbols, previous)
-            if same_name(state, node.source, node.name_start, node.name_end, first.source, first.name_start, first.name_end) {
+            if same_name(state, node.source, node.name_start, node.name_end, first.source, first.name_start, first.name_end) && (module_source == 0 || first.module_source == module_source) {
                 let related = __s0_buffer_get(SyntaxRec, parse.nodes, first.node - 1)
                 return check_token_related_fail(d, state, store, 1, node, related)
             }
@@ -846,12 +882,13 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         let symbol_id = __s0_buffer_len(SymbolRec, store.symbols) + 1
         var declaration: U64 = 0
         if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
-        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0)
+        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, module_source: module_source, public: public)
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
         store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
         root_at = root_at + 1
+        }
     }
-    return Ok(CheckGood(store))
+    return validate_import_targets(d, state, parse, store)
 }
 
 fn append_type_param(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
@@ -894,14 +931,72 @@ fn find_type_param(state: State, store: CheckStore, owner: U64, node: SyntaxRec)
     return 0
 }
 
-fn find_declared_type(state: State, store: CheckStore, node: SyntaxRec) -> U64 {
+fn find_declared_type(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
+    let resolved = symbol_named(state, parse, store, node)
+    if resolved != 0 {
+        let found = __s0_buffer_get(SymbolRec, store.symbols, resolved - 1)
+        if found.kind == 2 || found.kind == 3 { return resolved }
+    }
+    return 0
+}
+
+fn module_source_named(state: State, parse: ParseStore, source: U64, start: U64, end: U64) -> U64 {
     var at: U64 = 0
-    while at < __s0_buffer_len(SymbolRec, store.symbols) {
-        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if (symbol.kind == 2 || symbol.kind == 3) && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) { return at + 1 }
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, at) - 1)
+        if root.kind == 40 && same_name(state, source, start, end, root.source, root.name_start, root.name_end) { return root.source + 1 }
         at = at + 1
     }
     return 0
+}
+
+fn exported_symbol_named(state: State, parse: ParseStore, store: CheckStore, module_source: U64, source: U64, start: U64, end: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.module_source == module_source && symbol.public && same_name(state, source, start, end, symbol.source, symbol.name_start, symbol.name_end) { return at + 1 }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, at) - 1)
+        if root.kind == 42 && root.source + 1 == module_source {
+            var link = root.children
+            while link != 0 {
+                let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+                let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+                if child.kind == 43 && same_name(state, source, start, end, child.source, child.name_start, child.name_end) {
+                    let target = module_source_named(state, parse, root.source, root.name_start, root.name_end)
+                    if target != 0 { return exported_symbol_named(state, parse, store, target, source, start, end) }
+                }
+                link = item.next
+            }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn validate_import_targets(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, at) - 1)
+        if root.kind == 41 || root.kind == 42 {
+            if root.kind == 42 && !import_has_selected(parse, root) { return check_fail(d, store, 87, root, 0, 0, 0) }
+            let target = module_source_named(state, parse, root.source, root.name_start, root.name_end)
+            if target == 0 { return check_fail(d, store, 40, root, 0, 0, 0) }
+            if import_has_selected(parse, root) {
+                var binding_at: U64 = 0
+                while binding_at < import_binding_count(parse, root) {
+                    let binding = import_binding_at(state, parse, root, binding_at)
+                    if exported_symbol_named(state, parse, store, target, binding.source, binding.name_start, binding.name_end) == 0 { return check_fail(d, store, 40, binding, 0, 0, 0) }
+                    binding_at = binding_at + 1
+                }
+            }
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
 }
 
 fn builtin_type_kind(state: State, node: SyntaxRec) -> U64 {
@@ -1214,7 +1309,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
     let first = __s0_buffer_len(U64, store.type_args) + 1
     let with_args = try append_instance_args(d, store, declaration, bindings, 0)
     let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
-    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent))
+    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent, module_source: declared.module_source, public: declared.public))
     let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, indexes: with_args.indexes, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
@@ -1360,7 +1455,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             if concrete != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, concrete))) }
             return Ok(CheckGood(try append_checked_type(d, store, owner, 6, node_id, param, 0, 0)))
         }
-        let symbol = find_declared_type(state, store, node)
+        let symbol = find_declared_type(state, parse, store, node)
         if symbol == 0 { return check_fail(d, store, 4, node, 0, 0, 0) }
         if __s0_buffer_get(SymbolRec, store.symbols, symbol - 1).type_arity != 0 { return check_fail(d, store, 5, node, 0, 0, 0) }
         let appended = try append_checked_type(d, store, owner, 7, node_id, symbol, 0, 0)
@@ -1391,7 +1486,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         arity = 1 }
     var target: U64 = 0
     if kind == 0 {
-        target = find_declared_type(state, current, node)
+        target = find_declared_type(state, parse, current, node)
         if target != 0 { kind = 7
             arity = __s0_buffer_get(SymbolRec, current.symbols, target - 1).type_arity }
     }
@@ -2151,12 +2246,190 @@ fn append_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
-fn symbol_named(state: State, store: CheckStore, node: SyntaxRec) -> U64 {
+fn import_target_source(state: State, parse: ParseStore, imp: SyntaxRec) -> U64 {
+    return module_source_named(state, parse, imp.source, imp.name_start, imp.name_end)
+}
+
+fn import_has_selected(parse: ParseStore, imp: SyntaxRec) -> Bool {
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 43 { return true }
+        link = item.next
+    }
+    return false
+}
+
+fn import_binding_count(parse: ParseStore, imp: SyntaxRec) -> U64 {
+    var count: U64 = 0
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 43 { count = count + 1 }
+        link = item.next
+    }
+    if count == 0 { return 1 }
+    return count
+}
+
+fn import_binding_at(state: State, parse: ParseStore, imp: SyntaxRec, ordinal: U64) -> SyntaxRec {
+    var selected: U64 = 0
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 43 {
+            if selected == ordinal { return child }
+            selected = selected + 1
+        }
+        link = item.next
+    }
+    link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 44 { return child }
+        link = item.next
+    }
+    var last = imp.name_start
+    var at = imp.name_start
+    let source = __s0_buffer_get(SourceRec, state.sources, imp.source)
+    while at < imp.name_end {
+        if text_byte(state, source, at) == 46 { last = at + 1 }
+        at = at + 1
+    }
+    return SyntaxRec(kind: 44, token: imp.token, source: imp.source, start: last, end: imp.name_end, name_start: last, name_end: imp.name_end, children: 0)
+}
+
+fn validate_import_bindings(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var root_at: U64 = 0
+    while root_at < __s0_buffer_len(U64, parse.roots) {
+        let imp = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
+        if imp.kind == 41 || imp.kind == 42 {
+            var binding_at: U64 = 0
+            while binding_at < import_binding_count(parse, imp) {
+                let binding = import_binding_at(state, parse, imp, binding_at)
+                var same_at = binding_at + 1
+                while same_at < import_binding_count(parse, imp) {
+                    let same = import_binding_at(state, parse, imp, same_at)
+                    if same_name(state, binding.source, binding.name_start, binding.name_end, same.source, same.name_start, same.name_end) { return check_token_related_fail(d, state, store, 1, same, binding) }
+                    same_at = same_at + 1
+                }
+                var prior_root: U64 = 0
+                while prior_root < root_at {
+                    let prior = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, prior_root) - 1)
+                    if prior.source == imp.source && (prior.kind == 41 || prior.kind == 42) {
+                        var prior_at: U64 = 0
+                        while prior_at < import_binding_count(parse, prior) {
+                            let prior_binding = import_binding_at(state, parse, prior, prior_at)
+                            if same_name(state, binding.source, binding.name_start, binding.name_end, prior_binding.source, prior_binding.name_start, prior_binding.name_end) { return check_token_related_fail(d, state, store, 1, binding, prior_binding) }
+                            prior_at = prior_at + 1
+                        }
+                    }
+                    prior_root = prior_root + 1
+                }
+                binding_at = binding_at + 1
+            }
+        }
+        root_at = root_at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
+fn import_selects(state: State, parse: ParseStore, imp: SyntaxRec, node: SyntaxRec) -> Bool {
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 43 && same_name(state, node.source, node.name_start, node.name_end, child.source, child.name_start, child.name_end) { return true }
+        link = item.next
+    }
+    return false
+}
+
+fn import_namespace_matches(state: State, parse: ParseStore, imp: SyntaxRec, node: SyntaxRec) -> Bool {
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 44 { return same_name(state, node.source, node.name_start, node.name_end, child.source, child.name_start, child.name_end) }
+        link = item.next
+    }
+    var last = imp.name_start
+    var at = imp.name_start
+    let source = __s0_buffer_get(SourceRec, state.sources, imp.source)
+    while at < imp.name_end {
+        if text_byte(state, source, at) == 46 { last = at + 1 }
+        at = at + 1
+    }
+    return same_name(state, node.source, node.name_start, node.name_end, imp.source, last, imp.name_end)
+}
+
+fn import_namespace_range_matches(state: State, parse: ParseStore, imp: SyntaxRec, source_id: U64, start: U64, end: U64) -> Bool {
+    var link = imp.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 44 { return same_name(state, source_id, start, end, child.source, child.name_start, child.name_end) }
+        link = item.next
+    }
+    var last = imp.name_start
+    var at = imp.name_start
+    let source = __s0_buffer_get(SourceRec, state.sources, imp.source)
+    while at < imp.name_end {
+        if text_byte(state, source, at) == 46 { last = at + 1 }
+        at = at + 1
+    }
+    return same_name(state, source_id, start, end, imp.source, last, imp.name_end)
+}
+
+fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
+    var module_source: U64 = 0
+    var root_at: U64 = 0
+    while root_at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
+        if root.source == node.source && root.kind == 40 { module_source = node.source + 1 }
+        root_at = root_at + 1
+    }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) { return at + 1 }
+        if same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
         at = at + 1
+    }
+    if module_source == 0 { return 0 }
+    var qualifier_end: U64 = 0
+    var member_start: U64 = 0
+    let occurrence_source = __s0_buffer_get(SourceRec, state.sources, node.source)
+    var name_at = node.name_start
+    while name_at < node.name_end {
+        if text_byte(state, occurrence_source, name_at) == 46 && qualifier_end == 0 {
+            qualifier_end = name_at
+            member_start = name_at + 1
+        }
+        name_at = name_at + 1
+    }
+    if node.kind == 29 && node.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        if base.kind == 24 {
+            qualifier_end = base.name_end
+            member_start = node.name_start
+            name_at = base.name_start
+        }
+    } else { name_at = node.name_start }
+    root_at = 0
+    while root_at < __s0_buffer_len(U64, parse.roots) {
+        let imp = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
+        if imp.source == node.source && (imp.kind == 41 || imp.kind == 42) && import_has_selected(parse, imp) && import_selects(state, parse, imp, node) {
+            let target = import_target_source(state, parse, imp)
+            if target != 0 { return exported_symbol_named(state, parse, store, target, node.source, node.name_start, node.name_end) }
+        }
+        if qualifier_end != 0 && imp.source == node.source && (imp.kind == 41 || imp.kind == 42) && !import_has_selected(parse, imp) && import_namespace_range_matches(state, parse, imp, node.source, name_at, qualifier_end) {
+            let target = import_target_source(state, parse, imp)
+            if target != 0 { return exported_symbol_named(state, parse, store, target, node.source, member_start, node.name_end) }
+        }
+        root_at = root_at + 1
     }
     return 0
 }
@@ -2184,7 +2457,7 @@ fn call_link_at(parse: ParseStore, call: SyntaxRec, ordinal: U64) -> SyntaxLinkR
     return __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
 }
 
-fn expression_type_head(state: State, store: CheckStore, node: SyntaxRec) -> CheckedTypeRec {
+fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> CheckedTypeRec {
     let builtin = builtin_type_kind(state, node)
     if builtin == 1 { return CheckedTypeRec(kind: 1, syntax: 0, target: primitive_type_target(state, node), first_arg: 0, arg_count: 0) }
     if builtin == 2 { return CheckedTypeRec(kind: 8, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
@@ -2194,7 +2467,7 @@ fn expression_type_head(state: State, store: CheckStore, node: SyntaxRec) -> Che
     if node_word(state, node, "Map") { return CheckedTypeRec(kind: 11, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
     if node_word(state, node, "Ptr") { return CheckedTypeRec(kind: 12, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "__s0_Buffer") { return CheckedTypeRec(kind: 13, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
-    let declared = find_declared_type(state, store, node)
+    let declared = find_declared_type(state, parse, store, node)
     if declared != 0 { return CheckedTypeRec(kind: 7, syntax: 0, target: declared, first_arg: 0, arg_count: __s0_buffer_get(SymbolRec, store.symbols, declared - 1).type_arity) }
     return CheckedTypeRec(kind: 0, syntax: 0, target: 0, first_arg: 0, arg_count: 0)
 }
@@ -2203,13 +2476,13 @@ fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore,
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     if node.kind == 24 {
         if find_type_param(state, store, instance_declaration(store, owner), node) != 0 { return true }
-        return expression_type_head(state, store, node).kind != 0
+        return expression_type_head(state, parse, store, node).kind != 0
     }
     if node.kind != 27 { return false }
     let callee_link = call_link_at(parse, node, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 { return false }
-    let head = expression_type_head(state, store, callee)
+    let head = expression_type_head(state, parse, store, callee)
     let count = call_link_count(parse, node) - 1
     if head.kind == 0 || count != head.arg_count { return false }
     var ordinal: U64 = 0
@@ -2258,7 +2531,7 @@ fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: Ch
             if concrete == 0 { return check_token_fail(d, state, store, 57, node) }
             return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, concrete)))
         }
-        let head = expression_type_head(state, store, node)
+        let head = expression_type_head(state, parse, store, node)
         if head.kind == 8 && node_word(state, node, "String") {
             let u8 = canonical_type_id(store, 1, 6, 0, 0)
             let existing = canonical_single_arg(store, 8, 0, u8)
@@ -2274,7 +2547,7 @@ fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: Ch
     let callee_link = call_link_at(parse, node, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 { return check_token_fail(d, state, store, 56, node) }
-    let head = expression_type_head(state, store, callee)
+    let head = expression_type_head(state, parse, store, callee)
     let count = call_link_count(parse, node) - 1
     if head.kind == 0 || count != head.arg_count { return check_token_fail(d, state, store, 56, node) }
     let empty = try __s0_buffer_new(U64, d)
@@ -3459,12 +3732,12 @@ fn check_s0_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore
 fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
-    if callee.kind != 24 {
+    if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {
             let applied_callee_link = call_link_at(parse, callee, 0)
             let applied_callee = __s0_buffer_get(SyntaxRec, parse.nodes, applied_callee_link.node - 1)
             if applied_callee.kind != 24 { return expr_token_fail(d, state, base, 40, call) }
-            let applied_target = symbol_named(state, store, applied_callee)
+            let applied_target = symbol_named(state, parse, store, applied_callee)
             if applied_target == 0 { return expr_token_fail(d, state, base, 40, call) }
             let applied_symbol = __s0_buffer_get(SymbolRec, store.symbols, applied_target - 1)
             if applied_symbol.kind == 2 && applied_symbol.type_arity != 0 {
@@ -3485,7 +3758,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         return expr_token_fail(d, state, base, 40, call)
     }
-    if node_word(state, callee, "len") || node_word(state, callee, "range") { return check_slice_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+    if callee.kind == 24 && (node_word(state, callee, "len") || node_word(state, callee, "range")) { return check_slice_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if node_word(state, callee, "Get") || node_word(state, callee, "Set") || node_word(state, callee, "Remove") { return check_map_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if node_word(state, callee, "__s0_alloc") || node_word(state, callee, "__s0_domain_create") || node_word(state, callee, "__s0_domain_mark") || node_word(state, callee, "__s0_domain_reset") || node_word(state, callee, "__s0_domain_destroy") || node_word(state, callee, "__s0_map_create") || node_word(state, callee, "__s0_buffer_new") || node_word(state, callee, "__s0_buffer_len") || node_word(state, callee, "__s0_buffer_append") || node_word(state, callee, "__s0_buffer_get") || node_word(state, callee, "__s0_buffer_set") || node_word(state, callee, "__s0_buffer_slice") { return check_s0_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if node_word(state, callee, "Some") || node_word(state, callee, "Ok") || node_word(state, callee, "Err") {
@@ -3526,7 +3799,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         if draft.deferred { return expr_deferred(base) }
         return append_expression(d, current, owner, call_id, kind, expected, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
     }
-    let target = symbol_named(state, store, callee)
+    let target = symbol_named(state, parse, store, callee)
     if target != 0 {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
         if symbol.kind == 12 { return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
@@ -3552,7 +3825,7 @@ fn check_unsafe_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 { return expr_token_fail(d, state, base, 52, unsafe_node) }
-    let target = symbol_named(state, store, callee)
+    let target = symbol_named(state, parse, store, callee)
     if target == 0 || __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind != 1 { return expr_token_fail(d, state, base, 52, unsafe_node) }
     let argument_count = call_link_count(parse, call) - 1
     var ordinal: U64 = 0
@@ -3770,7 +4043,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             binding_type = binding.checked_type
             if binding.kind == 1 { kind = 1 }
         } else {
-            let target = symbol_named(state, store, expression)
+            let target = symbol_named(state, parse, store, expression)
             if target != 0 && __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind == 12 { return expr_fail(d, base, 39, expression) }
             let any_variant = any_variant_named(state, store, expression)
             if any_variant != 0 {
@@ -4370,7 +4643,7 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
     }
     if initializer.deferred { return body_token_fail(d, state, current, 87, initializer_node) }
     let cleanup_node = __s0_buffer_get(SyntaxRec, parse.nodes, cleanup_link.node - 1)
-    let callback = symbol_named(state, current, cleanup_node)
+    let callback = symbol_named(state, parse, current, cleanup_node)
     if callback == 0 || __s0_buffer_get(SymbolRec, current.symbols, callback - 1).kind != 12 { return body_fail(d, current, 83, cleanup_node) }
     let callback_symbol = __s0_buffer_get(SymbolRec, current.symbols, callback - 1)
     var parameter: U64 = 0
@@ -4676,6 +4949,40 @@ fn check_function_bodies(d: Domain, state: State, parse: ParseStore, store: Chec
     return check_function_body_at(d, state, parse, store, 1)
 }
 
+fn private_signature_type(store: CheckStore, checked_type: U64) -> U64 {
+    if checked_type == 0 { return 0 }
+    let item = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if item.kind == 7 {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.target - 1)
+        if symbol.module_source != 0 && !symbol.public { return item.target }
+    }
+    var at: U64 = 0
+    while at < item.arg_count {
+        let hidden = private_signature_type(store, __s0_buffer_get(U64, store.type_args, item.first_arg - 1 + at))
+        if hidden != 0 { return hidden }
+        at = at + 1
+    }
+    return 0
+}
+
+fn check_public_signatures(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        let owner = __s0_buffer_get(SymbolRec, store.symbols, use.owner - 1)
+        if owner.public {
+            let hidden = private_signature_type(store, use.checked_type)
+            if hidden != 0 {
+                let symbol = __s0_buffer_get(SymbolRec, store.symbols, hidden - 1)
+                let node = __s0_buffer_get(SyntaxRec, parse.nodes, use.syntax - 1)
+                return check_fail(d, store, 88, node, symbol.source, symbol.name_start, symbol.name_end)
+            }
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
 fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
     let aggregates = try check_declaration_kind(d, state, parse, initial, 0)
     let after_aggregates = match aggregates {
@@ -4723,7 +5030,16 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(functions) }
-    let indexed = try build_use_indexes(d, after_functions, true)
+    let public_signatures = try check_public_signatures(d, state, parse, after_functions)
+    let after_public_signatures = match public_signatures {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match public_signatures {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(public_signatures) }
+    let indexed = try build_use_indexes(d, after_public_signatures, true)
     return check_function_bodies(d, state, parse, indexed)
 }
 
