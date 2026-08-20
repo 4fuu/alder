@@ -151,6 +151,7 @@ enum(TypeId)
 option(TypeId)
 result(TypeId, TypeId)
 slice(TypeId)
+array(TypeId, Length)
 safe_ref(TypeId)
 safe_mut(TypeId)
 raw_ptr(TypeId)
@@ -168,6 +169,8 @@ table_mut_view(TypeId)
 The canonical primitives occupy fixed `TypeId` slots 0 through 11 in every module. Named aggregates and enums are table entries; anonymous structural types are interned by shape, so identical textual types share one `TypeId`. The singleton types (`domain_handle`, `domain_mark`, `cleanup_scope`, `cleanup_id`) each intern to one entry.
 
 `safe_ref(T)` and `safe_mut(T)` are checked references associated with a valid storage or table access scope. `raw_ptr(T)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics. Strings are `slice(u8)` at the MIR level.
+
+`array(T, N)` is a fixed-length value type. Array assignment and return copy all elements and produce an independent value. The C backend represents it as a wrapper struct containing a native C element array, preserving these value semantics under ordinary C assignment and return.
 
 The exact string and dynamic-array representations belong to the runtime ABI, not the semantic type system.
 
@@ -239,7 +242,9 @@ edge observes the pre-instruction resource state, while success produces a
 slice whose provenance is the supplied domain. Aggregate values are built with
 `aggregate.construct` and written into places with `store`; the earlier
 `construct destination, operands` form was folded into these two operations
-during the format revision.
+during the format revision. Array construction uses
+`aggregate.construct array(T, N) { value, ... }` with exactly `N` operands,
+each of type `T`.
 
 Required invariants:
 
@@ -289,11 +294,12 @@ int.div.checked a, b else edge
 int.shl.checked a, b else edge
 int.shr.checked a, b else edge
 slice.index.checked slice_or_ref, index else edge -> safe_mut(elem)
+array.index.checked array_or_safe_mut_array, index else edge -> safe_mut(elem)
 slice.range.checked slice_or_ref, lo, hi else edge -> slice(elem)
 enum.payload.checked value, variant else edge -> payload
 ```
 
-Checked integer operations require both operands to have the same integer type. `int.shl.checked` is a wrapping left shift on the integer's bit pattern; `int.shr.checked` is arithmetic for signed operands and logical for unsigned operands. Both fail when the shift count is negative or at least the operand width. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. A null data pointer is valid only for a zero-length slice: `[0, 0)` succeeds without pointer arithmetic, while indexing it and every operation on `{null, len > 0}` fail. `enum.payload.checked` requires a variant with a non-unit payload.
+Checked integer operations require both operands to have the same integer type. `int.shl.checked` is a wrapping left shift on the integer's bit pattern; `int.shr.checked` is arithmetic for signed operands and logical for unsigned operands. Both fail when the shift count is negative or at least the operand width. `slice.index.checked` and `slice.range.checked` accept `slice(T)`, `safe_ref(T)`, and `safe_mut(T)` bases with `u64` indices; `slice.index.checked` yields a checked mutable element reference. `array.index.checked` accepts `array(T, N)` or `safe_mut(array(T, N))` and a `u64` index, fails when the index is at least `N`, and yields `safe_mut(T)`. A null data pointer is valid only for a zero-length slice: `[0, 0)` succeeds without pointer arithmetic, while indexing it and every operation on `{null, len > 0}` fail. `enum.payload.checked` requires a variant with a non-unit payload.
 
 A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
 

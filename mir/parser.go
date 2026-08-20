@@ -798,23 +798,28 @@ func (p *parser) parseOp() (Instr, error) {
 		if err = p.expectPunct("{"); err != nil {
 			return in, err
 		}
+		isArray := p.m.Types[in.AggType].Kind == TypeArray
 		for {
 			if p.peek().kind == tokPunct && p.peek().text == "}" {
 				p.next()
 				break
 			}
-			nameTok, err := p.expectIdent("a field name")
-			if err != nil {
-				return in, err
-			}
-			if err = p.expectPunct(":"); err != nil {
-				return in, err
+			name := ""
+			if !isArray {
+				nameTok, err := p.expectIdent("a field name")
+				if err != nil {
+					return in, err
+				}
+				name = nameTok.text
+				if err = p.expectPunct(":"); err != nil {
+					return in, err
+				}
 			}
 			val, err := p.parseValueRef()
 			if err != nil {
 				return in, err
 			}
-			in.AggFields = append(in.AggFields, AggField{Name: nameTok.text, Value: val})
+			in.AggFields = append(in.AggFields, AggField{Name: name, Value: val})
 			if p.peek().kind == tokPunct && p.peek().text == "," {
 				p.next()
 			}
@@ -947,6 +952,19 @@ func (p *parser) parseOp() (Instr, error) {
 	case "slice.index.checked":
 		in.Op = OpSliceIndexChecked
 		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Index, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+
+	case "array.index.checked":
+		in.Op = OpArrayIndexChecked
+		if in.Array, err = p.parseValueRef(); err != nil {
 			return in, err
 		}
 		if err = p.expectComma(); err != nil {
@@ -1425,7 +1443,7 @@ func (p *parser) parseType() (TypeId, error) {
 			return p.m.CleanupScope(), nil
 		case "cleanup_id":
 			return p.m.CleanupID(), nil
-		case "option", "result", "slice", "safe_ref", "safe_mut", "raw_ptr",
+		case "option", "result", "slice", "array", "safe_ref", "safe_mut", "raw_ptr",
 			"table", "id", "table_view", "table_mut_view":
 			return p.parseStructuralType(t)
 		case "function":
@@ -1474,6 +1492,23 @@ func (p *parser) parseStructuralType(nameTok *token) (TypeId, error) {
 			return NoType, err
 		}
 		return p.m.Result(first, second), nil
+	}
+	if nameTok.text == "array" {
+		if err := p.expectComma(); err != nil {
+			return NoType, err
+		}
+		lengthTok := p.next()
+		if lengthTok.kind != tokInt {
+			return NoType, p.errf(lengthTok, "expected an array length, got %s", lengthTok.describe())
+		}
+		length, err := strconv.ParseUint(lengthTok.text, 10, 64)
+		if err != nil {
+			return NoType, p.errf(lengthTok, "array length %q out of range", lengthTok.text)
+		}
+		if err := p.expectPunct(")"); err != nil {
+			return NoType, err
+		}
+		return p.m.Array(first, length), nil
 	}
 	if err := p.expectPunct(")"); err != nil {
 		return NoType, err

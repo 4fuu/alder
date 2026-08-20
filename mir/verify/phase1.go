@@ -23,13 +23,13 @@ func phase1Integrity(m *mir.Module) []Error {
 			if t.Kind != mir.TypePrimitive {
 				errs = append(errs, Error{Loc: typeLoc(m, id), Msg: fmt.Sprintf("primitive slot holds kind %v", t.Kind)})
 			}
-			if t.Name != "" || len(t.Fields) != 0 || len(t.Variants) != 0 || t.Elem != mir.TypeUnit ||
+			if t.Name != "" || len(t.Fields) != 0 || len(t.Variants) != 0 || t.Elem != mir.TypeUnit || t.Length != 0 ||
 				t.OK != mir.TypeUnit || t.Err != mir.TypeUnit || len(t.Sig.Params) != 0 || t.Sig.Result != mir.TypeUnit {
 				errs = append(errs, Error{Loc: typeLoc(m, id), Msg: "primitive slot contains non-canonical type data"})
 			}
 			continue
 		}
-		if t.Kind > mir.TypeTableMutView {
+		if t.Kind > mir.TypeArray {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("unknown type kind %d", t.Kind)})
 			continue
 		}
@@ -334,7 +334,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpBorrowMut {
+	if in.Op > mir.OpArrayIndexChecked {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -450,6 +450,9 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	case mir.OpSliceIndexChecked:
 		require(in.Slice, "slice operand")
 		require(in.Index, "index operand")
+	case mir.OpArrayIndexChecked:
+		require(in.Array, "array operand")
+		require(in.Index, "index operand")
 	case mir.OpSliceRangeChecked:
 		require(in.Slice, "slice operand")
 		require(in.Lo, "low operand")
@@ -562,6 +565,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Slice)
 	case mir.OpSliceIndexChecked:
 		add(in.Slice)
+		add(in.Index)
+	case mir.OpArrayIndexChecked:
+		add(in.Array)
 		add(in.Index)
 	case mir.OpSliceRangeChecked:
 		add(in.Slice)

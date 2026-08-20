@@ -190,10 +190,11 @@ type Instr struct {
 	CleanupArgs []ValueId
 	CleanupID   ValueId
 
-	// int / float / slice / enum operands
+	// int / float / slice / array / enum operands
 	A         ValueId
 	B         ValueId
 	Slice     ValueId
+	Array     ValueId
 	Index     ValueId
 	Lo        ValueId
 	Hi        ValueId

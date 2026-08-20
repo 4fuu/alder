@@ -18,6 +18,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	runSyntheticValueNameCollisionConformance(t, exe)
 	runPreferredResultNameCollisionConformance(t, exe)
 	runMethodLowerConformance(t, exe)
+	t.Run("arrays", func(t *testing.T) { runArrayLowerConformance(t, exe) })
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -614,6 +615,93 @@ fn read_temporary() -> U64 { return Counter.new(4).read() }
 	}
 	if !borrowed || !storedThroughReceiver {
 		t.Fatalf("method MIR does not preserve mutable receiver borrowing: borrow=%v store-through-receiver=%v\n%s", borrowed, storedThroughReceiver, text)
+	}
+}
+
+func runArrayLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	source := `fn copy(value: Array(U64, 3)) -> Array(U64, 3) { return value }
+fn independent() -> U64 {
+    var original: Array(U64, 3) = [1, 2, 3]
+    var copied: Array(U64, 3) = copy(original)
+    copied[1] = 9
+    return original[1] * 10 + copied[1]
+}
+fn empty() -> Array(U64, 0) { return [] }
+fn out_of_bounds() -> U64 {
+    let values: Array(U64, 3) = [1, 2, 3]
+    return values[3]
+}
+`
+	files := map[string]string{"arrays.al": source}
+	parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{"arrays.al"}, false), files)
+	first := runLowerCompiler(t, exe, files, []string{"arrays.al"})
+	second := runLowerCompiler(t, exe, files, []string{"arrays.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("array lowering changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse array MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify array MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	indexed := 0
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op == mir.OpArrayIndexChecked {
+					indexed++
+				}
+			}
+		}
+	}
+	if indexed != 4 {
+		t.Fatalf("array MIR has %d checked indexes, want 4\n%s", indexed, first)
+	}
+	runArrayCgenBehavior(t, module, exe, files)
+}
+
+func runArrayCgenBehavior(t *testing.T, module *mir.Module, coreExe string, files map[string]string) {
+	t.Helper()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	generated := runResourceCgenCompiler(t, coreExe, files, []string{"arrays.al"})
+	independent, ok := module.Function("independent")
+	if !ok {
+		t.Fatal("array MIR has no independent function")
+	}
+	outOfBounds, ok := module.Function("out_of_bounds")
+	if !ok {
+		t.Fatal("array MIR has no out_of_bounds function")
+	}
+	dir := t.TempDir()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compile := func(name, driver string) string {
+		file := filepath.Join(dir, name+".c")
+		if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		program := filepath.Join(dir, name+".exe")
+		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+		if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("compile array C: %v\n%s", err, output)
+		}
+		return program
+	}
+	success := compile("array-success", fmt.Sprintf("\nint main(void) { return alder_fn_independent_%d() == 29 ? 0 : 1; }\n", independent))
+	if output, err := conformanceCommand(success).CombinedOutput(); err != nil {
+		t.Fatalf("run array value-independence C: %v\n%s", err, output)
+	}
+	bounds := compile("array-bounds", fmt.Sprintf("\nint main(void) { (void)alder_fn_out_of_bounds_%d(); return 0; }\n", outOfBounds))
+	if output, err := conformanceCommand(bounds).CombinedOutput(); err == nil {
+		t.Fatalf("out-of-bounds array access succeeded\n%s", output)
 	}
 }
 

@@ -227,7 +227,11 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(af.Name + ": " + valueName(f, af.Value))
+			if m.Types[in.AggType].Kind == TypeArray {
+				b.WriteString(valueName(f, af.Value))
+			} else {
+				b.WriteString(af.Name + ": " + valueName(f, af.Value))
+			}
 		}
 		b.WriteString(" }")
 
@@ -269,6 +273,10 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 
 	case OpSliceIndexChecked:
 		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Index))
+		printFailEdge(b, f, in)
+
+	case OpArrayIndexChecked:
+		b.WriteString(" " + valueName(f, in.Array) + ", " + valueName(f, in.Index))
 		printFailEdge(b, f, in)
 
 	case OpSliceRangeChecked:

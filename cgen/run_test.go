@@ -168,6 +168,72 @@ int main(void) {
 	}
 }
 
+func TestFixedArrayBehavior(t *testing.T) {
+	const text = `mir 3
+
+fn @construct(%x: i64, %y: i64) -> array(i64, 2) {
+bb0:
+  %a = aggregate.construct array(i64, 2) { %x, %y }
+  return %a
+}
+
+fn @replace(%a: array(i64, 2), %i: u64, %x: i64) -> array(i64, 2) {
+  local %copy: array(i64, 2)
+bb0:
+  store local %copy, %a
+  %r = borrow_mut local %copy
+  %p = array.index.checked %r, %i else bb_fail
+  store deref %p, %x
+  %result = load local %copy
+  return %result
+bb_fail:
+  %fallback = load local %copy
+  return %fallback
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := Generate(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			dir := t.TempDir()
+			gen := filepath.Join(dir, "gen.c")
+			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			driver := filepath.Join(dir, "driver.c")
+			const source = `#include "gen.c"
+int main(void) {
+    AlderTy12 original = alder_fn_construct_0((int64_t)10, (int64_t)20);
+    AlderTy12 changed = alder_fn_replace_1(original, (uint64_t)1, (int64_t)99);
+    if (original.alder_e[0] != (int64_t)10 || original.alder_e[1] != (int64_t)20) { return 1; }
+    if (changed.alder_e[0] != (int64_t)10 || changed.alder_e[1] != (int64_t)99) { return 2; }
+    changed = alder_fn_replace_1(changed, (uint64_t)2, (int64_t)77);
+    return changed.alder_e[1] == (int64_t)99 ? 0 : 3;
+}
+`
+			if err := os.WriteFile(driver, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(dir, "array.exe")
+			args := runArgs(gen, driver)
+			args = append(args, "-o", exe)
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("compile fixed array fixture: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run fixed array fixture: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 func TestLoopCarriedExternalAllocationsBehavior(t *testing.T) {
 	const text = `mir 1
 

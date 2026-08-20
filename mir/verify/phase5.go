@@ -102,11 +102,25 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		c.expectExact(in.StoreVal, "store value", pt)
 
 	case mir.OpAggregateConstruct:
-		if !m.ValidType(in.AggType) || m.Types[in.AggType].Kind != mir.TypeAggregate {
-			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "aggregate type operand is not an aggregate"})
+		if !m.ValidType(in.AggType) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "aggregate type operand is not an aggregate or array"})
 			break
 		}
 		decl := &m.Types[in.AggType]
+		if decl.Kind == mir.TypeArray {
+			if uint64(len(in.AggFields)) != decl.Length {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("aggregate.construct: expected %d elements, got %d", decl.Length, len(in.AggFields))})
+				break
+			}
+			for j, elem := range in.AggFields {
+				c.expectExact(elem.Value, fmt.Sprintf("aggregate.construct element %d", j), decl.Elem)
+			}
+			break
+		}
+		if decl.Kind != mir.TypeAggregate {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "aggregate type operand is not an aggregate or array"})
+			break
+		}
 		if len(in.AggFields) != len(decl.Fields) {
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("aggregate.construct: expected %d fields, got %d", len(decl.Fields), len(in.AggFields))})
 			break
@@ -176,6 +190,18 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			_, ok := m.ElemType(t)
 			return ok
 		}, "a slice, safe_ref, or safe_mut")
+		c.expectExact(in.Index, "index operand", mir.TypeU64)
+
+	case mir.OpArrayIndexChecked:
+		c.expect(in.Array, "array operand", func(t mir.TypeId) bool {
+			if !m.ValidType(t) {
+				return false
+			}
+			if m.Types[t].Kind == mir.TypeSafeMut {
+				t = m.Types[t].Elem
+			}
+			return m.ValidType(t) && m.Types[t].Kind == mir.TypeArray
+		}, "an array or safe_mut(array)")
 		c.expectExact(in.Index, "index operand", mir.TypeU64)
 
 	case mir.OpSliceRangeChecked:

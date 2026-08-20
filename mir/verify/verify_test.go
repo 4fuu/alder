@@ -168,6 +168,34 @@ func TestAPIRejections(t *testing.T) {
 	}
 }
 
+func TestArrayConstructRejections(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		type2 mir.TypeId
+		want  string
+	}{
+		{"wrong count", mir.TypeI64, "aggregate.construct: expected 2 elements, got 1"},
+		{"wrong element type", mir.TypeBool, "aggregate.construct element 1: expected i64, got bool"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mir.NewModule()
+			arr := m.Array(mir.TypeI64, 2)
+			f := m.AddFunction("f", []mir.Param{{Name: "x", Type: mir.TypeI64}, {Name: "y", Type: tc.type2}}, arr)
+			b := f.AddBlock("bb0", nil)
+			fields := []mir.AggField{{Value: 0}}
+			if tc.name != "wrong count" {
+				fields = append(fields, mir.AggField{Value: 1})
+			}
+			v := f.AddValue("a", arr, mir.ValueDef{Kind: mir.ValueDefInstr, Block: 0, Instr: 0})
+			b.AddInstr(mir.Instr{Op: mir.OpAggregateConstruct, Result: v, AggType: arr, AggFields: fields, FailTarget: mir.NoBlock})
+			b.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: v})
+			if errs := Module(m); !containsMsg(errs, tc.want) {
+				t.Fatalf("missing %q diagnostic:\n%s", tc.want, Errors(errs).String())
+			}
+		})
+	}
+}
+
 func TestAllocCheckedResultUnavailableOnFailure(t *testing.T) {
 	m := mir.NewModule()
 	f := m.AddFunction("f", []mir.Param{

@@ -707,7 +707,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
             let iid = mir_v6_instruction_for_value(store, indexes, value)
             if iid != 0 {
                 let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-                if x.op == mir_op_domain_create() || x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() {
+                if x.op == mir_op_domain_create() || x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() {
                     consumers = try mir_v6_consumer_add(d, round, consumers, function, x.a, value_id)
                 }
                 if x.op == mir_op_copy_to_domain() { consumers = try mir_v6_consumer_add(d, round, consumers, function, x.b, value_id) }
@@ -814,7 +814,7 @@ var oi: U64 = 0
 while oi < total { let o = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_instr(indexes, iid, oi) - 1)
 if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, o.value) }
 oi = oi + 1 } }
-if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a) }
+if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a) }
 if x.op == mir_op_call() { var e = mir_v6_round_effect_start(index, x.target)
 while e != 0 { let effect = mir_v6_round_effect_at(durable, e)
 if effect.kind == mir_v6_effect_result_from() || effect.kind == mir_v6_effect_result_alloc() { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)

@@ -132,7 +132,7 @@ fn emit_malformed_records() -> Bool {
     let duplicate_edge_a = MirOperandRec(kind: mir_operand_terminator_arg(), owner: 1, ordinal: 0, edge: mir_edge_then(), value: 1, target: 2, operand_type: 0, name_start: 0, name_end: 0)
     let duplicate_edge_b = MirOperandRec(kind: mir_operand_terminator_arg(), owner: 1, ordinal: 0, edge: mir_edge_then(), value: 2, target: 2, operand_type: 0, name_start: 0, name_end: 0)
     let wrong_owner = MirOperandRec(kind: mir_operand_switch_case_arg(), owner: 999, ordinal: 0, edge: 0, value: 1, target: 2, operand_type: 0, name_start: 0, name_end: 0)
-    let bad_boundary = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 999, part_count: 2, result_type: mir_type_unit())
+    let bad_boundary = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 999, part_count: 2, result_type: mir_type_unit(), length: 0)
     if !mout(88) || !mfield(1) || !mfield(duplicate_a.function) || !mfield(duplicate_a.ordinal) || !mout(10) { return false }
     if !mout(88) || !mfield(1) || !mfield(duplicate_b.function) || !mfield(duplicate_b.ordinal) || !mout(10) { return false }
     if !mout(88) || !mfield(1) || !mfield(gap.function) || !mfield(gap.ordinal) || !mout(10) { return false }

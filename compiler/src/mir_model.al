@@ -30,6 +30,7 @@ fn mir_type_kind_table() -> U64 { return 14 }
 fn mir_type_kind_id() -> U64 { return 15 }
 fn mir_type_kind_table_view() -> U64 { return 16 }
 fn mir_type_kind_table_mut_view() -> U64 { return 17 }
+fn mir_type_kind_array() -> U64 { return 18 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }
@@ -122,6 +123,7 @@ fn mir_op_call() -> U64 { return 51 }
 fn mir_op_ffi_call_unsafe() -> U64 { return 52 }
 fn mir_op_borrow() -> U64 { return 53 }
 fn mir_op_borrow_mut() -> U64 { return 54 }
+fn mir_op_array_index_checked() -> U64 { return 55 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }
@@ -146,7 +148,7 @@ fn mir_edge_else() -> U64 { return 2 }
 
 // Type kinds mirror mir/types.go: primitive, aggregate, enum, option, result,
 // slice, safe_ref, safe_mut, raw_ptr, function, domain_handle, domain_mark,
-// cleanup_scope, cleanup_id, table, id, table_view, table_mut_view.
+// cleanup_scope, cleanup_id, table, id, table_view, table_mut_view, array.
 type MirTypeRec {
     kind: U64
     name_start: U64
@@ -157,6 +159,7 @@ type MirTypeRec {
     first_part: U64
     part_count: U64
     result_type: U64
+    length: U64
 }
 
 // owner is an external Type ID and ordinal is contiguous and zero-based within

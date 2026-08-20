@@ -441,6 +441,8 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		merge(in.EnumValue)
 	case mir.OpSliceIndexChecked, mir.OpSliceRangeChecked:
 		merge(in.Slice)
+	case mir.OpArrayIndexChecked:
+		merge(in.Array)
 	case mir.OpTableLookup, mir.OpTableLookupMut:
 		merge(in.Table)
 	case mir.OpCall:

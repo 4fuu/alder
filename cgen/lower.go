@@ -41,7 +41,7 @@ func (g *gen) cType(t mir.TypeId) string {
 	}
 	ty := &g.m.Types[t]
 	switch ty.Kind {
-	case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult:
+	case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult, mir.TypeArray:
 		return "AlderTy" + strconv.Itoa(int(t))
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
 		return "AlderSlice"

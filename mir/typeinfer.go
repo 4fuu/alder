@@ -109,10 +109,24 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		return m.SafeMut(placeType), true
 
 	case OpAggregateConstruct:
-		if !m.ValidType(in.AggType) || m.Types[in.AggType].Kind != TypeAggregate {
+		if !m.ValidType(in.AggType) {
 			return NoType, false
 		}
 		decl := &m.Types[in.AggType]
+		if decl.Kind == TypeArray {
+			if uint64(len(in.AggFields)) != decl.Length {
+				return NoType, false
+			}
+			for _, af := range in.AggFields {
+				if vt, ok := f.ValueType(af.Value); !ok || vt != decl.Elem {
+					return NoType, false
+				}
+			}
+			return in.AggType, true
+		}
+		if decl.Kind != TypeAggregate {
+			return NoType, false
+		}
 		if len(in.AggFields) != len(decl.Fields) {
 			return NoType, false
 		}
@@ -189,6 +203,18 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return m.SafeMut(elem), true
+	case OpArrayIndexChecked:
+		t, ok := f.ValueType(in.Array)
+		if !ok || !m.ValidType(t) || !m.isU64(f, in.Index) {
+			return NoType, false
+		}
+		if m.Types[t].Kind == TypeSafeMut {
+			t = m.Types[t].Elem
+		}
+		if !m.ValidType(t) || m.Types[t].Kind != TypeArray {
+			return NoType, false
+		}
+		return m.SafeMut(m.Types[t].Elem), true
 	case OpSliceRangeChecked:
 		elem, ok := m.operandElemType(f, in.Slice)
 		if !ok || !m.isU64(f, in.Lo) || !m.isU64(f, in.Hi) {

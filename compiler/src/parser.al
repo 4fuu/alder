@@ -146,7 +146,12 @@ fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if !token_punct(state, cursor, ")") {
         var more = true
         while more {
-            let arg = try parse_type(d, state, cursor)
+            var arg: ParseStep = Rejected(cursor)
+            let arg_token = parse_token(state, cursor)
+            if arg_token.kind == 2 {
+                let node = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 20, cursor.token + 1, arg_token.source, arg_token.start, arg_token.end, 0, 0, 0)
+                arg = Parsed(node)
+            } else { arg = try parse_type(d, state, cursor) }
             if parse_step_bad(arg) { return Ok(arg) }
             let value = parse_step_value(arg)
             cursor = try add_link(d, value.cursor, value.node, children)
@@ -300,10 +305,37 @@ fn parse_unsafe_c(d: Domain, state: State, initial: ParseCursor, depth: U64) -> 
     return Ok(Parsed(node))
 }
 
+fn parse_array_literal(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
+    let open = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    var children: U64 = 0
+    if !token_punct(state, cursor, "]") {
+        var more = true
+        while more {
+            let element = try parse_expression(d, state, cursor, depth + 1)
+            if parse_step_bad(element) { return Ok(element) }
+            let value = parse_step_value(element)
+            cursor = try add_link(d, value.cursor, value.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, "]") { more = false }
+            } else { more = false }
+        }
+    }
+    let close = try expect_punct(d, state, cursor, "]")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    let node = try add_syntax(d, cursor, 50, initial.token + 1, open.source, open.start, end, 0, 0, children)
+    return Ok(Parsed(node))
+}
+
 fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
     if token.keyword == 13 { return parse_match(d, state, initial, depth) }
     if token.keyword == 19 { return parse_unsafe_c(d, state, initial, depth) }
+    if token_punct(state, initial, "[") { return parse_array_literal(d, state, initial, depth) }
     var kind: U64 = 0
     if token.kind == 2 { kind = 20 }
     if token.kind == 3 { kind = 21 }

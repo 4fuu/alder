@@ -175,11 +175,11 @@ fn mir_validate_types(store: MirStore) -> Bool {
         let rec = __s0_buffer_get(MirTypeRec, store.types, at)
         let id = at + 1
         if at < mir_primitive_type_count() {
-            if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
+            if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
         } else {
-            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_table_mut_view() { return false }
+            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_array() { return false }
             if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() {
-                if !mir_name_valid(store, rec.name_start, rec.name_end, true) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
+                if !mir_name_valid(store, rec.name_start, rec.name_end, true) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
                 var part_kind = mir_type_part_variant()
                 if rec.kind == mir_type_kind_aggregate() { part_kind = mir_type_part_field() }
                 if !mir_type_part_group_valid(store, id, part_kind) { return false }
@@ -209,6 +209,7 @@ fn mir_validate_types(store: MirStore) -> Bool {
                 if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() {
                     if !mir_type_valid(store, rec.elem) || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
+                if rec.kind != mir_type_kind_array() && rec.length != 0 { return false }
             }
         }
         at = at + 1
@@ -294,7 +295,7 @@ fn mir_instr_produces(op: U64) -> Bool {
 }
 
 fn mir_instr_checked(op: U64) -> Bool {
-    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_enum_payload_checked()
+    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_array_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_enum_payload_checked()
 }
 
 fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
@@ -308,7 +309,7 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
     if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() {
         if !mir_value_valid(store, rec.function, rec.a) { return false }
     }
-    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_copy_to_domain() {
+    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() {
         if !mir_value_valid(store, rec.function, rec.a) || !mir_value_valid(store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {
@@ -338,7 +339,7 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
 }
 
 fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_borrow_mut() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
+    if rec.op > mir_op_array_index_checked() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -541,7 +542,13 @@ fn mir_validate_operands(store: MirStore) -> Bool {
             let instruction = __s0_buffer_get(MirInstrRec, store.instructions, rec.owner - 1)
             if rec.value != 0 && !mir_value_valid(store, instruction.function, rec.value) { return false }
             if rec.kind == mir_operand_checked_edge_arg() && rec.target != instruction.target { return false }
-            if rec.kind == mir_operand_aggregate_field() && !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
+            if rec.kind == mir_operand_aggregate_field() {
+                if instruction.op != mir_op_aggregate_construct() || !mir_type_valid(store, instruction.type_op) { return false }
+                let aggregate = __s0_buffer_get(MirTypeRec, store.types, instruction.type_op - 1)
+                if aggregate.kind == mir_type_kind_array() {
+                    if rec.name_start != 0 || rec.name_end != 0 { return false }
+                } else { if !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false } }
+            }
         }
         if rec.kind == mir_operand_terminator_arg() || rec.kind == mir_operand_switch_case() {
             if !mir_id_valid(rec.owner, __s0_buffer_len(MirTermRec, store.terminators)) { return false }
@@ -738,6 +745,7 @@ fn mir_out_type(store: MirStore, id: U64, depth: U64) -> Bool {
     if rec.kind == mir_type_kind_id() { return out_string("id(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_table_view() { return out_string("table_view(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_table_mut_view() { return out_string("table_mut_view(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
+    if rec.kind == mir_type_kind_array() { return out_string("array(") && mir_out_type(store, rec.elem, depth - 1) && out_string(", ") && out_u64(rec.length) && out(41) }
     if rec.kind == mir_type_kind_function() {
         if !out_string("function(fn(") { return false }
         var ordinal: U64 = 0
@@ -877,7 +885,8 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 51 { return out_string("call") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
-    return out_string("borrow_mut")
+    if op == 54 { return out_string("borrow_mut") }
+    return out_string("array.index.checked")
 }
 
 fn mir_out_fail_edge(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
@@ -905,7 +914,9 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
                 let field = __s0_buffer_get(MirOperandRec, store.operands, at)
                 if field.kind == mir_operand_aggregate_field() && field.owner == id && field.ordinal == ordinal {
                     if ordinal > 0 && !out_string(", ") { return false }
-                    if !mir_out_name(store, field.name_start, field.name_end) || !out_string(": ") || !mir_out_value(store, rec.function, field.value) { return false }
+                    let aggregate = __s0_buffer_get(MirTypeRec, store.types, rec.type_op - 1)
+                    if aggregate.kind != mir_type_kind_array() && (!mir_out_name(store, field.name_start, field.name_end) || !out_string(": ")) { return false }
+                    if !mir_out_value(store, rec.function, field.value) { return false }
                 }
                 at = at + 1
             }
@@ -933,6 +944,9 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !mir_out_fail_edge(store, id, rec) { return false }
     }
     if rec.op == mir_op_slice_index_checked() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !mir_out_fail_edge(store, id, rec) { return false }
+    }
+    if rec.op == mir_op_array_index_checked() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !mir_out_fail_edge(store, id, rec) { return false }
     }
     if rec.op == mir_op_slice_range_checked() {

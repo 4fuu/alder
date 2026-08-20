@@ -928,7 +928,7 @@ fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(__s0_Buffe
 }
 
 fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let kind_count: U64 = 18
+    let kind_count: U64 = 19
     var first = __s0_alloc(U64, d, kind_count)
     var at: U64 = 0
     while at < kind_count { first[at] = 0
@@ -948,7 +948,7 @@ fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer
 }
 
 fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let kind_count: U64 = 18
+    let kind_count: U64 = 19
     let type_count = __s0_buffer_len(MirTypeRec, store.types)
     let slot_count = kind_count * type_count
     var first = __s0_alloc(U64, d, slot_count)
@@ -1085,8 +1085,8 @@ fn mir_vindex_type_kind(indexes: MirVIndexes, kind: U64) -> U64 {
 }
 
 fn mir_vindex_type_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 {
-    let type_count = __s0_buffer_len(U64, indexes.type_unary) / 18
-    if kind >= 18 || elem == 0 || elem > type_count { return 0 }
+    let type_count = __s0_buffer_len(U64, indexes.type_unary) / 19
+    if kind >= 19 || elem == 0 || elem > type_count { return 0 }
     return __s0_buffer_get(U64, indexes.type_unary, kind * type_count + elem - 1)
 }
 

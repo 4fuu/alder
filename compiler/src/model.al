@@ -45,9 +45,11 @@ type LexDiagRec {
 // 38 match arm, 39 match binding, 40 module declaration, 41 module import,
 // 42 public module import, 43 selected import name, 44 import alias,
 // 45 public declaration wrapper, 46 module path, 47 mut runtime parameter, and
-// 48 take runtime parameter, and 49 inherent impl declaration. An impl's first
+// 48 take runtime parameter, 49 inherent impl declaration, and 50 array
+// literal. An impl's first
 // child is its owner type and remaining children are function declarations;
 // receiver parameters use kinds 13, 47, and 48 and the name `self`.
+// Array literal children are their elements in source order.
 // Module/import names retain their complete
 // dotted path span. Import children are selected names or one alias; a public
 // declaration wrapper has its declaration as its sole child.
@@ -142,9 +144,10 @@ type TypeParamRec {
 
 // Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
 // 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
-// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, and 14 Bytes. Primitive targets
+// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, and 15 Array. Primitive targets
 // 1..12 identify Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, and
-// Unit directly. String and Bytes retain source identities distinct from
+// Unit directly. An Array record has one type argument and stores its fixed
+// length in target. String and Bytes retain source identities distinct from
 // slice(U8); the private bootstrap ABI may still lower all three to MIR
 // slice(u8). Canonical records have no source ownership (syntax is zero);
 // source occurrences are retained by

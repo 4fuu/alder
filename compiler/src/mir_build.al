@@ -117,7 +117,7 @@ fn mir_new_parts(d: Domain, names: __s0_Buffer(U8), types: __s0_Buffer(MirTypeRe
 }
 
 fn mir_append_primitive(d: Domain, types: __s0_Buffer(MirTypeRec)) -> Result(__s0_Buffer(MirTypeRec), __s0_Error) {
-    return __s0_buffer_append(MirTypeRec, d, types, MirTypeRec(kind: mir_type_kind_primitive(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0))
+    return __s0_buffer_append(MirTypeRec, d, types, MirTypeRec(kind: mir_type_kind_primitive(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0, length: 0))
 }
 
 fn mir_new_types(d: Domain, names: __s0_Buffer(U8)) -> Result(MirStore, __s0_Error) {
@@ -180,14 +180,25 @@ fn mir_intern_type(d: Domain, store: MirStore, kind: U64, elem: U64, ok_type: U6
         type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_param(), owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, parts, part_at)))
         part_at = part_at + 1
     }
-    let rec = MirTypeRec(kind: kind, name_start: 0, name_end: 0, elem: elem, ok_type: ok_type, err_type: err_type, first_part: first, part_count: part_at, result_type: result_type)
+    let rec = MirTypeRec(kind: kind, name_start: 0, name_end: 0, elem: elem, ok_type: ok_type, err_type: err_type, first_part: first, part_count: part_at, result_type: result_type, length: 0)
     let types = try __s0_buffer_append(MirTypeRec, d, store.types, rec)
     return Ok(MirTypeStep(store: mir_with_types(mir_with_type_parts(store, type_parts), types), type_id: type_id))
 }
 
+fn mir_intern_array(d: Domain, store: MirStore, elem: U64, length: U64) -> Result(MirTypeStep, __s0_Error) {
+    var at: U64 = mir_primitive_type_count()
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let prior = __s0_buffer_get(MirTypeRec, store.types, at)
+        if prior.kind == mir_type_kind_array() && prior.elem == elem && prior.length == length { return Ok(MirTypeStep(store: store, type_id: at + 1)) }
+        at = at + 1
+    }
+    let types = try __s0_buffer_append(MirTypeRec, d, store.types, MirTypeRec(kind: mir_type_kind_array(), name_start: 0, name_end: 0, elem: elem, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0, length: length))
+    return Ok(MirTypeStep(store: mir_with_types(store, types), type_id: __s0_buffer_len(MirTypeRec, types)))
+}
+
 fn mir_add_named_type(d: Domain, store: MirStore, kind: U64, name: String) -> Result(MirTypeStep, __s0_Error) {
     let named = try mir_append_name(d, store, name)
-    let types = try __s0_buffer_append(MirTypeRec, d, named.store.types, MirTypeRec(kind: kind, name_start: named.start, name_end: named.end, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0))
+    let types = try __s0_buffer_append(MirTypeRec, d, named.store.types, MirTypeRec(kind: kind, name_start: named.start, name_end: named.end, elem: 0, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0, length: 0))
     return Ok(MirTypeStep(store: mir_with_types(named.store, types), type_id: __s0_buffer_len(MirTypeRec, types)))
 }
 

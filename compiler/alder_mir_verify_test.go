@@ -924,7 +924,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !expect_verification(6, cyclic, mir_vdiag(1, mir_vdiag_bad_place(), 1, 0, 0, 0, 0, 0, 1, 0, 0, 1)) { return Ok(false) }
 
     let bad_child_base = try mir_store_new(d)
-    let bad_child_types = try __s0_buffer_append(MirTypeRec, d, bad_child_base.types, MirTypeRec(kind: mir_type_kind_slice(), name_start: 0, name_end: 0, elem: 999, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0))
+    let bad_child_types = try __s0_buffer_append(MirTypeRec, d, bad_child_base.types, MirTypeRec(kind: mir_type_kind_slice(), name_start: 0, name_end: 0, elem: 999, ok_type: 0, err_type: 0, first_part: 0, part_count: 0, result_type: 0, length: 0))
     let bad_child = try mir_verify_module(d, mir_with_types(bad_child_base, bad_child_types), 3)
     if !expect_verification(7, bad_child, mir_vdiag(2, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, 13, 13, 0, 0, 999)) { return Ok(false) }
 

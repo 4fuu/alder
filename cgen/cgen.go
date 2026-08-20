@@ -209,7 +209,7 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	switch ty.Kind {
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
 		return false
-	case mir.TypeOption:
+	case mir.TypeOption, mir.TypeArray:
 		return g.copyTrivial(ty.Elem)
 	case mir.TypeResult:
 		return g.copyTrivial(ty.OK) && g.copyTrivial(ty.Err)
@@ -307,7 +307,7 @@ func (g *gen) collectCopyTypes(t mir.TypeId, set map[mir.TypeId]bool) {
 				visit(v.Payload)
 			}
 		}
-	case mir.TypeOption, mir.TypeResult:
+	case mir.TypeOption, mir.TypeResult, mir.TypeArray:
 		visit(ty.Elem)
 		if ty.Kind == mir.TypeResult {
 			visit(ty.OK)
@@ -400,7 +400,7 @@ func (g *gen) emitTypes(b *strings.Builder) {
 		id := mir.TypeId(i)
 		ty := &g.m.Types[i]
 		switch ty.Kind {
-		case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult:
+		case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult, mir.TypeArray:
 			b.WriteString("typedef struct AlderTy" + strconv.Itoa(int(id)) + " AlderTy" + strconv.Itoa(int(id)) + ";\n")
 			hasRecords = true
 		}
@@ -411,7 +411,7 @@ func (g *gen) emitTypes(b *strings.Builder) {
 	for _, id := range g.typeEmissionOrder() {
 		ty := &g.m.Types[id]
 		switch ty.Kind {
-		case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult:
+		case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult, mir.TypeArray:
 			g.emitStruct(b, id, ty)
 		case mir.TypeFunction:
 			g.emitFunctionType(b, id, ty.Sig)
@@ -452,7 +452,7 @@ func typeDependencies(ty *mir.Type) []mir.TypeId {
 		for _, variant := range ty.Variants {
 			out = append(out, variant.Payload)
 		}
-	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut,
+	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		out = append(out, ty.Elem)
 	case mir.TypeResult:
@@ -516,6 +516,12 @@ func (g *gen) emitStruct(b *strings.Builder, id mir.TypeId, ty *mir.Type) {
 			b.WriteString("  } alder_u;\n")
 		}
 		b.WriteString("  uint32_t alder_tag;\n")
+	case mir.TypeArray:
+		length := ty.Length
+		if length == 0 {
+			length = 1 // native C arrays cannot have zero length
+		}
+		b.WriteString("  " + g.cType(ty.Elem) + " alder_e[" + strconv.FormatUint(length, 10) + "];\n")
 	}
 	b.WriteString("};\n")
 }
@@ -598,6 +604,12 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 		b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
 		b.WriteString("    alder_v.data = alder_p;\n")
 		b.WriteString("  }\n")
+	case mir.TypeArray:
+		if !g.copyTrivial(ty.Elem) {
+			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)" + strconv.FormatUint(ty.Length, 10) + "; alder_i++) {\n")
+			b.WriteString("    alder_v.alder_e[alder_i] = " + g.copyCall(ty.Elem) + "(alder_d, alder_v.alder_e[alder_i]);\n")
+			b.WriteString("  }\n")
+		}
 	case mir.TypeAggregate:
 		for i, fld := range ty.Fields {
 			if g.copyTrivial(fld.Type) {

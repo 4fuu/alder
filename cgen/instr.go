@@ -85,6 +85,21 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		b.WriteString("  " + g.place(&in.Place) + " = " + g.valueExpr(in.StoreVal) + ";\n")
 
 	case mir.OpAggregateConstruct:
+		if g.m.Types[in.AggType].Kind == mir.TypeArray {
+			if len(in.AggFields) == 0 {
+				b.WriteString("  " + g.val(in.Result) + " = (AlderTy" + strconv.Itoa(int(in.AggType)) + "){0};\n")
+				break
+			}
+			b.WriteString("  " + g.val(in.Result) + " = (AlderTy" + strconv.Itoa(int(in.AggType)) + "){ .alder_e = {")
+			for i, elem := range in.AggFields {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(g.valueExpr(elem.Value))
+			}
+			b.WriteString("} };\n")
+			break
+		}
 		if len(in.AggFields) == 0 {
 			b.WriteString("  " + g.val(in.Result) + " = (AlderTy" + strconv.Itoa(int(in.AggType)) + "){0};\n")
 			break
@@ -194,6 +209,20 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 
 	case mir.OpSliceIndexChecked:
 		g.emitSliceIndex(b, in)
+
+	case mir.OpArrayIndexChecked:
+		t, _ := g.f.ValueType(in.Array)
+		direct := g.m.Types[t].Kind == mir.TypeArray
+		if !direct {
+			t = g.m.Types[t].Elem
+		}
+		length := g.m.Types[t].Length
+		b.WriteString("  if (" + g.valueExpr(in.Index) + " >= (uint64_t)" + strconv.FormatUint(length, 10) + ") { " + g.failBody(in) + " }\n")
+		if direct {
+			b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)&" + g.valueExpr(in.Array) + ".alder_e[" + g.valueExpr(in.Index) + "], (uint64_t)1 };\n")
+		} else {
+			b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)&((AlderTy" + strconv.Itoa(int(t)) + " *)" + g.valueExpr(in.Array) + ".data)->alder_e[" + g.valueExpr(in.Index) + "], (uint64_t)1 };\n")
+		}
 
 	case mir.OpSliceRangeChecked:
 		g.emitSliceRange(b, in)

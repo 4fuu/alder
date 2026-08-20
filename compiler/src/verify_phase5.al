@@ -23,6 +23,14 @@ fn mir_v5_signed(t: U64) -> Bool { return t >= mir_type_i8() && t <= mir_type_i6
 fn mir_v5_elem(store: MirStore, t: U64) -> U64 { let k = mir_vtype_kind(store, t)
 if k == mir_type_kind_slice() || k == mir_type_kind_safe_ref() || k == mir_type_kind_safe_mut() { return __s0_buffer_get(MirTypeRec, store.types, t - 1).elem }
 return 0 }
+fn mir_v5_array_type(store: MirStore, t: U64) -> U64 {
+    if mir_vtype_kind(store, t) == mir_type_kind_array() { return t }
+    if mir_vtype_kind(store, t) == mir_type_kind_safe_mut() {
+        let elem = __s0_buffer_get(MirTypeRec, store.types, t - 1).elem
+        if mir_vtype_kind(store, elem) == mir_type_kind_array() { return elem }
+    }
+    return 0
+}
 fn mir_v5_find_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 { return mir_vindex_type_unary(indexes, kind, elem) }
 fn mir_v5_find_kind(indexes: MirVIndexes, kind: U64) -> U64 { return mir_vindex_type_kind(indexes, kind) }
 fn mir_v5_const_type(store: MirStore, indexes: MirVIndexes, start: U64, end: U64) -> U64 { let at = mir_vindex_const(store, indexes, start, end)
@@ -211,8 +219,20 @@ fn mir_v5_args_match(store: MirStore, indexes: MirVIndexes, function: U64, instr
 }
 
 fn mir_v5_aggregate_matches(store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, type_id: U64) -> Bool {
-    if mir_vtype_kind(store, type_id) != mir_type_kind_aggregate() { return false }
+    let kind = mir_vtype_kind(store, type_id)
+    if kind != mir_type_kind_aggregate() && kind != mir_type_kind_array() { return false }
     let count = mir_v5_operand_count(store, indexes, mir_operand_aggregate_field(), instruction, 0)
+    if kind == mir_type_kind_array() {
+        let array = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+        if count != array.length { return false }
+        var element: U64 = 0
+        while element < count {
+            let item = __s0_buffer_get(MirOperandRec, store.operands, mir_v5_operand(store, indexes, mir_operand_aggregate_field(), instruction, 0, element) - 1)
+            if item.name_start != item.name_end || mir_v5_value_type(store, indexes, function, item.value) != array.elem { return false }
+            element = element + 1
+        }
+        return true
+    }
     if count != mir_v5_type_part_count(store, indexes, type_id, mir_type_part_field()) { return false }
     var ordinal: U64 = 0
     while ordinal < count {
@@ -249,6 +269,9 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op >= mir_op_int_add_checked() && x.op <= mir_op_int_shr_checked() { return MirVTypeResult(valid: mir_v5_is_int(ta) && ta == tb, type_id: ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
+    if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)
+    if array == 0 { return MirVTypeResult(valid: false, type_id: 0) }
+    return MirVTypeResult(valid: tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), __s0_buffer_get(MirTypeRec, store.types, array - 1).elem)) }
     if x.op == mir_op_slice_range_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64() && mir_v5_value_type(store, indexes, x.function, x.c) == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_slice(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_enum_payload_checked() { let p = mir_vcase_payload(store, indexes, ta, x.name_start, x.name_end)
 return MirVTypeResult(valid: mir_v5_is_enum(store, ta) && p != 0 && p != mir_type_unit(), type_id: p) }
@@ -301,11 +324,15 @@ let baseline = __s0_buffer_len(MirVerifyDiagRec, out)
 if !p.valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_place_type(), x.function, x.block, id, 0, x.place, 0, 0, x.place) } else { if x.op == mir_op_store() || x.op == mir_op_borrow_mut() { if !mir_v5_place_mutable(store, indexes, x.function, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_readonly_place(), x.function, x.block, id, 0, x.place, 0, p.type_id, x.place) }
 if x.op == mir_op_store() {
 result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, p.type_id) } } } }
-    if x.op == mir_op_aggregate_construct() { let fields = mir_v5_type_part_count(store, indexes, x.type_op, mir_type_part_field())
+    if x.op == mir_op_aggregate_construct() { var fields = mir_v5_type_part_count(store, indexes, x.type_op, mir_type_part_field())
+if mir_vtype_kind(store, x.type_op) == mir_type_kind_array() { fields = __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1).length }
 let got = mir_v5_operand_count(store, indexes, mir_operand_aggregate_field(), id, 0)
-if mir_vtype_kind(store, x.type_op) != mir_type_kind_aggregate() || got != fields { result = try mir_v5_bad(d, result, mir_vdiag_bad_aggregate(), x.function, x.block, id, 0, 0, fields, got, x.type_op) } else { var n: U64 = 0
+if (mir_vtype_kind(store, x.type_op) != mir_type_kind_aggregate() && mir_vtype_kind(store, x.type_op) != mir_type_kind_array()) || got != fields { result = try mir_v5_bad(d, result, mir_vdiag_bad_aggregate(), x.function, x.block, id, 0, 0, fields, got, x.type_op) } else { var n: U64 = 0
 while n < got { let oi = mir_v5_operand(store, indexes, mir_operand_aggregate_field(), id, 0, n)
 let o = __s0_buffer_get(MirOperandRec, store.operands, oi - 1)
+if mir_vtype_kind(store, x.type_op) == mir_type_kind_array() {
+if o.name_start != o.name_end { result = try mir_v5_bad(d, result, mir_vdiag_bad_aggregate(), x.function, x.block, id, 0, oi, n, o.ordinal, x.type_op) }
+result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, oi, o.value, __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1).elem) }
 let total = mir_vindex_type_part_count(indexes, x.type_op)
 var pi: U64 = 0
 while pi < total { let pid = mir_vindex_type_part(indexes, x.type_op, pi)
@@ -334,6 +361,8 @@ if !mir_v5_is_float(ta) || ta != tb { result = try mir_v5_bad(d, result, mir_vdi
     if x.op == mir_op_slice_len() || x.op == mir_op_slice_index_checked() || x.op == mir_op_slice_range_checked() { if mir_v5_elem(store, mir_v5_value_type(store, indexes, x.function, x.a)) == 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_slice(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
 if x.op != mir_op_slice_len() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) }
 if x.op == mir_op_slice_range_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.c, mir_type_u64()) } }
+    if x.op == mir_op_array_index_checked() { if mir_v5_array_type(store, mir_v5_value_type(store, indexes, x.function, x.a)) == 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_array(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
+result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) }
     if x.op == mir_op_enum_payload_checked() || x.op == mir_op_enum_construct() { var et = mir_v5_value_type(store, indexes, x.function, x.a)
 if x.op == mir_op_enum_construct() { et = x.type_op }
 let payload = mir_vcase_payload(store, indexes, et, x.name_start, x.name_end)

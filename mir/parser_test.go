@@ -133,6 +133,21 @@ func TestAllocCheckedParsePrintParse(t *testing.T) {
 	}
 }
 
+func TestArrayParsePrintParse(t *testing.T) {
+	const text = "mir 3\n\nfn @array_ops(%x: i64, %y: i64, %i: u64) -> array(i64, 2) {\nbb0:\n  %a = aggregate.construct array(i64, 2) { %x, %y }\n  %p = array.index.checked %a, %i else bb_fail\n  store deref %p, %x\n  return %a\n\nbb_fail:\n  panic\n}\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("printed array MIR differs:\n%s", got)
+	}
+	arrayType := m.Functions[0].Result
+	if m.Types[arrayType].Kind != TypeArray || m.Types[arrayType].Elem != TypeI64 || m.Types[arrayType].Length != 2 {
+		t.Fatalf("parsed array type = %+v", m.Types[arrayType])
+	}
+}
+
 // TestParseValueIDs verifies that parsing assigns deterministic IDs: the same
 // text parses to modules whose printed forms and value identities agree.
 func TestParseValueIDs(t *testing.T) {

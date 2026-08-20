@@ -434,6 +434,41 @@ func runCheckerConformance(t *testing.T, exe string) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, categoryGood, []string{"categories.al"}, false), categoryGood)
 	methodGood := map[string]string{"methods.al": "type Counter { value: U64 }\ntype Owner { domain: Domain }\nimpl Counter {\nfn new(value: U64) -> Counter { return Counter(value: value) }\nfn read(self) -> U64 { return self.value }\nfn write(mut self, value: U64) -> Unit { self.value = value }\nfn echo(T: type, self, value: T) -> T { return value }\n}\nimpl Owner {\nfn consume(take self) -> Owner { return self }\n}\nfn use(value: Counter) -> U64 { var local: Counter = value\n local.write(7)\n return local.echo(local.read()) }\nfn make() -> Counter { return Counter.new(3) }\nfn consume(take value: Owner) -> Owner { return value.consume() }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, methodGood, []string{"methods.al"}, false), methodGood)
+	arrayGood := map[string]string{"arrays.al": "fn identity(T: type, value: T) -> T { return value }\nfn read() -> U64 { let values: Array(U64, 3) = [1, 2, 3]\n return values[1] }\nfn write() -> U64 { var values: Array(U64, 3) = identity([1, 2, 3])\n values[1] = 7\n return values[1] }\nfn empty() -> Array(U64, 0) { return [] }\n"}
+	arrayManifest := parseCheckerManifest(t, runAlderChecker(t, exe, arrayGood, []string{"arrays.al"}, false), arrayGood)
+	arrayKinds := make(map[int]bool)
+	for _, checked := range arrayManifest.types {
+		arrayKinds[checked.kind] = true
+	}
+	if !arrayKinds[15] {
+		t.Fatal("array fixture did not retain the fixed-array checked type")
+	}
+	arrayRejects := []struct {
+		name, text string
+		kind       int
+	}{
+		{name: "array-mixed.al", text: "fn f() -> Array(U64, 2) { return [1, true] }\n", kind: 98},
+		{name: "array-length.al", text: "fn f() -> Array(U64, 2) { return [1] }\n", kind: 98},
+		{name: "array-empty-inferred.al", text: "fn f() -> Unit { let values = []\n return }\n", kind: 97},
+		{name: "array-negative-length.al", text: "fn f() -> Array(U64, -1) {}\n", kind: 96},
+		{name: "array-overflow-length.al", text: "fn f() -> Array(U64, 18446744073709551616) {}\n", kind: 96},
+		{name: "array-noninteger-length.al", text: "fn f() -> Array(U64, U64) {}\n", kind: 96},
+		{name: "array-immutable-index.al", text: "fn f() -> Unit { let values: Array(U64, 1) = [1]\n values[0] = 2 }\n", kind: 28},
+	}
+	for _, tc := range arrayRejects {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name: tc.text}
+			first := runAlderChecker(t, exe, files, []string{tc.name}, true)
+			second := runAlderChecker(t, exe, files, []string{tc.name}, true)
+			if first != second {
+				t.Fatal("array diagnostic changed across processes")
+			}
+			manifest := parseCheckerManifest(t, first, files)
+			if len(manifest.diagnostics) != 1 || manifest.diagnostics[0].kind != tc.kind {
+				t.Fatalf("array diagnostic=%+v, want kind %d", manifest.diagnostics, tc.kind)
+			}
+		})
+	}
 	bodyGood := map[string]string{
 		"a.al": "type Pair(T: type) { value: T }\n" +
 			"fn identity(value: U64) -> U64 { return value }\n" +
@@ -1757,7 +1792,7 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	bodyPhase := len(m.expressions) != 0 || len(m.returns) != 0 || len(m.locals) != 0 || len(m.blocks) != 0 || len(m.matches) != 0 || len(m.tries) != 0
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind >= 18 && diagnostic.kind <= 69 {
+		if diagnostic.kind >= 18 && diagnostic.kind <= 69 || diagnostic.kind >= 97 && diagnostic.kind <= 98 {
 			bodyPhase = true
 		}
 	}
@@ -1817,14 +1852,14 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 14 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 15 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
 		if checked.kind == 1 && (checked.target < 1 || checked.target > 12) {
 			return fmt.Errorf("checked type %+v has an invalid primitive target", checked)
 		}
-		if checked.target != 0 && checked.kind != 1 && checked.kind != 6 && checked.kind != 7 {
+		if checked.target != 0 && checked.kind != 1 && checked.kind != 6 && checked.kind != 7 && checked.kind != 15 {
 			return fmt.Errorf("checked type %+v has an unexpected target", checked)
 		}
 		if checked.kind == 6 && (checked.target < 1 || checked.target > len(m.params)) {
@@ -1837,7 +1872,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		switch checked.kind {
 		case 7:
 			wantCount = m.symbols[checked.target-1].arity
-		case 8, 9, 12, 13:
+		case 8, 9, 12, 13, 15:
 			wantCount = 1
 		case 10, 11:
 			wantCount = 2
@@ -1984,7 +2019,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		rootType := m.locals[place.root-1].checkedType
 		valueType := rootType
 		if place.kind >= 3 {
-			if rootType < 1 || rootType > len(m.types) || m.types[rootType-1].kind != 8 || m.types[rootType-1].count != 1 {
+			if rootType < 1 || rootType > len(m.types) || (m.types[rootType-1].kind != 8 && m.types[rootType-1].kind != 15) || m.types[rootType-1].count != 1 {
 				return fmt.Errorf("checked place has nonslice indexed root %+v", place)
 			}
 			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
@@ -2382,8 +2417,17 @@ func validateCheckerManifest(m checkerManifest) error {
 				if validPayload {
 					sequence, indexType := m.types[base.checkedType-1], m.types[index.checkedType-1]
 					args := checkerDirectArgs(m, sequence)
-					validPayload = sequence.kind == 8 && len(args) == 1 && args[0].checkedType == expression.checkedType && indexType.kind == 1 && indexType.target == 9
+					validPayload = (sequence.kind == 8 || sequence.kind == 15) && len(args) == 1 && args[0].checkedType == expression.checkedType && indexType.kind == 1 && indexType.target == 9
 				}
+			}
+		}
+		if expression.kind == 23 && expression.parameterUse == 0 && expression.boolValue == 0 && expression.operator == 0 && expression.annotation == 0 && expression.checkedType >= 1 && expression.checkedType <= len(m.types) {
+			array := m.types[expression.checkedType-1]
+			args := checkerDirectArgs(m, array)
+			validPayload = array.kind == 15 && len(args) == 1 && array.target == expression.childCount
+			for childOrdinal := 0; validPayload && childOrdinal < expression.childCount; childOrdinal++ {
+				childID := m.children[expression.firstChild-1+childOrdinal].expression
+				validPayload = childID >= 1 && childID < expression.id && m.expressions[childID-1].owner == expression.owner && m.expressions[childID-1].checkedType == args[0].checkedType
 			}
 		}
 		if expression.kind == 13 && expression.parameterUse >= 1 && expression.parameterUse <= len(m.tries) && expression.boolValue == 0 && expression.operator == 0 && expression.annotation == 0 && expression.left >= 1 && expression.left < expression.id && expression.right == 0 {
@@ -2551,7 +2595,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 95 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 98 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

@@ -76,6 +76,7 @@ const (
 	OpFFICallUnsafe
 	OpBorrow
 	OpBorrowMut
+	OpArrayIndexChecked
 )
 
 // String returns the canonical textual name of the operation.
@@ -191,6 +192,8 @@ func (k OpKind) String() string {
 		return "borrow"
 	case OpBorrowMut:
 		return "borrow_mut"
+	case OpArrayIndexChecked:
+		return "array.index.checked"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -211,7 +214,7 @@ func (k OpKind) HasFailEdge() bool {
 	switch k {
 	case OpAllocChecked, OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked,
 		OpIntShlChecked, OpIntShrChecked, OpSliceIndexChecked, OpSliceRangeChecked,
-		OpEnumPayloadChecked:
+		OpEnumPayloadChecked, OpArrayIndexChecked:
 		return true
 	}
 	return false

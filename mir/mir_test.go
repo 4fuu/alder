@@ -25,6 +25,12 @@ func TestPrimitiveSlots(t *testing.T) {
 
 func TestStructuralInterning(t *testing.T) {
 	m := NewModule()
+	if m.Array(TypeI64, 3) != m.Array(TypeI64, 3) {
+		t.Error("Array(i64, 3) not interned")
+	}
+	if m.Array(TypeI64, 2) == m.Array(TypeI64, 3) {
+		t.Error("arrays with different lengths collided")
+	}
 	if m.Slice(TypeI64) != m.Slice(TypeI64) {
 		t.Error("Slice(i64) not interned")
 	}
@@ -62,6 +68,7 @@ func TestTypeString(t *testing.T) {
 		{pair, "@Pair"},
 		{err, "@Err"},
 		{m.Slice(TypeI64), "slice(i64)"},
+		{m.Array(TypeI64, 3), "array(i64, 3)"},
 		{m.SafeMut(pair), "safe_mut(@Pair)"},
 		{m.Option(m.Slice(TypeI64)), "option(slice(i64))"},
 		{m.Result(pair, err), "result(@Pair, @Err)"},

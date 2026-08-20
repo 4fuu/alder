@@ -48,6 +48,8 @@ const (
 	TypeTableView
 	// TypeTableMutView is a scoped mutable view of one table element.
 	TypeTableMutView
+	// TypeArray is the array(T, N) fixed-length value type.
+	TypeArray
 )
 
 // Canonical primitive TypeIds occupy the first slots of every module type
@@ -108,7 +110,8 @@ type Type struct {
 	Name     string    // non-empty for named aggregate and enum declarations
 	Fields   []Field   // TypeAggregate
 	Variants []Variant // TypeEnum
-	Elem     TypeId    // option, slice, safe_ref, safe_mut, raw_ptr, table, id, table_view, table_mut_view
+	Elem     TypeId    // option, slice, safe_ref, safe_mut, raw_ptr, table, id, table_view, table_mut_view, array
+	Length   uint64    // TypeArray
 	OK       TypeId    // TypeResult
 	Err      TypeId    // TypeResult
 	Sig      FuncSig   // TypeFunction
@@ -172,6 +175,8 @@ func (m *Module) TypeString(t TypeId) string {
 		return "table_view(" + m.TypeString(ty.Elem) + ")"
 	case TypeTableMutView:
 		return "table_mut_view(" + m.TypeString(ty.Elem) + ")"
+	case TypeArray:
+		return "array(" + m.TypeString(ty.Elem) + ", " + strconv.FormatUint(ty.Length, 10) + ")"
 	}
 	return "<invalid kind " + strconv.Itoa(int(ty.Kind)) + ">"
 }
@@ -340,6 +345,11 @@ func (m *Module) Result(ok, err TypeId) TypeId {
 // Slice interns and returns slice(elem).
 func (m *Module) Slice(elem TypeId) TypeId {
 	return m.intern(TypeSlice, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
+}
+
+// Array interns and returns array(elem, length).
+func (m *Module) Array(elem TypeId, length uint64) TypeId {
+	return m.intern(TypeArray, func(t *Type) bool { return t.Elem == elem && t.Length == length }, func(t *Type) { t.Elem = elem; t.Length = length })
 }
 
 // SafeRef interns and returns safe_ref(elem).

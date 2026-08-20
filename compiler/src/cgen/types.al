@@ -18,7 +18,7 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     if id == mir_type_f32() { return cgen_put(d, writer, "float") }
     if id == mir_type_f64() { return cgen_put(d, writer, "double") }
     let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
-    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() { let out = try cgen_put(d, writer, "AlderTy")
+    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { let out = try cgen_put(d, writer, "AlderTy")
     return cgen_put_u64(d, out, id - 1) }
     if t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() { return cgen_put(d, writer, "AlderSlice") }
     if t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { return cgen_put(d, writer, "void *") }
@@ -64,7 +64,7 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
             ordinal = ordinal + 1
         }
     }
-    if t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { state = try cgen_emit_type(d, state, store, t.elem) }
+    if t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array() { state = try cgen_emit_type(d, state, store, t.elem) }
     if t.kind == mir_type_kind_result() { state = try cgen_emit_type(d, state, store, t.ok_type)
     state = try cgen_emit_type(d, state, store, t.err_type) }
     if t.kind == mir_type_kind_function() {
@@ -74,7 +74,7 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
         state = try cgen_emit_type(d, state, store, t.result_type)
     }
     var writer = state.writer
-    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() { writer = try cgen_emit_struct(d, writer, store, id, t) }
+    if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { writer = try cgen_emit_struct(d, writer, store, id, t) }
     if t.kind == mir_type_kind_function() { writer = try cgen_emit_function_type(d, writer, store, id, t) }
     let emitted = try __s0_buffer_append(U64, d, state.emitted, id)
     return Ok(CgenTypeState(writer: writer, emitted: emitted))
@@ -109,7 +109,15 @@ fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t:
     out = try cgen_put(d, out, "struct AlderTy")
     out = try cgen_put_u64(d, out, id - 1)
     out = try cgen_put(d, out, " {\n")
-    if t.kind == mir_type_kind_aggregate() {
+    if t.kind == mir_type_kind_array() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_type(d, out, store, t.elem)
+        out = try cgen_put(d, out, " alder_e[")
+        var storage = t.length
+        if storage == 0 { storage = 1 }
+        out = try cgen_put_u64(d, out, storage)
+        out = try cgen_put(d, out, "];\n")
+    } else { if t.kind == mir_type_kind_aggregate() {
         let count = mir_type_part_count(store, id, mir_type_part_field())
         if count == 0 { out = try cgen_put(d, out, "  uint8_t alder_empty;\n") }
         var ordinal: U64 = 0
@@ -156,7 +164,7 @@ fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t:
             out = try cgen_put(d, out, "  } alder_u;\n")
         }
         out = try cgen_put(d, out, "  uint32_t alder_tag;\n")
-    }
+    } }
     return cgen_put(d, out, "};\n")
 }
 
@@ -166,7 +174,7 @@ fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(Cg
     var records = false
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let t = __s0_buffer_get(MirTypeRec, store.types, at)
-        if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() { out = try cgen_put(d, out, "typedef struct AlderTy")
+        if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { out = try cgen_put(d, out, "typedef struct AlderTy")
         out = try cgen_put_u64(d, out, at)
         out = try cgen_put(d, out, " AlderTy")
         out = try cgen_put_u64(d, out, at)
