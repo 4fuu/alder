@@ -1,55 +1,22 @@
-fn count_bytes(s: String) -> U64 {
-    var n: U64 = 0
-    for c in s {
-        if c == 0 {
-            return n
-        }
-        n = n + 1
-    }
-    return n
+fn string_identity(s: String) -> String {
+    return s
+}
+
+fn bytes_identity(b: Bytes) -> Bytes {
+    return b
 }
 
 fn main() -> I32 {
-    let s = "hello"
-    if len(s) != 5 {
-        return 1
-    }
-    if s[1] != 101 {
-        return 2
-    }
-    var sum: U64 = 0
-    for c in s {
-        sum = sum + 1
-        if c < 97 {
-            return 3
-        }
-    }
-    if sum != 5 {
-        return 4
-    }
-    let tail = range(s, 1, 3)
-    if len(tail) != 2 {
-        return 5
-    }
-    if tail[0] != 101 {
-        return 6
-    }
-    let nul = "a\0b"
-    if len(nul) != 3 {
-        return 7
-    }
-    if count_bytes(nul) != 1 {
-        return 8
-    }
-    let empty = ""
-    if len(empty) != 0 {
-        return 9
-    }
-    // String values flow through generic functions.
-    let e2 = identity(empty)
-    if len(e2) != 0 {
-        return 10
-    }
+    let text: String = "hello"
+    let raw: Bytes = "\x00\x80\xff"
+    let empty_text: String = ""
+    let empty_raw: Bytes = ""
+    let text_copy = string_identity(text)
+    let raw_copy = bytes_identity(raw)
+    let generic_text = identity(text_copy)
+    let generic_raw = identity(raw_copy)
+    let generic_empty_text = identity(empty_text)
+    let generic_empty_raw = identity(empty_raw)
     return 0
 }
 

@@ -15,9 +15,9 @@ type @Names {
 
 const @unit: unit = ()
 const @scalar_before_strings: i32 = 7
-const @nul_then_digit: slice(u8) = "a\0007z"
-const @octal_then_digit: slice(u8) = "b\0018z"
-const @unused_string: slice(u8) = "not referenced"
+const @nul_then_digit: bytes = "a\0007z"
+const @octal_then_digit: bytes = "b\0018z"
+const @unused_string: string = "not referenced"
 
 fn @cleanup_no_args() -> unit {
 bb0:

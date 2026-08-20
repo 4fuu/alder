@@ -303,7 +303,7 @@ fn cgen_put_int_limit(d: Domain, writer: CgenWriter, signed: Bool, width: U64, m
     return cgen_put(d, writer, "UINT64_MAX")
 }
 
-fn cgen_put_tmp(d: Domain, writer: CgenWriter, value: U64, suffix: String) -> Result(CgenWriter, __s0_Error) {
+fn cgen_put_tmp(d: Domain, writer: CgenWriter, value: U64, suffix: __s0_String) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, writer, "alder_t")
     out = try cgen_put_u64(d, out, value - 1)
     return cgen_put(d, out, suffix)
@@ -946,7 +946,9 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         if constant.kind == mir_const_string() {
             out = try cgen_put(d, out, "  ")
             out = try cgen_put_value(d, out, item.result)
-            out = try cgen_put(d, out, " = (AlderSlice){ (void *)alder_str_")
+            out = try cgen_put(d, out, " = (")
+            out = try cgen_put_type(d, out, store, constant.const_type)
+            out = try cgen_put(d, out, "){ alder_str_")
             out = try cgen_put_u64(d, out, constant_id - 1)
             out = try cgen_put(d, out, ", (uint64_t)")
             out = try cgen_put_u64(d, out, constant.string_end - constant.string_start)

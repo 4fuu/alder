@@ -26,9 +26,6 @@ fn main() -> I32 {
     if pr.first != 1 {
         return 3
     }
-    if len(pr.second) != 1 {
-        return 4
-    }
     let sw = swap(Pair(first: 5, second: 6))
     if sw.first != 6 || sw.second != 5 {
         return 5

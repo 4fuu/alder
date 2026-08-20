@@ -1,1 +1,1 @@
-line 2, column 32: Map value type [U8] must be copy-trivial (no slices, references, maps, or domain handles)
+line 3, column 32: Map value type Wrapped must be copy-trivial (no slices, references, maps, or domain handles)

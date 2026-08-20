@@ -56,12 +56,12 @@ fn parse_token(state: State, cursor: ParseCursor) -> TokenRec {
     return __s0_buffer_get(TokenRec, state.tokens, cursor.token)
 }
 
-fn token_text(state: State, token: TokenRec, text: String) -> Bool {
+fn token_text(state: State, token: TokenRec, text: __s0_String) -> Bool {
     let source = __s0_buffer_get(SourceRec, state.sources, token.source)
     return source_word(state, source, token.start, token.end, text)
 }
 
-fn token_punct(state: State, cursor: ParseCursor, text: String) -> Bool {
+fn token_punct(state: State, cursor: ParseCursor, text: __s0_String) -> Bool {
     let token = parse_token(state, cursor)
     return token.kind == 5 && token_text(state, token, text)
 }
@@ -109,7 +109,7 @@ fn add_root(d: Domain, cursor: ParseCursor, node: U64) -> Result(ParseCursor, __
     return Ok(ParseCursor(token: cursor.token, store: store))
 }
 
-fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: String) -> Result(ParseStep, __s0_Error) {
+fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: __s0_String) -> Result(ParseStep, __s0_Error) {
     if !token_punct(state, cursor, text) { return reject_parse(d, state, cursor, 4) }
     return Ok(Parsed(ParseValue(cursor: ParseCursor(token: cursor.token + 1, store: cursor.store), node: 0)))
 }

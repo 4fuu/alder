@@ -15,9 +15,6 @@ fn main() -> I32 {
         return 1
     }
     let s = identity("abc")
-    if len(s) != 3 {
-        return 2
-    }
     if identity(I64, 8) != 8 {
         return 3
     }
@@ -25,9 +22,6 @@ fn main() -> I32 {
         return 4
     }
     let f = first2("x", 9)
-    if len(f) != 1 {
-        return 5
-    }
     // Explicit leading type arguments with the rest inferred.
     if swap2(I64, U8, 1, 2) != 2 {
         return 6

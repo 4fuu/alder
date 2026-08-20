@@ -182,8 +182,8 @@ Git inputs use exact commits plus independently verified canonical trees.
 
 - Go is the temporary Stage 0 implementation language.
 - `Domain`, `DomainMark`, `__s0_*`, fixed-capacity S0 Map, S0 Buffer,
-  `String = [U8]`, callback-bearing `using`, global source sets, and direct C
-  symbol declarations are removal-gated bridges.
+  private `__s0_String = [U8]`, callback-bearing `using`, global source sets,
+  and direct C symbol declarations are removal-gated bridges.
 - Self-hosting and fixed-point source bootstrap precede broad implementation
   of the 1.0 product profile, but they do not narrow that profile.
 

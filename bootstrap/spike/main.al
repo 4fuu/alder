@@ -1,5 +1,5 @@
 fn storage_error(at: U64) -> Bool {
-    let text = "alder spike: storage failure\n"
+    let text: __s0_String = "alder spike: storage failure\n"
     if at == len(text) { return true }
     if !unsafe c { alderhost_stderr_byte(text[at]) } { return false }
     return storage_error(at + 1)

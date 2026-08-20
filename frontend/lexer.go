@@ -345,6 +345,20 @@ func (l *lexer) lexString(line, col int) (token, error) {
 				return token{}, l.errf(line, col, "unterminated string literal")
 			}
 			l.advance()
+			if c2 == 'x' {
+				hi, okHi := l.peek()
+				if !okHi || !isHex(hi) {
+					return token{}, l.errf(line, col, "invalid escape \\x (expected two hexadecimal digits)")
+				}
+				l.advance()
+				lo, okLo := l.peek()
+				if !okLo || !isHex(lo) {
+					return token{}, l.errf(line, col, "invalid escape \\x (expected two hexadecimal digits)")
+				}
+				l.advance()
+				b.WriteByte(hexNibble(hi)<<4 | hexNibble(lo))
+				continue
+			}
 			switch c2 {
 			case 'n':
 				b.WriteByte('\n')
@@ -366,6 +380,20 @@ func (l *lexer) lexString(line, col int) (token, error) {
 		b.WriteByte(l.advance())
 	}
 	return token{kind: tokStr, text: b.String(), line: line, col: col}, nil
+}
+
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func hexNibble(c byte) byte {
+	if c >= '0' && c <= '9' {
+		return c - '0'
+	}
+	if c >= 'a' && c <= 'f' {
+		return c - 'a' + 10
+	}
+	return c - 'A' + 10
 }
 
 // parseIntLiteral parses a decimal integer literal into an int64 value and

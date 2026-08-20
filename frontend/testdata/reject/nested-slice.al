@@ -1,4 +1,4 @@
 fn main() -> I32 {
-    let x: [String] = ""
+    let x: [[U8]] = ""
     return 0
 }

@@ -45,7 +45,7 @@ var coreConformanceSourceManifest = []string{
 }
 
 const coreConformanceDispatch = `
-fn host_path_is(source: U64, word: String) -> Bool {
+fn host_path_is(source: U64, word: __s0_String) -> Bool {
     if unsafe c { alderhost_source_path_len(source) } != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {

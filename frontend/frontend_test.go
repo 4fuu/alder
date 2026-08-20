@@ -206,8 +206,11 @@ fn main(d: Domain) -> I32 {
 type Box(T: type) {
     value: T
 }
+type Wrapped {
+    text: [U8]
+}
 fn main(d: Domain) -> I32 {
-    let storage = __s0_alloc(Box(String), d, 1)
+    let storage = __s0_alloc(Box(Wrapped), d, 1)
     return 0
 }
 `)
@@ -243,7 +246,7 @@ fn main() -> I32 {
 
 	_, err = Compile(`
 type Outer {
-    bad: Inner(String)
+    bad: Inner([U8])
 }
 type Inner(T: type) {
     values: [T]
@@ -538,26 +541,27 @@ fn main() -> I32 {
 
 func TestLexicalBindingsDoNotEscape(t *testing.T) {
 	tests := []struct {
-		name string
-		body string
+		name   string
+		params string
+		body   string
 	}{
-		{"branch", `if true {
+		{"branch", "", `if true {
  let hidden = 1
  }
  return hidden
 `},
-		{"block", `{
+		{"block", "", `{
  let hidden = 1
  }
  return hidden
 `},
-		{"for", `for hidden in "x" { }
+		{"for", "s: [U8]", `for hidden in s { }
  return hidden
 `},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Compile("fn main() -> I64 { " + tt.body + " }")
+			_, err := Compile("fn main(" + tt.params + ") -> I64 { " + tt.body + " }")
 			if err == nil || !strings.Contains(err.Error(), `unknown name "hidden"`) {
 				t.Fatalf("expected escaped binding rejection, got %v", err)
 			}
@@ -587,7 +591,7 @@ fn main() -> I64 {
 func TestScopedCleanupMIRVerifiesOnFallthroughAndFailure(t *testing.T) {
 	m := compileStr(t, `
 fn close(x: I64) -> Unit { }
-fn main(n: I64, s: String) -> I64 {
+fn main(n: I64, s: [U8]) -> I64 {
     using outer = 1 with close
     if n > 0 {
         using inner = 2 with close
@@ -606,32 +610,75 @@ fn main(n: I64, s: String) -> I64 {
 	}
 }
 
-// TestSmokeString exercises string literals and iteration.
+// TestSmokeString exercises distinct String and Bytes value flow.
 func TestSmokeString(t *testing.T) {
 	src := `
+fn string_identity(value: String) -> String { return value }
+fn bytes_identity(value: Bytes) -> Bytes { return value }
 fn main() -> I32 {
-    let s = "hello"
-    if len(s) != 5 {
-        return 1
-    }
-    if s[1] != 101 {
-        return 2
-    }
-    var sum: U64 = 0
-    for c in s {
-        sum = sum + 1
-    }
-    if sum != 5 {
-        return 3
-    }
-    let tail = range(s, 1, 3)
-    if len(tail) != 2 {
-        return 4
-    }
+    let text = string_identity("hello")
+    let raw: Bytes = bytes_identity("\x00\x80\xff")
+    let empty_text: String = ""
+    let empty_raw: Bytes = ""
     return 0
 }
 `
 	compileStr(t, src)
+}
+
+func TestStringAndBytesContracts(t *testing.T) {
+	m := compileStr(t, `
+fn identity(T: type, value: T) -> T { return value }
+fn main() -> I32 {
+    let inferred = "text"
+    let text: String = identity("")
+    let raw: Bytes = identity("")
+    return 0
+}
+`)
+	text := mir.Print(m)
+	for _, want := range []string{
+		"const @lit.str.c0: string = \"text\"",
+		"const @lit.str.c1: string = \"\"",
+		"const @lit.str.c2: bytes = \"\"",
+		"fn @identity.String(%value: string) -> string",
+		"fn @identity.Bytes(%value: bytes) -> bytes",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("String/Bytes MIR is missing %q:\n%s", want, text)
+		}
+	}
+
+	invalidUTF8 := string([]byte{0xff})
+	if _, err := Compile("fn bad() -> String { return \"" + invalidUTF8 + "\" }"); err == nil || !strings.Contains(err.Error(), "String literal is not valid UTF-8") {
+		t.Fatalf("invalid UTF-8 String diagnostic = %v", err)
+	}
+	compileStr(t, "fn raw() -> Bytes { return \""+invalidUTF8+"\" }")
+
+	rejections := []struct {
+		src  string
+		want string
+	}{
+		{`fn bad(value: Bytes) -> String { return value }`, "expected String, got Bytes"},
+		{`fn bad(value: [U8]) -> String { return value }`, "expected String, got [U8]"},
+		{`fn bad(value: String) -> Bytes { return value }`, "expected Bytes, got String"},
+		{`fn bad(value: String) -> U8 { return value[0] }`, "expected a slice, got String"},
+		{`fn bad(value: Bytes) -> U8 { return value[0] }`, "expected a slice, got Bytes"},
+	}
+	for _, tc := range rejections {
+		if _, err := Compile(tc.src); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Compile(%q) = %v, want %q", tc.src, err, tc.want)
+		}
+	}
+}
+
+func TestHexEscapeRequiresTwoDigits(t *testing.T) {
+	for _, escape := range []string{`\x`, `\x0`, `\x0g`, `\xg0`} {
+		src := `fn bad() -> Bytes { return "` + escape + `" }`
+		if _, err := Compile(src); err == nil || !strings.Contains(err.Error(), `invalid escape \x (expected two hexadecimal digits)`) {
+			t.Errorf("escape %q diagnostic = %v", escape, err)
+		}
+	}
 }
 
 func TestBootstrapBufferRejectsInvalidSurfaceUses(t *testing.T) {
@@ -641,19 +688,20 @@ func TestBootstrapBufferRejectsInvalidSurfaceUses(t *testing.T) {
 		want string
 	}{
 		{
-			name: "string element",
+			name: "slice element",
 			src: `
+type SliceBox { value: [U8] }
 fn main(d: Domain) -> I32 {
-    let b = __s0_buffer_new(String, d)
+    let b = __s0_buffer_new(SliceBox, d)
     return 0
 }
 `,
-			want: "buffer element type [U8] must be copy-trivial",
+			want: "buffer element type SliceBox must be copy-trivial",
 		},
 		{
 			name: "nested reference element",
 			src: `
-type Wrapped { text: String }
+type Wrapped { text: [U8] }
 fn main(d: Domain) -> I32 {
     let b = __s0_buffer_new(Wrapped, d)
     return 0

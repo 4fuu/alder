@@ -301,6 +301,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 93 { return out_string("affine owner reaches function exit without an ownership transfer") }
     if kind == 94 { return out_string("affine owner must be transferred on every reachable path or on none") }
     if kind == 95 { return out_string("affine owner cannot be mutable or overwritten; transfer or clean it up first") }
+    if kind == 99 { return out_string("String literal is not valid UTF-8") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }
@@ -358,7 +359,7 @@ fn driver_check_diagnostic(state: State, parse: ParseStore, store: CheckStore) -
     return driver_diagnostic(state, parse, 3, rec.kind, rec.source, rec.start, rec.end, rec.related_source, rec.related_start, rec.related_end, rec.detail_a, rec.detail_b, rec.detail_c, rec.detail_d)
 }
 
-fn driver_failure(status: U64, kind: String, message: String) -> I32 {
+fn driver_failure(status: U64, kind: __s0_String, message: __s0_String) -> I32 {
     if driver_json() {
         if !driver_reset_response() || !driver_select(0) || !out_string("{\"version\":1,\"command\":\"") { return 3 }
         if driver_command() == 1 { if !out_string("check") { return 3 } } else { if !out_string("compile") { return 3 } }
@@ -382,7 +383,7 @@ fn driver_success_check() -> I32 {
     return 0
 }
 
-fn driver_artifact_start(kind: String) -> Bool {
+fn driver_artifact_start(kind: __s0_String) -> Bool {
     if driver_json() {
         if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"compile\",\"success\":true,\"diagnostics\":[],\"artifact\":{\"kind\":\"") || !out_string(kind) { return false }
         if unsafe c { alderhost_output_path_len() } != 0 {

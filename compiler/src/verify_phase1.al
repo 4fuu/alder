@@ -83,13 +83,14 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
         } else {
-            if t.kind > mir_type_kind_array() || t.kind == mir_type_kind_primitive() {
-                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_array(), t.kind, 0))
+            if t.kind > mir_type_kind_bytes() || t.kind == mir_type_kind_primitive() {
+                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_bytes(), t.kind, 0))
             } else {
                 let named = t.name_start != t.name_end
                 let named_kind = t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum()
                 if (named_kind && !named) || (!named_kind && named) || (named && !mir_vname_valid(store, t.name_start, t.name_end, true)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, id, id, 0, 0, 0)) }
-                if (t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
+                let leaf = t.kind == mir_type_kind_string() || t.kind == mir_type_kind_bytes()
+                if (t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) || (leaf && (t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
                 var prior: U64 = mir_primitive_type_count()
                 while named && prior < at {
                     let p = __s0_buffer_get(MirTypeRec, store.types, prior)

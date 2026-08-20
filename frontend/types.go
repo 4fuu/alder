@@ -24,6 +24,9 @@ const (
 	tCleanupScope
 	tCleanupID
 	tPtr
+	tString
+	tBytes
+	tS0String  // private bootstrap byte-sequence string
 	tTypeParam // an unresolved generic type parameter (checking only)
 )
 
@@ -160,6 +163,12 @@ func (t *Type) display() string {
 		return primNames[t.prim]
 	case tSlice:
 		return "[" + t.elem.display() + "]"
+	case tString:
+		return "String"
+	case tBytes:
+		return "Bytes"
+	case tS0String:
+		return "__s0_String"
 	case tAlloc:
 		return "[" + t.elem.display() + "] (allocated)"
 	case tOption:
@@ -220,6 +229,12 @@ func (t *Type) mangledName() string {
 		return strings.Join(parts, ".")
 	case tSlice:
 		return "Slice.c1." + t.elem.mangledName()
+	case tString:
+		return "String"
+	case tBytes:
+		return "Bytes"
+	case tS0String:
+		return "__s0_String"
 	case tAlloc:
 		return "AllocRef.c1." + t.elem.mangledName()
 	case tOption:
@@ -352,6 +367,9 @@ func typeEqual(a, b *Type) bool {
 		return a == b
 	}
 	if a.kind != b.kind {
+		if a.kind == tS0String && b.kind == tSlice && b.elem.kind == tPrim && b.elem.prim == pU8 || b.kind == tS0String && a.kind == tSlice && a.elem.kind == tPrim && a.elem.prim == pU8 {
+			return true
+		}
 		return false
 	}
 	switch a.kind {
@@ -373,7 +391,7 @@ func typeEqual(a, b *Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tString, tBytes, tS0String:
 		return true
 	case tTypeParam:
 		return a.name == b.name
@@ -395,6 +413,9 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 		return true
 	}
 	if pattern.kind != actual.kind {
+		if pattern.kind == tS0String && actual.kind == tSlice && actual.elem.kind == tPrim && actual.elem.prim == pU8 || actual.kind == tS0String && pattern.kind == tSlice && pattern.elem.kind == tPrim && pattern.elem.prim == pU8 {
+			return true
+		}
 		return false
 	}
 	switch pattern.kind {
@@ -416,7 +437,7 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tString, tBytes, tS0String:
 		return true
 	case tTypeParam:
 		return pattern.name == actual.name

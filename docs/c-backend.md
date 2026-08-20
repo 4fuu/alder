@@ -126,6 +126,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `unit` is represented by `(uint8_t)0` only where storage or an expression is required; unit SSA declarations and assignments are erased. It is `void` as a function result, while unit parameters and call arguments are omitted, which is exact because unit has exactly one value;
 - `bool` maps to `bool`; integers to the exact-width `intN_t`/`uintN_t` (which C11 requires to be two's complement); floats to `float`/`double`;
 - aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t alder_tag` (variant index) and a union of non-unit payloads named `alder_p<index>`. An empty aggregate has one private byte because portable C11 has no empty structs;
+- `string` maps to `AlderString { const uint8_t *data; uint64_t len; }` and `bytes` maps to the layout-identical but distinct `AlderBytes`; ordinary assignment, argument passing, and return copy the value while sharing immutable constant backing;
 - `slice`, `safe_ref`, and `safe_mut` share the runtime `AlderSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AlderDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AlderTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AlderCleanupScope *` pointing at a per-create-site slot;
 - `function(Signature)` maps to an `AlderFnTy<N>` function-pointer typedef; an empty C parameter list is written as `(void)`.
 
@@ -172,7 +173,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 ### Constants and strings
 
 - scalar constants inline as typed literals (`INT64_MIN` uses the portable `(-9223372036854775807LL - 1)` form; negative zero prints as `-0.0`);
-- string constants reference possibly-unused static byte arrays named by their module constant IDs; non-printable bytes use exactly three octal digits, so an immediately following digit cannot be consumed by the escape.
+- string and bytes constants reference immutable, possibly-unused static numeric byte arrays named by their module constant IDs. Every element is an exact `UINT8_C(N)` value; empty values retain a non-null one-byte backing while exposing length zero. Private bootstrap `slice(u8)` constants retain their legacy mutable backing until M7.3.
 
 ### Unchecked failure policy
 

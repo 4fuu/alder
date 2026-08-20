@@ -1,1 +1,1 @@
-line 2, column 5: binding: type mismatch: expected I64, got [U8]
+line 2, column 5: binding: type mismatch: expected I64, got String

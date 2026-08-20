@@ -8,7 +8,7 @@ import (
 )
 
 const cgenBodyWrapper = `
-fn cgen_test_const(d: Domain, store: MirStore, function: U64, block: U64, ordinal: U64, name: String, type_id: U64) -> Result(MirBuildStep, __s0_Error) {
+fn cgen_test_const(d: Domain, store: MirStore, function: U64, block: U64, ordinal: U64, name: __s0_String, type_id: U64) -> Result(MirBuildStep, __s0_Error) {
     let value = try mir_add_value(d, store, function, name, type_id, mir_value_def_instruction(), block, ordinal + 1)
     let named = try mir_append_name(d, value.store, name)
     let instruction = try mir_add_instruction(d, named.store, MirInstrRec(function: function, block: block, ordinal: ordinal, op: mir_op_const_get(), result: value.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: named.start, name_end: named.end))

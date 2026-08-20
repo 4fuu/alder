@@ -3,6 +3,7 @@ package verify
 import (
 	"fmt"
 	"math"
+	"unicode/utf8"
 
 	"github.com/4fuu/alder/mir"
 )
@@ -304,8 +305,11 @@ func checkConst(m *mir.Module, c *mir.ConstDecl) []Error {
 			}
 		}
 	case mir.ConstString:
-		if c.Type != m.Slice(mir.TypeU8) {
-			return []Error{{Loc: loc, Msg: "string constant must have type slice(u8)"}}
+		if !m.ValidType(c.Type) || (m.Types[c.Type].Kind != mir.TypeString && m.Types[c.Type].Kind != mir.TypeBytes && !(m.Types[c.Type].Kind == mir.TypeSlice && m.Types[c.Type].Elem == mir.TypeU8)) {
+			return []Error{{Loc: loc, Msg: "byte-sequence constant has incompatible type"}}
+		}
+		if m.Types[c.Type].Kind == mir.TypeString && !utf8.ValidString(c.Value.String) {
+			return []Error{{Loc: loc, Msg: "string constant must contain valid UTF-8"}}
 		}
 	default:
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown constant kind %d", c.Value.Kind)}}

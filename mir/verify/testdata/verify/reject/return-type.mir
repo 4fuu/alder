@@ -1,6 +1,6 @@
 mir 1
 
-const @k: slice(u8) = "hi"
+const @k: bytes = "hi"
 
 fn @f(%x: i64) -> i64 {
 bb0:

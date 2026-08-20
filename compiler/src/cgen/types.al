@@ -20,6 +20,8 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { let out = try cgen_put(d, writer, "AlderTy")
     return cgen_put_u64(d, out, id - 1) }
+    if t.kind == mir_type_kind_string() { return cgen_put(d, writer, "AlderString") }
+    if t.kind == mir_type_kind_bytes() { return cgen_put(d, writer, "AlderBytes") }
     if t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() { return cgen_put(d, writer, "AlderSlice") }
     if t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { return cgen_put(d, writer, "void *") }
     if t.kind == mir_type_kind_function() { let out = try cgen_put(d, writer, "AlderFnTy")
@@ -171,6 +173,18 @@ fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t:
 fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = mir_primitive_type_count()
+    var has_string = false
+    var has_bytes = false
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let kind = __s0_buffer_get(MirTypeRec, store.types, at).kind
+        if kind == mir_type_kind_string() { has_string = true }
+        if kind == mir_type_kind_bytes() { has_bytes = true }
+        at = at + 1
+    }
+    if has_string { out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderString;\n") }
+    if has_bytes { out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n") }
+    if has_string || has_bytes { out = try cgen_put(d, out, "\n") }
+    at = mir_primitive_type_count()
     var records = false
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let t = __s0_buffer_get(MirTypeRec, store.types, at)

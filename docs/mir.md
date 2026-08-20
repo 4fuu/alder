@@ -152,6 +152,8 @@ option(TypeId)
 result(TypeId, TypeId)
 slice(TypeId)
 array(TypeId, Length)
+string
+bytes
 safe_ref(TypeId)
 safe_mut(TypeId)
 raw_ptr(TypeId)
@@ -168,11 +170,11 @@ table_mut_view(TypeId)
 
 The canonical primitives occupy fixed `TypeId` slots 0 through 11 in every module. Named aggregates and enums are table entries; anonymous structural types are interned by shape, so identical textual types share one `TypeId`. The singleton types (`domain_handle`, `domain_mark`, `cleanup_scope`, `cleanup_id`) each intern to one entry.
 
-`safe_ref(T)` and `safe_mut(T)` are checked references associated with a valid storage or table access scope. `raw_ptr(T)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics. Strings are `slice(u8)` at the MIR level.
+`safe_ref(T)` and `safe_mut(T)` are checked references associated with a valid storage or table access scope. `raw_ptr(T)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics. `string` and `bytes` are distinct owned byte-sequence value types; `string` constants must contain valid UTF-8, while `bytes` constants preserve arbitrary bytes. The private source-bootstrap `__s0_String` may still lower to `slice(u8)` until the M7.3 migration gate, but public `String` and `Bytes` do not.
 
 `array(T, N)` is a fixed-length value type. Array assignment and return copy all elements and produce an independent value. The C backend represents it as a wrapper struct containing a native C element array, preserving these value semantics under ordinary C assignment and return.
 
-The exact string and dynamic-array representations belong to the runtime ABI, not the semantic type system.
+The exact string, bytes, and dynamic-array layouts belong to the runtime ABI, not the semantic type system.
 
 ## Places and Values
 
@@ -355,7 +357,11 @@ Modules declare named constants; instructions materialize them with `const.get`.
 const @name: type = literal
 ```
 
-Constant types are `unit`, `bool`, integer and float primitives, and `slice(u8)` string literals. Integer literals are decimal `i64`-range values; floats print with shortest-round-trip formatting.
+Constant types are `unit`, `bool`, integer and float primitives, `string`, and
+`bytes`; private source-bootstrap constants may additionally use `slice(u8)`.
+Integer literals are decimal `i64`-range values; floats print with
+shortest-round-trip formatting. Quoted `string` payloads must be valid UTF-8,
+while quoted `bytes` payloads preserve every decoded byte.
 
 ## Calls and C FFI
 

@@ -5,10 +5,11 @@ const @one: i64 = 1
 const @two: i64 = 2
 const @zero_u64: u64 = 0
 const @scalar_before_strings: i32 = 7
-const @nul_then_digit: slice(u8) = "a\0007z"
+const @nul_then_digit: bytes = "a\0007z\200\377"
 const @scalar_between_strings: i32 = 8
-const @octal_then_digit: slice(u8) = "b\0018z"
-const @unused_string: slice(u8) = "not referenced"
+const @octal_then_digit: bytes = "b\0018z"
+const @unused_string: string = "\360\237\277\277"
+const @empty_bytes: bytes = ""
 
 fn @swap_loop(%n: i64) -> i64 {
 bb0:
@@ -50,14 +51,25 @@ bb_fail:
   fail %z2
 }
 
-fn @nul_bytes() -> slice(u8) {
+fn @nul_bytes() -> bytes {
 bb0:
   %s = const.get @nul_then_digit
   return %s
 }
 
-fn @octal_bytes() -> slice(u8) {
+fn @octal_bytes() -> bytes {
 bb0:
   %s = const.get @octal_then_digit
   return %s
+}
+
+fn @copy_bytes(%value: bytes) -> bytes {
+bb0:
+  return %value
+}
+
+fn @empty_bytes() -> bytes {
+bb0:
+  %value = const.get @empty_bytes
+  return %value
 }

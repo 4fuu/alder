@@ -573,3 +573,31 @@ func TestAPIBuiltRecursivePrintParseVerify(t *testing.T) {
 		t.Fatalf("verify recursive API module:\n%s", Errors(errs).String())
 	}
 }
+
+func TestOwnedStringAndBytesConstants(t *testing.T) {
+	m := mir.NewModule()
+	m.AddConst("utf8", m.String(), mir.ConstValue{Kind: mir.ConstString, String: "\x00\x7f\xc2\x80\xf4\x8f\xbf\xbf"})
+	m.AddConst("bytes", m.Bytes(), mir.ConstValue{Kind: mir.ConstString, String: "\x00\x80\xff"})
+	if errs := Module(m); len(errs) != 0 {
+		t.Fatalf("valid constants rejected:\n%s", Errors(errs).String())
+	}
+
+	m.AddConst("invalid_utf8", m.String(), mir.ConstValue{Kind: mir.ConstString, String: "\x80"})
+	if errs := Module(m); !containsMsg(errs, "string constant must contain valid UTF-8") {
+		t.Fatalf("invalid UTF-8 not rejected:\n%s", Errors(errs).String())
+	}
+
+	// The private source-bootstrap string lowers to slice(u8) until M7.3, so
+	// MIR continues to admit that internal constant representation.
+	bootstrap := mir.NewModule()
+	bootstrap.AddConst("private", bootstrap.Slice(mir.TypeU8), mir.ConstValue{Kind: mir.ConstString, String: "x"})
+	if errs := Module(bootstrap); len(errs) != 0 {
+		t.Fatalf("private bootstrap string rejected:\n%s", Errors(errs).String())
+	}
+
+	incompatible := mir.NewModule()
+	incompatible.AddConst("bad", incompatible.Slice(mir.TypeU16), mir.ConstValue{Kind: mir.ConstString, String: "x"})
+	if errs := Module(incompatible); !containsMsg(errs, "byte-sequence constant has incompatible type") {
+		t.Fatalf("incompatible constant not rejected:\n%s", Errors(errs).String())
+	}
+}

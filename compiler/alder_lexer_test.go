@@ -223,6 +223,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		{raw: "0", kind: 2}, {raw: "-12", kind: 2}, {raw: "3.", kind: 3}, {raw: "4.5", kind: 3},
 		{raw: "6e2", kind: 3}, {raw: "7E+3", kind: 3}, {raw: "-8e-2", kind: 3},
 		{raw: `"a\n\t\r\\\"\0b"`, semantic: []byte{'a', '\n', '\t', '\r', '\\', '"', 0, 'b'}, kind: 4},
+		{raw: `"\x00\x80\xff"`, semantic: []byte{0, 0x80, 0xff}, kind: 4},
 	}
 	for _, punct := range []string{"(", ")", "{", "}", "[", "]", ",", ":", "=", ".", "<", ">", "!", "&", "|", "+", "-", "*", "/", "%", "->", "<<", ">>", "==", "!=", "<=", ">=", "&&", "||", "=>"} {
 		valueTokens = append(valueTokens, expectedLexerToken{raw: punct, kind: 5})
@@ -274,6 +275,10 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		{"overlong-utf8.al", []byte{0xc0, 0x80}, 2, 1},
 		{"exponent.al", []byte("1e+"), 3, 1},
 		{"escape.al", []byte(`"\q"`), 4, 1},
+		{"hex-empty.al", []byte(`"\x"`), 4, 1},
+		{"hex-short.al", []byte(`"\x0"`), 4, 1},
+		{"hex-high.al", []byte(`"\xg0"`), 4, 1},
+		{"hex-low.al", []byte(`"\x0g"`), 4, 1},
 		{"string.al", []byte(`"abc`), 5, 1},
 		{"comment.al", []byte("/* x"), 6, 1},
 	}

@@ -272,8 +272,8 @@ type ValidationWorkRec {
 type IntRangeRec {
     integer: Bool
     signed: Bool
-    positive: String
-    negative: String
+    positive: __s0_String
+    negative: __s0_String
 }
 
 type ArrayLengthRec {
@@ -320,8 +320,7 @@ fn interpreted_slice_u8(state: State, parse: ParseStore, store: CheckStore, bind
 }
 
 // Finite structural equality is iterative. Declared applications compare their
-// target and direct arguments and never expand declaration bodies. String is
-// compared as its documented [U8] semantic form.
+// target and direct arguments and never expand declaration bodies.
 fn interpreted_type_equal(d: Domain, state: State, parse: ParseStore, store: CheckStore, bindings: __s0_Buffer(TypeBindingRec), left_type: U64, left_env: U64, right_type: U64, right_env: U64) -> Result(Bool, __s0_Error) {
     let initial = try __s0_buffer_new(PairWorkRec, d)
     var work = try __s0_buffer_append(PairWorkRec, d, initial, PairWorkRec(left_type: left_type, left_env: left_env, right_type: right_type, right_env: right_env))
@@ -345,8 +344,9 @@ fn interpreted_type_equal(d: Domain, state: State, parse: ParseStore, store: Che
                 let a = __s0_buffer_get(CheckedTypeRec, store.types, left.checked_type - 1)
                 let b = __s0_buffer_get(CheckedTypeRec, store.types, right.checked_type - 1)
                 if a.kind != b.kind {
-                    if !((a.kind == 2 && interpreted_slice_u8(state, parse, store, bindings, b, right.env)) || (b.kind == 2 && interpreted_slice_u8(state, parse, store, bindings, a, left.env))) { return Ok(false) }
-                } else {
+                    if !((a.kind == 16 && interpreted_slice_u8(state, parse, store, bindings, b, right.env)) || (b.kind == 16 && interpreted_slice_u8(state, parse, store, bindings, a, left.env))) { return Ok(false) }
+                }
+                else {
                     if a.target != b.target || a.arg_count != b.arg_count { return Ok(false) }
                     if a.kind == 1 && !primitive_same(state, parse, a, b) { return Ok(false) }
                     if a.kind == 6 && a.target != b.target { return Ok(false) }
@@ -555,7 +555,7 @@ fn interpreted_contains_reference(d: Domain, state: State, parse: ParseStore, st
             if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
         }
         if inspect {
-            if checked.kind == 2 || checked.kind == 3 || checked.kind == 4 || checked.kind == 8 || checked.kind == 11 || checked.kind == 12 || checked.kind == 13 { return Ok(true) }
+            if checked.kind == 3 || checked.kind == 4 || checked.kind == 8 || checked.kind == 11 || checked.kind == 12 || checked.kind == 13 || checked.kind == 16 { return Ok(true) }
             if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 {
                 var child: U64 = 0
                 while child < checked.arg_count {
@@ -820,7 +820,7 @@ fn same_name(state: State, a_source: U64, a_start: U64, a_end: U64, b_source: U6
     return true
 }
 
-fn node_word(state: State, node: SyntaxRec, word: String) -> Bool {
+fn node_word(state: State, node: SyntaxRec, word: __s0_String) -> Bool {
     let source = __s0_buffer_get(SourceRec, state.sources, node.source)
     return source_word(state, source, node.name_start, node.name_end, word)
 }
@@ -828,7 +828,7 @@ fn node_word(state: State, node: SyntaxRec, word: String) -> Bool {
 fn reserved_symbol(state: State, node: SyntaxRec) -> Bool {
     let source = __s0_buffer_get(SourceRec, state.sources, node.source)
     if node.name_end - node.name_start >= 5 && source_word(state, source, node.name_start, node.name_start + 5, "__s0_") { return true }
-    return node_word(state, node, "Bool") || node_word(state, node, "I8") || node_word(state, node, "I16") || node_word(state, node, "I32") || node_word(state, node, "I64") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64") || node_word(state, node, "F32") || node_word(state, node, "F64") || node_word(state, node, "Unit") || node_word(state, node, "String") || node_word(state, node, "Bytes") || node_word(state, node, "Option") || node_word(state, node, "Result") || node_word(state, node, "Map") || node_word(state, node, "Ptr") || node_word(state, node, "Domain") || node_word(state, node, "DomainMark") || node_word(state, node, "__s0_Buffer") || node_word(state, node, "__s0_Error") || node_word(state, node, "len") || node_word(state, node, "range") || node_word(state, node, "__s0_alloc") || node_word(state, node, "__s0_domain_create") || node_word(state, node, "__s0_domain_mark") || node_word(state, node, "__s0_domain_reset") || node_word(state, node, "__s0_domain_destroy") || node_word(state, node, "__s0_map_create") || node_word(state, node, "__s0_buffer_new") || node_word(state, node, "__s0_buffer_len") || node_word(state, node, "__s0_buffer_append") || node_word(state, node, "__s0_buffer_get") || node_word(state, node, "__s0_buffer_set") || node_word(state, node, "__s0_buffer_slice") || node_word(state, node, "Get") || node_word(state, node, "Set") || node_word(state, node, "Remove") || node_word(state, node, "None") || node_word(state, node, "Some") || node_word(state, node, "Ok") || node_word(state, node, "Err")
+    return node_word(state, node, "Bool") || node_word(state, node, "I8") || node_word(state, node, "I16") || node_word(state, node, "I32") || node_word(state, node, "I64") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64") || node_word(state, node, "F32") || node_word(state, node, "F64") || node_word(state, node, "Unit") || node_word(state, node, "String") || node_word(state, node, "Bytes") || node_word(state, node, "Option") || node_word(state, node, "Result") || node_word(state, node, "Map") || node_word(state, node, "Ptr") || node_word(state, node, "Domain") || node_word(state, node, "DomainMark") || node_word(state, node, "__s0_String") || node_word(state, node, "__s0_Buffer") || node_word(state, node, "__s0_Error") || node_word(state, node, "len") || node_word(state, node, "range") || node_word(state, node, "__s0_alloc") || node_word(state, node, "__s0_domain_create") || node_word(state, node, "__s0_domain_mark") || node_word(state, node, "__s0_domain_reset") || node_word(state, node, "__s0_domain_destroy") || node_word(state, node, "__s0_map_create") || node_word(state, node, "__s0_buffer_new") || node_word(state, node, "__s0_buffer_len") || node_word(state, node, "__s0_buffer_append") || node_word(state, node, "__s0_buffer_get") || node_word(state, node, "__s0_buffer_set") || node_word(state, node, "__s0_buffer_slice") || node_word(state, node, "Get") || node_word(state, node, "Set") || node_word(state, node, "Remove") || node_word(state, node, "None") || node_word(state, node, "Some") || node_word(state, node, "Ok") || node_word(state, node, "Err")
 }
 
 fn reserved_value_name(state: State, store: CheckStore, node: SyntaxRec) -> Bool {
@@ -1138,6 +1138,7 @@ fn validate_import_targets(d: Domain, state: State, parse: ParseStore, store: Ch
 fn builtin_type_kind(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, "String") { return 2 }
     if node_word(state, node, "Bytes") { return 14 }
+    if node_word(state, node, "__s0_String") { return 16 }
     if node_word(state, node, "Domain") { return 3 }
     if node_word(state, node, "DomainMark") { return 4 }
     if node_word(state, node, "__s0_Error") { return 5 }
@@ -1690,7 +1691,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         CheckBad(value) => true
     } { return Ok(before) }
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
-    if child.kind == 7 || child.kind == 14 || child.kind == skip_kind { return Ok(CheckGood(current)) }
+    if child.kind == 7 || child.kind == 14 || child.kind == 16 || child.kind == skip_kind { return Ok(CheckGood(current)) }
     var actual_role = role
     if role == 5 && child.kind != 13 && child.kind != 47 && child.kind != 48 { actual_role = 6 }
     var actual_ordinal: U64 = 0
@@ -2084,7 +2085,7 @@ fn zero_magnitude(values: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
 
 // Canonical digit order compares by width, then by ASCII byte order. Leading
 // zeros are skipped so 007 and 7 share one canonical form.
-fn digits_at_most(values: __s0_Buffer(U8), start: U64, end: U64, limit: String) -> Bool {
+fn digits_at_most(values: __s0_Buffer(U8), start: U64, end: U64, limit: __s0_String) -> Bool {
     var first = start
     while first + 1 < end && __s0_buffer_get(U8, values, first) == 48 { first = first + 1 }
     let width = end - first
@@ -2203,7 +2204,7 @@ fn expr_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
 fn diagnostic_type(store: CheckStore, checked_type: U64) -> DiagnosticTypeRec {
     let rec = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if rec.kind == 1 { return DiagnosticTypeRec(kind: 1, target: rec.target) }
-    if rec.kind == 2 || rec.kind == 14 { return DiagnosticTypeRec(kind: rec.kind, target: 0) }
+    if rec.kind == 2 || rec.kind == 14 || rec.kind == 16 { return DiagnosticTypeRec(kind: rec.kind, target: 0) }
     if (rec.kind == 8 || rec.kind == 15) && rec.arg_count == 1 {
         let child = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, rec.first_arg - 1) - 1)
         if child.kind == 1 { return DiagnosticTypeRec(kind: rec.kind, target: child.target) }
@@ -2215,8 +2216,27 @@ fn diagnostic_type(store: CheckStore, checked_type: U64) -> DiagnosticTypeRec {
 fn sequence_element_type(state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> U64 {
     let sequence = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if sequence.kind == 8 && sequence.arg_count == 1 { return __s0_buffer_get(U64, store.type_args, sequence.first_arg - 1) }
-    if sequence.kind == 2 || sequence.kind == 14 { return primitive_type_id(state, parse, store, "U8") }
+    if sequence.kind == 16 { return primitive_type_id(state, parse, store, "U8") }
     return 0
+}
+
+fn checker_utf8_continuation(value: U8) -> Bool { return value >= 128 && value <= 191 }
+
+fn checker_utf8_valid(values: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+    var at = start
+    while at < end {
+        let first = __s0_buffer_get(U8, values, at)
+        if first < 128 { at = at + 1 }
+        else { if first >= 194 && first <= 223 && at + 1 < end && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 1)) { at = at + 2 }
+        else { if first == 224 && at + 2 < end && __s0_buffer_get(U8, values, at + 1) >= 160 && __s0_buffer_get(U8, values, at + 1) <= 191 && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if ((first >= 225 && first <= 236) || (first >= 238 && first <= 239)) && at + 2 < end && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 1)) && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if first == 237 && at + 2 < end && __s0_buffer_get(U8, values, at + 1) >= 128 && __s0_buffer_get(U8, values, at + 1) <= 159 && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if first == 240 && at + 3 < end && __s0_buffer_get(U8, values, at + 1) >= 144 && __s0_buffer_get(U8, values, at + 1) <= 191 && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { if first >= 241 && first <= 243 && at + 3 < end && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 1)) && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { if first == 244 && at + 3 < end && __s0_buffer_get(U8, values, at + 1) >= 128 && __s0_buffer_get(U8, values, at + 1) <= 143 && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 2)) && checker_utf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { return false } } } } } } } }
+    }
+    return true
 }
 
 fn expr_token_type_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec, expected: U64, actual: U64) -> Result(ExprOutcome, __s0_Error) {
@@ -2248,7 +2268,7 @@ fn expr_draft(store: CheckStore, checked_type: U64, expression: U64) -> Result(E
     return Ok(ExprGood(ExprValueRec(store: store, draft: ExprDraftRec(deferred: false, checked_type: checked_type, expression: expression))))
 }
 
-fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: String) -> U64 {
+fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: __s0_String) -> U64 {
     var target: U64 = 0
     if len(name) == 4 && name[0] == 66 { target = 1 }
     if len(name) == 3 && name[0] == 73 { target = 5 }
@@ -2264,7 +2284,7 @@ fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: S
     return 0
 }
 
-fn primitive_type_named(state: State, parse: ParseStore, store: CheckStore, checked_type: U64, name: String) -> Bool {
+fn primitive_type_named(state: State, parse: ParseStore, store: CheckStore, checked_type: U64, name: __s0_String) -> Bool {
     if checked_type == 0 { return false }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     var target: U64 = 0
@@ -4394,7 +4414,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             }
         }
         let expected_type = __s0_buffer_get(CheckedTypeRec, string_store.types, string_type - 1)
-        if expected_type.kind != 2 && expected_type.kind != 8 {
+        if expected_type.kind != 2 && expected_type.kind != 14 && expected_type.kind != 16 {
             let want = diagnostic_type(string_store, expected)
             let failed = try check_token_detail_fail(d, state, base, mismatch_kind, mismatch_node, want.kind, want.target, 2, 0)
             let bad = match failed {
@@ -4403,6 +4423,8 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             }
             return Ok(ExprBad(bad))
         }
+        let token = __s0_buffer_get(TokenRec, state.tokens, expression.token - 1)
+        if expected_type.kind == 2 && !checker_utf8_valid(state.values, token.value_start, token.value_end) { return expr_token_fail(d, state, base, 99, expression) }
         return append_expression(d, string_store, owner, expression_id, 4, string_type, 0, 0, 0, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 23 {

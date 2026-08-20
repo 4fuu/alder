@@ -144,12 +144,13 @@ type TypeParamRec {
 
 // Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
 // 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
-// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, and 15 Array. Primitive targets
+// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, 15 Array, and
+// 16 __s0_String. Primitive targets
 // 1..12 identify Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, and
 // Unit directly. An Array record has one type argument and stores its fixed
 // length in target. String and Bytes retain source identities distinct from
-// slice(U8); the private bootstrap ABI may still lower all three to MIR
-// slice(u8). Canonical records have no source ownership (syntax is zero);
+// slice(U8); __s0_String is the private bootstrap slice(U8) facility.
+// Canonical records have no source ownership (syntax is zero);
 // source occurrences are retained by
 // CheckedTypeAnnotationRec.
 type CheckedTypeRec {

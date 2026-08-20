@@ -702,7 +702,7 @@ func (g *gen) emitConstGet(b *strings.Builder, in *mir.Instr) {
 			floatLiteral(c.Value.Float) + ");\n")
 	case mir.ConstString:
 		idx := g.strConsts[c.Name]
-		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)alder_str_" +
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(c.Type) + "){ alder_str_" +
 			strconv.Itoa(idx) + ", (uint64_t)" + strconv.Itoa(len(c.Value.String)) + " };\n")
 	}
 }

@@ -115,10 +115,10 @@ func TestPrintModuleSections(t *testing.T) {
 	m.AddConst("k", TypeI64, ConstValue{Kind: ConstInt, Int: -5})
 	m.AddConst("f", TypeF64, ConstValue{Kind: ConstFloat, Float: 1.5})
 	m.AddConst("b", TypeBool, ConstValue{Kind: ConstBool, Bool: true})
-	m.AddConst("s", m.Slice(TypeU8), ConstValue{Kind: ConstString, String: "he\"llo"})
+	m.AddConst("s", m.String(), ConstValue{Kind: ConstString, String: "he\"llo"})
 	m.AddConst("u", TypeUnit, ConstValue{Kind: ConstUnit})
 	got := Print(m)
-	want := "mir 3\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: slice(u8) = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
+	want := "mir 3\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: string = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
 	if got != want {
 		t.Errorf("const printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}

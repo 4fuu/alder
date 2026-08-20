@@ -1,6 +1,6 @@
 fn out(byte: U8) -> Bool { return unsafe c { alderhost_stdout_byte(byte) } }
 
-fn out_string(value: String) -> Bool {
+fn out_string(value: __s0_String) -> Bool {
     var at: U64 = 0
     while at < len(value) {
         if !out(value[at]) { return false }

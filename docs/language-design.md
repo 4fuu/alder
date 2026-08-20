@@ -183,11 +183,11 @@ as `defer`.
 | `type` parameters and `Name(...)` generics | Yes | Implemented in S0; monomorphized before MIR |
 | `Option`, `Result`, `try`, exhaustive `match` | Yes | Implemented in S0 |
 | Exact-width numerics and checked operations | Yes | S0/MIR/C implemented, with current full-`U64` frontend limits documented in S0 |
-| `String`, `Bytes`, arrays, slices, `Vec`, ordered `Map`/`Set` | Required for 1.0 | Long-term distinction not implemented; S0 uses narrower bridge representations |
+| `String`, `Bytes`, arrays, slices, `Vec`, ordered `Map`/`Set` | Required for 1.0 | M7 implements fixed arrays and distinct owned `String`/`Bytes`; views and ordinary collections remain gated on M7.1 |
 | Inferred invisible storage | Required for 1.0 | Explicit bootstrap domains and MIR operations exist; inference is not implemented |
 | `Table(T)` and `T.Id` | Required for 1.0 | MIR/runtime implemented; source surface not implemented |
 | Resource-selected `using` | Required for 1.0 | S0 callback form is bootstrap-only |
-| Inherent methods | Required for 1.0 | Not implemented in S0 |
+| Inherent methods | Required for 1.0 | M7 implements inherent methods, associated functions, and receiver modes |
 | Static traits and safe closures | Required for 1.0 | Not implemented in S0 |
 | `async fn`, `await`, task groups, channels, cancellation | Required for 1.0 | Not implemented; current runtime is single-threaded |
 | C binding blocks, exports, callbacks, and safe wrappers | Required for 1.0 | S0 direct-symbol import is bootstrap-only |

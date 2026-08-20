@@ -19,7 +19,7 @@ import (
 
 const parserWrapper = `
 fn parser_storage_error() -> I32 {
-    let text = "alder compiler: storage failure\n"
+    let text: __s0_String = "alder compiler: storage failure\n"
     var at: U64 = 0
     while at < len(text) {
         if !unsafe c { alderhost_stderr_byte(text[at]) } { return 3 }

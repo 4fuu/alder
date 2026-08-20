@@ -1,1 +1,1 @@
-line 3, column 5: cleanup function parameter: type mismatch: expected [U8], got I64
+line 3, column 5: cleanup function parameter: type mismatch: expected String, got I64

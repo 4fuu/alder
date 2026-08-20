@@ -395,6 +395,20 @@ func (g *gen) emitImportDecls(b *strings.Builder) {
 // rejects cycles, so a stable postorder is sufficient even for API-built
 // modules whose child TypeIds are greater than their parents.
 func (g *gen) emitTypes(b *strings.Builder) {
+	hasString, hasBytes := false, false
+	for i := range g.m.Types {
+		hasString = hasString || g.m.Types[i].Kind == mir.TypeString
+		hasBytes = hasBytes || g.m.Types[i].Kind == mir.TypeBytes
+	}
+	if hasString {
+		b.WriteString("typedef struct { const uint8_t *data; uint64_t len; } AlderString;\n")
+	}
+	if hasBytes {
+		b.WriteString("typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n")
+	}
+	if hasString || hasBytes {
+		b.WriteByte('\n')
+	}
 	hasRecords := false
 	for i := range g.m.Types {
 		id := mir.TypeId(i)
@@ -526,52 +540,32 @@ func (g *gen) emitStruct(b *strings.Builder, id mir.TypeId, ty *mir.Type) {
 	b.WriteString("};\n")
 }
 
-// emitStringConsts writes static storage for string constants.
+// emitStringConsts writes immutable numeric byte storage for byte-sequence constants.
 func (g *gen) emitStringConsts(b *strings.Builder) {
 	for i, c := range g.m.Constants {
 		if c.Value.Kind != mir.ConstString {
 			continue
 		}
-		b.WriteString("static ALDER_MAYBE_UNUSED uint8_t alder_str_" + strconv.Itoa(i) + "[] = \"")
-		b.WriteString(cString(c.Value.String))
-		b.WriteString("\";\n")
+		qualifier := "const "
+		if g.m.Types[c.Type].Kind == mir.TypeSlice {
+			qualifier = ""
+		}
+		b.WriteString("static ALDER_MAYBE_UNUSED " + qualifier + "uint8_t alder_str_" + strconv.Itoa(i) + "[] = {")
+		if len(c.Value.String) == 0 {
+			b.WriteString(" UINT8_C(0)")
+		} else {
+			for j := 0; j < len(c.Value.String); j++ {
+				if j > 0 {
+					b.WriteByte(',')
+				}
+				b.WriteString(" UINT8_C(" + strconv.Itoa(int(c.Value.String[j])) + ")")
+			}
+		}
+		b.WriteString(" };\n")
 	}
 	if len(g.strConsts) > 0 {
 		b.WriteString("\n")
 	}
-}
-
-// cString escapes a byte string as a C string literal with octal escapes, so
-// embedded NUL bytes and hex-digit ambiguity are impossible.
-func cString(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch c {
-		case '"':
-			b.WriteString("\\\"")
-		case '\\':
-			b.WriteString("\\\\")
-		case '\n':
-			b.WriteString("\\n")
-		case '\t':
-			b.WriteString("\\t")
-		case '\r':
-			b.WriteString("\\r")
-		default:
-			if c >= 0x20 && c < 0x7f {
-				b.WriteByte(c)
-			} else {
-				b.WriteString("\\" + octal(c))
-			}
-		}
-	}
-	return b.String()
-}
-
-func octal(c byte) string {
-	s := strconv.FormatInt(int64(c), 8)
-	return strings.Repeat("0", 3-len(s)) + s
 }
 
 // emitCopyHelpers writes the per-type copy functions used by copy_to_domain.

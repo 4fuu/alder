@@ -369,3 +369,18 @@ func TestFunctionPredeclarationBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestParseOwnedStringAndBytesTypes(t *testing.T) {
+	const text = "mir 3\n\nconst @s: string = \"hi\"\n\nconst @b: bytes = \"\\000\\200\\377\"\n"
+	const want = "mir 3\n\nconst @s: string = \"hi\"\n\nconst @b: bytes = \"\\x00\\x80\\xff\"\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(m); got != want {
+		t.Fatalf("round trip mismatch:\n%s", got)
+	}
+	if m.Types[m.Constants[0].Type].Kind != TypeString || m.Types[m.Constants[1].Type].Kind != TypeBytes {
+		t.Fatal("string and bytes did not parse as distinct leaf types")
+	}
+}

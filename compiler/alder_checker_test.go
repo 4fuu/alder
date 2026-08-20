@@ -349,7 +349,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, deepFiles, []string{"deep.al"}, false), deepFiles)
 
 	genericGood := map[string]string{
-		"a.al": "type Concrete {\n outer: Outer(U64)\n bool_key: Map(Bool, U64)\n u8_key: Map(U8, U64)\n u16_key: Map(U16, U64)\n u32_key: Map(U32, U64)\n u64_key: Map(U64, U64)\n nested_key: Map(PairKey(U8, PairKey(Bool, U64)), U64)\n nested_box: CallerBox(CallerBox(U64))\n node: Node(U64)\n same: Same(U64)\n mutual: Left(U64)\n pointer_cut: PointerBox(Concrete)\n phantom: Phantom(String)\n sugar_one: StringSliceOne(String)\n sugar_two: StringSliceTwo([U8])\n sugar_relay: StringRelayRoot(String)\n}\n",
+		"a.al": "type Concrete {\n outer: Outer(U64)\n bool_key: Map(Bool, U64)\n u8_key: Map(U8, U64)\n u16_key: Map(U16, U64)\n u32_key: Map(U32, U64)\n u64_key: Map(U64, U64)\n nested_key: Map(PairKey(U8, PairKey(Bool, U64)), U64)\n nested_box: CallerBox(CallerBox(U64))\n node: Node(U64)\n same: Same(U64)\n mutual: Left(U64)\n pointer_cut: PointerBox(Concrete)\n phantom: Phantom(String)\n}\n",
 		"z.al": "type Key(T: type) { value: T }\n" +
 			"type PairKey(A: type, B: type) { first: A\n second: B }\n" +
 			"type CallerBox(T: type) { value: T }\n" +
@@ -362,12 +362,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"type Left(T: type) { right: Ptr(Right(T)) }\n" +
 			"type Right(T: type) { left: Ptr(Left(T)) }\n" +
 			"type PointerBox(T: type) { value: Ptr(T) }\n" +
-			"type Phantom(T: type) { value: U64 }\n" +
-			"type StringSliceOne(T: type) { next: Ptr(StringSliceOne([U8])) }\n" +
-			"type StringSliceTwo(T: type) { next: Ptr(StringSliceTwo(String)) }\n" +
-			"type StringRelayRoot(T: type) { next: Ptr(StringRelayOne([U8])) }\n" +
-			"type StringRelayOne(T: type) { next: Ptr(StringRelayTwo(T)) }\n" +
-			"type StringRelayTwo(T: type) { next: Ptr(StringRelayRoot(T)) }\n",
+			"type Phantom(T: type) { value: U64 }\n",
 	}
 	genericOne := runAlderChecker(t, exe, genericGood, []string{"z.al", "a.al"}, false)
 	genericTwo := runAlderChecker(t, exe, genericGood, []string{"a.al", "z.al"}, false)
@@ -473,8 +468,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 		"a.al": "type Pair(T: type) { value: T }\n" +
 			"fn identity(value: U64) -> U64 { return value }\n" +
 			"fn choose(first: I64, second: U64) -> U64 { return second }\n" +
-			"fn string_to_slice(value: String) -> [U8] { return value }\n" +
-			"fn slice_to_string(value: [U8]) -> String { return value }\n" +
+			"fn string_identity(value: String) -> String { return value }\n" +
+			"fn bytes_identity(value: Bytes) -> Bytes { return value }\n" +
 			"fn declared(value: Pair(U64)) -> Pair(U64) { return value }\n" +
 			"fn done() -> Unit { return }\n" +
 			"fn yes() -> Bool { return true }\n" +
@@ -486,12 +481,12 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"fn leading_zeros() -> U64 { return 007 }\n" +
 			"fn neg_zero() -> U8 { return -0 }\n" +
 			"fn greeting() -> String { return \"hello\" }\n" +
-			"fn raw() -> [U8] { return \"bytes\" }\n" +
+			"fn raw() -> Bytes { return \"bytes\" }\n" +
 			"fn empty_string() -> String { return \"\" }\n" +
 			"fn local_param(value: U64) -> U64 { let x: U64 = value\n return x }\n" +
 			"fn local_assign() -> U64 { var y: U64 = 5\n y = 7\n return y }\n" +
 			"fn local_literal() -> I64 { let z: I64 = -3\n return z }\n" +
-			"fn local_string(value: String) -> [U8] { let s: String = value\n return s }\n",
+			"fn local_string(value: String) -> String { let s: String = value\n return s }\n",
 		"z.al": "",
 	}
 	for i := 0; i < 20; i++ {
@@ -516,7 +511,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 			t.Fatalf("checked returns are not in canonical function order: %+v", bodyManifest.returns)
 		}
 	}
-	for _, name := range []string{"identity", "choose", "string_to_slice", "slice_to_string", "declared"} {
+	for _, name := range []string{"identity", "choose", "string_identity", "bytes_identity", "declared"} {
 		owner := checkerSymbolByName(t, bodyManifest, bodyGood, name)
 		checkedReturn := checkerReturnForOwner(t, bodyManifest, owner.id)
 		if checkedReturn.expression == 0 || bodyManifest.expressions[checkedReturn.expression-1].owner != owner.id {
@@ -549,15 +544,15 @@ func runCheckerConformance(t *testing.T, exe string) {
 	if parameter := bodyManifest.locals[chooseExpression.parameterUse-1]; chooseExpression.kind != 1 || chooseExpression.boolValue != 0 || parameter.kind != 1 || checkerSourceText(bodyManifest, bodyGood, parameter.source, parameter.nameStart, parameter.nameEnd) != "second" {
 		t.Fatalf("multi-parameter return resolved the wrong binding: %+v", parameter)
 	}
-	stringToSlice := checkerSymbolByName(t, bodyManifest, bodyGood, "string_to_slice")
-	stringExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, stringToSlice.id).expression-1]
-	if bodyManifest.types[stringExpression.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, stringToSlice.id, 6, 0).checkedType-1].kind != 8 {
-		t.Fatal("String parameter was not accepted as a [U8] return")
+	stringIdentity := checkerSymbolByName(t, bodyManifest, bodyGood, "string_identity")
+	stringExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, stringIdentity.id).expression-1]
+	if bodyManifest.types[stringExpression.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, stringIdentity.id, 6, 0).checkedType-1].kind != 2 {
+		t.Fatal("String identity did not retain String")
 	}
-	sliceToString := checkerSymbolByName(t, bodyManifest, bodyGood, "slice_to_string")
-	sliceExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, sliceToString.id).expression-1]
-	if bodyManifest.types[sliceExpression.checkedType-1].kind != 8 || bodyManifest.types[checkerUse(t, bodyManifest, sliceToString.id, 6, 0).checkedType-1].kind != 2 {
-		t.Fatal("[U8] parameter was not accepted as a String return")
+	bytesIdentity := checkerSymbolByName(t, bodyManifest, bodyGood, "bytes_identity")
+	bytesExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, bytesIdentity.id).expression-1]
+	if bodyManifest.types[bytesExpression.checkedType-1].kind != 14 || bodyManifest.types[checkerUse(t, bodyManifest, bytesIdentity.id, 6, 0).checkedType-1].kind != 14 {
+		t.Fatal("Bytes identity did not retain Bytes")
 	}
 	done := checkerSymbolByName(t, bodyManifest, bodyGood, "done")
 	if checkedReturn := checkerReturnForOwner(t, bodyManifest, done.id); checkedReturn.expression != 0 {
@@ -599,21 +594,28 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	localString := checkerSymbolByName(t, bodyManifest, bodyGood, "local_string")
 	localStringExpr := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, localString.id).expression-1]
-	if bodyManifest.types[localStringExpr.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, localString.id, 6, 0).checkedType-1].kind != 8 {
-		t.Fatal("String local was not accepted as a [U8] return")
+	if bodyManifest.types[localStringExpr.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, localString.id, 6, 0).checkedType-1].kind != 2 {
+		t.Fatal("String local did not retain String")
 	}
-	// The compatibility bridge accepts decoded literals for String and [U8]
-	// while preserving the expected source identity in the checked expression.
-	for _, name := range []string{"greeting", "raw", "empty_string"} {
+	// Decoded literals preserve the distinct expected String or Bytes type.
+	for name, wantKind := range map[string]int{"greeting": 2, "raw": 14, "empty_string": 2} {
 		owner := checkerSymbolByName(t, bodyManifest, bodyGood, name)
 		checkedReturn := checkerReturnForOwner(t, bodyManifest, owner.id)
 		expression := bodyManifest.expressions[checkedReturn.expression-1]
 		result := checkerUse(t, bodyManifest, owner.id, 6, 0)
 		resultKind := bodyManifest.types[expression.checkedType-1].kind
-		if expression.kind != 4 || expression.parameterUse != 0 || expression.boolValue != 0 || expression.checkedType != result.checkedType || (resultKind != 2 && resultKind != 8) {
+		if expression.kind != 4 || expression.parameterUse != 0 || expression.boolValue != 0 || expression.checkedType != result.checkedType || resultKind != wantKind {
 			t.Fatalf("string return %s has invalid expression/result records: expression=%+v result=%+v", name, expression, result)
 		}
 	}
+	invalidUTF8 := string([]byte{0xff})
+	invalidUTF8Files := map[string]string{"invalid-utf8.al": "fn bad() -> String { return \"" + invalidUTF8 + "\" }\n"}
+	invalidUTF8Manifest := parseCheckerManifest(t, runAlderChecker(t, exe, invalidUTF8Files, []string{"invalid-utf8.al"}, true), invalidUTF8Files)
+	if len(invalidUTF8Manifest.diagnostics) != 1 || invalidUTF8Manifest.diagnostics[0].kind != 99 {
+		t.Fatalf("invalid UTF-8 String diagnostics=%+v, want kind 99", invalidUTF8Manifest.diagnostics)
+	}
+	bytesUTF8Files := map[string]string{"bytes-utf8.al": "fn raw() -> Bytes { return \"" + invalidUTF8 + "\" }\n"}
+	parseCheckerManifest(t, runAlderChecker(t, exe, bytesUTF8Files, []string{"bytes-utf8.al"}, false), bytesUTF8Files)
 	callGood := map[string]string{
 		"a.al": "import c foreign: fn(U64) -> U64\n" +
 			"type Point { x: U64\n y: Bool }\n" +
@@ -680,6 +682,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"fn right(T: type, value: T) -> T { return left(value) }\n" +
 			"fn inferred() -> I64 { return identity(7) }\n" +
 			"fn explicit() -> U64 { return identity(U64, 7) }\n" +
+			"fn string_instance() -> String { return identity(\"\") }\n" +
+			"fn bytes_instance() -> Bytes { return identity(\"\") }\n" +
 			"fn inferred_record() -> Pair(I64, Bool) { return Pair(first: 1, second: true) }\n" +
 			"fn explicit_record() -> Pair(U64, Bool) { return Pair(U64, Bool)(second: true, first: 1) }\n" +
 			"fn expected_variant() -> Maybe(I64) { return Some(1) }\n" +
@@ -699,16 +703,18 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	identityDecl := checkerSymbolByName(t, genericManifest, genericCalls, "identity")
 	identityInstances := 0
+	identityKinds := make(map[int]bool)
 	for _, instance := range genericManifest.instances {
 		if instance.declaration == identityDecl.id {
 			identityInstances++
-			if instance.argCount != 1 || genericManifest.types[genericManifest.args[instance.firstArg-1].checkedType-1].kind != 1 {
+			if instance.argCount != 1 {
 				t.Fatalf("identity instance is not concretely specialized: %+v", instance)
 			}
+			identityKinds[genericManifest.types[genericManifest.args[instance.firstArg-1].checkedType-1].kind] = true
 		}
 	}
-	if identityInstances != 2 {
-		t.Fatalf("identity concrete specialization count=%d, want shared I64 and U64 instances", identityInstances)
+	if identityInstances != 4 || !identityKinds[1] || !identityKinds[2] || !identityKinds[14] {
+		t.Fatalf("identity concrete specializations=%d/%v, want primitive, String, and Bytes instances", identityInstances, identityKinds)
 	}
 	for _, expression := range genericManifest.expressions {
 		if !checkedManifestTypeConcrete(genericManifest, expression.checkedType) {
@@ -937,36 +943,36 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "generic-substituted-value-cycle.al", text: "type Loop(T: type) { value: Box(Loop(T)) }\ntype Box(T: type) { value: T }\n", kind: 9, marker: "type"},
 		{name: "substituted-cycle-before-forward-restriction.al", text: "type Root { value: Box(Root) }\ntype Box(T: type) { bad: Map(T, U64)\n value: T }\n", kind: 9, marker: "type"},
 		{name: "substituted-cycle-sibling.al", text: "type Pair(T: type) { left: Box(T)\n right: Box(Root) }\ntype Box(T: type) { value: T }\ntype Root { value: Pair(U64) }\n", kind: 9, marker: "type"},
-		{name: "nested-string-slice.al", text: "type A { x: [String] }\n", kind: 10, marker: "["},
-		{name: "substituted-slice.al", text: "type Box(T: type) { x: [T] }\ntype A { x: Box(String) }\n", kind: 10, marker: "Box", last: true},
-		{name: "multi-substituted-slice.al", text: "type Leaf(T: type) { x: [T] }\ntype Middle(T: type) { x: Leaf(T) }\ntype A { x: Middle(String) }\n", kind: 10, marker: "Middle", last: true},
-		{name: "caller-ancestry-slice.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box([String])) }\n", kind: 10, marker: "["},
-		{name: "inherited-ancestry-forward-slice.al", text: "type Inner(T: type) { value: T }\ntype Outer { value: Inner([Later]) }\ntype Later { text: String }\ntype Root { value: Outer }\n", kind: 10, marker: "Outer", last: true},
-		{name: "shared-specialization-slice.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: [Pair(String)] }\n", kind: 10, marker: "["},
+		{name: "nested-slice-element.al", text: "type A { x: [[U8]] }\n", kind: 10, marker: "["},
+		{name: "substituted-slice.al", text: "type Box(T: type) { x: [T] }\ntype A { x: Box([U8]) }\n", kind: 10, marker: "Box", last: true},
+		{name: "multi-substituted-slice.al", text: "type Leaf(T: type) { x: [T] }\ntype Middle(T: type) { x: Leaf(T) }\ntype A { x: Middle([U8]) }\n", kind: 10, marker: "Middle", last: true},
+		{name: "caller-ancestry-slice.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box([[U8]])) }\n", kind: 10, marker: "["},
+		{name: "inherited-ancestry-forward-slice.al", text: "type Inner(T: type) { value: T }\ntype Outer { value: Inner([Later]) }\ntype Later { text: [U8] }\ntype Root { value: Outer }\n", kind: 10, marker: "Outer", last: true},
+		{name: "shared-specialization-slice.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: [Pair([U8])] }\n", kind: 10, marker: "["},
 		{name: "recursive-slice.al", text: "type A { x: [A] }\n", kind: 10, marker: "["},
-		{name: "buffer-string.al", text: "type A { x: __s0_Buffer(String) }\n", kind: 11, marker: "__s0_Buffer"},
-		{name: "substituted-buffer.al", text: "type Box(T: type) { x: __s0_Buffer(T) }\ntype A { x: Box(String) }\n", kind: 11, marker: "Box", last: true},
-		{name: "caller-ancestry-buffer.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(__s0_Buffer(String))) }\n", kind: 11, marker: "__s0_Buffer"},
-		{name: "shared-specialization-buffer.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: __s0_Buffer(Pair(String)) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "buffer-slice.al", text: "type A { x: __s0_Buffer([U8]) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "substituted-buffer.al", text: "type Box(T: type) { x: __s0_Buffer(T) }\ntype A { x: Box([U8]) }\n", kind: 11, marker: "Box", last: true},
+		{name: "caller-ancestry-buffer.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(__s0_Buffer([U8]))) }\n", kind: 11, marker: "__s0_Buffer"},
+		{name: "shared-specialization-buffer.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: __s0_Buffer(Pair([U8])) }\n", kind: 11, marker: "__s0_Buffer"},
 		{name: "recursive-buffer.al", text: "type A { x: __s0_Buffer(A) }\n", kind: 11, marker: "__s0_Buffer"},
 		{name: "map-key-before-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(I64, String) }\n", kind: 12, marker: "Pair", last: true},
 		{name: "map-key-float.al", text: "type A { x: Map(F64, U64) }\n", kind: 12, marker: "Map"},
 		{name: "map-key-generic.al", text: "type Key(T: type) { x: T }\ntype A { x: Map(Key(I64), String) }\n", kind: 12, marker: "Map"},
 		{name: "caller-ancestry-map-key.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Map(I64, U64))) }\n", kind: 12, marker: "Map"},
 		{name: "shared-specialization-map-key.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: Map(Pair(I64), U64) }\n", kind: 12, marker: "Map"},
-		{name: "substituted-map-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(U64, String) }\n", kind: 13, marker: "Pair", last: true},
-		{name: "declared-map-value.al", text: "type Value(T: type) { x: T }\ntype A { x: Map(U64, Value(String)) }\n", kind: 13, marker: "Map"},
-		{name: "caller-ancestry-map-value.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Map(U64, String))) }\n", kind: 13, marker: "Map"},
-		{name: "shared-specialization-map-value.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: Map(U64, Pair(String)) }\n", kind: 13, marker: "Map"},
-		{name: "struct-member-order.al", text: "type Fields(T: type) { first: __s0_Buffer(T)\n second: Map(T, U64) }\ntype A { x: Fields(String) }\n", kind: 11, marker: "Fields", last: true},
-		{name: "enum-member-order.al", text: "enum E(T: type) { First(value: __s0_Buffer(T))\n Second(value: Map(T, U64)) }\ntype A { x: E(String) }\n", kind: 11, marker: "E", last: true},
+		{name: "substituted-map-value.al", text: "type Pair(K: type, V: type) { x: Map(K, V) }\ntype A { x: Pair(U64, [U8]) }\n", kind: 13, marker: "Pair", last: true},
+		{name: "declared-map-value.al", text: "type Value(T: type) { x: T }\ntype A { x: Map(U64, Value([U8])) }\n", kind: 13, marker: "Map"},
+		{name: "caller-ancestry-map-value.al", text: "type Box(T: type) { value: T }\ntype Root { value: Box(Box(Map(U64, [U8]))) }\n", kind: 13, marker: "Map"},
+		{name: "shared-specialization-map-value.al", text: "type Leaf(T: type) { value: T }\ntype Pair(T: type) { left: Leaf(T)\n right: Leaf(T) }\ntype Root { value: Map(U64, Pair([U8])) }\n", kind: 13, marker: "Map"},
+		{name: "struct-member-order.al", text: "type Fields(T: type) { first: __s0_Buffer(T)\n second: Map(T, U64) }\ntype A { x: Fields([U8]) }\n", kind: 11, marker: "Fields", last: true},
+		{name: "enum-member-order.al", text: "enum E(T: type) { First(value: __s0_Buffer(T))\n Second(value: Map(T, U64)) }\ntype A { x: E([U8]) }\n", kind: 11, marker: "E", last: true},
 		{name: "changed-recursive-specialization.al", text: "type A(T: type) { next: Ptr(A(Option(T))) }\ntype Root { x: A(U64) }\n", kind: 14, marker: "A", last: true},
 		{name: "memoized-changed-recursive-specialization.al", text: "type C { next: Ptr(A(Option(U64))) }\ntype A(T: type) { next: Ptr(C) }\ntype D(T: type) { first: C\n second: A(T) }\ntype Root { value: D(U64) }\n", kind: 14, marker: "D", last: true},
 		{name: "recursive-sibling.al", text: "type A(T: type) { next: Ptr(A(T))\n bad: Map(T, U64) }\ntype Root { x: A(I64) }\n", kind: 12, marker: "A", last: true},
 		{name: "restriction-before-cycle.al", text: "type Bad { x: Map(I64, String) }\ntype Cycle { x: Cycle }\n", kind: 12, marker: "Map"},
-		{name: "forward-substituted-buffer.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\n", kind: 11, marker: "Later"},
-		{name: "cycle-before-forward-revalidation.al", text: "type Use { x: Later(String) }\ntype Later(T: type) { x: __s0_Buffer(T) }\ntype Cycle { x: Cycle }\n", kind: 9, marker: "type", last: true},
-		{name: "import-restriction-before-function.al", text: "fn earlier(x: __s0_Buffer(String)) -> U64 {}\nimport c bad: fn(Map(I64, U64)) -> U64\n", kind: 15, marker: "import"},
+		{name: "forward-substituted-buffer.al", text: "type Use { x: Later([U8]) }\ntype Later(T: type) { x: __s0_Buffer(T) }\n", kind: 11, marker: "Later"},
+		{name: "cycle-before-forward-revalidation.al", text: "type Use { x: Later([U8]) }\ntype Later(T: type) { x: __s0_Buffer(T) }\ntype Cycle { x: Cycle }\n", kind: 9, marker: "type", last: true},
+		{name: "import-restriction-before-function.al", text: "fn earlier(x: __s0_Buffer([U8])) -> U64 {}\nimport c bad: fn(Map(I64, U64)) -> U64\n", kind: 15, marker: "import"},
 		{name: "ffi-string-parameter.al", text: "import c bad: fn(String) -> U64\n", kind: 15, marker: "import"},
 		{name: "ffi-string-result.al", text: "import c bad: fn(U64) -> String\n", kind: 15, marker: "import"},
 		{name: "ffi-pointer-string.al", text: "import c bad: fn(Ptr(String)) -> U64\n", kind: 15, marker: "import"},
@@ -1094,7 +1100,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 		})
 	}
 	reserved := []string{
-		"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64", "Unit", "String", "Option", "Result", "Map", "Ptr", "Domain", "DomainMark", "__s0_Buffer", "__s0_Error",
+		"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64", "Unit", "String", "Bytes", "Option", "Result", "Map", "Ptr", "Domain", "DomainMark", "__s0_String", "__s0_Buffer", "__s0_Error",
 		"len", "range", "__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy", "__s0_map_create", "__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice", "Get", "Set", "Remove",
 		"None", "Some", "Ok", "Err",
 	}
@@ -1792,7 +1798,7 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	bodyPhase := len(m.expressions) != 0 || len(m.returns) != 0 || len(m.locals) != 0 || len(m.blocks) != 0 || len(m.matches) != 0 || len(m.tries) != 0
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind >= 18 && diagnostic.kind <= 69 || diagnostic.kind >= 97 && diagnostic.kind <= 98 {
+		if diagnostic.kind >= 18 && diagnostic.kind <= 69 || diagnostic.kind >= 97 && diagnostic.kind <= 99 {
 			bodyPhase = true
 		}
 	}
@@ -2323,7 +2329,7 @@ func validateCheckerManifest(m checkerManifest) error {
 			if expression.checkedType >= 1 && expression.checkedType <= len(m.types) {
 				payloadKind = m.types[expression.checkedType-1].kind
 			}
-			validPayload = expression.parameterUse == 0 && expression.boolValue == 0 && (payloadKind == 2 || payloadKind == 8)
+			validPayload = expression.parameterUse == 0 && expression.boolValue == 0 && (payloadKind == 2 || payloadKind == 8 || payloadKind == 14)
 		}
 		if (expression.kind == 5 || expression.kind == 22) && expression.parameterUse >= 1 && expression.parameterUse <= len(m.locals) && expression.boolValue == 0 {
 			local := m.locals[expression.parameterUse-1]
@@ -2595,7 +2601,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 98 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 99 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

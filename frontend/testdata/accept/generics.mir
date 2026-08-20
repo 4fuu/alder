@@ -1,13 +1,13 @@
 mir 3
 
-type @Pair.c2.I64.Slice.c1.U8 {
+type @Pair.c2.I64.String {
   first: i64
-  second: slice(u8)
+  second: string
 }
 
 const @lit.int.c0: i64 = 1
 
-const @lit.str.c1: slice(u8) = "a"
+const @lit.str.c1: string = "a"
 
 const @lit.int.c2: i32 = 1
 
@@ -22,12 +22,12 @@ const @lit.int.c6: i32 = 3
 const @lit.int.c7: i32 = 0
 
 fn @main() -> i32 {
-  local %p: @Pair.c2.I64.Slice.c1.U8
+  local %p: @Pair.c2.I64.String
 
 bb0:
   %v = const.get @lit.int.c0
   %v0 = const.get @lit.str.c1
-  %v1 = aggregate.construct @Pair.c2.I64.Slice.c1.U8 { first: %v, second: %v0 }
+  %v1 = aggregate.construct @Pair.c2.I64.String { first: %v, second: %v0 }
   store local %p, %v1
   %v2 = load field(local %p, first)
   %v3 = const.get @lit.int.c0

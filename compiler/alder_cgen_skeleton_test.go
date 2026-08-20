@@ -141,7 +141,7 @@ typedef bool (*AlderFnTy15)(AlderTy12);
 static ALDER_MAYBE_UNUSED const bool alder_const_1 = true;
 static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854775807LL - 1);
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_3_bits = UINT64_C(4607182418800017408);
-static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = "a\000\"\\9";
+static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = {UINT8_C(97), UINT8_C(0), UINT8_C(34), UINT8_C(92), UINT8_C(57)};
 
 static ALDER_MAYBE_UNUSED void alder_fn_ns_helper_0(void);
 static ALDER_MAYBE_UNUSED int32_t alder_fn_main_1(AlderDomain * alder_v0);
@@ -191,7 +191,7 @@ typedef bool (*AlderFnTy15)(AlderTy12);
 static ALDER_MAYBE_UNUSED const bool alder_const_1 = true;
 static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854775807LL - 1);
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_3_bits = UINT64_C(4607182418800017408);
-static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = "a\000\"\\9";
+static ALDER_MAYBE_UNUSED uint8_t alder_str_4[] = {UINT8_C(97), UINT8_C(0), UINT8_C(34), UINT8_C(92), UINT8_C(57)};
 
 static ALDER_MAYBE_UNUSED void alder_fn_ns_helper_0(void);
 static ALDER_MAYBE_UNUSED int32_t alder_fn_main_1(AlderDomain * alder_v0);
@@ -260,7 +260,7 @@ func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 		"AlderTy12 (foreign_call)(AlderFnTy15);",
 		"alder_const_2 = (int64_t)(-9223372036854775807LL - 1);",
 		"alder_const_3_bits = UINT64_C(4607182418800017408);",
-		`alder_str_4[] = "a\000\"\\9";`,
+		`alder_str_4[] = {UINT8_C(97), UINT8_C(0), UINT8_C(34), UINT8_C(92), UINT8_C(57)};`,
 		"int32_t alder_program_entry(void *host_context)",
 	} {
 		if !strings.Contains(cgenSkeletonGolden, fragment) {

@@ -866,7 +866,7 @@ fn backend_element_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(Mi
 	return Ok((try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
 }
 
-fn hosted_fixture(d: Domain, initial: MirStore, name: String, result_type: U64, params: U64) -> Result(MirStore, __s0_Error) {
+fn hosted_fixture(d: Domain, initial: MirStore, name: __s0_String, result_type: U64, params: U64) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
     var base = handle.store

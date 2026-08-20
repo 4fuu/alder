@@ -106,11 +106,21 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
             out = try cgen_put(d, out, ");\n")
         }
         if item.kind == mir_const_string() {
-            out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED uint8_t alder_str_")
+            out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED ")
+            if mir_vtype_kind(store, item.const_type) != mir_type_kind_slice() { out = try cgen_put(d, out, "const ") }
+            out = try cgen_put(d, out, "uint8_t alder_str_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, "[] = \"")
-            out = try cgen_put_c_bytes(d, out, store.names, item.string_start, item.string_end)
-            out = try cgen_put(d, out, "\";\n")
+            out = try cgen_put(d, out, "[] = {")
+            var byte_at = item.string_start
+            if byte_at == item.string_end { out = try cgen_put(d, out, "UINT8_C(0)") }
+            while byte_at < item.string_end {
+                if byte_at != item.string_start { out = try cgen_put(d, out, ", ") }
+                out = try cgen_put(d, out, "UINT8_C(")
+                out = try cgen_put_u64(d, out, cgen_u8_to_u64(__s0_buffer_get(U8, store.names, byte_at)))
+                out = try cgen_put(d, out, ")")
+                byte_at = byte_at + 1
+            }
+            out = try cgen_put(d, out, "};\n")
         }
         at = at + 1
     }

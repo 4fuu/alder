@@ -3,6 +3,7 @@ package frontend
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // annInfo annotates a checked expression with its concrete type and, for
@@ -73,8 +74,8 @@ var builtinFnNames = []string{
 // builtinTypeNames are reserved in the type namespace.
 var builtinTypeNames = []string{
 	"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
-	"F32", "F64", "Unit", "String", "Option", "Result", "Map", "Ptr",
-	"Domain", "DomainMark", "__s0_Buffer", "__s0_Error",
+	"F32", "F64", "Unit", "String", "Bytes", "Option", "Result", "Map", "Ptr",
+	"Domain", "DomainMark", "__s0_String", "__s0_Buffer", "__s0_Error",
 }
 
 // variantReserved are reserved in the value namespace.
@@ -474,7 +475,13 @@ func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 	switch t := e.(type) {
 	case *PrimType:
 		if t.Name == "String" {
-			return &Type{kind: tSlice, elem: prim(pU8)}, nil
+			return &Type{kind: tString}, nil
+		}
+		if t.Name == "Bytes" {
+			return &Type{kind: tBytes}, nil
+		}
+		if t.Name == "__s0_String" {
+			return &Type{kind: tS0String}, nil
 		}
 		if p, ok := primOf(t.Name); ok {
 			return prim(p), nil
@@ -1132,6 +1139,9 @@ func (k *bodyChecker) mismatch(p pos, what string, want, got *Type) error {
 
 // sliceElem returns the element type of a slice or allocated slice.
 func (k *bodyChecker) sliceElem(p pos, t *Type) (*Type, error) {
+	if t != nil && t.kind == tS0String {
+		return prim(pU8), nil
+	}
 	if t == nil || (t.kind != tSlice && t.kind != tAlloc) {
 		return nil, diag(p, "expected a slice, got %s", t.display())
 	}
@@ -1166,7 +1176,13 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		return t, nil
 
 	case *StrLit:
-		t := &Type{kind: tSlice, elem: prim(pU8)}
+		t := &Type{kind: tString}
+		if expected != nil && (expected.kind == tString || expected.kind == tBytes || expected.kind == tS0String) {
+			t = expected
+		}
+		if t.kind == tString && !utf8.ValidString(x.Value) {
+			return nil, diag(x.P, "String literal is not valid UTF-8")
+		}
 		k.note(e, t)
 		return t, nil
 

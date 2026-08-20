@@ -1,18 +1,18 @@
 // Final conservative C11/backend checks. Earlier phases own structural, type,
 // function, instruction, and terminator validity; this phase refuses the
 // remaining forms which those valid records cannot lower safely.
-fn mir_v10_name_prefix(store: MirStore, start: U64, end: U64, word: String) -> Bool {
+fn mir_v10_name_prefix(store: MirStore, start: U64, end: U64, word: __s0_String) -> Bool {
     if end - start < len(word) { return false }
     var at: U64 = 0
     while at < len(word) { if __s0_buffer_get(U8, store.names, start + at) != word[at] { return false }
 at = at + 1 }
     return true
 }
-fn mir_v10_name_suffix(store: MirStore, start: U64, end: U64, word: String) -> Bool {
+fn mir_v10_name_suffix(store: MirStore, start: U64, end: U64, word: __s0_String) -> Bool {
     if end - start < len(word) { return false }
     return mir_vname_word(store, end - len(word), end, word)
 }
-fn mir_v10_name_list(store: MirStore, start: U64, end: U64, words: String) -> Bool {
+fn mir_v10_name_list(store: MirStore, start: U64, end: U64, words: __s0_String) -> Bool {
     var first: U64 = 0
 var at: U64 = 0
     while at <= len(words) {

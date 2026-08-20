@@ -31,6 +31,8 @@ fn mir_type_kind_id() -> U64 { return 15 }
 fn mir_type_kind_table_view() -> U64 { return 16 }
 fn mir_type_kind_table_mut_view() -> U64 { return 17 }
 fn mir_type_kind_array() -> U64 { return 18 }
+fn mir_type_kind_string() -> U64 { return 19 }
+fn mir_type_kind_bytes() -> U64 { return 20 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }

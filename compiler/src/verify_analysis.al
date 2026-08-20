@@ -13,7 +13,7 @@ fn mir_vname_equal(store: MirStore, a_start: U64, a_end: U64, b_start: U64, b_en
     }
     return true
 }
-fn mir_vname_word(store: MirStore, start: U64, end: U64, word: String) -> Bool {
+fn mir_vname_word(store: MirStore, start: U64, end: U64, word: __s0_String) -> Bool {
     if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) || end - start != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {

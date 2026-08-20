@@ -29,7 +29,7 @@ func phase1Integrity(m *mir.Module) []Error {
 			}
 			continue
 		}
-		if t.Kind > mir.TypeArray {
+		if t.Kind > mir.TypeBytes {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("unknown type kind %d", t.Kind)})
 			continue
 		}

@@ -1,8 +1,3 @@
-fn main() -> I32 {
-    let s = "ab"
-    let i: I64 = 1
-    if s[i] != 98 {
-        return 1
-    }
-    return 0
+fn get(s: [U8], i: I64) -> U8 {
+    return s[i]
 }

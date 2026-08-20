@@ -16,7 +16,7 @@ fn cgen_put_byte(d: Domain, writer: CgenWriter, byte: U8) -> Result(CgenWriter, 
     return Ok(CgenWriter(bytes: bytes))
 }
 
-fn cgen_put(d: Domain, writer: CgenWriter, text: String) -> Result(CgenWriter, __s0_Error) {
+fn cgen_put(d: Domain, writer: CgenWriter, text: __s0_String) -> Result(CgenWriter, __s0_Error) {
     var out = writer
     var at: U64 = 0
     while at < len(text) {
@@ -64,6 +64,13 @@ fn cgen_put_u64(d: Domain, writer: CgenWriter, value: U64) -> Result(CgenWriter,
     var out = writer
     if value >= 10 { out = try cgen_put_u64(d, out, value / 10) }
     return cgen_put_digit(d, out, value % 10)
+}
+
+fn cgen_u8_to_u64(value: U8) -> U64 {
+    if value == 0 { return 0 }
+    var result = cgen_u8_to_u64(value / 2) * 2
+    if value % 2 == 1 { result = result + 1 }
+    return result
 }
 
 fn cgen_put_i64_digits(d: Domain, writer: CgenWriter, value: I64) -> Result(CgenWriter, __s0_Error) {

@@ -87,7 +87,7 @@ fn project_fail(message: U64) -> I32 {
     return driver_failure(2, "package", "compiler storage failure while preparing project")
 }
 
-fn project_equal(b: __s0_Buffer(U8), start: U64, end: U64, s: String) -> Bool {
+fn project_equal(b: __s0_Buffer(U8), start: U64, end: U64, s: __s0_String) -> Bool {
     if end - start != len(s) { return false }
     var i: U64 = 0
     while i < len(s) {
@@ -344,19 +344,21 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
     if pn != 0 {
         profile = 0
         if pn == 5 {
+            let expected: __s0_String = "debug"
             var ok = true
             var z: U64 = 0
             while z < 5 {
-                if unsafe c { alderhost_profile_byte(z) } != "debug"[z] { ok = false }
+                if unsafe c { alderhost_profile_byte(z) } != expected[z] { ok = false }
                 z = z + 1
             }
             if ok { profile = 1 }
         }
         if pn == 7 {
+            let expected: __s0_String = "release"
             var ok = true
             var z: U64 = 0
             while z < 7 {
-                if unsafe c { alderhost_profile_byte(z) } != "release"[z] { ok = false }
+                if unsafe c { alderhost_profile_byte(z) } != expected[z] { ok = false }
                 z = z + 1
             }
             if ok { profile = 2 }
@@ -389,7 +391,7 @@ fn project_source_byte(source: U64, at: U64) -> U8 {
     return unsafe c { alderhost_source_text_byte(source - 1, at) }
 }
 
-fn project_source_word(source: U64, start: U64, end: U64, word: String) -> Bool {
+fn project_source_word(source: U64, start: U64, end: U64, word: __s0_String) -> Bool {
     if end - start != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {
@@ -399,7 +401,7 @@ fn project_source_word(source: U64, start: U64, end: U64, word: String) -> Bool 
     return true
 }
 
-fn project_source_token(source: U64, start: U64, end: U64, word: String) -> Bool {
+fn project_source_token(source: U64, start: U64, end: U64, word: __s0_String) -> Bool {
     if !project_source_word(source, start, end, word) { return false }
     if start > 0 && project_source_ident_continue(project_source_byte(source, start - 1)) { return false }
     let source_end = unsafe c { alderhost_source_text_len(source - 1) }
@@ -499,7 +501,7 @@ fn project_manifest_source_equal(plan: ProjectPlanRec, source: U64, source_start
     return true
 }
 
-fn project_source_path_is(source: U64, word: String) -> Bool {
+fn project_source_path_is(source: U64, word: __s0_String) -> Bool {
     let end = unsafe c { alderhost_source_path_len(source - 1) }
     if end != len(word) { return false }
     var at: U64 = 0
@@ -532,7 +534,7 @@ fn project_declared_module_matches(plan: ProjectPlanRec, source: U64, start: U64
     return start + at == end
 }
 
-fn project_request_literal(word: String) -> Bool {
+fn project_request_literal(word: __s0_String) -> Bool {
     var at: U64 = 0
     while at < len(word) {
         if !unsafe c { alderhost_source_request_byte(word[at]) } { return false }
@@ -933,7 +935,7 @@ fn project_host_output_byte(byte: U8) -> Bool {
     return unsafe c { alderhost_project_output_byte(byte) }
 }
 
-fn project_host_output_string(word: String) -> Bool {
+fn project_host_output_string(word: __s0_String) -> Bool {
     var at: U64 = 0
     while at < len(word) {
         if !project_host_output_byte(word[at]) { return false }

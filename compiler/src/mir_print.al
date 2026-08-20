@@ -177,7 +177,7 @@ fn mir_validate_types(store: MirStore) -> Bool {
         if at < mir_primitive_type_count() {
             if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
         } else {
-            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_array() { return false }
+            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_bytes() { return false }
             if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() {
                 if !mir_name_valid(store, rec.name_start, rec.name_end, true) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
                 var part_kind = mir_type_part_variant()
@@ -203,10 +203,10 @@ fn mir_validate_types(store: MirStore) -> Bool {
                     }
                     if mir_type_part_count(store, id, mir_type_part_function_param()) != rec.part_count { return false }
                 }
-                if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() {
+                if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() || rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() {
                     if rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
-                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() {
+                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() && rec.kind != mir_type_kind_string() && rec.kind != mir_type_kind_bytes() {
                     if !mir_type_valid(store, rec.elem) || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
                 if rec.kind != mir_type_kind_array() && rec.length != 0 { return false }
@@ -746,6 +746,8 @@ fn mir_out_type(store: MirStore, id: U64, depth: U64) -> Bool {
     if rec.kind == mir_type_kind_table_view() { return out_string("table_view(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_table_mut_view() { return out_string("table_mut_view(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_array() { return out_string("array(") && mir_out_type(store, rec.elem, depth - 1) && out_string(", ") && out_u64(rec.length) && out(41) }
+    if rec.kind == mir_type_kind_string() { return out_string("string") }
+    if rec.kind == mir_type_kind_bytes() { return out_string("bytes") }
     if rec.kind == mir_type_kind_function() {
         if !out_string("function(fn(") { return false }
         var ordinal: U64 = 0

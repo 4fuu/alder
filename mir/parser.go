@@ -1435,6 +1435,10 @@ func (p *parser) parseType() (TypeId, error) {
 			return TypeF32, nil
 		case "f64":
 			return TypeF64, nil
+		case "string":
+			return p.m.String(), nil
+		case "bytes":
+			return p.m.Bytes(), nil
 		case "domain_handle":
 			return p.m.DomainHandle(), nil
 		case "domain_mark":

@@ -10,7 +10,7 @@ fn digit(byte: U8) -> Bool { return byte >= 48 && byte <= 57 }
 fn ident_continue(byte: U8) -> Bool { return alpha(byte) || digit(byte) }
 fn whitespace(byte: U8) -> Bool { return byte == 32 || byte == 9 || byte == 13 || byte == 10 }
 
-fn source_word(state: State, source: SourceRec, start: U64, end: U64, word: String) -> Bool {
+fn source_word(state: State, source: SourceRec, start: U64, end: U64, word: __s0_String) -> Bool {
     if end - start != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {
@@ -81,6 +81,14 @@ fn pair_operator(a: U8, b: U8) -> Bool {
 }
 
 fn utf8_continuation(byte: U8) -> Bool { return byte >= 128 && byte <= 191 }
+
+fn hex_digit(byte: U8) -> Bool { return (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102) }
+
+fn hex_value(byte: U8) -> U8 {
+    if byte >= 48 && byte <= 57 { return byte - 48 }
+    if byte >= 65 && byte <= 70 { return byte - 55 }
+    return byte - 87
+}
 
 fn unexpected_end(state: State, source: SourceRec, start: U64, length: U64) -> U64 {
     let first = text_byte(state, source, start)
@@ -197,7 +205,7 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                     if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
                                     let escape = text_byte(state, source, pos)
                                     var decoded: U8 = 0
-                                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48
+                                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48 || escape == 120
                                     if escape == 110 { decoded = 10 }
                                     if escape == 116 { decoded = 9 }
                                     if escape == 114 { decoded = 13 }
@@ -205,6 +213,11 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                     if escape == 34 { decoded = 34 }
                                     if escape == 48 { decoded = 0 }
                                     if !valid { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
+                                    if escape == 120 {
+                                        if pos + 2 >= length || !hex_digit(text_byte(state, source, pos + 1)) || !hex_digit(text_byte(state, source, pos + 2)) { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
+                                        decoded = hex_value(text_byte(state, source, pos + 1)) * 16 + hex_value(text_byte(state, source, pos + 2))
+                                        pos = pos + 2
+                                    }
                                     values = try __s0_buffer_append(U8, d, values, decoded)
                                     pos = pos + 1
                                 } else {

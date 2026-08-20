@@ -149,7 +149,8 @@ The `__s0_domain_create`, `__s0_alloc`, `__s0_domain_mark`,
 `Domain`/`DomainMark` types, and `using x = expr with CleanupFn` are temporary
 MIR 1 bootstrap bridges. They do not implement or replace the intended
 compiler-inferred storage, `Table(T)`/generational `T.Id`, and resource-owned
-cleanup model. S0 has no fixed arrays, source modules, header importing,
+cleanup model. At the M4 acceptance point S0 had no fixed arrays, source
+modules, header importing,
 storage inference, table surface, structured concurrency, traits, closures,
 or methods, and is not a complete language frontend.
 
@@ -359,7 +360,8 @@ function signature items with stable semantic IDs, rejects duplicate aggregate
 members and empty enums, rejects deterministic value-type cycles, and now
 performs concrete generic substitution/revalidation for current slice, buffer,
 map, and recursive-specialization representation restrictions. Binding traversal
-restores caller context, compares `String` with its `[U8]` semantic form, and
+restores caller context and, after M7, keeps public `String`, `Bytes`, and
+`[U8]` identities distinct while retaining a private `__s0_String` bridge, and
 memoizes equivalent interpreted declaration specializations independently of
 active ancestry so finite declaration DAGs do not expand by path. The checker
 also restricts C import signatures to primitives and `Ptr(primitive)`, and
@@ -368,8 +370,8 @@ checking. Its body slice checks concrete function instances compositionally
 across lexical blocks, assignments, `if`/`else`, `while`, and slice `for`: a
 runtime parameter or local identifier must have the declared type, `true` and
 `false` require `Bool`, a bare return requires `Unit`, an integer literal must
-fit the declared integer type, and a string literal requires `String` or
-its `[U8]` semantic form. Binding initializers, assignment right-hand sides,
+fit the declared integer type, and a quoted literal adapts to distinct
+`String`, `Bytes`, or private `__s0_String` context. Binding initializers, assignment right-hand sides,
 and returns recursively check unary `-`/`!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Bool operators
 with the Go Stage 0 operand rules. Binding order mirrors the Go checker: reserved
@@ -387,7 +389,8 @@ statement, and assignment-place records retain parameter, local, Bool-payload,
 child, operator, statement-site, scope, concrete type, and result-use relationships.
 Unannotated bindings infer scalar types from supported literals, identifiers,
 and unary/binary expressions. Checked types are canonical structure-deduplicated
-DAG nodes with direct primitive targets and one `String`/`[U8]` identity; source
+DAG nodes with direct primitive targets and distinct public `String`, `Bytes`,
+and `[U8]` identities; source
 spellings live on annotations. Stable parameter/local binding IDs, persistent
 environment chains, and flattened ordered expression-child ranges establish the
 body model. Direct user calls now support all-or-none explicit type arguments,
@@ -634,7 +637,7 @@ Exit-criteria evidence:
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
-Status: **planned after local modules**
+Status: **complete**
 
 Implement the first foundational source semantics from
 [Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md), and
@@ -662,6 +665,22 @@ deterministic evaluation and value behavior. Ordinary source construction of
 arrays, strings, and bytes must not require explicit bootstrap storage, while
 the compiler implementation may retain private bootstrap facilities until the
 Milestone 7.3 migration gate.
+
+Exit-criteria evidence:
+
+- commits `55c2e1f`, `18febe3`, and `061567d` establish recursive value
+  categories, parameter ownership modes, and deterministic affine owner flow;
+- commits `f350b74` and `a0e700e` add inherent/associated method resolution,
+  receiver modes, fixed arrays, checked indexing, and independent C value
+  behavior;
+- the final M7 slice adds distinct `string`/`bytes` MIR and C ABI values,
+  UTF-8-only `String`, arbitrary-byte `Bytes`, exact `\xNN` decoding, empty and
+  embedded-NUL constants, distinct generic instances, and a private
+  `__s0_String` bootstrap bridge owned by the M7.3 migration gate;
+- focused Go and Alder-written checker/lowering/verifier/C tests pin rejection
+  of public String/Bytes slicing and indexing, malformed escapes and invalid
+  UTF-8, plus deterministic assignment, call, return, generic, and generated-C
+  behavior.
 
 ## Milestone 7.1: Core Collections and Scoped Views
 

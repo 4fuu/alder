@@ -1,1 +1,1 @@
-line 4, column 9: index: type mismatch: expected U64, got I64
+line 2, column 13: index: type mismatch: expected U64, got I64

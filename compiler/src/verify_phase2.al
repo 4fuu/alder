@@ -1,3 +1,22 @@
+fn mir_vutf8_continuation(value: U8) -> Bool { return value >= 128 && value <= 191 }
+
+fn mir_vutf8_valid(values: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+    var at = start
+    while at < end {
+        let first = __s0_buffer_get(U8, values, at)
+        if first < 128 { at = at + 1 }
+        else { if first >= 194 && first <= 223 && at + 1 < end && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 1)) { at = at + 2 }
+        else { if first == 224 && at + 2 < end && __s0_buffer_get(U8, values, at + 1) >= 160 && __s0_buffer_get(U8, values, at + 1) <= 191 && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if ((first >= 225 && first <= 236) || (first >= 238 && first <= 239)) && at + 2 < end && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 1)) && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if first == 237 && at + 2 < end && __s0_buffer_get(U8, values, at + 1) >= 128 && __s0_buffer_get(U8, values, at + 1) <= 159 && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) { at = at + 3 }
+        else { if first == 240 && at + 3 < end && __s0_buffer_get(U8, values, at + 1) >= 144 && __s0_buffer_get(U8, values, at + 1) <= 191 && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { if first >= 241 && first <= 243 && at + 3 < end && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 1)) && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { if first == 244 && at + 3 < end && __s0_buffer_get(U8, values, at + 1) >= 128 && __s0_buffer_get(U8, values, at + 1) <= 143 && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 2)) && mir_vutf8_continuation(__s0_buffer_get(U8, values, at + 3)) { at = at + 4 }
+        else { return false } } } } } } } }
+    }
+    return true
+}
+
 fn mir_vappend_type_children(d: Domain, store: MirStore, indexes: MirVIndexes, work: __s0_Buffer(U64), id: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
     if !mir_vtype_exists(store, id) { return Ok(work) }
     var out = work
@@ -148,7 +167,12 @@ var valid = mir_vtype_exists(store, c.const_type) && c.kind <= mir_const_string(
         if c.kind == mir_const_int() { valid = valid && mir_vint_fits(c.const_type, c.int_value) }
         if c.kind == mir_const_float() { valid = valid && (c.const_type == mir_type_f32() || c.const_type == mir_type_f64()) && mir_vfloat_finite(c.float_bits)
 if c.const_type == mir_type_f32() { valid = valid && mir_vfloat_exact_f32(c.float_bits) } }
-        if c.kind == mir_const_string() { valid = valid && mir_vtype_kind(store, c.const_type) == mir_type_kind_slice() && __s0_buffer_get(MirTypeRec, store.types, c.const_type - 1).elem == mir_type_u8() && mir_vrange_valid(c.string_start, c.string_end, __s0_buffer_len(U8, store.names)) }
+        if c.kind == mir_const_string() {
+            let type_kind = mir_vtype_kind(store, c.const_type)
+            let bootstrap_string = type_kind == mir_type_kind_slice() && __s0_buffer_get(MirTypeRec, store.types, c.const_type - 1).elem == mir_type_u8()
+            valid = valid && (type_kind == mir_type_kind_string() || type_kind == mir_type_kind_bytes() || bootstrap_string) && mir_vrange_valid(c.string_start, c.string_end, __s0_buffer_len(U8, store.names))
+            if valid && type_kind == mir_type_kind_string() { valid = mir_vutf8_valid(store.names, c.string_start, c.string_end) }
+        }
         if !valid { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_constant(), 0, 0, 0, 0, 0, c.const_type, at + 1, 0, c.kind, 0)) }
         at = at + 1
     }

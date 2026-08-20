@@ -50,6 +50,10 @@ const (
 	TypeTableMutView
 	// TypeArray is the array(T, N) fixed-length value type.
 	TypeArray
+	// TypeString is an immutable, UTF-8 encoded owned string value.
+	TypeString
+	// TypeBytes is an immutable owned byte-sequence value.
+	TypeBytes
 )
 
 // Canonical primitive TypeIds occupy the first slots of every module type
@@ -177,6 +181,10 @@ func (m *Module) TypeString(t TypeId) string {
 		return "table_mut_view(" + m.TypeString(ty.Elem) + ")"
 	case TypeArray:
 		return "array(" + m.TypeString(ty.Elem) + ", " + strconv.FormatUint(ty.Length, 10) + ")"
+	case TypeString:
+		return "string"
+	case TypeBytes:
+		return "bytes"
 	}
 	return "<invalid kind " + strconv.Itoa(int(ty.Kind)) + ">"
 }
@@ -350,6 +358,16 @@ func (m *Module) Slice(elem TypeId) TypeId {
 // Array interns and returns array(elem, length).
 func (m *Module) Array(elem TypeId, length uint64) TypeId {
 	return m.intern(TypeArray, func(t *Type) bool { return t.Elem == elem && t.Length == length }, func(t *Type) { t.Elem = elem; t.Length = length })
+}
+
+// String interns and returns the string leaf type.
+func (m *Module) String() TypeId {
+	return m.intern(TypeString, func(*Type) bool { return true }, func(*Type) {})
+}
+
+// Bytes interns and returns the bytes leaf type.
+func (m *Module) Bytes() TypeId {
+	return m.intern(TypeBytes, func(*Type) bool { return true }, func(*Type) {})
 }
 
 // SafeRef interns and returns safe_ref(elem).

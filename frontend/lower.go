@@ -104,6 +104,12 @@ func (l *lowerer) ty(t *Type) mir.TypeId {
 		return primMir(t.prim)
 	case tSlice:
 		return l.m.Slice(l.ty(t.elem))
+	case tString:
+		return l.m.String()
+	case tBytes:
+		return l.m.Bytes()
+	case tS0String:
+		return l.m.Slice(mir.TypeU8)
 	case tAlloc:
 		return l.m.SafeMut(l.ty(t.elem))
 	case tOption:
@@ -130,6 +136,13 @@ func (l *lowerer) ty(t *Type) mir.TypeId {
 		return l.m.RawPtr(l.ty(t.elem))
 	}
 	return mir.TypeUnit
+}
+
+func sequenceElem(t *Type) *Type {
+	if t.kind == tS0String {
+		return prim(pU8)
+	}
+	return t.elem
 }
 
 func primMir(p primType) mir.TypeId {
@@ -1173,7 +1186,7 @@ func constKey(typ *Type, v mir.ConstValue) string {
 	case mir.ConstFloat:
 		return fmt.Sprintf("float|%s|%s", typ.display(), strconv.FormatFloat(v.Float, 'g', -1, 64))
 	case mir.ConstString:
-		return fmt.Sprintf("str|%q", v.String)
+		return fmt.Sprintf("str|%s|%q", typ.display(), v.String)
 	}
 	return "unit"
 }
@@ -1349,9 +1362,10 @@ func (b *fb) stmt(s Stmt) error {
 		b.emit(mir.Instr{Op: mir.OpIntLt, Result: lt, A: headParams[0], B: lenVal})
 		b.branch(lt, blkID(b.f, body), blkID(b.f, join))
 		b.setCur(body)
-		ref := b.res(b.l.m.SafeMut(b.l.ty(seqTy.elem)))
+		seqElem := sequenceElem(seqTy)
+		ref := b.res(b.l.m.SafeMut(b.l.ty(seqElem)))
 		b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: seq, Index: headParams[0], FailTarget: b.panicBlock()})
-		elem := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(seqTy.elem))
+		elem := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(seqElem))
 		savedValues := b.values
 		b.values = cloneValueIDs(savedValues)
 		b.values[st.Name] = elem
@@ -1596,7 +1610,7 @@ func (b *fb) indexRef(x *Index) (mir.ValueId, error) {
 		return 0, err
 	}
 	baseTy := b.ann[x.Base].typ
-	ref := b.res(b.l.m.SafeMut(b.l.ty(baseTy.elem)))
+	ref := b.res(b.l.m.SafeMut(b.l.ty(sequenceElem(baseTy))))
 	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: base, Index: idx, FailTarget: b.panicBlock()})
 	return ref, nil
 }

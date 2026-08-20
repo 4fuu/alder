@@ -124,15 +124,20 @@ Unit
 Composite/bootstrap types:
 
 - `[T]` slice;
-- `String`, currently semantic sugar for `[U8]`;
+- `Array(T, N)` fixed array;
+- distinct owned `String` and `Bytes` values;
 - `Option(T)` and `Result(T, E)`;
 - nominal generic records and zero/unary-payload enums;
 - fixed-capacity bootstrap `Map(K, V)`;
 - raw `Ptr(T)` for C imports;
 - temporary `Domain`, `DomainMark`, `__s0_Buffer(T)`, and `__s0_Error`.
 
-The S0 `String`, map, buffer, domain, and pointer rules are not the 1.0
-`String`, `Map`, `Vec`, inferred-storage, or C binding contracts.
+`String` requires valid UTF-8 and `Bytes` preserves arbitrary bytes. Neither is
+an integer-indexable slice. Compiler implementation sources temporarily use the
+reserved private `__s0_String` slice bridge for byte-oriented bootstrap work;
+ordinary source does not share that identity. The S0 map, buffer, domain, and
+pointer rules are not the 1.0 `Map`, `Vec`, inferred-storage, or C binding
+contracts.
 
 Current representation restrictions reject nested lifetime-bearing values in
 aggregate storage, infinite value recursion, unsupported map keys/values,
@@ -161,7 +166,7 @@ function path returns explicitly.
 
 Implemented expressions include:
 
-- integer, float, Boolean, and string literals;
+- integer, float, Boolean, string/bytes, and fixed-array literals;
 - unary `-` and `!`;
 - checked arithmetic, shifts, comparisons, equality for supported primitives,
   and short-circuit Boolean operators;
@@ -171,9 +176,8 @@ Implemented expressions include:
 - a single direct imported call in `unsafe c { ... }`;
 - S0 domain, allocation, buffer, and map intrinsics.
 
-Bitwise source operators, trait methods, closures, fixed arrays, ordinary owned
-vectors, table identity, modules, `pub`, async, and the 1.0 standard library are
-absent.
+Bitwise source operators, trait methods, closures, ordinary owned vectors,
+table identity, modules, `pub`, async, and the 1.0 standard library are absent.
 
 ## Temporary memory and cleanup bridges
 
@@ -284,7 +288,9 @@ evidence and regeneration procedure are recorded in the
 Integer literal checking keeps the literal as decimal digit text and compares
 it against per-type bounds, so the port accepts every `U64` value and the
 `I64` minimum instead of inheriting Stage 0's signed host-storage limit.
-String literal results accept `String` and its `[U8]` semantic form alike.
+Quoted literals default to `String`; an expected `Bytes` type preserves the
+decoded bytes exactly, including NUL and invalid UTF-8. `\xNN` consumes exactly
+two hexadecimal digits. Invalid UTF-8 is rejected only in `String` context.
 The operator slice covers unary `-` and `!`, checked integer arithmetic and
 shifts, integer/float comparison and equality, and short-circuit Boolean
 operators with the Go Stage 0 operand rules. Direct calls support concrete and
@@ -310,8 +316,9 @@ identifiers, and unary/binary expressions.
 
 The checked model interns types by kind, semantic target, and ordered canonical
 argument IDs. Primitive targets are fixed, repeated applications share one
-canonical record, and `String` and `[U8]` share the slice-of-`U8` identity while
-separate annotations retain each source spelling. Concrete checked bodies use
+canonical record, and public `String`, `Bytes`, and `[U8]` retain distinct
+identities. The private `__s0_String` bridge alone retains slice-of-`U8`
+compatibility for compiler implementation sources. Concrete checked bodies use
 stable parameter/local binding IDs, a persistent lexical-environment chain,
 postorder expression records, flattened ordered child ranges, and private block,
 statement-link, statement, and assignment-place records. The Alder lowering
@@ -339,7 +346,7 @@ Bootstrap bridges are removed when their 1.0 owners exist:
 | Bootstrap construct | Removed after |
 |---|---|
 | global explicit source namespace | module/build graph works |
-| `String = [U8]` | owned UTF-8 `String` and views work |
+| private `__s0_String = [U8]` | compiler byte-oriented internals migrate to M7.1 views under M7.3 storage inference |
 | fixed S0 `Map` | standard insertion-ordered `Map` works |
 | `__s0_Buffer` | ordinary source `Vec`/builders work |
 | explicit `Domain`/`DomainMark` | storage inference is verified |

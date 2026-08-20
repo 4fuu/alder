@@ -7,7 +7,7 @@ fn out_bytes(bytes: __s0_Buffer(U8), at: U64, end: U64) -> Bool {
     return out_bytes(bytes, at + 1, end)
 }
 
-fn out_string(value: String, at: U64) -> Bool {
+fn out_string(value: __s0_String, at: U64) -> Bool {
     if at == len(value) { return true }
     if !out(value[at]) { return false }
     return out_string(value, at + 1)

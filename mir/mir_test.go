@@ -69,6 +69,8 @@ func TestTypeString(t *testing.T) {
 		{err, "@Err"},
 		{m.Slice(TypeI64), "slice(i64)"},
 		{m.Array(TypeI64, 3), "array(i64, 3)"},
+		{m.String(), "string"},
+		{m.Bytes(), "bytes"},
 		{m.SafeMut(pair), "safe_mut(@Pair)"},
 		{m.Option(m.Slice(TypeI64)), "option(slice(i64))"},
 		{m.Result(pair, err), "result(@Pair, @Err)"},
