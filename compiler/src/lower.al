@@ -223,6 +223,23 @@ fn lower_type_concrete(store: CheckStore, checked_type: U64) -> Bool {
     return true
 }
 
+fn lower_slice_u8(store: CheckStore, checked_type: U64) -> Bool {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 8 || checked.arg_count != 1 { return false }
+    let element = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1) - 1)
+    return element.kind == 1 && element.target == 6
+}
+
+// The checked model retains String identity before the private bootstrap ABI
+// stops accepting its historical [U8] bridge. Both lower to MIR slice(u8), so
+// model validation must compare this temporary ABI compatibility semantically.
+fn lower_checked_abi_equal(store: CheckStore, left: U64, right: U64) -> Bool {
+    if left == right { return true }
+    let a = __s0_buffer_get(CheckedTypeRec, store.types, left - 1)
+    let b = __s0_buffer_get(CheckedTypeRec, store.types, right - 1)
+    return (a.kind == 2 && lower_slice_u8(store, right)) || (b.kind == 2 && lower_slice_u8(store, left))
+}
+
 fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
     let prior = lower_type_lookup(state, checked_type)
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
@@ -233,6 +250,12 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         if primitive == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let mapped = try __s0_buffer_append(LowerTypeMapRec, d, state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: primitive))
         return Ok(LowerStep(state: lower_with_types(state, mapped), id: primitive))
+    }
+    if checked.kind == 2 || checked.kind == 14 {
+        let empty = try __s0_buffer_new(U64, d)
+        let built = try mir_intern_type(d, state.mir, mir_type_kind_slice(), mir_type_u8(), 0, 0, empty, 0)
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
+        return Ok(LowerStep(state: lower_with_types(lower_with_mir(state, built.store), mapped), id: built.type_id))
     }
     if checked.kind == 3 || checked.kind == 4 {
         var id = mir_type_kind_domain_handle()
@@ -1747,7 +1770,8 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         let sequence_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
         let sequence_type = __s0_buffer_get(CheckedTypeRec, store.types, sequence_expression.checked_type - 1)
-        if sequence_type.kind != 8 || sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        if sequence_type.kind != 2 && sequence_type.kind != 8 && sequence_type.kind != 14 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        if sequence_type.kind == 8 && sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
         // slice.len always returns canonical U64 (checked type 9 in the sealed primitive prefix).
         let length_value = try lower_add_result(d, sequence.state, function, active, 9, source_state, store)
         let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, sequence.id, 0, 0, "")
@@ -1762,7 +1786,8 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let compared = try lower_add_result(d, current, function, head.id, 1, source_state, store)
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
         current = try lower_branch(d, compare.state, function, head.id, compared.id, body.id, join.id)
-        let elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1)
+        var elem_checked: U64 = 6
+        if sequence_type.kind == 8 { elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1) }
         let elem = try lower_type(d, source_state, store, current, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
@@ -2864,11 +2889,11 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     let first_type = lower_builtin_child_type(store, expression, 0)
     if first_type == 0 { return false }
     let first = __s0_buffer_get(CheckedTypeRec, store.types, first_type - 1)
-    if annotation.builtin == 1 { return first.kind == 8 && result.kind == 1 && result.target == 9 }
+    if annotation.builtin == 1 { return (first.kind == 2 || first.kind == 8 || first.kind == 14) && result.kind == 1 && result.target == 9 }
     if annotation.builtin == 2 {
         let lo = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
         let hi = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 2) - 1)
-        return first.kind == 8 && annotation.checked_type == first_type && lo.kind == 1 && lo.target == 9 && hi.kind == 1 && hi.target == 9
+        return (first.kind == 2 || first.kind == 8 || first.kind == 14) && annotation.checked_type == first_type && lo.kind == 1 && lo.target == 9 && hi.kind == 1 && hi.target == 9
     }
     if annotation.builtin == 3 { return first.kind == 3 && result.kind == 8 && __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1).target == 9 }
     if annotation.builtin == 4 { return first.kind == 3 && result.kind == 3 }
@@ -3071,13 +3096,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if item.kind != 1 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 { return false }
         if item.syntax != 0 { return false }
         if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
-        if (item.kind == 3 || item.kind == 4 || item.kind == 5) && (item.target != 0 || item.arg_count != 0) { return false }
+        if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
-        if item.kind >= 8 && item.kind <= 13 && item.target != 0 { return false }
+        if item.kind >= 8 && item.kind <= 14 && item.target != 0 { return false }
         if item.arg_count == 0 && item.first_arg != 0 { return false }
         if item.arg_count != 0 {
             if item.first_arg == 0 || item.first_arg - 1 + item.arg_count > __s0_buffer_len(U64, store.type_args) { return false }
@@ -3199,12 +3224,12 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             var result_role: U64 = 6
             if target.kind == 13 { result_role = 8 }
             let result_use = lower_use_by_role(store, item.target, result_role, 0)
-            if result_use == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type != item.checked_type { return false }
+            if result_use == 0 || !lower_checked_abi_equal(store, __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type, item.checked_type) { return false }
         }
         if item.kind == 2 {
             if target.kind != 1 { return false }
             let result_use = lower_use_by_role(store, item.target, 4, 0)
-            if result_use == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type != item.checked_type { return false }
+            if result_use == 0 || !lower_checked_abi_equal(store, __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type, item.checked_type) { return false }
         }
         if item.kind == 3 {
             if target.kind != 2 { return false }
@@ -3257,9 +3282,11 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         }
         if item.kind == 4 {
             let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
-            if literal_type.kind != 8 { return false }
-            let element_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, literal_type.first_arg - 1) - 1)
-            if element_type.kind != 1 || element_type.target != 6 { return false }
+            if literal_type.kind != 2 && literal_type.kind != 8 { return false }
+            if literal_type.kind == 8 {
+                let element_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, literal_type.first_arg - 1) - 1)
+                if element_type.kind != 1 || element_type.target != 6 { return false }
+            }
         }
         if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2)) { return false }
         if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 17) { return false }
@@ -3322,7 +3349,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                     expected_type = __s0_buffer_get(DeclTypeUseRec, store.uses, argument_use - 1).checked_type
                 }
                 let argument = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + argument_at).expression - 1)
-                if lower_type_concrete(store, expected_type) && argument.checked_type != expected_type { return false }
+                if lower_type_concrete(store, expected_type) && !lower_checked_abi_equal(store, argument.checked_type, expected_type) { return false }
                 argument_at = argument_at + 1
             }
             }
@@ -3356,7 +3383,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 if item.kind == 17 { type_ordinal = 1 }
                 let expected_type = __s0_buffer_get(U64, store.type_args, checked_type.first_arg - 1 + type_ordinal)
                 let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
-                if child.checked_type != expected_type { return false }
+                if !lower_checked_abi_equal(store, child.checked_type, expected_type) { return false }
             }
         }
         if item.kind == 19 {
@@ -3365,7 +3392,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             let index = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child).expression - 1)
             let base_type = __s0_buffer_get(CheckedTypeRec, store.types, base.checked_type - 1)
             let index_type = __s0_buffer_get(CheckedTypeRec, store.types, index.checked_type - 1)
-            if base_type.kind != 8 || __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1) != item.checked_type || index_type.kind != 1 || index_type.target != 9 { return false }
+            var element_type: U64 = 0
+            if base_type.kind == 8 { element_type = __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1) }
+            if base_type.kind == 2 || base_type.kind == 14 {
+                let element = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+                if element.kind == 1 && element.target == 6 { element_type = item.checked_type }
+            }
+            if element_type != item.checked_type || index_type.kind != 1 || index_type.target != 9 { return false }
         }
         if item.kind == 20 {
             if item.child_count != 0 { return false }
@@ -3378,7 +3411,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             let base = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
             let base_type = __s0_buffer_get(CheckedTypeRec, store.types, base.checked_type - 1)
             if base_type.kind != 7 || base_type.target != field.owner { return false }
-            if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
+            if lower_type_concrete(store, field.checked_type) && !lower_checked_abi_equal(store, field.checked_type, item.checked_type) { return false }
         }
         if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.parameter_use != 0 { return false }
         at = at + 1
@@ -3418,7 +3451,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 2 || item.kind == 4 {
             let field = __s0_buffer_get(DeclTypeUseRec, store.uses, item.field - 1)
             if base_type.kind != 7 || base_type.target != field.owner { return false }
-            if lower_type_concrete(store, field.checked_type) && field.checked_type != item.checked_type { return false }
+            if lower_type_concrete(store, field.checked_type) && !lower_checked_abi_equal(store, field.checked_type, item.checked_type) { return false }
         }
         if (item.kind == 1 || item.kind == 3) && item.field != 0 { return false }
         if place_owners[at + 1] != 1 { return false }
@@ -3506,7 +3539,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 3 {
             if item.place == 0 || item.place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
             let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, item.place - 1)
-            if place.owner != item.owner || place.checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+            if place.owner != item.owner || !lower_checked_abi_equal(store, place.checked_type, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type) { return false }
         } else { if item.place != 0 { return false } }
         if needs_binding {
             if item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) { return false }
@@ -3514,7 +3547,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if binding.owner != item.owner || binding.kind != 2 || binding.syntax != item.syntax { return false }
             if item.kind == 1 && binding.mutable != 0 { return false }
             if item.kind == 2 && binding.mutable != 1 { return false }
-            if item.kind == 10 && binding.checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+            if item.kind == 10 && !lower_checked_abi_equal(store, binding.checked_type, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type) { return false }
         } else { if item.binding != 0 { return false } }
         if needs_block {
             if item.body == 0 || item.body > __s0_buffer_len(CheckedBlockRec, store.control.blocks) || __s0_buffer_get(CheckedBlockRec, store.control.blocks, item.body - 1).owner != item.owner { return false }
@@ -3534,10 +3567,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         }
         if item.kind == 9 {
             let sequence = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type - 1)
-            if sequence.kind != 8 || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(U64, store.type_args, sequence.first_arg - 1) { return false }
+            let binding_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type - 1)
+            if sequence.kind == 8 {
+                if __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(U64, store.type_args, sequence.first_arg - 1) { return false }
+            } else { if (sequence.kind != 2 && sequence.kind != 14) || binding_type.kind != 1 || binding_type.target != 6 { return false } }
         }
         if item.kind == 1 || item.kind == 2 {
-            if __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type { return false }
+            if !lower_checked_abi_equal(store, __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type) { return false }
         }
         if item.kind == 4 {
             var result_role: U64 = 6
@@ -3548,7 +3584,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if item.expression == 0 {
                 let checked_result = __s0_buffer_get(CheckedTypeRec, store.types, result_type - 1)
                 if checked_result.kind != 1 || checked_result.target != 12 { return false }
-            } else { if __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type != result_type { return false } }
+            } else { if !lower_checked_abi_equal(store, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type, result_type) { return false } }
         }
         at = at + 1
     }
@@ -3590,7 +3626,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         let scrutinee = __s0_buffer_get(CheckedExprRec, store.expressions, item.scrutinee - 1)
-        if scrutinee.owner != item.owner || scrutinee.checked_type != item.scrutinee_type { return false }
+        if scrutinee.owner != item.owner || !lower_checked_abi_equal(store, scrutinee.checked_type, item.scrutinee_type) { return false }
         if match_owners[at + 1] != 1 { return false }
         var ordinal: U64 = 0
         while ordinal < item.arm_count {
@@ -3613,7 +3649,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || item.body == 0 || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
         let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.checked_match - 1)
         let body = __s0_buffer_get(CheckedExprRec, store.expressions, item.body - 1)
-        if checked_match.owner != item.owner || body.owner != item.owner || body.checked_type != checked_match.checked_type { return false }
+        if checked_match.owner != item.owner || body.owner != item.owner || !lower_checked_abi_equal(store, body.checked_type, checked_match.checked_type) { return false }
         active_arm_owners = active_arm_owners + arm_starts[at]
         active_arm_owners = active_arm_owners - arm_ends[at]
         if active_arm_owners != 1 { return false }
@@ -3644,7 +3680,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if item.binding == 0 || item.binding > __s0_buffer_len(LocalRec, store.locals) { return false }
             let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
             if binding.owner != item.owner || binding.kind != 2 { return false }
-            if lower_type_concrete(store, payload_type) && binding.checked_type != payload_type { return false }
+            if lower_type_concrete(store, payload_type) && !lower_checked_abi_equal(store, binding.checked_type, payload_type) { return false }
             var binding_active = false
             var environment = item.environment
             while environment != 0 {
@@ -3662,7 +3698,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.expression == 0 || item.expression > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.result_type) || !lower_type_concrete(store, item.ok_type) || !lower_type_concrete(store, item.error_type) { return false }
         let expression = __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1)
         let result = __s0_buffer_get(CheckedTypeRec, store.types, item.result_type - 1)
-        if expression.owner != item.owner || expression.checked_type != item.result_type || result.kind != 10 || __s0_buffer_get(U64, store.type_args, result.first_arg - 1) != item.ok_type || __s0_buffer_get(U64, store.type_args, result.first_arg) != item.error_type { return false }
+        if expression.owner != item.owner || !lower_checked_abi_equal(store, expression.checked_type, item.result_type) || result.kind != 10 || !lower_checked_abi_equal(store, __s0_buffer_get(U64, store.type_args, result.first_arg - 1), item.ok_type) || !lower_checked_abi_equal(store, __s0_buffer_get(U64, store.type_args, result.first_arg), item.error_type) { return false }
         if try_owners[at + 1] != 1 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         var result_role: U64 = 6
@@ -3680,12 +3716,12 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let binding = __s0_buffer_get(LocalRec, store.locals, item.binding - 1)
         if binding.owner != item.owner || binding.kind != 2 || binding.syntax != item.syntax || item.initializer == 0 || item.initializer > __s0_buffer_len(CheckedExprRec, store.expressions) || item.normal_exit != 1 || item.return_exit != 1 || item.try_exit != 1 { return false }
         let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, item.initializer - 1)
-        if initializer.owner != item.owner || initializer.checked_type != binding.checked_type || initializer.site_kind != 8 || initializer.site_syntax != item.syntax { return false }
+        if initializer.owner != item.owner || !lower_checked_abi_equal(store, initializer.checked_type, binding.checked_type) || initializer.site_kind != 8 || initializer.site_syntax != item.syntax { return false }
         let callback = __s0_buffer_get(SymbolRec, store.symbols, item.callback - 1)
         if callback.kind != 12 || callback.type_arity != 0 || callback.declaration != item.callback { return false }
         let callback_parameter = lower_use_by_role(store, item.callback, 5, 0)
         let callback_result = lower_use_by_role(store, item.callback, 6, 0)
-        if callback_parameter == 0 || callback_result == 0 || __s0_buffer_get(DeclTypeUseRec, store.uses, callback_parameter - 1).checked_type != binding.checked_type { return false }
+        if callback_parameter == 0 || callback_result == 0 || !lower_checked_abi_equal(store, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_parameter - 1).checked_type, binding.checked_type) { return false }
         if lower_use_by_role(store, item.callback, 5, 1) != 0 { return false }
         let callback_result_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_result - 1).checked_type - 1)
         if callback_result_type.kind != 1 || callback_result_type.target != 12 { return false }

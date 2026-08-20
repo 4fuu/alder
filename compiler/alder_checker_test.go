@@ -236,7 +236,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	good := map[string]string{
 		"a space.al": "import c foreign: fn(U64, Ptr(U8),) -> I32\n" +
 			"type Box(T: type) { value: T }\n" +
-			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(U64)\n mark: DomainMark\n text: String\n}\n" +
+			"type Nest {\n x: Map(U64, Option(U8))\n a: [U8]\n b: Result(U64, __s0_Error)\n c: Ptr(Domain)\n d: __s0_Buffer(U64)\n mark: DomainMark\n text: String\n bytes: Bytes\n}\n" +
 			"enum E {\n Empty\n Full(value: Box(U64))\n}\n" +
 			"fn f(T: type, x: T, y: Box(T),) -> Option(U64) {}\n" +
 			"type Other(T: type) { value: T }\n" +
@@ -420,13 +420,13 @@ func runCheckerConformance(t *testing.T, exe string) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, interpretationFiles, []string{"interpretation.al"}, false), interpretationFiles)
 	ffiGood := map[string]string{"ffi.al": "import c primitive_ffi: fn(Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Unit, Ptr(F64)) -> Unit\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, ffiGood, []string{"ffi.al"}, false), ffiGood)
-	canonicalGood := map[string]string{"canonical.al": "type Shared { first: Option(U64)\n second: Option(U64)\n text: String\n bytes: [U8] }\n"}
+	canonicalGood := map[string]string{"canonical.al": "type Shared { first: Option(U64)\n second: Option(U64)\n text: String\n slice: [U8]\n bytes: Bytes }\n"}
 	canonicalManifest := parseCheckerManifest(t, runAlderChecker(t, exe, canonicalGood, []string{"canonical.al"}, false), canonicalGood)
 	shared := checkerSymbolByName(t, canonicalManifest, canonicalGood, "Shared")
 	canonicalFirst, canonicalSecond := checkerUse(t, canonicalManifest, shared.id, 1, 0), checkerUse(t, canonicalManifest, shared.id, 1, 1)
-	text, bytesUse := checkerUse(t, canonicalManifest, shared.id, 1, 2), checkerUse(t, canonicalManifest, shared.id, 1, 3)
-	if canonicalFirst.checkedType != canonicalSecond.checkedType || canonicalFirst.syntax == canonicalSecond.syntax || text.checkedType != bytesUse.checkedType || text.syntax == bytesUse.syntax {
-		t.Fatalf("canonical types did not deduplicate while retaining uses: first=%+v second=%+v text=%+v bytes=%+v", canonicalFirst, canonicalSecond, text, bytesUse)
+	text, sliceUse, bytesUse := checkerUse(t, canonicalManifest, shared.id, 1, 2), checkerUse(t, canonicalManifest, shared.id, 1, 3), checkerUse(t, canonicalManifest, shared.id, 1, 4)
+	if canonicalFirst.checkedType != canonicalSecond.checkedType || canonicalFirst.syntax == canonicalSecond.syntax || text.checkedType == sliceUse.checkedType || text.checkedType == bytesUse.checkedType || sliceUse.checkedType == bytesUse.checkedType {
+		t.Fatalf("canonical identities changed: first=%+v second=%+v text=%+v slice=%+v bytes=%+v", canonicalFirst, canonicalSecond, text, sliceUse, bytesUse)
 	}
 	functionNameGood := map[string]string{"functions.al": "fn helper() -> U64 { return 0 }\nfn use(T: type, helper: T, T: T) -> T {}\nfn main(value: U64) -> Bool { return true }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, functionNameGood, []string{"functions.al"}, false), functionNameGood)
@@ -512,12 +512,12 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	stringToSlice := checkerSymbolByName(t, bodyManifest, bodyGood, "string_to_slice")
 	stringExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, stringToSlice.id).expression-1]
-	if bodyManifest.types[stringExpression.checkedType-1].kind != 8 || stringExpression.checkedType != checkerUse(t, bodyManifest, stringToSlice.id, 6, 0).checkedType {
+	if bodyManifest.types[stringExpression.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, stringToSlice.id, 6, 0).checkedType-1].kind != 8 {
 		t.Fatal("String parameter was not accepted as a [U8] return")
 	}
 	sliceToString := checkerSymbolByName(t, bodyManifest, bodyGood, "slice_to_string")
 	sliceExpression := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, sliceToString.id).expression-1]
-	if bodyManifest.types[sliceExpression.checkedType-1].kind != 8 || sliceExpression.checkedType != checkerUse(t, bodyManifest, sliceToString.id, 6, 0).checkedType {
+	if bodyManifest.types[sliceExpression.checkedType-1].kind != 8 || bodyManifest.types[checkerUse(t, bodyManifest, sliceToString.id, 6, 0).checkedType-1].kind != 2 {
 		t.Fatal("[U8] parameter was not accepted as a String return")
 	}
 	done := checkerSymbolByName(t, bodyManifest, bodyGood, "done")
@@ -560,10 +560,11 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	localString := checkerSymbolByName(t, bodyManifest, bodyGood, "local_string")
 	localStringExpr := bodyManifest.expressions[checkerReturnForOwner(t, bodyManifest, localString.id).expression-1]
-	if bodyManifest.types[localStringExpr.checkedType-1].kind != 8 || localStringExpr.checkedType != checkerUse(t, bodyManifest, localString.id, 6, 0).checkedType {
+	if bodyManifest.types[localStringExpr.checkedType-1].kind != 2 || bodyManifest.types[checkerUse(t, bodyManifest, localString.id, 6, 0).checkedType-1].kind != 8 {
 		t.Fatal("String local was not accepted as a [U8] return")
 	}
-	// String and [U8] are one semantic type for a decoded string literal.
+	// The compatibility bridge accepts decoded literals for String and [U8]
+	// while preserving the expected source identity in the checked expression.
 	for _, name := range []string{"greeting", "raw", "empty_string"} {
 		owner := checkerSymbolByName(t, bodyManifest, bodyGood, name)
 		checkedReturn := checkerReturnForOwner(t, bodyManifest, owner.id)
@@ -1794,7 +1795,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 13 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 14 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
@@ -2733,7 +2734,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatal("Box.T did not resolve to its owner-local parameter")
 	}
 	nest := checkerSymbolByName(t, m, inputs, "Nest")
-	for ordinal, name := range []string{"x", "a", "b", "c", "d", "mark", "text"} {
+	for ordinal, name := range []string{"x", "a", "b", "c", "d", "mark", "text", "bytes"} {
 		item := checkerUse(t, m, nest.id, 1, ordinal)
 		if checkerSourceText(m, inputs, item.source, item.nameStart, item.nameEnd) != name {
 			t.Fatalf("Nest field %d metadata changed: %+v", ordinal, item)
@@ -2757,8 +2758,11 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	if kind := m.types[checkerUse(t, m, nest.id, 1, 5).checkedType-1].kind; kind != 4 {
 		t.Fatalf("Nest DomainMark field kind=%d, want 4", kind)
 	}
-	if kind := m.types[checkerUse(t, m, nest.id, 1, 6).checkedType-1].kind; kind != 8 {
-		t.Fatalf("Nest String field kind=%d, want canonical slice kind 8", kind)
+	if kind := m.types[checkerUse(t, m, nest.id, 1, 6).checkedType-1].kind; kind != 2 {
+		t.Fatalf("Nest String field kind=%d, want distinct String kind 2", kind)
+	}
+	if kind := m.types[checkerUse(t, m, nest.id, 1, 7).checkedType-1].kind; kind != 14 {
+		t.Fatalf("Nest Bytes field kind=%d, want distinct Bytes kind 14", kind)
 	}
 	enum := checkerSymbolByName(t, m, inputs, "E")
 	enumUses := 0
@@ -2809,7 +2813,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 		t.Fatalf("pointer-cut recursive field kind=%d, want 12", kind)
 	}
 	controlled := checkerSymbolByName(t, m, inputs, "controlled")
-	if len(m.uses) != 85 || len(m.expressions) != 2 || len(m.returns) != 1 || len(m.locals) != 0 || m.types[checkerUse(t, m, controlled.id, 6, 0).checkedType-1].kind != 1 {
+	if len(m.uses) != 86 || len(m.expressions) != 2 || len(m.returns) != 1 || len(m.locals) != 0 || m.types[checkerUse(t, m, controlled.id, 6, 0).checkedType-1].kind != 1 {
 		t.Fatalf("controlled body or declaration-use count changed: uses=%d expressions=%d returns=%d", len(m.uses), len(m.expressions), len(m.returns))
 	}
 	for owner := 11; owner <= 74; owner++ {
@@ -2824,10 +2828,7 @@ func assertCheckerSuccessManifest(t *testing.T, m checkerManifest, inputs map[st
 	for _, checked := range m.types {
 		kinds[checked.kind] = true
 	}
-	for kind := 1; kind <= 13; kind++ {
-		if kind == 2 {
-			continue // String is canonical slice(U8), not a distinct type kind.
-		}
+	for kind := 1; kind <= 14; kind++ {
 		if !kinds[kind] {
 			t.Fatalf("success fixture did not exercise checked type kind %d", kind)
 		}

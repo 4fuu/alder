@@ -196,6 +196,12 @@ func assertAlder1RejectsLikeGo(t *testing.T, exe string, noGo []string, files ma
 		t.Fatalf("Go diagnostic oracle: module=%v diagnostics=%+v error=%v", oracle, diagnostics, err)
 	}
 	want := diagnostics[0]
+	// The retained Go frontend remains an S0 oracle and still renders String as
+	// its historical [U8] alias. The Alder-written M7 checker preserves the new
+	// source identity, so only that legacy spelling is normalized here.
+	if source == "type-mismatch.al" || source == "map-value-string.al" || source == "nested-slice.al" || source == "using-callback-type.al" {
+		want.Message = strings.ReplaceAll(want.Message, "[U8]", "String")
+	}
 	src := frontend.Source{ID: 1, Path: source, Text: text}
 	startLine, startColumn := src.LineColumn(want.Primary.Start)
 	wantHuman := fmt.Sprintf("%s:%d:%d: %s[%s]: %s\n", source, startLine, startColumn, want.Severity, want.Code, want.Message)
@@ -435,7 +441,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "44365df5cf5b3046b218f40e1112f57abc8fdd600a0351c8f47939e8980860fa"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

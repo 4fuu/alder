@@ -189,6 +189,8 @@ fn driver_out_parse_message(kind: U64) -> Bool {
 }
 
 fn driver_out_diagnostic_type(kind: U64, target: U64) -> Bool {
+    if kind == 2 { return out_string("String") }
+    if kind == 14 { return out_string("Bytes") }
     if kind == 8 {
         if !out(91) || !driver_out_diagnostic_type(1, target) { return false }
         return out(93)
