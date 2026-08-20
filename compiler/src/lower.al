@@ -17,6 +17,7 @@ type LowerBindingMapRec {
     binding: U64
     mir_id: U64
     parameter: U64
+    initial: U64
 }
 
 type LowerValueMapRec {
@@ -191,7 +192,7 @@ fn lower_binding_lookup(state: LowerState, binding: U64) -> LowerBindingMapRec {
         if item.binding == binding { return item }
         at = at - 1
     }
-    return LowerBindingMapRec(binding: 0, mir_id: 0, parameter: 0)
+    return LowerBindingMapRec(binding: 0, mir_id: 0, parameter: 0, initial: 0)
 }
 
 fn lower_primitive(target: U64) -> U64 {
@@ -668,7 +669,7 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
                 let rec = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
                 entry = source_word(source_state, rec, symbol.name_start, symbol.name_end, "main")
             }
-            if symbol.kind == 13 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
+            if symbol.kind == 13 || symbol.inherent_owner != 0 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
             let owners = try __s0_buffer_append(LowerOwnerMapRec, d, current.owners, LowerOwnerMapRec(owner: owner, mir_id: function.id))
@@ -1074,8 +1075,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
         let binding = lower_binding_lookup(state, expression.parameter_use)
         if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        if binding.parameter != 0 { return Ok(LowerStep(state: state, id: binding.mir_id)) }
-        let place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        if binding.parameter == 1 { return Ok(LowerStep(state: state, id: binding.mir_id)) }
+        var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
+        if binding.parameter == 2 || binding.parameter == 3 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: binding.mir_id)) } else {
+            place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        }
         let local = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
         let local_type = try lower_local_type(d, source_state, store, lower_with_mir(state, place.store), owner, expression.parameter_use, local)
         let result = try lower_add_typed_result(d, local_type.state, function, block, local_type.id)
@@ -1260,7 +1264,58 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         while ordinal < expression.child_count {
             if expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
-            let child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
+            var child = LowerStep(state: current, id: 0)
+            var borrow_kind: U64 = 0
+            if annotation.kind == 1 {
+                let target_symbol = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+                var parameter_at: U64 = 0
+                var parameter_ordinal: U64 = 0
+                while parameter_at < __s0_buffer_len(LocalRec, store.locals) {
+                    let parameter = __s0_buffer_get(LocalRec, store.locals, parameter_at)
+                    if parameter.owner == annotation.target && parameter.kind == 1 {
+                        if parameter_ordinal == ordinal {
+                            if parameter.mutable == 1 { borrow_kind = 2 }
+                            let parameter_source = __s0_buffer_get(SourceRec, source_state.sources, parameter.source)
+                            if parameter.mutable == 0 && target_symbol.inherent_owner != 0 && source_word(source_state, parameter_source, parameter.name_start, parameter.name_end, "self") { borrow_kind = 1 }
+                        }
+                        parameter_ordinal = parameter_ordinal + 1
+                    }
+                    parameter_at = parameter_at + 1
+                }
+            }
+            if borrow_kind != 0 {
+                let checked_child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+                let mapped = lower_binding_lookup(current, checked_child.parameter_use)
+                var place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
+                var borrow_state = current
+                if borrow_kind == 1 && ((checked_child.kind != 1 && checked_child.kind != 5) || mapped.binding == 0 || mapped.parameter == 1) {
+                    let staged = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
+                    let ordinary = try lower_type(d, source_state, store, staged.state, checked_child.checked_type)
+                    let slot_name = try lower_decimal_name(d, "__alder_borrow_temp_", lower_local_count(ordinary.state.mir, function))
+                    let slot = try mir_add_local(d, ordinary.state.mir, function, lower_local_count(ordinary.state.mir, function), slot_name, ordinary.id)
+                    place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+                    let stored = try lower_add_instr(d, lower_with_mir(ordinary.state, place.store), function, block, mir_op_store(), 0, place.id, 0, staged.id, 0, 0, "")
+                    borrow_state = stored.state
+                } else {
+                    if (checked_child.kind != 1 && checked_child.kind != 5) || mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                    if mapped.parameter == 0 { place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+                        place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+                    }
+                    borrow_state = lower_with_mir(current, place.store)
+                }
+                let ordinary = try lower_type(d, source_state, store, borrow_state, checked_child.checked_type)
+                let empty = try __s0_buffer_new(U64, d)
+                var reference_kind = mir_type_kind_safe_ref()
+                var borrow_op = mir_op_borrow()
+                if borrow_kind == 2 {
+                    reference_kind = mir_type_kind_safe_mut()
+                    borrow_op = mir_op_borrow_mut()
+                }
+                let reference = try mir_intern_type(d, ordinary.state.mir, reference_kind, ordinary.id, 0, 0, empty, 0)
+                let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
+                let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, place.id, 0, 0, 0, 0, "")
+                child = LowerStep(state: borrowed.state, id: value.id)
+            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1
@@ -1485,7 +1540,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__s0_match_payload", checked.first_arm + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
                 current = lower_with_mir(payload_type.state, value.store)
                 binding_value = value.id
-                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1))
+                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
                 current = lower_with_bindings(current, bindings)
             }
             let case = try lower_add_switch_case(d, current, term.id, ordinal, name, binding_value, __s0_buffer_get(U64, arm_blocks, ordinal))
@@ -1639,8 +1694,11 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place_id - 1)
     if checked.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let binding = lower_binding_lookup(state, checked.root)
-    if binding.binding == 0 || binding.parameter != 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-    let root = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    if binding.binding == 0 || binding.parameter == 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    var root: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
+    if binding.parameter == 0 { root = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+        root = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: binding.mir_id))
+    }
     var current = lower_with_mir(state, root.store)
     if checked.kind == 1 { return Ok(LowerStep(state: current, id: root.id)) }
     if checked.kind == 2 {
@@ -1998,15 +2056,33 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         var name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
         if local.kind != 1 && lower_local_name_seen(source_state, store, locals, start, at, local) { name = try lower_decimal_name(d, "__s0_local_", local_ordinal) }
         if local.kind == 1 {
-            let parameter = try mir_add_function_param(d, current.mir, function, param_ordinal, name, typ.id)
+            var parameter_type = typ
+            let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+            let source = __s0_buffer_get(SourceRec, source_state.sources, local.source)
+            let read_receiver = owner_symbol.inherent_owner != 0 && local.mutable == 0 && source_word(source_state, source, local.name_start, local.name_end, "self")
+            if local.mutable == 1 || read_receiver {
+                let empty = try __s0_buffer_new(U64, d)
+                var reference_kind = mir_type_kind_safe_ref()
+                if local.mutable == 1 { reference_kind = mir_type_kind_safe_mut() }
+                let reference = try mir_intern_type(d, typ.state.mir, reference_kind, typ.id, 0, 0, empty, 0)
+                parameter_type = LowerStep(state: lower_with_mir(typ.state, reference.store), id: reference.type_id)
+            }
+            let parameter = try mir_add_function_param(d, parameter_type.state.mir, function, param_ordinal, name, parameter_type.id)
             current = lower_with_mir(current, parameter.store)
-            let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: 1))
-            current = lower_with_bindings(current, bindings)
+            if (local.mutable == 0 && !read_receiver) || local.mutable == 2 {
+                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: 1, initial: 0))
+                current = lower_with_bindings(current, bindings)
+            } else {
+                var parameter_kind: U64 = 3
+                if local.mutable == 1 { parameter_kind = 2 }
+                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: parameter_kind, initial: 0))
+                current = lower_with_bindings(current, bindings)
+            }
             param_ordinal = param_ordinal + 1
         } else {
             let slot = try mir_add_local(d, current.mir, function, local_ordinal, name, typ.id)
             current = lower_with_mir(current, slot.store)
-            let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: slot.id, parameter: 0))
+            let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: slot.id, parameter: 0, initial: 0))
             current = lower_with_bindings(current, bindings)
             local_ordinal = local_ordinal + 1
         }
@@ -3178,10 +3254,9 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < local_count {
         let item = __s0_buffer_get(LocalRec, store.locals, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 2 || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.mutable > 1 || !lower_type_concrete(store, item.checked_type) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 2 || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.mutable > 2 || (item.kind == 2 && item.mutable > 1) || !lower_type_concrete(store, item.checked_type) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return false }
-        if item.kind == 1 && item.mutable > 1 { return false }
         if binding_environment_counts[at + 1] != 1 { return false }
         at = at + 1
     }

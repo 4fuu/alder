@@ -78,7 +78,7 @@ fn mir_vp4_collect_uses_into(d: Domain, store: MirStore, indexes: MirVIndexes, f
             if id != 0 {
                 let i = __s0_buffer_get(MirInstrRec, store.instructions, id - 1)
                 uses = try mir_vp4_place_uses(d, store, uses, block, id, i.place)
-                if (i.op == mir_op_load() || i.op == mir_op_store()) && __s0_buffer_get(MirPlaceRec, store.places, i.place - 1).kind == mir_place_deref() { uses = try mir_vp4_use(d, uses, __s0_buffer_get(MirPlaceRec, store.places, i.place - 1).deref_value, block, id, 0, 0, 0) }
+                if (i.op == mir_op_load() || i.op == mir_op_store() || i.op == mir_op_borrow() || i.op == mir_op_borrow_mut()) && __s0_buffer_get(MirPlaceRec, store.places, i.place - 1).kind == mir_place_deref() { uses = try mir_vp4_use(d, uses, __s0_buffer_get(MirPlaceRec, store.places, i.place - 1).deref_value, block, id, 0, 0, 0) }
                 uses = try mir_vp4_direct_uses(d, uses, i, id)
                 var pass: U64 = 0
                 while pass < 3 {
@@ -389,7 +389,7 @@ fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: 
                 let iid = instruction_at[block_base + position]
                 if iid != 0 {
                     let ins = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-                    if ins.op == mir_op_load() {
+                    if ins.op == mir_op_load() || ins.op == mir_op_borrow() || ins.op == mir_op_borrow_mut() {
                         let load_root = __s0_buffer_get(U64, indexes.place_root, ins.place - 1)
                         let load_depth = __s0_buffer_get(U64, indexes.place_depth, ins.place - 1)
                         if load_root != 0 {

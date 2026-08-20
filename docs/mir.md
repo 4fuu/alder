@@ -185,7 +185,17 @@ deref checked_reference_value
 
 The initial vocabulary has no unchecked index place. Checked element access uses `slice.index.checked`, which yields a checked reference that `deref` places consume.
 
-A value is an immutable result of an instruction. `load` reads a place and produces a value; `store` writes a value into a place and does not invalidate other source-level names. Unsafe raw-pointer dereference is never represented as an ordinary safe place. Every reachable load from a local or one of its fields requires that place to be definitely initialized on every incoming path. Storing a whole aggregate initializes all of its fields; storing every field is equivalent at control-flow joins. A store reached only through a loop backedge cannot initialize the first iteration.
+A value is an immutable result of an instruction. `load` reads a place and
+produces a value; `store` writes a value into a place and does not invalidate
+other source-level names. `borrow place` and `borrow_mut place` produce
+`safe_ref(T)` and `safe_mut(T)` respectively for a place of type `T`;
+`borrow_mut` requires a mutable place. Both borrows observe the place for
+definite-initialization purposes. Unsafe raw-pointer dereference is never
+represented as an ordinary safe place. Every reachable load or borrow from a
+local or one of its fields requires that place to be definitely initialized on
+every incoming path. Storing a whole aggregate initializes all of its fields;
+storing every field is equivalent at control-flow joins. A store reached only
+through a loop backedge cannot initialize the first iteration.
 
 ## Control Flow
 

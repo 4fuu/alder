@@ -334,7 +334,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpFFICallUnsafe {
+	if in.Op > mir.OpBorrowMut {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -369,7 +369,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 			}
 		}
 	}
-	if in.Op == mir.OpLoad || in.Op == mir.OpStore {
+	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut {
 		errs = append(errs, checkPlaceIntegrity(f, &in.Place, loc)...)
 	}
 	if in.Op == mir.OpCall && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
@@ -519,7 +519,7 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		}
 	}
 	switch in.Op {
-	case mir.OpLoad:
+	case mir.OpLoad, mir.OpBorrow, mir.OpBorrowMut:
 		if in.Place.Kind == mir.PlaceDeref {
 			add(in.Place.Deref)
 		}

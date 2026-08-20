@@ -309,7 +309,7 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     if token.kind == 3 { kind = 21 }
     if token.kind == 4 { kind = 22 }
     if token.kind == 1 && (token.keyword == 17 || token.keyword == 18) { kind = 23 }
-    if token_ident(state, initial) { kind = 24 }
+    if token_ident(state, initial) || token.keyword == 26 { kind = 24 }
     if kind != 0 {
         let names = kind == 24
         var name_start: U64 = 0
@@ -355,6 +355,54 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             var cursor = ParseCursor(token: value.cursor.token + 1, store: value.cursor.store)
             cursor = try add_link(d, cursor, value.node, 0)
             var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            let callee = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
+            if callee.kind == 29 {
+                let base_link = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, callee.children - 1)
+                let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, base_link.node - 1)
+                let source = __s0_buffer_get(SourceRec, state.sources, base.source)
+                var associated = false
+                if base.kind == 24 {
+                    let first = text_byte(state, source, base.name_start)
+                    associated = first >= 65 && first <= 90
+                    var root_at: U64 = 0
+                    while root_at < __s0_buffer_len(U64, cursor.store.roots) {
+                        let root = __s0_buffer_get(SyntaxRec, cursor.store.nodes, __s0_buffer_get(U64, cursor.store.roots, root_at) - 1)
+                        if root.source == base.source && (root.kind == 41 || root.kind == 42) {
+                            var candidate_start = root.name_start
+                            var candidate_end = root.name_end
+                            var path_at = root.name_start
+                            while path_at < root.name_end {
+                                if text_byte(state, source, path_at) == 46 { candidate_start = path_at + 1 }
+                                path_at = path_at + 1
+                            }
+                            var child_link = root.children
+                            while child_link != 0 {
+                                let child = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, child_link - 1)
+                                let child_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, child.node - 1)
+                                if child_node.kind == 44 {
+                                    candidate_start = child_node.name_start
+                                    candidate_end = child_node.name_end
+                                }
+                                child_link = child.next
+                            }
+                            if candidate_end - candidate_start == base.name_end - base.name_start {
+                                var equal = true
+                                var name_at: U64 = 0
+                                while name_at < base.name_end - base.name_start {
+                                    if text_byte(state, source, candidate_start + name_at) != text_byte(state, source, base.name_start + name_at) { equal = false }
+                                    name_at = name_at + 1
+                                }
+                                if equal { associated = true }
+                            }
+                        }
+                        root_at = root_at + 1
+                    }
+                }
+                if !associated {
+                    cursor = try add_link(d, cursor, base_link.node, children)
+                    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                }
+            }
             if !token_punct(state, cursor, ")") {
                 var args = true
                 while args {
@@ -638,7 +686,7 @@ fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
     return Ok(Parsed(node))
 }
 
-fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_type: U64) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
     if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
@@ -662,13 +710,23 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
                     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 }
             }
-            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            let receiver = parse_token(state, cursor).keyword == 26
+            if !token_ident(state, cursor) && !receiver { return reject_parse(d, state, cursor, 3) }
             let param = parse_token(state, cursor)
+            var pnode: ParseValue = ParseValue(cursor: cursor, node: 0)
+            if receiver {
+                if receiver_type == 0 || runtime { return reject_parse(d, state, cursor, 10) }
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                let owner = __s0_buffer_get(SyntaxRec, cursor.store.nodes, receiver_type - 1)
+                let copied = try add_syntax(d, cursor, owner.kind, owner.token, owner.source, owner.start, owner.end, owner.name_start, owner.name_end, owner.children)
+                let linked = try add_link(d, copied.cursor, copied.node, 0)
+                pnode = try add_syntax(d, linked, parameter_kind, cursor.token, param.source, param.start, param.end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                runtime = true
+            } else {
             let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
             let colon = try expect_punct(d, state, colon_cursor, ":")
             if parse_step_bad(colon) { return Ok(colon) }
             cursor = parse_step_cursor(colon)
-            var pnode: ParseValue = ParseValue(cursor: cursor, node: 0)
             if parse_token(state, cursor).keyword == 2 {
                 if parameter_kind != 13 { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
                 if runtime { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
@@ -680,6 +738,7 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
                 let linked = try add_link(d, tv.cursor, tv.node, 0)
                 pnode = try add_syntax(d, linked, parameter_kind, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
                 runtime = true
+            }
             }
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
@@ -705,6 +764,39 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
     cursor = try add_link(d, bv.cursor, bv.node, children)
     let block = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1)
     let node = try add_syntax(d, cursor, 12, initial.token + 1, start.source, start.start, block.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    return Ok(Parsed(node))
+}
+
+fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    return parse_function_owned(d, state, initial, 0)
+}
+
+fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    let owner = try parse_type(d, state, ParseCursor(token: initial.token + 1, store: initial.store))
+    if parse_step_bad(owner) { return Ok(owner) }
+    let owner_value = parse_step_value(owner)
+    var cursor = owner_value.cursor
+    let open = try expect_punct(d, state, cursor, "{")
+    if parse_step_bad(open) { return Ok(open) }
+    cursor = parse_step_cursor(open)
+    cursor = try add_link(d, cursor, owner_value.node, 0)
+    var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    while !token_punct(state, cursor, "}") {
+        if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 4) }
+        let method = try parse_function_owned(d, state, cursor, owner_value.node)
+        if parse_step_bad(method) { return Ok(method) }
+        let value = parse_step_value(method)
+        cursor = try add_root(d, value.cursor, value.node)
+        cursor = try add_link(d, cursor, value.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 7) }
+    }
+    let close = try expect_punct(d, state, cursor, "}")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    let owner_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, owner_value.node - 1)
+    let node = try add_syntax(d, cursor, 49, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, owner_node.name_start, owner_node.name_end, children)
     return Ok(Parsed(node))
 }
 
@@ -799,6 +891,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     let start = parse_token(state, initial)
     if start.keyword == 20 { return parse_module_decl(d, state, initial) }
     if start.keyword == 21 { return parse_public_decl(d, state, initial) }
+    if start.keyword == 25 { return parse_impl(d, state, initial) }
     let is_import = start.keyword == 1
     let is_struct = start.keyword == 2
     let is_enum = start.keyword == 3

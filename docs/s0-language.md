@@ -58,6 +58,10 @@ type Pair(T: type) {
     value: T
 }
 
+type Counter {
+    value: U64
+}
+
 enum Maybe(T: type) {
     Some(value: T)
     None
@@ -66,12 +70,25 @@ enum Maybe(T: type) {
 fn identity(T: type, value: T) -> T {
     return value
 }
+
+impl Counter {
+    fn get(self) -> U64 {
+        return self.value
+    }
+}
 ```
 
 Generic compile-time parameters must be the leading `type` parameters. Type
 application and explicit specialization use `Name(...)`. A call either omits
 all type arguments and infers them from runtime arguments/expected result, or
 supplies all of them. Monomorphization completes before MIR.
+
+Function parameters use ordinary copy/borrow semantics by default. `mut`
+permits mutation through a mutable argument or receiver, while `take`
+transfers an affine value and invalidates the source on that path. Inherent
+`impl Type { ... }` blocks provide `self`, `mut self`, and `take self`
+receivers plus associated functions. They do not provide traits or extension
+methods.
 
 The hosted entry forms are temporarily `fn main() -> I32` and
 `fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim
@@ -154,9 +171,9 @@ Implemented expressions include:
 - a single direct imported call in `unsafe c { ... }`;
 - S0 domain, allocation, buffer, and map intrinsics.
 
-Bitwise source operators, methods, traits, closures, fixed arrays, ordinary
-owned vectors, table identity, modules, `pub`, async, and the 1.0 standard
-library are absent.
+Bitwise source operators, trait methods, closures, fixed arrays, ordinary owned
+vectors, table identity, modules, `pub`, async, and the 1.0 standard library are
+absent.
 
 ## Temporary memory and cleanup bridges
 
@@ -274,8 +291,10 @@ operators with the Go Stage 0 operand rules. Direct calls support concrete and
 generic user functions, generic records, variants resolved through a concrete
 expected enum, unary-payload inference through declared generic enums, and one
 direct C-import root in `unsafe c`; record fields are checked and stored in
-declaration order. Explicit type arguments are all-or-none and use the same
-postfix call tree as runtime arguments. Checked places cover mutable locals and
+declaration order. Inherent methods support ordinary, mutable, and taking
+receivers; associated functions and same-named methods on distinct owner types
+resolve to distinct concrete symbols. Explicit type arguments are all-or-none
+and use the same postfix call tree as runtime arguments. Checked places cover mutable locals and
 struct fields plus slice indices and indexed struct fields; roots and fields
 retain stable semantic IDs, and concrete generic field types are substituted
 before checking the right-hand side. Lexical environments do not leak block,

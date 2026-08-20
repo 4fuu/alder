@@ -187,6 +187,7 @@ func TestInferResultType(t *testing.T) {
 		{Name: "e", Type: en},
 	}, TypeI64)
 	f.AddBlock("bb0", nil)
+	local := f.AddLocal("local", pair)
 
 	// Params: %0 = d (domain_handle), %1 = s (slice(u8)), %2 = x (i64), %3 = e (enum).
 	d, s, x, e := ValueId(0), ValueId(1), ValueId(2), ValueId(3)
@@ -207,6 +208,8 @@ func TestInferResultType(t *testing.T) {
 	want("alloc", Instr{Op: OpAlloc, Domain: d, TypeOp: TypeU8, Count: cnt}, m.SafeMut(TypeU8))
 	want("alloc.checked", Instr{Op: OpAllocChecked, Domain: d, TypeOp: TypeU8, Count: cnt}, m.SafeMut(TypeU8))
 	want("copy_to_domain", Instr{Op: OpCopyToDomain, Domain: d, CopyVal: s}, m.Slice(TypeU8))
+	want("borrow", Instr{Op: OpBorrow, Place: Place{Kind: PlaceLocal, Local: local}}, m.SafeRef(pair))
+	want("borrow_mut", Instr{Op: OpBorrowMut, Place: Place{Kind: PlaceLocal, Local: local}}, m.SafeMut(pair))
 	want("cleanup.scope.begin", Instr{Op: OpCleanupScopeBegin}, m.CleanupScope())
 	want("int.add.checked", Instr{Op: OpIntAddChecked, A: x, B: x}, TypeI64)
 	want("int.shl.checked", Instr{Op: OpIntShlChecked, A: x, B: x}, TypeI64)
@@ -269,7 +272,7 @@ func TestOpTable(t *testing.T) {
 	if !OpAllocChecked.HasFailEdge() || !OpIntAddChecked.HasFailEdge() || OpAlloc.HasFailEdge() || OpLoad.HasFailEdge() || OpStore.HasFailEdge() {
 		t.Error("HasFailEdge misclassified")
 	}
-	if OpStore.String() != "store" || OpFFICallUnsafe.String() != "ffi.call.unsafe" {
+	if OpStore.String() != "store" || OpFFICallUnsafe.String() != "ffi.call.unsafe" || OpBorrow.String() != "borrow" || OpBorrowMut.String() != "borrow_mut" {
 		t.Error("op names mismatched")
 	}
 	if got := OpKind(200).String(); got == "" {
@@ -277,7 +280,7 @@ func TestOpTable(t *testing.T) {
 	}
 	// Every operation has a name, and ProducesResult agrees with HasFailEdge
 	// on the non-checked set.
-	for k := OpKind(0); k <= OpFFICallUnsafe; k++ {
+	for k := OpKind(0); k <= OpBorrowMut; k++ {
 		if k.String() == "" {
 			t.Errorf("OpKind %d has an empty name", k)
 		}

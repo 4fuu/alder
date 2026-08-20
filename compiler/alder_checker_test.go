@@ -432,6 +432,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 	parseCheckerManifest(t, runAlderChecker(t, exe, functionNameGood, []string{"functions.al"}, false), functionNameGood)
 	categoryGood := map[string]string{"categories.al": "type Owner { domain: Domain }\nfn inspect(value: Owner) -> Unit {}\nfn update(mut value: Owner) -> Unit {}\nfn install(take value: Owner) -> Owner { return value }\nfn edit(mut view: [U8]) -> Unit {}\nfn pass(take value: Owner) -> Owner { return install(value) }\nfn change(mut value: Owner) -> Unit { update(value) }\nfn branch(take value: Owner, flag: Bool) -> Owner { if flag { return install(value) } else { return install(value) } }\nfn forward(T: type, take value: T) -> T { return value }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, categoryGood, []string{"categories.al"}, false), categoryGood)
+	methodGood := map[string]string{"methods.al": "type Counter { value: U64 }\ntype Owner { domain: Domain }\nimpl Counter {\nfn new(value: U64) -> Counter { return Counter(value: value) }\nfn read(self) -> U64 { return self.value }\nfn write(mut self, value: U64) -> Unit { self.value = value }\nfn echo(T: type, self, value: T) -> T { return value }\n}\nimpl Owner {\nfn consume(take self) -> Owner { return self }\n}\nfn use(value: Counter) -> U64 { var local: Counter = value\n local.write(7)\n return local.echo(local.read()) }\nfn make() -> Counter { return Counter.new(3) }\nfn consume(take value: Owner) -> Owner { return value.consume() }\n"}
+	parseCheckerManifest(t, runAlderChecker(t, exe, methodGood, []string{"methods.al"}, false), methodGood)
 	bodyGood := map[string]string{
 		"a.al": "type Pair(T: type) { value: T }\n" +
 			"fn identity(value: U64) -> U64 { return value }\n" +
@@ -583,7 +585,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"enum Shape { Circle(value: U64)\n Dot }\n" +
 			"fn forward(value: U64) -> U64 { return add(value, 1) }\n" +
 			"fn add(left: U64, right: U64) -> U64 { return left + right }\n" +
-			"fn self(value: U64) -> U64 { return self(value) }\n" +
+			"fn recurse(value: U64) -> U64 { return recurse(value) }\n" +
 			"fn even(value: U64) -> U64 { return odd(value) }\n" +
 			"fn odd(value: U64) -> U64 { return even(value) }\n" +
 			"fn point() -> Point { return Point(y: true, x: 3) }\n" +
@@ -623,7 +625,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	if pointFirst.kind != 3 || pointSecond.kind != 2 {
 		t.Fatalf("record fields were not stored in declaration order: first=%+v second=%+v", pointFirst, pointSecond)
 	}
-	for _, name := range []string{"self", "even", "odd", "cross_file"} {
+	for _, name := range []string{"recurse", "even", "odd", "cross_file"} {
 		owner := checkerSymbolByName(t, callManifest, callGood, name)
 		root := callManifest.expressions[checkerReturnForOwner(t, callManifest, owner.id).expression-1]
 		if root.kind != 8 || root.annotation == 0 {
@@ -958,6 +960,10 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "drop-affine-local.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { let local: Owner = sink(value) }\n", kind: 93, marker: "let"},
 		{name: "mutable-affine-local.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { var local: Owner = sink(value) }\n", kind: 95, marker: "var"},
 		{name: "overwrite-affine-owner.al", text: "type Owner { domain: Domain }\nfn f(take value: Owner) -> Owner { value = value\n return value }\n", kind: 95, marker: "="},
+		{name: "unknown-impl-owner.al", text: "impl Missing {\nfn make() -> U64 { return 0 }\n}\n", kind: 4, marker: "Missing"},
+		{name: "duplicate-inherent-method.al", text: "type Item { value: U64 }\nimpl Item {\nfn read(self) -> U64 { return self.value }\nfn read(self) -> U64 { return self.value }\n}\n", kind: 1, marker: "fn", last: true, relatedMarker: "fn"},
+		{name: "take-copyable-receiver.al", text: "type Item { value: U64 }\nimpl Item {\nfn consume(take self) -> Item { return self }\n}\n", kind: 90, marker: "Item", occurrence: 2},
+		{name: "immutable-mut-receiver.al", text: "type Item { value: U64 }\nimpl Item {\nfn update(mut self, value: U64) -> Unit { self.value = value }\n}\nfn f(value: Item) -> Unit { value.update(1) }\n", kind: 92, marker: "value", last: true},
 		{name: "function-parameter-type-before-name.al", text: "fn f(x: U64, x: Missing) -> Unit {}\n", kind: 4, marker: "Missing"},
 		{name: "body-unknown.al", text: "fn f() -> U64 { return missing }\n", kind: 18, marker: "missing"},
 		{name: "body-return-mismatch.al", text: "fn f(value: U64) -> I64 { return value }\n", kind: 19, marker: "return"},
@@ -1962,7 +1968,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		sharedParameterSyntax := local.kind == 1 && local.syntax >= 1 && nodes[local.syntax]
 		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
-		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && ownerArity < 0 || (local.mutable != 0 && local.mutable != 1) || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
+		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && ownerArity < 0 || local.mutable < 0 || local.mutable > 2 || local.kind == 2 && local.mutable > 1 || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
 			return fmt.Errorf("invalid local binding %+v", local)
 		}
 		if local.kind == 2 {

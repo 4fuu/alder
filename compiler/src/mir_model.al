@@ -120,6 +120,8 @@ fn mir_op_float_from_int() -> U64 { return 49 }
 fn mir_op_const_get() -> U64 { return 50 }
 fn mir_op_call() -> U64 { return 51 }
 fn mir_op_ffi_call_unsafe() -> U64 { return 52 }
+fn mir_op_borrow() -> U64 { return 53 }
+fn mir_op_borrow_mut() -> U64 { return 54 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

@@ -237,8 +237,8 @@ func (g *gen) computeUses(f *mir.Function) {
 			for _, v := range verifyOperandValues(in) {
 				markRead(v)
 			}
-			if in.Op == mir.OpLoad || in.Op == mir.OpStore {
-				g.markPlaceReads(in.Place, in.Op == mir.OpLoad)
+			if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut {
+				g.markPlaceReads(in.Place, in.Op != mir.OpStore)
 			}
 			if in.FailTarget != mir.NoBlock {
 				for _, v := range in.FailArgs {

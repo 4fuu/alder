@@ -773,6 +773,12 @@ func (p *parser) parseOp() (Instr, error) {
 	case "load":
 		in.Op = OpLoad
 		in.Place, err = p.parsePlace()
+	case "borrow":
+		in.Op = OpBorrow
+		in.Place, err = p.parsePlace()
+	case "borrow_mut":
+		in.Op = OpBorrowMut
+		in.Place, err = p.parsePlace()
 
 	case "store":
 		in.Op = OpStore

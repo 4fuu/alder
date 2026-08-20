@@ -97,7 +97,7 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 	for _, b := range f.Blocks {
 		for i := range b.Instrs {
 			in := &b.Instrs[i]
-			if in.Op != mir.OpLoad {
+			if in.Op != mir.OpLoad && in.Op != mir.OpBorrow && in.Op != mir.OpBorrowMut {
 				continue
 			}
 			key, keyOK := localPlaceKey(&in.Place)
@@ -181,7 +181,7 @@ func definiteLocalInitialization(m *mir.Module, f *mir.Function, g *pointCFG) []
 		}
 		for i := range b.Instrs {
 			in := &b.Instrs[i]
-			if in.Op != mir.OpLoad {
+			if in.Op != mir.OpLoad && in.Op != mir.OpBorrow && in.Op != mir.OpBorrowMut {
 				continue
 			}
 			key, ok := localPlaceKey(&in.Place)

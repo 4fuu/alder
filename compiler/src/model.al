@@ -45,7 +45,10 @@ type LexDiagRec {
 // 38 match arm, 39 match binding, 40 module declaration, 41 module import,
 // 42 public module import, 43 selected import name, 44 import alias,
 // 45 public declaration wrapper, 46 module path, 47 mut runtime parameter, and
-// 48 take runtime parameter. Module/import names retain their complete
+// 48 take runtime parameter, and 49 inherent impl declaration. An impl's first
+// child is its owner type and remaining children are function declarations;
+// receiver parameters use kinds 13, 47, and 48 and the name `self`.
+// Module/import names retain their complete
 // dotted path span. Import children are selected names or one alias; a public
 // declaration wrapper has its declaration as its sole child.
 // Function children are parameters, result,
@@ -120,6 +123,9 @@ type SymbolRec {
     first_instance_arg: U64
     instance_arg_count: U64
     discovery_parent: U64
+    // Nonzero for an inherent function and its concrete generic instances;
+    // identifies the owning impl syntax for deterministic static name mangling.
+    inherent_owner: U64
     // M6 module ownership and visibility. module_source is zero in the legacy
     // explicit-source mode and source+1 for declarations in a module file.
     module_source: U64

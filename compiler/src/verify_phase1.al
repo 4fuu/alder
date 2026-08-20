@@ -6,7 +6,7 @@ fn mir_vop_checked(op: U64) -> Bool {
 }
 fn mir_vop_required_mask(op: U64) -> U64 {
     // bits: a=1, b=2, c=4, place=8, type=16, target=32, name=64.
-    if op == mir_op_load() { return 8 }
+    if op == mir_op_load() || op == mir_op_borrow() || op == mir_op_borrow_mut() { return 8 }
     if op == mir_op_store() { return 9 }
     if op == mir_op_aggregate_construct() { return 16 }
     if op == mir_op_domain_create() || op == mir_op_domain_mark() || op == mir_op_domain_destroy() || op == mir_op_table_create() { return 1 }
@@ -1015,7 +1015,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_ffi_call_unsafe() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_ffi_call_unsafe(), i.op, 0)) } else {
+        if i.op > mir_op_borrow_mut() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_borrow_mut(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false

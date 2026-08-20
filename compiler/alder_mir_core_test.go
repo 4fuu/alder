@@ -96,7 +96,7 @@ fn emit_contract() -> Bool {
     if !mout(80) || !mout(75) || !emit_contract_range(mir_param_function(), mir_param_block() + 1) { return false }
     if !mout(86) || !mout(68) || !emit_contract_range(mir_value_def_function_param(), mir_value_def_switch_case() + 1) { return false }
     if !mout(80) || !mout(76) || !emit_contract_range(mir_place_local(), mir_place_deref() + 1) { return false }
-    if !mout(79) || !mout(80) || !emit_contract_range(mir_op_load(), mir_op_ffi_call_unsafe() + 1) { return false }
+    if !mout(79) || !mout(80) || !emit_contract_range(mir_op_load(), mir_op_borrow_mut() + 1) { return false }
     if !mout(84) || !mout(77) || !emit_contract_range(mir_term_jump(), mir_term_panic() + 1) { return false }
     return mout(79) && mout(75) && emit_contract_range(mir_operand_type_part(), mir_operand_aggregate_field() + 1)
 }
@@ -292,7 +292,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 		"TK 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17\n" +
 		"PR 1 2 3 4 5 6 7 8 9 10 11 12\n" +
 		"PT 1 2 3\nCK 0 1 2 3 4\nPK 1 2\nVD 0 1 2 3\nPL 0 1 2\n" +
-		"OP 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52\n" +
+		"OP 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54\n" +
 		"TM 0 1 2 3 4 5 6\nOK 1 2 3 4 5 6 7 8\n" +
 		"T 1 0 0 0 0 0 0\nT 2 0 0 0 0 0 0\nT 3 0 0 0 0 0 0\nT 4 0 0 0 0 0 0\n" +
 		"T 5 0 0 0 0 0 0\nT 6 0 0 0 0 0 0\nT 7 0 0 0 0 0 0\nT 8 0 0 0 0 0 0\n" +
@@ -330,7 +330,7 @@ func validateMIRContractManifest(t *testing.T, text string) {
 		"PK": {1, 2},
 		"VD": {int(mir.ValueDefFuncParam), int(mir.ValueDefSwitchCase) + 1},
 		"PL": {int(mir.PlaceLocal), int(mir.PlaceDeref) + 1},
-		"OP": {int(mir.OpLoad), int(mir.OpFFICallUnsafe) + 1},
+		"OP": {int(mir.OpLoad), int(mir.OpBorrowMut) + 1},
 		"TM": {int(mir.TermJump), int(mir.TermPanic) + 1},
 		"OK": {1, 8},
 	}

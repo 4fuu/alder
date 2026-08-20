@@ -219,7 +219,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_ffi_call_unsafe() { return false }
+        if item.op > mir_op_borrow_mut() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -488,6 +488,13 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, " = ")
         out = try cgen_put_place(d, out, store, indexes, item.function, item.place)
         return cgen_put(d, out, ";\n")
+    }
+    if item.op == mir_op_borrow() || item.op == mir_op_borrow_mut() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderSlice){ (void *)&")
+        out = try cgen_put_place(d, out, store, indexes, item.function, item.place)
+        return cgen_put(d, out, ", (uint64_t)1 };\n")
     }
     if item.op == mir_op_store() {
         out = try cgen_put(d, out, "  ")

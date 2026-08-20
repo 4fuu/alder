@@ -82,9 +82,12 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	errBaseline := len(c.errs)
 
 	switch in.Op {
-	case mir.OpLoad:
+	case mir.OpLoad, mir.OpBorrow, mir.OpBorrowMut:
 		if _, ok := m.PlaceType(f, &in.Place); !ok {
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "place is not well-formed"})
+		}
+		if in.Op == mir.OpBorrowMut && !placeMutable(m, f, &in.Place) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "mutable borrow target is read-only"})
 		}
 
 	case mir.OpStore:

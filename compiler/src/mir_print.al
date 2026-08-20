@@ -298,7 +298,7 @@ fn mir_instr_checked(op: U64) -> Bool {
 }
 
 fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op == mir_op_load() || rec.op == mir_op_store() {
+    if rec.op == mir_op_load() || rec.op == mir_op_store() || rec.op == mir_op_borrow() || rec.op == mir_op_borrow_mut() {
         if !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) || __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).function != rec.function { return false }
         if rec.op == mir_op_store() && !mir_value_valid(store, rec.function, rec.a) { return false }
     }
@@ -338,7 +338,7 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
 }
 
 fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_ffi_call_unsafe() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
+    if rec.op > mir_op_borrow_mut() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -875,7 +875,9 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 49 { return out_string("float.from_int") }
     if op == 50 { return out_string("const.get") }
     if op == 51 { return out_string("call") }
-    return out_string("ffi.call.unsafe")
+    if op == 52 { return out_string("ffi.call.unsafe") }
+    if op == 53 { return out_string("borrow") }
+    return out_string("borrow_mut")
 }
 
 fn mir_out_fail_edge(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
@@ -887,7 +889,7 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
     if !out_string("  ") { return false }
     if rec.result != 0 && (!mir_out_value(store, rec.function, rec.result) || !out_string(" = ")) { return false }
     if !mir_out_op(rec.op) { return false }
-    if rec.op == mir_op_load() {
+    if rec.op == mir_op_load() || rec.op == mir_op_borrow() || rec.op == mir_op_borrow_mut() {
         if !out(32) || !mir_out_place(store, rec.function, rec.place) { return false }
     }
     if rec.op == mir_op_store() {

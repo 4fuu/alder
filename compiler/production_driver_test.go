@@ -244,9 +244,9 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 			"src/types.al": "module hello.types\npub type Box { value: U64 }\n",
 		}, true},
 		{"selected-reexport", map[string]string{
-			"src/main.al": "module hello.main\nimport hello.api { helper }\npub fn main() -> I32 { return helper() }\n",
-			"src/api.al":  "module hello.api\npub import hello.impl { helper }\n",
-			"src/impl.al": "module hello.impl\npub fn helper() -> I32 { return 0 }\n",
+			"src/main.al":     "module hello.main\nimport hello.api { helper }\npub fn main() -> I32 { return helper() }\n",
+			"src/api.al":      "module hello.api\npub import hello.internal { helper }\n",
+			"src/internal.al": "module hello.internal\npub fn helper() -> I32 { return 0 }\n",
 		}, true},
 		{"same-name-isolated", map[string]string{
 			"src/main.al": "module hello.main\nimport hello.a as a\nimport hello.b as b\npub fn main() -> I32 { return a.helper() - b.helper() }\n",

@@ -215,7 +215,7 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	}
 	b.WriteString(in.Op.String())
 	switch in.Op {
-	case OpLoad:
+	case OpLoad, OpBorrow, OpBorrowMut:
 		b.WriteString(" " + printPlace(m, f, &in.Place))
 
 	case OpStore:

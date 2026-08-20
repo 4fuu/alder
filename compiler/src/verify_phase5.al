@@ -235,6 +235,10 @@ fn mir_v5_infer(store: MirStore, indexes: MirVIndexes, id: U64, x: MirInstrRec) 
     let ta = mir_v5_value_type(store, indexes, x.function, x.a)
     let tb = mir_v5_value_type(store, indexes, x.function, x.b)
     if x.op == mir_op_load() { return mir_v5_place_type(store, indexes, x.function, x.place) }
+    if x.op == mir_op_borrow() { let p = mir_v5_place_type(store, indexes, x.function, x.place)
+return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_ref(), p.type_id)) }
+    if x.op == mir_op_borrow_mut() { let p = mir_v5_place_type(store, indexes, x.function, x.place)
+return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), p.type_id)) }
     if x.op == mir_op_aggregate_construct() { return MirVTypeResult(valid: mir_v5_aggregate_matches(store, indexes, x.function, id, x.type_op), type_id: x.type_op) }
     if x.op == mir_op_domain_create() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()), type_id: mir_v5_find_kind(indexes, mir_type_kind_domain_handle())) }
     if x.op == mir_op_domain_mark() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()), type_id: mir_v5_find_kind(indexes, mir_type_kind_domain_mark())) }
@@ -293,9 +297,10 @@ return Ok(result) }
 fn mir_v5_instruction(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), id: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
 let baseline = __s0_buffer_len(MirVerifyDiagRec, out)
-    if x.op == mir_op_load() || x.op == mir_op_store() { let p = mir_v5_place_type(store, indexes, x.function, x.place)
-if !p.valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_place_type(), x.function, x.block, id, 0, x.place, 0, 0, x.place) } else { if x.op == mir_op_store() { if !mir_v5_place_mutable(store, indexes, x.function, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_readonly_place(), x.function, x.block, id, 0, x.place, 0, p.type_id, x.place) }
-result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, p.type_id) } } }
+    if x.op == mir_op_load() || x.op == mir_op_store() || x.op == mir_op_borrow() || x.op == mir_op_borrow_mut() { let p = mir_v5_place_type(store, indexes, x.function, x.place)
+if !p.valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_place_type(), x.function, x.block, id, 0, x.place, 0, 0, x.place) } else { if x.op == mir_op_store() || x.op == mir_op_borrow_mut() { if !mir_v5_place_mutable(store, indexes, x.function, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_readonly_place(), x.function, x.block, id, 0, x.place, 0, p.type_id, x.place) }
+if x.op == mir_op_store() {
+result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, p.type_id) } } } }
     if x.op == mir_op_aggregate_construct() { let fields = mir_v5_type_part_count(store, indexes, x.type_op, mir_type_part_field())
 let got = mir_v5_operand_count(store, indexes, mir_operand_aggregate_field(), id, 0)
 if mir_vtype_kind(store, x.type_op) != mir_type_kind_aggregate() || got != fields { result = try mir_v5_bad(d, result, mir_vdiag_bad_aggregate(), x.function, x.block, id, 0, 0, fields, got, x.type_op) } else { var n: U64 = 0

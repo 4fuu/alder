@@ -74,6 +74,8 @@ const (
 	OpConstGet
 	OpCall
 	OpFFICallUnsafe
+	OpBorrow
+	OpBorrowMut
 )
 
 // String returns the canonical textual name of the operation.
@@ -185,6 +187,10 @@ func (k OpKind) String() string {
 		return "call"
 	case OpFFICallUnsafe:
 		return "ffi.call.unsafe"
+	case OpBorrow:
+		return "borrow"
+	case OpBorrowMut:
+		return "borrow_mut"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

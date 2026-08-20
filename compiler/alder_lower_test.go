@@ -17,6 +17,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Helper()
 	runSyntheticValueNameCollisionConformance(t, exe)
 	runPreferredResultNameCollisionConformance(t, exe)
+	runMethodLowerConformance(t, exe)
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -563,6 +564,56 @@ int main(void) {
 	}
 	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
 		t.Fatalf("run short-circuit C: %v\n%s", err, output)
+	}
+}
+
+func runMethodLowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	source := `type Counter { value: U64 }
+type Other { value: U64 }
+impl Counter {
+fn new(value: U64) -> Counter { return Counter(value: value) }
+fn read(self) -> U64 { return self.value }
+fn write(mut self, value: U64) -> Unit { self.value = value
+ return }
+fn echo(T: type, self, value: T) -> T { return value }
+}
+impl Other {
+fn read(self) -> U64 { return self.value }
+}
+fn main(value: Counter) -> U64 {
+    var local: Counter = value
+    local.write(7)
+    return local.echo(local.read())
+}
+fn make() -> Counter { return Counter.new(3) }
+fn read_parameter(value: Counter) -> U64 { return value.read() }
+fn read_temporary() -> U64 { return Counter.new(4).read() }
+`
+	text := runLowerCompiler(t, exe, map[string]string{"methods.al": source}, []string{"methods.al"})
+	module, err := mir.Parse(string(text))
+	if err != nil {
+		t.Fatalf("parse method MIR: %v\n%s", err, text)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify method MIR: %s\n%s", verify.Errors(diagnostics), text)
+	}
+	borrowed := false
+	storedThroughReceiver := false
+	for _, function := range module.Functions {
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				if instruction.Op == mir.OpBorrowMut {
+					borrowed = true
+				}
+				if instruction.Op == mir.OpStore && instruction.Place.Kind == mir.PlaceField && instruction.Place.Base != nil && instruction.Place.Base.Kind == mir.PlaceDeref {
+					storedThroughReceiver = true
+				}
+			}
+		}
+	}
+	if !borrowed || !storedThroughReceiver {
+		t.Fatalf("method MIR does not preserve mutable receiver borrowing: borrow=%v store-through-receiver=%v\n%s", borrowed, storedThroughReceiver, text)
 	}
 }
 

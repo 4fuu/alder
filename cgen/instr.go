@@ -78,6 +78,8 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		if t, _ := g.f.ValueType(in.Result); t != mir.TypeUnit {
 			b.WriteString("  " + g.val(in.Result) + " = " + g.place(&in.Place) + ";\n")
 		}
+	case mir.OpBorrow, mir.OpBorrowMut:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)&" + g.place(&in.Place) + ", (uint64_t)1 };\n")
 
 	case mir.OpStore:
 		b.WriteString("  " + g.place(&in.Place) + " = " + g.valueExpr(in.StoreVal) + ";\n")

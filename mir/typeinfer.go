@@ -98,6 +98,15 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 	switch in.Op {
 	case OpLoad:
 		return m.PlaceType(f, &in.Place)
+	case OpBorrow, OpBorrowMut:
+		placeType, ok := m.PlaceType(f, &in.Place)
+		if !ok {
+			return NoType, false
+		}
+		if in.Op == OpBorrow {
+			return m.SafeRef(placeType), true
+		}
+		return m.SafeMut(placeType), true
 
 	case OpAggregateConstruct:
 		if !m.ValidType(in.AggType) || m.Types[in.AggType].Kind != TypeAggregate {

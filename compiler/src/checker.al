@@ -884,6 +884,60 @@ fn symbol_arity(parse: ParseStore, node: SyntaxRec) -> U64 {
     return count
 }
 
+// Inherent functions remain ordinary static symbols after discovery. Their
+// owning type is recovered from the parser root so the bootstrap model needs
+// no parallel method table or runtime dispatch metadata.
+fn inherent_owner_node(parse: ParseStore, function_node: U64) -> U64 {
+    var root_at: U64 = 0
+    while root_at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
+        if root.kind == 49 {
+            var link = root.children
+            var owner: U64 = 0
+            while link != 0 {
+                let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+                if item.next == 0 { owner = item.node }
+                link = item.next
+            }
+            if owner != 0 {
+                link = root.children
+                while link != 0 {
+                    let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+                    if item.node == function_node && item.next != 0 { return owner }
+                    link = item.next
+                }
+            }
+        }
+        root_at = root_at + 1
+    }
+    return 0
+}
+
+fn same_inherent_owner(state: State, parse: ParseStore, left: U64, right: U64) -> Bool {
+    if left == 0 { return right == 0 }
+    if right == 0 { return false }
+    let a = __s0_buffer_get(SyntaxRec, parse.nodes, left - 1)
+    let b = __s0_buffer_get(SyntaxRec, parse.nodes, right - 1)
+    return same_name(state, a.source, a.start, a.end, b.source, b.start, b.end)
+}
+
+fn validate_inherent_owners(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var root_at: U64 = 0
+    while root_at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
+        if root.kind == 49 {
+            var link = root.children
+            while __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).next != 0 {
+                link = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).next
+            }
+            let owner = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).node - 1)
+            if find_declared_type(state, parse, store, owner) == 0 { return check_token_fail(d, state, store, 4, owner) }
+        }
+        root_at = root_at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
 fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
     let imports = try validate_import_bindings(d, state, parse, initial)
     if match imports {
@@ -895,7 +949,7 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
     while root_at < __s0_buffer_len(U64, parse.roots) {
         var node_id = __s0_buffer_get(U64, parse.roots, root_at)
         var node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
-        if node.kind == 40 || node.kind == 41 || node.kind == 42 {
+        if node.kind == 40 || node.kind == 41 || node.kind == 42 || node.kind == 49 {
             root_at = root_at + 1
         } else {
         if node.kind == 45 {
@@ -927,9 +981,11 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
             scan = scan + 1
         }
         var previous: U64 = 0
+        let inherent_owner = inherent_owner_node(parse, node_id)
         while previous < __s0_buffer_len(SymbolRec, store.symbols) {
             let first = __s0_buffer_get(SymbolRec, store.symbols, previous)
-            if same_name(state, node.source, node.name_start, node.name_end, first.source, first.name_start, first.name_end) && (module_source == 0 || first.module_source == module_source) {
+            let first_owner = inherent_owner_node(parse, first.node)
+            if same_name(state, node.source, node.name_start, node.name_end, first.source, first.name_start, first.name_end) && same_inherent_owner(state, parse, inherent_owner, first_owner) && (module_source == 0 || first.module_source == module_source) {
                 let related = __s0_buffer_get(SyntaxRec, parse.nodes, first.node - 1)
                 return check_token_related_fail(d, state, store, 1, node, related)
             }
@@ -939,12 +995,17 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         let symbol_id = __s0_buffer_len(SymbolRec, store.symbols) + 1
         var declaration: U64 = 0
         if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
-        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, module_source: module_source, public: public)
+        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: inherent_owner, module_source: module_source, public: public)
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
         store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics)
         root_at = root_at + 1
         }
     }
+    let inherent = try validate_inherent_owners(d, state, parse, store)
+    if match inherent {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(inherent) }
     return validate_import_targets(d, state, parse, store)
 }
 
@@ -1367,7 +1428,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
     let first = __s0_buffer_len(U64, store.type_args) + 1
     let with_args = try append_instance_args(d, store, declaration, bindings, 0)
     let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
-    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent, module_source: declared.module_source, public: declared.public))
+    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent, inherent_owner: declared.inherent_owner, module_source: declared.module_source, public: declared.public))
     let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, indexes: with_args.indexes, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
@@ -1647,7 +1708,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
             let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
             let category = try interpreted_type_category(d, state, parse, next, empty, no_ancestry, checked_type_for_syntax(next, owner, syntax), 0, 0)
             if category.category != 0 {
-                if child.kind == 47 && category.category == 1 { return check_token_fail(d, state, next, 89, diag_node) }
+                if child.kind == 47 && category.category == 1 && !node_word(state, child, "self") { return check_token_fail(d, state, next, 89, diag_node) }
                 if child.kind == 48 && category.category != 2 { return check_token_fail(d, state, next, 90, diag_node) }
             }
         }
@@ -2462,7 +2523,7 @@ fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: Syntax
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
+        if inherent_owner_node(parse, symbol.node) == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
         at = at + 1
     }
     if module_source == 0 { return 0 }
@@ -2523,6 +2584,29 @@ fn call_link_at(parse: ParseStore, call: SyntaxRec, ordinal: U64) -> SyntaxLinkR
         skip = skip - 1
     }
     return __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+}
+
+fn inherent_symbol_named(state: State, parse: ParseStore, store: CheckStore, name: SyntaxRec, owner_target: U64, receiver: Bool) -> U64 {
+    let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner_target - 1)
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        let owner_id = inherent_owner_node(parse, symbol.node)
+        if owner_id != 0 && same_name(state, name.source, name.name_start, name.name_end, symbol.source, symbol.name_start, symbol.name_end) {
+            let owner = __s0_buffer_get(SyntaxRec, parse.nodes, owner_id - 1)
+            if same_name(state, owner.source, owner.name_start, owner.name_end, owner_symbol.source, owner_symbol.name_start, owner_symbol.name_end) {
+                var has_receiver = false
+                if use_count(store, at + 1, 5) != 0 {
+                    let first = __s0_buffer_get(DeclTypeUseRec, store.uses, use_by_ordinal(store, at + 1, 5, 0) - 1)
+                    let parameter = __s0_buffer_get(SyntaxRec, parse.nodes, first.node - 1)
+                    has_receiver = node_word(state, parameter, "self")
+                }
+                if (has_receiver && receiver) || (!has_receiver && !receiver) { return at + 1 }
+            }
+        }
+        at = at + 1
+    }
+    return 0
 }
 
 fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> CheckedTypeRec {
@@ -2900,7 +2984,7 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, parameter.checked_type, 0, 0)
-    if parameter_node.kind == 47 && category.category == 1 { return expr_token_fail(d, state, base, 89, arg) }
+    if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { return expr_token_fail(d, state, base, 89, arg) }
     if parameter_node.kind == 48 && category.category != 2 { return expr_token_fail(d, state, base, 90, arg) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, base, 92, arg) }
@@ -3895,6 +3979,38 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             return expr_token_fail(d, state, base, 56, callee)
         }
         return expr_token_fail(d, state, base, 40, call)
+    }
+    if callee.kind == 29 && symbol_named(state, parse, store, callee) == 0 {
+        let receiver_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
+        let receiver_node = __s0_buffer_get(SyntaxRec, parse.nodes, receiver_link.node - 1)
+        let static_owner = symbol_named(state, parse, store, receiver_node)
+        if static_owner != 0 {
+            let static_symbol = __s0_buffer_get(SymbolRec, store.symbols, static_owner - 1)
+            if static_symbol.kind == 2 || static_symbol.kind == 3 {
+                let target = inherent_symbol_named(state, parse, store, callee, static_owner, false)
+                if target == 0 { return expr_token_fail(d, state, base, 61, callee) }
+                return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+            }
+        }
+        let checked_receiver = try check_value_expression_inner(d, state, parse, base, store, owner, receiver_node, receiver_link.node, 0, 60, callee, 0, 0)
+        let current = match checked_receiver {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked_receiver {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(ExprBad(current)) }
+        let receiver_draft = match checked_receiver {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if receiver_draft.deferred { return expr_deferred(base) }
+        let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
+        if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
+        let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)
+        if target == 0 { return expr_token_fail(d, state, base, 61, callee) }
+        return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
     }
     if callee.kind == 24 && (node_word(state, callee, "len") || node_word(state, callee, "range")) { return check_slice_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if node_word(state, callee, "Get") || node_word(state, callee, "Set") || node_word(state, callee, "Remove") { return check_map_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
@@ -5048,6 +5164,7 @@ fn append_parameter_bindings(d: Domain, parse: ParseStore, store: CheckStore, ow
             let parameter = __s0_buffer_get(SyntaxRec, parse.nodes, use.node - 1)
             var mutable: U64 = 0
             if parameter.kind == 47 { mutable = 1 }
+            if parameter.kind == 48 { mutable = 2 }
             let locals = try __s0_buffer_append(LocalRec, d, next.locals, LocalRec(owner: owner, kind: 1, syntax: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, mutable: mutable, checked_type: use.checked_type))
             let binding = __s0_buffer_len(LocalRec, locals)
             var parent: U64 = 0
