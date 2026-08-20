@@ -632,29 +632,98 @@ Exit-criteria evidence:
   compiler root. The committed fixed-point C has SHA-256
   `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`.
 
-## Milestone 7: Core Values, Views, and Inferred Storage
+## Milestone 7: Core Value Categories and Owned Foundations
 
-Status: **planned after local modules; may be sliced in dependency order**
+Status: **planned after local modules**
 
-Implement the foundational source semantics from [Syntax](docs/syntax.md),
-[Language Semantics](docs/language-semantics.md), and
-[Memory and Resources](docs/memory-and-resources.md): copyable, affine, and
-scoped-capability type categories; owner borrowing and transfer; inherent
-methods; owned UTF-8 `String` and arbitrary `Bytes`; fixed arrays; ordinary
-`Vec`; immutable and mutable slices; and inferred hierarchical storage with a
-safe outer-domain retention fallback.
+Implement the first foundational source semantics from
+[Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md), and
+[Memory and Resources](docs/memory-and-resources.md): recursive copyable,
+affine, and scoped-capability type classification; owner borrowing and transfer
+through ordinary, `mut`, and `take` parameters; inherent methods and receiver
+modes; fixed arrays; and distinct owned UTF-8 `String` and arbitrary `Bytes`
+values.
 
-Exit requires focused acceptance/rejection tests for value independence,
-owner transfer and illegal drop/overwrite, mutable and immutable view
-escape/overlap/invalidation, storage retention fallback, cross-domain copies,
-collection growth and mutation independence, and generic monomorphization.
-Generated MIR/C must preserve deterministic evaluation and value behavior, and
-the public language may no longer expose `String = [U8]` or explicit bootstrap
-storage as the way to construct ordinary values.
+Advance this gate through five dependency-ordered slices:
+
+1. type-category representation and recursive propagation;
+2. affine owner flow, borrowing, transfer, and illegal drop/overwrite checks;
+3. inherent methods, associated functions, receiver modes, and static
+   monomorphized resolution;
+4. `Array(T, N)`, array literals, indexing, and value independence;
+5. owned `String` and `Bytes` representations with `String` no longer sharing
+   the `[U8]` source identity.
+
+Exit requires focused acceptance/rejection tests for category propagation,
+owner transfer and illegal copy/drop/overwrite, receiver access and
+consumption, fixed-array bounds and independence, UTF-8 validation, arbitrary
+byte preservation, and generic monomorphization. Generated MIR/C must preserve
+deterministic evaluation and value behavior. Ordinary source construction of
+arrays, strings, and bytes must not require explicit bootstrap storage, while
+the compiler implementation may retain private bootstrap facilities until the
+Milestone 7.3 migration gate.
+
+## Milestone 7.1: Core Collections and Scoped Views
+
+Status: **planned after Milestone 7**
+
+Build the owned/view sequence model on the Milestone 7 category and method
+foundation: ordinary `Vec(T)`, immutable `[T]` views, and exclusive
+`MutSlice(T)` views. Arrays and vectors borrow as slices without changing their
+owned value semantics; strings and bytes expose only their documented view
+operations, and integer indexing remains unavailable on `String`.
+
+Advance this gate through three dependency-ordered slices:
+
+1. ordinary `Vec(T)` construction, geometric growth, indexing, mutation, and
+   independent copies;
+2. immutable views, range formation, lexical validity, and non-retaining call
+   borrowing;
+3. mutable views, exclusive access, overlap rejection, and invalidation by
+   incompatible owner mutation.
+
+Exit requires focused acceptance/rejection tests for collection growth and
+mutation independence; immutable and mutable view formation; view
+escape/overlap/invalidation; checked bounds and growth arithmetic; and generic
+monomorphization. Generated MIR/C must preserve left-to-right evaluation,
+checked access, deterministic output, and independent value behavior. Cases
+that require a view or allocation to survive an inner candidate domain remain
+conservatively retained for the Milestone 7.3 inference gate rather than being
+accepted through an unproved lifetime.
+
+## Milestone 7.3: Inferred Hierarchical Storage
+
+Status: **planned after Milestone 7.1**
+
+Complete the foundational value and view model with compiler-inferred
+hierarchical storage. Placement chooses the smallest domain proven to outlive
+all uses, retains storage in the nearest safe outer domain when an earlier end
+cannot be proved, and makes material retention and cross-domain copy costs
+visible rather than introducing dangling views or hidden universal reference
+counting.
+
+Advance this gate through three dependency-ordered slices:
+
+1. a deterministic compiler-scale constraint/fixed-point analysis for
+   allocation placement, view validity, and safe outer-domain retention;
+2. inferred-domain lowering, returned-view retention, and deterministic
+   cross-domain copying for ordinary values and collections;
+3. migration and qualification of the complete Milestone 7 value/view surface,
+   including removal of explicit bootstrap storage from ordinary public value
+   construction.
+
+Exit requires focused acceptance/rejection tests for storage retention
+fallback, returned immutable views, cross-domain copies, nested candidate
+domains, collection growth and mutation independence, mutable and immutable
+view escape/overlap/invalidation, and generic monomorphization. Compiler-scale
+layered inputs must terminate with deterministic diagnostics, MIR, and C.
+Generated MIR/C must preserve deterministic evaluation and independent value
+behavior, and the public language may no longer expose `String = [U8]` or
+explicit bootstrap storage as the way to construct ordinary values.
 
 ## Milestone 7.5: Static Abstraction, Resources, and Identity
 
-Status: **planned after core values, views, and inferred storage**
+Status: **planned after Milestone 7.3 completes core values, views, and inferred storage**
 
 Complete the remaining 1.0 language and memory model from
 [Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md),
