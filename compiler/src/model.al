@@ -161,6 +161,16 @@ type TypeCategoryRec {
     contains_scoped: Bool
 }
 
+// Per-owner structured flow validation uses states 0 available and 1
+// transferred. terminated means the current path has returned. error_kind and
+// syntax identify the first deterministic ownership diagnostic.
+type OwnerFlowRec {
+    state: U64
+    terminated: Bool
+    error_kind: U64
+    syntax: U64
+}
+
 type CheckedTypeAnnotationRec {
     owner: U64
     syntax: U64
@@ -450,7 +460,9 @@ type EnvironmentRec {
 // copyable value, 90 rejects `take` on a non-affine value, 91 rejects use after
 // transfer, and 92 rejects a call argument that cannot provide the parameter's
 // exclusive or owning access. Code 93 rejects an affine owner that reaches a
-// function exit without an ownership transfer. kind is the
+// function exit without an ownership transfer. Code 94 rejects a transfer
+// performed on only some paths, and 95 rejects mutable binding or overwrite of
+// an affine owner. kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.

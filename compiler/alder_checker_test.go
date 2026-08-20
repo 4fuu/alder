@@ -430,7 +430,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	functionNameGood := map[string]string{"functions.al": "fn helper() -> U64 { return 0 }\nfn use(T: type, helper: T, T: T) -> T {}\nfn main(value: U64) -> Bool { return true }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, functionNameGood, []string{"functions.al"}, false), functionNameGood)
-	categoryGood := map[string]string{"categories.al": "type Owner { domain: Domain }\nfn inspect(value: Owner) -> Unit {}\nfn update(mut value: Owner) -> Unit {}\nfn install(take value: Owner) -> Owner { return value }\nfn edit(mut view: [U8]) -> Unit {}\nfn pass(take value: Owner) -> Owner { return install(value) }\nfn change(mut value: Owner) -> Unit { update(value) }\nfn forward(T: type, take value: T) -> T { return value }\n"}
+	categoryGood := map[string]string{"categories.al": "type Owner { domain: Domain }\nfn inspect(value: Owner) -> Unit {}\nfn update(mut value: Owner) -> Unit {}\nfn install(take value: Owner) -> Owner { return value }\nfn edit(mut view: [U8]) -> Unit {}\nfn pass(take value: Owner) -> Owner { return install(value) }\nfn change(mut value: Owner) -> Unit { update(value) }\nfn branch(take value: Owner, flag: Bool) -> Owner { if flag { return install(value) } else { return install(value) } }\nfn forward(T: type, take value: T) -> T { return value }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, categoryGood, []string{"categories.al"}, false), categoryGood)
 	bodyGood := map[string]string{
 		"a.al": "type Pair(T: type) { value: T }\n" +
@@ -952,6 +952,12 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "use-after-take.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { let gone: Owner = sink(value)\n sink(value) }\n", kind: 91, marker: "value", last: true},
 		{name: "implicit-affine-drop.al", text: "type Owner { domain: Domain }\nfn f(take value: Owner) -> Unit {}\n", kind: 93, marker: "value"},
 		{name: "generic-take-copyable.al", text: "fn forward(T: type, take value: T) -> T { return value }\nfn f(value: U64) -> U64 { return forward(U64, value) }\n", kind: 90, marker: "value", last: true},
+		{name: "conditional-affine-transfer.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner, flag: Bool) -> Unit { if flag { let gone: Owner = sink(value) } }\n", kind: 94, marker: "if", last: true},
+		{name: "loop-affine-transfer.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner, flag: Bool) -> Unit { while flag { let gone: Owner = sink(value) } }\n", kind: 94, marker: "while"},
+		{name: "copy-borrowed-owner.al", text: "type Owner { domain: Domain }\nfn f(value: Owner) -> Unit { let copied: Owner = value }\n", kind: 92, marker: "value", last: true},
+		{name: "drop-affine-local.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { let local: Owner = sink(value) }\n", kind: 93, marker: "let"},
+		{name: "mutable-affine-local.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { var local: Owner = sink(value) }\n", kind: 95, marker: "var"},
+		{name: "overwrite-affine-owner.al", text: "type Owner { domain: Domain }\nfn f(take value: Owner) -> Owner { value = value\n return value }\n", kind: 95, marker: "="},
 		{name: "function-parameter-type-before-name.al", text: "fn f(x: U64, x: Missing) -> Unit {}\n", kind: 4, marker: "Missing"},
 		{name: "body-unknown.al", text: "fn f() -> U64 { return missing }\n", kind: 18, marker: "missing"},
 		{name: "body-return-mismatch.al", text: "fn f(value: U64) -> I64 { return value }\n", kind: 19, marker: "return"},
@@ -2539,7 +2545,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 93 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 95 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

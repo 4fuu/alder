@@ -27,9 +27,11 @@ fn roundtrip(d: Domain, n: U64) -> U64 {
 fn main(d: Domain) -> I32 {
     let child = __s0_domain_create(d)
     if fill(child, 4) != 3 {
+        __s0_domain_destroy(child)
         return 1
     }
     if roundtrip(child, 5) != 49 {
+        __s0_domain_destroy(child)
         return 2
     }
     __s0_domain_destroy(child)

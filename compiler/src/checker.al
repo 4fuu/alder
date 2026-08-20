@@ -3738,6 +3738,15 @@ fn check_s0_runtime_args(d: Domain, state: State, parse: ParseStore, base: Check
     }
     if draft.deferred { return expr_deferred(base) }
     if !(try expression_type_equal(d, state, parse, current, draft.checked_type, wanted)) { return expr_token_fail(d, state, base, 42, argument) }
+    if identity == 7 && ordinal == 0 {
+        let consumed = __s0_buffer_get(CheckedExprRec, current.expressions, draft.expression - 1)
+        if consumed.kind != 1 && consumed.kind != 5 { return expr_token_fail(d, state, base, 92, argument) }
+        let binding = __s0_buffer_get(LocalRec, current.locals, consumed.parameter_use - 1)
+        var owned = binding.kind == 2
+        if binding.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1).kind == 48 { owned = true }
+        if !owned { return expr_token_fail(d, state, base, 92, argument) }
+        __s0_buffer_set(CheckedExprRec, current.expressions, draft.expression - 1, CheckedExprRec(owner: consumed.owner, owner_previous: consumed.owner_previous, syntax: consumed.syntax, kind: 22, checked_type: consumed.checked_type, parameter_use: consumed.parameter_use, bool_value: consumed.bool_value, left: consumed.left, right: consumed.right, annotation: consumed.annotation, first_child: consumed.first_child, child_count: consumed.child_count, operator: consumed.operator, site_kind: consumed.site_kind, site_syntax: consumed.site_syntax))
+    }
     return check_s0_runtime_args(d, state, parse, base, current, owner, call, call_id, identity, ordinal + 1, arity, type_operands, domain_type, mark_type, buffer_type, element, u64_type, result, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
 }
 
@@ -4165,12 +4174,6 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         var binding_type: U64 = 0
         if local_id != 0 {
             let binding = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
-            var prior_at: U64 = 0
-            while prior_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
-                let prior = __s0_buffer_get(CheckedExprRec, store.expressions, prior_at)
-                if prior.owner == owner && prior.kind == 22 && prior.parameter_use == local_id { return expr_fail(d, base, 91, expression) }
-                prior_at = prior_at + 1
-            }
             binding_type = binding.checked_type
             if binding.kind == 1 { kind = 1 }
         } else {
@@ -4546,6 +4549,12 @@ fn check_assignment_place(d: Domain, state: State, parse: ParseStore, store: Che
     let local_id = local_lookup(store, owner, root, state)
     if local_id == 0 { return place_bad(d, store, 18, root) }
     let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+    if kind == 1 {
+        let root_empty = try __s0_buffer_new(TypeBindingRec, d)
+        let root_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+        let root_category = try interpreted_type_category(d, state, parse, store, root_empty, root_ancestry, local.checked_type, 0, 0)
+        if root_category.category == 2 { return place_token_bad(d, state, store, 95, statement) }
+    }
     if local.mutable == 0 && kind <= 2 { return place_bad(d, store, 28, root) }
     var current = store
     var value_type = local.checked_type
@@ -4584,6 +4593,10 @@ fn check_assignment_place(d: Domain, state: State, parse: ParseStore, store: Che
         current = concrete.store
         value_type = concrete.checked_type
     }
+    let empty = try __s0_buffer_new(TypeBindingRec, d)
+    let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+    let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, value_type, 0, 0)
+    if category.category == 2 { return place_token_bad(d, state, current, 95, statement) }
     return append_place(d, current, owner, target_id, kind, local_id, field, index_expression, value_type)
 }
 
@@ -4636,6 +4649,20 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
     if annotation.kind == 4 {
         if annotation_syntax == 0 { return body_token_fail(d, state, next, 26, statement) }
         return body_fail(d, next, 26, diag_node)
+    }
+    let empty_bindings = try __s0_buffer_new(TypeBindingRec, d)
+    let empty_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+    let category = try interpreted_type_category(d, state, parse, ostore, empty_bindings, empty_ancestry, annotated, 0, 0)
+    if category.category == 2 {
+        if statement.kind == 16 { return body_token_fail(d, state, ostore, 95, statement) }
+        let initializer = __s0_buffer_get(CheckedExprRec, ostore.expressions, draft.expression - 1)
+        if initializer.kind == 1 || initializer.kind == 5 {
+            let source = __s0_buffer_get(LocalRec, ostore.locals, initializer.parameter_use - 1)
+            var owned = source.kind == 2
+            if source.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, source.syntax - 1).kind == 48 { owned = true }
+            if !owned { return body_token_fail(d, state, ostore, 92, init) }
+            __s0_buffer_set(CheckedExprRec, ostore.expressions, draft.expression - 1, CheckedExprRec(owner: initializer.owner, owner_previous: initializer.owner_previous, syntax: initializer.syntax, kind: 22, checked_type: initializer.checked_type, parameter_use: initializer.parameter_use, bool_value: initializer.bool_value, left: initializer.left, right: initializer.right, annotation: initializer.annotation, first_child: initializer.first_child, child_count: initializer.child_count, operator: initializer.operator, site_kind: initializer.site_kind, site_syntax: initializer.site_syntax))
+        }
     }
     if local_lookup(ostore, owner, statement, state) != 0 || function_use(ostore, owner, 5, statement, state) != 0 { return body_token_fail(d, state, next, 27, statement) }
     var mutable: U64 = 0
@@ -5036,6 +5063,90 @@ fn append_parameter_bindings(d: Domain, parse: ParseStore, store: CheckStore, ow
     return Ok(next)
 }
 
+fn owner_flow_expression(store: CheckStore, binding: U64, expression_id: U64, state: U64) -> OwnerFlowRec {
+    if expression_id == 0 { return OwnerFlowRec(state: state, terminated: false, error_kind: 0, syntax: 0) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    var current = state
+    var child: U64 = 0
+    while child < expression.child_count {
+        let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression
+        let checked = owner_flow_expression(store, binding, child_id, current)
+        if checked.error_kind != 0 { return checked }
+        if expression.kind == 7 && (expression.operator == 16 || expression.operator == 17) && child == 1 && checked.state != current {
+            return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: expression.syntax)
+        }
+        current = checked.state
+        child = child + 1
+    }
+    if expression.kind == 12 {
+        let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
+        var arm: U64 = 0
+        var arm_state: U64 = 2
+        while arm < checked_match.arm_count {
+            let body = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked_match.first_arm - 1 + arm).body
+            let checked = owner_flow_expression(store, binding, body, current)
+            if checked.error_kind != 0 { return checked }
+            if arm_state == 2 { arm_state = checked.state } else {
+                if arm_state != checked.state { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: expression.syntax) }
+            }
+            arm = arm + 1
+        }
+        if arm_state != 2 { current = arm_state }
+    }
+    if (expression.kind == 1 || expression.kind == 5 || expression.kind == 22) && expression.parameter_use == binding {
+        if current == 1 { return OwnerFlowRec(state: current, terminated: false, error_kind: 91, syntax: expression.syntax) }
+        if expression.kind == 22 { current = 1 }
+    }
+    return OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0)
+}
+
+fn owner_flow_block(store: CheckStore, binding: U64, block_id: U64, state: U64) -> OwnerFlowRec {
+    if block_id == 0 { return OwnerFlowRec(state: state, terminated: false, error_kind: 0, syntax: 0) }
+    let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
+    return owner_flow_links(store, binding, block.statements, state)
+}
+
+fn owner_flow_statement(store: CheckStore, binding: U64, statement_id: U64, state: U64) -> OwnerFlowRec {
+    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_id - 1)
+    let expression = owner_flow_expression(store, binding, statement.expression, state)
+    if expression.error_kind != 0 { return expression }
+    let current = expression.state
+    if statement.kind == 4 {
+        if current == 0 { return OwnerFlowRec(state: current, terminated: true, error_kind: 93, syntax: statement.syntax) }
+        return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0)
+    }
+    if statement.kind == 6 { return owner_flow_block(store, binding, statement.body, current) }
+    if statement.kind == 7 {
+        let yes = owner_flow_block(store, binding, statement.body, current)
+        if yes.error_kind != 0 { return yes }
+        var no = OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0)
+        if statement.alternative != 0 { no = owner_flow_block(store, binding, statement.alternative, current) }
+        if no.error_kind != 0 { return no }
+        if yes.terminated && no.terminated { return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0) }
+        if yes.terminated { return no }
+        if no.terminated { return yes }
+        if yes.state != no.state { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: statement.syntax) }
+        return yes
+    }
+    if statement.kind == 8 || statement.kind == 9 {
+        let body = owner_flow_block(store, binding, statement.body, current)
+        if body.error_kind != 0 { return body }
+        if !body.terminated && body.state != current { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: statement.syntax) }
+    }
+    if (statement.kind == 1 || statement.kind == 2) && statement.binding == binding {
+        return OwnerFlowRec(state: 0, terminated: false, error_kind: 0, syntax: 0)
+    }
+    return OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0)
+}
+
+fn owner_flow_links(store: CheckStore, binding: U64, link_id: U64, state: U64) -> OwnerFlowRec {
+    if link_id == 0 { return OwnerFlowRec(state: state, terminated: false, error_kind: 0, syntax: 0) }
+    let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
+    let before = owner_flow_links(store, binding, link.next, state)
+    if before.error_kind != 0 || before.terminated { return before }
+    return owner_flow_statement(store, binding, link.statement, before.state)
+}
+
 // Bodies are checked compositionally in source order. Every concrete body is
 // complete or produces one source diagnostic; control-flow and every nested
 // block retain concrete-instance ownership and persistent environments.
@@ -5076,17 +5187,28 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     var local_at: U64 = 0
     while local_at < __s0_buffer_len(LocalRec, after.locals) {
         let local = __s0_buffer_get(LocalRec, after.locals, local_at)
-        if local.owner == owner && local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 {
-            var transferred = false
-            var expression_at: U64 = 0
-            while expression_at < __s0_buffer_len(CheckedExprRec, after.expressions) {
-                let expression = __s0_buffer_get(CheckedExprRec, after.expressions, expression_at)
-                if expression.owner == owner && expression.kind == 22 && expression.parameter_use == local_at + 1 { transferred = true }
-                expression_at = expression_at + 1
+        var owned = false
+        var initial_state: U64 = 0
+        if local.owner == owner && local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 { owned = true }
+        if local.owner == owner && local.kind == 2 {
+            let empty = try __s0_buffer_new(TypeBindingRec, d)
+            let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+            let category = try interpreted_type_category(d, state, parse, after, empty, no_ancestry, local.checked_type, 0, 0)
+            if category.category == 2 {
+                owned = true
+                initial_state = 2
             }
-            if !transferred {
-                let parameter = __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1)
-                let failed = try check_fail(d, after, 93, parameter, 0, 0, 0)
+        }
+        if owned {
+            let flow = owner_flow_block(after, local_at + 1, checked_block.semantic, initial_state)
+            if flow.error_kind != 0 || (!flow.terminated && flow.state == 0) {
+                var diagnostic_kind: U64 = 93
+                var diagnostic_node = __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1)
+                if flow.error_kind != 0 {
+                    diagnostic_kind = flow.error_kind
+                    diagnostic_node = __s0_buffer_get(SyntaxRec, parse.nodes, flow.syntax - 1)
+                }
+                let failed = try check_token_fail(d, state, after, diagnostic_kind, diagnostic_node)
                 let bad = match failed {
                     CheckGood(value) => value
                     CheckBad(value) => value
