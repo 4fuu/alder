@@ -7,8 +7,9 @@ type SourceRec {
 
 // Token kinds mirror the Go Stage 0 lexer: 0 EOF, 1 identifier/keyword,
 // 2 integer, 3 float, 4 decoded string, and 5 punctuation. Keyword IDs are the
-// IDs 1..19 retain the frozen Go Stage 0 order. Alder-owned M6 keywords use
-// 20 `module`, 21 `pub`, and 22 `as`; zero means not a keyword.
+// IDs 1..19 retain the frozen Go Stage 0 order. Alder-owned keywords use
+// 20 `module`, 21 `pub`, 22 `as`, 23 `mut`, and 24 `take`; zero means not a
+// keyword.
 type TokenRec {
     source: U64
     kind: U64
@@ -43,7 +44,8 @@ type LexDiagRec {
 // 31 try, 32 if, 33 while, 34 for, 35 using, 36 unsafe-c, 37 match,
 // 38 match arm, 39 match binding, 40 module declaration, 41 module import,
 // 42 public module import, 43 selected import name, 44 import alias,
-// 45 public declaration wrapper, and 46 module path. Module/import names retain their complete
+// 45 public declaration wrapper, 46 module path, 47 mut runtime parameter, and
+// 48 take runtime parameter. Module/import names retain their complete
 // dotted path span. Import children are selected names or one alias; a public
 // declaration wrapper has its declaration as its sole child.
 // Function children are parameters, result,
@@ -200,7 +202,8 @@ type DeclTypeUseRec {
 // binding for kinds 1 and 5; bool_value is used only by kind 2. Kinds 6 and 7
 // are unary and binary. Kind 20 is a float literal and kind 21 is a concrete
 // field projection whose parameter_use names the declaration-field use.
-// Kinds 12 and 13 are checked match and Result try;
+// Kinds 12 and 13 are checked match and Result try; kind 22 is an affine local
+// read that transfers ownership into a visible `take` parameter.
 // parameter_use names their lowering-facing CheckedMatchRec/CheckedTryRec.
 // Ordered children are stored in one
 // flattened child buffer rather than encoded by operator arity.
@@ -443,7 +446,12 @@ type EnvironmentRec {
 // cleanup function not having exactly one concrete runtime parameter, 85
 // cleanup parameter mismatch, and 86 cleanup result not Unit. Code 87 is the
 // deterministic boundary rejection for syntax outside the supported S0 body
-// contract. kind is the stable checker diagnostic code. The primary range is
+// contract, 88 rejects public leakage of private types, 89 rejects `mut` on a
+// copyable value, 90 rejects `take` on a non-affine value, 91 rejects use after
+// transfer, and 92 rejects a call argument that cannot provide the parameter's
+// exclusive or owning access. Code 93 rejects an affine owner that reaches a
+// function exit without an ownership transfer. kind is the
+// stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.
 type CheckDiagRec {

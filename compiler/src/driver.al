@@ -294,6 +294,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return driver_out_diagnostic_type(detail_c, detail_d) }
     if kind == 87 { return out_string("source form is outside the supported S0 contract") }
     if kind == 88 { return out_string("public declaration signature exposes a private type") }
+    if kind == 89 { return out_string("mut parameter requires an affine owner or scoped capability") }
+    if kind == 90 { return out_string("take parameter requires an affine owner") }
+    if kind == 91 { return out_string("owner was already transferred") }
+    if kind == 92 { return out_string("argument does not provide the parameter's required exclusive or owning access") }
+    if kind == 93 { return out_string("affine owner reaches function exit without an ownership transfer") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

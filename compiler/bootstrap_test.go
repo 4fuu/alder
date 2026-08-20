@@ -101,7 +101,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "noslice.al", "", 0)
 	})
 	t.Run("buffer-match-result", func(t *testing.T) {
-		files := map[string]string{"matchbuf.al": "fn take(b: __s0_Buffer(U64)) -> I32 { return 0 }\nfn main(d: Domain) -> I32 {\n    return match __s0_buffer_new(U64, d) {\n        Err(error) => 1\n        Ok(b) => take(b)\n    }\n}\n"}
+		files := map[string]string{"matchbuf.al": "fn consume(b: __s0_Buffer(U64)) -> I32 { return 0 }\nfn main(d: Domain) -> I32 {\n    return match __s0_buffer_new(U64, d) {\n        Err(error) => 1\n        Ok(b) => consume(b)\n    }\n}\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "matchbuf.al", "", 0)
 	})
 
@@ -441,7 +441,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "44365df5cf5b3046b218f40e1112f57abc8fdd600a0351c8f47939e8980860fa"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "5182b0fbce46150a166743baff1ca38a99cb9c9ac417e78c9e4e14526d0f83cf"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

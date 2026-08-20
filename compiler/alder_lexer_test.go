@@ -212,7 +212,8 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		{raw: "match", kind: 1, keyword: 13}, {raw: "using", kind: 1, keyword: 14},
 		{raw: "with", kind: 1, keyword: 15}, {raw: "try", kind: 1, keyword: 16},
 		{raw: "true", kind: 1, keyword: 17}, {raw: "false", kind: 1, keyword: 18},
-		{raw: "unsafe", kind: 1, keyword: 19}, {raw: "ident_9", kind: 1},
+		{raw: "unsafe", kind: 1, keyword: 19}, {raw: "mut", kind: 1, keyword: 23},
+		{raw: "take", kind: 1, keyword: 24}, {raw: "ident_9", kind: 1},
 	}
 	keywordRaw := make([]string, len(keywords))
 	for i := range keywords {

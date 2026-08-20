@@ -430,6 +430,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	functionNameGood := map[string]string{"functions.al": "fn helper() -> U64 { return 0 }\nfn use(T: type, helper: T, T: T) -> T {}\nfn main(value: U64) -> Bool { return true }\n"}
 	parseCheckerManifest(t, runAlderChecker(t, exe, functionNameGood, []string{"functions.al"}, false), functionNameGood)
+	categoryGood := map[string]string{"categories.al": "type Owner { domain: Domain }\nfn inspect(value: Owner) -> Unit {}\nfn update(mut value: Owner) -> Unit {}\nfn install(take value: Owner) -> Owner { return value }\nfn edit(mut view: [U8]) -> Unit {}\nfn pass(take value: Owner) -> Owner { return install(value) }\nfn change(mut value: Owner) -> Unit { update(value) }\nfn forward(T: type, take value: T) -> T { return value }\n"}
+	parseCheckerManifest(t, runAlderChecker(t, exe, categoryGood, []string{"categories.al"}, false), categoryGood)
 	bodyGood := map[string]string{
 		"a.al": "type Pair(T: type) { value: T }\n" +
 			"fn identity(value: U64) -> U64 { return value }\n" +
@@ -942,6 +944,14 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "reserved-function-parameter-prefix.al", text: "fn f(__s0_private: U64) -> Unit {}\n", kind: 17, marker: "U64"},
 		{name: "reserved-function-parameter-type.al", text: "type User {}\nfn f(User: U64) -> Unit {}\n", kind: 17, marker: "U64"},
 		{name: "reserved-parameter-before-result.al", text: "fn f(len: U64) -> Missing {}\n", kind: 17, marker: "U64"},
+		{name: "mut-copyable-parameter.al", text: "fn f(mut value: U64) -> Unit {}\n", kind: 89, marker: "U64"},
+		{name: "take-copyable-parameter.al", text: "fn f(take value: U64) -> Unit {}\n", kind: 90, marker: "U64"},
+		{name: "take-scoped-parameter.al", text: "fn f(take value: [U8]) -> Unit {}\n", kind: 90, marker: "["},
+		{name: "take-borrowed-owner.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(value: Owner) -> Unit { sink(value) }\n", kind: 92, marker: "value", last: true},
+		{name: "mut-borrowed-owner.al", text: "type Owner { domain: Domain }\nfn sink(mut value: Owner) -> Unit {}\nfn f(value: Owner) -> Unit { sink(value) }\n", kind: 92, marker: "value", last: true},
+		{name: "use-after-take.al", text: "type Owner { domain: Domain }\nfn sink(take value: Owner) -> Owner { return value }\nfn f(take value: Owner) -> Unit { let gone: Owner = sink(value)\n sink(value) }\n", kind: 91, marker: "value", last: true},
+		{name: "implicit-affine-drop.al", text: "type Owner { domain: Domain }\nfn f(take value: Owner) -> Unit {}\n", kind: 93, marker: "value"},
+		{name: "generic-take-copyable.al", text: "fn forward(T: type, take value: T) -> T { return value }\nfn f(value: U64) -> U64 { return forward(U64, value) }\n", kind: 90, marker: "value", last: true},
 		{name: "function-parameter-type-before-name.al", text: "fn f(x: U64, x: Missing) -> Unit {}\n", kind: 4, marker: "Missing"},
 		{name: "body-unknown.al", text: "fn f() -> U64 { return missing }\n", kind: 18, marker: "missing"},
 		{name: "body-return-mismatch.al", text: "fn f(value: U64) -> I64 { return value }\n", kind: 19, marker: "return"},
@@ -1946,7 +1956,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		sharedParameterSyntax := local.kind == 1 && local.syntax >= 1 && nodes[local.syntax]
 		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
-		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && (local.mutable != 0 || ownerArity < 0) || (local.mutable != 0 && local.mutable != 1) || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
+		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && ownerArity < 0 || (local.mutable != 0 && local.mutable != 1) || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
 			return fmt.Errorf("invalid local binding %+v", local)
 		}
 		if local.kind == 2 {
@@ -2243,9 +2253,9 @@ func validateCheckerManifest(m checkerManifest) error {
 			ownerArity = m.symbols[expression.owner-1].arity
 		}
 		validPayload := false
-		if expression.kind == 1 && expression.parameterUse >= 1 && expression.parameterUse <= len(m.locals) && expression.boolValue == 0 {
+		if (expression.kind == 1 || expression.kind == 22) && expression.parameterUse >= 1 && expression.parameterUse <= len(m.locals) && expression.boolValue == 0 {
 			parameter := m.locals[expression.parameterUse-1]
-			validPayload = parameter.owner == expression.owner && parameter.kind == 1 && parameter.checkedType == expression.checkedType
+			validPayload = parameter.owner == expression.owner && (expression.kind == 22 || parameter.kind == 1) && parameter.checkedType == expression.checkedType
 		}
 		if expression.kind == 2 {
 			validPayload = expression.parameterUse == 0 && (expression.boolValue == 0 || expression.boolValue == 1) && expression.checkedType >= 1 && expression.checkedType <= len(m.types) && m.types[expression.checkedType-1].kind == 1
@@ -2268,11 +2278,11 @@ func validateCheckerManifest(m checkerManifest) error {
 			}
 			validPayload = expression.parameterUse == 0 && expression.boolValue == 0 && (payloadKind == 2 || payloadKind == 8)
 		}
-		if expression.kind == 5 && expression.parameterUse >= 1 && expression.parameterUse <= len(m.locals) && expression.boolValue == 0 {
+		if (expression.kind == 5 || expression.kind == 22) && expression.parameterUse >= 1 && expression.parameterUse <= len(m.locals) && expression.boolValue == 0 {
 			local := m.locals[expression.parameterUse-1]
 			validPayload = local.owner == expression.owner && local.checkedType == expression.checkedType
 		}
-		if expression.kind >= 1 && expression.kind <= 5 {
+		if expression.kind >= 1 && expression.kind <= 5 || expression.kind == 22 {
 			validPayload = validPayload && expression.left == 0 && expression.right == 0 && expression.operator == 0
 		}
 		if expression.kind == 6 && expression.parameterUse == 0 && expression.boolValue == 0 && expression.left >= 1 && expression.left < expression.id && expression.right == 0 && (expression.operator == 1 || expression.operator == 2) {
@@ -2529,7 +2539,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 87 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 93 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

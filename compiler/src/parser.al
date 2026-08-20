@@ -652,6 +652,16 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
     if !token_punct(state, cursor, ")") {
         var more = true
         while more {
+            var parameter_kind: U64 = 13
+            if parse_token(state, cursor).keyword == 23 {
+                parameter_kind = 47
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            } else {
+                if parse_token(state, cursor).keyword == 24 {
+                    parameter_kind = 48
+                    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                }
+            }
             if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
             let param = parse_token(state, cursor)
             let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -660,6 +670,7 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
             cursor = parse_step_cursor(colon)
             var pnode: ParseValue = ParseValue(cursor: cursor, node: 0)
             if parse_token(state, cursor).keyword == 2 {
+                if parameter_kind != 13 { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
                 if runtime { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
                 pnode = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 7, colon_cursor.token, param.source, param.start, parse_token(state, cursor).end, param.start, param.end, 0)
             } else {
@@ -667,7 +678,7 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
                 if parse_step_bad(ty) { return Ok(ty) }
                 let tv = parse_step_value(ty)
                 let linked = try add_link(d, tv.cursor, tv.node, 0)
-                pnode = try add_syntax(d, linked, 13, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                pnode = try add_syntax(d, linked, parameter_kind, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
                 runtime = true
             }
             cursor = try add_link(d, pnode.cursor, pnode.node, children)

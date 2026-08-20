@@ -1071,7 +1071,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-    if expression.kind == 1 || expression.kind == 5 {
+    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
         let binding = lower_binding_lookup(state, expression.parameter_use)
         if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         if binding.parameter != 0 { return Ok(LowerStep(state: state, id: binding.mir_id)) }
@@ -3181,7 +3181,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 2 || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.mutable > 1 || !lower_type_concrete(store, item.checked_type) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return false }
-        if item.kind == 1 && item.mutable != 0 { return false }
+        if item.kind == 1 && item.mutable > 1 { return false }
         if binding_environment_counts[at + 1] != 1 { return false }
         at = at + 1
     }
@@ -3251,7 +3251,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind > 21 { return false }
+        if item.kind == 0 || item.kind > 22 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -3264,12 +3264,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             child_at = child_at + 1
         }
         if item.site_kind > 8 || (item.site_kind == 0 && item.site_syntax != 0) || (item.site_kind != 0 && item.site_syntax == 0) || item.site_syntax > __s0_buffer_len(CheckedSpanRec, spans) { return false }
-        if item.kind == 1 || item.kind == 5 {
+        if item.kind == 1 || item.kind == 5 || item.kind == 22 {
             if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).owner != item.owner { return false }
         }
         if item.kind == 1 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 1 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
         if item.kind == 5 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 2 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
-        if item.kind >= 1 && item.kind <= 5 && item.child_count != 0 { return false }
+        if item.kind == 22 && __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type { return false }
+        if (item.kind >= 1 && item.kind <= 5 || item.kind == 22) && item.child_count != 0 { return false }
         if item.kind == 2 && item.bool_value > 1 { return false }
         if item.kind != 2 && item.bool_value != 0 { return false }
         if item.kind == 2 {
@@ -3413,7 +3414,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if base_type.kind != 7 || base_type.target != field.owner { return false }
             if lower_type_concrete(store, field.checked_type) && !lower_checked_abi_equal(store, field.checked_type, item.checked_type) { return false }
         }
-        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.parameter_use != 0 { return false }
+        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.kind != 22 && item.parameter_use != 0 { return false }
         at = at + 1
     }
     at = 0

@@ -254,7 +254,7 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	}
 	validateParserManifest(t, first, files)
 	functionSource := "fn empty() -> U64 {\r\n return\r\n}\r\n" +
-		"fn core(T: type, x: U64,) -> U64 {\r\n" +
+		"fn core(T: type, mut x: U64, take owner: Domain,) -> U64 {\r\n" +
 		" // bindings and delimiter continuation\r\n let a: U64 = (1 +\r\n 2) * 3 / 4 % 5 - 6 << 1 >> 1 < 9 <= 9 > 0 >= 0 == true != false && !false || true\r\n" +
 		" var b = 1.5\r\n let s = \"text\"\r\n let c = empty()\r\n let d = core(\r\n T: x, x,\r\n )\r\n x = try d\r\n x.field = a\r\n x[b] = c\r\n x[b].field = s\r\n {\r\n  return x\r\n }\r\n return\r\n}\r\n"
 	functionSource += "fn assoc(a: U64, b: U64, c: U64, d: U64) -> U64 {\r\n" +
@@ -699,7 +699,7 @@ func validParserNodeToken(node parserManifestNode, tokenText string) bool {
 		return node.tokenStart == node.start && tokenText == "type"
 	case 3:
 		return node.tokenStart == node.start && tokenText == "enum"
-	case 4, 6, 7, 8, 9, 11, 13, 24, 28:
+	case 4, 6, 7, 8, 9, 11, 13, 24, 28, 47, 48:
 		return nameToken
 	case 5, 30:
 		return tokenText == "["
@@ -861,18 +861,21 @@ func assertFunctionParserTree(t *testing.T, tree parserManifest) {
 	}
 
 	coreChildren := tree.childrenInSourceOrder(t, tree.rootNamed(t, "core"))
-	assertNodeKinds(t, tree, coreChildren, 7, 13, 4, 14)
+	assertNodeKinds(t, tree, coreChildren, 7, 47, 48, 4, 14)
 	if tree.name(t, coreChildren[0]) != "T" || tree.name(t, coreChildren[1]) != "x" {
 		t.Fatalf("function parameter order changed: %q, %q", tree.name(t, coreChildren[0]), tree.name(t, coreChildren[1]))
 	}
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreChildren[1]), 4)
-	coreStatements := tree.childrenInSourceOrder(t, coreChildren[3])
+	if tree.name(t, coreChildren[2]) != "owner" {
+		t.Fatalf("take parameter name = %q, want owner", tree.name(t, coreChildren[2]))
+	}
+	coreStatements := tree.childrenInSourceOrder(t, coreChildren[4])
 	assertNodeKinds(t, tree, coreStatements, 15, 16, 15, 15, 15, 17, 17, 17, 17, 14, 18)
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[0]), 4, 26)
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[1]), 21)
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[2]), 22)
 	assertNodeKinds(t, tree, tree.childrenInSourceOrder(t, coreStatements[3]), 27)
-	callWithNamed := bindingValue(t, tree, coreChildren[3], "d")
+	callWithNamed := bindingValue(t, tree, coreChildren[4], "d")
 	callChildren := tree.childrenInSourceOrder(t, callWithNamed)
 	assertNodeKinds(t, tree, callChildren, 24, 28, 24)
 	if tree.name(t, callChildren[1]) != "T" {
