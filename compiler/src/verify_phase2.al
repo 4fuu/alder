@@ -21,7 +21,7 @@ fn mir_vappend_type_children(d: Domain, store: MirStore, indexes: MirVIndexes, w
     if !mir_vtype_exists(store, id) { return Ok(work) }
     var out = work
     let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
-    if t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array() { out = try __s0_buffer_append(U64, d, out, t.elem) }
+    if t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array() || t.kind == mir_type_kind_vec() { out = try __s0_buffer_append(U64, d, out, t.elem) }
     if t.kind == mir_type_kind_result() { out = try __s0_buffer_append(U64, d, out, t.ok_type)
 out = try __s0_buffer_append(U64, d, out, t.err_type) }
     // Function parameter parts are the owner's type-part list filtered to the
@@ -130,7 +130,7 @@ var pv: U64 = 0
 while pv < part_total { if __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, pv) - 1).kind == mir_type_part_variant() { variant_count = variant_count + 1 }
 pv = pv + 1 }
 if variant_count == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_empty_enum(), 0, 0, 0, 0, 0, id, id, 1, 0, 0)) } }
-        if (t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array()) && !mir_vtype_exists(store, t.elem) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.elem)) }
+        if (t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array() || t.kind == mir_type_kind_vec()) && !mir_vtype_exists(store, t.elem) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.elem)) }
         if t.kind == mir_type_kind_result() && (!mir_vtype_exists(store, t.ok_type) || !mir_vtype_exists(store, t.err_type)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.ok_type)) }
         if t.kind == mir_type_kind_function() && !mir_vtype_exists(store, t.result_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_signature(), 0, 0, 0, 0, 0, id, id, 0, 0, t.result_type)) }
         at = at + 1

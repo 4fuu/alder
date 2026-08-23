@@ -204,6 +204,17 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		}, "an array or safe_mut(array)")
 		c.expectExact(in.Index, "index operand", mir.TypeU64)
 
+	case mir.OpArrayAsSlice:
+		c.expect(in.Array, "array operand", func(t mir.TypeId) bool {
+			if !m.ValidType(t) {
+				return false
+			}
+			if m.Types[t].Kind == mir.TypeSafeRef || m.Types[t].Kind == mir.TypeSafeMut {
+				t = m.Types[t].Elem
+			}
+			return m.ValidType(t) && m.Types[t].Kind == mir.TypeArray
+		}, "an array, safe_ref(array), or safe_mut(array)")
+
 	case mir.OpSliceRangeChecked:
 		c.expect(in.Slice, "slice operand", func(t mir.TypeId) bool {
 			_, ok := m.ElemType(t)

@@ -1,4 +1,4 @@
-mir 3
+mir 4
 
 type @__s0_Buffer.c1.U64 {
   data: safe_mut(u64)

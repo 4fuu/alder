@@ -1,4 +1,4 @@
-mir 3
+mir 4
 
 type @BridgeKey {
   active: bool

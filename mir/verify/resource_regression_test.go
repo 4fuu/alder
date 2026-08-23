@@ -866,6 +866,26 @@ entry:
 `, "lifetime-bearing values may not be stored through dereference places")
 	})
 
+	t.Run("deref write of owned vector is accepted", func(t *testing.T) {
+		requireAccepted(t, `mir 4
+fn @stash(%out: safe_mut(vec(u64)), %value: vec(u64)) {
+entry:
+  store deref %out, %value
+  return
+}
+`)
+	})
+
+	t.Run("deref write of vector containing a view is rejected", func(t *testing.T) {
+		requireRejectedWith(t, `mir 4
+fn @stash(%out: safe_mut(vec(slice(u64))), %value: vec(slice(u64))) {
+entry:
+  store deref %out, %value
+  return
+}
+`, "lifetime-bearing values may not be stored through dereference places")
+	})
+
 	t.Run("external domain parameters may alias", func(t *testing.T) {
 		requireRejectedWith(t, `mir 1
 fn @f(%a: domain_handle, %b: domain_handle, %n: u64) {

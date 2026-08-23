@@ -34,12 +34,13 @@ failure and every unhosted result carries entry ID zero; duplicate `main`
 declarations are rejected earlier by V1's duplicate function-name rule.
 
 The Alder-written `cgen_generate(d, store, version, hosted)` entry implements
-the current M5.4 body path directly over flat MIR 3. It lowers loads,
+the current production body path directly over flat MIR 4. It lowers loads,
 stores, field and checked-reference places, aggregate and enum-like values,
 scalar comparisons and conversions, checked integer and slice operations,
 direct and unsafe-import calls, block edges with staged parallel copies,
 branches, loops, switches, returns, typed failures, panic, unreachable, domains,
-allocation, supported domain copies, cleanup scopes, and generational tables.
+allocation, supported domain copies, cleanup scopes, generational tables, vectors,
+and scoped array/vector views.
 Every operand is read from an already materialized value in an explicitly
 ordered statement; generated calls never embed another call or checked
 operation in a C argument expression. Verification and the supported-operation
@@ -127,7 +128,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `bool` maps to `bool`; integers to the exact-width `intN_t`/`uintN_t` (which C11 requires to be two's complement); floats to `float`/`double`;
 - aggregates and enum-like types (declared enums, `option`, `result`) map to structs: fields in declaration order; enums are tagged unions with `uint32_t alder_tag` (variant index) and a union of non-unit payloads named `alder_p<index>`. An empty aggregate has one private byte because portable C11 has no empty structs;
 - `string` maps to `AlderString { const uint8_t *data; uint64_t len; }` and `bytes` maps to the layout-identical but distinct `AlderBytes`; ordinary assignment, argument passing, and return copy the value while sharing immutable constant backing;
-- `slice`, `safe_ref`, and `safe_mut` share the runtime `AlderSlice { void *data; uint64_t len; }`; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AlderDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AlderTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AlderCleanupScope *` pointing at a per-create-site slot;
+- `slice`, `safe_ref`, and `safe_mut` share the runtime `AlderSlice { void *data; uint64_t len; }`; `vec(T)` is exactly `AlderVec { void *data; uint64_t len; uint64_t capacity; }`, with no domain, allocator, reference-count, or ownership field; `table_view`/`table_mut_view` are `void *` pointers to element storage; `raw_ptr(T)` is `void *`; `domain_handle` is `AlderDomain *`; `domain_mark`, `cleanup_id`, and `id(T)` map to their runtime structs; `table(T)` is `AlderTable *`, preserving one mutable table identity through calls, locals, aggregates, and block parameters; `cleanup_scope` is `AlderCleanupScope *` pointing at a per-create-site slot;
 - `function(Signature)` maps to an `AlderFnTy<N>` function-pointer typedef; an empty C parameter list is written as `(void)`.
 
 ### Values and control flow
@@ -160,7 +161,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
 - `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `alder_domain_alloc`, and a slice with the count; overflow, non-representability, invalid domains, and out-of-memory terminate;
 - `alloc.checked` performs the same preparation and runtime call, but every failure branches through its explicit failure edge with normal parallel edge copies; success constructs the slice;
-- `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. A slice whose element type contains references is rejected at generation time (M3 copies bytes, so a nested reference would be shared instead of copied);
+- `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. Vec helpers recursively deep-copy non-trivial elements and normalize copied capacity to length; the ABI carries no allocator metadata;
 - `cleanup.scope.begin` initializes a hidden per-site scope slot; `cleanup.push` fills a per-site context struct and registers a generated adapter; `disarm`, `run`, and `end` call the runtime and terminate on contract violations;
 - `table.create` allocates a zeroed `AlderTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
 

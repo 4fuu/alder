@@ -117,7 +117,7 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 			seen[v.Name] = true
 			checkChild(v.Payload, fmt.Sprintf("variant %q payload", v.Name))
 		}
-	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
+	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		checkChild(t.Elem, "element")
 	case mir.TypeResult:
@@ -188,7 +188,7 @@ func containsKindSeen(m *mir.Module, t mir.TypeId, kind mir.TypeKind, seen map[m
 		return true
 	}
 	switch ty.Kind {
-	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
+	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		return containsKindSeen(m, ty.Elem, kind, seen)
 	case mir.TypeResult:
@@ -258,7 +258,7 @@ func typeChildren(t *mir.Type) []mir.TypeId {
 		for _, v := range t.Variants {
 			children = append(children, v.Payload)
 		}
-	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
+	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		children = append(children, t.Elem)
 	case mir.TypeResult:

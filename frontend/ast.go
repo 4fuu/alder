@@ -99,6 +99,12 @@ type AppType struct {
 	Args []TypeExpr
 }
 
+// ArrayLit is a fixed-length array value.
+type ArrayLit struct {
+	P     pos
+	Elems []Expr
+}
+
 func (t *PrimType) typePos() pos  { return t.P }
 func (t *SliceType) typePos() pos { return t.P }
 func (t *AppType) typePos() pos   { return t.P }
@@ -222,6 +228,7 @@ func (e *Field) exprPos() pos    { return e.P }
 func (e *Index) exprPos() pos    { return e.P }
 func (e *Match) exprPos() pos    { return e.P }
 func (e *Try) exprPos() pos      { return e.P }
+func (e *ArrayLit) exprPos() pos { return e.P }
 
 // Stmt is a statement.
 type Stmt interface{ stmtPos() pos }

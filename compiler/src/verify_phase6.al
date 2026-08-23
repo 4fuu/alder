@@ -214,7 +214,7 @@ k = k + 1 }
 k = 0
 while k <= total_keys + 1 { cursor[k] = base[k] + 0
 k = k + 1 }
-let pos = __s0_alloc(U64, d, total)
+var pos = __s0_alloc(U64, d, total)
 i = 0
 while i < total {
     let fact = __s0_buffer_get(MirV6Fact, durable.facts, i)
@@ -259,7 +259,7 @@ h = 0
 while h < hash_buckets { hbase[h + 1] = hbase[h] + hcnt[h]
 hcursor[h] = hbase[h] + 0
 h = h + 1 }
-let hpos = __s0_alloc(U64, d, total)
+var hpos = __s0_alloc(U64, d, total)
 i = 0
 while i < total { let fact = __s0_buffer_get(MirV6Fact, durable.facts, i)
 let slot = mir_v6_fact_hash(fact, hash_buckets)
@@ -295,7 +295,7 @@ f = f + 1 }
 e = 0
 while e <= fcount + 1 { ecursor[e] = ebase[e] + 0
 e = e + 1 }
-let epos = __s0_alloc(U64, d, etotal)
+var epos = __s0_alloc(U64, d, etotal)
 i = 0
 while i < etotal {
     let effect = __s0_buffer_get(MirV6Effect, durable.effects, i)
@@ -486,8 +486,12 @@ return Ok(false) }
 fn mir_v6_type_reference(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
+if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_vec()) { return Ok(true) }
 return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) }
-fn mir_v6_type_local_store(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_reference(d, store, indexes, type_id) { return Ok(true) }
+fn mir_v6_type_local_store(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
+if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
+if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
+if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) { return Ok(true) }
 return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) }
 
@@ -632,7 +636,7 @@ fn mir_v6_transfer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes)
         cursor[p] = running
         running = running + counts[p]
         p = p + 1 }
-    let sources = __s0_alloc(U64, d, running)
+    var sources = __s0_alloc(U64, d, running)
     at = 0
     while at < __s0_buffer_len(U64, incoming_ids) {
         let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, incoming_ids, at) - 1)
@@ -707,7 +711,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
             let iid = mir_v6_instruction_for_value(store, indexes, value)
             if iid != 0 {
                 let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-                if x.op == mir_op_domain_create() || x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() {
+                if x.op == mir_op_domain_create() || x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() {
                     consumers = try mir_v6_consumer_add(d, round, consumers, function, x.a, value_id)
                 }
                 if x.op == mir_op_copy_to_domain() { consumers = try mir_v6_consumer_add(d, round, consumers, function, x.b, value_id) }
@@ -814,7 +818,8 @@ var oi: U64 = 0
 while oi < total { let o = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_instr(indexes, iid, oi) - 1)
 if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, o.value) }
 oi = oi + 1 } }
-if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a) }
+if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a) }
+if x.op == mir_op_vec_grow_checked() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.b) }
 if x.op == mir_op_call() { var e = mir_v6_round_effect_start(index, x.target)
 while e != 0 { let effect = mir_v6_round_effect_at(durable, e)
 if effect.kind == mir_v6_effect_result_from() || effect.kind == mir_v6_effect_result_alloc() { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)
@@ -1095,7 +1100,7 @@ return Ok(state0) }
 fn mir_v6_apply(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: MirVP4PointCfg, dom: MirVP4Dom, analysis: MirV6Analysis, cleanup: MirV7Analysis, state0: __s0_Buffer(MirV6StateFact), iid: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirV6StateFact), __s0_Error) { var state = state0
 if x.op == mir_op_domain_create() { state = try mir_v6_clear_dead(d, state, x.block, x.ordinal) }
 if x.op == mir_op_domain_mark() { state = try mir_v6_clear_mark(d, state, x.result) }
-if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_call() { state = try mir_v6_clear_produced(d, state, x.block, x.ordinal) }
+if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_call() || x.op == mir_op_vec_grow_checked() { state = try mir_v6_clear_produced(d, state, x.block, x.ordinal) }
 if x.op == mir_op_domain_destroy() { state = try mir_v6_invalidate(d, store, indexes, cfg, dom, analysis, state, x.function, x.a, false, 0) }
 if x.op == mir_op_domain_reset() { state = try mir_v6_invalidate(d, store, indexes, cfg, dom, analysis, state, x.function, x.a, true, x.b) }
 if x.op == mir_op_call() { var e = mir_v6_effect_start(analysis, x.target)

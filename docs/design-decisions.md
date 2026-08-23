@@ -52,6 +52,18 @@ Status: **Frozen 1.0**
 Long-lived identity uses affine `Table(T)` and copyable generational `T.Id`.
 Graphs use IDs rather than persistent interior pointers. Views are scoped.
 
+### D005A — M7.1 hidden borrowed placement domain
+
+Status: **Bootstrap until Milestone 7.3**
+
+Before placement inference, lowering prepends and threads one hidden borrowed
+root/result domain through every ordinary source function, method, source call,
+recursive call, and cleanup callback. Hosted entry owns that root; unhosted C
+signatures retain the explicit hidden parameter. `Vec` does not contain a
+domain and every semantic vector copy remains a verifier-visible eager deep
+copy. Generated ordinary functions never reset or destroy the borrowed root.
+Returned vectors are safe; returned views remain rejected until Milestone 7.3.
+
 ### D006 — One generic syntax
 
 Status: **Frozen 1.0**

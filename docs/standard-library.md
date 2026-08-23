@@ -12,6 +12,14 @@ This document freezes the minimum scope and major contracts, not every final
 function spelling. Public API snapshots and executable examples become
 normative as each module is implemented.
 
+Implemented module snapshots are versioned separately so their exact spelling
+can be reviewed without pretending the rest of the 1.0 sysroot is available:
+
+- [`core.collection` public snapshot v1](api/core.collection-v1.md), covering
+  the Milestone 7.1 `Vec(T)` surface;
+- [`core.slice` public snapshot v1](api/core.slice-v1.md), covering the
+  Milestone 7.1 immutable and mutable view surface.
+
 ## Distribution layers
 
 The installed sysroot has two stability layers:

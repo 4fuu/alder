@@ -181,6 +181,22 @@ func (g *gen) analyze() error {
 						copySet = make(map[mir.TypeId]bool)
 					}
 					g.collectCopyTypes(t, copySet)
+				case mir.OpVecGrowChecked:
+					t, ok := f.ValueType(in.Slice)
+					if !ok || !g.m.ValidType(t) {
+						continue
+					}
+					elem := g.m.Types[t].Elem
+					if g.copyTrivial(elem) {
+						continue
+					}
+					if err := g.requireCopyable(elem); err != nil {
+						return err
+					}
+					if copySet == nil {
+						copySet = make(map[mir.TypeId]bool)
+					}
+					g.collectCopyTypes(elem, copySet)
 				}
 			}
 		}
@@ -207,7 +223,7 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	}
 	ty := &g.m.Types[t]
 	switch ty.Kind {
-	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+	case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut:
 		return false
 	case mir.TypeOption, mir.TypeArray:
 		return g.copyTrivial(ty.Elem)
@@ -250,6 +266,8 @@ func (g *gen) requireCopyable(t mir.TypeId) error {
 		if !g.copyTrivial(ty.Elem) {
 			return fmt.Errorf("cgen: copy_to_domain of %s: slice elements must be copy-trivial (no nested references)", g.m.TypeString(t))
 		}
+	case mir.TypeVec:
+		return g.requireCopyable(ty.Elem)
 	case mir.TypeAggregate:
 		for _, fld := range ty.Fields {
 			if err := child(fld.Type); err != nil {
@@ -295,7 +313,7 @@ func (g *gen) collectCopyTypes(t mir.TypeId, set map[mir.TypeId]bool) {
 		g.collectCopyTypes(ct, set)
 	}
 	switch ty.Kind {
-	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+	case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut:
 		visit(ty.Elem)
 	case mir.TypeAggregate:
 		for _, fld := range ty.Fields {
@@ -466,7 +484,7 @@ func typeDependencies(ty *mir.Type) []mir.TypeId {
 		for _, variant := range ty.Variants {
 			out = append(out, variant.Payload)
 		}
-	case mir.TypeOption, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
+	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		out = append(out, ty.Elem)
 	case mir.TypeResult:
@@ -584,7 +602,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v) {\n")
 	ty := &g.m.Types[t]
 	switch ty.Kind {
-	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeVec:
 		elem := ty.Elem
 		b.WriteString("  uint64_t alder_t;\n")
 		b.WriteString("  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)" +
@@ -595,9 +613,16 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 		b.WriteString("    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)" +
 			g.typeAlign(elem) + ");\n")
 		b.WriteString("    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
-		b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
+		if g.copyTrivial(elem) {
+			b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
+		} else {
+			b.WriteString("    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { ((" + g.cType(elem) + " *)alder_p)[alder_i] = " + g.copyCall(elem) + "(alder_d, ((" + g.cType(elem) + " *)alder_v.data)[alder_i]); }\n")
+		}
 		b.WriteString("    alder_v.data = alder_p;\n")
 		b.WriteString("  }\n")
+		if ty.Kind == mir.TypeVec {
+			b.WriteString("  alder_v.capacity = alder_v.len;\n")
+		}
 	case mir.TypeArray:
 		if !g.copyTrivial(ty.Elem) {
 			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)" + strconv.FormatUint(ty.Length, 10) + "; alder_i++) {\n")

@@ -183,6 +183,7 @@ type checkerDiagnostic struct {
 }
 
 func runCheckerConformance(t *testing.T, exe string) {
+	t.Run("m71-collections", func(t *testing.T) { runAlderM71CheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
@@ -519,7 +520,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 		}
 	}
 	controlGood := map[string]string{"control.al": "type Box(T: type) { value: T }\n" +
-		"fn branches(flag: Bool, values: [U64], boxes: [Box(U64)]) -> U64 {\n var direct: U64 = 0\n direct = 1\n var box: Box(U64) = Box(value: direct)\n box.value = 2\n values[0] = 3\n boxes[0].value = 4\n { let nested: U64 = direct }\n { let sibling: U64 = direct }\n if flag { let yes: U64 = direct\n return yes } else { let no: U64 = direct\n return no }\n}\n" +
+		"fn branches(flag: Bool, mut values: [U64], mut boxes: [Box(U64)]) -> U64 {\n var direct: U64 = 0\n direct = 1\n var box: Box(U64) = Box(value: direct)\n box.value = 2\n values[0] = 3\n boxes[0].value = 4\n { let nested: U64 = direct }\n { let sibling: U64 = direct }\n if flag { let yes: U64 = direct\n return yes } else { let no: U64 = direct\n return no }\n}\n" +
 		"fn loops(flag: Bool, values: [U64]) -> Unit {\n while flag { let inside: U64 = 1 }\n for item in values { let copy: U64 = item }\n}\n" +
 		"fn fallthrough() -> Unit {}\n"}
 	controlGood["control.al"] += "fn deep_blocks() -> Unit {"
@@ -1798,7 +1799,7 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	bodyPhase := len(m.expressions) != 0 || len(m.returns) != 0 || len(m.locals) != 0 || len(m.blocks) != 0 || len(m.matches) != 0 || len(m.tries) != 0
 	for _, diagnostic := range m.diagnostics {
-		if diagnostic.kind >= 18 && diagnostic.kind <= 69 || diagnostic.kind >= 97 && diagnostic.kind <= 99 {
+		if diagnostic.kind >= 18 && diagnostic.kind <= 69 || diagnostic.kind >= 97 && diagnostic.kind <= 104 {
 			bodyPhase = true
 		}
 	}
@@ -1858,7 +1859,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 15 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
@@ -1878,7 +1879,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		switch checked.kind {
 		case 7:
 			wantCount = m.symbols[checked.target-1].arity
-		case 8, 9, 12, 13, 15:
+		case 8, 9, 12, 13, 15, 17, 18:
 			wantCount = 1
 		case 10, 11:
 			wantCount = 2
@@ -2025,7 +2026,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		rootType := m.locals[place.root-1].checkedType
 		valueType := rootType
 		if place.kind >= 3 {
-			if rootType < 1 || rootType > len(m.types) || (m.types[rootType-1].kind != 8 && m.types[rootType-1].kind != 15) || m.types[rootType-1].count != 1 {
+			if rootType < 1 || rootType > len(m.types) || (m.types[rootType-1].kind != 8 && m.types[rootType-1].kind != 15 && m.types[rootType-1].kind != 17 && m.types[rootType-1].kind != 18) || m.types[rootType-1].count != 1 {
 				return fmt.Errorf("checked place has nonslice indexed root %+v", place)
 			}
 			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
@@ -2251,7 +2252,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 17 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2423,7 +2424,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				if validPayload {
 					sequence, indexType := m.types[base.checkedType-1], m.types[index.checkedType-1]
 					args := checkerDirectArgs(m, sequence)
-					validPayload = (sequence.kind == 8 || sequence.kind == 15) && len(args) == 1 && args[0].checkedType == expression.checkedType && indexType.kind == 1 && indexType.target == 9
+					validPayload = (sequence.kind == 8 || sequence.kind == 15 || sequence.kind == 17 || sequence.kind == 18) && len(args) == 1 && args[0].checkedType == expression.checkedType && indexType.kind == 1 && indexType.target == 9
 				}
 			}
 		}
@@ -2601,7 +2602,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 99 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 104 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

@@ -231,9 +231,10 @@ var invalidParseTests = []struct {
 }{
 	{"missing version", "type @T {}", "expected 'mir <version>'"},
 	{"bad version", "mir x\n", "expected a format version number"},
-	{"unsupported version", "mir 4\n", "unsupported format version 4"},
+	{"unsupported version", "mir 5\n", "unsupported format version 5"},
 	{"panic in legacy version", "mir 1\nfn @f() {\nbb0:\n  panic\n}\n", "panic requires MIR format version 2"},
 	{"alloc.checked in format 2", "mir 2\nfn @f(%d: domain_handle, %n: u64) {\nbb0:\n  %p = alloc.checked %d, u8, %n else bb1\n  return\nbb1:\n  return\n}\n", "alloc.checked requires MIR format version 3"},
+	{"vec in format 3", "mir 3\nfn @f(%v: vec(u8)) {\nbb0:\n  return\n}\n", "vec requires MIR format version 4"},
 	{"unknown declaration", "mir 1\nwat\n", "expected a declaration"},
 	{"duplicate type", "mir 1\ntype @T {}\ntype @T {}\n", "duplicate type @T"},
 	{"empty function", "mir 1\nfn @f() {}\n", "function must contain at least one block"},
@@ -382,5 +383,19 @@ func TestParseOwnedStringAndBytesTypes(t *testing.T) {
 	}
 	if m.Types[m.Constants[0].Type].Kind != TypeString || m.Types[m.Constants[1].Type].Kind != TypeBytes {
 		t.Fatal("string and bytes did not parse as distinct leaf types")
+	}
+}
+
+func TestParseVecTypeAndOperations(t *testing.T) {
+	const text = "mir 4\n\nfn @vec(%storage: safe_mut(i64), %len: u64, %capacity: u64) -> vec(i64) {\nbb0:\n  %v = vec.construct.checked %storage, %len, %capacity else bad\n  %n = vec.len %v\n  %s = vec.as_slice %v\n  return %v\n\nbad:\n  %empty = vec.new vec(i64)\n  return %empty\n}\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("round trip mismatch:\n%s", got)
+	}
+	if m.Types[m.Functions[0].Result].Kind != TypeVec {
+		t.Fatal("result did not parse as vec")
 	}
 }

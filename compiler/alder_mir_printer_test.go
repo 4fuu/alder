@@ -41,7 +41,7 @@ fn printer_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error)
 }
 
 fn run_print(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
-    // A raw invalid constant type must be rejected without writing "mir 3".
+    // A raw invalid constant type must be rejected without writing "mir 4".
     let bad = try mir_add_const(d, store, "bad", 999, mir_const_int(), 0, 1, 0, "")
     if mir_print(bad.store) { return Ok(5) }
     let fixture = try printer_fixture(d, store)
@@ -65,7 +65,7 @@ fn main(d: Domain) -> I32 { return match mir_store_new(d) {
 `
 
 func runMIRPrinterConformance(t *testing.T, exe string) {
-	wantSource := "mir 3\n\nconst @min: i64 = -9223372036854775808\n\nconst @max: i64 = 9223372036854775807\n\nconst @tiny: f64 = 5e-324\n\nconst @largest: f64 = 1.7976931348623157e+308\n\nconst @escaped: slice(u8) = \"a\\n\\t\\r\\\\\\\"\\x00z\"\n\nfn @main() {\nbb0:\n  return\n}\n"
+	wantSource := "mir 4\n\nconst @min: i64 = -9223372036854775808\n\nconst @max: i64 = 9223372036854775807\n\nconst @tiny: f64 = 5e-324\n\nconst @largest: f64 = 1.7976931348623157e+308\n\nconst @escaped: slice(u8) = \"a\\n\\t\\r\\\\\\\"\\x00z\"\n\nfn @main() {\nbb0:\n  return\n}\n"
 	wantModule, err := mir.Parse(wantSource)
 	if err != nil {
 		t.Fatalf("parse canonical expectation: %v", err)

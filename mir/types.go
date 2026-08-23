@@ -54,6 +54,8 @@ const (
 	TypeString
 	// TypeBytes is an immutable owned byte-sequence value.
 	TypeBytes
+	// TypeVec is an owned growable vector value.
+	TypeVec
 )
 
 // Canonical primitive TypeIds occupy the first slots of every module type
@@ -185,6 +187,8 @@ func (m *Module) TypeString(t TypeId) string {
 		return "string"
 	case TypeBytes:
 		return "bytes"
+	case TypeVec:
+		return "vec(" + m.TypeString(ty.Elem) + ")"
 	}
 	return "<invalid kind " + strconv.Itoa(int(ty.Kind)) + ">"
 }
@@ -237,13 +241,13 @@ func (m *Module) VariantPayload(t TypeId, i int) (TypeId, bool) {
 	return vs[i].Payload, true
 }
 
-// ElemType returns the element type of a slice, safe_ref, or safe_mut type.
+// ElemType returns the element type of a slice, vector, safe_ref, or safe_mut type.
 func (m *Module) ElemType(t TypeId) (TypeId, bool) {
 	if !m.ValidType(t) {
 		return NoType, false
 	}
 	switch m.Types[t].Kind {
-	case TypeSlice, TypeSafeRef, TypeSafeMut:
+	case TypeSlice, TypeSafeRef, TypeSafeMut, TypeVec:
 		return m.Types[t].Elem, true
 	}
 	return NoType, false
@@ -353,6 +357,11 @@ func (m *Module) Result(ok, err TypeId) TypeId {
 // Slice interns and returns slice(elem).
 func (m *Module) Slice(elem TypeId) TypeId {
 	return m.intern(TypeSlice, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
+}
+
+// Vec interns and returns vec(elem).
+func (m *Module) Vec(elem TypeId) TypeId {
+	return m.intern(TypeVec, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
 }
 
 // Array interns and returns array(elem, length).

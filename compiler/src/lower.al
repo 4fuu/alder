@@ -1,4 +1,4 @@
-// Deterministic lowering from the sealed checked model to independent MIR 3.
+// Deterministic lowering from the sealed checked model to independent MIR 4.
 // This layer consumes semantic IDs and canonical source spans only. Parser
 // records, kinds, links, and child graphs are not part of its input. A
 // malformed or unresolved checked model is an internal failure.
@@ -238,6 +238,54 @@ fn lower_checked_abi_equal(store: CheckStore, left: U64, right: U64) -> Bool {
     return (a.kind == 16 && lower_slice_u8(store, right)) || (b.kind == 16 && lower_slice_u8(store, left))
 }
 
+fn lower_call_borrow_compatible(store: CheckStore, expected: U64, actual: U64) -> Bool {
+    if lower_checked_abi_equal(store, expected, actual) { return true }
+    let want = __s0_buffer_get(CheckedTypeRec, store.types, expected - 1)
+    let got = __s0_buffer_get(CheckedTypeRec, store.types, actual - 1)
+    if want.kind != 8 || want.arg_count != 1 || (got.kind != 15 && got.kind != 17) || got.arg_count != 1 { return false }
+    return lower_checked_abi_equal(store, __s0_buffer_get(U64, store.type_args, want.first_arg - 1), __s0_buffer_get(U64, store.type_args, got.first_arg - 1))
+}
+
+fn lower_has_vec(store: CheckStore) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        if __s0_buffer_get(CheckedTypeRec, store.types, at).kind == 17 { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn lower_owner_aliases_domain(source_state: State, store: CheckStore, owner: U64) -> Bool {
+    if owner == 0 || owner > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    let source = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
+    if !source_word(source_state, source, symbol.name_start, symbol.name_end, "main") { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(LocalRec, store.locals) {
+        let local = __s0_buffer_get(LocalRec, store.locals, at)
+        if local.owner == owner && local.kind == 1 {
+            return __s0_buffer_get(CheckedTypeRec, store.types, local.checked_type - 1).kind == 3
+        }
+        at = at + 1
+    }
+    return false
+}
+
+fn lower_domain_key(store: CheckStore, owner: U64) -> U64 {
+    return __s0_buffer_len(LocalRec, store.locals) + owner
+}
+
+fn lower_domain_value(state: LowerState, store: CheckStore, owner: U64) -> U64 {
+    let key = lower_domain_key(store, owner)
+    var at = __s0_buffer_len(LowerValueMapRec, state.values)
+    while at > 0 {
+        let item = __s0_buffer_get(LowerValueMapRec, state.values, at - 1)
+        if item.expression == key { return item.value }
+        at = at - 1
+    }
+    return 0
+}
+
 fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
     let prior = lower_type_lookup(state, checked_type)
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
@@ -291,13 +339,14 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_variant(), built.type_id, 1, "Limit", mir_type_unit()))
         return Ok(LowerStep(state: next, id: built.type_id))
     }
-    if checked.kind == 8 || checked.kind == 9 || checked.kind == 12 {
+    if checked.kind == 8 || checked.kind == 9 || checked.kind == 12 || checked.kind == 17 || checked.kind == 18 {
         if checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let elem = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
         if !elem.state.valid { return Ok(elem) }
         var kind = mir_type_kind_slice()
         if checked.kind == 9 { kind = mir_type_kind_option() }
         if checked.kind == 12 { kind = mir_type_kind_raw_ptr() }
+        if checked.kind == 17 { kind = mir_type_kind_vec() }
         let empty = try __s0_buffer_new(U64, d)
         let built = try mir_intern_type(d, elem.state.mir, kind, elem.id, 0, 0, empty, 0)
         let mapped = try __s0_buffer_append(LowerTypeMapRec, d, elem.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
@@ -684,6 +733,11 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             if symbol.kind == 13 || symbol.inherent_owner != 0 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
+            if lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, owner) {
+                let domain = try lower_domain_mir_type(d, current)
+                let hidden = try mir_add_function_param(d, domain.state.mir, function.id, 0, "__domain", domain.id)
+                current = lower_with_mir(domain.state, hidden.store)
+            }
             let owners = try __s0_buffer_append(LowerOwnerMapRec, d, current.owners, LowerOwnerMapRec(owner: owner, mir_id: function.id))
             current = lower_with_owners(current, owners)
         }
@@ -1080,14 +1134,53 @@ fn lower_token_for_span(state: State, span: CheckedSpanRec) -> U64 {
     return 0
 }
 
-fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
-    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
-        let binding = lower_binding_lookup(state, expression.parameter_use)
-        if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        if binding.parameter == 1 { return Ok(LowerStep(state: state, id: binding.mir_id)) }
+fn lower_mir_type_contains_vec(d: Domain, store: MirStore, root: U64) -> Result(Bool, __s0_Error) {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    var seen = __s0_alloc(U64, d, count + 1)
+    var zero: U64 = 0
+    while zero <= count { seen[zero] = 0
+        zero = zero + 1 }
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        if id >= 1 && id <= count && seen[id] == 0 {
+            seen[id] = 1
+            let typ = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+            if typ.kind == mir_type_kind_vec() { return Ok(true) }
+            if typ.elem != 0 { work = try __s0_buffer_append(U64, d, work, typ.elem) }
+            if typ.ok_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.ok_type) }
+            if typ.err_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.err_type) }
+            if typ.result_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.result_type) }
+            var part_at: U64 = 0
+            while part_at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_at)
+                if part.owner == id && part.part_type != 0 { work = try __s0_buffer_append(U64, d, work, part.part_type) }
+                part_at = part_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, checked_type)
+    if !(try lower_mir_type_contains_vec(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
+    let domain = lower_domain_value(typ.state, store, owner)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
+    let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+    let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
+    return Ok(LowerStep(state: copied.state, id: result.id))
+}
+
+fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, copy: Bool) -> Result(LowerStep, __s0_Error) {
+    let binding = lower_binding_lookup(state, expression.parameter_use)
+    if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    var current = state
+    var value = binding.mir_id
+    if binding.parameter != 1 {
         var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
         if binding.parameter == 2 || binding.parameter == 3 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: binding.mir_id)) } else {
             place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
@@ -1096,7 +1189,285 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let local_type = try lower_local_type(d, source_state, store, lower_with_mir(state, place.store), owner, expression.parameter_use, local)
         let result = try lower_add_typed_result(d, local_type.state, function, block, local_type.id)
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
-        return Ok(LowerStep(state: instr.state, id: result.id))
+        current = instr.state
+        value = result.id
+    }
+    if copy { return lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression.checked_type, value) }
+    return Ok(LowerStep(state: current, id: value))
+}
+
+fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 { return lower_binding_expression(d, source_state, store, state, owner, function, block, expression, false) }
+    return lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
+}
+
+fn lower_array_view(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64, mutable: Bool) -> Result(LowerStep, __s0_Error) {
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+    if checked.kind != 15 || checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let array_type = try lower_type(d, source_state, store, state, expression.checked_type)
+    var current = array_type.state
+    var place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
+    var direct_place = false
+    if expression.kind == 1 || expression.kind == 5 {
+        let mapped = lower_binding_lookup(current, expression.parameter_use)
+        if mapped.binding != 0 && mapped.parameter != 1 {
+            if mapped.parameter == 0 { place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+                place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+            }
+            current = lower_with_mir(current, place.store)
+            direct_place = true
+        }
+    }
+    if !direct_place {
+        if mutable { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let value = try lower_direct_expression(d, source_state, spans, store, current, owner, function, block, expression_id, environment, panic_block)
+        let ordinal = lower_local_count(value.state.mir, function)
+        let slot = try mir_add_local(d, value.state.mir, function, ordinal, try lower_decimal_name(d, "array_view", ordinal), array_type.id)
+        place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        let stored = try lower_add_instr(d, lower_with_mir(value.state, place.store), function, block, mir_op_store(), 0, place.id, 0, value.id, 0, 0, "")
+        current = stored.state
+    }
+    let empty = try __s0_buffer_new(U64, d)
+    var reference_kind = mir_type_kind_safe_ref()
+    var borrow_op = mir_op_borrow()
+    if mutable { reference_kind = mir_type_kind_safe_mut()
+        borrow_op = mir_op_borrow_mut() }
+    let reference = try mir_intern_type(d, current.mir, reference_kind, array_type.id, 0, 0, empty, 0)
+    let borrowed = try lower_add_typed_result(d, lower_with_mir(current, reference.store), function, block, reference.type_id)
+    let borrow = try lower_add_instr(d, borrowed.state, function, block, borrow_op, borrowed.id, place.id, 0, 0, 0, 0, "")
+    let element = try lower_type(d, source_state, store, borrow.state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+    let view_type = try mir_intern_type(d, element.state.mir, mir_type_kind_slice(), element.id, 0, 0, empty, 0)
+    let view = try lower_add_typed_result(d, lower_with_mir(element.state, view_type.store), function, block, view_type.type_id)
+    let converted = try lower_add_instr(d, view.state, function, block, mir_op_array_as_slice(), view.id, 0, 0, borrowed.id, 0, 0, "")
+    return Ok(LowerStep(state: converted.state, id: view.id))
+}
+
+fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if annotation.builtin == 18 {
+        let vector = try lower_type(d, source_state, store, state, expression.checked_type)
+        let result = try lower_add_typed_result(d, vector.state, function, block, vector.id)
+        let created = try lower_add_instr(d, result.state, function, block, mir_op_vec_new(), result.id, 0, vector.id, 0, 0, 0, "")
+        return Ok(LowerStep(state: created.state, id: result.id))
+    }
+    if annotation.builtin == 19 {
+        let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let array = try lower_expression(d, source_state, spans, store, state, owner, function, block, child_id, environment, panic_block)
+        let array_expression = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+        let array_checked = __s0_buffer_get(CheckedTypeRec, store.types, array_expression.checked_type - 1)
+        let vector_checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+        let element_checked = __s0_buffer_get(U64, store.type_args, vector_checked.first_arg - 1)
+        let element = try lower_type(d, source_state, store, array.state, element_checked)
+        let empty = try __s0_buffer_new(U64, d)
+        let storage_type = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+        var current = lower_with_mir(element.state, storage_type.store)
+        let zero = try lower_int_value(d, source_state, store, current, function, block, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let one = try lower_int_value(d, source_state, store, zero.state, function, block, 1, __s0_buffer_len(MirConstRec, zero.state.mir.constants) + 1)
+        current = one.state
+        var length = zero.id
+        var count_at: U64 = 0
+        while count_at < array_checked.target {
+            let next = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+            let added = try lower_add_instr(d, next.state, function, block, mir_op_int_add_checked(), next.id, 0, 0, length, one.id, panic_block, "")
+            current = added.state
+            length = next.id
+            count_at = count_at + 1
+        }
+        let domain = lower_domain_value(current, store, owner)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let storage = try lower_add_typed_result(d, current, function, block, storage_type.type_id)
+        let allocated = try lower_add_instr(d, storage.state, function, block, mir_op_alloc_checked(), storage.id, 0, element.id, domain, length, panic_block, "")
+        current = allocated.state
+        var index = zero.id
+        count_at = 0
+        while count_at < array_checked.target {
+            let source_ref = try lower_add_typed_result(d, current, function, block, storage_type.type_id)
+            let source_index = try lower_add_instr(d, source_ref.state, function, block, mir_op_array_index_checked(), source_ref.id, 0, 0, array.id, index, panic_block, "")
+            let source_place = try mir_add_place(d, source_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: source_ref.id))
+            let loaded = try lower_add_typed_result(d, lower_with_mir(source_index.state, source_place.store), function, block, element.id)
+            let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, source_place.id, 0, 0, 0, 0, "")
+            let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, block, element_checked, loaded.id)
+            let target_ref = try lower_add_typed_result(d, copied.state, function, block, storage_type.type_id)
+            let target_index = try lower_add_instr(d, target_ref.state, function, block, mir_op_slice_index_checked(), target_ref.id, 0, 0, storage.id, index, panic_block, "")
+            let target_place = try mir_add_place(d, target_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
+            let stored = try lower_add_instr(d, lower_with_mir(target_index.state, target_place.store), function, block, mir_op_store(), 0, target_place.id, 0, copied.id, 0, 0, "")
+            let next = try lower_add_typed_result(d, stored.state, function, block, mir_type_u64())
+            let added = try lower_add_instr(d, next.state, function, block, mir_op_int_add_checked(), next.id, 0, 0, index, one.id, panic_block, "")
+            current = added.state
+            index = next.id
+            count_at = count_at + 1
+        }
+        let vector = try lower_type(d, source_state, store, current, expression.checked_type)
+        let result = try lower_add_typed_result(d, vector.state, function, block, vector.id)
+        let constructed = try lower_add_instr_three(d, result.state, function, block, mir_op_vec_construct_checked(), result.id, 0, storage.id, length, length, panic_block)
+        return Ok(LowerStep(state: constructed.state, id: result.id))
+    }
+
+    let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver_expression = __s0_buffer_get(CheckedExprRec, store.expressions, receiver_id - 1)
+    let receiver_checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver_expression.checked_type - 1)
+    var active = block
+    var receiver = LowerStep(state: state, id: 0)
+    if receiver_checked.kind == 15 {
+        receiver = try lower_array_view(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block, annotation.builtin == 24)
+    } else {
+        receiver = try lower_direct_expression(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block)
+    }
+    var current = receiver.state
+    active = lower_open_block(current.mir, function, active)
+    var first_arg: U64 = 0
+    var second_arg: U64 = 0
+    var ordinal: U64 = 1
+    while ordinal < expression.child_count {
+        let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+        let child = try lower_expression(d, source_state, spans, store, current, owner, function, active, child_id, environment, panic_block)
+        current = child.state
+        active = lower_open_block(current.mir, function, active)
+        if ordinal == 1 { first_arg = child.id }
+        if ordinal == 2 { second_arg = child.id }
+        ordinal = ordinal + 1
+    }
+    if annotation.builtin == 20 {
+        let result = try lower_add_result(d, current, function, active, expression.checked_type, source_state, store)
+        var op = mir_op_slice_len()
+        if receiver_checked.kind == 17 { op = mir_op_vec_len() }
+        let length = try lower_add_instr(d, result.state, function, active, op, result.id, 0, 0, receiver.id, 0, 0, "")
+        return Ok(LowerStep(state: length.state, id: result.id))
+    }
+    if annotation.builtin == 21 {
+        let length = try lower_add_typed_result(d, current, function, active, mir_type_u64())
+        let length_instr = try lower_add_instr(d, length.state, function, active, mir_op_vec_len(), length.id, 0, 0, receiver.id, 0, 0, "")
+        let capacity = try lower_add_typed_result(d, length_instr.state, function, active, mir_type_u64())
+        let capacity_instr = try lower_add_instr(d, capacity.state, function, active, mir_op_vec_capacity(), capacity.id, 0, 0, receiver.id, 0, 0, "")
+        let full = try lower_add_typed_result(d, capacity_instr.state, function, active, mir_type_bool())
+        let compared = try lower_add_instr(d, full.state, function, active, mir_op_int_eq(), full.id, 0, 0, length.id, capacity.id, 0, "")
+        let grow = try lower_add_block(d, compared.state, function, "bb_vec_grow")
+        let keep = try lower_add_block(d, grow.state, function, "bb_vec_keep")
+        let ready = try lower_add_block(d, keep.state, function, "bb_vec_ready")
+        let vector = try lower_type(d, source_state, store, ready.state, receiver_expression.checked_type)
+        let ready_value = try mir_add_block_param(d, vector.state.mir, function, ready.id, 0, try lower_decimal_name(d, "__m71_vec_", ready.id), vector.id)
+        current = try lower_branch(d, lower_with_mir(vector.state, ready_value.store), function, active, full.id, grow.id, keep.id)
+
+        let zero = try lower_int_value(d, source_state, store, current, function, grow.id, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let is_zero = try lower_add_typed_result(d, zero.state, function, grow.id, mir_type_bool())
+        let zero_cmp = try lower_add_instr(d, is_zero.state, function, grow.id, mir_op_int_eq(), is_zero.id, 0, 0, capacity.id, zero.id, 0, "")
+        let initial = try lower_add_block(d, zero_cmp.state, function, "bb_vec_initial_capacity")
+        let doubled_block = try lower_add_block(d, initial.state, function, "bb_vec_double_capacity")
+        let capacity_join = try lower_add_block(d, doubled_block.state, function, "bb_vec_capacity")
+        let capacity_value = try mir_add_block_param(d, capacity_join.state.mir, function, capacity_join.id, 0, try lower_decimal_name(d, "__m71_capacity_", capacity_join.id), mir_type_u64())
+        current = try lower_branch(d, lower_with_mir(capacity_join.state, capacity_value.store), function, grow.id, is_zero.id, initial.id, doubled_block.id)
+        let four = try lower_int_value(d, source_state, store, current, function, initial.id, 4, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        current = try lower_jump_value(d, four.state, function, initial.id, capacity_join.id, four.id)
+        let two = try lower_int_value(d, source_state, store, current, function, doubled_block.id, 2, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
+        let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
+        current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
+        let domain = lower_domain_value(current, store, owner)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let grown = try lower_add_typed_result(d, current, function, capacity_join.id, vector.id)
+        let grown_instr = try lower_add_instr_three(d, grown.state, function, capacity_join.id, mir_op_vec_grow_checked(), grown.id, 0, receiver.id, domain, capacity_value.id, panic_block)
+        current = try lower_jump_value(d, grown_instr.state, function, capacity_join.id, ready.id, grown.id)
+        current = try lower_jump_value(d, current, function, keep.id, ready.id, receiver.id)
+
+        let element_checked = __s0_buffer_get(U64, store.type_args, receiver_checked.first_arg - 1)
+        let element = try lower_type(d, source_state, store, current, element_checked)
+        let empty = try __s0_buffer_new(U64, d)
+        let storage_type = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+        let storage = try lower_add_typed_result(d, lower_with_mir(element.state, storage_type.store), function, ready.id, storage_type.type_id)
+        let storage_instr = try lower_add_instr(d, storage.state, function, ready.id, mir_op_vec_storage(), storage.id, 0, 0, ready_value.id, 0, 0, "")
+        let target = try lower_add_typed_result(d, storage_instr.state, function, ready.id, storage_type.type_id)
+        let indexed = try lower_add_instr(d, target.state, function, ready.id, mir_op_slice_index_checked(), target.id, 0, 0, storage.id, length.id, panic_block, "")
+        let target_place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target.id))
+        let stored = try lower_add_instr(d, lower_with_mir(indexed.state, target_place.store), function, ready.id, mir_op_store(), 0, target_place.id, 0, first_arg, 0, 0, "")
+        let one = try lower_int_value(d, source_state, store, stored.state, function, ready.id, 1, __s0_buffer_len(MirConstRec, stored.state.mir.constants) + 1)
+        let next_length = try lower_add_typed_result(d, one.state, function, ready.id, mir_type_u64())
+        let added = try lower_add_instr(d, next_length.state, function, ready.id, mir_op_int_add_checked(), next_length.id, 0, 0, length.id, one.id, panic_block, "")
+        let next_capacity = try lower_add_typed_result(d, added.state, function, ready.id, mir_type_u64())
+        let next_capacity_instr = try lower_add_instr(d, next_capacity.state, function, ready.id, mir_op_vec_capacity(), next_capacity.id, 0, 0, ready_value.id, 0, 0, "")
+        let updated = try lower_add_typed_result(d, next_capacity_instr.state, function, ready.id, vector.id)
+        let built = try lower_add_instr_three(d, updated.state, function, ready.id, mir_op_vec_construct_checked(), updated.id, 0, storage.id, next_length.id, next_capacity.id, panic_block)
+        let mapped = lower_binding_lookup(built.state, receiver_expression.parameter_use)
+        if mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerStep(state: lower_invalid(built.state), id: 0)) }
+        var receiver_place: MirBuildStep = MirBuildStep(store: built.state.mir, id: 0)
+        if mapped.parameter == 0 { receiver_place = try mir_add_place(d, built.state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+            receiver_place = try mir_add_place(d, built.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+        }
+        let saved = try lower_add_instr(d, lower_with_mir(built.state, receiver_place.store), function, ready.id, mir_op_store(), 0, receiver_place.id, 0, updated.id, 0, 0, "")
+        return Ok(LowerStep(state: saved.state, id: 0))
+    }
+    if annotation.builtin == 22 {
+        let length = try lower_add_typed_result(d, current, function, active, mir_type_u64())
+        var length_op = mir_op_slice_len()
+        if receiver_checked.kind == 17 { length_op = mir_op_vec_len() }
+        let length_instr = try lower_add_instr(d, length.state, function, active, length_op, length.id, 0, 0, receiver.id, 0, 0, "")
+        let in_bounds = try lower_add_typed_result(d, length_instr.state, function, active, mir_type_bool())
+        let compared = try lower_add_instr(d, in_bounds.state, function, active, mir_op_int_lt(), in_bounds.id, 0, 0, first_arg, length.id, 0, "")
+        let some_block = try lower_add_block(d, compared.state, function, "bb_get_some")
+        let none_block = try lower_add_block(d, some_block.state, function, "bb_get_none")
+        let join = try lower_add_block(d, none_block.state, function, "bb_get_result")
+        let option = try lower_type(d, source_state, store, join.state, expression.checked_type)
+        let result = try mir_add_block_param(d, option.state.mir, function, join.id, 0, try lower_decimal_name(d, "__m71_get_", join.id), option.id)
+        current = try lower_branch(d, lower_with_mir(option.state, result.store), function, active, in_bounds.id, some_block.id, none_block.id)
+        var view = receiver
+        if receiver_checked.kind == 17 {
+            let element_checked = __s0_buffer_get(U64, store.type_args, receiver_checked.first_arg - 1)
+            let element = try lower_type(d, source_state, store, current, element_checked)
+            let empty = try __s0_buffer_new(U64, d)
+            let view_type = try mir_intern_type(d, element.state.mir, mir_type_kind_slice(), element.id, 0, 0, empty, 0)
+            let view_value = try lower_add_typed_result(d, lower_with_mir(element.state, view_type.store), function, some_block.id, view_type.type_id)
+            let converted = try lower_add_instr(d, view_value.state, function, some_block.id, mir_op_vec_as_slice(), view_value.id, 0, 0, receiver.id, 0, 0, "")
+            view = LowerStep(state: converted.state, id: view_value.id)
+        } else { view = LowerStep(state: current, id: receiver.id) }
+        let element_checked = __s0_buffer_get(U64, store.type_args, receiver_checked.first_arg - 1)
+        let element = try lower_type(d, source_state, store, view.state, element_checked)
+        let empty = try __s0_buffer_new(U64, d)
+        let reference_type = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
+        let reference = try lower_add_typed_result(d, lower_with_mir(element.state, reference_type.store), function, some_block.id, reference_type.type_id)
+        let indexed = try lower_add_instr(d, reference.state, function, some_block.id, mir_op_slice_index_checked(), reference.id, 0, 0, view.id, first_arg, panic_block, "")
+        let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: reference.id))
+        let loaded = try lower_add_typed_result(d, lower_with_mir(indexed.state, place.store), function, some_block.id, element.id)
+        let load = try lower_add_instr(d, loaded.state, function, some_block.id, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
+        let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, some_block.id, element_checked, loaded.id)
+        let some = try lower_add_typed_result(d, copied.state, function, some_block.id, option.id)
+        let made_some = try lower_add_instr(d, some.state, function, some_block.id, mir_op_enum_construct(), some.id, 0, option.id, copied.id, 0, 0, "some")
+        current = try lower_jump_value(d, made_some.state, function, some_block.id, join.id, some.id)
+        let none = try lower_add_typed_result(d, current, function, none_block.id, option.id)
+        let made_none = try lower_add_instr(d, none.state, function, none_block.id, mir_op_enum_construct(), none.id, 0, option.id, 0, 0, 0, "none")
+        current = try lower_jump_value(d, made_none.state, function, none_block.id, join.id, none.id)
+        return Ok(LowerStep(state: current, id: result.id))
+    }
+    if annotation.builtin == 23 || annotation.builtin == 24 || annotation.builtin == 25 {
+        var base = receiver
+        if receiver_checked.kind == 17 {
+            let element_checked = __s0_buffer_get(U64, store.type_args, receiver_checked.first_arg - 1)
+            let element = try lower_type(d, source_state, store, current, element_checked)
+            let empty = try __s0_buffer_new(U64, d)
+            var view_kind = mir_type_kind_slice()
+            var op = mir_op_vec_as_slice()
+            if annotation.builtin == 24 { view_kind = mir_type_kind_safe_mut()
+                op = mir_op_vec_as_mut_slice() }
+            let view_type = try mir_intern_type(d, element.state.mir, view_kind, element.id, 0, 0, empty, 0)
+            let view = try lower_add_typed_result(d, lower_with_mir(element.state, view_type.store), function, active, view_type.type_id)
+            let converted = try lower_add_instr(d, view.state, function, active, op, view.id, 0, 0, receiver.id, 0, 0, "")
+            base = LowerStep(state: converted.state, id: view.id)
+            current = converted.state
+        }
+        let result_type = try lower_type(d, source_state, store, current, expression.checked_type)
+        let result = try lower_add_typed_result(d, result_type.state, function, active, result_type.id)
+        let ranged = try lower_add_instr_three(d, result.state, function, active, mir_op_slice_range_checked(), result.id, 0, base.id, first_arg, second_arg, panic_block)
+        return Ok(LowerStep(state: ranged.state, id: result.id))
+    }
+    return Ok(LowerStep(state: lower_invalid(current), id: 0))
+}
+
+fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
+        return lower_binding_expression(d, source_state, store, state, owner, function, block, expression, expression.kind != 22)
     }
     if expression.kind >= 2 && expression.kind <= 4 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
@@ -1163,22 +1534,36 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if expression.child_count != 2 || expression.first_child == 0 || expression.first_child >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
         let index_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
-        let base = try lower_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+        let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
+        let checked_base_type = __s0_buffer_get(CheckedTypeRec, store.types, base_expression.checked_type - 1)
+        var base = LowerStep(state: state, id: 0)
+        if checked_base_type.kind == 17 { base = try lower_direct_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block) } else {
+            base = try lower_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+        }
         let base_block = lower_open_block(base.state.mir, function, block)
-        let index = try lower_expression(d, source_state, spans, store, base.state, owner, function, base_block, index_id, environment, panic_block)
+        var sequence = base
+        if checked_base_type.kind == 17 {
+            let element_checked = __s0_buffer_get(U64, store.type_args, checked_base_type.first_arg - 1)
+            let element_type = try lower_type(d, source_state, store, base.state, element_checked)
+            let empty_view = try __s0_buffer_new(U64, d)
+            let view_type = try mir_intern_type(d, element_type.state.mir, mir_type_kind_slice(), element_type.id, 0, 0, empty_view, 0)
+            let view = try lower_add_typed_result(d, lower_with_mir(element_type.state, view_type.store), function, base_block, view_type.type_id)
+            let converted = try lower_add_instr(d, view.state, function, base_block, mir_op_vec_as_slice(), view.id, 0, 0, base.id, 0, 0, "")
+            sequence = LowerStep(state: converted.state, id: view.id)
+        }
+        let index = try lower_expression(d, source_state, spans, store, sequence.state, owner, function, base_block, index_id, environment, panic_block)
         let active = lower_open_block(index.state.mir, function, base_block)
         let element = try lower_type(d, source_state, store, index.state, expression.checked_type)
         let empty = try __s0_buffer_new(U64, d)
         let reference = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
         let ref_value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(reference.store, function, active) + 1)
         var index_op = mir_op_slice_index_checked()
-        let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
         if __s0_buffer_get(CheckedTypeRec, store.types, base_expression.checked_type - 1).kind == 15 { index_op = mir_op_array_index_checked() }
-        let indexed = try lower_add_instr(d, lower_with_mir(element.state, ref_value.store), function, active, index_op, ref_value.id, 0, 0, base.id, index.id, panic_block, "")
+        let indexed = try lower_add_instr(d, lower_with_mir(element.state, ref_value.store), function, active, index_op, ref_value.id, 0, 0, sequence.id, index.id, panic_block, "")
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let result = try lower_add_result(d, lower_with_mir(indexed.state, place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
-        return Ok(LowerStep(state: loaded.state, id: result.id))
+        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression.checked_type, result.id)
     }
     if expression.kind == 21 {
         if expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) || expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -1202,7 +1587,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: local_place.id, field_start: named.start, field_end: named.end, deref_value: 0))
         let result = try lower_add_result(d, lower_with_mir(stored.state, field_place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, field_place.id, 0, 0, 0, 0, "")
-        return Ok(LowerStep(state: loaded.state, id: result.id))
+        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression.checked_type, result.id)
     }
     if expression.kind == 6 || expression.kind == 7 {
         if expression.child_count == 0 || expression.first_child == 0 || expression.first_child - 1 + expression.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -1303,10 +1688,21 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         while ordinal < expression.child_count {
             if expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+            let checked_child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
             var child = LowerStep(state: current, id: 0)
             var borrow_kind: U64 = 0
+            var sequence_borrow = false
             if annotation.kind == 1 {
                 let target_symbol = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+                var parameter_role: U64 = 5
+                if target_symbol.kind == 13 { parameter_role = 7 }
+                let parameter_use = lower_use_by_role(store, annotation.target, parameter_role, ordinal)
+                if parameter_use != 0 {
+                    let parameter_type = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_use - 1).checked_type
+                    let expected = __s0_buffer_get(CheckedTypeRec, store.types, parameter_type - 1)
+                    let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_child.checked_type - 1)
+                    sequence_borrow = expected.kind == 8 && (actual.kind == 15 || actual.kind == 17)
+                }
                 var parameter_at: U64 = 0
                 var parameter_ordinal: U64 = 0
                 while parameter_at < __s0_buffer_len(LocalRec, store.locals) {
@@ -1322,8 +1718,19 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     parameter_at = parameter_at + 1
                 }
             }
-            if borrow_kind != 0 {
-                let checked_child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+            if sequence_borrow {
+                let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_child.checked_type - 1)
+                if actual.kind == 15 { child = try lower_array_view(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block, false) }
+                if actual.kind == 17 {
+                    let vector = try lower_direct_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
+                    let element = try lower_type(d, source_state, store, vector.state, __s0_buffer_get(U64, store.type_args, actual.first_arg - 1))
+                    let empty = try __s0_buffer_new(U64, d)
+                    let view_type = try mir_intern_type(d, element.state.mir, mir_type_kind_slice(), element.id, 0, 0, empty, 0)
+                    let view = try lower_add_typed_result(d, lower_with_mir(element.state, view_type.store), function, block, view_type.type_id)
+                    let converted = try lower_add_instr(d, view.state, function, block, mir_op_vec_as_slice(), view.id, 0, 0, vector.id, 0, 0, "")
+                    child = LowerStep(state: converted.state, id: view.id)
+                }
+            } else { if borrow_kind != 0 {
                 let mapped = lower_binding_lookup(current, checked_child.parameter_use)
                 var place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
                 var borrow_state = current
@@ -1354,7 +1761,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
                 let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, place.id, 0, 0, 0, 0, "")
                 child = LowerStep(state: borrowed.state, id: value.id)
-            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
+            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } }
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1
@@ -1378,8 +1785,15 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let instr = try lower_add_instr(d, current, function, block, op, result, 0, 0, 0, 0, target, "")
             current = instr.state
             ordinal = 0
+            var argument_ordinal: U64 = 0
+            if annotation.kind == 1 && lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, annotation.target) {
+                let domain = lower_domain_value(current, store, owner)
+                if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                current = try lower_add_instr_operand(d, current, instr.id, 0, domain, mir_operand_instruction(), "")
+                argument_ordinal = 1
+            }
             while ordinal < __s0_buffer_len(U64, args) {
-                current = try lower_add_instr_operand(d, current, instr.id, ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+                current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal + ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
                 ordinal = ordinal + 1
             }
             return Ok(LowerStep(state: current, id: result))
@@ -1419,7 +1833,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 17 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 25 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin >= 18 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression, annotation, environment, panic_block) }
         var current = state
         var args = try __s0_buffer_new(U64, d)
         var ordinal: U64 = 0
@@ -1750,17 +2165,27 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     if checked.kind == 3 || checked.kind == 4 {
         let root_local = __s0_buffer_get(LocalRec, store.locals, checked.root - 1)
         let root_type = __s0_buffer_get(CheckedTypeRec, store.types, root_local.checked_type - 1)
-        if (root_type.kind != 8 && root_type.kind != 15) || root_type.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        if (root_type.kind != 8 && root_type.kind != 15 && root_type.kind != 17 && root_type.kind != 18) || root_type.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         let lowered_root = try lower_local_type(d, source_state, store, current, owner, checked.root, root_local)
         current = lowered_root.state
         let root_mir_type = lowered_root.id
         if root_mir_type == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         var sequence_value: U64 = 0
-        if root_type.kind == 8 {
+        if root_type.kind == 8 || root_type.kind == 18 || root_type.kind == 17 {
             let loaded = try lower_add_typed_result(d, current, function, block, root_mir_type)
             let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, root.id, 0, 0, 0, 0, "")
             current = load.state
             sequence_value = loaded.id
+            if root_type.kind == 17 {
+                let elem_checked = __s0_buffer_get(U64, store.type_args, root_type.first_arg - 1)
+                let elem = try lower_type(d, source_state, store, current, elem_checked)
+                let empty_view = try __s0_buffer_new(U64, d)
+                let view_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty_view, 0)
+                let view = try lower_add_typed_result(d, lower_with_mir(elem.state, view_type.store), function, block, view_type.type_id)
+                let converted = try lower_add_instr(d, view.state, function, block, mir_op_vec_as_mut_slice(), view.id, 0, 0, loaded.id, 0, 0, "")
+                current = converted.state
+                sequence_value = view.id
+            }
         } else {
             let empty_ref = try __s0_buffer_new(U64, d)
             let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), root_mir_type, 0, 0, empty_ref, 0)
@@ -1874,11 +2299,22 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         return Ok(LowerFlowStep(state: current, block: join.id, terminated: false))
     }
     if statement.kind == 9 {
-        let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        var sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         let sequence_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
         let sequence_type = __s0_buffer_get(CheckedTypeRec, store.types, sequence_expression.checked_type - 1)
-        if sequence_type.kind != 8 && sequence_type.kind != 16 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
-        if sequence_type.kind == 8 && sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        if sequence_type.kind != 8 && sequence_type.kind != 15 && sequence_type.kind != 16 && sequence_type.kind != 17 && sequence_type.kind != 18 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        if sequence_type.kind != 16 && sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        if sequence_type.kind == 15 || sequence_type.kind == 17 {
+            let elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1)
+            let elem = try lower_type(d, source_state, store, sequence.state, elem_checked)
+            let empty_view = try __s0_buffer_new(U64, d)
+            let view_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_slice(), elem.id, 0, 0, empty_view, 0)
+            let view = try lower_add_typed_result(d, lower_with_mir(elem.state, view_type.store), function, active, view_type.type_id)
+            var op = mir_op_array_as_slice()
+            if sequence_type.kind == 17 { op = mir_op_vec_as_slice() }
+            let converted = try lower_add_instr(d, view.state, function, active, op, view.id, 0, 0, sequence.id, 0, 0, "")
+            sequence = LowerStep(state: converted.state, id: view.id)
+        }
         // slice.len always returns canonical U64 (checked type 9 in the sealed primitive prefix).
         let length_value = try lower_add_result(d, sequence.state, function, active, 9, source_state, store)
         let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, sequence.id, 0, 0, "")
@@ -1894,7 +2330,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
         current = try lower_branch(d, compare.state, function, head.id, compared.id, body.id, join.id)
         var elem_checked: U64 = 6
-        if sequence_type.kind == 8 { elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1) }
+        if sequence_type.kind == 8 || sequence_type.kind == 15 || sequence_type.kind == 17 || sequence_type.kind == 18 { elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1) }
         let elem = try lower_type(d, source_state, store, current, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
         let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
@@ -1903,7 +2339,8 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
-        current = try lower_store_binding(d, loaded.state, function, body.id, statement.binding, element_value.id)
+        let copied = try lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, body.id, elem_checked, element_value.id)
+        current = try lower_store_binding(d, copied.state, function, body.id, statement.binding, copied.id)
         let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
         if !body_flow.terminated {
@@ -1927,7 +2364,15 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let callback = lower_owner_lookup(current.owners, cleanup.callback)
         if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
         let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, 0, 0, scope_value.id, 0, callback, "")
-        current = try lower_add_instr_operand(d, pushed.state, pushed.id, 0, value.id, mir_operand_instruction(), "")
+        current = pushed.state
+        var cleanup_ordinal: U64 = 0
+        if lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {
+            let domain = lower_domain_value(current, store, owner)
+            if domain == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
+            current = try lower_add_instr_operand(d, current, pushed.id, 0, domain, mir_operand_instruction(), "")
+            cleanup_ordinal = 1
+        }
+        current = try lower_add_instr_operand(d, current, pushed.id, cleanup_ordinal, value.id, mir_operand_instruction(), "")
         let scopes = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: statement.binding, value: scope_value.id))
         current = lower_with_values(current, scopes)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
@@ -2045,7 +2490,7 @@ fn lower_local_indexes(d: Domain, store: CheckStore) -> Result(LowerLocalIndex, 
         running = running + counts[owner]
         owner = owner + 1 }
     starts[owner_count] = running
-    let ids = __s0_alloc(U64, d, running)
+    var ids = __s0_alloc(U64, d, running)
     at = 0
     while at < local_count {
         let item_owner = __s0_buffer_get(LocalRec, store.locals, at).owner
@@ -2093,6 +2538,21 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     if function == 0 { return Ok(lower_invalid(state)) }
     var current = state
     var param_ordinal: U64 = 0
+    let hidden_domain = lower_has_vec(store)
+    let aliases_domain = hidden_domain && lower_owner_aliases_domain(source_state, store, owner)
+    if hidden_domain && !aliases_domain {
+        var parameter = __s0_buffer_get(MirParamRec, current.mir.params, 0)
+        var parameter_at: U64 = 0
+        while parameter_at < __s0_buffer_len(MirParamRec, current.mir.params) {
+            let candidate = __s0_buffer_get(MirParamRec, current.mir.params, parameter_at)
+            if candidate.function == function && candidate.kind == mir_param_function() && candidate.ordinal == 0 { parameter = candidate }
+            parameter_at = parameter_at + 1
+        }
+        if parameter.function != function || parameter.kind != mir_param_function() || parameter.ordinal != 0 { return Ok(lower_invalid(current)) }
+        let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.value))
+        current = lower_with_values(current, domains)
+        param_ordinal = 1
+    }
     var local_ordinal: U64 = 0
     let start = __s0_buffer_get(U64, locals.starts, owner - 1)
     let end = __s0_buffer_get(U64, locals.starts, owner)
@@ -2126,6 +2586,10 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 if local.mutable == 1 { parameter_kind = 2 }
                 let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: parameter_kind, initial: 0))
                 current = lower_with_bindings(current, bindings)
+            }
+            if aliases_domain && param_ordinal == 0 {
+                let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.id))
+                current = lower_with_values(current, domains)
             }
             param_ordinal = param_ordinal + 1
         } else {
@@ -3004,16 +3468,36 @@ fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.target != 0 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 17 { return false }
+    if annotation.kind != 5 || annotation.target != 0 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 25 { return false }
     var expected_count: U64 = 1
+    if annotation.builtin == 18 { expected_count = 0 }
     if annotation.builtin == 2 || annotation.builtin == 11 || annotation.builtin == 15 { expected_count = 3 }
     if annotation.builtin == 3 || annotation.builtin == 6 || annotation.builtin == 12 || annotation.builtin == 14 || annotation.builtin == 16 { expected_count = 2 }
     if annotation.builtin == 17 { expected_count = 3 }
+    if annotation.builtin == 19 || annotation.builtin == 20 { expected_count = 1 }
+    if annotation.builtin == 21 || annotation.builtin == 22 { expected_count = 2 }
+    if annotation.builtin >= 23 { expected_count = 3 }
     if expression.child_count != expected_count { return false }
     let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+    if annotation.builtin == 18 { return result.kind == 17 && result.arg_count == 1 }
     let first_type = lower_builtin_child_type(store, expression, 0)
     if first_type == 0 { return false }
     let first = __s0_buffer_get(CheckedTypeRec, store.types, first_type - 1)
+    if annotation.builtin >= 19 {
+        if first.arg_count != 1 { return false }
+        let element = __s0_buffer_get(U64, store.type_args, first.first_arg - 1)
+        if annotation.builtin == 19 { return first.kind == 15 && result.kind == 17 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element }
+        if annotation.builtin == 20 { return (first.kind == 8 || first.kind == 15 || first.kind == 17 || first.kind == 18) && result.kind == 1 && result.target == 9 }
+        if annotation.builtin == 21 { return first.kind == 17 && lower_builtin_child_type(store, expression, 1) == element && result.kind == 1 && result.target == 12 }
+        let index = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
+        if index.kind != 1 || index.target != 9 { return false }
+        if annotation.builtin == 22 { return (first.kind == 8 || first.kind == 15 || first.kind == 17 || first.kind == 18) && result.kind == 9 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element }
+        let hi = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 2) - 1)
+        if hi.kind != 1 || hi.target != 9 || result.arg_count != 1 || __s0_buffer_get(U64, store.type_args, result.first_arg - 1) != element { return false }
+        if annotation.builtin == 23 { return (first.kind == 8 || first.kind == 15 || first.kind == 17) && result.kind == 8 }
+        if annotation.builtin == 24 { return (first.kind == 15 || first.kind == 17) && result.kind == 18 }
+        return first.kind == 18 && result.kind == 18
+    }
     if annotation.builtin == 1 { return (first.kind == 8 || first.kind == 16) && result.kind == 1 && result.target == 9 }
     if annotation.builtin == 2 {
         let lo = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
@@ -3221,13 +3705,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 { return false }
         if item.syntax != 0 { return false }
         if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
         if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14 || item.kind == 16) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
-        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16) && item.target != 0 { return false }
+        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16 || item.kind == 17 || item.kind == 18) && item.target != 0 { return false }
         if item.arg_count == 0 && item.first_arg != 0 { return false }
         if item.arg_count != 0 {
             if item.first_arg == 0 || item.first_arg - 1 + item.arg_count > __s0_buffer_len(U64, store.type_args) { return false }
@@ -3239,7 +3723,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             }
         }
         if item.kind == 7 && item.arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).type_arity { return false }
-        if (item.kind == 8 || item.kind == 9 || item.kind == 12 || item.kind == 13 || item.kind == 15) && item.arg_count != 1 { return false }
+        if (item.kind == 8 || item.kind == 9 || item.kind == 12 || item.kind == 13 || item.kind == 15 || item.kind == 17 || item.kind == 18) && item.arg_count != 1 { return false }
         if (item.kind == 10 || item.kind == 11) && item.arg_count != 2 { return false }
         at = at + 1
     }
@@ -3338,7 +3822,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             at = at + 1
         } else {
         if item.kind == 5 {
-            if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 17 { return false }
+            if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 25 { return false }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }
@@ -3474,7 +3958,11 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                     expected_type = __s0_buffer_get(DeclTypeUseRec, store.uses, argument_use - 1).checked_type
                 }
                 let argument = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + argument_at).expression - 1)
-                if lower_type_concrete(store, expected_type) && !lower_checked_abi_equal(store, argument.checked_type, expected_type) { return false }
+                if lower_type_concrete(store, expected_type) {
+                    var compatible = lower_checked_abi_equal(store, argument.checked_type, expected_type)
+                    if annotation.kind == 1 { compatible = lower_call_borrow_compatible(store, expected_type, argument.checked_type) }
+                    if !compatible { return false }
+                }
                 argument_at = argument_at + 1
             }
             }
@@ -3518,7 +4006,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             let base_type = __s0_buffer_get(CheckedTypeRec, store.types, base.checked_type - 1)
             let index_type = __s0_buffer_get(CheckedTypeRec, store.types, index.checked_type - 1)
             var element_type: U64 = 0
-            if base_type.kind == 8 || base_type.kind == 15 { element_type = __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1) }
+            if base_type.kind == 8 || base_type.kind == 15 || base_type.kind == 17 || base_type.kind == 18 { element_type = __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1) }
             if base_type.kind == 16 {
                 let element = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
                 if element.kind == 1 && element.target == 6 { element_type = item.checked_type }
@@ -3576,7 +4064,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         var base_type = __s0_buffer_get(CheckedTypeRec, store.types, root.checked_type - 1)
         if (item.kind == 3 || item.kind == 4) {
             if item.index == 0 || item.index > __s0_buffer_len(CheckedExprRec, store.expressions) || __s0_buffer_get(CheckedExprRec, store.expressions, item.index - 1).owner != item.owner { return false }
-            if base_type.kind != 8 && base_type.kind != 15 { return false }
+            if base_type.kind != 8 && base_type.kind != 15 && base_type.kind != 17 && base_type.kind != 18 { return false }
             let element_type = __s0_buffer_get(U64, store.type_args, base_type.first_arg - 1)
             if item.kind == 3 && item.checked_type != element_type { return false }
             base_type = __s0_buffer_get(CheckedTypeRec, store.types, element_type - 1)
@@ -3704,7 +4192,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 9 {
             let sequence = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, item.expression - 1).checked_type - 1)
             let binding_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type - 1)
-            if sequence.kind == 8 {
+            if sequence.kind == 8 || sequence.kind == 15 || sequence.kind == 17 || sequence.kind == 18 {
                 if __s0_buffer_get(LocalRec, store.locals, item.binding - 1).checked_type != __s0_buffer_get(U64, store.type_args, sequence.first_arg - 1) { return false }
             } else { if sequence.kind != 16 || binding_type.kind != 1 || binding_type.target != 6 { return false } }
         }

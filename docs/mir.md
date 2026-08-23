@@ -73,7 +73,7 @@ SpanId        (reserved)
 
 `DomainId`, `CleanupId`, and `SpanId` are reserved parts of the identity vocabulary and are not yet used by operations. Printed ordering must not depend on host-language map iteration, pointer values, allocation addresses, or traversal races. Within a function, value IDs are assigned in textual or construction order: function parameters, then per block in order its parameters, instruction results, and switch case bindings.
 
-### Independent Alder MIR 3 encoding
+### Independent Alder MIR 4 encoding
 
 The bootstrap compiler's independent flat model in `compiler/src/mir_model.al`
 uses external 1-based `U64` identities so that zero uniformly means absent. A
@@ -84,7 +84,7 @@ in this order: `unit`, `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
 terminator kinds retain the exact zero-based numeric values of the Go model;
 the Alder-only type-part, parameter, and flattened-operand kinds are explicitly
 numbered by named functions in that file. The independent model's format
-version is exactly 3.
+version is exactly 4.
 
 Function-local Go IDs are encoded as ordinal + 1. Consumers resolve a block,
 value, or local by scanning its flat buffer for the owning function and the
@@ -131,7 +131,7 @@ constructors: they neither verify nor repair malformed raw records, which must
 remain observable for deterministic verifier rejection tests.
 
 The bootstrap compiler's Alder textual printer implements this consumer
-validation and emits the canonical MIR 3 spelling directly from the independent
+validation and emits the canonical MIR 4 spelling directly from the independent
 store. It does not read source files or retain host paths. Its float output uses
 a narrow host formatting primitive with the same finite, shortest-round-trip
 contract as Go's `strconv.FormatFloat(value, 'g', -1, 64)`; non-finite constant
@@ -151,6 +151,7 @@ enum(TypeId)
 option(TypeId)
 result(TypeId, TypeId)
 slice(TypeId)
+vec(TypeId)
 array(TypeId, Length)
 string
 bytes
@@ -169,6 +170,12 @@ table_mut_view(TypeId)
 ```
 
 The canonical primitives occupy fixed `TypeId` slots 0 through 11 in every module. Named aggregates and enums are table entries; anonymous structural types are interned by shape, so identical textual types share one `TypeId`. The singleton types (`domain_handle`, `domain_mark`, `cleanup_scope`, `cleanup_id`) each intern to one entry.
+
+`vec(T)` is an owned growable vector represented by `{data, len, capacity}`. `vec.new vec(T)` creates an empty value. `vec.construct.checked storage, len, capacity else edge` validates `len <= capacity <= storage.len`; `vec.grow.checked vec, domain, capacity else edge` reallocates with checked sizing. `vec.len`, `vec.capacity`, `vec.storage`, `vec.as_slice`, and `vec.as_mut_slice` expose its bounds and views. `copy_to_domain` recursively copies vector elements and sets the copied capacity to its length.
+
+`array.as_slice` converts an array value or a checked reference to an array into
+an immutable contiguous view. Source-level mutable-view exclusivity remains a
+frontend invariant; the C representation is shared with `slice(T)`.
 
 `safe_ref(T)` and `safe_mut(T)` are checked references associated with a valid storage or table access scope. `raw_ptr(T)` may only be produced or consumed by operations explicitly marked unsafe or by narrowly defined runtime intrinsics. `string` and `bytes` are distinct owned byte-sequence value types; `string` constants must contain valid UTF-8, while `bytes` constants preserve arbitrary bytes. The private source-bootstrap `__s0_String` may still lower to `slice(u8)` until the M7.3 migration gate, but public `String` and `Bytes` do not.
 
@@ -376,9 +383,9 @@ MIR verification cannot prove arbitrary foreign behavior. It verifies only that 
 
 ## Textual MIR
 
-The current textual format is `mir 3`; the parser and verifier retain legacy
-`mir 1` and `mir 2` support. MIR 2 adds the `panic` terminator and MIR 3 adds
-`alloc.checked`, so use of either operation under an older header is rejected
+The current textual format is `mir 4`; the parser and verifier retain legacy
+`mir 1`, `mir 2`, and `mir 3` support. MIR 2 adds the `panic` terminator, MIR 3
+adds `alloc.checked`, and MIR 4 adds Vec, so use under an older header is rejected
 rather than silently changing the old format. Function headers are predeclared
 in textual order before function bodies are parsed, so calls and cleanup
 callbacks may name the current function or any later function; `FunctionId`
@@ -498,8 +505,8 @@ Diagnostics must be stable and must identify the relevant function, block, opera
 ## Versioning
 
 Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
-format; `mir 2` adds only valueless `panic`; and current `mir 3` adds
-`alloc.checked`.
+format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`; and
+current `mir 4` adds `vec(T)` and the minimal Vec operations.
 Incompatible changes must use a new version and update:
 
 - this document;

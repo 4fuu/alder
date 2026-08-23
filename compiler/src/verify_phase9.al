@@ -1,5 +1,5 @@
 // Phase 9 permits values whose type recursively contains raw_ptr only at the
-// two explicit unsafe boundaries owned by MIR 3: unsafe FFI arguments and a
+// two explicit unsafe MIR boundaries: unsafe FFI arguments and a
 // function return/fail operand. The complete V4 use inventory keeps places,
 // edge arguments, aggregates, safe calls, and nested raw values on one stable
 // declaration-ordered path.

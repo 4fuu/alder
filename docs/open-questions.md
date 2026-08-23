@@ -62,7 +62,10 @@ Review and freeze exact method names and error payloads one coherent module at
 a time; implementation may not invent a public surface absent from that
 snapshot. Keep the selected owned/view/resource categories and module scope.
 Pre-1.0 spelling may change only by updating the snapshot, examples, and
-callers together.
+callers together. The Milestone 7.1 `core.collection` and `core.slice` surfaces
+are resolved by their linked v1 snapshots in
+[Standard Library](standard-library.md); this question remains open only for
+module families without a versioned snapshot.
 
 ### Performance budgets
 

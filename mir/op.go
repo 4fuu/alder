@@ -77,6 +77,15 @@ const (
 	OpBorrow
 	OpBorrowMut
 	OpArrayIndexChecked
+	OpVecNew
+	OpVecConstructChecked
+	OpVecGrowChecked
+	OpVecLen
+	OpVecCapacity
+	OpVecStorage
+	OpVecAsSlice
+	OpVecAsMutSlice
+	OpArrayAsSlice
 )
 
 // String returns the canonical textual name of the operation.
@@ -194,6 +203,24 @@ func (k OpKind) String() string {
 		return "borrow_mut"
 	case OpArrayIndexChecked:
 		return "array.index.checked"
+	case OpVecNew:
+		return "vec.new"
+	case OpVecConstructChecked:
+		return "vec.construct.checked"
+	case OpVecGrowChecked:
+		return "vec.grow.checked"
+	case OpVecLen:
+		return "vec.len"
+	case OpVecCapacity:
+		return "vec.capacity"
+	case OpVecStorage:
+		return "vec.storage"
+	case OpVecAsSlice:
+		return "vec.as_slice"
+	case OpVecAsMutSlice:
+		return "vec.as_mut_slice"
+	case OpArrayAsSlice:
+		return "array.as_slice"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -215,6 +242,8 @@ func (k OpKind) HasFailEdge() bool {
 	case OpAllocChecked, OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked,
 		OpIntShlChecked, OpIntShrChecked, OpSliceIndexChecked, OpSliceRangeChecked,
 		OpEnumPayloadChecked, OpArrayIndexChecked:
+		return true
+	case OpVecConstructChecked, OpVecGrowChecked:
 		return true
 	}
 	return false

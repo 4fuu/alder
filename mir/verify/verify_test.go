@@ -86,6 +86,13 @@ func TestRejectFixtures(t *testing.T) {
 // cannot express (malformed value definitions, missing failure edges, result
 // binding mismatches).
 func TestAPIRejections(t *testing.T) {
+	legacyVec := mir.NewModule()
+	legacyVec.FormatVersion = mir.AllocCheckedFormatVersion
+	legacyVec.Vec(mir.TypeU8)
+	if errs := Module(legacyVec); !containsMsg(errs, "vec type requires MIR format version 4") {
+		t.Errorf("legacy vec type not rejected:\n%s", Errors(errs).String())
+	}
+
 	// Checked operation without a failure edge.
 	m := mir.NewModule()
 	f := m.AddFunction("f", nil, mir.TypeI64)

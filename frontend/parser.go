@@ -593,6 +593,10 @@ func (p *parser) parseType() (TypeExpr, error) {
 		return &SliceType{P: tokenPos(t), Elem: elem}, nil
 	}
 	if t.kind != tokIdent || t.kw != kwNone {
+		if t.kind == tokInt {
+			p.advance()
+			return &PrimType{P: tokenPos(t), Name: t.text}, nil
+		}
 		return nil, p.errf(t, "expected a type, got %s", t.describe())
 	}
 	name := p.advance()
@@ -774,6 +778,31 @@ func (p *parser) parsePostfix() (Expr, error) {
 func (p *parser) parsePrimary() (Expr, error) {
 	t := p.cur()
 	switch {
+	case t.kind == tokPunct && t.text == "[":
+		p.advance()
+		p.exprDepth++
+		var elems []Expr
+		if p.cur().text != "]" {
+			for {
+				e, err := p.parseExpr()
+				if err != nil {
+					return nil, err
+				}
+				elems = append(elems, e)
+				if p.cur().text != "," {
+					break
+				}
+				p.advance()
+				if p.cur().text == "]" {
+					break
+				}
+			}
+		}
+		if err := p.expectPunct("]"); err != nil {
+			return nil, err
+		}
+		p.exprDepth--
+		return &ArrayLit{P: tokenPos(t), Elems: elems}, nil
 	case t.kind == tokInt:
 		p.advance()
 		value, overflow := parseIntLiteral(t.text)

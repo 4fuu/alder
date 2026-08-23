@@ -19,6 +19,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	runPreferredResultNameCollisionConformance(t, exe)
 	runMethodLowerConformance(t, exe)
 	t.Run("arrays", func(t *testing.T) { runArrayLowerConformance(t, exe) })
+	t.Run("m71-collections", func(t *testing.T) { runM71LowerConformance(t, exe) })
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {
@@ -702,6 +703,183 @@ func runArrayCgenBehavior(t *testing.T, module *mir.Module, coreExe string, file
 	bounds := compile("array-bounds", fmt.Sprintf("\nint main(void) { (void)alder_fn_out_of_bounds_%d(); return 0; }\n", outOfBounds))
 	if output, err := conformanceCommand(bounds).CombinedOutput(); err == nil {
 		t.Fatalf("out-of-bounds array access succeeded\n%s", output)
+	}
+}
+
+func runM71LowerConformance(t *testing.T, exe string) {
+	t.Helper()
+	source := `fn first(T: type, values: [T]) -> T { return values[0] }
+fn clone_vec(T: type, values: Vec(T)) -> Vec(T) { return values }
+fn main() -> I32 {
+    let seed: Array(U64, 2) = [1, 2]
+    var values: Vec(U64) = Vec.from_array(U64, seed)
+    values.push(3)
+    values.push(5)
+    values.push(8)
+    if values.len() != 5 { return 1 }
+
+    var copied: Vec(U64) = clone_vec(values)
+    copied[0] = 13
+    if values[0] != 1 || copied[0] != 13 { return 2 }
+
+    var view_sum: U64 = 0
+    {
+        let middle: [U64] = values.slice(1, 4)
+        view_sum = middle[0] + middle[2]
+    }
+    {
+        var head: MutSlice(U64) = values.slice_mut(0, 2)
+        head[0] = 21
+        {
+            var one: MutSlice(U64) = head.subview(1, 2)
+            one[0] = 34
+        }
+    }
+    if view_sum != 7 || first(values) != 21 || values[1] != 34 { return 3 }
+
+    let present = values.get(2)
+    let found = match present {
+        Some(value) => value
+        None => 0
+    }
+    let absent = values.get(99)
+    let fallback = match absent {
+        Some(value) => value
+        None => 55
+    }
+    if found != 3 || fallback != 55 { return 4 }
+
+    var array: Array(U64, 4) = [2, 3, 5, 7]
+    var before: U64 = 0
+    {
+        let middle: [U64] = array.slice(1, 3)
+        before = first(middle)
+    }
+    {
+        var tail: MutSlice(U64) = array.slice_mut(2, 4)
+        tail[0] = 11
+        {
+            var last: MutSlice(U64) = tail.subview(1, 2)
+            last[0] = 13
+        }
+    }
+    if before != 3 || array[2] != 11 || array[3] != 13 || first(array) != 2 { return 5 }
+
+    var empty: Vec(U64) = Vec.new(U64)
+    empty.push(55)
+    if empty.len() != 1 || empty[0] != 55 { return 6 }
+
+    var nested_seed: Vec(U64) = Vec.from_array(U64, [89])
+    var nested: Vec(Vec(U64)) = Vec.from_array(Vec(U64), [nested_seed])
+    var nested_copy: Vec(Vec(U64)) = clone_vec(nested)
+    var replacement: Vec(U64) = Vec.from_array(U64, [144])
+    nested_copy[0] = replacement
+    var nested_original: Vec(U64) = nested[0]
+    var nested_changed: Vec(U64) = nested_copy[0]
+    if nested_original[0] != 89 || nested_changed[0] != 144 { return 7 }
+    return 0
+}
+fn out_of_bounds() -> U64 {
+    var values: Vec(U64) = Vec.new(U64)
+    values.push(1)
+    return values[1]
+}
+`
+	files := map[string]string{"collections.al": source}
+	first := runLowerCompiler(t, exe, files, []string{"collections.al"})
+	second := runLowerCompiler(t, exe, files, []string{"collections.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("M7.1 collection lowering changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse M7.1 MIR: %v\n%s", err, first)
+	}
+	if module.FormatVersion != mir.VecFormatVersion {
+		t.Fatalf("M7.1 MIR version = %d, want %d", module.FormatVersion, mir.VecFormatVersion)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify M7.1 MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+
+	counts := map[mir.OpKind]int{}
+	for _, function := range module.Functions {
+		if len(function.Params) == 0 || module.Types[function.Params[0].Type].Kind != mir.TypeDomainHandle {
+			t.Fatalf("M7.1 function %s has no hidden domain parameter", function.Name)
+		}
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instrs {
+				counts[instruction.Op]++
+			}
+		}
+	}
+	for _, op := range []mir.OpKind{
+		mir.OpVecNew,
+		mir.OpVecConstructChecked,
+		mir.OpVecGrowChecked,
+		mir.OpVecLen,
+		mir.OpVecCapacity,
+		mir.OpVecStorage,
+		mir.OpVecAsSlice,
+		mir.OpVecAsMutSlice,
+		mir.OpArrayAsSlice,
+		mir.OpSliceRangeChecked,
+		mir.OpCopyToDomain,
+		mir.OpIntMulChecked,
+	} {
+		if counts[op] == 0 {
+			t.Fatalf("M7.1 MIR has no %s instruction\n%s", op, first)
+		}
+	}
+	runM71CgenBehavior(t, module, exe, files)
+}
+
+func runM71CgenBehavior(t *testing.T, module *mir.Module, coreExe string, files map[string]string) {
+	t.Helper()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	generated := runResourceCgenCompiler(t, coreExe, files, []string{"collections.al"})
+	if second := runResourceCgenCompiler(t, coreExe, files, []string{"collections.al"}); !bytes.Equal(generated, second) {
+		t.Fatal("Alder-written M7.1 C changed across processes")
+	}
+	outOfBounds, ok := module.Function("out_of_bounds")
+	if !ok {
+		t.Fatal("M7.1 MIR has no out_of_bounds function")
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("M7.1 MIR has no main function")
+	}
+	dir := t.TempDir()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compile := func(name, driver string) string {
+		t.Helper()
+		file := filepath.Join(dir, name+".c")
+		program := filepath.Join(dir, name+".exe")
+		text := append(append([]byte(nil), generated...), []byte(driver)...)
+		if err := os.WriteFile(file, text, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+		if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("strict C11 compile of %s: %v\n%s", name, err, output)
+		}
+		return program
+	}
+	successDriver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; int32_t status = alder_fn_main_%d(&root); alder_domain_destroy(&root); return status; }\n", mainID)
+	success := compile("m71-success", successDriver)
+	if output, err := conformanceCommand(success).CombinedOutput(); err != nil {
+		t.Fatalf("run M7.1 collection behavior: %v\n%s", err, output)
+	}
+	boundsDriver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; (void)alder_fn_out_of_bounds_%d(&root); alder_domain_destroy(&root); return 0; }\n", outOfBounds)
+	bounds := compile("m71-bounds", boundsDriver)
+	if output, err := conformanceCommand(bounds).CombinedOutput(); err == nil {
+		t.Fatalf("out-of-bounds Vec access succeeded\n%s", output)
 	}
 }
 

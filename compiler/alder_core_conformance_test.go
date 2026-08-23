@@ -140,11 +140,21 @@ fn lower_cgen_status(wrote: Bool) -> I32 {
     if wrote { return 0 }
     return 5
 }
+fn lower_cgen_verified(d: Domain, mir: MirStore, verified: MirVerifyCompleteOutput) -> I32 {
+    if !verified.complete {
+        if emit_complete(71, verified) { return 5 }
+        return 3
+    }
+    return match cgen_generate_verified(d, mir, verified) {
+        Err(error) => 3
+        Ok(wrote) => lower_cgen_status(wrote)
+    }
+}
 fn lower_emit(d: Domain, mir: MirStore) -> I32 {
     if host_path_is(0, "!alder-core-cgen-resources") {
-        return match cgen_generate(d, mir, 3, false) {
+        return match mir_verify_complete(d, mir, 4, false) {
             Err(error) => 3
-            Ok(wrote) => lower_cgen_status(wrote)
+            Ok(verified) => lower_cgen_verified(d, mir, verified)
         }
     }
     return lower_print(mir)

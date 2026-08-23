@@ -10,8 +10,10 @@ const (
 	PanicFormatVersion = 2
 	// AllocCheckedFormatVersion introduced recoverably fallible allocation.
 	AllocCheckedFormatVersion = 3
+	// VecFormatVersion introduced vec(T) and its minimal operations.
+	VecFormatVersion = 4
 	// CurrentFormatVersion is the format emitted by newly constructed modules.
-	CurrentFormatVersion = AllocCheckedFormatVersion
+	CurrentFormatVersion = VecFormatVersion
 )
 
 // Module is a complete MIR unit: type declarations, imported C declarations,
@@ -198,6 +200,7 @@ type Instr struct {
 	Index     ValueId
 	Lo        ValueId
 	Hi        ValueId
+	Capacity  ValueId
 	EnumValue ValueId
 	Variant   string
 	Payload   ValueId // NoValue when the variant has a unit payload

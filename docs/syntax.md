@@ -317,8 +317,11 @@ String interpolation uses `Display`. An array literal `[a, b]` produces
 `Array(T, 2)` after checking every element against one type. An empty array
 literal requires an expected `Array(T, 0)` type. Arrays and vectors borrow as
 `[T]` for a call; constructing an owned vector remains explicit, for example
-`Vec.from([1, 2, 3])`. Raw strings, character literals, user-defined suffixes,
-and collection comprehensions are deferred.
+`Vec.from_array(U64, [1, 2, 3])`. `Vec.new(T)` names the element type when no
+value argument can infer it. The exact implemented collection and view calls
+are frozen in the [`core.collection`](api/core.collection-v1.md) and
+[`core.slice`](api/core.slice-v1.md) snapshots. Raw strings, character
+literals, user-defined suffixes, and collection comprehensions are deferred.
 
 ## Expressions and precedence
 

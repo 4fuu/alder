@@ -221,6 +221,53 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return m.Slice(elem), true
+	case OpVecNew:
+		if !m.ValidType(in.TypeOp) || m.Types[in.TypeOp].Kind != TypeVec {
+			return NoType, false
+		}
+		return in.TypeOp, true
+	case OpVecConstructChecked:
+		elem, ok := m.operandElemType(f, in.Slice)
+		if !ok || !m.isU64(f, in.Lo) || !m.isU64(f, in.Capacity) {
+			return NoType, false
+		}
+		return m.Vec(elem), true
+	case OpVecGrowChecked:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec || !m.isHandleType(f, in.Domain) || !m.isU64(f, in.Capacity) {
+			return NoType, false
+		}
+		return t, true
+	case OpVecLen, OpVecCapacity:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec {
+			return NoType, false
+		}
+		return TypeU64, true
+	case OpVecStorage, OpVecAsMutSlice:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec {
+			return NoType, false
+		}
+		return m.SafeMut(m.Types[t].Elem), true
+	case OpVecAsSlice:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec {
+			return NoType, false
+		}
+		return m.Slice(m.Types[t].Elem), true
+	case OpArrayAsSlice:
+		t, ok := f.ValueType(in.Array)
+		if !ok || !m.ValidType(t) {
+			return NoType, false
+		}
+		if m.Types[t].Kind == TypeSafeRef || m.Types[t].Kind == TypeSafeMut {
+			t = m.Types[t].Elem
+		}
+		if !m.ValidType(t) || m.Types[t].Kind != TypeArray {
+			return NoType, false
+		}
+		return m.Slice(m.Types[t].Elem), true
 	case OpEnumPayloadChecked:
 		t, ok := f.ValueType(in.EnumValue)
 		if !ok {

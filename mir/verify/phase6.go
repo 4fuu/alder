@@ -441,7 +441,14 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		merge(in.EnumValue)
 	case mir.OpSliceIndexChecked, mir.OpSliceRangeChecked:
 		merge(in.Slice)
+	case mir.OpVecConstructChecked, mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
+		merge(in.Slice)
+	case mir.OpVecGrowChecked:
+		merge(in.Domain)
+		merge(in.Slice)
 	case mir.OpArrayIndexChecked:
+		merge(in.Array)
+	case mir.OpArrayAsSlice:
 		merge(in.Array)
 	case mir.OpTableLookup, mir.OpTableLookupMut:
 		merge(in.Table)
@@ -470,7 +477,7 @@ func isDomainType(m *mir.Module, t mir.TypeId) bool {
 }
 func typeContainsRef(m *mir.Module, t mir.TypeId) bool {
 	return containsKind(m, t, mir.TypeSafeRef) || containsKind(m, t, mir.TypeSafeMut) ||
-		containsKind(m, t, mir.TypeSlice) || containsKind(m, t, mir.TypeTable)
+		containsKind(m, t, mir.TypeSlice) || containsKind(m, t, mir.TypeVec) || containsKind(m, t, mir.TypeTable)
 }
 func typeRequiresLocalStore(m *mir.Module, t mir.TypeId) bool {
 	for _, kind := range []mir.TypeKind{

@@ -113,7 +113,7 @@ func TestCompileOutputs(t *testing.T) {
 	root := t.TempDir()
 	sourceFile(t, root, "fn main() -> I32 { return 0 }\n")
 	code, out, errOut := invoke(t, root, "compile", "--emit=mir", "src/main.al")
-	if code != 0 || errOut != "" || !strings.Contains(out, "mir 3\n") {
+	if code != 0 || errOut != "" || !strings.Contains(out, "mir 4\n") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	code, out, errOut = invoke(t, root, "compile", "--format=json", "--emit=c", "-o", "out.c", "src/main.al")

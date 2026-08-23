@@ -2,7 +2,7 @@ fn mir_vop_produces(op: U64) -> Bool {
     return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end())
 }
 fn mir_vop_checked(op: U64) -> Bool {
-    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked()
+    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked() || op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked()
 }
 fn mir_vop_required_mask(op: U64) -> U64 {
     // bits: a=1, b=2, c=4, place=8, type=16, target=32, name=64.
@@ -26,6 +26,10 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op >= mir_op_int_trunc() && op <= mir_op_float_from_int() { return 17 }
     if op == mir_op_const_get() { return 64 }
     if op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
+    if op == mir_op_vec_new() { return 16 }
+    if op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() { return 7 }
+    if op >= mir_op_vec_len() && op <= mir_op_vec_as_mut_slice() { return 1 }
+    if op == mir_op_array_as_slice() { return 1 }
     return 0
 }
 // Flat (kind, owner) key for operand ordinal counting. Zero means the
@@ -83,9 +87,10 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
         } else {
-            if t.kind > mir_type_kind_bytes() || t.kind == mir_type_kind_primitive() {
-                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_bytes(), t.kind, 0))
+            if t.kind > mir_type_kind_vec() || t.kind == mir_type_kind_primitive() {
+                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_vec(), t.kind, 0))
             } else {
+                if t.kind == mir_type_kind_vec() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 4, version, 0)) }
                 let named = t.name_start != t.name_end
                 let named_kind = t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum()
                 if (named_kind && !named) || (!named_kind && named) || (named && !mir_vname_valid(store, t.name_start, t.name_end, true)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, id, id, 0, 0, 0)) }
@@ -1017,7 +1022,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_array_index_checked() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_array_index_checked(), i.op, 0)) } else {
+        if i.op > mir_op_array_as_slice() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_array_as_slice(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false
@@ -1068,6 +1073,7 @@ scan = scan + 1 }
                 if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, 1, 0, i.result)) } else { let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if v.def_kind != mir_value_def_instruction() || v.block != i.block || v.item != i.ordinal + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, i.ordinal + 1, v.item, i.result)) } } }
             if i.op == mir_op_alloc_checked() && version < 3 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 3, version, 0)) }
+            if i.op >= mir_op_vec_new() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 4, version, 0)) }
         }
         at = at + 1
     }

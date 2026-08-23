@@ -22,6 +22,7 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     return cgen_put_u64(d, out, id - 1) }
     if t.kind == mir_type_kind_string() { return cgen_put(d, writer, "AlderString") }
     if t.kind == mir_type_kind_bytes() { return cgen_put(d, writer, "AlderBytes") }
+    if t.kind == mir_type_kind_vec() { return cgen_put(d, writer, "AlderVec") }
     if t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() { return cgen_put(d, writer, "AlderSlice") }
     if t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { return cgen_put(d, writer, "void *") }
     if t.kind == mir_type_kind_function() { let out = try cgen_put(d, writer, "AlderFnTy")

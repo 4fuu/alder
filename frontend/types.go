@@ -16,6 +16,9 @@ const (
 	tResult
 	tMap
 	tBuffer
+	tArray
+	tVec
+	tMutSlice
 	tS0Error
 	tStruct
 	tEnum
@@ -70,7 +73,8 @@ type Type struct {
 	decl *typeDecl // tStruct, tEnum
 	args []*Type   // monomorphization arguments (tStruct, tEnum)
 
-	name string // type parameter name (tTypeParam)
+	name   string // type parameter name (tTypeParam)
+	length uint64 // tArray
 }
 
 // prim returns the primitive type.
@@ -87,7 +91,7 @@ func (t *Type) concrete() bool {
 		return false
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tPtr, tOption, tBuffer:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer, tArray, tVec, tMutSlice:
 		return t.elem.concrete()
 	case tResult:
 		return t.ok.concrete() && t.err.concrete()
@@ -163,6 +167,12 @@ func (t *Type) display() string {
 		return primNames[t.prim]
 	case tSlice:
 		return "[" + t.elem.display() + "]"
+	case tArray:
+		return "Array(" + t.elem.display() + ", " + strconv.FormatUint(t.length, 10) + ")"
+	case tVec:
+		return "Vec(" + t.elem.display() + ")"
+	case tMutSlice:
+		return "MutSlice(" + t.elem.display() + ")"
 	case tString:
 		return "String"
 	case tBytes:
@@ -229,6 +239,12 @@ func (t *Type) mangledName() string {
 		return strings.Join(parts, ".")
 	case tSlice:
 		return "Slice.c1." + t.elem.mangledName()
+	case tArray:
+		return "Array.c2." + t.elem.mangledName() + "." + strconv.FormatUint(t.length, 10)
+	case tVec:
+		return "Vec.c1." + t.elem.mangledName()
+	case tMutSlice:
+		return "MutSlice.c1." + t.elem.mangledName()
 	case tString:
 		return "String"
 	case tBytes:
@@ -299,9 +315,9 @@ func (t *Type) containsSlice() bool {
 		return false
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tMap, tBuffer, tDomain, tDomainMark, tCleanupScope, tCleanupID, tPtr:
+	case tSlice, tMutSlice, tAlloc, tMap, tBuffer, tDomain, tDomainMark, tCleanupScope, tCleanupID, tPtr:
 		return true
-	case tOption:
+	case tArray, tVec, tOption:
 		return t.elem.containsSlice()
 	case tResult:
 		return t.ok.containsSlice() || t.err.containsSlice()
@@ -325,11 +341,86 @@ func (t *Type) containsSlice() bool {
 	return false
 }
 
+// containsScopedView reports whether the type contains an immutable or mutable
+// view at any depth. Such capabilities cannot be returned or stored in an
+// ordinary aggregate during M7.1.
+func (t *Type) containsScopedView() bool {
+	return t.containsScopedViewSeen(make(map[*typeDecl]bool))
+}
+
+func (t *Type) containsScopedViewSeen(seen map[*typeDecl]bool) bool {
+	if t == nil {
+		return false
+	}
+	switch t.kind {
+	case tSlice, tMutSlice:
+		return true
+	case tAlloc, tPtr, tOption, tBuffer, tArray, tVec:
+		return t.elem.containsScopedViewSeen(seen)
+	case tResult:
+		return t.ok.containsScopedViewSeen(seen) || t.err.containsScopedViewSeen(seen)
+	case tMap:
+		return t.key.containsScopedViewSeen(seen) || t.val.containsScopedViewSeen(seen)
+	case tStruct, tEnum:
+		if seen[t.decl] {
+			return false
+		}
+		seen[t.decl] = true
+		defer delete(seen, t.decl)
+		bindings := structBindings(t)
+		for _, field := range t.decl.fields {
+			if substType(field, bindings).containsScopedViewSeen(seen) {
+				return true
+			}
+		}
+		for _, variant := range t.decl.variants {
+			if variant.payload != nil && substType(variant.payload, bindings).containsScopedViewSeen(seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// containsVec reports whether copying the type requires an eager Vec deep
+// copy. Immutable String and Bytes descriptors remain copy-trivial because
+// their backing storage cannot be mutated observationally.
+func (t *Type) containsVec() bool {
+	if t == nil {
+		return false
+	}
+	switch t.kind {
+	case tVec:
+		return true
+	case tArray, tSlice, tMutSlice, tAlloc, tPtr, tOption, tBuffer:
+		return t.elem.containsVec()
+	case tResult:
+		return t.ok.containsVec() || t.err.containsVec()
+	case tMap:
+		return t.key.containsVec() || t.val.containsVec()
+	case tStruct:
+		bindings := structBindings(t)
+		for _, field := range t.decl.fields {
+			if substType(field, bindings).containsVec() {
+				return true
+			}
+		}
+	case tEnum:
+		bindings := structBindings(t)
+		for _, variant := range t.decl.variants {
+			if variant.payload != nil && substType(variant.payload, bindings).containsVec() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // copyTrivial reports whether a value of the type can be stored through a
 // dereference place under the current MIR rules: no slices, references, or tables
 // anywhere inside.
 func (t *Type) copyTrivial() bool {
-	return !t.containsSlice()
+	return !t.containsSlice() && !t.containsVec()
 }
 
 // mapKeyOK reports whether the type may be a Map key: unsigned integers,
@@ -375,8 +466,10 @@ func typeEqual(a, b *Type) bool {
 	switch a.kind {
 	case tPrim:
 		return a.prim == b.prim
-	case tSlice, tAlloc, tPtr, tOption, tBuffer:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer, tVec, tMutSlice:
 		return typeEqual(a.elem, b.elem)
+	case tArray:
+		return a.length == b.length && typeEqual(a.elem, b.elem)
 	case tResult:
 		return typeEqual(a.ok, b.ok) && typeEqual(a.err, b.err)
 	case tMap:
@@ -413,6 +506,9 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 		return true
 	}
 	if pattern.kind != actual.kind {
+		if pattern.kind == tSlice && (actual.kind == tArray || actual.kind == tVec) {
+			return unify(pattern.elem, actual.elem, out)
+		}
 		if pattern.kind == tS0String && actual.kind == tSlice && actual.elem.kind == tPrim && actual.elem.prim == pU8 || actual.kind == tS0String && pattern.kind == tSlice && pattern.elem.kind == tPrim && pattern.elem.prim == pU8 {
 			return true
 		}
@@ -421,8 +517,10 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 	switch pattern.kind {
 	case tPrim:
 		return pattern.prim == actual.prim
-	case tSlice, tAlloc, tPtr, tOption, tBuffer:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer, tVec, tMutSlice:
 		return unify(pattern.elem, actual.elem, out)
+	case tArray:
+		return pattern.length == actual.length && unify(pattern.elem, actual.elem, out)
 	case tResult:
 		return unify(pattern.ok, actual.ok, out) && unify(pattern.err, actual.err, out)
 	case tMap:
@@ -459,6 +557,8 @@ func substType(t *Type, bindings map[string]*Type) *Type {
 	switch t.kind {
 	case tSlice:
 		return &Type{kind: tSlice, elem: substType(t.elem, bindings)}
+	case tArray, tVec, tMutSlice:
+		return &Type{kind: t.kind, elem: substType(t.elem, bindings), length: t.length}
 	case tAlloc:
 		return &Type{kind: tAlloc, elem: substType(t.elem, bindings)}
 	case tOption:

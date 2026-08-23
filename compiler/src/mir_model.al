@@ -1,4 +1,4 @@
-// Independent MIR 3 storage model. Every external identity is a 1-based U64;
+// Independent MIR 4 storage model. Every external identity is a 1-based U64;
 // zero means absent. A nonzero module-table ID converts to a Go MIR ID by
 // subtracting one. Function-local block, value, and local IDs similarly store
 // ordinal + 1 and are resolved by scanning the flat buffer for the owning
@@ -7,7 +7,7 @@
 // Builders append but do not validate or normalize records, so rejection tests
 // may construct malformed raw stores.
 
-fn mir_format_version() -> U64 { return 3 }
+fn mir_format_version() -> U64 { return 4 }
 
 // TypeKind values match mir/types.go exactly. Primitive Type IDs are external
 // IDs 1..12 in the fixed Go order unit, bool, i8, i16, i32, i64, u8, u16,
@@ -33,6 +33,7 @@ fn mir_type_kind_table_mut_view() -> U64 { return 17 }
 fn mir_type_kind_array() -> U64 { return 18 }
 fn mir_type_kind_string() -> U64 { return 19 }
 fn mir_type_kind_bytes() -> U64 { return 20 }
+fn mir_type_kind_vec() -> U64 { return 21 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }
@@ -126,6 +127,15 @@ fn mir_op_ffi_call_unsafe() -> U64 { return 52 }
 fn mir_op_borrow() -> U64 { return 53 }
 fn mir_op_borrow_mut() -> U64 { return 54 }
 fn mir_op_array_index_checked() -> U64 { return 55 }
+fn mir_op_vec_new() -> U64 { return 56 }
+fn mir_op_vec_construct_checked() -> U64 { return 57 }
+fn mir_op_vec_grow_checked() -> U64 { return 58 }
+fn mir_op_vec_len() -> U64 { return 59 }
+fn mir_op_vec_capacity() -> U64 { return 60 }
+fn mir_op_vec_storage() -> U64 { return 61 }
+fn mir_op_vec_as_slice() -> U64 { return 62 }
+fn mir_op_vec_as_mut_slice() -> U64 { return 63 }
+fn mir_op_array_as_slice() -> U64 { return 64 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }
@@ -150,7 +160,8 @@ fn mir_edge_else() -> U64 { return 2 }
 
 // Type kinds mirror mir/types.go: primitive, aggregate, enum, option, result,
 // slice, safe_ref, safe_mut, raw_ptr, function, domain_handle, domain_mark,
-// cleanup_scope, cleanup_id, table, id, table_view, table_mut_view, array.
+// cleanup_scope, cleanup_id, table, id, table_view, table_mut_view, array,
+// string, bytes, and vec.
 type MirTypeRec {
     kind: U64
     name_start: U64

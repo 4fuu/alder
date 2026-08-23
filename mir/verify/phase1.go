@@ -12,7 +12,7 @@ import (
 func phase1Integrity(m *mir.Module) []Error {
 	var errs []Error
 	if m.FormatVersion < mir.LegacyFormatVersion || m.FormatVersion > mir.CurrentFormatVersion {
-		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3)", m.FormatVersion)})
+		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3, 4)", m.FormatVersion)})
 	}
 	if len(m.Types) < int(mir.NumPrimitiveTypes) {
 		errs = append(errs, Error{Msg: fmt.Sprintf("type table has %d entries; expected at least %d canonical primitive slots", len(m.Types), mir.NumPrimitiveTypes)})
@@ -29,13 +29,16 @@ func phase1Integrity(m *mir.Module) []Error {
 			}
 			continue
 		}
-		if t.Kind > mir.TypeBytes {
+		if t.Kind > mir.TypeVec {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("unknown type kind %d", t.Kind)})
 			continue
 		}
 		if t.Kind == mir.TypePrimitive {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "primitive type appears outside the canonical primitive slots"})
 			continue
+		}
+		if t.Kind == mir.TypeVec && m.FormatVersion < mir.VecFormatVersion {
+			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "vec type requires MIR format version 4"})
 		}
 		if t.Name == "" {
 			if t.Kind == mir.TypeAggregate || t.Kind == mir.TypeEnum {
@@ -334,7 +337,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpArrayIndexChecked {
+	if in.Op > mir.OpArrayAsSlice {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -391,6 +394,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 		errs = append(errs, Error{Loc: loc, Msg: "alloc.checked requires MIR format version 3"})
 	}
 	for _, op := range []mir.OpKind{mir.OpAlloc, mir.OpAllocChecked, mir.OpTableCreate, mir.OpEnumConstruct,
+		mir.OpVecNew,
 		mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
 		mir.OpIntFromFloat, mir.OpFloatFromInt} {
 		if in.Op == op && !m.ValidType(in.TypeOp) {
@@ -457,6 +461,18 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 		require(in.Slice, "slice operand")
 		require(in.Lo, "low operand")
 		require(in.Hi, "high operand")
+	case mir.OpVecConstructChecked:
+		require(in.Slice, "storage operand")
+		require(in.Lo, "length operand")
+		require(in.Capacity, "capacity operand")
+	case mir.OpVecGrowChecked:
+		require(in.Slice, "vec operand")
+		require(in.Domain, "domain operand")
+		require(in.Capacity, "capacity operand")
+	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
+		require(in.Slice, "vec operand")
+	case mir.OpArrayAsSlice:
+		require(in.Array, "array operand")
 	case mir.OpEnumPayloadChecked:
 		require(in.EnumValue, "enum operand")
 	case mir.OpTableInsert:
@@ -573,6 +589,18 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Slice)
 		add(in.Lo)
 		add(in.Hi)
+	case mir.OpVecConstructChecked:
+		add(in.Slice)
+		add(in.Lo)
+		add(in.Capacity)
+	case mir.OpVecGrowChecked:
+		add(in.Slice)
+		add(in.Domain)
+		add(in.Capacity)
+	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
+		add(in.Slice)
+	case mir.OpArrayAsSlice:
+		add(in.Array)
 	case mir.OpEnumPayloadChecked:
 		add(in.EnumValue)
 	case mir.OpEnumConstruct:

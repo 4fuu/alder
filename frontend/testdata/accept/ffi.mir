@@ -1,4 +1,4 @@
-mir 3
+mir 4
 
 const @lit.int.c0: u64 = 40
 

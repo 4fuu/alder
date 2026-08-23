@@ -130,6 +130,17 @@ copy-on-write, but the first mutation must preserve independence. Collection
 growth is geometric with checked size arithmetic; no capacity calculation may
 wrap or narrow into C `size_t` unchecked.
 
+Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
+uses eager deep copy. This temporary restriction keeps ordinary vector APIs
+free of transfer and cleanup behavior before Milestone 7.5 implements affine
+element composition. M7.1 places vector allocations in one hidden borrowed
+root/result domain threaded through lowered ordinary functions and calls. The
+domain is absent from source APIs and vector representations, generated
+ordinary functions never reset or destroy it, and the hosted entry owns its
+creation and destruction. Milestone 7.3 replaces this conservative placement
+with inferred hierarchical storage; it does not change independent value
+semantics.
+
 ## Generational identity with `Table(T)`
 
 Long-lived identity belongs to a table rather than an interior address:

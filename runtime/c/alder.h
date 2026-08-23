@@ -133,6 +133,17 @@ typedef struct {
     uint64_t len;
 } AlderSlice;
 
+/* Owned growable-vector ABI. Ownership metadata belongs to static MIR
+ * provenance; it is deliberately absent from this value representation. */
+typedef struct {
+    void *data;
+    uint64_t len;
+    uint64_t capacity;
+} AlderVec;
+
+bool alder_vec_construct_checked(AlderSlice storage, uint64_t len,
+                                 uint64_t capacity, AlderVec *out);
+
 /* Bounds checks used by slice.index.checked and slice.range.checked. A NULL
  * data pointer is valid only for a zero-length slice; its sole valid range is
  * [0, 0), while indexing and every range of {NULL, len>0} fail. */

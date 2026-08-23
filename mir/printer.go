@@ -282,6 +282,18 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpSliceRangeChecked:
 		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Lo) + ", " + valueName(f, in.Hi))
 		printFailEdge(b, f, in)
+	case OpVecNew:
+		b.WriteString(" " + m.TypeString(in.TypeOp))
+	case OpVecConstructChecked:
+		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Lo) + ", " + valueName(f, in.Capacity))
+		printFailEdge(b, f, in)
+	case OpVecGrowChecked:
+		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Domain) + ", " + valueName(f, in.Capacity))
+		printFailEdge(b, f, in)
+	case OpVecLen, OpVecCapacity, OpVecStorage, OpVecAsSlice, OpVecAsMutSlice:
+		b.WriteString(" " + valueName(f, in.Slice))
+	case OpArrayAsSlice:
+		b.WriteString(" " + valueName(f, in.Array))
 
 	case OpEnumPayloadChecked:
 		b.WriteString(" " + valueName(f, in.EnumValue) + ", " + in.Variant)

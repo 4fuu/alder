@@ -30,6 +30,7 @@ var e2eFixtures = []struct {
 	{"domains", "default"},
 	{"maps", "default"},
 	{"buffer", "default"},
+	{"collections", "default"},
 	{"cleanup", "cleanup_driver.c"},
 	{"ffi", "ffi_driver.c"},
 }

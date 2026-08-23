@@ -53,7 +53,7 @@ compiler or claim that the full language is implemented.
 ## Reproducing the source bootstrap
 
 On a POSIX host with a C11 compiler and common command-line utilities, verify
-the committed fixed point from the explicit, digest-pinned 28-file compiler
+the committed fixed point from the explicit, digest-pinned 29-file compiler
 inventory:
 
 ```sh

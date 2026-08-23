@@ -1,4 +1,4 @@
-mir 3
+mir 4
 
 type @Pair.c2.I64.String {
   first: i64

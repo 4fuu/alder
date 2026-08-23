@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -24,6 +25,10 @@ type callAnn struct {
 	variant      *variantType // callVariant (resolved variant)
 	enumType     *Type        // callVariant (the variant's enum type)
 	explicitArgs int          // leading type arguments consumed at the call site
+	receiver     Expr         // source receiver for a collection/view method
+	borrowArgs   []bool       // Array/Vec arguments borrowed as [T]
+	viewOwner    string       // lexical owner of a returned scoped view
+	viewMutable  bool         // returned view is exclusive
 }
 
 type callKind uint8
@@ -35,6 +40,7 @@ const (
 	callStruct
 	callMap
 	callVariant
+	callMethod
 )
 
 // checkedFn is one concrete function instantiation.
@@ -49,9 +55,16 @@ type checkedFn struct {
 
 // binding is a checked name binding in a function.
 type binding struct {
-	mut  bool
-	typ  *Type
-	kind bindKind
+	mut       bool
+	typ       *Type
+	kind      bindKind
+	viewOwner string
+	viewMut   bool
+}
+
+type activeBorrow struct {
+	immutable uint64
+	mutable   bool
 }
 
 type bindKind uint8
@@ -75,7 +88,7 @@ var builtinFnNames = []string{
 var builtinTypeNames = []string{
 	"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
 	"F32", "F64", "Unit", "String", "Bytes", "Option", "Result", "Map", "Ptr",
-	"Domain", "DomainMark", "__s0_String", "__s0_Buffer", "__s0_Error",
+	"Domain", "DomainMark", "Array", "Vec", "MutSlice", "__s0_String", "__s0_Buffer", "__s0_Error",
 }
 
 // variantReserved are reserved in the value namespace.
@@ -514,6 +527,24 @@ func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 		}
 		return &Type{kind: tSlice, elem: elem}, nil
 	case *AppType:
+		if t.Name == "Array" {
+			if len(t.Args) != 2 {
+				return nil, diag(t.P, "Array expects 2 arguments, got %d", len(t.Args))
+			}
+			elem, err := c.resolveType(t.Args[0], tps)
+			if err != nil {
+				return nil, err
+			}
+			n, ok := t.Args[1].(*PrimType)
+			if !ok {
+				return nil, diag(t.Args[1].typePos(), "array length must be an integer literal")
+			}
+			length, err := strconv.ParseUint(n.Name, 10, 64)
+			if err != nil {
+				return nil, diag(n.P, "invalid array length %q", n.Name)
+			}
+			return &Type{kind: tArray, elem: elem, length: length}, nil
+		}
 		args := make([]*Type, 0, len(t.Args))
 		for _, a := range t.Args {
 			at, err := c.resolveType(a, tps)
@@ -566,6 +597,18 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 			return nil, diag(p, "Ptr expects 1 type argument, got %d", len(args))
 		}
 		return &Type{kind: tPtr, elem: args[0]}, nil
+	case "Vec", "MutSlice":
+		if len(args) != 1 {
+			return nil, diag(p, "%s expects 1 type argument, got %d", name, len(args))
+		}
+		if args[0].containsSlice() {
+			return nil, diag(p, "%s element type %s is affine or scoped", name, args[0].display())
+		}
+		kind := tVec
+		if name == "MutSlice" {
+			kind = tMutSlice
+		}
+		return &Type{kind: kind, elem: args[0]}, nil
 	}
 	td := c.types[name]
 	if td == nil {
@@ -775,13 +818,14 @@ func fnKeyName(name string, args []*Type) string {
 
 // bodyChecker checks one function body.
 type bodyChecker struct {
-	c      *checker
-	cf     *checkedFn
-	env    map[string]*binding
-	inLoop bool
-	ann    map[Expr]*annInfo
-	result *Type
-	types  typeEnv
+	c       *checker
+	cf      *checkedFn
+	env     map[string]*binding
+	inLoop  bool
+	ann     map[Expr]*annInfo
+	result  *Type
+	types   typeEnv
+	borrows map[string]activeBorrow
 }
 
 func (k *bodyChecker) note(e Expr, t *Type) { k.ann[e] = &annInfo{typ: t} }
@@ -805,7 +849,7 @@ func (c *checker) checkBody(cf *checkedFn, bindings map[string]*Type) error {
 		if isReservedValueName(p.Name, c) {
 			return diag(p.Type.typePos(), "parameter name %q is reserved", p.Name)
 		}
-		env[p.Name] = &binding{kind: bindParam, typ: cf.params[pi]}
+		env[p.Name] = &binding{kind: bindParam, typ: cf.params[pi], mut: cf.params[pi].kind == tMutSlice}
 		pi++
 	}
 	ann := make(map[Expr]*annInfo)
@@ -814,7 +858,7 @@ func (c *checker) checkBody(cf *checkedFn, bindings map[string]*Type) error {
 	for name, typ := range bindings {
 		types[name] = typ
 	}
-	k := &bodyChecker{c: c, cf: cf, env: env, ann: ann, result: cf.result, types: types}
+	k := &bodyChecker{c: c, cf: cf, env: env, ann: ann, result: cf.result, types: types, borrows: make(map[string]activeBorrow)}
 	if err := k.checkBlock(cf.decl.Body); err != nil {
 		return err
 	}
@@ -875,8 +919,13 @@ func exprGuaranteesReturn(e Expr) bool {
 // are unreachable.
 func (k *bodyChecker) checkBlock(b *Block) error {
 	saved := k.env
+	savedBorrows := k.borrows
 	k.env = cloneBindings(saved)
-	defer func() { k.env = saved }()
+	k.borrows = cloneBorrows(savedBorrows)
+	defer func() {
+		k.env = saved
+		k.borrows = savedBorrows
+	}()
 	for i, s := range b.Stmts {
 		if i > 0 && stmtGuaranteesReturn(b.Stmts[i-1]) {
 			return diag(s.stmtPos(), "unreachable statement")
@@ -884,6 +933,25 @@ func (k *bodyChecker) checkBlock(b *Block) error {
 		if err := k.checkStmt(s); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func cloneBorrows(src map[string]activeBorrow) map[string]activeBorrow {
+	dst := make(map[string]activeBorrow, len(src))
+	for name, borrow := range src {
+		dst[name] = borrow
+	}
+	return dst
+}
+
+func (k *bodyChecker) checkOwnerMutation(p pos, name string) error {
+	active := k.borrows[name]
+	if active.mutable {
+		return diag(p, "cannot mutate %q while its mutable view is active", name)
+	}
+	if active.immutable != 0 {
+		return diag(p, "cannot mutate %q while an immutable view is active", name)
 	}
 	return nil
 }
@@ -928,10 +996,29 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if typ.kind == tDomainMark {
 			return diag(st.P, "domain marks cannot be bound; use them directly (the current MIR profile requires the reset mark to be the direct domain.mark result)")
 		}
+		if typ.kind == tMutSlice {
+			ann := k.ann[st.Value]
+			if ann == nil || ann.call == nil || !ann.call.viewMutable {
+				return diag(st.Value.exprPos(), "mutable view %s must be formed directly by slice_mut or subview", typ.display())
+			}
+		}
 		if _, dup := k.env[st.Name]; dup {
 			return diag(st.P, "name %q is already bound in this function", st.Name)
 		}
-		k.env[st.Name] = &binding{mut: st.Var, typ: typ, kind: bindLocal}
+		binding := &binding{mut: st.Var, typ: typ, kind: bindLocal}
+		if ann := k.ann[st.Value]; ann != nil && ann.call != nil && ann.call.viewOwner != "" {
+			owner := ann.call.viewOwner
+			active := k.borrows[owner]
+			if ann.call.viewMutable {
+				active.mutable = true
+			} else {
+				active.immutable++
+			}
+			k.borrows[owner] = active
+			binding.viewOwner = owner
+			binding.viewMut = ann.call.viewMutable
+		}
+		k.env[st.Name] = binding
 		return nil
 
 	case *Assign:
@@ -942,12 +1029,24 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if !b.mut && st.Target.Index == nil {
 			return diag(st.P, "cannot assign to immutable binding %q", st.Target.Name)
 		}
+		if err := k.checkOwnerMutation(st.P, st.Target.Name); err != nil {
+			return err
+		}
+		if st.Target.Index == nil && st.Target.Field == "" && b.typ.kind == tMutSlice {
+			return diag(st.P, "mutable view %s cannot be reassigned or copied", b.typ.display())
+		}
 		if st.Target.Index != nil {
+			if !b.mut && b.typ.kind != tAlloc {
+				return diag(st.P, "cannot assign through immutable binding %q", st.Target.Name)
+			}
+			if b.typ.kind == tSlice {
+				return diag(st.P, "indexed assignment is not available on immutable view %s", b.typ.display())
+			}
 			elem, err := k.sliceElem(st.P, b.typ)
 			if err != nil {
 				return err
 			}
-			if !elem.copyTrivial() {
+			if b.typ.kind != tVec && b.typ.kind != tArray && b.typ.kind != tMutSlice && !elem.copyTrivial() {
 				return diag(st.P, "element type %s is not copy-trivial; index assignment is not available (M4 restriction)", elem.display())
 			}
 			it, err := k.checkExpr(st.Target.Index, prim(pU64))
@@ -1114,6 +1213,9 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if !typeEqual(vt, k.result) {
 			return k.mismatch(st.P, "return", k.result, vt)
 		}
+		if vt.containsScopedView() && !strings.HasPrefix(k.cf.decl.Name, "__s0_") {
+			return diag(st.P, "scoped view %s cannot be returned", vt.display())
+		}
 		return nil
 
 	case *ExprStmt:
@@ -1142,7 +1244,7 @@ func (k *bodyChecker) sliceElem(p pos, t *Type) (*Type, error) {
 	if t != nil && t.kind == tS0String {
 		return prim(pU8), nil
 	}
-	if t == nil || (t.kind != tSlice && t.kind != tAlloc) {
+	if t == nil || (t.kind != tSlice && t.kind != tMutSlice && t.kind != tArray && t.kind != tVec && t.kind != tAlloc) {
 		return nil, diag(p, "expected a slice, got %s", t.display())
 	}
 	return t.elem, nil
@@ -1153,6 +1255,34 @@ func (k *bodyChecker) sliceElem(p pos, t *Type) (*Type, error) {
 // type; integer and float literals adapt to it.
 func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 	switch x := e.(type) {
+	case *ArrayLit:
+		var elem *Type
+		if expected != nil && expected.kind == tArray {
+			if uint64(len(x.Elems)) != expected.length {
+				return nil, diag(x.P, "array literal has length %d, expected %d", len(x.Elems), expected.length)
+			}
+			elem = expected.elem
+		} else if len(x.Elems) == 0 {
+			return nil, diag(x.P, "empty array literal requires an expected Array(T, 0) type")
+		}
+		for _, item := range x.Elems {
+			it, err := k.checkExpr(item, elem)
+			if err != nil {
+				return nil, err
+			}
+			if elem == nil {
+				elem = it
+			} else if !typeEqual(elem, it) {
+				return nil, k.mismatch(item.exprPos(), "array element", elem, it)
+			}
+		}
+		if elem.containsScopedView() {
+			return nil, diag(x.P, "scoped view %s cannot be stored in an array", elem.display())
+		}
+		t := &Type{kind: tArray, elem: elem, length: uint64(len(x.Elems))}
+		k.note(e, t)
+		return t, nil
+
 	case *IntLit:
 		t := prim(pI64)
 		if expected != nil && expected.isInt() {
@@ -1192,6 +1322,9 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 
 	case *Ident:
 		if b, ok := k.env[x.Name]; ok {
+			if k.borrows[x.Name].mutable {
+				return nil, diag(x.P, "cannot access %q while its mutable view is active", x.Name)
+			}
 			k.note(e, b.typ)
 			return b.typ, nil
 		}
@@ -1478,6 +1611,9 @@ func callHead(e Expr) *callHeadInfo {
 
 // checkCall resolves and checks a call.
 func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
+	if field, ok := x.Callee.(*Field); ok {
+		return k.checkMethodCall(x, field)
+	}
 	head := callHead(x.Callee)
 	if head == nil {
 		return nil, diag(x.P, "invalid call target")
@@ -1522,6 +1658,9 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 			if len(x.Args) != 1 {
 				return nil, diag(x.P, "variant %q expects 1 payload argument, got %d", name, len(x.Args))
 			}
+			if payload.containsScopedView() {
+				return nil, diag(x.Args[0].exprPos(), "scoped view %s cannot be stored in variant %q", payload.display(), name)
+			}
 			at, err := k.checkExpr(x.Args[0], payload)
 			if err != nil {
 				return nil, err
@@ -1534,6 +1673,127 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 		}
 	}
 	return nil, diag(x.P, "unknown function or type %q", name)
+}
+
+func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
+	if id, ok := field.Base.(*Ident); ok && id.Name == "Vec" {
+		if field.Name != "new" && field.Name != "from_array" {
+			return nil, diag(x.P, "unknown Vec constructor %q", field.Name)
+		}
+		want := 1
+		if field.Name == "from_array" {
+			want = 2
+		}
+		if len(x.Args) != want {
+			return nil, diag(x.P, "Vec.%s expects %d arguments, got %d", field.Name, want, len(x.Args))
+		}
+		elem, err := k.typeArgOf(x.Args[0])
+		if err != nil {
+			return nil, err
+		}
+		if elem.containsSlice() {
+			return nil, diag(x.P, "Vec element type %s is affine or scoped", elem.display())
+		}
+		result := &Type{kind: tVec, elem: elem}
+		if field.Name == "from_array" {
+			var expectedArray *Type
+			if literal, ok := x.Args[1].(*ArrayLit); ok {
+				expectedArray = &Type{kind: tArray, elem: elem, length: uint64(len(literal.Elems))}
+			}
+			at, e := k.checkExpr(x.Args[1], expectedArray)
+			if e != nil {
+				return nil, e
+			}
+			if at.kind != tArray || !typeEqual(at.elem, elem) {
+				return nil, diag(x.Args[1].exprPos(), "Vec.from_array requires Array(%s, N)", elem.display())
+			}
+		}
+		k.noteCall(x, result, &callAnn{kind: callMethod, builtin: field.Name})
+		return result, nil
+	}
+	recv, err := k.checkExpr(field.Base, nil)
+	if err != nil {
+		return nil, err
+	}
+	arg := func(i int, want *Type) error {
+		got, e := k.checkExpr(x.Args[i], want)
+		if e != nil {
+			return e
+		}
+		if !typeEqual(got, want) {
+			return k.mismatch(x.Args[i].exprPos(), "method argument", want, got)
+		}
+		return nil
+	}
+	result := recv
+	receiverID, receiverIsID := field.Base.(*Ident)
+	switch field.Name {
+	case "len":
+		if len(x.Args) != 0 || (recv.kind != tVec && recv.kind != tSlice && recv.kind != tMutSlice) {
+			return nil, diag(x.P, "method len is not available on %s", recv.display())
+		}
+		result = prim(pU64)
+	case "push":
+		if recv.kind != tVec || len(x.Args) != 1 {
+			return nil, diag(x.P, "method push expects one argument on Vec")
+		}
+		if err := arg(0, recv.elem); err != nil {
+			return nil, err
+		}
+		if !receiverIsID || !k.env[receiverID.Name].mut {
+			return nil, diag(field.P, "method push requires a mutable Vec binding")
+		}
+		if err := k.checkOwnerMutation(field.P, receiverID.Name); err != nil {
+			return nil, err
+		}
+		result = prim(pUnit)
+	case "get":
+		if (recv.kind != tVec && recv.kind != tSlice && recv.kind != tMutSlice) || len(x.Args) != 1 {
+			return nil, diag(x.P, "method get expects one index argument")
+		}
+		if err := arg(0, prim(pU64)); err != nil {
+			return nil, err
+		}
+		result = &Type{kind: tOption, elem: recv.elem}
+	case "slice", "slice_mut", "subview":
+		valid := field.Name == "slice" && (recv.kind == tVec || recv.kind == tArray || recv.kind == tSlice) || field.Name == "slice_mut" && (recv.kind == tVec || recv.kind == tArray) || field.Name == "subview" && recv.kind == tMutSlice
+		if !valid || len(x.Args) != 2 {
+			return nil, diag(x.P, "method %s is not available on %s", field.Name, recv.display())
+		}
+		if !receiverIsID {
+			return nil, diag(field.P, "scoped view formation requires a named lexical owner")
+		}
+		mutableView := field.Name != "slice"
+		if mutableView {
+			owner := k.env[receiverID.Name]
+			if owner == nil || !owner.mut {
+				return nil, diag(field.P, "method %s requires a mutable binding", field.Name)
+			}
+			if err := k.checkOwnerMutation(field.P, receiverID.Name); err != nil {
+				return nil, err
+			}
+		}
+		if err := arg(0, prim(pU64)); err != nil {
+			return nil, err
+		}
+		if err := arg(1, prim(pU64)); err != nil {
+			return nil, err
+		}
+		if field.Name == "slice" {
+			result = &Type{kind: tSlice, elem: recv.elem}
+		} else {
+			result = &Type{kind: tMutSlice, elem: recv.elem}
+		}
+	default:
+		return nil, diag(x.P, "unknown method %q on %s", field.Name, recv.display())
+	}
+	annotation := &callAnn{kind: callMethod, builtin: field.Name, receiver: field.Base}
+	if field.Name == "slice" || field.Name == "slice_mut" || field.Name == "subview" {
+		annotation.viewOwner = receiverID.Name
+		annotation.viewMutable = field.Name != "slice"
+	}
+	k.noteCall(x, result, annotation)
+	return result, nil
 }
 
 func (k *bodyChecker) checkImportCall(x *Call, name string) (*Type, error) {
@@ -1552,6 +1812,11 @@ func (k *bodyChecker) checkImportCall(x *Call, name string) (*Type, error) {
 	}
 	k.noteCall(x, sig.Result, &callAnn{kind: callImport, importName: name})
 	return sig.Result, nil
+}
+
+func callBorrowCompatible(want, got *Type) bool {
+	return want != nil && got != nil && want.kind == tSlice &&
+		(got.kind == tArray || got.kind == tVec) && typeEqual(want.elem, got.elem)
 }
 
 // checkUserCall handles calls to declared functions with explicit type
@@ -1624,7 +1889,7 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl, expected *Type) (*Type,
 			if err != nil {
 				return nil, err
 			}
-			if !typeEqual(exp, at) {
+			if !typeEqual(exp, at) && !callBorrowCompatible(exp, at) {
 				return nil, k.mismatch(arg.exprPos(), "call argument", exp, at)
 			}
 			continue
@@ -1667,11 +1932,23 @@ func (k *bodyChecker) checkUserCall(x *Call, fn *FnDecl, expected *Type) (*Type,
 		if err != nil {
 			return nil, err
 		}
-		if !typeEqual(cf.params[i], at) {
+		if !typeEqual(cf.params[i], at) && !callBorrowCompatible(cf.params[i], at) {
 			return nil, k.mismatch(arg.exprPos(), "call argument", cf.params[i], at)
 		}
+		if i+1 < len(rest) {
+			ann := k.ann[arg]
+			temporaryView := callBorrowCompatible(cf.params[i], at) ||
+				ann != nil && ann.call != nil && ann.call.viewOwner != ""
+			if cf.params[i].kind == tMutSlice || temporaryView {
+				return nil, diag(arg.exprPos(), "mutable or temporary scoped-view argument must be last; bind immutable views before a multi-argument call")
+			}
+		}
 	}
-	k.noteCall(x, cf.result, &callAnn{kind: callUser, fn: cf, explicitArgs: len(typeArgs)})
+	borrowArgs := make([]bool, len(rest))
+	for i, arg := range rest {
+		borrowArgs[i] = callBorrowCompatible(cf.params[i], k.ann[arg].typ)
+	}
+	k.noteCall(x, cf.result, &callAnn{kind: callUser, fn: cf, explicitArgs: len(typeArgs), borrowArgs: borrowArgs})
 	return cf.result, nil
 }
 
@@ -1715,7 +1992,7 @@ func patternBound(t *Type, bindings map[string]*Type) bool {
 		return ok
 	}
 	switch t.kind {
-	case tSlice, tAlloc, tPtr, tOption, tBuffer:
+	case tSlice, tAlloc, tPtr, tOption, tBuffer, tArray, tVec, tMutSlice:
 		return patternBound(t.elem, bindings)
 	case tResult:
 		return patternBound(t.ok, bindings) && patternBound(t.err, bindings)
@@ -1883,6 +2160,9 @@ func (k *bodyChecker) checkConstruction(x *Call, ty *Type) (*Type, error) {
 		bindings := structBindings(ty)
 		for i, arg := range ordered {
 			ft := substType(ty.decl.fields[i], bindings)
+			if ft.containsScopedView() {
+				return nil, diag(arg.exprPos(), "scoped view %s cannot be stored in field %q", ft.display(), ty.decl.decl.Fields[i].Name)
+			}
 			at, err := k.checkExpr(arg, ft)
 			if err != nil {
 				return nil, err

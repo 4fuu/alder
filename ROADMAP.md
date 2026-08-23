@@ -684,7 +684,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.1: Core Collections and Scoped Views
 
-Status: **planned after Milestone 7**
+Status: **complete**
 
 Build the owned/view sequence model on the Milestone 7 category and method
 foundation: ordinary `Vec(T)`, immutable `[T]` views, and exclusive
@@ -709,6 +709,28 @@ checked access, deterministic output, and independent value behavior. Cases
 that require a view or allocation to survive an inner candidate domain remain
 conservatively retained for the Milestone 7.3 inference gate rather than being
 accepted through an unproved lifetime.
+
+Exit-criteria evidence:
+
+- MIR format v4 and the Go/Alder-written lowering, printer, parser, verifier,
+  and C11 backend implement `Vec(T)` construction, checked 0-to-4 geometric
+  growth, checked indexing and mutation, and recursive eager deep copies,
+  including independent nested `Vec(Vec(T))` values;
+- arrays and vectors form checked half-open immutable views, and exact `[T]`
+  parameters accept deterministic non-retaining Array/Vec call borrows without
+  changing owned value semantics;
+- focused checker rejections enforce lexical view lifetimes, mutable-view
+  exclusivity and direct formation, overlapping-view and owner-access
+  conflicts, temporary call-borrow ordering, and escape prevention through
+  returns, records, arrays, variants, and collections;
+- Go and Alder-written checker/lowering conformance tests, generated-C goldens,
+  strict C11 compile-and-run fixtures, and runtime regressions cover growth,
+  bounds termination, mutation independence, generic monomorphization, nested
+  deep copies, view formation, subviews, and deterministic output;
+- `gofmt -l .`, `go vet ./...`, `go test ./...`, the strict runtime C11 syntax
+  check, and the Go-free `bootstrap/regenerate.sh` byte-for-byte fixed-point
+  gate pass with the committed 29-source compiler inventory and MIR v4
+  bootstrap artifact.
 
 ## Milestone 7.3: Inferred Hierarchical Storage
 

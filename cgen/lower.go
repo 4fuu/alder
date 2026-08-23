@@ -45,6 +45,8 @@ func (g *gen) cType(t mir.TypeId) string {
 		return "AlderTy" + strconv.Itoa(int(t))
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
 		return "AlderSlice"
+	case mir.TypeVec:
+		return "AlderVec"
 	case mir.TypeString:
 		return "AlderString"
 	case mir.TypeBytes:

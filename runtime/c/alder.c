@@ -313,6 +313,16 @@ void alder_domain_destroy(AlderDomain *domain) {
 /* Slices and bounds                                                   */
 /* ------------------------------------------------------------------ */
 
+bool alder_vec_construct_checked(AlderSlice storage, uint64_t len,
+                                  uint64_t capacity, AlderVec *out) {
+    if (out == NULL || len > capacity || capacity > storage.len ||
+        (capacity != 0 && storage.data == NULL)) {
+        return false;
+    }
+    *out = (AlderVec){storage.data, len, capacity};
+    return true;
+}
+
 bool alder_slice_index_checked(AlderSlice slice, uint64_t index) {
     return slice.data != NULL && index < slice.len;
 }

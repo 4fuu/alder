@@ -224,7 +224,7 @@ fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     var f: U64 = 1
     while f <= fcount { base[f] = base[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var w: U64 = 0
     while w < total { ids[w] = 0
         w = w + 1 }
@@ -276,7 +276,7 @@ fn mir_vindex_build_values(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     var f: U64 = 1
     while f <= fcount { base[f] = base[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var w: U64 = 0
     while w < total { ids[w] = 0
         w = w + 1 }
@@ -328,7 +328,7 @@ fn mir_vindex_build_locals(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     var f: U64 = 1
     while f <= fcount { base[f] = base[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var w: U64 = 0
     while w < total { ids[w] = 0
         w = w + 1 }
@@ -380,7 +380,7 @@ fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRe
     var f: U64 = 1
     while f <= fcount { base[f] = base[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var w: U64 = 0
     while w < total { ids[w] = 0
         w = w + 1 }
@@ -440,7 +440,7 @@ fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec
     var s: U64 = 0
     while s < btotal { ioff[s + 1] = ioff[s] + icnt[s]
         s = s + 1 }
-    let ids = __s0_alloc(U64, d, itotal)
+    var ids = __s0_alloc(U64, d, itotal)
     var w: U64 = 0
     while w < itotal { ids[w] = 0
         w = w + 1 }
@@ -505,7 +505,7 @@ fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamR
     var f: U64 = 1
     while f <= fcount { start[f] = start[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var used = __s0_alloc(U64, d, fcount + 1)
     var w: U64 = 0
     while w < total { ids[w] = 0
@@ -602,9 +602,9 @@ fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, _
     owner = 1
     while owner <= ocount { cstart[owner] = cstart[owner - 1] + ccnt[owner - 1]
         owner = owner + 1 }
-    let iids = __s0_alloc(U64, d, total_i)
-    let tids = __s0_alloc(U64, d, total_t)
-    let cids = __s0_alloc(U64, d, total_c)
+    var iids = __s0_alloc(U64, d, total_i)
+    var tids = __s0_alloc(U64, d, total_t)
+    var cids = __s0_alloc(U64, d, total_c)
     var iused = __s0_alloc(U64, d, icount + 1)
     var tused = __s0_alloc(U64, d, tcount + 1)
     var cused = __s0_alloc(U64, d, ocount + 1)
@@ -731,7 +731,7 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
     var f: U64 = 1
     while f <= tcount { start[f] = start[f - 1] + cnt[f - 1]
         f = f + 1 }
-    let ids = __s0_alloc(U64, d, total)
+    var ids = __s0_alloc(U64, d, total)
     var used = __s0_alloc(U64, d, tcount + 1)
     var w: U64 = 0
     while w < total { ids[w] = 0
@@ -928,7 +928,7 @@ fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(__s0_Buffe
 }
 
 fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let kind_count: U64 = 19
+    let kind_count = mir_type_kind_vec() + 1
     var first = __s0_alloc(U64, d, kind_count)
     var at: U64 = 0
     while at < kind_count { first[at] = 0
@@ -948,7 +948,7 @@ fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer
 }
 
 fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let kind_count: U64 = 19
+    let kind_count = mir_type_kind_vec() + 1
     let type_count = __s0_buffer_len(MirTypeRec, store.types)
     let slot_count = kind_count * type_count
     var first = __s0_alloc(U64, d, slot_count)
@@ -1085,8 +1085,9 @@ fn mir_vindex_type_kind(indexes: MirVIndexes, kind: U64) -> U64 {
 }
 
 fn mir_vindex_type_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 {
-    let type_count = __s0_buffer_len(U64, indexes.type_unary) / 19
-    if kind >= 19 || elem == 0 || elem > type_count { return 0 }
+    let kind_count = __s0_buffer_len(U64, indexes.type_first)
+    let type_count = __s0_buffer_len(U64, indexes.type_unary) / kind_count
+    if kind >= kind_count || elem == 0 || elem > type_count { return 0 }
     return __s0_buffer_get(U64, indexes.type_unary, kind * type_count + elem - 1)
 }
 
@@ -1390,7 +1391,7 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
     var blk: U64 = 1
     while blk <= block_count { edge_base[blk] = edge_base[blk - 1] + edge_cnt[blk - 1]
         blk = blk + 1 }
-    let edge_ids = __s0_alloc(U64, d, edge_count)
+    var edge_ids = __s0_alloc(U64, d, edge_count)
     var edge_used = __s0_alloc(U64, d, block_count + 1)
     z = 0
     while z < edge_count { edge_ids[z] = 0
@@ -1615,7 +1616,7 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
         start = start + count
         v = v + 1
     }
-    let children = __s0_alloc(U64, d, start)
+    var children = __s0_alloc(U64, d, start)
     z = 0
     while z < start { children[z] = 0
         z = z + 1 }

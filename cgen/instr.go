@@ -224,8 +224,51 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)&((AlderTy" + strconv.Itoa(int(t)) + " *)" + g.valueExpr(in.Array) + ".data)->alder_e[" + g.valueExpr(in.Index) + "], (uint64_t)1 };\n")
 		}
 
+	case mir.OpArrayAsSlice:
+		t, _ := g.f.ValueType(in.Array)
+		direct := g.m.Types[t].Kind == mir.TypeArray
+		if !direct {
+			t = g.m.Types[t].Elem
+		}
+		length := g.m.Types[t].Length
+		if direct {
+			b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)" + g.valueExpr(in.Array) + ".alder_e, (uint64_t)" + strconv.FormatUint(length, 10) + " };\n")
+		} else {
+			b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)((AlderTy" + strconv.Itoa(int(t)) + " *)" + g.valueExpr(in.Array) + ".data)->alder_e, (uint64_t)" + strconv.FormatUint(length, 10) + " };\n")
+		}
+
 	case mir.OpSliceRangeChecked:
 		g.emitSliceRange(b, in)
+
+	case mir.OpVecNew:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderVec){ NULL, (uint64_t)0, (uint64_t)0 };\n")
+	case mir.OpVecConstructChecked:
+		b.WriteString("  if (!alder_vec_construct_checked(" + g.valueExpr(in.Slice) + ", " + g.valueExpr(in.Lo) + ", " + g.valueExpr(in.Capacity) + ", &" + g.val(in.Result) + ")) " + g.failBody(in) + "\n")
+	case mir.OpVecGrowChecked:
+		t, _ := g.f.ValueType(in.Slice)
+		elem := g.m.Types[t].Elem
+		b.WriteString("  if (" + g.valueExpr(in.Capacity) + " < " + g.valueExpr(in.Slice) + ".len) " + g.failBody(in) + "\n")
+		b.WriteString("  uint64_t " + g.tmp(in, "") + ";\n")
+		b.WriteString("  if (!alder_u64_mul_checked(" + g.valueExpr(in.Capacity) + ", " + g.typeSize(elem) + ", &" + g.tmp(in, "") + ") || " + g.tmp(in, "") + " > (uint64_t)SIZE_MAX) " + g.failBody(in) + "\n")
+		b.WriteString("  if (" + g.valueExpr(in.Slice) + ".len != (uint64_t)0 && " + g.valueExpr(in.Slice) + ".data == NULL) " + g.failBody(in) + "\n")
+		b.WriteString("  void *" + g.tmp(in, "p") + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + g.tmp(in, "") + ", (size_t)" + g.typeAlign(elem) + ");\n")
+		b.WriteString("  if (" + g.tmp(in, "p") + " == NULL) " + g.failBody(in) + "\n")
+		b.WriteString("  uint64_t " + g.tmp(in, "n") + ";\n")
+		b.WriteString("  if (!alder_u64_mul_checked(" + g.valueExpr(in.Slice) + ".len, " + g.typeSize(elem) + ", &" + g.tmp(in, "n") + ") || " + g.tmp(in, "n") + " > (uint64_t)SIZE_MAX) " + g.failBody(in) + "\n")
+		if g.copyTrivial(elem) {
+			b.WriteString("  if (" + g.tmp(in, "n") + " != (uint64_t)0) { memcpy(" + g.tmp(in, "p") + ", " + g.valueExpr(in.Slice) + ".data, (size_t)" + g.tmp(in, "n") + "); }\n")
+		} else {
+			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < " + g.valueExpr(in.Slice) + ".len; alder_i++) { ((" + g.cType(elem) + " *)" + g.tmp(in, "p") + ")[alder_i] = " + g.copyCall(elem) + "(" + g.valueExpr(in.Domain) + ", ((" + g.cType(elem) + " *)" + g.valueExpr(in.Slice) + ".data)[alder_i]); }\n")
+		}
+		b.WriteString("  " + g.val(in.Result) + " = (AlderVec){ " + g.tmp(in, "p") + ", " + g.valueExpr(in.Slice) + ".len, " + g.valueExpr(in.Capacity) + " };\n")
+	case mir.OpVecLen:
+		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
+	case mir.OpVecCapacity:
+		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".capacity;\n")
+	case mir.OpVecStorage:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ " + g.valueExpr(in.Slice) + ".data, " + g.valueExpr(in.Slice) + ".capacity };\n")
+	case mir.OpVecAsSlice, mir.OpVecAsMutSlice:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ " + g.valueExpr(in.Slice) + ".data, " + g.valueExpr(in.Slice) + ".len };\n")
 
 	case mir.OpEnumPayloadChecked:
 		t, _ := g.f.ValueType(in.EnumValue)

@@ -3,6 +3,7 @@ package mir
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // parser builds a Module from the textual MIR format. Names resolve to stable
@@ -122,7 +123,7 @@ func (p *parser) parseModule() error {
 		return p.errf(vt, "invalid format version %q", vt.text)
 	}
 	if n < LegacyFormatVersion || n > CurrentFormatVersion {
-		return p.errf(vt, "unsupported format version %d (supported: 1, 2, 3)", n)
+		return p.errf(vt, "unsupported format version %d (supported: 1, 2, 3, 4)", n)
 	}
 	p.m.FormatVersion = n
 
@@ -736,6 +737,12 @@ func (p *parser) parseOp() (Instr, error) {
 	t := p.next() // operation name
 	in := Instr{Result: NoValue, FailTarget: NoBlock}
 	var err error
+	if strings.HasPrefix(t.text, "vec.") && p.m.FormatVersion < VecFormatVersion {
+		return in, p.errf(t, "%s requires MIR format version 4", t.text)
+	}
+	if t.text == "array.as_slice" && p.m.FormatVersion < VecFormatVersion {
+		return in, p.errf(t, "%s requires MIR format version 4", t.text)
+	}
 
 	// Binary operations over two values with an optional required else edge.
 	parseBinary := func(op OpKind) error {
@@ -993,6 +1000,63 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		err = p.parseOptionalElse(t, &in)
+
+	case "vec.new":
+		in.Op = OpVecNew
+		in.TypeOp, err = p.parseType()
+	case "vec.construct.checked":
+		in.Op = OpVecConstructChecked
+		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Lo, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Capacity, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+	case "vec.grow.checked":
+		in.Op = OpVecGrowChecked
+		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Capacity, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+	case "vec.len", "vec.capacity", "vec.storage", "vec.as_slice", "vec.as_mut_slice":
+		switch t.text {
+		case "vec.len":
+			in.Op = OpVecLen
+		case "vec.capacity":
+			in.Op = OpVecCapacity
+		case "vec.storage":
+			in.Op = OpVecStorage
+		case "vec.as_slice":
+			in.Op = OpVecAsSlice
+		default:
+			in.Op = OpVecAsMutSlice
+		}
+		in.Slice, err = p.parseValueRef()
+	case "array.as_slice":
+		in.Op = OpArrayAsSlice
+		in.Array, err = p.parseValueRef()
 
 	case "enum.payload.checked":
 		in.Op = OpEnumPayloadChecked
@@ -1447,8 +1511,11 @@ func (p *parser) parseType() (TypeId, error) {
 			return p.m.CleanupScope(), nil
 		case "cleanup_id":
 			return p.m.CleanupID(), nil
-		case "option", "result", "slice", "array", "safe_ref", "safe_mut", "raw_ptr",
+		case "option", "result", "slice", "vec", "array", "safe_ref", "safe_mut", "raw_ptr",
 			"table", "id", "table_view", "table_mut_view":
+			if t.text == "vec" && p.m.FormatVersion < VecFormatVersion {
+				return NoType, p.errf(t, "vec requires MIR format version 4")
+			}
 			return p.parseStructuralType(t)
 		case "function":
 			if err := p.expectPunct("("); err != nil {
@@ -1522,6 +1589,8 @@ func (p *parser) parseStructuralType(nameTok *token) (TypeId, error) {
 		return p.m.Option(first), nil
 	case "slice":
 		return p.m.Slice(first), nil
+	case "vec":
+		return p.m.Vec(first), nil
 	case "safe_ref":
 		return p.m.SafeRef(first), nil
 	case "safe_mut":

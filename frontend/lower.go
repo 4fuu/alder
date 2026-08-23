@@ -15,14 +15,15 @@ type lowerer struct {
 	ann        map[*checkedFn]map[Expr]*annInfo
 	importSigs map[string]*checkSig
 
-	fnID        map[*checkedFn]mir.FunctionId
-	fnByName    map[string]*checkedFn
-	tyCache     map[string]mir.TypeId
-	hashEq      map[string]*hashEqIDs
-	consts      map[string]string
-	constSeq    int
-	mapCache    map[string]*mapHelpers
-	bufferCache map[string]*bufferHelpers
+	fnID         map[*checkedFn]mir.FunctionId
+	fnByName     map[string]*checkedFn
+	tyCache      map[string]mir.TypeId
+	hashEq       map[string]*hashEqIDs
+	consts       map[string]string
+	constSeq     int
+	mapCache     map[string]*mapHelpers
+	bufferCache  map[string]*bufferHelpers
+	hiddenDomain bool
 }
 
 // hashEqIDs are the per-key hash and equality helpers.
@@ -56,6 +57,13 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 		mapCache:    make(map[string]*mapHelpers),
 		bufferCache: make(map[string]*bufferHelpers),
 	}
+	for _, anns := range cm.ann {
+		for _, a := range anns {
+			if a.typ != nil && a.typ.containsVec() {
+				l.hiddenDomain = true
+			}
+		}
+	}
 	// Imports in source order.
 	for _, d := range decls {
 		imp, ok := d.(*ImportDecl)
@@ -72,6 +80,10 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 	// Pass 1: function skeletons in instantiation order.
 	for _, cf := range cm.fns {
 		params := make([]mir.Param, 0, len(cf.params))
+		aliasesDomain := cf.decl.Name == "main" && len(cf.params) > 0 && cf.params[0].kind == tDomain
+		if l.hiddenDomain && !aliasesDomain {
+			params = append(params, mir.Param{Name: "__domain", Type: l.m.DomainHandle()})
+		}
 		pi := 0
 		for _, p := range cf.decl.Params {
 			if p.Kind == paramType {
@@ -103,6 +115,12 @@ func (l *lowerer) ty(t *Type) mir.TypeId {
 	case tPrim:
 		return primMir(t.prim)
 	case tSlice:
+		return l.m.Slice(l.ty(t.elem))
+	case tArray:
+		return l.m.Array(l.ty(t.elem), t.length)
+	case tVec:
+		return l.m.Vec(l.ty(t.elem))
+	case tMutSlice:
 		return l.m.Slice(l.ty(t.elem))
 	case tString:
 		return l.m.String()
@@ -1146,6 +1164,56 @@ func (b *fb) storePlace(p mir.Place, v mir.ValueId) {
 	b.emit(mir.Instr{Op: mir.OpStore, Place: p, StoreVal: v})
 }
 
+func (b *fb) copyValue(v mir.ValueId, typ *Type) mir.ValueId {
+	if typ == nil || !typ.containsVec() {
+		return v
+	}
+	domain, ok := b.values["__domain"]
+	if !ok {
+		return v
+	}
+	copy := b.res(b.l.ty(typ))
+	b.emit(mir.Instr{Op: mir.OpCopyToDomain, Result: copy, Domain: domain, CopyVal: v})
+	return copy
+}
+
+// directExpr reads a named owner without applying ordinary Vec copy
+// semantics. Collection methods and indexing use it only for the duration of
+// one checked access; every value-producing read still goes through expr.
+func (b *fb) directExpr(e Expr) (mir.ValueId, error) {
+	if id, ok := e.(*Ident); ok {
+		if local, exists := b.locals[id.Name]; exists {
+			return b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, b.f.Locals[local].Type), nil
+		}
+		if value, exists := b.values[id.Name]; exists {
+			return value, nil
+		}
+	}
+	return b.expr(e)
+}
+
+func (b *fb) arrayView(e Expr) (mir.ValueId, error) {
+	typ := b.ann[e].typ
+	arrayType := b.l.ty(typ)
+	var place mir.Place
+	if p, ok := b.place(e); ok {
+		place = p
+	} else {
+		value, err := b.directExpr(e)
+		if err != nil {
+			return 0, err
+		}
+		local := b.f.AddLocal(b.localName("array_view"), arrayType)
+		place = mir.Place{Kind: mir.PlaceLocal, Local: local}
+		b.storePlace(place, value)
+	}
+	borrow := b.res(b.l.m.SafeRef(arrayType))
+	b.emit(mir.Instr{Op: mir.OpBorrow, Result: borrow, Place: place})
+	view := b.res(b.l.m.Slice(b.l.ty(typ.elem)))
+	b.emit(mir.Instr{Op: mir.OpArrayAsSlice, Result: view, Array: borrow})
+	return view, nil
+}
+
 // constGet materializes a module constant.
 func (b *fb) constGet(typ *Type, v mir.ConstValue) mir.ValueId {
 	key := constKey(typ, v)
@@ -1198,6 +1266,14 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 	b.ann = l.ann[cf]
 	b.result = cf.result
 	pi := 0
+	aliasesDomain := cf.decl.Name == "main" && len(cf.params) > 0 && cf.params[0].kind == tDomain
+	if l.hiddenDomain && !aliasesDomain {
+		b.values["__domain"] = 0
+		pi = 1
+	}
+	if l.hiddenDomain && aliasesDomain {
+		b.values["__domain"] = 0
+	}
 	for _, p := range cf.decl.Params {
 		if p.Kind == paramType {
 			continue
@@ -1421,14 +1497,40 @@ func (b *fb) stmt(s Stmt) error {
 func (b *fb) stmtAssign(st *Assign) error {
 	var ref mir.ValueId
 	if st.Target.Index != nil {
-		local := b.locals[st.Target.Name]
-		base := b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, b.f.Locals[local].Type)
 		idx, err := b.expr(st.Target.Index)
 		if err != nil {
 			return err
 		}
-		ref = b.res(b.l.m.SafeMut(b.l.m.Types[b.f.Locals[local].Type].Elem))
-		b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: base, Index: idx, FailTarget: b.panicBlock()})
+		local, localOK := b.locals[st.Target.Name]
+		var sourceType mir.TypeId
+		if localOK {
+			sourceType = b.f.Locals[local].Type
+		} else {
+			value := b.values[st.Target.Name]
+			sourceType, _ = b.f.ValueType(value)
+		}
+		typ := b.l.m.Types[sourceType]
+		if typ.Kind == mir.TypeVec {
+			base := b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, sourceType)
+			view := b.res(b.l.m.SafeMut(typ.Elem))
+			b.emit(mir.Instr{Op: mir.OpVecAsMutSlice, Result: view, Slice: base})
+			ref = b.res(b.l.m.SafeMut(typ.Elem))
+			b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: view, Index: idx, FailTarget: b.panicBlock()})
+		} else if typ.Kind == mir.TypeArray {
+			borrow := b.res(b.l.m.SafeMut(sourceType))
+			b.emit(mir.Instr{Op: mir.OpBorrowMut, Result: borrow, Place: mir.Place{Kind: mir.PlaceLocal, Local: local}})
+			ref = b.res(b.l.m.SafeMut(typ.Elem))
+			b.emit(mir.Instr{Op: mir.OpArrayIndexChecked, Result: ref, Array: borrow, Index: idx, FailTarget: b.panicBlock()})
+		} else {
+			var base mir.ValueId
+			if localOK {
+				base = b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, sourceType)
+			} else {
+				base = b.values[st.Target.Name]
+			}
+			ref = b.res(b.l.m.SafeMut(typ.Elem))
+			b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: base, Index: idx, FailTarget: b.panicBlock()})
+		}
 	}
 	value, err := b.expr(st.Value)
 	if err != nil {
@@ -1452,6 +1554,18 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 	switch x := e.(type) {
 	case *UnsafeC:
 		return b.expr(x.Call)
+	case *ArrayLit:
+		fields := make([]mir.AggField, 0, len(x.Elems))
+		for i, item := range x.Elems {
+			v, err := b.expr(item)
+			if err != nil {
+				return 0, err
+			}
+			fields = append(fields, mir.AggField{Name: strconv.Itoa(i), Value: v})
+		}
+		id := b.res(b.l.ty(b.ann[e].typ))
+		b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: b.l.ty(b.ann[e].typ), AggFields: fields})
+		return id, nil
 	case *IntLit:
 		typ := b.ann[e].typ
 		return b.constGet(typ, mir.ConstValue{Kind: mir.ConstInt, Int: x.Value}), nil
@@ -1469,10 +1583,11 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 
 	case *Ident:
 		if local, ok := b.locals[x.Name]; ok {
-			return b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, b.f.Locals[local].Type), nil
+			value := b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, b.f.Locals[local].Type)
+			return b.copyValue(value, b.ann[e].typ), nil
 		}
 		if v, ok := b.values[x.Name]; ok {
-			return v, nil
+			return b.copyValue(v, b.ann[e].typ), nil
 		}
 		if ai, ok := b.ann[e]; ok && ai.call != nil && ai.call.kind == callVariant {
 			enumTy := b.l.ty(ai.call.enumType)
@@ -1520,14 +1635,16 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 
 	case *Field:
 		if p, ok := b.place(x); ok {
-			return b.loadPlace(p, b.l.ty(b.ann[e].typ)), nil
+			value := b.loadPlace(p, b.l.ty(b.ann[e].typ))
+			return b.copyValue(value, b.ann[e].typ), nil
 		}
 		if idx, ok := x.Base.(*Index); ok {
 			ref, err := b.indexRef(idx)
 			if err != nil {
 				return 0, err
 			}
-			return b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: x.Name}, b.l.ty(b.ann[e].typ)), nil
+			value := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: x.Name}, b.l.ty(b.ann[e].typ))
+			return b.copyValue(value, b.ann[e].typ), nil
 		}
 		base, err := b.expr(x.Base)
 		if err != nil {
@@ -1536,14 +1653,16 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 		baseTy := b.ann[x.Base].typ
 		local := b.f.AddLocal(b.localName("tmp"), b.l.ty(baseTy))
 		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, base)
-		return b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: local}, Field: x.Name}, b.l.ty(b.ann[e].typ)), nil
+		value := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceLocal, Local: local}, Field: x.Name}, b.l.ty(b.ann[e].typ))
+		return b.copyValue(value, b.ann[e].typ), nil
 
 	case *Index:
 		ref, err := b.indexRef(x)
 		if err != nil {
 			return 0, err
 		}
-		return b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(b.ann[e].typ)), nil
+		value := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(b.ann[e].typ))
+		return b.copyValue(value, b.ann[e].typ), nil
 
 	case *Call:
 		return b.call(x)
@@ -1601,7 +1720,7 @@ func (b *fb) place(e Expr) (mir.Place, bool) {
 
 // indexRef lowers base[index] to a checked safe_mut element reference.
 func (b *fb) indexRef(x *Index) (mir.ValueId, error) {
-	base, err := b.expr(x.Base)
+	base, err := b.directExpr(x.Base)
 	if err != nil {
 		return 0, err
 	}
@@ -1610,6 +1729,20 @@ func (b *fb) indexRef(x *Index) (mir.ValueId, error) {
 		return 0, err
 	}
 	baseTy := b.ann[x.Base].typ
+	if baseTy.kind == tVec {
+		view := b.res(b.l.m.SafeMut(b.l.ty(baseTy.elem)))
+		b.emit(mir.Instr{Op: mir.OpVecAsMutSlice, Result: view, Slice: base})
+		base = view
+	}
+	if baseTy.kind == tArray {
+		local := b.f.AddLocal(b.localName("array"), b.l.ty(baseTy))
+		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, base)
+		borrow := b.res(b.l.m.SafeMut(b.l.ty(baseTy)))
+		b.emit(mir.Instr{Op: mir.OpBorrowMut, Result: borrow, Place: mir.Place{Kind: mir.PlaceLocal, Local: local}})
+		ref := b.res(b.l.m.SafeMut(b.l.ty(baseTy.elem)))
+		b.emit(mir.Instr{Op: mir.OpArrayIndexChecked, Result: ref, Array: borrow, Index: idx, FailTarget: b.panicBlock()})
+		return ref, nil
+	}
 	ref := b.res(b.l.m.SafeMut(b.l.ty(sequenceElem(baseTy))))
 	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: base, Index: idx, FailTarget: b.panicBlock()})
 	return ref, nil
@@ -1736,9 +1869,33 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		// The leading explicit type arguments are compile-time; only the
 		// runtime arguments are lowered.
 		runtime := x.Args[ai.explicitArgs:]
-		args := make([]mir.ValueId, 0, len(runtime))
-		for _, a := range runtime {
-			v, err := b.expr(a)
+		args := make([]mir.ValueId, 0, len(runtime)+1)
+		calleeAliases := ai.fn.decl.Name == "main" && len(ai.fn.params) > 0 && ai.fn.params[0].kind == tDomain
+		if b.l.hiddenDomain && !calleeAliases {
+			if d, ok := b.values["__domain"]; ok {
+				args = append(args, d)
+			} else {
+				args = append(args, 0)
+			}
+		}
+		for i, a := range runtime {
+			var v mir.ValueId
+			var err error
+			if i < len(ai.borrowArgs) && ai.borrowArgs[i] {
+				actual := b.ann[a].typ
+				if actual.kind == tVec {
+					owner, directErr := b.directExpr(a)
+					err = directErr
+					if err == nil {
+						v = b.res(b.l.m.Slice(b.l.ty(actual.elem)))
+						b.emit(mir.Instr{Op: mir.OpVecAsSlice, Result: v, Slice: owner})
+					}
+				} else {
+					v, err = b.arrayView(a)
+				}
+			} else {
+				v, err = b.expr(a)
+			}
 			if err != nil {
 				return 0, err
 			}
@@ -1812,8 +1969,173 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 
 	case callBuiltin:
 		return b.builtinCall(x, ai.builtin)
+	case callMethod:
+		return b.methodCall(x, ai)
 	}
 	return 0, diag(x.P, "internal: unresolved call at lowering")
+}
+
+func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
+	if ai.builtin == "new" {
+		id := b.res(b.l.ty(b.ann[x].typ))
+		b.emit(mir.Instr{Op: mir.OpVecNew, Result: id, TypeOp: b.l.ty(b.ann[x].typ)})
+		return id, nil
+	}
+	if ai.builtin == "from_array" {
+		arr, err := b.expr(x.Args[1])
+		if err != nil {
+			return 0, err
+		}
+		at := b.ann[x.Args[1]].typ
+		domain := b.values["__domain"]
+		ln := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: int64(at.length)})
+		storage := b.res(b.l.m.SafeMut(b.l.ty(at.elem)))
+		b.emit(mir.Instr{Op: mir.OpAllocChecked, Result: storage, Domain: domain, Count: ln, TypeOp: b.l.ty(at.elem), FailTarget: b.panicBlock()})
+		local := b.f.AddLocal(b.localName("array"), b.l.ty(at))
+		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, arr)
+		borrow := b.res(b.l.m.SafeMut(b.l.ty(at)))
+		b.emit(mir.Instr{Op: mir.OpBorrowMut, Result: borrow, Place: mir.Place{Kind: mir.PlaceLocal, Local: local}})
+		for i := uint64(0); i < at.length; i++ {
+			index := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: int64(i)})
+			source := b.res(b.l.m.SafeMut(b.l.ty(at.elem)))
+			b.emit(mir.Instr{Op: mir.OpArrayIndexChecked, Result: source, Array: borrow, Index: index, FailTarget: b.panicBlock()})
+			value := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: source}, b.l.ty(at.elem))
+			target := b.res(b.l.m.SafeMut(b.l.ty(at.elem)))
+			b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: target, Slice: storage, Index: index, FailTarget: b.panicBlock()})
+			b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: target}, value)
+		}
+		id := b.res(b.l.ty(b.ann[x].typ))
+		b.emit(mir.Instr{Op: mir.OpVecConstructChecked, Result: id, Slice: storage, Lo: ln, Capacity: ln, FailTarget: b.panicBlock()})
+		return id, nil
+	}
+	receiverType := b.ann[ai.receiver].typ
+	var recv mir.ValueId
+	var err error
+	if receiverType.kind == tArray {
+		recv, err = b.arrayView(ai.receiver)
+	} else {
+		recv, err = b.directExpr(ai.receiver)
+	}
+	if err != nil {
+		return 0, err
+	}
+	args := make([]mir.ValueId, len(x.Args))
+	for i, a := range x.Args {
+		args[i], err = b.expr(a)
+		if err != nil {
+			return 0, err
+		}
+	}
+	switch ai.builtin {
+	case "len":
+		id := b.res(mir.TypeU64)
+		op := mir.OpSliceLen
+		if receiverType.kind == tVec {
+			op = mir.OpVecLen
+		}
+		b.emit(mir.Instr{Op: op, Result: id, Slice: recv})
+		return id, nil
+	case "push":
+		length := b.res(mir.TypeU64)
+		b.emit(mir.Instr{Op: mir.OpVecLen, Result: length, Slice: recv})
+		capacity := b.res(mir.TypeU64)
+		b.emit(mir.Instr{Op: mir.OpVecCapacity, Result: capacity, Slice: recv})
+		full := b.res(mir.TypeBool)
+		b.emit(mir.Instr{Op: mir.OpIntEq, Result: full, A: length, B: capacity})
+		growBlock, _ := b.addBlock("bb_vec_grow", nil)
+		keepBlock, _ := b.addBlock("bb_vec_keep", nil)
+		join, joined := b.addBlock("bb_vec_ready", []mir.Param{{Name: "vec", Type: b.l.ty(receiverType)}})
+		b.branch(full, blkID(b.f, growBlock), blkID(b.f, keepBlock))
+
+		b.setCur(growBlock)
+		zero := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 0})
+		isZero := b.res(mir.TypeBool)
+		b.emit(mir.Instr{Op: mir.OpIntEq, Result: isZero, A: capacity, B: zero})
+		initialBlock, _ := b.addBlock("bb_vec_initial_capacity", nil)
+		doubleBlock, _ := b.addBlock("bb_vec_double_capacity", nil)
+		capacityJoin, capacities := b.addBlock("bb_vec_capacity", []mir.Param{{Name: "capacity", Type: mir.TypeU64}})
+		b.branch(isZero, blkID(b.f, initialBlock), blkID(b.f, doubleBlock))
+		b.setCur(initialBlock)
+		four := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 4})
+		b.jump(blkID(b.f, capacityJoin), []mir.ValueId{four})
+		b.setCur(doubleBlock)
+		two := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 2})
+		doubled := b.res(mir.TypeU64)
+		b.emit(mir.Instr{Op: mir.OpIntMulChecked, Result: doubled, A: capacity, B: two, FailTarget: b.panicBlock()})
+		b.jump(blkID(b.f, capacityJoin), []mir.ValueId{doubled})
+		b.setCur(capacityJoin)
+		grown := b.res(b.l.ty(receiverType))
+		b.emit(mir.Instr{Op: mir.OpVecGrowChecked, Result: grown, Slice: recv, Domain: b.values["__domain"], Capacity: capacities[0], FailTarget: b.panicBlock()})
+		b.jump(blkID(b.f, join), []mir.ValueId{grown})
+
+		b.setCur(keepBlock)
+		b.jump(blkID(b.f, join), []mir.ValueId{recv})
+		b.setCur(join)
+		storage := b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+		b.emit(mir.Instr{Op: mir.OpVecStorage, Result: storage, Slice: joined[0]})
+		target := b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+		b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: target, Slice: storage, Index: length, FailTarget: b.panicBlock()})
+		b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: target}, args[0])
+		one := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+		newLength := b.res(mir.TypeU64)
+		b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: newLength, A: length, B: one, FailTarget: b.panicBlock()})
+		newCapacity := b.res(mir.TypeU64)
+		b.emit(mir.Instr{Op: mir.OpVecCapacity, Result: newCapacity, Slice: joined[0]})
+		updated := b.res(b.l.ty(receiverType))
+		b.emit(mir.Instr{Op: mir.OpVecConstructChecked, Result: updated, Slice: storage, Lo: newLength, Capacity: newCapacity, FailTarget: b.panicBlock()})
+		receiver := ai.receiver.(*Ident)
+		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: b.locals[receiver.Name]}, updated)
+		return mir.NoValue, nil
+	case "get":
+		length := b.res(mir.TypeU64)
+		if receiverType.kind == tVec {
+			b.emit(mir.Instr{Op: mir.OpVecLen, Result: length, Slice: recv})
+		} else {
+			b.emit(mir.Instr{Op: mir.OpSliceLen, Result: length, Slice: recv})
+		}
+		inBounds := b.res(mir.TypeBool)
+		b.emit(mir.Instr{Op: mir.OpIntLt, Result: inBounds, A: args[0], B: length})
+		someBlock, _ := b.addBlock("bb_get_some", nil)
+		noneBlock, _ := b.addBlock("bb_get_none", nil)
+		optionType := b.l.ty(b.ann[x].typ)
+		join, result := b.addBlock("bb_get_result", []mir.Param{{Name: "value", Type: optionType}})
+		b.branch(inBounds, blkID(b.f, someBlock), blkID(b.f, noneBlock))
+		b.setCur(someBlock)
+		view := recv
+		if receiverType.kind == tVec {
+			view = b.res(b.l.m.Slice(b.l.ty(receiverType.elem)))
+			b.emit(mir.Instr{Op: mir.OpVecAsSlice, Result: view, Slice: recv})
+		}
+		ref := b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+		b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: ref, Slice: view, Index: args[0], FailTarget: b.panicBlock()})
+		value := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: ref}, b.l.ty(receiverType.elem))
+		value = b.copyValue(value, receiverType.elem)
+		some := b.res(optionType)
+		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: some, TypeOp: optionType, Variant: "some", Payload: value})
+		b.jump(blkID(b.f, join), []mir.ValueId{some})
+		b.setCur(noneBlock)
+		none := b.res(optionType)
+		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: none, TypeOp: optionType, Variant: "none"})
+		b.jump(blkID(b.f, join), []mir.ValueId{none})
+		b.setCur(join)
+		return result[0], nil
+	case "slice", "slice_mut", "subview":
+		base := recv
+		if receiverType.kind == tVec {
+			id := b.res(b.l.m.Slice(b.l.ty(receiverType.elem)))
+			op := mir.OpVecAsSlice
+			if ai.builtin == "slice_mut" {
+				id = b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+				op = mir.OpVecAsMutSlice
+			}
+			b.emit(mir.Instr{Op: op, Result: id, Slice: recv})
+			base = id
+		}
+		id := b.res(b.l.m.Slice(b.l.ty(receiverType.elem)))
+		b.emit(mir.Instr{Op: mir.OpSliceRangeChecked, Result: id, Slice: base, Lo: args[0], Hi: args[1], FailTarget: b.panicBlock()})
+		return id, nil
+	}
+	return 0, diag(x.P, "internal: method %s lowering is unavailable", ai.builtin)
 }
 
 // builtinCall lowers a builtin call. Alloc and Push skip their compile-time

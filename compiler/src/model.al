@@ -144,12 +144,13 @@ type TypeParamRec {
 
 // Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
 // 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
-// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, 15 Array, and
-// 16 __s0_String. Primitive targets
+// 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, 15 Array,
+// 16 __s0_String, 17 Vec, and 18 MutSlice. Primitive targets
 // 1..12 identify Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, and
 // Unit directly. An Array record has one type argument and stores its fixed
 // length in target. String and Bytes retain source identities distinct from
-// slice(U8); __s0_String is the private bootstrap slice(U8) facility.
+// slice(U8); __s0_String is the private bootstrap slice(U8) facility. Vec has
+// recursively copyable value semantics; slice and MutSlice are scoped views.
 // Canonical records have no source ownership (syntax is zero);
 // source occurrences are retained by
 // CheckedTypeAnnotationRec.
@@ -273,7 +274,9 @@ type CheckedExprChildRec {
 // zero except for kind 4, where it is the stable role-2 DeclTypeUseRec ID.
 // checked_type is the concrete function/import result or constructed type.
 // builtin is zero for kinds 1..4, a stable builtin identity for kind 5,
-// and 5 OutOfMemory or 6 Limit for kind 6.
+// and 5 OutOfMemory or 6 Limit for kind 6. Collection builtin identities are
+// 18 Vec.new, 19 Vec.from_array, 20 len, 21 Vec.push, 22 get,
+// 23 immutable slice/range, 24 mutable slice, and 25 mutable subview.
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -472,7 +475,12 @@ type EnvironmentRec {
 // exclusive or owning access. Code 93 rejects an affine owner that reaches a
 // function exit without an ownership transfer. Code 94 rejects a transfer
 // performed on only some paths, and 95 rejects mutable binding or overwrite of
-// an affine owner. kind is the
+// an affine owner. Codes 96..98 reject malformed array type/literal shape and
+// length, 99 rejects invalid UTF-8 for String, 100 rejects a non-copyable Vec
+// element, 101 rejects mutation through a non-mutable sequence receiver, 102
+// rejects binding MutSlice through `let`, 103 rejects indexed mutation through
+// an immutable scoped view, and 104 rejects scoped-view escape by return or
+// aggregate storage. kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.

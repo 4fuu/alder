@@ -1,4 +1,4 @@
-// Append-only deterministic construction for the independent MIR 3 model.
+// Append-only deterministic construction for the independent MIR 4 model.
 
 fn mir_with_names(store: MirStore, names: __s0_Buffer(U8)) -> MirStore {
     return MirStore(names: names, types: store.types, type_parts: store.type_parts, imports: store.imports, constants: store.constants, functions: store.functions, params: store.params, locals: store.locals, blocks: store.blocks, values: store.values, places: store.places, instructions: store.instructions, terminators: store.terminators, operands: store.operands)
@@ -157,7 +157,7 @@ fn mir_type_parts_equal(store: MirStore, first: U64, count: U64, parts: __s0_Buf
     return true
 }
 
-// Structural type kinds option..bytes are interned by deterministic
+// Structural type kinds option..vec are interned by deterministic
 // ascending scans.
 // For unary and singleton types parts is empty; function types use ordered
 // parameter Type IDs and result_type. Named aggregate/enum kinds are appended

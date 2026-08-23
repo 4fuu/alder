@@ -1,5 +1,5 @@
 fn fill(d: Domain, n: U64) -> I64 {
-    let buf = __s0_alloc(I64, d, n)
+    var buf = __s0_alloc(I64, d, n)
     var i: U64 = 0
     while i < n {
         buf[i] = 3
@@ -9,7 +9,7 @@ fn fill(d: Domain, n: U64) -> I64 {
 }
 
 fn roundtrip(d: Domain, n: U64) -> U64 {
-    let buf = __s0_alloc(U64, d, n)
+    var buf = __s0_alloc(U64, d, n)
     var i: U64 = 0
     while i < n {
         buf[i] = i
@@ -18,7 +18,7 @@ fn roundtrip(d: Domain, n: U64) -> U64 {
     // Reset releases the storage; a fresh allocation reuses the domain.
     // The mark must be the direct domain.mark result.
     __s0_domain_reset(d, __s0_domain_mark(d))
-    let buf2 = __s0_alloc(U64, d, 2)
+    var buf2 = __s0_alloc(U64, d, 2)
     buf2[0] = 42
     buf2[1] = 7
     return buf2[0] + buf2[1]

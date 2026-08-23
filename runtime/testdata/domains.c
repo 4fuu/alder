@@ -193,6 +193,19 @@ static void test_cycles(void) {
     }
 }
 
+static void test_vec_construction(void) {
+    uint32_t data[4] = {0u, 1u, 2u, 3u};
+    AlderSlice storage = {(void *)data, UINT64_C(4)};
+    AlderVec vec = {0};
+    CHECK(alder_vec_construct_checked(storage, UINT64_C(2), UINT64_C(4), &vec));
+    CHECK(vec.data == (void *)data && vec.len == UINT64_C(2) &&
+          vec.capacity == UINT64_C(4));
+    CHECK(!alder_vec_construct_checked(storage, UINT64_C(5), UINT64_C(4), &vec));
+    CHECK(!alder_vec_construct_checked(storage, UINT64_C(2), UINT64_C(5), &vec));
+    CHECK(!alder_vec_construct_checked((AlderSlice){NULL, UINT64_C(1)},
+                                       UINT64_C(0), UINT64_C(1), &vec));
+}
+
 int main(void) {
     test_lifecycle();
     test_marks();
@@ -200,6 +213,7 @@ int main(void) {
     test_invalid();
     test_segmentation();
     test_cycles();
+    test_vec_construction();
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;
