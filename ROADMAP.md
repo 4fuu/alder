@@ -550,9 +550,9 @@ bit-identical native binaries require a separately pinned native toolchain.
 
 Exit-criteria evidence:
 
-- `alder1 -> C2 -> alder2 -> C3` completes for the current 29-source compiler
+- `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`;
+  `314709c7a2138f0285563ed47de4dbd98f01c256b0452d597653cd90135bf08f`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -631,9 +631,9 @@ Exit-criteria evidence:
   C; snapshots enumerate only exact requested paths and are sorted before the
   compiler consumes them;
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
-  Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 29-source
+  Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `1bb58c1797f982a08f4bac980a19fe33bf0b2f52309e39dd56106d568f736d8d`.
+  `314709c7a2138f0285563ed47de4dbd98f01c256b0452d597653cd90135bf08f`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -729,12 +729,12 @@ Exit-criteria evidence:
   deep copies, view formation, subviews, and deterministic output;
 - `gofmt -l .`, `go vet ./...`, `go test ./...`, the strict runtime C11 syntax
   check, and the Go-free `bootstrap/regenerate.sh` byte-for-byte fixed-point
-  gate pass with the committed 29-source compiler inventory and MIR v4
+  gate pass with the committed 30-source compiler inventory and MIR v4
   bootstrap artifact.
 
 ## Milestone 7.3: Inferred Hierarchical Storage
 
-Status: **planned after Milestone 7.1**
+Status: **in progress — slice 1 complete**
 
 Complete the foundational value and view model with compiler-inferred
 hierarchical storage. Placement chooses the smallest domain proven to outlive
@@ -752,6 +752,18 @@ Advance this gate through three dependency-ordered slices:
 3. migration and qualification of the complete Milestone 7 value/view surface,
    including removal of explicit bootstrap storage from ordinary public value
    construction.
+
+Slice 1 establishes the Alder-written, lowering-independent storage-analysis
+boundary. Stable candidate-domain, allocation, dependency, fallback, and view
+records feed a deterministic monotone worklist. The result records the nearest
+safe placement, every conservative outer-domain retention site, and validated
+views; malformed hierarchies/constraints and views proven invalidated are
+rejected in stable input order. Parent-before-child domain IDs make hierarchy
+validation and depth construction finite, while a stable dependency index and
+FIFO queue avoid whole-graph rescans on layered compiler-scale inputs. Slice 2
+owns construction of these constraints from ordinary source programs and all
+consumption by inferred-domain lowering; the current hidden-root lowering and
+returned-view rejection therefore remain unchanged.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate

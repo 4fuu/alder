@@ -37,6 +37,7 @@ var compilerSourceManifest = []string{
 	"output.al",
 	"parser.al",
 	"project.al",
+	"storage_analysis.al",
 	"verify_analysis.al",
 	"verify_model.al",
 	"verify_phase1.al",

@@ -30,6 +30,7 @@ var coreConformanceSourceManifest = []string{
 	"model.al",
 	"output.al",
 	"parser.al",
+	"storage_analysis.al",
 	"verify_analysis.al",
 	"verify_model.al",
 	"verify_phase1.al",
@@ -84,6 +85,7 @@ fn main(d: Domain) -> I32 {
 	if host_path_is(0, "!alder-core-cgen") { return cgen_mode(d) }
     if host_path_is(0, "!alder-core-printer") { return printer_mode(d) }
     if host_path_is(0, "!alder-core-verifier") { return verifier_mode(d) }
+	if host_path_is(0, "!alder-core-storage") { return storage_mode(d) }
     return 2
 }
 `
@@ -131,7 +133,7 @@ func coreConformanceWrapper() string {
 
 	verifier := strings.TrimPrefix(mirVerifyWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\n")
 	verifier = strings.Replace(verifier, "fn main(d: Domain)", "fn verifier_mode(d: Domain)", 1)
-	return checker + printer + verifier + cgenBodyWrapper + cgenSkeletonWrapper + `
+	return checker + printer + verifier + storageAnalysisWrapper + cgenBodyWrapper + cgenSkeletonWrapper + `
 fn lower_print(mir: MirStore) -> I32 {
     if mir_print(mir) { return 0 }
     return 5
@@ -354,5 +356,11 @@ func TestAlderCoreConformance(t *testing.T) {
 			t.Parallel()
 		}
 		runMIRVerifierConformance(t, exe)
+	})
+	t.Run("storage-analysis", func(t *testing.T) {
+		if parallel {
+			t.Parallel()
+		}
+		runStorageAnalysisConformance(t, exe)
 	})
 }

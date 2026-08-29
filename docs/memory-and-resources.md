@@ -93,6 +93,19 @@ memory but cannot produce use after free. The compiler must diagnose or profile
 material retention and cross-domain copies; it does not silently switch the
 program to per-object reference counting.
 
+The placement analysis is a finite monotone constraint problem over stable
+candidate-domain and allocation IDs. A placement starts at its innermost
+candidate and moves only toward ancestors until it outlives direct uses, view
+uses, and dependent allocations. An unproved lifetime contributes an explicit
+root-retention constraint and a stable retention record; it is not interpreted
+as permission to keep an inner placement. Candidate domains use
+parent-before-child order, and dependency propagation uses stable input order,
+so equivalent inputs produce identical plans independent of map iteration or
+process scheduling. A view proven invalidated before use is rejected rather
+than made apparently valid by retaining its backing allocation. M7.3 slice 1
+implements this analysis boundary; inferred-domain MIR lowering, returned-view
+retention, and cross-domain copying remain owned by slice 2.
+
 Domains may use resettable segments, dedicated large-object segments, caller
 result segments, and container-owned segments. The exact segmentation strategy
 is an implementation choice so long as observable value, cleanup, and OOM
