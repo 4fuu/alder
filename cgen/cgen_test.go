@@ -211,6 +211,30 @@ bb0:
 	if _, err = Generate(m2); err != nil {
 		t.Fatalf("recursive copy_to_domain rejected: %v", err)
 	}
+
+	// The internal trusted generation path still keeps its copyability contract:
+	// identity-bearing children must not be hidden by aggregate triviality.
+	identity := `mir 4
+type @P {
+  value: u64
+}
+type @Mixed {
+  value: u64
+  table: table(@P)
+}
+fn @copy(%d: domain_handle, %value: @Mixed) {
+entry:
+  %copy = copy_to_domain %d, %value
+  return
+}
+`
+	m3, err := mir.Parse(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = generate(m3, mir.NoFunction, false); err == nil || !strings.Contains(err.Error(), "identity-bearing type is not relocatable") {
+		t.Fatalf("trusted Cgen accepted identity-bearing aggregate copy: %v", err)
+	}
 }
 
 // TestGenerateRejectsUnsafeExternalNames pins the backend-safe subset of MIR

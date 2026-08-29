@@ -271,6 +271,13 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
         out = try cgen_put(d, out, "    alder_v.data = alder_p;\n  }\n")
         if item.kind == mir_type_kind_vec() { out = try cgen_put(d, out, "  alder_v.capacity = alder_v.len;\n") }
     }
+    if item.kind == mir_type_kind_array() && !cgen_copy_trivial(store, item.elem) {
+        out = try cgen_put(d, out, "  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)")
+        out = try cgen_put_u64(d, out, item.length)
+        out = try cgen_put(d, out, "; alder_i++) {\n    alder_v.alder_e[alder_i] = alder_copy_ty")
+        out = try cgen_put_u64(d, out, item.elem - 1)
+        out = try cgen_put(d, out, "(alder_d, alder_v.alder_e[alder_i]);\n  }\n")
+    }
     if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
         var ordinal: U64 = 0
         var kind = mir_type_part_variant()

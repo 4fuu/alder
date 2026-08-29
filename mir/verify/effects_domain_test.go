@@ -96,3 +96,28 @@ entry:
 		t.Fatalf("identity-bearing copy diagnostic = %q", got)
 	}
 }
+
+func TestCopyToDomainForbiddenKindOrder(t *testing.T) {
+	text := `mir 4
+type @P {
+  value: u64
+}
+type @Mixed {
+  table: table(@P)
+  domain: domain_handle
+}
+fn @copy(%root: domain_handle, %value: @Mixed) {
+entry:
+  %copy = copy_to_domain %root, %value
+  return
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := phase10Backend(m)
+	if len(errs) != 1 || !strings.Contains(errs[0].Msg, "may not contain domain_handle") {
+		t.Fatalf("mixed identity-bearing copy diagnostics = %v", errs)
+	}
+}

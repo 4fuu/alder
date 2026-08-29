@@ -53,8 +53,15 @@ fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, t
     return Ok(0)
 }
 fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) { return Ok(mir_type_kind_domain_handle()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) { return Ok(mir_type_kind_domain_mark()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_scope()) { return Ok(mir_type_kind_cleanup_scope()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_id()) { return Ok(mir_type_kind_cleanup_id()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) { return Ok(mir_type_kind_table()) }
-    return mir_v10_forbidden_element(d, store, indexes, type_id)
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_view()) { return Ok(mir_type_kind_table_view()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_mut_view()) { return Ok(mir_type_kind_table_mut_view()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
+    return Ok(0)
 }
 fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial

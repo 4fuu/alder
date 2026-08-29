@@ -24,6 +24,12 @@ fn returned_nested_vec_view() -> [Vec(U64)] {
     return values.slice(0, 2)
 }
 
+fn returned_nested_vec_array() -> Array(Vec(U64), 2) {
+    var first: Vec(U64) = Vec.from_array(U64, [71, 73])
+    var second: Vec(U64) = Vec.from_array(U64, [79])
+    return [first, second]
+}
+
 fn make_values() -> Vec(U64) {
     var values: Vec(U64) = Vec.from_array(U64, [19, 23])
     values.push(29)
@@ -64,18 +70,26 @@ fn main() -> I32 {
     if nested_original[0] != 47 || nested_original.len() != 2 { return 4 }
     if nested_changed[0] != 61 || nested_changed.len() != 3 { return 5 }
 
+    let nested_array = returned_nested_vec_array()
+    var array_original: Vec(U64) = nested_array[0]
+    var array_changed: Vec(U64) = nested_array[0]
+    array_changed[0] = 79
+    array_changed.push(83)
+    if array_original[0] != 71 || array_original.len() != 2 { return 6 }
+    if array_changed[0] != 79 || array_changed.len() != 3 { return 7 }
+
     var original = make_values()
     var copied = original
     copied[0] = 41
     copied.push(43)
-    if original[0] != 19 || original.len() != 3 { return 6 }
-    if copied[0] != 41 || copied.len() != 4 || copied[3] != 43 { return 7 }
+    if original[0] != 19 || original.len() != 3 { return 8 }
+    if copied[0] != 41 || copied.len() != 4 || copied[3] != 43 { return 9 }
 
-    if scalar_from_local_collection() != 37 { return 8 }
+    if scalar_from_local_collection() != 37 { return 10 }
     let propagated = propagate_vec_error()
     if !match propagated {
         Ok(value) => false
         Err(error) => error[0] == 7 && error[1] == 11
-    } { return 9 }
+    } { return 11 }
     return 0
 }

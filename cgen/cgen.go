@@ -223,7 +223,9 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	}
 	ty := &g.m.Types[t]
 	switch ty.Kind {
-	case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut:
+	case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut,
+		mir.TypeDomainHandle, mir.TypeDomainMark, mir.TypeCleanupScope, mir.TypeCleanupID,
+		mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr:
 		return false
 	case mir.TypeOption, mir.TypeArray:
 		return g.copyTrivial(ty.Elem)

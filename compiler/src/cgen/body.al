@@ -181,6 +181,7 @@ fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
     if type_id <= mir_primitive_type_count() { return true }
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_vec() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return false }
+    if item.kind == mir_type_kind_domain_handle() || item.kind == mir_type_kind_domain_mark() || item.kind == mir_type_kind_cleanup_scope() || item.kind == mir_type_kind_cleanup_id() || item.kind == mir_type_kind_table() || item.kind == mir_type_kind_table_view() || item.kind == mir_type_kind_table_mut_view() || item.kind == mir_type_kind_raw_ptr() { return false }
     if item.kind == mir_type_kind_array() { return cgen_copy_trivial(store, item.elem) }
     if item.kind == mir_type_kind_option() { return cgen_copy_trivial(store, item.elem) }
     if item.kind == mir_type_kind_result() { return cgen_copy_trivial(store, item.ok_type) && cgen_copy_trivial(store, item.err_type) }
@@ -200,6 +201,7 @@ fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
 fn cgen_copy_supported(store: MirStore, type_id: U64) -> Bool {
     if cgen_copy_trivial(store, type_id) || type_id <= mir_primitive_type_count() { return true }
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_domain_handle() || item.kind == mir_type_kind_domain_mark() || item.kind == mir_type_kind_cleanup_scope() || item.kind == mir_type_kind_cleanup_id() || item.kind == mir_type_kind_table() || item.kind == mir_type_kind_table_view() || item.kind == mir_type_kind_table_mut_view() || item.kind == mir_type_kind_raw_ptr() { return false }
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_vec() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_array() { return cgen_copy_supported(store, item.elem) }

@@ -727,6 +727,11 @@ fn returned_nested_vec_view() -> [Vec(U64)] {
     let values: Array(Vec(U64), 2) = [first, second]
     return values.slice(0, 2)
 }
+fn returned_nested_vec_array() -> Array(Vec(U64), 2) {
+    var first: Vec(U64) = Vec.from_array(U64, [71, 73])
+    var second: Vec(U64) = Vec.from_array(U64, [79])
+    return [first, second]
+}
 fn scalar_from_local_collection() -> U64 {
     var values: Vec(U64) = Vec.from_array(U64, [31])
     values.push(37)
@@ -820,12 +825,19 @@ fn main() -> I32 {
     view_changed.push(67)
     if view_original[0] != 47 || view_original.len() != 2 { return 11 }
     if view_changed[0] != 61 || view_changed.len() != 3 { return 12 }
-    if scalar_from_local_collection() != 37 { return 13 }
+    let nested_array = returned_nested_vec_array()
+    var array_original: Vec(U64) = nested_array[0]
+    var array_changed: Vec(U64) = nested_array[0]
+    array_changed[0] = 79
+    array_changed.push(83)
+    if array_original[0] != 71 || array_original.len() != 2 { return 13 }
+    if array_changed[0] != 79 || array_changed.len() != 3 { return 14 }
+    if scalar_from_local_collection() != 37 { return 15 }
     let propagated = propagate_vec_error()
     if !match propagated {
         Ok(value) => false
         Err(error) => error[0] == 7 && error[1] == 11
-    } { return 14 }
+    } { return 16 }
     return 0
 }
 fn out_of_bounds() -> U64 {
