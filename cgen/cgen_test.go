@@ -195,8 +195,7 @@ func TestGenerateRejectsUnverified(t *testing.T) {
 		t.Fatalf("unverified module accepted: %v", err)
 	}
 
-	// copy_to_domain of a slice whose elements contain references: the M3
-	// backend copies slice element bytes, so it must refuse this honestly.
+	// copy_to_domain recursively materializes non-trivial slice elements.
 	text := `mir 1
 
 fn @copy(%d: domain_handle, %s: slice(slice(u8))) -> slice(slice(u8)) {
@@ -209,9 +208,8 @@ bb0:
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Generate(m2)
-	if err == nil || !strings.Contains(err.Error(), "slice elements must be copy-trivial") {
-		t.Fatalf("non-copyable copy_to_domain accepted: %v", err)
+	if _, err = Generate(m2); err != nil {
+		t.Fatalf("recursive copy_to_domain rejected: %v", err)
 	}
 }
 

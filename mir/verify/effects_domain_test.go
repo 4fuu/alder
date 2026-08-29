@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/4fuu/alder/mir"
@@ -70,5 +71,28 @@ entry:
 	}
 	if errs := Module(m); len(errs) != 0 {
 		t.Fatalf("independent outer-domain copy rejected:\n%s", Errors(errs).String())
+	}
+}
+
+func TestCopyToDomainRejectsIdentityBearingSource(t *testing.T) {
+	text := `mir 4
+const @one: u64 = 1
+fn @copy(%root: domain_handle) {
+entry:
+  %child = domain.create %root
+  %copy = copy_to_domain %root, %child
+  domain.destroy %child
+  %one = const.get @one
+  %value = alloc %copy, u8, %one
+  return
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := Module(m)
+	if got := Errors(errs).String(); !strings.Contains(got, "copy_to_domain source type may not contain domain_handle") {
+		t.Fatalf("identity-bearing copy diagnostic = %q", got)
 	}
 }

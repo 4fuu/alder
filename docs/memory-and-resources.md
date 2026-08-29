@@ -153,8 +153,10 @@ element composition. M7.3 slice 2 replaces M7.1's single hidden borrowed root
 placement with a hidden caller-result domain plus a nested function domain.
 The `StoragePlan` chooses result or function placement at material allocation,
 growth, and copy sites. Function domains are destroyed on every return,
-failure, and panic path; recursive `copy_to_domain` operations establish
-independent destination provenance before that destruction. Domains remain
+failure, and panic path; return and failed-`try` values with relocatable storage
+are recursively copied to caller-result storage before that destruction.
+Identity-bearing resources are not relocatable and retain their real
+provenance instead of passing through `copy_to_domain`. Domains remain
 absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.

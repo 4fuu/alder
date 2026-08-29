@@ -1233,6 +1233,37 @@ fn lower_mir_type_contains_vec(d: Domain, store: MirStore, root: U64) -> Result(
     return Ok(false)
 }
 
+fn lower_mir_type_copy_relocatable(d: Domain, store: MirStore, root: U64) -> Result(Bool, __s0_Error) {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    var seen = __s0_alloc(U64, d, count + 1)
+    var zero: U64 = 0
+    while zero <= count { seen[zero] = 0
+        zero = zero + 1 }
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        if id >= 1 && id <= count && seen[id] == 0 {
+            seen[id] = 1
+            let typ = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+            if typ.kind == mir_type_kind_domain_handle() || typ.kind == mir_type_kind_domain_mark() || typ.kind == mir_type_kind_cleanup_scope() || typ.kind == mir_type_kind_cleanup_id() || typ.kind == mir_type_kind_table() || typ.kind == mir_type_kind_table_view() || typ.kind == mir_type_kind_table_mut_view() || typ.kind == mir_type_kind_raw_ptr() { return Ok(false) }
+            if typ.elem != 0 { work = try __s0_buffer_append(U64, d, work, typ.elem) }
+            if typ.ok_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.ok_type) }
+            if typ.err_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.err_type) }
+            if typ.result_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.result_type) }
+            var part_at: U64 = 0
+            while part_at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_at)
+                if part.owner == id && part.part_type != 0 { work = try __s0_buffer_append(U64, d, work, part.part_type) }
+                part_at = part_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return Ok(true)
+}
+
 fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
     if !(try lower_mir_type_contains_vec(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
@@ -1245,9 +1276,19 @@ fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: L
 
 fn lower_copy_result_storage(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
-    if !lower_has_storage(store) { return Ok(LowerStep(state: typ.state, id: value)) }
+    if !lower_has_storage(store) || !(try lower_mir_type_copy_relocatable(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
     let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
     if domain == 0 || domain != lower_result_domain_value(typ.state, store, owner) { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
+    let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+    let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
+    return Ok(LowerStep(state: copied.state, id: result.id))
+}
+
+fn lower_retain_exit_value(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, checked_type)
+    if !lower_has_storage(store) || !(try lower_mir_type_copy_relocatable(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
+    let domain = lower_result_domain_value(typ.state, store, owner)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
     let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
     let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
     return Ok(LowerStep(state: copied.state, id: result.id))
@@ -2115,8 +2156,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let fn_type = try lower_type(d, source_state, store, current, owner_result.checked_type)
         let wrapped = try lower_add_result(d, fn_type.state, function, err_block.id, owner_result.checked_type, source_state, store)
         let constructed = try lower_add_instr(d, wrapped.state, function, err_block.id, mir_op_enum_construct(), wrapped.id, 0, fn_type.id, err_value.id, 0, 0, "err")
-        current = try lower_cleanup_exits(d, source_state, store, constructed.state, owner, function, err_block.id, environment, 0, 3)
-        let failed = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: err_block.id, kind: mir_term_fail(), value: wrapped.id, target: 0, then_block: 0, else_block: 0))
+        let retained = try lower_retain_exit_value(d, source_state, store, constructed.state, owner, function, err_block.id, owner_result.checked_type, wrapped.id)
+        current = try lower_cleanup_exits(d, source_state, store, retained.state, owner, function, err_block.id, environment, 0, 3)
+        let failed = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: err_block.id, kind: mir_term_fail(), value: retained.id, target: 0, then_block: 0, else_block: 0))
         return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_value.id))
     }
     return Ok(LowerStep(state: lower_invalid(state), id: 0))

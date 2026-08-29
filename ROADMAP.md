@@ -773,9 +773,12 @@ the current function domain, while return copies target the nearest
 caller-visible result domain before the function domain is destroyed. This
 also permits direct immutable `[T]` results by materializing independent result
 storage, including array-backed, Vec-backed, parameter-backed, and
-callee-returned views. `copy_to_domain` now severs source-domain provenance, so
-ordinary values and recursive Vec copies remain valid and independent after an
-inner source domain ends. Mutable views and aggregates containing views remain
+callee-returned views and views whose elements contain recursively copyable
+collections. Return and failed-`try` exits retain the complete relocatable
+result before local cleanup and domain destruction. `copy_to_domain` severs
+source-domain provenance only for values it can independently materialize;
+domain, table, cleanup, raw-pointer, and other identity-bearing resource inputs
+are rejected. Mutable views and aggregates containing views remain
 non-escaping, and their overlap, mutation, and invalidation checks are
 unchanged.
 

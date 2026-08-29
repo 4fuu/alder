@@ -721,10 +721,24 @@ fn returned_vec_view() -> [U64] {
 }
 fn nested_returned_view() -> [U64] { return returned_vec_view() }
 fn returned_parameter_view(values: [U64]) -> [U64] { return values }
+fn returned_nested_vec_view() -> [Vec(U64)] {
+    var first: Vec(U64) = Vec.from_array(U64, [47, 53])
+    var second: Vec(U64) = Vec.from_array(U64, [59])
+    let values: Array(Vec(U64), 2) = [first, second]
+    return values.slice(0, 2)
+}
 fn scalar_from_local_collection() -> U64 {
     var values: Vec(U64) = Vec.from_array(U64, [31])
     values.push(37)
     return values[1]
+}
+fn fail_vec() -> Result(U64, Vec(U64)) {
+    var error: Vec(U64) = Vec.from_array(U64, [7, 11])
+    return Err(error)
+}
+fn propagate_vec_error() -> Result(U64, Vec(U64)) {
+    let value = try fail_vec()
+    return Ok(value)
 }
 fn main() -> I32 {
     let seed: Array(U64, 2) = [1, 2]
@@ -799,7 +813,19 @@ fn main() -> I32 {
     if vec_view[0] != 11 || vec_view[2] != 17 { return 9 }
     let parameter_view = returned_parameter_view(vec_view)
     if parameter_view[1] != 13 { return 10 }
-    if scalar_from_local_collection() != 37 { return 11 }
+    let nested_view = returned_nested_vec_view()
+    var view_original: Vec(U64) = nested_view[0]
+    var view_changed: Vec(U64) = nested_view[0]
+    view_changed[0] = 61
+    view_changed.push(67)
+    if view_original[0] != 47 || view_original.len() != 2 { return 11 }
+    if view_changed[0] != 61 || view_changed.len() != 3 { return 12 }
+    if scalar_from_local_collection() != 37 { return 13 }
+    let propagated = propagate_vec_error()
+    if !match propagated {
+        Ok(value) => false
+        Err(error) => error[0] == 7 && error[1] == 11
+    } { return 14 }
     return 0
 }
 fn out_of_bounds() -> U64 {

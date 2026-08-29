@@ -46,6 +46,19 @@ func phase10Backend(m *mir.Module) []Error {
 							break
 						}
 					}
+				case mir.OpCopyToDomain:
+					t, ok := f.ValueType(in.CopyVal)
+					if !ok {
+						break
+					}
+					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
+						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTable, mir.TypeTableView,
+						mir.TypeTableMutView, mir.TypeRawPtr} {
+						if containsKind(m, t, k) {
+							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("copy_to_domain source type may not contain %s", kindName(m, k))})
+							break
+						}
+					}
 				}
 			}
 		}
@@ -137,6 +150,8 @@ func kindName(m *mir.Module, k mir.TypeKind) string {
 		return "table_mut_view"
 	case mir.TypeRawPtr:
 		return "raw_ptr"
+	case mir.TypeTable:
+		return "table"
 	}
 	return fmt.Sprintf("kind %d", k)
 }

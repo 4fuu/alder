@@ -161,7 +161,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `domain.mark`/`reset`/`destroy` call the runtime directly; reset and destroy failures are contract violations and terminate;
 - `alloc` lowers to a checked count-times-size multiply, a `SIZE_MAX` representability check, `alder_domain_alloc`, and a slice with the count; overflow, non-representability, invalid domains, and out-of-memory terminate;
 - `alloc.checked` performs the same preparation and runtime call, but every failure branches through its explicit failure edge with normal parallel edge copies; success constructs the slice;
-- `copy_to_domain` is identity for copy-trivial types and calls a generated per-type copy helper otherwise; in either case its MIR result has independent destination-domain provenance and does not retain source-domain lifetime. Helpers deep-copy aggregates and enum payloads recursively and copy slice element bytes into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source. Vec helpers recursively deep-copy non-trivial elements and normalize copied capacity to length; the ABI carries no allocator metadata;
+- `copy_to_domain` is identity only for relocatable copy-trivial values and calls a generated per-type copy helper for storage-bearing values. Helpers recursively deep-copy slice, vector, array, aggregate, and enum children into the destination domain after checking `SIZE_MAX` and rejecting a non-empty null source; Vec capacity normalizes to length. The verifier rejects domain, table, cleanup, raw-pointer, and other identity-bearing resource/capability inputs because C identity assignment cannot establish independent destination provenance;
 - `cleanup.scope.begin` initializes a hidden per-site scope slot; `cleanup.push` fills a per-site context struct and registers a generated adapter; `disarm`, `run`, and `end` call the runtime and terminate on contract violations;
 - `table.create` allocates a zeroed `AlderTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
 
@@ -182,7 +182,6 @@ Unchecked runtime failures (allocation failure, identity exhaustion, rejected fl
 
 ### Documented M3 limitations
 
-- `copy_to_domain` of a slice whose elements contain references is rejected rather than copied shallowly;
 - unit-typed function parameters are dropped from the C ABI (semantically exact);
 - `fail` and `return` lower identically;
 - MIR modules containing unused functions compile because generated statics are marked possibly-unused;

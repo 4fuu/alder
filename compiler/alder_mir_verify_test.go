@@ -836,7 +836,8 @@ fn backend_names_fixture(d: Domain, initial: MirStore, reserved: Bool) -> Result
 	return Ok(store)
 }
 
-// Modes 0/1/2 cover recursive alloc, alloc.checked, and table element checks.
+// Modes 0/1/2 cover recursive alloc, alloc.checked, and table element checks;
+// mode 3 rejects identity-bearing copy_to_domain input.
 fn backend_element_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
 	let empty = try __s0_buffer_new(U64, d)
 	let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
@@ -851,16 +852,21 @@ fn backend_element_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(Mi
 	let entry = try mir_add_block(d, size.store, function.id, 0, "entry")
 	let failed = try mir_add_block(d, entry.store, function.id, 1, "failed")
 	var store = failed.store
-	if mode == 2 {
-		let value = try mir_add_value(d, store, function.id, "table", table.type_id, mir_value_def_instruction(), entry.id, 1)
-		store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_table_create(), result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+	if mode == 3 {
+		let value = try mir_add_value(d, store, function.id, "copy", handle.type_id, mir_value_def_instruction(), entry.id, 1)
+		store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_copy_to_domain(), result: value.id, place: 0, type_op: 0, a: domain.id, b: domain.id, c: 0, target: 0, name_start: 0, name_end: 0))).store
 	} else {
-		let value = try mir_add_value(d, store, function.id, "pointer", pointer.type_id, mir_value_def_instruction(), entry.id, 1)
-		var op = mir_op_alloc()
-		var target: U64 = 0
-		if mode == 1 { op = mir_op_alloc_checked()
-			target = failed.id }
-		store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: op, result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: size.id, c: 0, target: target, name_start: 0, name_end: 0))).store
+		if mode == 2 {
+			let value = try mir_add_value(d, store, function.id, "table", table.type_id, mir_value_def_instruction(), entry.id, 1)
+			store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: mir_op_table_create(), result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))).store
+		} else {
+			let value = try mir_add_value(d, store, function.id, "pointer", pointer.type_id, mir_value_def_instruction(), entry.id, 1)
+			var op = mir_op_alloc()
+			var target: U64 = 0
+			if mode == 1 { op = mir_op_alloc_checked()
+				target = failed.id }
+			store = (try mir_add_instruction(d, value.store, MirInstrRec(function: function.id, block: entry.id, ordinal: 0, op: op, result: value.id, place: 0, type_op: box.type_id, a: domain.id, b: size.id, c: 0, target: target, name_start: 0, name_end: 0))).store
+		}
 	}
 	let done = try mir_add_terminator(d, store, MirTermRec(function: function.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
 	return Ok((try mir_add_terminator(d, done.store, MirTermRec(function: function.id, block: failed.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))).store)
@@ -1165,6 +1171,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if !expect_verification(91, try mir_verify_module(d, duplicate_values, 3), mir_vdiag(1, mir_vdiag_duplicate_name(), 1, 0, 0, 0, 0, 0, 2, 0, 0, 1)) { return Ok(false) }
 	let rejected_values = try mir_verify_complete(d, duplicate_values, 3, false)
 	if !expect_complete(92, rejected_values, false, false, 0, 1, mir_vdiag_duplicate_name()) { return Ok(false) }
+	if !emit_complete(97, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 3), 3, false)) { return Ok(false) }
 	// Mirror the production fail-shut MIR authorization. Any accidental MIR or C
 	// bytes from these rejection checks make the exact process output fail.
 	if rejected_values.complete { if mir_print(duplicate_values) { return Ok(false) } }
@@ -1196,7 +1203,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.Replace(want, "E 24 1 7\nE 25 1 6\n", "V 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\nE 25 1 6\n", 1)
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 4\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 93 0 1 0 0\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 93 0 1 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

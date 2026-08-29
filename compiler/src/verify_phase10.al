@@ -52,6 +52,10 @@ fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, t
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
     return Ok(0)
 }
+fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) { return Ok(mir_type_kind_table()) }
+    return mir_v10_forbidden_element(d, store, indexes, type_id)
+}
 fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
 var import_id: U64 = 1
@@ -62,6 +66,9 @@ import_id = import_id + 1 }
     while iid <= __s0_buffer_len(MirInstrRec, store.instructions) { let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
 if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_table_create() { let forbidden = try mir_v10_forbidden_element(d, store, indexes, x.type_op)
 if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_backend_element_type(), x.function, x.block, iid, 0, 0, x.type_op, 0, 0, forbidden, x.type_op)) } }
+if x.op == mir_op_copy_to_domain() { let copied_type = mir_v5_value_type(store, indexes, x.function, x.b)
+let forbidden = try mir_v10_forbidden_copy(d, store, indexes, copied_type)
+if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_copy_source_type(), x.function, x.block, iid, 0, 0, copied_type, 0, 0, forbidden, copied_type)) } }
 iid = iid + 1 }
     return Ok(out)
 }

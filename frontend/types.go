@@ -416,6 +416,46 @@ func (t *Type) containsVec() bool {
 	return false
 }
 
+// copyToDomainAllowed reports whether MIR copy_to_domain can materialize an
+// independent value of this type. Identity-bearing resources cannot be
+// relocated; ordinary values and storage-backed collections recurse through
+// their children.
+func (t *Type) copyToDomainAllowed() bool {
+	return t.copyToDomainAllowedSeen(make(map[*typeDecl]bool))
+}
+
+func (t *Type) copyToDomainAllowedSeen(seen map[*typeDecl]bool) bool {
+	if t == nil {
+		return false
+	}
+	switch t.kind {
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tMap, tBuffer, tPtr:
+		return false
+	case tSlice, tAlloc, tOption, tArray, tVec, tMutSlice:
+		return t.elem.copyToDomainAllowedSeen(seen)
+	case tResult:
+		return t.ok.copyToDomainAllowedSeen(seen) && t.err.copyToDomainAllowedSeen(seen)
+	case tStruct, tEnum:
+		if seen[t.decl] {
+			return true
+		}
+		seen[t.decl] = true
+		defer delete(seen, t.decl)
+		bindings := structBindings(t)
+		for _, field := range t.decl.fields {
+			if !substType(field, bindings).copyToDomainAllowedSeen(seen) {
+				return false
+			}
+		}
+		for _, variant := range t.decl.variants {
+			if variant.payload != nil && !substType(variant.payload, bindings).copyToDomainAllowedSeen(seen) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // copyTrivial reports whether a value of the type can be stored through a
 // dereference place under the current MIR rules: no slices, references, or tables
 // anywhere inside.

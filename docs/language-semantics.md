@@ -211,6 +211,10 @@ For `try expression`:
 - the current function must return `Result(_, E)` with exactly the same `E` in
   Alder 1.0.
 
+When `E` contains relocatable collection storage, failed `try` propagation
+materializes the complete `Err(E)` value in caller-result storage before local
+cleanup and function-domain destruction.
+
 Error adaptation uses an explicit `map_error` call or another ordinary
 conversion; it is never implicit. `try` does not catch bounds, overflow,
 infallible allocation, or C contract violations. If `T` is affine, `try`

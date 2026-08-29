@@ -247,9 +247,9 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	return true
 }
 
-// requireCopyable rejects copy_to_domain targets whose slice elements are
-// themselves non-trivial: the M3 backend copies slice element bytes, so a
-// nested reference inside an element would be shared instead of copied.
+// requireCopyable checks that copy_to_domain can recursively materialize the
+// value. Identity-bearing resources are never relocatable; slices, vectors,
+// arrays, and ordinary aggregates recursively copy non-trivial children.
 func (g *gen) requireCopyable(t mir.TypeId) error {
 	if !g.m.ValidType(t) {
 		return nil
@@ -262,11 +262,12 @@ func (g *gen) requireCopyable(t mir.TypeId) error {
 		return nil
 	}
 	switch ty.Kind {
+	case mir.TypeDomainHandle, mir.TypeDomainMark, mir.TypeCleanupScope, mir.TypeCleanupID,
+		mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr:
+		return fmt.Errorf("cgen: copy_to_domain of %s: identity-bearing type is not relocatable", g.m.TypeString(t))
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
-		if !g.copyTrivial(ty.Elem) {
-			return fmt.Errorf("cgen: copy_to_domain of %s: slice elements must be copy-trivial (no nested references)", g.m.TypeString(t))
-		}
-	case mir.TypeVec:
+		return g.requireCopyable(ty.Elem)
+	case mir.TypeVec, mir.TypeArray:
 		return g.requireCopyable(ty.Elem)
 	case mir.TypeAggregate:
 		for _, fld := range ty.Fields {
@@ -282,17 +283,16 @@ func (g *gen) requireCopyable(t mir.TypeId) error {
 				}
 			}
 		}
-	case mir.TypeOption, mir.TypeResult:
+	case mir.TypeOption:
 		if err := child(ty.Elem); err != nil {
 			return err
 		}
-		if ty.Kind == mir.TypeResult {
-			if err := child(ty.OK); err != nil {
-				return err
-			}
-			if err := child(ty.Err); err != nil {
-				return err
-			}
+	case mir.TypeResult:
+		if err := child(ty.OK); err != nil {
+			return err
+		}
+		if err := child(ty.Err); err != nil {
+			return err
 		}
 	}
 	return nil

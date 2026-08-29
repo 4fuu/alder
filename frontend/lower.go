@@ -1139,7 +1139,21 @@ func (b *fb) destroyLocalDomain() {
 	}
 }
 
+func (b *fb) retainExitValue(v mir.ValueId) mir.ValueId {
+	if v == mir.NoValue || !b.l.hiddenDomain || b.result == nil || !b.result.copyToDomainAllowed() {
+		return v
+	}
+	domain, ok := b.values["__result_domain"]
+	if !ok {
+		return v
+	}
+	copy := b.res(b.l.ty(b.result))
+	b.emit(mir.Instr{Op: mir.OpCopyToDomain, Result: copy, Domain: domain, CopyVal: v})
+	return copy
+}
+
 func (b *fb) ret(v mir.ValueId) {
+	v = b.retainExitValue(v)
 	b.exits()
 	b.destroyLocalDomain()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: v})
@@ -1147,6 +1161,7 @@ func (b *fb) ret(v mir.ValueId) {
 }
 
 func (b *fb) fail(v mir.ValueId) {
+	v = b.retainExitValue(v)
 	b.exits()
 	b.destroyLocalDomain()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: v})
@@ -1501,12 +1516,6 @@ func (b *fb) stmt(s Stmt) error {
 		v, err := b.expr(st.Value)
 		if err != nil {
 			return err
-		}
-		resultType := b.ann[st.Value].typ
-		if b.l.hiddenDomain && resultType != nil {
-			copy := b.res(b.l.ty(resultType))
-			b.emit(mir.Instr{Op: mir.OpCopyToDomain, Result: copy, Domain: b.values["__result_domain"], CopyVal: v})
-			v = copy
 		}
 		b.ret(v)
 		return nil

@@ -200,7 +200,7 @@ fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
 fn cgen_copy_supported(store: MirStore, type_id: U64) -> Bool {
     if cgen_copy_trivial(store, type_id) || type_id <= mir_primitive_type_count() { return true }
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
-    if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return cgen_copy_trivial(store, item.elem) }
+    if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_vec() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_array() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_option() { return cgen_copy_supported(store, item.elem) }

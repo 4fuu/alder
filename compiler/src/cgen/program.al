@@ -327,8 +327,7 @@ fn cgen_emit_copy_type(d: Domain, initial: CgenTypeState, store: MirStore, type_
         while ordinal < mir_type_part_count(store, type_id, kind) { state = try cgen_emit_copy_type(d, state, store, cgen_type_part(store, type_id, kind, ordinal).part_type)
         ordinal = ordinal + 1 }
     }
-    if item.kind == mir_type_kind_option() { state = try cgen_emit_copy_type(d, state, store, item.elem) }
-    if item.kind == mir_type_kind_vec() { state = try cgen_emit_copy_type(d, state, store, item.elem) }
+    if item.kind == mir_type_kind_option() || item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() || item.kind == mir_type_kind_vec() || item.kind == mir_type_kind_array() { state = try cgen_emit_copy_type(d, state, store, item.elem) }
     if item.kind == mir_type_kind_result() { state = try cgen_emit_copy_type(d, state, store, item.ok_type)
     state = try cgen_emit_copy_type(d, state, store, item.err_type) }
     var out = try cgen_put(d, state.writer, "static ALDER_MAYBE_UNUSED ")
