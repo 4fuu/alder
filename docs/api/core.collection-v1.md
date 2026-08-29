@@ -59,14 +59,17 @@ length; subsequent growth follows the rule above. The representation is a
 plain data/length/capacity value and does not contain a domain, allocator,
 reference count, or bootstrap `__s0_*` value.
 
-The compiler privately prepends one borrowed placement domain to every lowered
+The compiler privately prepends a caller-result domain to every lowered
 ordinary source function, method, source call, recursive call, and cleanup
-callback. Hosted entry creates the root domain and destroys it after the source
-entry returns. A source `main(root: Domain)` binds that source parameter to the
-same hidden MIR value; a parameterless source `main` still receives the hidden
-MIR root. Unhosted generated functions keep the explicit hidden MIR parameter.
-Generated ordinary functions never reset or destroy it. Source signatures and
-calls do not expose this mechanism.
+callback. Each ordinary function creates a nested function domain and destroys
+it on every exit. The checked-source `StoragePlan` selects the smallest safe
+one of these domains for vector allocation, growth, and copies; returned values
+are copied into caller-result storage when needed. Hosted entry creates the
+outer root and destroys it after the source entry returns. A source
+`main(root: Domain)` binds that source parameter to the same hidden MIR value;
+a parameterless source `main` still receives the hidden MIR root. Unhosted
+generated functions keep the explicit hidden MIR parameter. Source signatures,
+calls, and vector representations do not expose this mechanism.
 
 M7.1 rejects `Vec(T)` deterministically when `T` is affine or scoped, including
 through a nested aggregate. Affine-element cleanup and transfer are owned by

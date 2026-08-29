@@ -51,6 +51,7 @@ type LowerState {
     bindings: __s0_Buffer(LowerBindingMapRec)
     values: __s0_Buffer(LowerValueMapRec)
     bridges: __s0_Buffer(LowerBridgeRec)
+    storage: __s0_Buffer(U64)
     valid: Bool
 }
 
@@ -72,35 +73,35 @@ enum LowerResult {
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: false)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: false)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, bridges: state.bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, bridges: state.bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: bridges, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: bridges, storage: state.storage, valid: state.valid)
 }
 
 fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
@@ -246,13 +247,62 @@ fn lower_call_borrow_compatible(store: CheckStore, expected: U64, actual: U64) -
     return lower_checked_abi_equal(store, __s0_buffer_get(U64, store.type_args, want.first_arg - 1), __s0_buffer_get(U64, store.type_args, got.first_arg - 1))
 }
 
-fn lower_has_vec(store: CheckStore) -> Bool {
+fn lower_has_storage(store: CheckStore) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
-        if __s0_buffer_get(CheckedTypeRec, store.types, at).kind == 17 { return true }
+        let kind = __s0_buffer_get(CheckedTypeRec, store.types, at).kind
+        if kind == 17 { return true }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if (use.role == 6 || use.role == 8) && __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1).kind == 8 { return true }
         at = at + 1
     }
     return false
+}
+
+// Build stable ordinary-source storage facts before MIR exists. Expression IDs
+// are also allocation-site IDs: lowering consumes a placement only when that
+// expression materializes Vec storage or a cross-domain result copy. This
+// keeps one deterministic identity through checking, analysis, and lowering
+// without duplicating the slice-1 fixed-point solver.
+fn lower_storage_plan(d: Domain, store: CheckStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var domains = try __s0_buffer_new(StorageDomainRec, d)
+    domains = try __s0_buffer_append(StorageDomainRec, d, domains, StorageDomainRec(parent: 0))
+    domains = try __s0_buffer_append(StorageDomainRec, d, domains, StorageDomainRec(parent: 1))
+    var allocations = try __s0_buffer_new(StorageAllocationRec, d)
+    var constraints = try __s0_buffer_new(StorageConstraintRec, d)
+    var views = try __s0_buffer_new(StorageViewRec, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        allocations = try __s0_buffer_append(StorageAllocationRec, d, allocations, StorageAllocationRec(candidate: 2))
+        if expression.site_kind == 3 {
+            var fallback = false
+            if expression.kind == 8 && expression.annotation != 0 {
+                fallback = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1).kind == 1
+            }
+            var required: U64 = 1
+            if fallback { required = 0 }
+            constraints = try __s0_buffer_append(StorageConstraintRec, d, constraints, StorageConstraintRec(allocation: at + 1, domain: required, dependency: 0, fallback: fallback, source: expression.site_syntax))
+        }
+        if expression.kind == 18 && expression.annotation != 0 {
+            let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+            if annotation.builtin == 23 {
+                var use_domain: U64 = 2
+                if expression.site_kind == 3 { use_domain = 1 }
+                views = try __s0_buffer_append(StorageViewRec, d, views, StorageViewRec(allocation: at + 1, parent_view: 0, use_domain: use_domain, invalidated: false, source: expression.syntax))
+            }
+        }
+        at = at + 1
+    }
+    let plan = try storage_analyze(d, domains, allocations, constraints, views)
+    if plan.issue_kind != 0 || __s0_buffer_len(U64, plan.placements) != __s0_buffer_len(CheckedExprRec, store.expressions) {
+        return Ok(try __s0_buffer_new(U64, d))
+    }
+    return Ok(plan.placements)
 }
 
 fn lower_owner_aliases_domain(source_state: State, store: CheckStore, owner: U64) -> Bool {
@@ -275,8 +325,11 @@ fn lower_domain_key(store: CheckStore, owner: U64) -> U64 {
     return __s0_buffer_len(LocalRec, store.locals) + owner
 }
 
-fn lower_domain_value(state: LowerState, store: CheckStore, owner: U64) -> U64 {
-    let key = lower_domain_key(store, owner)
+fn lower_active_domain_key(store: CheckStore, owner: U64) -> U64 {
+    return __s0_buffer_len(LocalRec, store.locals) + __s0_buffer_len(SymbolRec, store.symbols) + owner
+}
+
+fn lower_keyed_domain_value(state: LowerState, key: U64) -> U64 {
     var at = __s0_buffer_len(LowerValueMapRec, state.values)
     while at > 0 {
         let item = __s0_buffer_get(LowerValueMapRec, state.values, at - 1)
@@ -284,6 +337,21 @@ fn lower_domain_value(state: LowerState, store: CheckStore, owner: U64) -> U64 {
         at = at - 1
     }
     return 0
+}
+
+fn lower_result_domain_value(state: LowerState, store: CheckStore, owner: U64) -> U64 {
+    return lower_keyed_domain_value(state, lower_domain_key(store, owner))
+}
+
+fn lower_domain_value(state: LowerState, store: CheckStore, owner: U64) -> U64 {
+    return lower_keyed_domain_value(state, lower_active_domain_key(store, owner))
+}
+
+fn lower_storage_domain_value(state: LowerState, store: CheckStore, owner: U64, expression: U64) -> U64 {
+    if expression >= 1 && expression <= __s0_buffer_len(U64, state.storage) && __s0_buffer_get(U64, state.storage, expression - 1) == 1 {
+        return lower_result_domain_value(state, store, owner)
+    }
+    return lower_domain_value(state, store, owner)
 }
 
 fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
@@ -733,7 +801,7 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             if symbol.kind == 13 || symbol.inherent_owner != 0 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
-            if lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, owner) {
+            if lower_has_storage(store) && !lower_owner_aliases_domain(source_state, store, owner) {
                 let domain = try lower_domain_mir_type(d, current)
                 let hidden = try mir_add_function_param(d, domain.state.mir, function.id, 0, "__domain", domain.id)
                 current = lower_with_mir(domain.state, hidden.store)
@@ -1165,17 +1233,27 @@ fn lower_mir_type_contains_vec(d: Domain, store: MirStore, root: U64) -> Result(
     return Ok(false)
 }
 
-fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
     if !(try lower_mir_type_contains_vec(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
-    let domain = lower_domain_value(typ.state, store, owner)
+    let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
     if domain == 0 { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
     let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
     let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
     return Ok(LowerStep(state: copied.state, id: result.id))
 }
 
-fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, copy: Bool) -> Result(LowerStep, __s0_Error) {
+fn lower_copy_result_storage(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, checked_type)
+    if !lower_has_storage(store) { return Ok(LowerStep(state: typ.state, id: value)) }
+    let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
+    if domain == 0 || domain != lower_result_domain_value(typ.state, store, owner) { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
+    let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+    let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
+    return Ok(LowerStep(state: copied.state, id: result.id))
+}
+
+fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, copy: Bool) -> Result(LowerStep, __s0_Error) {
     let binding = lower_binding_lookup(state, expression.parameter_use)
     if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     var current = state
@@ -1192,14 +1270,14 @@ fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, s
         current = instr.state
         value = result.id
     }
-    if copy { return lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression.checked_type, value) }
+    if copy { return lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression_id, expression.checked_type, value) }
     return Ok(LowerStep(state: current, id: value))
 }
 
 fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 { return lower_binding_expression(d, source_state, store, state, owner, function, block, expression, false) }
+    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 { return lower_binding_expression(d, source_state, store, state, owner, function, block, expression_id, expression, false) }
     return lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
 }
 
@@ -1245,7 +1323,7 @@ fn lower_array_view(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     return Ok(LowerStep(state: converted.state, id: view.id))
 }
 
-fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if annotation.builtin == 18 {
         let vector = try lower_type(d, source_state, store, state, expression.checked_type)
         let result = try lower_add_typed_result(d, vector.state, function, block, vector.id)
@@ -1275,7 +1353,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
             length = next.id
             count_at = count_at + 1
         }
-        let domain = lower_domain_value(current, store, owner)
+        let domain = lower_storage_domain_value(current, store, owner, expression_id)
         if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         let storage = try lower_add_typed_result(d, current, function, block, storage_type.type_id)
         let allocated = try lower_add_instr(d, storage.state, function, block, mir_op_alloc_checked(), storage.id, 0, element.id, domain, length, panic_block, "")
@@ -1288,7 +1366,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
             let source_place = try mir_add_place(d, source_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: source_ref.id))
             let loaded = try lower_add_typed_result(d, lower_with_mir(source_index.state, source_place.store), function, block, element.id)
             let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, source_place.id, 0, 0, 0, 0, "")
-            let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, block, element_checked, loaded.id)
+            let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, block, expression_id, element_checked, loaded.id)
             let target_ref = try lower_add_typed_result(d, copied.state, function, block, storage_type.type_id)
             let target_index = try lower_add_instr(d, target_ref.state, function, block, mir_op_slice_index_checked(), target_ref.id, 0, 0, storage.id, index, panic_block, "")
             let target_place = try mir_add_place(d, target_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
@@ -1364,7 +1442,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
         let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
         current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
-        let domain = lower_domain_value(current, store, owner)
+        let domain = lower_storage_domain_value(current, store, owner, expression_id)
         if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         let grown = try lower_add_typed_result(d, current, function, capacity_join.id, vector.id)
         let grown_instr = try lower_add_instr_three(d, grown.state, function, capacity_join.id, mir_op_vec_grow_checked(), grown.id, 0, receiver.id, domain, capacity_value.id, panic_block)
@@ -1429,7 +1507,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: reference.id))
         let loaded = try lower_add_typed_result(d, lower_with_mir(indexed.state, place.store), function, some_block.id, element.id)
         let load = try lower_add_instr(d, loaded.state, function, some_block.id, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
-        let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, some_block.id, element_checked, loaded.id)
+        let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, some_block.id, expression_id, element_checked, loaded.id)
         let some = try lower_add_typed_result(d, copied.state, function, some_block.id, option.id)
         let made_some = try lower_add_instr(d, some.state, function, some_block.id, mir_op_enum_construct(), some.id, 0, option.id, copied.id, 0, 0, "some")
         current = try lower_jump_value(d, made_some.state, function, some_block.id, join.id, some.id)
@@ -1467,7 +1545,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
-        return lower_binding_expression(d, source_state, store, state, owner, function, block, expression, expression.kind != 22)
+        return lower_binding_expression(d, source_state, store, state, owner, function, block, expression_id, expression, expression.kind != 22)
     }
     if expression.kind >= 2 && expression.kind <= 4 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
@@ -1563,7 +1641,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let result = try lower_add_result(d, lower_with_mir(indexed.state, place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
-        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression.checked_type, result.id)
+        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id)
     }
     if expression.kind == 21 {
         if expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) || expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -1587,7 +1665,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: local_place.id, field_start: named.start, field_end: named.end, deref_value: 0))
         let result = try lower_add_result(d, lower_with_mir(stored.state, field_place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, field_place.id, 0, 0, 0, 0, "")
-        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression.checked_type, result.id)
+        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id)
     }
     if expression.kind == 6 || expression.kind == 7 {
         if expression.child_count == 0 || expression.first_child == 0 || expression.first_child - 1 + expression.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -1786,7 +1864,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = instr.state
             ordinal = 0
             var argument_ordinal: U64 = 0
-            if annotation.kind == 1 && lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, annotation.target) {
+            if annotation.kind == 1 && lower_has_storage(store) && !lower_owner_aliases_domain(source_state, store, annotation.target) {
                 let domain = lower_domain_value(current, store, owner)
                 if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
                 current = try lower_add_instr_operand(d, current, instr.id, 0, domain, mir_operand_instruction(), "")
@@ -1834,7 +1912,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
         if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 25 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        if annotation.builtin >= 18 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression, annotation, environment, panic_block) }
+        if annotation.builtin >= 18 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         var current = state
         var args = try __s0_buffer_new(U64, d)
         var ordinal: U64 = 0
@@ -2083,6 +2161,12 @@ fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state:
         }
         environment = active.parent
     }
+    if boundary_environment == 0 && exit_kind != 1 && lower_has_storage(store) {
+        let domain = lower_domain_value(current, store, owner)
+        if domain == 0 { return Ok(lower_invalid(current)) }
+        let destroyed = try lower_add_instr(d, current, function, block, mir_op_domain_destroy(), 0, 0, 0, domain, 0, 0, "")
+        current = destroyed.state
+    }
     return Ok(current)
 }
 
@@ -2248,8 +2332,10 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         var value: U64 = 0
         if statement.expression != 0 {
             let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
-            current = lowered.state
-            value = lowered.id
+            let expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
+            let retained = try lower_copy_result_storage(d, source_state, store, lowered.state, owner, function, active, statement.expression, expression.checked_type, lowered.id)
+            current = retained.state
+            value = retained.id
             active = lower_open_block(current.mir, function, active)
         }
         current = try lower_cleanup_exits(d, source_state, store, current, owner, function, active, statement.environment, 0, 2)
@@ -2339,7 +2425,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
-        let copied = try lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, body.id, elem_checked, element_value.id)
+        let copied = try lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, body.id, statement.expression, elem_checked, element_value.id)
         current = try lower_store_binding(d, copied.state, function, body.id, statement.binding, copied.id)
         let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
@@ -2366,7 +2452,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, 0, 0, scope_value.id, 0, callback, "")
         current = pushed.state
         var cleanup_ordinal: U64 = 0
-        if lower_has_vec(store) && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {
+        if lower_has_storage(store) && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {
             let domain = lower_domain_value(current, store, owner)
             if domain == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
             current = try lower_add_instr_operand(d, current, pushed.id, 0, domain, mir_operand_instruction(), "")
@@ -2538,7 +2624,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     if function == 0 { return Ok(lower_invalid(state)) }
     var current = state
     var param_ordinal: U64 = 0
-    let hidden_domain = lower_has_vec(store)
+    let hidden_domain = lower_has_storage(store)
     let aliases_domain = hidden_domain && lower_owner_aliases_domain(source_state, store, owner)
     if hidden_domain && !aliases_domain {
         var parameter = __s0_buffer_get(MirParamRec, current.mir.params, 0)
@@ -2605,14 +2691,31 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     current = lower_with_mir(current, entry.store)
     let panic = try mir_add_block(d, current.mir, function, 1, "bb_panic")
     current = lower_with_mir(current, panic.store)
+    if hidden_domain {
+        let parent = lower_result_domain_value(current, store, owner)
+        if parent == 0 { return Ok(lower_invalid(current)) }
+        let domain_type = try lower_domain_mir_type(d, current)
+        let local_domain = try lower_add_typed_result(d, domain_type.state, function, entry.id, domain_type.id)
+        let created = try lower_add_instr(d, local_domain.state, function, entry.id, mir_op_domain_create(), local_domain.id, 0, 0, parent, 0, 0, "")
+        let domains = try __s0_buffer_append(LowerValueMapRec, d, created.state.values, LowerValueMapRec(expression: lower_active_domain_key(store, owner), value: local_domain.id))
+        current = lower_with_values(created.state, domains)
+    }
     let root = lower_owner_lookup(state.roots, owner)
     if root == 0 { return Ok(lower_invalid(current)) }
     let flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, entry.id, root, panic.id)
     current = flow.state
     if !current.valid { return Ok(current) }
     if !flow.terminated {
+        if hidden_domain {
+            let destroyed = try lower_add_instr(d, current, function, flow.block, mir_op_domain_destroy(), 0, 0, 0, lower_domain_value(current, store, owner), 0, 0, "")
+            current = destroyed.state
+        }
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: flow.block, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
         current = lower_with_mir(current, term.store)
+    }
+    if hidden_domain {
+        let destroyed = try lower_add_instr(d, current, function, panic.id, mir_op_domain_destroy(), 0, 0, 0, lower_domain_value(current, store, owner), 0, 0, "")
+        current = destroyed.state
     }
     let panic_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: panic.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
     return Ok(lower_with_mir(current, panic_term.store))
@@ -4395,10 +4498,12 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     let bindings = try __s0_buffer_new(LowerBindingMapRec, d)
     let values = try __s0_buffer_new(LowerValueMapRec, d)
     let bridges = try __s0_buffer_new(LowerBridgeRec, d)
+    let storage = try lower_storage_plan(d, store)
+    if __s0_buffer_len(U64, storage) != __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerModelBad) }
     let roots = try lower_root_indexes(d, store)
     let binding_statements = try lower_binding_statement_indexes(d, store)
     let locals = try lower_local_indexes(d, store)
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, bridges: bridges, valid: true)
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, bridges: bridges, storage: storage, valid: true)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)

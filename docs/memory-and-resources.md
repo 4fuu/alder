@@ -102,9 +102,12 @@ as permission to keep an inner placement. Candidate domains use
 parent-before-child order, and dependency propagation uses stable input order,
 so equivalent inputs produce identical plans independent of map iteration or
 process scheduling. A view proven invalidated before use is rejected rather
-than made apparently valid by retaining its backing allocation. M7.3 slice 1
-implements this analysis boundary; inferred-domain MIR lowering, returned-view
-retention, and cross-domain copying remain owned by slice 2.
+than made apparently valid by retaining its backing allocation. M7.3 slices 1
+and 2 implement this analysis boundary and connect deterministic checked-source
+facts to inferred-domain MIR lowering. Ordinary calls nest function domains
+under caller-result domains; result copies and direct immutable-view
+materialization target the nearest caller-visible domain before inner storage
+is destroyed.
 
 Domains may use resettable segments, dedicated large-object segments, caller
 result segments, and container-owned segments. The exact segmentation strategy
@@ -146,13 +149,15 @@ wrap or narrow into C `size_t` unchecked.
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
 uses eager deep copy. This temporary restriction keeps ordinary vector APIs
 free of transfer and cleanup behavior before Milestone 7.5 implements affine
-element composition. M7.1 places vector allocations in one hidden borrowed
-root/result domain threaded through lowered ordinary functions and calls. The
-domain is absent from source APIs and vector representations, generated
-ordinary functions never reset or destroy it, and the hosted entry owns its
-creation and destruction. Milestone 7.3 replaces this conservative placement
-with inferred hierarchical storage; it does not change independent value
-semantics.
+element composition. M7.3 slice 2 replaces M7.1's single hidden borrowed root
+placement with a hidden caller-result domain plus a nested function domain.
+The `StoragePlan` chooses result or function placement at material allocation,
+growth, and copy sites. Function domains are destroyed on every return,
+failure, and panic path; recursive `copy_to_domain` operations establish
+independent destination provenance before that destruction. Domains remain
+absent from source APIs and vector representations, and the hosted entry still
+owns the outer root. This changes storage lifetime and visible copy cost, not
+independent value semantics.
 
 ## Generational identity with `Table(T)`
 

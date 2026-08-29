@@ -5333,7 +5333,10 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
         let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, result_use.checked_type, 0, 0)
-        if category.contains_scoped { return body_token_fail(d, state, current, 104, statement) }
+        // M7.3 slice 2 admits a direct immutable slice result. Mutable views
+        // and aggregates containing a scoped capability remain rejected until
+        // the final value/view-surface migration.
+        if category.contains_scoped && result_type.kind != 8 { return body_token_fail(d, state, current, 104, statement) }
         let returned = __s0_buffer_get(CheckedExprRec, current.expressions, expression - 1)
         if returned.kind == 1 || returned.kind == 5 {
             let binding = __s0_buffer_get(LocalRec, current.locals, returned.parameter_use - 1)

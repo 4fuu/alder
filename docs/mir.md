@@ -171,7 +171,7 @@ table_mut_view(TypeId)
 
 The canonical primitives occupy fixed `TypeId` slots 0 through 11 in every module. Named aggregates and enums are table entries; anonymous structural types are interned by shape, so identical textual types share one `TypeId`. The singleton types (`domain_handle`, `domain_mark`, `cleanup_scope`, `cleanup_id`) each intern to one entry.
 
-`vec(T)` is an owned growable vector represented by `{data, len, capacity}`. `vec.new vec(T)` creates an empty value. `vec.construct.checked storage, len, capacity else edge` validates `len <= capacity <= storage.len`; `vec.grow.checked vec, domain, capacity else edge` reallocates with checked sizing. `vec.len`, `vec.capacity`, `vec.storage`, `vec.as_slice`, and `vec.as_mut_slice` expose its bounds and views. `copy_to_domain` recursively copies vector elements and sets the copied capacity to its length.
+`vec(T)` is an owned growable vector represented by `{data, len, capacity}`. `vec.new vec(T)` creates an empty value. `vec.construct.checked storage, len, capacity else edge` validates `len <= capacity <= storage.len`; `vec.grow.checked vec, domain, capacity else edge` reallocates with checked sizing. `vec.len`, `vec.capacity`, `vec.storage`, `vec.as_slice`, and `vec.as_mut_slice` expose its bounds and views. `copy_to_domain` recursively copies vector elements, sets the copied capacity to its length, and gives the result independent destination-domain provenance; ending the source domain does not invalidate the copy.
 
 `array.as_slice` converts an array value or a checked reference to an array into
 an immutable contiguous view. Source-level mutable-view exclusivity remains a

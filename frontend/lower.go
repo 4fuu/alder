@@ -64,6 +64,11 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 			}
 		}
 	}
+	for _, cf := range cm.fns {
+		if cf.result.kind == tSlice {
+			l.hiddenDomain = true
+		}
+	}
 	// Imports in source order.
 	for _, d := range decls {
 		imp, ok := d.(*ImportDecl)
@@ -948,35 +953,37 @@ func (l *lowerer) lowerMapRemove(h *mapHelpers, mapTy, slotsTy, kt mir.TypeId) {
 
 // fb builds one MIR function body.
 type fb struct {
-	l          *lowerer
-	f          *mir.Function
-	ann        map[Expr]*annInfo
-	result     *Type
-	cur        *mir.Block
-	terminated bool
-	nval       int
-	nlocal     int
-	locals     map[string]mir.LocalId
-	values     map[string]mir.ValueId
-	usedVals   map[string]bool
-	usedLocals map[string]bool
-	usedBlocks map[string]bool
-	scopes     []mir.ValueId
-	panicBlk   mir.BlockId
-	panicBlks  map[string]mir.BlockId
+	l           *lowerer
+	f           *mir.Function
+	ann         map[Expr]*annInfo
+	result      *Type
+	cur         *mir.Block
+	terminated  bool
+	nval        int
+	nlocal      int
+	locals      map[string]mir.LocalId
+	values      map[string]mir.ValueId
+	usedVals    map[string]bool
+	usedLocals  map[string]bool
+	usedBlocks  map[string]bool
+	scopes      []mir.ValueId
+	localDomain mir.ValueId
+	panicBlk    mir.BlockId
+	panicBlks   map[string]mir.BlockId
 }
 
 func (l *lowerer) newFB(f *mir.Function) *fb {
 	b := &fb{
-		l:          l,
-		f:          f,
-		locals:     make(map[string]mir.LocalId),
-		values:     make(map[string]mir.ValueId),
-		usedVals:   make(map[string]bool),
-		usedLocals: make(map[string]bool),
-		usedBlocks: make(map[string]bool),
-		panicBlk:   mir.NoBlock,
-		panicBlks:  make(map[string]mir.BlockId),
+		l:           l,
+		f:           f,
+		locals:      make(map[string]mir.LocalId),
+		values:      make(map[string]mir.ValueId),
+		usedVals:    make(map[string]bool),
+		usedLocals:  make(map[string]bool),
+		usedBlocks:  make(map[string]bool),
+		localDomain: mir.NoValue,
+		panicBlk:    mir.NoBlock,
+		panicBlks:   make(map[string]mir.BlockId),
 	}
 	for _, v := range f.Values {
 		b.usedVals[v.Name] = true
@@ -1126,20 +1133,29 @@ func (b *fb) exits() {
 	}
 }
 
+func (b *fb) destroyLocalDomain() {
+	if b.localDomain != mir.NoValue {
+		b.emit(mir.Instr{Op: mir.OpDomainDestroy, Domain: b.localDomain})
+	}
+}
+
 func (b *fb) ret(v mir.ValueId) {
 	b.exits()
+	b.destroyLocalDomain()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: v})
 	b.terminated = true
 }
 
 func (b *fb) fail(v mir.ValueId) {
 	b.exits()
+	b.destroyLocalDomain()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermFail, Result: v})
 	b.terminated = true
 }
 
 func (b *fb) panic() {
 	b.exits()
+	b.destroyLocalDomain()
 	b.cur.SetTerm(mir.Terminator{Kind: mir.TermPanic, Result: mir.NoValue})
 	b.terminated = true
 }
@@ -1268,11 +1284,11 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 	pi := 0
 	aliasesDomain := cf.decl.Name == "main" && len(cf.params) > 0 && cf.params[0].kind == tDomain
 	if l.hiddenDomain && !aliasesDomain {
-		b.values["__domain"] = 0
+		b.values["__result_domain"] = 0
 		pi = 1
 	}
 	if l.hiddenDomain && aliasesDomain {
-		b.values["__domain"] = 0
+		b.values["__result_domain"] = 0
 	}
 	for _, p := range cf.decl.Params {
 		if p.Kind == paramType {
@@ -1282,6 +1298,12 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 		pi++
 	}
 	b.start("bb0")
+	if l.hiddenDomain {
+		local := b.res(l.m.DomainHandle())
+		b.emit(mir.Instr{Op: mir.OpDomainCreate, Result: local, Domain: b.values["__result_domain"]})
+		b.localDomain = local
+		b.values["__domain"] = local
+	}
 	if err := b.stmts(cf.decl.Body.Stmts); err != nil {
 		return err
 	}
@@ -1479,6 +1501,12 @@ func (b *fb) stmt(s Stmt) error {
 		v, err := b.expr(st.Value)
 		if err != nil {
 			return err
+		}
+		resultType := b.ann[st.Value].typ
+		if b.l.hiddenDomain && resultType != nil {
+			copy := b.res(b.l.ty(resultType))
+			b.emit(mir.Instr{Op: mir.OpCopyToDomain, Result: copy, Domain: b.values["__result_domain"], CopyVal: v})
+			v = copy
 		}
 		b.ret(v)
 		return nil

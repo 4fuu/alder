@@ -420,9 +420,10 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		changed = addDep(out, defKey{v.Def.Block, v.Def.Instr}) || changed
 	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
 		merge(in.Domain)
-		if in.Op == mir.OpCopyToDomain {
-			merge(in.CopyVal)
-		}
+		// copy_to_domain materializes an independent value. Its lifetime is
+		// rooted only in the destination domain; retaining source provenance
+		// would incorrectly invalidate the copy when an inner source domain
+		// is destroyed.
 		changed = addRoot(out, domainRoot{handle: in.Domain, allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1}) || changed
 	case mir.OpLoad:
 		if in.Place.Kind == mir.PlaceDeref {

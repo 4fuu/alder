@@ -130,9 +130,9 @@ fn main() -> I32 {
 			want: "mutable or temporary scoped-view argument must be last",
 		},
 		{
-			name: "view escape",
-			src:  `fn escaped(values: [U64]) -> [U64] { return values }`,
-			want: "scoped view [U64] cannot be returned",
+			name: "mutable view return",
+			src:  `fn bad(values: MutSlice(U64)) -> MutSlice(U64) { return values }`,
+			want: "scoped view MutSlice(U64) cannot be returned",
 		},
 		{
 			name: "view stored in record",

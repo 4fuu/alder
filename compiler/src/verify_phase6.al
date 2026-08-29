@@ -796,8 +796,10 @@ while at != 0 { let f = mir_v6_round_fact_at(durable, at)
 if f.kind == mir_v6_fact_dep() || f.kind == mir_v6_fact_parent() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_parent(), a: f.a, b: f.b, c: f.c)) }
 at = mir_v6_round_fact_next(durable, at) }
 durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_dep(), a: x.block, b: x.ordinal + 1, c: 0)) }
+// A cross-domain copy has independent value/storage provenance. The source is
+// intentionally not merged: destroying its inner domain cannot invalidate the
+// copy rooted in the destination domain.
 if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a)
-if x.op == mir_op_copy_to_domain() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.b) }
 durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1)) }
 if x.op == mir_op_load() { let p = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
 if p.kind == mir_place_deref() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, p.deref_value) }

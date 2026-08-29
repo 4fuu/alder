@@ -710,6 +710,22 @@ func runM71LowerConformance(t *testing.T, exe string) {
 	t.Helper()
 	source := `fn first(T: type, values: [T]) -> T { return values[0] }
 fn clone_vec(T: type, values: Vec(T)) -> Vec(T) { return values }
+fn returned_array_view() -> [U64] {
+    let values: Array(U64, 3) = [3, 5, 7]
+    return values.slice(0, 3)
+}
+fn returned_vec_view() -> [U64] {
+    var values: Vec(U64) = Vec.from_array(U64, [11, 13])
+    values.push(17)
+    return values.slice(0, 3)
+}
+fn nested_returned_view() -> [U64] { return returned_vec_view() }
+fn returned_parameter_view(values: [U64]) -> [U64] { return values }
+fn scalar_from_local_collection() -> U64 {
+    var values: Vec(U64) = Vec.from_array(U64, [31])
+    values.push(37)
+    return values[1]
+}
 fn main() -> I32 {
     let seed: Array(U64, 2) = [1, 2]
     var values: Vec(U64) = Vec.from_array(U64, seed)
@@ -777,6 +793,13 @@ fn main() -> I32 {
     var nested_original: Vec(U64) = nested[0]
     var nested_changed: Vec(U64) = nested_copy[0]
     if nested_original[0] != 89 || nested_changed[0] != 144 { return 7 }
+    let array_view = returned_array_view()
+    let vec_view = nested_returned_view()
+    if array_view[0] != 3 || array_view[2] != 7 { return 8 }
+    if vec_view[0] != 11 || vec_view[2] != 17 { return 9 }
+    let parameter_view = returned_parameter_view(vec_view)
+    if parameter_view[1] != 13 { return 10 }
+    if scalar_from_local_collection() != 37 { return 11 }
     return 0
 }
 fn out_of_bounds() -> U64 {
@@ -814,6 +837,8 @@ fn out_of_bounds() -> U64 {
 		}
 	}
 	for _, op := range []mir.OpKind{
+		mir.OpDomainCreate,
+		mir.OpDomainDestroy,
 		mir.OpVecNew,
 		mir.OpVecConstructChecked,
 		mir.OpVecGrowChecked,

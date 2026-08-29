@@ -1213,7 +1213,11 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if !typeEqual(vt, k.result) {
 			return k.mismatch(st.P, "return", k.result, vt)
 		}
-		if vt.containsScopedView() && !strings.HasPrefix(k.cf.decl.Name, "__s0_") {
+		// M7.3 permits a direct immutable view result. Lowering either keeps
+		// its ordinary backing in caller-result storage or materializes a
+		// deterministic cross-domain copy there. Mutable and nested views
+		// remain scoped until the final value/view-surface migration.
+		if vt.containsScopedView() && vt.kind != tSlice && !strings.HasPrefix(k.cf.decl.Name, "__s0_") {
 			return diag(st.P, "scoped view %s cannot be returned", vt.display())
 		}
 		return nil

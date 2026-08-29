@@ -47,9 +47,11 @@ does not turn ordinary values into a move-oriented language.
 ### Scoped capabilities
 
 Immutable slices, mutable slices, table views, and similar accesses are tied to
-an owner and a lexical access scope. They cannot be stored in longer-lived
-values, returned without a verified caller lifetime, retained by unknown code,
-or used after invalidation. Mutable capabilities are exclusive.
+an owner and a lexical access scope. A direct immutable slice result is allowed
+when lowering can materialize caller-result storage; mutable views and nested
+aggregates containing views cannot be returned. Capabilities cannot otherwise
+be stored in longer-lived values, retained by unknown code, or used after
+invalidation. Mutable capabilities are exclusive.
 
 No user-written lifetime parameters are required in Alder 1.0.
 

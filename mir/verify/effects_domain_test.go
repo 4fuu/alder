@@ -50,3 +50,25 @@ entry:
 		t.Fatal("destroying a local child was summarized as destroying its parent")
 	}
 }
+
+func TestCopyToOuterDomainSeversInnerProvenance(t *testing.T) {
+	text := `mir 4
+const @one: u64 = 1
+fn @copy(%root: domain_handle) -> safe_mut(u8) {
+entry:
+  %child = domain.create %root
+  %one = const.get @one
+  %source = alloc %child, u8, %one
+  %copy = copy_to_domain %root, %source
+  domain.destroy %child
+  return %copy
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := Module(m); len(errs) != 0 {
+		t.Fatalf("independent outer-domain copy rejected:\n%s", Errors(errs).String())
+	}
+}

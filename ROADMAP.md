@@ -734,7 +734,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.3: Inferred Hierarchical Storage
 
-Status: **in progress — slice 1 complete**
+Status: **in progress — slices 1 and 2 complete**
 
 Complete the foundational value and view model with compiler-inferred
 hierarchical storage. Placement chooses the smallest domain proven to outlive
@@ -762,8 +762,27 @@ rejected in stable input order. Parent-before-child domain IDs make hierarchy
 validation and depth construction finite, while a stable dependency index and
 FIFO queue avoid whole-graph rescans on layered compiler-scale inputs. Slice 2
 owns construction of these constraints from ordinary source programs and all
-consumption by inferred-domain lowering; the current hidden-root lowering and
-returned-view rejection therefore remain unchanged.
+consumption by inferred-domain lowering.
+
+Slice 2 constructs deterministic expression/allocation, result-lifetime,
+fallback, and immutable-view facts from the sealed checked graph, runs the
+slice-1 `StoragePlan` solver before MIR exists, and consumes its placements at
+Vec allocation, growth, value-copy, and result-copy sites. Ordinary functions
+receive a caller-result domain and create a nested function domain; calls pass
+the current function domain, while return copies target the nearest
+caller-visible result domain before the function domain is destroyed. This
+also permits direct immutable `[T]` results by materializing independent result
+storage, including array-backed, Vec-backed, parameter-backed, and
+callee-returned views. `copy_to_domain` now severs source-domain provenance, so
+ordinary values and recursive Vec copies remain valid and independent after an
+inner source domain ends. Mutable views and aggregates containing views remain
+non-escaping, and their overlap, mutation, and invalidation checks are
+unchanged.
+
+Slice 3 still owns migration and qualification of the complete Milestone 7
+value/view surface: private explicit bootstrap storage and `__s0_String`
+remain, direct immutable view results are not yet generalized to nested
+ordinary aggregates, and this milestone is not complete.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate

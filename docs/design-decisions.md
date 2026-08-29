@@ -52,17 +52,19 @@ Status: **Frozen 1.0**
 Long-lived identity uses affine `Table(T)` and copyable generational `T.Id`.
 Graphs use IDs rather than persistent interior pointers. Views are scoped.
 
-### D005A — M7.1 hidden borrowed placement domain
+### D005A — Inferred result and function placement domains
 
-Status: **Bootstrap until Milestone 7.3**
+Status: **M7.3 slice 2; complete surface migration remains in slice 3**
 
-Before placement inference, lowering prepends and threads one hidden borrowed
-root/result domain through every ordinary source function, method, source call,
-recursive call, and cleanup callback. Hosted entry owns that root; unhosted C
-signatures retain the explicit hidden parameter. `Vec` does not contain a
-domain and every semantic vector copy remains a verifier-visible eager deep
-copy. Generated ordinary functions never reset or destroy the borrowed root.
-Returned vectors are safe; returned views remain rejected until Milestone 7.3.
+Lowering prepends and threads a hidden caller-result domain through ordinary
+source functions, methods, calls, recursion, and cleanup callbacks. Each
+ordinary function creates a nested function domain and destroys it on every
+exit. The checked-source storage facts and `StoragePlan` select between these
+domains for Vec allocation, growth, and copies; returned values are copied to
+caller-result storage where required. Direct immutable slices are returned by
+materializing independent caller-result storage. `Vec` still carries no domain
+and semantic copies remain verifier-visible eager deep copies. Slice 3 retains
+the private bootstrap-storage and full value/view-surface migration.
 
 ### D006 — One generic syntax
 
