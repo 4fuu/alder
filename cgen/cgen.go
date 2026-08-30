@@ -166,7 +166,7 @@ func (g *gen) analyze() error {
 					g.domainTotal[fi]++
 				case mir.OpCleanupScopeBegin:
 					g.scopeTotal[fi]++
-				case mir.OpCopyToDomain:
+				case mir.OpCopyToDomain, mir.OpCopyToDomainTry:
 					t, ok := f.ValueType(in.CopyVal)
 					if !ok {
 						continue
@@ -181,7 +181,7 @@ func (g *gen) analyze() error {
 						copySet = make(map[mir.TypeId]bool)
 					}
 					g.collectCopyTypes(t, copySet)
-				case mir.OpVecGrowChecked:
+				case mir.OpVecGrowChecked, mir.OpVecTryGrow:
 					t, ok := f.ValueType(in.Slice)
 					if !ok || !g.m.ValidType(t) {
 						continue
@@ -591,6 +591,15 @@ func (g *gen) emitStringConsts(b *strings.Builder) {
 // emitCopyHelpers writes the per-type copy functions used by copy_to_domain.
 func (g *gen) emitCopyHelpers(b *strings.Builder) {
 	for _, t := range g.copyTypes {
+		b.WriteString("static ALDER_MAYBE_UNUSED uint8_t " + g.tryCopyCall(t) +
+			"(AlderDomain *, " + g.cType(t) + ", " + g.cType(t) + " *);\n")
+		b.WriteString("static ALDER_MAYBE_UNUSED " + g.cType(t) + " " + g.copyCall(t) +
+			"(AlderDomain *, " + g.cType(t) + ");\n")
+	}
+	if len(g.copyTypes) > 0 {
+		b.WriteString("\n")
+	}
+	for _, t := range g.copyTypes {
 		g.emitCopyHelper(b, t)
 	}
 	if len(g.copyTypes) > 0 {
@@ -599,26 +608,25 @@ func (g *gen) emitCopyHelpers(b *strings.Builder) {
 }
 
 func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
-	name := "alder_copy_ty" + strconv.Itoa(int(t))
-	b.WriteString("static ALDER_MAYBE_UNUSED " + g.cType(t) + " " + name +
-		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v) {\n")
+	b.WriteString("static ALDER_MAYBE_UNUSED uint8_t " + g.tryCopyCall(t) +
+		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v, " + g.cType(t) + " *alder_out) {\n")
 	ty := &g.m.Types[t]
 	switch ty.Kind {
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeVec:
 		elem := ty.Elem
 		b.WriteString("  uint64_t alder_t;\n")
 		b.WriteString("  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)" +
-			g.typeSize(elem) + ", &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n")
-		b.WriteString("  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n")
+			g.typeSize(elem) + ", &alder_t)) { return (uint8_t)2; }\n")
+		b.WriteString("  if (alder_t > (uint64_t)SIZE_MAX) { return (uint8_t)2; }\n")
 		b.WriteString("  if (alder_v.len > (uint64_t)0) {\n")
 		b.WriteString("    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n")
 		b.WriteString("    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)" +
 			g.typeAlign(elem) + ");\n")
-		b.WriteString("    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
+		b.WriteString("    if (alder_p == NULL) { return (uint8_t)1; }\n")
 		if g.copyTrivial(elem) {
 			b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
 		} else {
-			b.WriteString("    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { ((" + g.cType(elem) + " *)alder_p)[alder_i] = " + g.copyCall(elem) + "(alder_d, ((" + g.cType(elem) + " *)alder_v.data)[alder_i]); }\n")
+			b.WriteString("    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { uint8_t alder_s = " + g.tryCopyCall(elem) + "(alder_d, ((" + g.cType(elem) + " *)alder_v.data)[alder_i], &((" + g.cType(elem) + " *)alder_p)[alder_i]); if (alder_s != (uint8_t)0) { return alder_s; } }\n")
 		}
 		b.WriteString("    alder_v.data = alder_p;\n")
 		b.WriteString("  }\n")
@@ -628,7 +636,8 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 	case mir.TypeArray:
 		if !g.copyTrivial(ty.Elem) {
 			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)" + strconv.FormatUint(ty.Length, 10) + "; alder_i++) {\n")
-			b.WriteString("    alder_v.alder_e[alder_i] = " + g.copyCall(ty.Elem) + "(alder_d, alder_v.alder_e[alder_i]);\n")
+			b.WriteString("    uint8_t alder_s = " + g.tryCopyCall(ty.Elem) + "(alder_d, alder_v.alder_e[alder_i], &alder_v.alder_e[alder_i]);\n")
+			b.WriteString("    if (alder_s != (uint8_t)0) { return alder_s; }\n")
 			b.WriteString("  }\n")
 		}
 	case mir.TypeAggregate:
@@ -637,8 +646,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 				continue
 			}
 			field := "alder_f" + strconv.Itoa(i)
-			b.WriteString("  alder_v." + field + " = " +
-				g.copyCall(fld.Type) + "(alder_d, alder_v." + field + ");\n")
+			b.WriteString("  { uint8_t alder_s = " + g.tryCopyCall(fld.Type) + "(alder_d, alder_v." + field + ", &alder_v." + field + "); if (alder_s != (uint8_t)0) { return alder_s; } }\n")
 		}
 	case mir.TypeEnum:
 		vs := ty.Variants
@@ -647,8 +655,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 				continue
 			}
 			b.WriteString("  if (alder_v.alder_tag == (uint32_t)" + strconv.Itoa(i) + ") {\n")
-			b.WriteString("    alder_v.alder_u.alder_p" + strconv.Itoa(i) + " = " +
-				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ");\n")
+			b.WriteString("    uint8_t alder_s = " + g.tryCopyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ", &alder_v.alder_u.alder_p" + strconv.Itoa(i) + "); if (alder_s != (uint8_t)0) { return alder_s; }\n")
 			b.WriteString("  }\n")
 		}
 	case mir.TypeOption, mir.TypeResult:
@@ -658,17 +665,27 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 				continue
 			}
 			b.WriteString("  if (alder_v.alder_tag == (uint32_t)" + strconv.Itoa(i) + ") {\n")
-			b.WriteString("    alder_v.alder_u.alder_p" + strconv.Itoa(i) + " = " +
-				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ");\n")
+			b.WriteString("    uint8_t alder_s = " + g.tryCopyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ", &alder_v.alder_u.alder_p" + strconv.Itoa(i) + "); if (alder_s != (uint8_t)0) { return alder_s; }\n")
 			b.WriteString("  }\n")
 		}
 	}
-	b.WriteString("  return alder_v;\n}\n")
+	b.WriteString("  *alder_out = alder_v;\n  return (uint8_t)0;\n}\n")
+	b.WriteString("static ALDER_MAYBE_UNUSED " + g.cType(t) + " " + g.copyCall(t) +
+		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v) {\n")
+	b.WriteString("  " + g.cType(t) + " alder_out;\n")
+	b.WriteString("  uint8_t alder_s = " + g.tryCopyCall(t) + "(alder_d, alder_v, &alder_out);\n")
+	b.WriteString("  if (alder_s == (uint8_t)1) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
+	b.WriteString("  if (alder_s != (uint8_t)0) { alder_runtime_panic(\"copy_to_domain: size limit\"); }\n")
+	b.WriteString("  return alder_out;\n}\n")
 }
 
 // copyCall returns the helper name for a non-trivial copied type.
 func (g *gen) copyCall(t mir.TypeId) string {
 	return "alder_copy_ty" + strconv.Itoa(int(t))
+}
+
+func (g *gen) tryCopyCall(t mir.TypeId) string {
+	return "alder_try_copy_ty" + strconv.Itoa(int(t))
 }
 
 // emitCtxSites writes the cleanup adapter types, context structs, and adapter

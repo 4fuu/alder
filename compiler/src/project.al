@@ -51,10 +51,10 @@ type ProjectPathRec {
     valid: Bool
 }
 type ProjectPlanRec {
-    bytes: __s0_Buffer(U8)
-    targets: __s0_Buffer(ProjectTargetRec)
-    modules: __s0_Buffer(ProjectModuleRec)
-    edges: __s0_Buffer(ProjectEdgeRec)
+    bytes: Vec(U8)
+    targets: Vec(ProjectTargetRec)
+    modules: Vec(ProjectModuleRec)
+    edges: Vec(ProjectEdgeRec)
     package_start: U64
     package_end: U64
     selected: U64
@@ -87,20 +87,20 @@ fn project_fail(message: U64) -> I32 {
     return driver_failure(2, "package", "compiler storage failure while preparing project")
 }
 
-fn project_equal(b: __s0_Buffer(U8), start: U64, end: U64, s: __s0_String) -> Bool {
+fn project_equal(b: Vec(U8), start: U64, end: U64, s: [U8]) -> Bool {
     if end - start != len(s) { return false }
     var i: U64 = 0
     while i < len(s) {
-        if __s0_buffer_get(U8, b, start + i) != s[i] { return false }
+        if b[start + i] != s[i] { return false }
         i = i + 1
     }
     return true
 }
-fn project_range_equal(b: __s0_Buffer(U8), a: U64, ae: U64, c: U64, ce: U64) -> Bool {
+fn project_range_equal(b: Vec(U8), a: U64, ae: U64, c: U64, ce: U64) -> Bool {
     if ae - a != ce - c { return false }
     var i: U64 = 0
     while a + i < ae {
-        if __s0_buffer_get(U8, b, a + i) != __s0_buffer_get(U8, b, c + i) { return false }
+        if b[a + i] != b[c + i] { return false }
         i = i + 1
     }
     return true
@@ -114,37 +114,37 @@ fn project_name_byte(c: U8, first: Bool) -> Bool {
     return false
 }
 
-fn project_name(b: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn project_name(b: Vec(U8), start: U64, end: U64) -> Bool {
     if start >= end { return false }
     var at = start
     while at < end {
-        if !project_name_byte(__s0_buffer_get(U8, b, at), at == start) { return false }
+        if !project_name_byte(b[at], at == start) { return false }
         at = at + 1
     }
     return true
 }
 
-fn project_package_name(b: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn project_package_name(b: Vec(U8), start: U64, end: U64) -> Bool {
     if start >= end { return false }
     var at = start
     while at < end {
-        let c = __s0_buffer_get(U8, b, at)
+        let c = b[at]
         if !((c >= 97 && c <= 122) || (at > start && (digit(c) || c == 95))) { return false }
         at = at + 1
     }
     return true
 }
 
-fn project_manifest_path(b: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn project_manifest_path(b: Vec(U8), start: U64, end: U64) -> Bool {
     if start >= end { return false }
     var component = start
     var at = start
     while at <= end {
-        if at == end || __s0_buffer_get(U8, b, at) == 47 {
-            if at == component || (at - component == 1 && __s0_buffer_get(U8, b, component) == 46) || (at - component == 2 && __s0_buffer_get(U8, b, component) == 46 && __s0_buffer_get(U8, b, component + 1) == 46) { return false }
+        if at == end || b[at] == 47 {
+            if at == component || (at - component == 1 && b[component] == 46) || (at - component == 2 && b[component] == 46 && b[component + 1] == 46) { return false }
             component = at + 1
         } else {
-            let c = __s0_buffer_get(U8, b, at)
+            let c = b[at]
             if c == 92 || c == 58 || c < 32 || c >= 127 { return false }
         }
         at = at + 1
@@ -154,17 +154,17 @@ fn project_manifest_path(b: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
 
 // Parse one basic TOML string.  Escapes are validated and retained encoded;
 // manifest names and paths consequently remain ASCII and need no decoding.
-fn project_string(b: __s0_Buffer(U8), start: U64, end: U64) -> U64 {
-    if start >= end || __s0_buffer_get(U8, b, start) != 34 { return 0 }
+fn project_string(b: Vec(U8), start: U64, end: U64) -> U64 {
+    if start >= end || b[start] != 34 { return 0 }
     var at = start + 1
     while at < end {
-        let c = __s0_buffer_get(U8, b, at)
+        let c = b[at]
         if c == 34 { if at + 1 == end { return at } else { return 0 } }
         if c < 32 || c >= 128 { return 0 }
         if c == 92 {
             at = at + 1
             if at >= end { return 0 }
-            let e = __s0_buffer_get(U8, b, at)
+            let e = b[at]
             if e != 34 && e != 92 && e != 110 && e != 114 && e != 116 { return 0 }
         }
         at = at + 1
@@ -172,18 +172,18 @@ fn project_string(b: __s0_Buffer(U8), start: U64, end: U64) -> U64 {
     return 0
 }
 
-fn project_copy_manifest(d: Domain) -> Result(__s0_Buffer(U8), __s0_Error) {
-    var b = try __s0_buffer_new(U8, d)
+fn project_copy_manifest(d: Domain) -> Result(Vec(U8), __s0_Error) {
+    var b = Vec.new(U8)
     var i: U64 = 0
     let n = unsafe c { alderhost_manifest_len() }
     while i < n {
-        b = try __s0_buffer_append(U8, d, b, unsafe c { alderhost_manifest_byte(i) })
+        try b.try_push(unsafe c { alderhost_manifest_byte(i) })
         i = i + 1
     }
     return Ok(b)
 }
 
-fn project_option_equal(kind: U64, b: __s0_Buffer(U8), s: U64, e: U64) -> Bool {
+fn project_option_equal(kind: U64, b: Vec(U8), s: U64, e: U64) -> Bool {
     var n: U64 = unsafe c { alderhost_target_len() }
     if kind == 2 { n = unsafe c { alderhost_profile_len() } }
     if kind == 3 { n = unsafe c { alderhost_triple_len() } }
@@ -193,16 +193,16 @@ fn project_option_equal(kind: U64, b: __s0_Buffer(U8), s: U64, e: U64) -> Bool {
         var c = unsafe c { alderhost_target_byte(i) }
         if kind == 2 { c = unsafe c { alderhost_profile_byte(i) } }
         if kind == 3 { c = unsafe c { alderhost_triple_byte(i) } }
-        if c != __s0_buffer_get(U8, b, s + i) { return false }
+        if c != b[s + i] { return false }
         i = i + 1
     }
     return true
 }
 
-fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild, __s0_Error) {
-    var targets = try __s0_buffer_new(ProjectTargetRec, d)
-    var modules = try __s0_buffer_new(ProjectModuleRec, d)
-    var edges = try __s0_buffer_new(ProjectEdgeRec, d)
+fn project_parse_manifest(d: Domain, b: Vec(U8)) -> Result(ProjectBuild, __s0_Error) {
+    var targets = Vec.new(ProjectTargetRec)
+    var modules = Vec.new(ProjectModuleRec)
+    var edges = Vec.new(ProjectEdgeRec)
     var package_s: U64 = 0
     var package_e: U64 = 0
     var version = false
@@ -212,14 +212,14 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
     var table: U64 = 0
     var current: U64 = 0
     var at: U64 = 0
-    let n = __s0_buffer_len(U8, b)
+    let n = (b).len()
     while at < n {
         var end = at
         var quote = false
         var escape = false
         var line_done = false
-        while end < n && __s0_buffer_get(U8, b, end) != 10 && !line_done {
-            let c = __s0_buffer_get(U8, b, end)
+        while end < n && b[end] != 10 && !line_done {
+            let c = b[end]
             if c == 34 && !escape { quote = !quote }
             if c == 35 && !quote { line_done = true }
             if !line_done {
@@ -229,13 +229,13 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
             }
         }
         var ls = at
-        while ls < end && project_space(__s0_buffer_get(U8, b, ls)) { ls = ls + 1 }
+        while ls < end && project_space(b[ls]) { ls = ls + 1 }
         var le = end
-        while le > ls && project_space(__s0_buffer_get(U8, b, le - 1)) { le = le - 1 }
+        while le > ls && project_space(b[le - 1]) { le = le - 1 }
         if quote { return Ok(ProjectRejected(1)) }
         if ls < le {
-            if __s0_buffer_get(U8, b, ls) == 91 {
-                if __s0_buffer_get(U8, b, le - 1) != 93 { return Ok(ProjectRejected(1)) }
+            if b[ls] == 91 {
+                if b[le - 1] != 93 { return Ok(ProjectRejected(1)) }
                 let ts = ls + 1
                 let te = le - 1
                 if project_equal(b, ts, te, "package") {
@@ -247,13 +247,13 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
                     if te - ts > 8 && project_equal(b, ts, ts + 8, "targets.") {
                         if !project_name(b, ts + 8, te) { return Ok(ProjectRejected(1)) }
                         var k: U64 = 0
-                        while k < __s0_buffer_len(ProjectTargetRec, targets) {
-                            let old = __s0_buffer_get(ProjectTargetRec, targets, k)
+                        while k < (targets).len() {
+                            let old = targets[k]
                             if project_range_equal(b, old.name_start, old.name_end, ts + 8, te) { return Ok(ProjectRejected(2)) }
                             k = k + 1
                         }
-                        targets = try __s0_buffer_append(ProjectTargetRec, d, targets, ProjectTargetRec(name_start: ts + 8, name_end: te, root_start: 0, root_end: 0, kind: 0))
-                        current = __s0_buffer_len(ProjectTargetRec, targets)
+                        try targets.try_push(ProjectTargetRec(name_start: ts + 8, name_end: te, root_start: 0, root_end: 0, kind: 0))
+                        current = (targets).len()
                         table = 2
                     } else {
                         if project_equal(b, ts, te, "dependencies") || project_equal(b, ts, te, "workspace") || project_equal(b, ts, te, "native") || project_equal(b, ts, te, "lock") || project_equal(b, ts, te, "git") { return Ok(ProjectRejected(4)) }
@@ -263,12 +263,12 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
                 }
             } else {
                 var eq = ls
-                while eq < le && __s0_buffer_get(U8, b, eq) != 61 { eq = eq + 1 }
+                while eq < le && b[eq] != 61 { eq = eq + 1 }
                 if eq == le { return Ok(ProjectRejected(1)) }
                 var ke = eq
-                while ke > ls && project_space(__s0_buffer_get(U8, b, ke - 1)) { ke = ke - 1 }
+                while ke > ls && project_space(b[ke - 1]) { ke = ke - 1 }
                 var vs = eq + 1
-                while vs < le && project_space(__s0_buffer_get(U8, b, vs)) { vs = vs + 1 }
+                while vs < le && project_space(b[vs]) { vs = vs + 1 }
                 var handled = false
                 if table == 0 && project_equal(b, ls, ke, "manifest") {
                     if manifest || !project_equal(b, vs, le, "1") { return Ok(ProjectRejected(2)) }
@@ -294,7 +294,7 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
                     handled = true
                 }
                 if table == 2 && current != 0 {
-                    let old = __s0_buffer_get(ProjectTargetRec, targets, current - 1)
+                    let old = targets[current - 1]
                     let q = project_string(b, vs, le)
                     if q == 0 || q == vs + 1 { return Ok(ProjectRejected(1)) }
                     if project_equal(b, ls, ke, "kind") {
@@ -303,37 +303,37 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
                         if project_equal(b, vs + 1, q, "bin") { kind = 1 }
                         if project_equal(b, vs + 1, q, "lib") { kind = 2 }
                         if kind == 0 { return Ok(ProjectRejected(1)) }
-                        __s0_buffer_set(ProjectTargetRec, targets, current - 1, ProjectTargetRec(name_start: old.name_start, name_end: old.name_end, root_start: old.root_start, root_end: old.root_end, kind: kind))
+                        targets[current - 1] = ProjectTargetRec(name_start: old.name_start, name_end: old.name_end, root_start: old.root_start, root_end: old.root_end, kind: kind)
                         handled = true
                     } else {
                         if !project_equal(b, ls, ke, "root") { return Ok(ProjectRejected(1)) }
                         if old.root_end != 0 || q - (vs + 1) < 7 || !project_equal(b, vs + 1, vs + 5, "src/") || !project_equal(b, q - 3, q, ".al") || !project_manifest_path(b, vs + 1, q) { return Ok(ProjectRejected(1)) }
-                        __s0_buffer_set(ProjectTargetRec, targets, current - 1, ProjectTargetRec(name_start: old.name_start, name_end: old.name_end, root_start: vs + 1, root_end: q, kind: old.kind))
+                        targets[current - 1] = ProjectTargetRec(name_start: old.name_start, name_end: old.name_end, root_start: vs + 1, root_end: q, kind: old.kind)
                         handled = true
                     }
                 }
                 if !handled { return Ok(ProjectRejected(1)) }
             }
         }
-        while end < n && __s0_buffer_get(U8, b, end) != 10 { end = end + 1 }
+        while end < n && b[end] != 10 { end = end + 1 }
         at = end + 1
     }
-    if !manifest || !edition || package_e == 0 || !version || __s0_buffer_len(ProjectTargetRec, targets) == 0 { return Ok(ProjectRejected(3)) }
+    if !manifest || !edition || package_e == 0 || !version || (targets).len() == 0 { return Ok(ProjectRejected(3)) }
     var i: U64 = 0
-    while i < __s0_buffer_len(ProjectTargetRec, targets) {
-        let t = __s0_buffer_get(ProjectTargetRec, targets, i)
+    while i < (targets).len() {
+        let t = targets[i]
         if t.kind == 0 || t.root_end == 0 { return Ok(ProjectRejected(3)) }
         i = i + 1
     }
     var selected: U64 = 0
     let tn = unsafe c { alderhost_target_len() }
     if tn == 0 {
-        if __s0_buffer_len(ProjectTargetRec, targets) != 1 { return Ok(ProjectRejected(5)) }
+        if (targets).len() != 1 { return Ok(ProjectRejected(5)) }
         selected = 1
     } else {
         i = 0
-        while i < __s0_buffer_len(ProjectTargetRec, targets) {
-            let t = __s0_buffer_get(ProjectTargetRec, targets, i)
+        while i < (targets).len() {
+            let t = targets[i]
             if project_option_equal(1, b, t.name_start, t.name_end) { selected = i + 1 }
             i = i + 1
         }
@@ -344,7 +344,7 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
     if pn != 0 {
         profile = 0
         if pn == 5 {
-            let expected: __s0_String = "debug"
+            let expected: [U8] = "debug"
             var ok = true
             var z: U64 = 0
             while z < 5 {
@@ -354,7 +354,7 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
             if ok { profile = 1 }
         }
         if pn == 7 {
-            let expected: __s0_String = "release"
+            let expected: [U8] = "release"
             var ok = true
             var z: U64 = 0
             while z < 7 {
@@ -380,7 +380,7 @@ fn project_request(plan: ProjectPlanRec, start: U64, end: U64) -> U64 {
     if !unsafe c { alderhost_source_request_reset() } { return 0 }
     var i = start
     while i < end {
-        let byte = __s0_buffer_get(U8, plan.bytes, i)
+        let byte = (plan.bytes)[i]
         if !unsafe c { alderhost_source_request_byte(byte) } { return 0 }
         i = i + 1
     }
@@ -391,7 +391,7 @@ fn project_source_byte(source: U64, at: U64) -> U8 {
     return unsafe c { alderhost_source_text_byte(source - 1, at) }
 }
 
-fn project_source_word(source: U64, start: U64, end: U64, word: __s0_String) -> Bool {
+fn project_source_word(source: U64, start: U64, end: U64, word: [U8]) -> Bool {
     if end - start != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {
@@ -401,7 +401,7 @@ fn project_source_word(source: U64, start: U64, end: U64, word: __s0_String) -> 
     return true
 }
 
-fn project_source_token(source: U64, start: U64, end: U64, word: __s0_String) -> Bool {
+fn project_source_token(source: U64, start: U64, end: U64, word: [U8]) -> Bool {
     if !project_source_word(source, start, end, word) { return false }
     if start > 0 && project_source_ident_continue(project_source_byte(source, start - 1)) { return false }
     let source_end = unsafe c { alderhost_source_text_len(source - 1) }
@@ -495,13 +495,13 @@ fn project_manifest_source_equal(plan: ProjectPlanRec, source: U64, source_start
     if source_end - source_start != manifest_end - manifest_start { return false }
     var at: U64 = 0
     while source_start + at < source_end {
-        if project_source_byte(source, source_start + at) != __s0_buffer_get(U8, plan.bytes, manifest_start + at) { return false }
+        if project_source_byte(source, source_start + at) != (plan.bytes)[manifest_start + at] { return false }
         at = at + 1
     }
     return true
 }
 
-fn project_source_path_is(source: U64, word: __s0_String) -> Bool {
+fn project_source_path_is(source: U64, word: [U8]) -> Bool {
     let end = unsafe c { alderhost_source_path_len(source - 1) }
     if end != len(word) { return false }
     var at: U64 = 0
@@ -518,7 +518,7 @@ fn project_declared_module_matches(plan: ProjectPlanRec, source: U64, start: U64
     if path_end < 8 || end - start != (plan.package_end - plan.package_start) + 1 + path_end - 7 { return false }
     var at: U64 = 0
     while plan.package_start + at < plan.package_end {
-        if project_source_byte(source, start + at) != __s0_buffer_get(U8, plan.bytes, plan.package_start + at) { return false }
+        if project_source_byte(source, start + at) != (plan.bytes)[plan.package_start + at] { return false }
         at = at + 1
     }
     if project_source_byte(source, start + at) != 46 { return false }
@@ -534,7 +534,7 @@ fn project_declared_module_matches(plan: ProjectPlanRec, source: U64, start: U64
     return start + at == end
 }
 
-fn project_request_literal(word: __s0_String) -> Bool {
+fn project_request_literal(word: [U8]) -> Bool {
     var at: U64 = 0
     while at < len(word) {
         if !unsafe c { alderhost_source_request_byte(word[at]) } { return false }
@@ -563,7 +563,7 @@ fn project_request_module(plan: ProjectPlanRec, source: U64, start: U64, end: U6
     return unsafe c { alderhost_source_request_finish() }
 }
 
-fn project_with_graph(plan: ProjectPlanRec, modules: __s0_Buffer(ProjectModuleRec), edges: __s0_Buffer(ProjectEdgeRec)) -> ProjectPlanRec {
+fn project_with_graph(plan: ProjectPlanRec, modules: Vec(ProjectModuleRec), edges: Vec(ProjectEdgeRec)) -> ProjectPlanRec {
     return ProjectPlanRec(bytes: plan.bytes, targets: plan.targets, modules: modules, edges: edges, package_start: plan.package_start, package_end: plan.package_end, selected: plan.selected, action: plan.action, profile: plan.profile, triple: plan.triple, sysroot: plan.sysroot)
 }
 
@@ -575,12 +575,12 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
     let declared = project_parse_source_path(source, after_module.at, source_end)
     if !after_module.valid || !declared.valid || !project_source_module_path(source, declared.start, declared.end) || !project_declared_module_matches(plan, source, declared.start, declared.end) { return Ok(ProjectRejected(7)) }
     var module_at: U64 = 0
-    while module_at < __s0_buffer_len(ProjectModuleRec, plan.modules) {
-        let old = __s0_buffer_get(ProjectModuleRec, plan.modules, module_at)
+    while module_at < (plan.modules).len() {
+        let old = (plan.modules)[module_at]
         if old.source == source { return Ok(ProjectBuilt(plan)) }
         module_at = module_at + 1
     }
-    var modules = try __s0_buffer_append(ProjectModuleRec, d, plan.modules, ProjectModuleRec(name_start: declared.start, name_end: declared.end, source: source, mark: 0))
+    var modules = try vec_appended(ProjectModuleRec, plan.modules, ProjectModuleRec(name_start: declared.start, name_end: declared.end, source: source, mark: 0))
     var edges = plan.edges
     var scan = declared.at
     var depth: U64 = 0
@@ -632,12 +632,12 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
                             let target = project_request_module(plan, source, imported.start, imported.end)
                             if target == 0 { return Ok(ProjectRejected(8)) }
                             var prior: U64 = 0
-                            while prior < __s0_buffer_len(ProjectEdgeRec, edges) {
-                                let old = __s0_buffer_get(ProjectEdgeRec, edges, prior)
+                            while prior < (edges).len() {
+                                let old = edges[prior]
                                 if old.from == source && !project_range_less(source, old.name_start, old.name_end, source, imported.start, imported.end) && !project_range_less(source, imported.start, imported.end, source, old.name_start, old.name_end) { return Ok(ProjectRejected(7)) }
                                 prior = prior + 1
                             }
-                            edges = try __s0_buffer_append(ProjectEdgeRec, d, edges, ProjectEdgeRec(from: source, name_start: imported.start, name_end: imported.end, to: target))
+                            try edges.try_push(ProjectEdgeRec(from: source, name_start: imported.start, name_end: imported.end, to: target))
                         }
                         scan = imported.at
                     } else { scan = scan + 1 }
@@ -649,7 +649,7 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
 }
 
 fn project_graph_acyclic(d: Domain, plan: ProjectPlanRec) -> Result(Bool, __s0_Error) {
-    let count = __s0_buffer_len(ProjectModuleRec, plan.modules)
+    let count = (plan.modules).len()
     var indegree = __s0_alloc(U64, d, count + 1)
     var removed = __s0_alloc(U8, d, count + 1)
     var at: U64 = 0
@@ -659,8 +659,8 @@ fn project_graph_acyclic(d: Domain, plan: ProjectPlanRec) -> Result(Bool, __s0_E
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(ProjectEdgeRec, plan.edges) {
-        let edge = __s0_buffer_get(ProjectEdgeRec, plan.edges, at)
+    while at < (plan.edges).len() {
+        let edge = (plan.edges)[at]
         if edge.to <= count { indegree[edge.to] = indegree[edge.to] + 1 }
         at = at + 1
     }
@@ -675,8 +675,8 @@ fn project_graph_acyclic(d: Domain, plan: ProjectPlanRec) -> Result(Bool, __s0_E
                 total = total + 1
                 progress = true
                 var edge_at: U64 = 0
-                while edge_at < __s0_buffer_len(ProjectEdgeRec, plan.edges) {
-                    let edge = __s0_buffer_get(ProjectEdgeRec, plan.edges, edge_at)
+                while edge_at < (plan.edges).len() {
+                    let edge = (plan.edges)[edge_at]
                     if edge.from == node && edge.to <= count { indegree[edge.to] = indegree[edge.to] - 1 }
                     edge_at = edge_at + 1
                 }
@@ -705,7 +705,7 @@ fn project_close(d: Domain, initial: ProjectPlanRec) -> Result(ProjectBuild, __s
 }
 
 fn project_seed(plan: ProjectPlanRec) -> ProjectBuild {
-    let target = __s0_buffer_get(ProjectTargetRec, plan.targets, plan.selected - 1)
+    let target = (plan.targets)[plan.selected - 1]
     let requested = project_request(plan, target.root_start, target.root_end)
     if requested == 0 { return ProjectRejected(8) }
     if !unsafe c { alderhost_project_entry_source_set(requested) } { return ProjectRejected(12) }
@@ -715,7 +715,7 @@ fn project_seed(plan: ProjectPlanRec) -> ProjectBuild {
 fn project_out_manifest_range(plan: ProjectPlanRec, start: U64, end: U64) -> Bool {
     var at = start
     while at < end {
-        if !out(__s0_buffer_get(U8, plan.bytes, at)) { return false }
+        if !out((plan.bytes)[at]) { return false }
         at = at + 1
     }
     return true
@@ -776,8 +776,8 @@ fn project_hash_byte(initial: U64, byte: U8) -> U64 {
 fn project_snapshot_crc(plan: ProjectPlanRec) -> U64 {
     var crc: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(U8, plan.bytes) {
-        crc = project_hash_byte(crc, __s0_buffer_get(U8, plan.bytes, at))
+    while at < (plan.bytes).len() {
+        crc = project_hash_byte(crc, (plan.bytes)[at])
         at = at + 1
     }
     var source: U64 = 1
@@ -847,8 +847,8 @@ fn project_out_output_path(plan: ProjectPlanRec, target: ProjectTargetRec, kind:
 
 fn project_module_for_source(plan: ProjectPlanRec, source: U64) -> ProjectModuleRec {
     var at: U64 = 0
-    while at < __s0_buffer_len(ProjectModuleRec, plan.modules) {
-        let item = __s0_buffer_get(ProjectModuleRec, plan.modules, at)
+    while at < (plan.modules).len() {
+        let item = (plan.modules)[at]
         if item.source == source { return item }
         at = at + 1
     }
@@ -878,7 +878,7 @@ fn project_edge_less(plan: ProjectPlanRec, a: ProjectEdgeRec, b: ProjectEdgeRec)
 }
 
 fn project_emit_plan(plan: ProjectPlanRec) -> Bool {
-    let target = __s0_buffer_get(ProjectTargetRec, plan.targets, plan.selected - 1)
+    let target = (plan.targets)[plan.selected - 1]
     if !out_string("ALDER-BUILD-PLAN 1\nedition 1\ntarget ") || !project_out_manifest_range(plan, target.name_start, target.name_end) { return false }
     if target.kind == 1 { if !out_string("\nkind bin") { return false } }
     else { if !out_string("\nkind lib") { return false } }
@@ -900,23 +900,23 @@ fn project_emit_plan(plan: ProjectPlanRec) -> Bool {
         source = source + 1
     }
     var rank: U64 = 0
-    let edge_count = __s0_buffer_len(ProjectEdgeRec, plan.edges)
+    let edge_count = (plan.edges).len()
     while rank < edge_count {
         var candidate: U64 = 0
         var at: U64 = 0
         while at < edge_count {
-            let edge = __s0_buffer_get(ProjectEdgeRec, plan.edges, at)
+            let edge = (plan.edges)[at]
             var before: U64 = 0
             var other: U64 = 0
             while other < edge_count {
-                if project_edge_less(plan, __s0_buffer_get(ProjectEdgeRec, plan.edges, other), edge) { before = before + 1 }
+                if project_edge_less(plan, (plan.edges)[other], edge) { before = before + 1 }
                 other = other + 1
             }
             if before == rank { candidate = at + 1 }
             at = at + 1
         }
         if candidate == 0 { return false }
-        let edge = __s0_buffer_get(ProjectEdgeRec, plan.edges, candidate - 1)
+        let edge = (plan.edges)[candidate - 1]
         let module_rec = project_module_for_source(plan, edge.from)
         if !out_string("edge ") || !project_out_source_range(module_rec.source, module_rec.name_start, module_rec.name_end) || !out_string(" -> ") || !project_out_source_range(edge.from, edge.name_start, edge.name_end) || !out(10) { return false }
         rank = rank + 1
@@ -935,7 +935,7 @@ fn project_host_output_byte(byte: U8) -> Bool {
     return unsafe c { alderhost_project_output_byte(byte) }
 }
 
-fn project_host_output_string(word: __s0_String) -> Bool {
+fn project_host_output_string(word: [U8]) -> Bool {
     var at: U64 = 0
     while at < len(word) {
         if !project_host_output_byte(word[at]) { return false }
@@ -947,7 +947,7 @@ fn project_host_output_string(word: __s0_String) -> Bool {
 fn project_host_output_range(plan: ProjectPlanRec, start: U64, end: U64) -> Bool {
     var at = start
     while at < end {
-        if !project_host_output_byte(__s0_buffer_get(U8, plan.bytes, at)) { return false }
+        if !project_host_output_byte((plan.bytes)[at]) { return false }
         at = at + 1
     }
     return true
@@ -980,7 +980,7 @@ fn project_configure_one_output(plan: ProjectPlanRec, target: ProjectTargetRec, 
 }
 
 fn project_configure_outputs(plan: ProjectPlanRec) -> Bool {
-    let target = __s0_buffer_get(ProjectTargetRec, plan.targets, plan.selected - 1)
+    let target = (plan.targets)[plan.selected - 1]
     if plan.action == 3 && target.kind != 1 { return false }
     if !unsafe c { alderhost_project_target_kind(target.kind) } { return false }
     return project_configure_one_output(plan, target, 1) && project_configure_one_output(plan, target, 2)

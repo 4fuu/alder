@@ -2,7 +2,7 @@
 
 type CgenTypeState {
     writer: CgenWriter
-    emitted: __s0_Buffer(U64)
+    emitted: Vec(U64)
 }
 
 fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Result(CgenWriter, __s0_Error) {
@@ -17,7 +17,7 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     if id == mir_type_u64() { return cgen_put(d, writer, "uint64_t") }
     if id == mir_type_f32() { return cgen_put(d, writer, "float") }
     if id == mir_type_f64() { return cgen_put(d, writer, "double") }
-    let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+    let t = (store.types)[id - 1]
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { let out = try cgen_put(d, writer, "AlderTy")
     return cgen_put_u64(d, out, id - 1) }
     if t.kind == mir_type_kind_string() { return cgen_put(d, writer, "AlderString") }
@@ -35,10 +35,10 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     return cgen_put(d, writer, "AlderTableId")
 }
 
-fn cgen_emitted(ids: __s0_Buffer(U64), id: U64) -> Bool {
+fn cgen_emitted(ids: Vec(U64), id: U64) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(U64, ids) {
-        if __s0_buffer_get(U64, ids, at) == id { return true }
+    while at < (ids).len() {
+        if (ids)[at] == id { return true }
         at = at + 1
     }
     return false
@@ -46,18 +46,18 @@ fn cgen_emitted(ids: __s0_Buffer(U64), id: U64) -> Bool {
 
 fn cgen_type_part(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> MirTypePartRec {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let part = (store.type_parts)[at]
         if part.owner == owner && part.kind == kind && part.ordinal == ordinal { return part }
         at = at + 1
     }
-    return __s0_buffer_get(MirTypePartRec, store.type_parts, 0)
+    return (store.type_parts)[0]
 }
 
 fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -> Result(CgenTypeState, __s0_Error) {
     if id <= mir_primitive_type_count() || cgen_emitted(initial.emitted, id) { return Ok(initial) }
     var state = initial
-    let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+    let t = (store.types)[id - 1]
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() {
         var ordinal: U64 = 0
         var kind = mir_type_part_variant()
@@ -79,7 +79,7 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
     var writer = state.writer
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { writer = try cgen_emit_struct(d, writer, store, id, t) }
     if t.kind == mir_type_kind_function() { writer = try cgen_emit_function_type(d, writer, store, id, t) }
-    let emitted = try __s0_buffer_append(U64, d, state.emitted, id)
+    let emitted = try vec_appended(U64, state.emitted, id)
     return Ok(CgenTypeState(writer: writer, emitted: emitted))
 }
 
@@ -176,8 +176,8 @@ fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(Cg
     var at: U64 = mir_primitive_type_count()
     var has_string = false
     var has_bytes = false
-    while at < __s0_buffer_len(MirTypeRec, store.types) {
-        let kind = __s0_buffer_get(MirTypeRec, store.types, at).kind
+    while at < (store.types).len() {
+        let kind = (store.types)[at].kind
         if kind == mir_type_kind_string() { has_string = true }
         if kind == mir_type_kind_bytes() { has_bytes = true }
         at = at + 1
@@ -187,8 +187,8 @@ fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(Cg
     if has_string || has_bytes { out = try cgen_put(d, out, "\n") }
     at = mir_primitive_type_count()
     var records = false
-    while at < __s0_buffer_len(MirTypeRec, store.types) {
-        let t = __s0_buffer_get(MirTypeRec, store.types, at)
+    while at < (store.types).len() {
+        let t = (store.types)[at]
         if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { out = try cgen_put(d, out, "typedef struct AlderTy")
         out = try cgen_put_u64(d, out, at)
         out = try cgen_put(d, out, " AlderTy")
@@ -198,10 +198,10 @@ fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(Cg
         at = at + 1
     }
     if records { out = try cgen_put(d, out, "\n") }
-    let emitted = try __s0_buffer_new(U64, d)
+    let emitted = Vec.new(U64)
     var state = CgenTypeState(writer: out, emitted: emitted)
     at = mir_primitive_type_count()
-    while at < __s0_buffer_len(MirTypeRec, store.types) {
+    while at < (store.types).len() {
         state = try cgen_emit_type(d, state, store, at + 1)
         at = at + 1
     }

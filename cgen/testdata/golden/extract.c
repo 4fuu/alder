@@ -47,6 +47,8 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_extract_0(AlderTy15 alder_v0, Alder
   ALDER_MAYBE_UNUSED AlderTy16 alder_v7;
   ALDER_MAYBE_UNUSED AlderTy16 alder_v8;
   ALDER_MAYBE_UNUSED AlderTy13 alder_l0;
+  (void)alder_v0;
+  (void)alder_v1;
 
   if (alder_v0.alder_tag != (uint32_t)1) { { goto alder_b3; } }
   alder_v2 = alder_v0.alder_u.alder_p1;

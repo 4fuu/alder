@@ -13,6 +13,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_domain_reset() { return 3 }
     if op == mir_op_alloc() || op == mir_op_alloc_checked() { return 19 }
     if op == mir_op_copy_to_domain() { return 3 }
+    if op == mir_op_copy_to_domain_try() || op == mir_op_bytes_try_from_vec() { return 19 }
     if op == mir_op_cleanup_push() { return 33 }
     if op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() { return 1 }
     if (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || (op >= mir_op_int_eq() && op <= mir_op_float_ge()) { return 3 }
@@ -28,18 +29,19 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
     if op == mir_op_vec_new() { return 16 }
     if op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() { return 7 }
+    if op == mir_op_vec_try_grow() { return 23 }
     if op >= mir_op_vec_len() && op <= mir_op_vec_as_mut_slice() { return 1 }
-    if op == mir_op_array_as_slice() { return 1 }
+    if op == mir_op_array_as_slice() || op == mir_op_bytes_as_slice() || op == mir_op_string_as_bytes() { return 1 }
     return 0
 }
 // Flat (kind, owner) key for operand ordinal counting. Zero means the
 // (kind, owner) pair is outside every owning table and keeps the legacy scan.
 fn mir_v1q_operand_key(store: MirStore, o: MirOperandRec) -> U64 {
-    let type_total = __s0_buffer_len(MirTypeRec, store.types)
-    let import_total = __s0_buffer_len(MirImportRec, store.imports)
-    let instr_total = __s0_buffer_len(MirInstrRec, store.instructions)
-    let term_total = __s0_buffer_len(MirTermRec, store.terminators)
-    let operand_total = __s0_buffer_len(MirOperandRec, store.operands)
+    let type_total = (store.types).len()
+    let import_total = (store.imports).len()
+    let instr_total = (store.instructions).len()
+    let term_total = (store.terminators).len()
+    let operand_total = (store.operands).len()
     if o.kind == mir_operand_type_part() {
         if o.owner >= 1 && o.owner <= type_total { return o.owner }
         return 0
@@ -74,15 +76,15 @@ fn mir_v1q_operand_key(store: MirStore, o: MirOperandRec) -> U64 {
     }
     return 0
 }
-fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let type_count = __s0_buffer_len(MirTypeRec, store.types)
+    let type_count = (store.types).len()
     if version < 1 || version > mir_format_version() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_version(), 0, 0, 0, 0, 0, 0, 0, 1, version, mir_format_version())) }
     if type_count < mir_primitive_type_count() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_missing_primitives(), 0, 0, 0, 0, 0, 0, 0, mir_primitive_type_count(), type_count, 0)) }
     var at: U64 = 0
     while at < type_count {
-        let t = __s0_buffer_get(MirTypeRec, store.types, at)
+        let t = (store.types)[at]
         let id = at + 1
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
@@ -98,7 +100,7 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
                 if (t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) || (leaf && (t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
                 var prior: U64 = mir_primitive_type_count()
                 while named && prior < at {
-                    let p = __s0_buffer_get(MirTypeRec, store.types, prior)
+                    let p = (store.types)[prior]
                     if mir_vname_equal(store, t.name_start, t.name_end, p.name_start, p.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, id, id, 0, 0, prior + 1))
 prior = at }
                     prior = prior + 1
@@ -109,14 +111,14 @@ prior = at }
     }
     return Ok(out)
 }
-fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    let function_count = (store.functions).len()
     let constants = try mir_vindex_build_constants(d, store)
     // Per-function block segments: counting sort by function preserving store
     // order inside each segment. Only the missing-block probe uses them.
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let block_total = (store.blocks).len()
     var b_counts = __s0_alloc(U64, d, function_count + 1)
     var bz: U64 = 0
     while bz <= function_count {
@@ -125,7 +127,7 @@ fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(Mir
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -156,7 +158,7 @@ fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(Mir
     }
     bat = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count {
             b_ids[b_starts[bf] + b_cursor[bf]] = bat + 1
             b_cursor[bf] = b_cursor[bf] + 1
@@ -166,19 +168,19 @@ fn mir_vphase1_declarations(d: Domain, store: MirStore, initial: __s0_Buffer(Mir
     var at: U64 = 0
     // Module declarations: names and duplicates remain in storage order.
     at = 0
-    while at < __s0_buffer_len(MirImportRec, store.imports) {
-        let item = __s0_buffer_get(MirImportRec, store.imports, at)
+    while at < (store.imports).len() {
+        let item = (store.imports)[at]
         if !mir_vname_valid(store, item.name_start, item.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         var prior: U64 = 0
-        while prior < at { let p = __s0_buffer_get(MirImportRec, store.imports, prior)
+        while prior < at { let p = (store.imports)[prior]
 if mir_vname_equal(store, item.name_start, item.name_end, p.name_start, p.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, prior + 1))
 prior = at }
 prior = prior + 1 }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirConstRec, store.constants) {
-        let item = __s0_buffer_get(MirConstRec, store.constants, at)
+    while at < (store.constants).len() {
+        let item = (store.constants)[at]
         if !mir_vname_valid(store, item.name_start, item.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         let prior = mir_vindex_const_slots(store, constants.slots, item.name_start, item.name_end)
         if prior != 0 && prior != at + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, 0, at + 1, 0, 0, prior)) }
@@ -186,10 +188,10 @@ prior = prior + 1 }
     }
     at = 0
     while at < function_count {
-        let item = __s0_buffer_get(MirFunctionRec, store.functions, at)
+        let item = (store.functions)[at]
         if !mir_vname_valid(store, item.name_start, item.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), at + 1, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
         var prior: U64 = 0
-        while prior < at { let p = __s0_buffer_get(MirFunctionRec, store.functions, prior)
+        while prior < at { let p = (store.functions)[prior]
 if mir_vname_equal(store, item.name_start, item.name_end, p.name_start, p.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), at + 1, 0, 0, 0, 0, 0, at + 1, 0, 0, prior + 1))
 prior = at }
 prior = prior + 1 }
@@ -198,7 +200,7 @@ prior = prior + 1 }
         var has_entry: U64 = 0
         while bk < bcount && has_entry == 0 {
             let bid = b_ids[b_starts[at + 1] + bk]
-            if __s0_buffer_get(MirBlockRec, store.blocks, bid - 1).ordinal + 1 == 1 { has_entry = 1 }
+            if (store.blocks)[bid - 1].ordinal + 1 == 1 { has_entry = 1 }
             bk = bk + 1
         }
         if has_entry == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_missing_block(), at + 1, 0, 0, 0, 0, 0, at + 1, 1, 0, 0)) }
@@ -206,12 +208,12 @@ prior = prior + 1 }
     }
     return Ok(out)
 }
-fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_params(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    let function_count = (store.functions).len()
     // Dense ordinal block positions for block-owner presence.
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let block_total = (store.blocks).len()
     var b_counts = __s0_alloc(U64, d, function_count + 1)
     var bz: U64 = 0
     while bz <= function_count {
@@ -220,7 +222,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -245,7 +247,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     bat = 0
     while bat < block_total {
-        let brec = __s0_buffer_get(MirBlockRec, store.blocks, bat)
+        let brec = (store.blocks)[bat]
         let bf = brec.function
         if bf >= 1 && bf <= function_count && brec.ordinal < b_counts[bf] {
             let bslot = b_starts[bf] + brec.ordinal
@@ -254,7 +256,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
         bat = bat + 1
     }
     // Dense ordinal value positions for reciprocal value lookups.
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_total = (store.values).len()
     var v_counts = __s0_alloc(U64, d, function_count + 1)
     var vz: U64 = 0
     while vz <= function_count {
@@ -263,7 +265,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var vat: U64 = 0
     while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
+        let vf = (store.values)[vat].function
         if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
         vat = vat + 1
     }
@@ -288,7 +290,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     vat = 0
     while vat < value_total {
-        let vrec = __s0_buffer_get(MirValueRec, store.values, vat)
+        let vrec = (store.values)[vat]
         let vf = vrec.function
         if vf >= 1 && vf <= function_count && vrec.ordinal < v_counts[vf] {
             let vslot = v_starts[vf] + vrec.ordinal
@@ -299,7 +301,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // Running (function, kind, block) counters for expected ordinals. Params
     // with invalid functions, unknown kinds, or out-of-range blocks keep the
     // legacy prior scan.
-    let param_total = __s0_buffer_len(MirParamRec, store.params)
+    let param_total = (store.params).len()
     let pe_total = (b_running + function_count) * 2
     var pe_seen = __s0_alloc(U64, d, pe_total + 1)
     var pez: U64 = 0
@@ -311,7 +313,7 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // Every owner-local table is checked directly; builders are not trusted.
     at = 0
     while at < param_total {
-        let p = __s0_buffer_get(MirParamRec, store.params, at)
+        let p = (store.params)[at]
         var block_ok = p.kind != mir_param_block()
         if p.kind == mir_param_block() {
             if p.function >= 1 && p.function <= function_count && p.block >= 1 && p.block <= b_counts[p.function] {
@@ -330,13 +332,13 @@ fn mir_vphase1_params(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
                 pe_seen[pkey] = expected + 1
             } else {
                 var scan: U64 = 0
-                while scan < at { let q = __s0_buffer_get(MirParamRec, store.params, scan)
+                while scan < at { let q = (store.params)[scan]
 if q.kind == p.kind && q.function == p.function && q.block == p.block { expected = expected + 1 }
 scan = scan + 1 }
             }
         } else {
             var scan: U64 = 0
-            while scan < at { let q = __s0_buffer_get(MirParamRec, store.params, scan)
+            while scan < at { let q = (store.params)[scan]
 if q.kind == p.kind && q.function == p.function && q.block == p.block { expected = expected + 1 }
 scan = scan + 1 }
         }
@@ -347,7 +349,7 @@ scan = scan + 1 }
         } else {
             vi = mir_vvalue_index(store, p.function, p.value)
         } }
-        if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), p.function, p.block, 0, 0, 0, 0, at + 1, 1, 0, p.value)) } else { let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+        if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), p.function, p.block, 0, 0, 0, 0, at + 1, 1, 0, p.value)) } else { let v = (store.values)[vi - 1]
 var want = mir_value_def_function_param()
 if p.kind == mir_param_block() { want = mir_value_def_block_param() }
 if v.def_kind != want || v.block != p.block || v.item != p.ordinal + 1 || v.value_type != p.param_type { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), p.function, p.block, 0, 0, 0, 0, at + 1, want, v.def_kind, p.value)) } }
@@ -355,11 +357,11 @@ if v.def_kind != want || v.block != p.block || v.item != p.ordinal + 1 || v.valu
     }
     return Ok(out)
 }
-fn mir_vphase1_locals(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_locals(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let local_total = __s0_buffer_len(MirLocalRec, store.locals)
+    let function_count = (store.functions).len()
+    let local_total = (store.locals).len()
     var seen = __s0_alloc(U64, d, function_count + 1)
     var sz: U64 = 0
     while sz <= function_count {
@@ -370,14 +372,14 @@ fn mir_vphase1_locals(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     var at: U64 = 0
     at = 0
     while at < local_total {
-        let item = __s0_buffer_get(MirLocalRec, store.locals, at)
+        let item = (store.locals)[at]
         var expected: U64 = 0
         if item.function >= 1 && item.function <= function_count {
             expected = seen[item.function]
             seen[item.function] = expected + 1
         } else {
             var scan: U64 = 0
-            while scan < at { if __s0_buffer_get(MirLocalRec, store.locals, scan).function == item.function { expected = expected + 1 }
+            while scan < at { if (store.locals)[scan].function == item.function { expected = expected + 1 }
 scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, item.function) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), item.function, 0, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
@@ -390,11 +392,11 @@ scan = scan + 1 }
     }
     return Ok(out)
 }
-fn mir_vphase1_blocks(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_blocks(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let function_count = (store.functions).len()
+    let block_total = (store.blocks).len()
     var seen = __s0_alloc(U64, d, function_count + 1)
     var sz: U64 = 0
     while sz <= function_count {
@@ -404,14 +406,14 @@ fn mir_vphase1_blocks(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     var at: U64 = 0
     at = 0
     while at < block_total {
-        let item = __s0_buffer_get(MirBlockRec, store.blocks, at)
+        let item = (store.blocks)[at]
         var expected: U64 = 0
         if item.function >= 1 && item.function <= function_count {
             expected = seen[item.function]
             seen[item.function] = expected + 1
         } else {
             var scan: U64 = 0
-            while scan < at { if __s0_buffer_get(MirBlockRec, store.blocks, scan).function == item.function { expected = expected + 1 }
+            while scan < at { if (store.blocks)[scan].function == item.function { expected = expected + 1 }
 scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, item.function) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), item.function, item.ordinal + 1, 0, 0, 0, 0, at + 1, 0, 0, 0)) }
@@ -421,11 +423,11 @@ scan = scan + 1 }
     }
     return Ok(out)
 }
-fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_values(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let function_count = (store.functions).len()
+    let value_total = (store.values).len()
     let value_names = try mir_vindex_build_value_names(d, store)
     var seen = __s0_alloc(U64, d, function_count + 1)
     var sz: U64 = 0
@@ -434,7 +436,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
         sz = sz + 1
     }
     // Dense ordinal block positions for block-reference presence.
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let block_total = (store.blocks).len()
     var b_counts = __s0_alloc(U64, d, function_count + 1)
     var bz: U64 = 0
     while bz <= function_count {
@@ -443,7 +445,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -468,7 +470,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     bat = 0
     while bat < block_total {
-        let brec = __s0_buffer_get(MirBlockRec, store.blocks, bat)
+        let brec = (store.blocks)[bat]
         let bf = brec.function
         if bf >= 1 && bf <= function_count && brec.ordinal < b_counts[bf] {
             let bslot = b_starts[bf] + brec.ordinal
@@ -479,7 +481,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // Params keyed by (function, block) with block zero reserved for function
     // parameters, then by ordinal within the segment. Block zero and the
     // in-range block slots share one key space of b_running + function_count.
-    let param_total = __s0_buffer_len(MirParamRec, store.params)
+    let param_total = (store.params).len()
     let pkey_total = b_running + function_count
     var p2_counts = __s0_alloc(U64, d, pkey_total + 1)
     var pz: U64 = 0
@@ -489,7 +491,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var pat: U64 = 0
     while pat < param_total {
-        let prec = __s0_buffer_get(MirParamRec, store.params, pat)
+        let prec = (store.params)[pat]
         if prec.function >= 1 && prec.function <= function_count && prec.block <= b_counts[prec.function] {
             p2_counts[b_starts[prec.function] + (prec.function - 1) + prec.block] = p2_counts[b_starts[prec.function] + (prec.function - 1) + prec.block] + 1
         }
@@ -522,7 +524,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     pat = 0
     while pat < param_total {
-        let prec = __s0_buffer_get(MirParamRec, store.params, pat)
+        let prec = (store.params)[pat]
         if prec.function >= 1 && prec.function <= function_count && prec.block <= b_counts[prec.function] {
             let pkey = b_starts[prec.function] + (prec.function - 1) + prec.block
             if prec.ordinal < p2_counts[pkey] {
@@ -535,7 +537,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // Instructions keyed by (function, block) slot and ordinal. Records with
     // out-of-range blocks or ordinals are never placed and keep the legacy
     // scans.
-    let instr_total = __s0_buffer_len(MirInstrRec, store.instructions)
+    let instr_total = (store.instructions).len()
     var ord_counts = __s0_alloc(U64, d, b_running + 1)
     var oz: U64 = 0
     while oz <= b_running {
@@ -544,7 +546,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var iat: U64 = 0
     while iat < instr_total {
-        let irec = __s0_buffer_get(MirInstrRec, store.instructions, iat)
+        let irec = (store.instructions)[iat]
         if irec.function >= 1 && irec.function <= function_count && irec.block >= 1 && irec.block <= b_counts[irec.function] {
             let ikey = b_starts[irec.function] + irec.block
             ord_counts[ikey] = ord_counts[ikey] + 1
@@ -578,7 +580,7 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     iat = 0
     while iat < instr_total {
-        let irec = __s0_buffer_get(MirInstrRec, store.instructions, iat)
+        let irec = (store.instructions)[iat]
         if irec.function >= 1 && irec.function <= function_count && irec.block >= 1 && irec.block <= b_counts[irec.function] {
             let ikey = b_starts[irec.function] + irec.block
             if irec.ordinal < ord_counts[ikey] {
@@ -592,8 +594,8 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // block) slot and case ordinal. An operand whose owner is not a valid
     // terminator can never match a valid function value's reciprocal scan, so
     // excluding it is exact.
-    let term_total = __s0_buffer_len(MirTermRec, store.terminators)
-    let operand_total = __s0_buffer_len(MirOperandRec, store.operands)
+    let term_total = (store.terminators).len()
+    let operand_total = (store.operands).len()
     var s_counts = __s0_alloc(U64, d, b_running + 1)
     var sz2: U64 = 0
     while sz2 <= b_running {
@@ -602,9 +604,9 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var sat: U64 = 0
     while sat < operand_total {
-        let so = __s0_buffer_get(MirOperandRec, store.operands, sat)
+        let so = (store.operands)[sat]
         if so.kind == mir_operand_switch_case() && mir_vid_valid(so.owner, term_total) {
-            let sterm = __s0_buffer_get(MirTermRec, store.terminators, so.owner - 1)
+            let sterm = (store.terminators)[so.owner - 1]
             if sterm.function >= 1 && sterm.function <= function_count && sterm.block >= 1 && sterm.block <= b_counts[sterm.function] {
                 let skey = b_starts[sterm.function] + sterm.block
                 s_counts[skey] = s_counts[skey] + 1
@@ -639,9 +641,9 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     sat = 0
     while sat < operand_total {
-        let so = __s0_buffer_get(MirOperandRec, store.operands, sat)
+        let so = (store.operands)[sat]
         if so.kind == mir_operand_switch_case() && mir_vid_valid(so.owner, term_total) {
-            let sterm = __s0_buffer_get(MirTermRec, store.terminators, so.owner - 1)
+            let sterm = (store.terminators)[so.owner - 1]
             if sterm.function >= 1 && sterm.function <= function_count && sterm.block >= 1 && sterm.block <= b_counts[sterm.function] {
                 let skey = b_starts[sterm.function] + sterm.block
                 if so.ordinal < s_counts[skey] {
@@ -655,14 +657,14 @@ fn mir_vphase1_values(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     var at: U64 = 0
     at = 0
     while at < value_total {
-        let v = __s0_buffer_get(MirValueRec, store.values, at)
+        let v = (store.values)[at]
         var expected: U64 = 0
         if v.function >= 1 && v.function <= function_count {
             expected = seen[v.function]
             seen[v.function] = expected + 1
         } else {
             var scan: U64 = 0
-            while scan < at { if __s0_buffer_get(MirValueRec, store.values, scan).function == v.function { expected = expected + 1 }
+            while scan < at { if (store.values)[scan].function == v.function { expected = expected + 1 }
 scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, v.function) || v.def_kind > mir_value_def_switch_case() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), v.function, v.block, 0, 0, 0, 0, at + 1, 0, v.def_kind, 0)) }
@@ -688,19 +690,19 @@ scan = scan + 1 }
                     if p2_coll[pslot] == 0 {
                         let pid = p2_pos[pslot]
                         if pid != 0 {
-                            let p = __s0_buffer_get(MirParamRec, store.params, pid - 1)
+                            let p = (store.params)[pid - 1]
                             if p.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
                         }
                     } else { var pi: U64 = 0
-while pi < __s0_buffer_len(MirParamRec, store.params) { let p = __s0_buffer_get(MirParamRec, store.params, pi)
+while pi < (store.params).len() { let p = (store.params)[pi]
 if p.function == v.function && p.block == v.block && p.ordinal + 1 == v.item && p.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 pi = pi + 1 } }
                 } else { var pi: U64 = 0
-while pi < __s0_buffer_len(MirParamRec, store.params) { let p = __s0_buffer_get(MirParamRec, store.params, pi)
+while pi < (store.params).len() { let p = (store.params)[pi]
 if p.function == v.function && p.block == v.block && p.ordinal + 1 == v.item && p.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 pi = pi + 1 } }
             } else { var pi: U64 = 0
-while pi < __s0_buffer_len(MirParamRec, store.params) { let p = __s0_buffer_get(MirParamRec, store.params, pi)
+while pi < (store.params).len() { let p = (store.params)[pi]
 if p.function == v.function && p.block == v.block && p.ordinal + 1 == v.item && p.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 pi = pi + 1 } }
         }
@@ -712,19 +714,19 @@ pi = pi + 1 } }
                     if i_coll[islot] == 0 {
                         let iid = i_pos[islot]
                         if iid != 0 {
-                            let ins = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                            let ins = (store.instructions)[iid - 1]
                             if ins.result == v.ordinal + 1 { reciprocal = reciprocal + 1 }
                         }
                     } else { var ii: U64 = 0
-while ii < __s0_buffer_len(MirInstrRec, store.instructions) { let i = __s0_buffer_get(MirInstrRec, store.instructions, ii)
+while ii < (store.instructions).len() { let i = (store.instructions)[ii]
 if i.function == v.function && i.block == v.block && i.ordinal + 1 == v.item && i.result == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 ii = ii + 1 } }
                 } else { var ii: U64 = 0
-while ii < __s0_buffer_len(MirInstrRec, store.instructions) { let i = __s0_buffer_get(MirInstrRec, store.instructions, ii)
+while ii < (store.instructions).len() { let i = (store.instructions)[ii]
 if i.function == v.function && i.block == v.block && i.ordinal + 1 == v.item && i.result == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 ii = ii + 1 } }
             } else { var ii: U64 = 0
-while ii < __s0_buffer_len(MirInstrRec, store.instructions) { let i = __s0_buffer_get(MirInstrRec, store.instructions, ii)
+while ii < (store.instructions).len() { let i = (store.instructions)[ii]
 if i.function == v.function && i.block == v.block && i.ordinal + 1 == v.item && i.result == v.ordinal + 1 { reciprocal = reciprocal + 1 }
 ii = ii + 1 } }
         }
@@ -736,22 +738,22 @@ ii = ii + 1 } }
                     if s_coll[sslot] == 0 {
                         let sid = s_pos[sslot]
                         if sid != 0 {
-                            let so = __s0_buffer_get(MirOperandRec, store.operands, sid - 1)
+                            let so = (store.operands)[sid - 1]
                             if so.value == v.ordinal + 1 { reciprocal = reciprocal + 1 }
                         }
                     } else { var oi: U64 = 0
-while oi < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, oi)
-if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, __s0_buffer_len(MirTermRec, store.terminators)) { let term = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1)
+while oi < (store.operands).len() { let o = (store.operands)[oi]
+if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, (store.terminators).len()) { let term = (store.terminators)[o.owner - 1]
 if term.function == v.function && term.block == v.block { reciprocal = reciprocal + 1 } }
 oi = oi + 1 } }
                 } else { var oi: U64 = 0
-while oi < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, oi)
-if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, __s0_buffer_len(MirTermRec, store.terminators)) { let term = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1)
+while oi < (store.operands).len() { let o = (store.operands)[oi]
+if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, (store.terminators).len()) { let term = (store.terminators)[o.owner - 1]
 if term.function == v.function && term.block == v.block { reciprocal = reciprocal + 1 } }
 oi = oi + 1 } }
             } else { var oi: U64 = 0
-while oi < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, oi)
-if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, __s0_buffer_len(MirTermRec, store.terminators)) { let term = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1)
+while oi < (store.operands).len() { let o = (store.operands)[oi]
+if o.kind == mir_operand_switch_case() && o.ordinal + 1 == v.item && o.value == v.ordinal + 1 && mir_vid_valid(o.owner, (store.terminators).len()) { let term = (store.terminators)[o.owner - 1]
 if term.function == v.function && term.block == v.block { reciprocal = reciprocal + 1 } }
 oi = oi + 1 } }
         }
@@ -760,13 +762,13 @@ oi = oi + 1 } }
     }
     return Ok(out)
 }
-fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_places(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let place_total = __s0_buffer_len(MirPlaceRec, store.places)
+    let function_count = (store.functions).len()
+    let place_total = (store.places).len()
     // Dense ordinal local positions for local-reference presence.
-    let local_total = __s0_buffer_len(MirLocalRec, store.locals)
+    let local_total = (store.locals).len()
     var l_counts = __s0_alloc(U64, d, function_count + 1)
     var lz: U64 = 0
     while lz <= function_count {
@@ -775,7 +777,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var lat: U64 = 0
     while lat < local_total {
-        let lf = __s0_buffer_get(MirLocalRec, store.locals, lat).function
+        let lf = (store.locals)[lat].function
         if lf >= 1 && lf <= function_count { l_counts[lf] = l_counts[lf] + 1 }
         lat = lat + 1
     }
@@ -800,7 +802,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     lat = 0
     while lat < local_total {
-        let lrec = __s0_buffer_get(MirLocalRec, store.locals, lat)
+        let lrec = (store.locals)[lat]
         let lf = lrec.function
         if lf >= 1 && lf <= function_count && lrec.ordinal < l_counts[lf] {
             let lslot = l_starts[lf] + lrec.ordinal
@@ -809,7 +811,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
         lat = lat + 1
     }
     // Dense ordinal value positions for deref-value presence.
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_total = (store.values).len()
     var v_counts = __s0_alloc(U64, d, function_count + 1)
     var vz: U64 = 0
     while vz <= function_count {
@@ -818,7 +820,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     var vat: U64 = 0
     while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
+        let vf = (store.values)[vat].function
         if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
         vat = vat + 1
     }
@@ -843,7 +845,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     }
     vat = 0
     while vat < value_total {
-        let vrec = __s0_buffer_get(MirValueRec, store.values, vat)
+        let vrec = (store.values)[vat]
         let vf = vrec.function
         if vf >= 1 && vf <= function_count && vrec.ordinal < v_counts[vf] {
             let vslot = v_starts[vf] + vrec.ordinal
@@ -855,7 +857,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
     // Instructions, places, and terminators use only range-checked lookups.
     at = 0
     while at < place_total {
-        let p = __s0_buffer_get(MirPlaceRec, store.places, at)
+        let p = (store.places)[at]
         if !mir_vfunction_exists(store, p.function) || p.kind > mir_place_deref() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_place(), p.function, 0, 0, 0, 0, 0, at + 1, mir_place_deref(), p.kind, 0)) }
         if p.kind == mir_place_local() {
             var local_ok = false
@@ -878,7 +880,7 @@ fn mir_vphase1_places(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerify
         }
         if p.kind == mir_place_field() { var next = p.base
 var steps: U64 = 0
-while mir_vid_valid(next, place_total) && steps <= place_total { let base = __s0_buffer_get(MirPlaceRec, store.places, next - 1)
+while mir_vid_valid(next, place_total) && steps <= place_total { let base = (store.places)[next - 1]
 if base.function != p.function { steps = place_total + 2 } else { if base.kind == mir_place_field() { next = base.base } else { next = 0 } }
 steps = steps + 1 }
 if steps > place_total { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_place(), p.function, 0, 0, 0, 0, 0, at + 1, 0, 0, p.base)) } }
@@ -886,13 +888,13 @@ if steps > place_total { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_b
     }
     return Ok(out)
 }
-fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
+    let function_count = (store.functions).len()
     // Dense ordinal block positions plus the (function, block) ordinal
     // counters keyed by segment base + block.
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let block_total = (store.blocks).len()
     var b_counts = __s0_alloc(U64, d, function_count + 1)
     var bz: U64 = 0
     while bz <= function_count {
@@ -901,7 +903,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -926,7 +928,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
     }
     bat = 0
     while bat < block_total {
-        let brec = __s0_buffer_get(MirBlockRec, store.blocks, bat)
+        let brec = (store.blocks)[bat]
         let bf = brec.function
         if bf >= 1 && bf <= function_count && brec.ordinal < b_counts[bf] {
             let bslot = b_starts[bf] + brec.ordinal
@@ -934,7 +936,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
         }
         bat = bat + 1
     }
-    let instr_total = __s0_buffer_len(MirInstrRec, store.instructions)
+    let instr_total = (store.instructions).len()
     var ord_counts = __s0_alloc(U64, d, b_running + 1)
     var oz: U64 = 0
     while oz <= b_running {
@@ -942,7 +944,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
         oz = oz + 1
     }
     // Dense ordinal value positions for operand and result lookups.
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_total = (store.values).len()
     var v_counts = __s0_alloc(U64, d, function_count + 1)
     var vz: U64 = 0
     while vz <= function_count {
@@ -951,7 +953,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
     }
     var vat: U64 = 0
     while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
+        let vf = (store.values)[vat].function
         if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
         vat = vat + 1
     }
@@ -976,7 +978,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
     }
     vat = 0
     while vat < value_total {
-        let vrec = __s0_buffer_get(MirValueRec, store.values, vat)
+        let vrec = (store.values)[vat]
         let vf = vrec.function
         if vf >= 1 && vf <= function_count && vrec.ordinal < v_counts[vf] {
             let vslot = v_starts[vf] + vrec.ordinal
@@ -985,7 +987,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
         vat = vat + 1
     }
     // Per-owner instruction counts for the checked failure-argument arity.
-    let operand_total = __s0_buffer_len(MirOperandRec, store.operands)
+    let operand_total = (store.operands).len()
     var fail_counts = __s0_alloc(U64, d, instr_total + 1)
     var fz: U64 = 0
     while fz <= instr_total {
@@ -994,14 +996,14 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
     }
     var fat: U64 = 0
     while fat < operand_total {
-        let fo = __s0_buffer_get(MirOperandRec, store.operands, fat)
+        let fo = (store.operands)[fat]
         if fo.kind == mir_operand_checked_edge_arg() && fo.owner >= 1 && fo.owner <= instr_total && fo.edge == 0 { fail_counts[fo.owner] = fail_counts[fo.owner] + 1 }
         fat = fat + 1
     }
     var at: U64 = 0
     at = 0
     while at < instr_total {
-        let i = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        let i = (store.instructions)[at]
         let id = at + 1
         var expected: U64 = 0
         if i.function >= 1 && i.function <= function_count && i.block >= 1 && i.block <= b_counts[i.function] {
@@ -1010,7 +1012,7 @@ fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: _
             ord_counts[key] = expected + 1
         } else {
             var scan: U64 = 0
-            while scan < at { let q = __s0_buffer_get(MirInstrRec, store.instructions, scan)
+            while scan < at { let q = (store.instructions)[scan]
 if q.function == i.function && q.block == i.block { expected = expected + 1 }
 scan = scan + 1 }
         }
@@ -1022,12 +1024,12 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_array_as_slice() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_array_as_slice(), i.op, 0)) } else {
+        if i.op > mir_op_bytes_try_from_vec() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_bytes_try_from_vec(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false
-            if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).result_type == mir_type_unit() { droppable = true }
-            if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) && __s0_buffer_get(MirImportRec, store.imports, i.target - 1).result_type == mir_type_unit() { droppable = true }
+            if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && (store.functions)[i.target - 1].result_type == mir_type_unit() { droppable = true }
+            if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, (store.imports).len()) && (store.imports)[i.target - 1].result_type == mir_type_unit() { droppable = true }
             if (produces && !has_result && !droppable) || (!produces && has_result) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_result(), i.function, i.block, id, 0, 0, 0, id, 0, i.result, 0)) }
             let fail_count = fail_counts[id]
             let checked = mir_vop_checked(i.op)
@@ -1060,17 +1062,17 @@ scan = scan + 1 }
                 }
             }
             if !a_ok || !b_ok || !c_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.a)) }
-            if i.place != 0 && !mir_vid_valid(i.place, __s0_buffer_len(MirPlaceRec, store.places)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) }
+            if i.place != 0 && !mir_vid_valid(i.place, (store.places).len()) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) }
             if ((mask / 16) % 2 == 1) && !mir_vtype_exists(store, i.type_op) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, i.type_op, id, 0, 0, i.type_op)) }
             if (i.op == mir_op_call() || i.op == mir_op_cleanup_push()) && !mir_vid_valid(i.target, function_count) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
-            if i.op == mir_op_ffi_call_unsafe() && !mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
+            if i.op == mir_op_ffi_call_unsafe() && !mir_vid_valid(i.target, (store.imports).len()) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
             if i.result != 0 { var vi: U64 = 0
                 if i.function >= 1 && i.function <= function_count && i.result >= 1 && i.result <= v_counts[i.function] {
                     vi = v_pos[v_starts[i.function] + i.result - 1]
                 } else {
                     vi = mir_vvalue_index(store, i.function, i.result)
                 }
-                if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, 1, 0, i.result)) } else { let v = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+                if vi == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, 1, 0, i.result)) } else { let v = (store.values)[vi - 1]
 if v.def_kind != mir_value_def_instruction() || v.block != i.block || v.item != i.ordinal + 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), i.function, i.block, id, 0, 0, 0, id, i.ordinal + 1, v.item, i.result)) } } }
             if i.op == mir_op_alloc_checked() && version < 3 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 3, version, 0)) }
             if i.op >= mir_op_vec_new() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), i.function, i.block, id, 0, 0, 0, id, 4, version, 0)) }
@@ -1079,13 +1081,13 @@ if v.def_kind != mir_value_def_instruction() || v.block != i.block || v.item != 
     }
     return Ok(out)
 }
-fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let term_total = __s0_buffer_len(MirTermRec, store.terminators)
+    let function_count = (store.functions).len()
+    let term_total = (store.terminators).len()
     // Per-function block segments for block-owner presence.
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let block_total = (store.blocks).len()
     var b_counts = __s0_alloc(U64, d, function_count + 1)
     var bz: U64 = 0
     while bz <= function_count {
@@ -1094,7 +1096,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -1119,7 +1121,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     }
     bat = 0
     while bat < block_total {
-        let brec = __s0_buffer_get(MirBlockRec, store.blocks, bat)
+        let brec = (store.blocks)[bat]
         let bf = brec.function
         if bf >= 1 && bf <= function_count && brec.ordinal < b_counts[bf] {
             let bslot = b_starts[bf] + brec.ordinal
@@ -1128,7 +1130,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
         bat = bat + 1
     }
     // Dense ordinal value positions for value presence.
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_total = (store.values).len()
     var v_counts = __s0_alloc(U64, d, function_count + 1)
     var vz: U64 = 0
     while vz <= function_count {
@@ -1137,7 +1139,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     }
     var vat: U64 = 0
     while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
+        let vf = (store.values)[vat].function
         if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
         vat = vat + 1
     }
@@ -1162,7 +1164,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     }
     vat = 0
     while vat < value_total {
-        let vrec = __s0_buffer_get(MirValueRec, store.values, vat)
+        let vrec = (store.values)[vat]
         let vf = vrec.function
         if vf >= 1 && vf <= function_count && vrec.ordinal < v_counts[vf] {
             let vslot = v_starts[vf] + vrec.ordinal
@@ -1173,7 +1175,7 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     var at: U64 = 0
     at = 0
     while at < term_total {
-        let t = __s0_buffer_get(MirTermRec, store.terminators, at)
+        let t = (store.terminators)[at]
         let id = at + 1
         var block_ok = false
         if t.function >= 1 && t.function <= function_count && t.block >= 1 && t.block <= b_counts[t.function] {
@@ -1198,11 +1200,11 @@ fn mir_vphase1_terminators(d: Domain, store: MirStore, version: U64, initial: __
     }
     return Ok(out)
 }
-fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let block_total = __s0_buffer_len(MirBlockRec, store.blocks)
+    let function_count = (store.functions).len()
+    let block_total = (store.blocks).len()
     // Per-function block counts and bases, then per-(function, block)
     // terminator counts keyed by segment base + block.
     var b_counts = __s0_alloc(U64, d, function_count + 1)
@@ -1213,7 +1215,7 @@ fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffe
     }
     var bat: U64 = 0
     while bat < block_total {
-        let bf = __s0_buffer_get(MirBlockRec, store.blocks, bat).function
+        let bf = (store.blocks)[bat].function
         if bf >= 1 && bf <= function_count { b_counts[bf] = b_counts[bf] + 1 }
         bat = bat + 1
     }
@@ -1230,7 +1232,7 @@ fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffe
         b_running = b_running + b_counts[bg]
         bg = bg + 1
     }
-    let term_total = __s0_buffer_len(MirTermRec, store.terminators)
+    let term_total = (store.terminators).len()
     var term_counts = __s0_alloc(U64, d, b_running + 1)
     var tz: U64 = 0
     while tz <= b_running {
@@ -1239,7 +1241,7 @@ fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffe
     }
     var tat: U64 = 0
     while tat < term_total {
-        let tf = __s0_buffer_get(MirTermRec, store.terminators, tat)
+        let tf = (store.terminators)[tat]
         if tf.function >= 1 && tf.function <= function_count && tf.block >= 1 && tf.block <= b_counts[tf.function] {
             term_counts[b_starts[tf.function] + tf.block] = term_counts[b_starts[tf.function] + tf.block] + 1
         }
@@ -1249,14 +1251,14 @@ fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffe
     // Exactly one terminator per block.
     at = 0
     while at < block_total {
-        let b = __s0_buffer_get(MirBlockRec, store.blocks, at)
+        let b = (store.blocks)[at]
         var count: U64 = 0
         if b.function >= 1 && b.function <= function_count && b.ordinal + 1 <= b_counts[b.function] {
             count = term_counts[b_starts[b.function] + b.ordinal + 1]
         } else {
             var ti: U64 = 0
             while ti < term_total {
-                let t = __s0_buffer_get(MirTermRec, store.terminators, ti)
+                let t = (store.terminators)[ti]
                 if t.function == b.function && t.block == b.ordinal + 1 { count = count + 1 }
                 ti = ti + 1
             }
@@ -1266,15 +1268,15 @@ fn mir_vphase1_block_terminators(d: Domain, store: MirStore, initial: __s0_Buffe
     }
     return Ok(out)
 }
-fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1_operands(d: Domain, store: MirStore, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
-    let function_count = __s0_buffer_len(MirFunctionRec, store.functions)
-    let operand_total = __s0_buffer_len(MirOperandRec, store.operands)
-    let type_total = __s0_buffer_len(MirTypeRec, store.types)
-    let import_total = __s0_buffer_len(MirImportRec, store.imports)
-    let instr_total = __s0_buffer_len(MirInstrRec, store.instructions)
-    let term_total = __s0_buffer_len(MirTermRec, store.terminators)
+    let function_count = (store.functions).len()
+    let operand_total = (store.operands).len()
+    let type_total = (store.types).len()
+    let import_total = (store.imports).len()
+    let instr_total = (store.instructions).len()
+    let term_total = (store.terminators).len()
     let key_total = type_total + import_total + instr_total * 3 + term_total * 2 + operand_total
     // (kind, owner) segments for expected-ordinal counting. Every group keeps
     // store order, so counting ids below the current one with a matching edge
@@ -1287,7 +1289,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     }
     var gat: U64 = 0
     while gat < operand_total {
-        let gkey = mir_v1q_operand_key(store, __s0_buffer_get(MirOperandRec, store.operands, gat))
+        let gkey = mir_v1q_operand_key(store, (store.operands)[gat])
         if gkey != 0 { g_counts[gkey] = g_counts[gkey] + 1 }
         gat = gat + 1
     }
@@ -1318,7 +1320,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     }
     gat = 0
     while gat < operand_total {
-        let gkey = mir_v1q_operand_key(store, __s0_buffer_get(MirOperandRec, store.operands, gat))
+        let gkey = mir_v1q_operand_key(store, (store.operands)[gat])
         if gkey != 0 {
             g_ids[g_starts[gkey] + g_cursor[gkey]] = gat + 1
             g_cursor[gkey] = g_cursor[gkey] + 1
@@ -1326,7 +1328,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
         gat = gat + 1
     }
     // Per-function value segments for value presence.
-    let value_total = __s0_buffer_len(MirValueRec, store.values)
+    let value_total = (store.values).len()
     var v_counts = __s0_alloc(U64, d, function_count + 1)
     var vz: U64 = 0
     while vz <= function_count {
@@ -1335,7 +1337,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     }
     var vat: U64 = 0
     while vat < value_total {
-        let vf = __s0_buffer_get(MirValueRec, store.values, vat).function
+        let vf = (store.values)[vat].function
         if vf >= 1 && vf <= function_count { v_counts[vf] = v_counts[vf] + 1 }
         vat = vat + 1
     }
@@ -1360,7 +1362,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     }
     vat = 0
     while vat < value_total {
-        let vrec = __s0_buffer_get(MirValueRec, store.values, vat)
+        let vrec = (store.values)[vat]
         let vf = vrec.function
         if vf >= 1 && vf <= function_count && vrec.ordinal < v_counts[vf] {
             let vslot = v_starts[vf] + vrec.ordinal
@@ -1372,7 +1374,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     // Flattened operands validate kind, owner, contiguous ordinal, and values.
     at = 0
     while at < operand_total {
-        let o = __s0_buffer_get(MirOperandRec, store.operands, at)
+        let o = (store.operands)[at]
         let id = at + 1
         var owner_ok = true
         if o.kind < mir_operand_type_part() || o.kind > mir_operand_aggregate_field() { owner_ok = false }
@@ -1380,7 +1382,7 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
         if o.kind == mir_operand_import_param() { owner_ok = mir_vid_valid(o.owner, import_total) }
         if o.kind == mir_operand_instruction() || o.kind == mir_operand_checked_edge_arg() || o.kind == mir_operand_aggregate_field() { owner_ok = mir_vid_valid(o.owner, instr_total) }
         if o.kind == mir_operand_terminator_arg() || o.kind == mir_operand_switch_case() { owner_ok = mir_vid_valid(o.owner, term_total) }
-        if o.kind == mir_operand_switch_case_arg() { owner_ok = mir_vid_valid(o.owner, operand_total) && __s0_buffer_get(MirOperandRec, store.operands, o.owner - 1).kind == mir_operand_switch_case() }
+        if o.kind == mir_operand_switch_case_arg() { owner_ok = mir_vid_valid(o.owner, operand_total) && (store.operands)[o.owner - 1].kind == mir_operand_switch_case() }
         if !owner_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), 0, 0, 0, 0, id, 0, id, 0, o.kind, o.owner)) } else {
             var expected: U64 = 0
             let gkey = mir_v1q_operand_key(store, o)
@@ -1390,23 +1392,23 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
                 while gk < gcount {
                     let gid = g_ids[g_starts[gkey] + gk]
                     if gid < id {
-                        let q = __s0_buffer_get(MirOperandRec, store.operands, gid - 1)
+                        let q = (store.operands)[gid - 1]
                         if q.edge == o.edge { expected = expected + 1 }
                     }
                     gk = gk + 1
                 }
             } else {
                 var scan: U64 = 0
-                while scan < at { let q = __s0_buffer_get(MirOperandRec, store.operands, scan)
+                while scan < at { let q = (store.operands)[scan]
 if q.kind == o.kind && q.owner == o.owner && q.edge == o.edge { expected = expected + 1 }
 scan = scan + 1 }
             }
             if o.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), 0, 0, 0, 0, id, 0, id, expected, o.ordinal, o.owner)) }
             var owner_function: U64 = 0
-            if o.kind == mir_operand_instruction() || o.kind == mir_operand_checked_edge_arg() || o.kind == mir_operand_aggregate_field() { owner_function = __s0_buffer_get(MirInstrRec, store.instructions, o.owner - 1).function }
-            if o.kind == mir_operand_terminator_arg() || o.kind == mir_operand_switch_case() { owner_function = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1).function }
-            if o.kind == mir_operand_switch_case_arg() { let c = __s0_buffer_get(MirOperandRec, store.operands, o.owner - 1)
-owner_function = __s0_buffer_get(MirTermRec, store.terminators, c.owner - 1).function }
+            if o.kind == mir_operand_instruction() || o.kind == mir_operand_checked_edge_arg() || o.kind == mir_operand_aggregate_field() { owner_function = (store.instructions)[o.owner - 1].function }
+            if o.kind == mir_operand_terminator_arg() || o.kind == mir_operand_switch_case() { owner_function = (store.terminators)[o.owner - 1].function }
+            if o.kind == mir_operand_switch_case_arg() { let c = (store.operands)[o.owner - 1]
+owner_function = (store.terminators)[c.owner - 1].function }
             if o.value != 0 && owner_function != 0 {
                 var value_ok = false
                 if owner_function >= 1 && owner_function <= function_count && o.value >= 1 && o.value <= v_counts[owner_function] {
@@ -1416,21 +1418,21 @@ owner_function = __s0_buffer_get(MirTermRec, store.terminators, c.owner - 1).fun
                 }
                 if !value_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), owner_function, 0, 0, 0, id, 0, id, 0, 0, o.value)) }
             }
-            if o.kind == mir_operand_checked_edge_arg() { let instruction = __s0_buffer_get(MirInstrRec, store.instructions, o.owner - 1)
+            if o.kind == mir_operand_checked_edge_arg() { let instruction = (store.instructions)[o.owner - 1]
 if o.target != instruction.target { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), instruction.function, instruction.block, o.owner, 0, id, 0, id, instruction.target, o.target, o.owner)) } }
-            if o.kind == mir_operand_terminator_arg() { let term = __s0_buffer_get(MirTermRec, store.terminators, o.owner - 1)
+            if o.kind == mir_operand_terminator_arg() { let term = (store.terminators)[o.owner - 1]
 var target = term.target
 if o.edge == mir_edge_then() { target = term.then_block }
 if o.edge == mir_edge_else() { target = term.else_block }
 if o.target != target { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), term.function, term.block, 0, o.owner, id, 0, id, target, o.target, o.owner)) } }
-            if o.kind == mir_operand_switch_case_arg() { let c = __s0_buffer_get(MirOperandRec, store.operands, o.owner - 1)
+            if o.kind == mir_operand_switch_case_arg() { let c = (store.operands)[o.owner - 1]
 if o.target != c.target { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reciprocal(), owner_function, 0, 0, c.owner, id, 0, id, c.target, o.target, o.owner)) } }
         }
         at = at + 1
     }
     return Ok(out)
 }
-fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: Vec(MirVerifyDiagRec)) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
     var out = try mir_vphase1_types(d, store, version, initial)
     out = try mir_vphase1_declarations(d, store, out)
     out = try mir_vphase1_params(d, store, out)

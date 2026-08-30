@@ -1,8 +1,8 @@
 type ParseStore {
-    nodes: __s0_Buffer(SyntaxRec)
-    links: __s0_Buffer(SyntaxLinkRec)
-    roots: __s0_Buffer(U64)
-    diagnostics: __s0_Buffer(ParseDiagRec)
+    nodes: Vec(SyntaxRec)
+    links: Vec(SyntaxLinkRec)
+    roots: Vec(U64)
+    diagnostics: Vec(ParseDiagRec)
 }
 
 type ParseCursor {
@@ -53,15 +53,15 @@ fn parse_step_cursor(step: ParseStep) -> ParseCursor {
 }
 
 fn parse_token(state: State, cursor: ParseCursor) -> TokenRec {
-    return __s0_buffer_get(TokenRec, state.tokens, cursor.token)
+    return (state.tokens)[cursor.token]
 }
 
-fn token_text(state: State, token: TokenRec, text: __s0_String) -> Bool {
-    let source = __s0_buffer_get(SourceRec, state.sources, token.source)
+fn token_text(state: State, token: TokenRec, text: [U8]) -> Bool {
+    let source = (state.sources)[token.source]
     return source_word(state, source, token.start, token.end, text)
 }
 
-fn token_punct(state: State, cursor: ParseCursor, text: __s0_String) -> Bool {
+fn token_punct(state: State, cursor: ParseCursor, text: [U8]) -> Bool {
     let token = parse_token(state, cursor)
     return token.kind == 5 && token_text(state, token, text)
 }
@@ -73,7 +73,7 @@ fn token_ident(state: State, cursor: ParseCursor) -> Bool {
 
 fn line_break_before(state: State, cursor: ParseCursor) -> Bool {
     let token = parse_token(state, cursor)
-    let source = __s0_buffer_get(SourceRec, state.sources, token.source)
+    let source = (state.sources)[token.source]
     var at = token.leading_start
     while at < token.leading_end {
         if text_byte(state, source, at) == 10 { return true }
@@ -85,31 +85,31 @@ fn line_break_before(state: State, cursor: ParseCursor) -> Bool {
 fn reject_parse(d: Domain, state: State, cursor: ParseCursor, kind: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, cursor)
     let diag = ParseDiagRec(kind: kind, source: token.source, start: token.start, end: token.end)
-    let diagnostics = try __s0_buffer_append(ParseDiagRec, d, cursor.store.diagnostics, diag)
+    let diagnostics = try vec_appended(ParseDiagRec, cursor.store.diagnostics, diag)
     let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: diagnostics)
     return Ok(Rejected(ParseCursor(token: cursor.token, store: store)))
 }
 
 fn add_syntax(d: Domain, cursor: ParseCursor, kind: U64, token: U64, source: U64, start: U64, end: U64, name_start: U64, name_end: U64, children: U64) -> Result(ParseValue, __s0_Error) {
     let rec = SyntaxRec(kind: kind, token: token, source: source, start: start, end: end, name_start: name_start, name_end: name_end, children: children)
-    let nodes = try __s0_buffer_append(SyntaxRec, d, cursor.store.nodes, rec)
+    let nodes = try vec_appended(SyntaxRec, cursor.store.nodes, rec)
     let store = ParseStore(nodes: nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics)
-    return Ok(ParseValue(cursor: ParseCursor(token: cursor.token, store: store), node: __s0_buffer_len(SyntaxRec, nodes)))
+    return Ok(ParseValue(cursor: ParseCursor(token: cursor.token, store: store), node: (nodes).len()))
 }
 
 fn add_link(d: Domain, cursor: ParseCursor, node: U64, next: U64) -> Result(ParseCursor, __s0_Error) {
-    let links = try __s0_buffer_append(SyntaxLinkRec, d, cursor.store.links, SyntaxLinkRec(node: node, next: next))
+    let links = try vec_appended(SyntaxLinkRec, cursor.store.links, SyntaxLinkRec(node: node, next: next))
     let store = ParseStore(nodes: cursor.store.nodes, links: links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics)
     return Ok(ParseCursor(token: cursor.token, store: store))
 }
 
 fn add_root(d: Domain, cursor: ParseCursor, node: U64) -> Result(ParseCursor, __s0_Error) {
-    let roots = try __s0_buffer_append(U64, d, cursor.store.roots, node)
+    let roots = try vec_appended(U64, cursor.store.roots, node)
     let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: roots, diagnostics: cursor.store.diagnostics)
     return Ok(ParseCursor(token: cursor.token, store: store))
 }
 
-fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: __s0_String) -> Result(ParseStep, __s0_Error) {
+fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: [U8]) -> Result(ParseStep, __s0_Error) {
     if !token_punct(state, cursor, text) { return reject_parse(d, state, cursor, 4) }
     return Ok(Parsed(ParseValue(cursor: ParseCursor(token: cursor.token + 1, store: cursor.store), node: 0)))
 }
@@ -125,7 +125,7 @@ fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         var cursor = parse_step_value(close).cursor
         cursor = try add_link(d, cursor, value.node, 0)
         let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-        let node = try add_syntax(d, cursor, 5, initial.token + 1, first.source, first.start, end, 0, 0, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let node = try add_syntax(d, cursor, 5, initial.token + 1, first.source, first.start, end, 0, 0, (cursor.store.links).len())
         return Ok(Parsed(node))
     }
     if !token_ident(state, initial) { return reject_parse(d, state, initial, 5) }
@@ -155,7 +155,7 @@ fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
             if parse_step_bad(arg) { return Ok(arg) }
             let value = parse_step_value(arg)
             cursor = try add_link(d, value.cursor, value.node, children)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 if token_punct(state, cursor, ")") { more = false }
@@ -189,7 +189,7 @@ fn parse_named_item(d: Domain, state: State, initial: ParseCursor, kind: U64, pa
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
         let label_node = try add_syntax(d, cursor, 11, cursor.token - 1, label.source, label.start, label.end, label.start, label.end, 0)
         cursor = try add_link(d, label_node.cursor, label_node.node, 0)
-        item_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        item_children = (cursor.store.links).len()
     } else {
         if !token_punct(state, cursor, ":") { return reject_parse(d, state, cursor, 4) }
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -205,7 +205,7 @@ fn parse_named_item(d: Domain, state: State, initial: ParseCursor, kind: U64, pa
     }
     cursor = try add_link(d, cursor, value.node, item_children)
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let node = try add_syntax(d, cursor, kind, initial.token + 1, name.source, name.start, end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let node = try add_syntax(d, cursor, kind, initial.token + 1, name.source, name.start, end, name.start, name.end, (cursor.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -246,7 +246,7 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
             cursor = parse_step_cursor(close)
             let binding_node = try add_syntax(d, cursor, 39, binding_cursor.token + 1, binding.source, binding.start, binding.end, binding.start, binding.end, 0)
             cursor = try add_link(d, binding_node.cursor, binding_node.node, 0)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
         }
     }
     let arrow = try expect_punct(d, state, cursor, "=>")
@@ -256,7 +256,7 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     let value = parse_step_value(body)
     cursor = try add_link(d, value.cursor, value.node, children)
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, (cursor.store.links).len())
     return Ok(Parsed(arm))
 }
 
@@ -270,13 +270,13 @@ fn parse_match(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Res
     let open = try expect_punct(d, state, sv.cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     var cursor = try add_link(d, parse_step_cursor(open), sv.node, 0)
-    var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    var children = (cursor.store.links).len()
     while !token_punct(state, cursor, "}") {
         let arm = try parse_match_arm(d, state, cursor, depth + 1)
         if parse_step_bad(arm) { return Ok(arm) }
         let av = parse_step_value(arm)
         cursor = try add_link(d, av.cursor, av.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         if token_punct(state, cursor, ",") || token_punct(state, cursor, ";") { return reject_parse(d, state, cursor, 16) }
         if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 16) }
     }
@@ -296,12 +296,12 @@ fn parse_unsafe_c(d: Domain, state: State, initial: ParseCursor, depth: U64) -> 
     let expr = try parse_expression(d, state, parse_step_cursor(open), depth + 1)
     if parse_step_bad(expr) { return Ok(expr) }
     let value = parse_step_value(expr)
-    let rec = __s0_buffer_get(SyntaxRec, value.cursor.store.nodes, value.node - 1)
+    let rec = (value.cursor.store.nodes)[value.node - 1]
     if rec.kind != 27 { return reject_parse(d, state, initial, 18) }
     if !token_punct(state, value.cursor, "}") { return reject_parse(d, state, value.cursor, 18) }
     let close = parse_token(state, value.cursor)
     cursor = try add_link(d, ParseCursor(token: value.cursor.token + 1, store: value.cursor.store), value.node, 0)
-    let node = try add_syntax(d, cursor, 36, initial.token + 1, start.source, start.start, close.end, 0, 0, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let node = try add_syntax(d, cursor, 36, initial.token + 1, start.source, start.start, close.end, 0, 0, (cursor.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -316,7 +316,7 @@ fn parse_array_literal(d: Domain, state: State, initial: ParseCursor, depth: U64
             if parse_step_bad(element) { return Ok(element) }
             let value = parse_step_value(element)
             cursor = try add_link(d, value.cursor, value.node, children)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 if token_punct(state, cursor, "]") { more = false }
@@ -360,8 +360,8 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
         if parse_step_bad(operand) { return Ok(operand) }
         let value = parse_step_value(operand)
         let linked = try add_link(d, value.cursor, value.node, 0)
-        let child = __s0_buffer_get(SyntaxRec, linked.store.nodes, value.node - 1)
-        let node = try add_syntax(d, linked, 31, initial.token + 1, token.source, token.start, child.end, token.start, token.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+        let child = (linked.store.nodes)[value.node - 1]
+        let node = try add_syntax(d, linked, 31, initial.token + 1, token.source, token.start, child.end, token.start, token.end, (linked.store.links).len())
         return Ok(Parsed(node))
     }
     if token_punct(state, initial, "(") {
@@ -386,19 +386,19 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             if !expression_line_ok(state, value.cursor, depth) { return reject_parse(d, state, value.cursor, 13) }
             var cursor = ParseCursor(token: value.cursor.token + 1, store: value.cursor.store)
             cursor = try add_link(d, cursor, value.node, 0)
-            var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-            let callee = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
+            var children = (cursor.store.links).len()
+            let callee = (cursor.store.nodes)[value.node - 1]
             if callee.kind == 29 {
-                let base_link = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, callee.children - 1)
-                let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, base_link.node - 1)
-                let source = __s0_buffer_get(SourceRec, state.sources, base.source)
+                let base_link = (cursor.store.links)[callee.children - 1]
+                let base = (cursor.store.nodes)[base_link.node - 1]
+                let source = (state.sources)[base.source]
                 var associated = false
                 if base.kind == 24 {
                     let first = text_byte(state, source, base.name_start)
                     associated = first >= 65 && first <= 90
                     var root_at: U64 = 0
-                    while root_at < __s0_buffer_len(U64, cursor.store.roots) {
-                        let root = __s0_buffer_get(SyntaxRec, cursor.store.nodes, __s0_buffer_get(U64, cursor.store.roots, root_at) - 1)
+                    while root_at < (cursor.store.roots).len() {
+                        let root = (cursor.store.nodes)[(cursor.store.roots)[root_at] - 1]
                         if root.source == base.source && (root.kind == 41 || root.kind == 42) {
                             var candidate_start = root.name_start
                             var candidate_end = root.name_end
@@ -409,8 +409,8 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
                             }
                             var child_link = root.children
                             while child_link != 0 {
-                                let child = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, child_link - 1)
-                                let child_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, child.node - 1)
+                                let child = (cursor.store.links)[child_link - 1]
+                                let child_node = (cursor.store.nodes)[child.node - 1]
                                 if child_node.kind == 44 {
                                     candidate_start = child_node.name_start
                                     candidate_end = child_node.name_end
@@ -432,7 +432,7 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
                 }
                 if !associated {
                     cursor = try add_link(d, cursor, base_link.node, children)
-                    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                    children = (cursor.store.links).len()
                 }
             }
             if !token_punct(state, cursor, ")") {
@@ -446,14 +446,14 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
                         if parse_step_bad(parsed) { return Ok(parsed) }
                         let item = parse_step_value(parsed)
                         let linked = try add_link(d, item.cursor, item.node, 0)
-                        let rec = __s0_buffer_get(SyntaxRec, linked.store.nodes, item.node - 1)
-                        let named = try add_syntax(d, linked, 28, cursor.token + 1, first.source, first.start, rec.end, first.start, first.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                        let rec = (linked.store.nodes)[item.node - 1]
+                        let named = try add_syntax(d, linked, 28, cursor.token + 1, first.source, first.start, rec.end, first.start, first.end, (linked.store.links).len())
                         arg = Parsed(named)
                     } else { arg = try parse_expression(d, state, cursor, depth + 1) }
                     if parse_step_bad(arg) { return Ok(arg) }
                     let av = parse_step_value(arg)
                     cursor = try add_link(d, av.cursor, av.node, children)
-                    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                    children = (cursor.store.links).len()
                     if token_punct(state, cursor, ",") {
                         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                         if token_punct(state, cursor, ")") { args = false }
@@ -463,7 +463,7 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             let close = try expect_punct(d, state, cursor, ")")
             if parse_step_bad(close) { return Ok(close) }
             cursor = parse_step_cursor(close)
-            let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
+            let base = (cursor.store.nodes)[value.node - 1]
             value = try add_syntax(d, cursor, 27, value.cursor.token + 1, mark.source, base.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, 0, 0, children)
         } else {
             if token_punct(state, value.cursor, ".") {
@@ -473,8 +473,8 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
                 let name = parse_token(state, name_cursor)
                 var cursor = ParseCursor(token: name_cursor.token + 1, store: name_cursor.store)
                 cursor = try add_link(d, cursor, value.node, 0)
-                let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
-                value = try add_syntax(d, cursor, 29, value.cursor.token + 1, mark.source, base.start, name.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+                let base = (cursor.store.nodes)[value.node - 1]
+                value = try add_syntax(d, cursor, 29, value.cursor.token + 1, mark.source, base.start, name.end, name.start, name.end, (cursor.store.links).len())
             } else {
                 if token_punct(state, value.cursor, "[") {
                     if !expression_line_ok(state, value.cursor, depth) { return reject_parse(d, state, value.cursor, 13) }
@@ -485,10 +485,10 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
                     if parse_step_bad(close) { return Ok(close) }
                     var cursor = parse_step_cursor(close)
                     cursor = try add_link(d, cursor, value.node, 0)
-                    let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                    let children = (cursor.store.links).len()
                     cursor = try add_link(d, cursor, iv.node, children)
-                    let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
-                    value = try add_syntax(d, cursor, 30, value.cursor.token + 1, mark.source, base.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, 0, 0, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+                    let base = (cursor.store.nodes)[value.node - 1]
+                    value = try add_syntax(d, cursor, 30, value.cursor.token + 1, mark.source, base.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, 0, 0, (cursor.store.links).len())
                 } else { more = false }
             }
         }
@@ -505,8 +505,8 @@ fn parse_unary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Res
         if parse_step_bad(operand) { return Ok(operand) }
         let value = parse_step_value(operand)
         let linked = try add_link(d, value.cursor, value.node, 0)
-        let child = __s0_buffer_get(SyntaxRec, linked.store.nodes, value.node - 1)
-        let node = try add_syntax(d, linked, 25, initial.token + 1, token.source, token.start, child.end, token.start, token.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+        let child = (linked.store.nodes)[value.node - 1]
+        let node = try add_syntax(d, linked, 25, initial.token + 1, token.source, token.start, child.end, token.start, token.end, (linked.store.links).len())
         return Ok(Parsed(node))
     }
     return parse_postfix(d, state, initial, depth)
@@ -529,11 +529,11 @@ fn parse_binary(d: Domain, state: State, initial: ParseCursor, depth: U64, minim
             if parse_step_bad(right) { return Ok(right) }
             let rv = parse_step_value(right)
             var cursor = try add_link(d, rv.cursor, value.node, 0)
-            let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            let children = (cursor.store.links).len()
             cursor = try add_link(d, cursor, rv.node, children)
-            let left = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
-            let right_rec = __s0_buffer_get(SyntaxRec, cursor.store.nodes, rv.node - 1)
-            value = try add_syntax(d, cursor, 26, operator_cursor.token + 1, operator.source, left.start, right_rec.end, operator.start, operator.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+            let left = (cursor.store.nodes)[value.node - 1]
+            let right_rec = (cursor.store.nodes)[rv.node - 1]
+            value = try add_syntax(d, cursor, 26, operator_cursor.token + 1, operator.source, left.start, right_rec.end, operator.start, operator.end, (cursor.store.links).len())
         }
     }
     return Ok(Parsed(value))
@@ -544,18 +544,18 @@ fn parse_expression(d: Domain, state: State, cursor: ParseCursor, depth: U64) ->
 }
 
 fn assignment_target(store: ParseStore, node_id: U64) -> Bool {
-    let node = __s0_buffer_get(SyntaxRec, store.nodes, node_id - 1)
+    let node = (store.nodes)[node_id - 1]
     if node.kind == 24 { return true }
     if node.kind != 29 && node.kind != 30 { return false }
-    let head = __s0_buffer_get(SyntaxLinkRec, store.links, node.children - 1)
+    let head = (store.links)[node.children - 1]
     var base_link = head
-    if node.kind == 30 { base_link = __s0_buffer_get(SyntaxLinkRec, store.links, head.next - 1) }
-    let base = __s0_buffer_get(SyntaxRec, store.nodes, base_link.node - 1)
+    if node.kind == 30 { base_link = (store.links)[head.next - 1] }
+    let base = (store.nodes)[base_link.node - 1]
     if base.kind == 24 { return true }
     if node.kind != 29 || base.kind != 30 { return false }
-    let index_head = __s0_buffer_get(SyntaxLinkRec, store.links, base.children - 1)
-    let index_base = __s0_buffer_get(SyntaxLinkRec, store.links, index_head.next - 1)
-    return __s0_buffer_get(SyntaxRec, store.nodes, index_base.node - 1).kind == 24
+    let index_head = (store.links)[base.children - 1]
+    let index_base = (store.links)[index_head.next - 1]
+    return (store.nodes)[index_base.node - 1].kind == 24
 }
 
 fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
@@ -572,17 +572,17 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         if parse_step_bad(body) { return Ok(body) }
         let bv = parse_step_value(body)
         var cursor = try add_link(d, bv.cursor, cv.node, 0)
-        var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        var children = (cursor.store.links).len()
         cursor = try add_link(d, cursor, bv.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-        var end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
+        children = (cursor.store.links).len()
+        var end = (cursor.store.nodes)[bv.node - 1].end
         if kind == 32 && parse_token(state, cursor).keyword == 8 {
             let alternative = try parse_block(d, state, ParseCursor(token: cursor.token + 1, store: cursor.store))
             if parse_step_bad(alternative) { return Ok(alternative) }
             let av = parse_step_value(alternative)
             cursor = try add_link(d, av.cursor, av.node, children)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-            end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, av.node - 1).end
+            children = (cursor.store.links).len()
+            end = (cursor.store.nodes)[av.node - 1].end
         }
         let node = try add_syntax(d, cursor, kind, initial.token + 1, start.source, start.start, end, 0, 0, children)
         return Ok(Parsed(node))
@@ -602,9 +602,9 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         if parse_step_bad(body) { return Ok(body) }
         let bv = parse_step_value(body)
         cursor = try add_link(d, bv.cursor, sv.node, 0)
-        let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let children = (cursor.store.links).len()
         cursor = try add_link(d, cursor, bv.node, children)
-        let node = try add_syntax(d, cursor, 34, initial.token + 1, start.source, start.start, __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let node = try add_syntax(d, cursor, 34, initial.token + 1, start.source, start.start, (cursor.store.nodes)[bv.node - 1].end, name.start, name.end, (cursor.store.links).len())
         return Ok(Parsed(node))
     }
     if start.keyword == 14 {
@@ -626,9 +626,9 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         let cleanup = parse_token(state, cursor)
         let cleanup_node = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 24, cursor.token + 1, cleanup.source, cleanup.start, cleanup.end, cleanup.start, cleanup.end, 0)
         cursor = try add_link(d, cleanup_node.cursor, ev.node, 0)
-        let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let children = (cursor.store.links).len()
         cursor = try add_link(d, cursor, cleanup_node.node, children)
-        let node = try add_syntax(d, cursor, 35, initial.token + 1, start.source, start.start, cleanup.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let node = try add_syntax(d, cursor, 35, initial.token + 1, start.source, start.start, cleanup.end, name.start, name.end, (cursor.store.links).len())
         return Ok(Parsed(node))
     }
     if start.keyword == 5 || start.keyword == 6 {
@@ -644,7 +644,7 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
             if parse_step_bad(ty) { return Ok(ty) }
             let tv = parse_step_value(ty)
             cursor = try add_link(d, tv.cursor, tv.node, 0)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
         }
         let equals = try expect_punct(d, state, cursor, "=")
         if parse_step_bad(equals) { return Ok(equals) }
@@ -654,8 +654,8 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         if parse_step_bad(expr) { return Ok(expr) }
         let ev = parse_step_value(expr)
         cursor = try add_link(d, ev.cursor, ev.node, children)
-        let rec = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1)
-        let node = try add_syntax(d, cursor, kind, initial.token + 1, start.source, start.start, rec.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let rec = (cursor.store.nodes)[ev.node - 1]
+        let node = try add_syntax(d, cursor, kind, initial.token + 1, start.source, start.start, rec.end, name.start, name.end, (cursor.store.links).len())
         return Ok(Parsed(node))
     }
     if start.keyword == 12 {
@@ -667,8 +667,8 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
             if parse_step_bad(expr) { return Ok(expr) }
             let ev = parse_step_value(expr)
             cursor = try add_link(d, ev.cursor, ev.node, 0)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-            end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1).end
+            children = (cursor.store.links).len()
+            end = (cursor.store.nodes)[ev.node - 1].end
         }
         let node = try add_syntax(d, cursor, 18, initial.token + 1, start.source, start.start, end, 0, 0, children)
         return Ok(Parsed(node))
@@ -686,15 +686,15 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         if parse_step_bad(rhs) { return Ok(rhs) }
         let rv = parse_step_value(rhs)
         var cursor = try add_link(d, rv.cursor, ev.node, 0)
-        let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let children = (cursor.store.links).len()
         cursor = try add_link(d, cursor, rv.node, children)
-        let rec = __s0_buffer_get(SyntaxRec, cursor.store.nodes, rv.node - 1)
-        let node = try add_syntax(d, cursor, 17, ev.cursor.token + 1, start.source, start.start, rec.end, assignment.start, assignment.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let rec = (cursor.store.nodes)[rv.node - 1]
+        let node = try add_syntax(d, cursor, 17, ev.cursor.token + 1, start.source, start.start, rec.end, assignment.start, assignment.end, (cursor.store.links).len())
         return Ok(Parsed(node))
     }
     let linked = try add_link(d, ev.cursor, ev.node, 0)
     let end = parse_token(state, ParseCursor(token: ev.cursor.token - 1, store: ev.cursor.store)).end
-    let node = try add_syntax(d, linked, 19, initial.token + 1, start.source, start.start, end, 0, 0, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+    let node = try add_syntax(d, linked, 19, initial.token + 1, start.source, start.start, end, 0, 0, (linked.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -709,7 +709,7 @@ fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
         if parse_step_bad(stmt) { return Ok(stmt) }
         let value = parse_step_value(stmt)
         cursor = try add_link(d, value.cursor, value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 11) }
     }
     let close = parse_token(state, cursor)
@@ -749,10 +749,10 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
             if receiver {
                 if receiver_type == 0 || runtime { return reject_parse(d, state, cursor, 10) }
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-                let owner = __s0_buffer_get(SyntaxRec, cursor.store.nodes, receiver_type - 1)
+                let owner = (cursor.store.nodes)[receiver_type - 1]
                 let copied = try add_syntax(d, cursor, owner.kind, owner.token, owner.source, owner.start, owner.end, owner.name_start, owner.name_end, owner.children)
                 let linked = try add_link(d, copied.cursor, copied.node, 0)
-                pnode = try add_syntax(d, linked, parameter_kind, cursor.token, param.source, param.start, param.end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                pnode = try add_syntax(d, linked, parameter_kind, cursor.token, param.source, param.start, param.end, param.start, param.end, (linked.store.links).len())
                 runtime = true
             } else {
             let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -768,12 +768,12 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
                 if parse_step_bad(ty) { return Ok(ty) }
                 let tv = parse_step_value(ty)
                 let linked = try add_link(d, tv.cursor, tv.node, 0)
-                pnode = try add_syntax(d, linked, parameter_kind, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                pnode = try add_syntax(d, linked, parameter_kind, colon_cursor.token, param.source, param.start, (linked.store.nodes)[tv.node - 1].end, param.start, param.end, (linked.store.links).len())
                 runtime = true
             }
             }
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 if token_punct(state, cursor, ")") { more = false }
@@ -789,13 +789,13 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
     if parse_step_bad(result) { return Ok(result) }
     let rv = parse_step_value(result)
     cursor = try add_link(d, rv.cursor, rv.node, children)
-    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    children = (cursor.store.links).len()
     let body = try parse_block(d, state, cursor)
     if parse_step_bad(body) { return Ok(body) }
     let bv = parse_step_value(body)
     cursor = try add_link(d, bv.cursor, bv.node, children)
-    let block = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1)
-    let node = try add_syntax(d, cursor, 12, initial.token + 1, start.source, start.start, block.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let block = (cursor.store.nodes)[bv.node - 1]
+    let node = try add_syntax(d, cursor, 12, initial.token + 1, start.source, start.start, block.end, name.start, name.end, (cursor.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -813,7 +813,7 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
     cursor = try add_link(d, cursor, owner_value.node, 0)
-    var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    var children = (cursor.store.links).len()
     while !token_punct(state, cursor, "}") {
         if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 4) }
         let method = try parse_function_owned(d, state, cursor, owner_value.node)
@@ -821,13 +821,13 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         let value = parse_step_value(method)
         cursor = try add_root(d, value.cursor, value.node)
         cursor = try add_link(d, cursor, value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 7) }
     }
     let close = try expect_punct(d, state, cursor, "}")
     if parse_step_bad(close) { return Ok(close) }
     cursor = parse_step_cursor(close)
-    let owner_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, owner_value.node - 1)
+    let owner_node = (cursor.store.nodes)[owner_value.node - 1]
     let node = try add_syntax(d, cursor, 49, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, owner_node.name_start, owner_node.name_end, children)
     return Ok(Parsed(node))
 }
@@ -852,9 +852,9 @@ fn parse_module_decl(d: Domain, state: State, initial: ParseCursor) -> Result(Pa
     let path = try parse_module_path(d, state, ParseCursor(token: initial.token + 1, store: initial.store))
     if parse_step_bad(path) { return Ok(path) }
     let value = parse_step_value(path)
-    let path_node = __s0_buffer_get(SyntaxRec, value.cursor.store.nodes, value.node - 1)
+    let path_node = (value.cursor.store.nodes)[value.node - 1]
     let linked = try add_link(d, value.cursor, value.node, 0)
-    let node = try add_syntax(d, linked, 40, initial.token + 1, start.source, start.start, path_node.end, path_node.name_start, path_node.name_end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+    let node = try add_syntax(d, linked, 40, initial.token + 1, start.source, start.start, path_node.end, path_node.name_start, path_node.name_end, (linked.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -863,9 +863,9 @@ fn parse_module_import(d: Domain, state: State, initial: ParseCursor, public: Bo
     let path = try parse_module_path(d, state, ParseCursor(token: initial.token + 1, store: initial.store))
     if parse_step_bad(path) { return Ok(path) }
     let path_value = parse_step_value(path)
-    let path_node = __s0_buffer_get(SyntaxRec, path_value.cursor.store.nodes, path_value.node - 1)
+    let path_node = (path_value.cursor.store.nodes)[path_value.node - 1]
     var cursor = try add_link(d, path_value.cursor, path_value.node, 0)
-    var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    var children = (cursor.store.links).len()
     var end = path_node.end
     if parse_token(state, cursor).keyword == 22 {
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -874,7 +874,7 @@ fn parse_module_import(d: Domain, state: State, initial: ParseCursor, public: Bo
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
         let alias_node = try add_syntax(d, cursor, 44, cursor.token, alias.source, alias.start, alias.end, alias.start, alias.end, 0)
         cursor = try add_link(d, alias_node.cursor, alias_node.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         end = alias.end
     } else {
         if token_punct(state, cursor, "{") {
@@ -887,7 +887,7 @@ fn parse_module_import(d: Domain, state: State, initial: ParseCursor, public: Bo
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 let selected_node = try add_syntax(d, cursor, 43, cursor.token, selected.source, selected.start, selected.end, selected.start, selected.end, 0)
                 cursor = try add_link(d, selected_node.cursor, selected_node.node, children)
-                children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                children = (cursor.store.links).len()
                 if token_punct(state, cursor, ",") {
                     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                     if token_punct(state, cursor, "}") { more = false }
@@ -912,10 +912,10 @@ fn parse_public_decl(d: Domain, state: State, initial: ParseCursor) -> Result(Pa
     let declaration = try parse_decl(d, state, next)
     if parse_step_bad(declaration) { return Ok(declaration) }
     let value = parse_step_value(declaration)
-    let declared = __s0_buffer_get(SyntaxRec, value.cursor.store.nodes, value.node - 1)
+    let declared = (value.cursor.store.nodes)[value.node - 1]
     if declared.kind != 2 && declared.kind != 3 && declared.kind != 12 { return reject_parse(d, state, next, 1) }
     let linked = try add_link(d, value.cursor, value.node, 0)
-    let node = try add_syntax(d, linked, 45, initial.token + 1, start.source, start.start, declared.end, declared.name_start, declared.name_end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+    let node = try add_syntax(d, linked, 45, initial.token + 1, start.source, start.start, declared.end, declared.name_start, declared.name_end, (linked.store.links).len())
     return Ok(Parsed(node))
 }
 
@@ -954,7 +954,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
                 if parse_step_bad(param) { return Ok(param) }
                 let value = parse_step_value(param)
                 cursor = try add_link(d, value.cursor, value.node, children)
-                children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                children = (cursor.store.links).len()
                 if token_punct(state, cursor, ",") {
                     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                     if token_punct(state, cursor, ")") { more = false }
@@ -971,10 +971,10 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         if parse_step_bad(result) { return Ok(result) }
         let result_value = parse_step_value(result)
         cursor = try add_link(d, result_value.cursor, result_value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         let sig = try add_syntax(d, cursor, 10, initial.token + 5, fn_token.source, fn_token.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, 0, 0, children)
         cursor = try add_link(d, sig.cursor, sig.node, 0)
-        let decl = try add_syntax(d, cursor, 1, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        let decl = try add_syntax(d, cursor, 1, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, name.start, name.end, (cursor.store.links).len())
         return Ok(Parsed(decl))
     }
     if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
@@ -994,7 +994,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
             cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
             let pnode = try add_syntax(d, cursor, 7, cursor.token - 2, param.source, param.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, param.start, param.end, 0)
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            children = (cursor.store.links).len()
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 if token_punct(state, cursor, ")") { more = false }
@@ -1015,7 +1015,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         if parse_step_bad(item) { return Ok(item) }
         let value = parse_step_value(item)
         cursor = try add_link(d, value.cursor, value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        children = (cursor.store.links).len()
         if token_punct(state, cursor, ",") || token_punct(state, cursor, ";") { return reject_parse(d, state, cursor, item_kind) }
         if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, item_kind) }
     }
@@ -1048,7 +1048,7 @@ fn parse_sources(d: Domain, initial: State, store: ParseStore) -> Result(ParseRe
     var state = initial
     var cursor = ParseCursor(token: 0, store: store)
     var source: U64 = 0
-    while source < __s0_buffer_len(SourceRec, state.sources) {
+    while source < (state.sources).len() {
         let lexed = try lex_source(d, state, source)
         if lex_result_failed(lexed) {
             let failed = lex_result_state(lexed)
@@ -1067,27 +1067,27 @@ fn parse_sources(d: Domain, initial: State, store: ParseStore) -> Result(ParseRe
 
 fn emit_parse_manifest(state: State, store: ParseStore) -> Bool {
     if !out_string("ALDER-PARSER-MANIFEST 1\n") || !emit_sources(state) { return false }
-    if !out_string("T ") || !out_u64(__s0_buffer_len(TokenRec, state.tokens)) || !out(10) { return false }
+    if !out_string("T ") || !out_u64((state.tokens).len()) || !out(10) { return false }
     var at: U64 = 0
-    while at < __s0_buffer_len(U64, store.roots) {
-        if !out_string("R ") || !out_u64(at) || !out(32) || !out_u64(__s0_buffer_get(U64, store.roots, at)) || !out(10) { return false }
+    while at < (store.roots).len() {
+        if !out_string("R ") || !out_u64(at) || !out(32) || !out_u64((store.roots)[at]) || !out(10) { return false }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(SyntaxRec, store.nodes) {
-        let node = __s0_buffer_get(SyntaxRec, store.nodes, at)
-        let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
+    while at < (store.nodes).len() {
+        let node = (store.nodes)[at]
+        let token = (state.tokens)[node.token - 1]
         if !out_string("N ") || !out_u64(at + 1) || !out(32) || !out_u64(node.kind) || !out(32) || !out_u64(node.token) || !out(32) || !out_u64(token.source) || !out(32) || !out_u64(token.start) || !out(32) || !out_u64(token.end) || !out(32) || !out_path(state, node.source) || !out(32) || !out_u64(node.start) || !out(32) || !out_u64(node.end) || !out(32) || !out_u64(node.name_start) || !out(32) || !out_u64(node.name_end) || !out(32) || !out_u64(node.children) || !out(10) { return false }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(SyntaxLinkRec, store.links) {
-        let link = __s0_buffer_get(SyntaxLinkRec, store.links, at)
+    while at < (store.links).len() {
+        let link = (store.links)[at]
         if !out_string("L ") || !out_u64(at + 1) || !out(32) || !out_u64(link.node) || !out(32) || !out_u64(link.next) || !out(10) { return false }
         at = at + 1
     }
-    if __s0_buffer_len(ParseDiagRec, store.diagnostics) != 0 {
-        let diag = __s0_buffer_get(ParseDiagRec, store.diagnostics, 0)
+    if (store.diagnostics).len() != 0 {
+        let diag = (store.diagnostics)[0]
         if !out_string("D SYN0001 ") || !out_u64(diag.kind) || !out(32) || !out_path(state, diag.source) || !out(32) || !out_u64(diag.start) || !out(32) || !out_u64(diag.end) || !out(10) { return false }
     }
     return out_string("END\n")

@@ -11,6 +11,8 @@ void (c_free)(void *);
 
 static ALDER_MAYBE_UNUSED void * alder_fn_ffi_0(uint64_t alder_v0, void * alder_v1) {
   ALDER_MAYBE_UNUSED void * alder_v2;
+  (void)alder_v0;
+  (void)alder_v1;
 
   alder_v2 = (c_malloc)(alder_v0);
   (c_free)(alder_v1);

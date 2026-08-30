@@ -42,5 +42,24 @@ fn main() -> I32 {
     }
     if before != 3 || array[2] != 11 || array[3] != 13 { return 7 }
     if first(array) != 2 { return 8 }
+
+    let reserved = match values.try_reserve(12) {
+        Ok => true
+        Err(error) => false
+    }
+    if !reserved || values.len() != 5 || values[1] != 5 { return 9 }
+    let pushed = match values.try_push(34) {
+        Ok => true
+        Err(error) => false
+    }
+    if !pushed || values.len() != 6 || values[5] != 34 { return 10 }
+
+    var nested: Vec(Vec(U64)) = Vec.new(Vec(U64))
+    let nested_pushed = match nested.try_push(values) {
+        Ok => true
+        Err(error) => false
+    }
+    values[0] = 55
+    if !nested_pushed || nested[0][0] != 3 || values[0] != 55 { return 11 }
     return 0
 }

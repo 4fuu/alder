@@ -1,3 +1,16 @@
+type ViewBox {
+    values: [U64]
+}
+
+type GenericViewBox(T: type) {
+    value: T
+}
+
+enum ViewChoice {
+    Missing
+    Present(value: ViewBox)
+}
+
 fn returned_array_view() -> [U64] {
     let values: Array(U64, 3) = [3, 5, 7]
     return values.slice(0, 3)
@@ -28,6 +41,35 @@ fn returned_nested_vec_array() -> Array(Vec(U64), 2) {
     var first: Vec(U64) = Vec.from_array(U64, [71, 73])
     var second: Vec(U64) = Vec.from_array(U64, [79])
     return [first, second]
+}
+
+fn returned_record_view() -> ViewBox {
+    var values: Vec(U64) = Vec.from_array(U64, [89, 97])
+    return ViewBox(values: values.slice(0, 2))
+}
+
+fn returned_variant_view() -> ViewChoice {
+    let values: Array(U64, 2) = [101, 103]
+    return Present(ViewBox(values: values.slice(0, 2)))
+}
+
+fn returned_array_views() -> Array([U64], 2) {
+    let left: Array(U64, 2) = [107, 109]
+    var right: Vec(U64) = Vec.from_array(U64, [113, 127])
+    return [left.slice(0, 2), right.slice(0, 2)]
+}
+
+fn returned_vec_views() -> Vec(ViewBox) {
+    let left: Array(U64, 1) = [131]
+    let right: Array(U64, 1) = [137]
+    var values: Vec(ViewBox) = Vec.from_array(ViewBox, [ViewBox(values: left.slice(0, 1))])
+    values.push(ViewBox(values: right.slice(0, 1)))
+    return values
+}
+
+fn returned_generic_view() -> GenericViewBox([U64]) {
+    let values: Array(U64, 2) = [139, 149]
+    return GenericViewBox(value: values.slice(0, 2))
 }
 
 fn make_values() -> Vec(U64) {
@@ -91,5 +133,23 @@ fn main() -> I32 {
         Ok(value) => false
         Err(error) => error[0] == 7 && error[1] == 11
     } { return 11 }
+
+    let record = returned_record_view()
+    if record.values[0] != 89 || record.values[1] != 97 { return 12 }
+
+    let choice = returned_variant_view()
+    if !match choice {
+        Missing => false
+        Present(box) => box.values[0] == 101 && box.values[1] == 103
+    } { return 13 }
+
+    let array_views = returned_array_views()
+    if array_views[0][0] != 107 || array_views[1][1] != 127 { return 14 }
+
+    let vec_views = returned_vec_views()
+    if vec_views[0].values[0] != 131 || vec_views[1].values[0] != 137 { return 15 }
+
+    let generic = returned_generic_view()
+    if generic.value[0] != 139 || generic.value[1] != 149 { return 16 }
     return 0
 }

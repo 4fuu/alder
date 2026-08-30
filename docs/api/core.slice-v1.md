@@ -66,9 +66,9 @@ Views may be passed to another non-retaining `[T]` or `MutSlice(T)` parameter.
 To keep argument evaluation deterministic without temporary descriptors being
 invalidated before call entry, a mutable or newly formed/implicitly borrowed
 view argument must be last; bind immutable views in a lexical block before a
-multi-argument call. M7.3 slice 2 permits a direct immutable `[T]` result by
-materializing deterministic caller-result storage before the function domain
-ends. Mutable views and views nested in records, arrays, variants, or other
-ordinary aggregates or collections remain non-escaping. No source lifetime
-syntax is introduced; full value/view-surface migration remains in M7.3 slice
-3.
+multi-argument call. M7.3 recursively materializes an immutable `[T]` in
+inferred storage when it enters or returns inside an ordinary record, array,
+variant, option, result, or vector. Materialization occurs before the source
+domain ends and recursively severs mutable collection backing, so the result
+remains independent. Mutable views remain non-escaping directly and through
+aggregates. No source lifetime syntax is introduced.

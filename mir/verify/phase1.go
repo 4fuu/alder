@@ -337,7 +337,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpArrayAsSlice {
+	if in.Op > mir.OpBytesTryFromVec {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -433,7 +433,7 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	case mir.OpAlloc, mir.OpAllocChecked:
 		require(in.Domain, "domain operand")
 		require(in.Count, "count operand")
-	case mir.OpCopyToDomain:
+	case mir.OpCopyToDomain, mir.OpCopyToDomainTry:
 		require(in.Domain, "domain operand")
 		require(in.CopyVal, "copy value")
 	case mir.OpCleanupPush:
@@ -465,10 +465,15 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 		require(in.Slice, "storage operand")
 		require(in.Lo, "length operand")
 		require(in.Capacity, "capacity operand")
-	case mir.OpVecGrowChecked:
+	case mir.OpVecGrowChecked, mir.OpVecTryGrow:
 		require(in.Slice, "vec operand")
 		require(in.Domain, "domain operand")
 		require(in.Capacity, "capacity operand")
+	case mir.OpBytesAsSlice, mir.OpStringAsBytes:
+		require(in.Slice, "byte sequence operand")
+	case mir.OpBytesTryFromVec:
+		require(in.Domain, "domain operand")
+		require(in.Slice, "vec operand")
 	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
 		require(in.Slice, "vec operand")
 	case mir.OpArrayAsSlice:
@@ -559,7 +564,7 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpAlloc, mir.OpAllocChecked:
 		add(in.Domain)
 		add(in.Count)
-	case mir.OpCopyToDomain:
+	case mir.OpCopyToDomain, mir.OpCopyToDomainTry:
 		add(in.Domain)
 		add(in.CopyVal)
 	case mir.OpCleanupPush:
@@ -593,10 +598,15 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Slice)
 		add(in.Lo)
 		add(in.Capacity)
-	case mir.OpVecGrowChecked:
+	case mir.OpVecGrowChecked, mir.OpVecTryGrow:
 		add(in.Slice)
 		add(in.Domain)
 		add(in.Capacity)
+	case mir.OpBytesAsSlice, mir.OpStringAsBytes:
+		add(in.Slice)
+	case mir.OpBytesTryFromVec:
+		add(in.Domain)
+		add(in.Slice)
 	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
 		add(in.Slice)
 	case mir.OpArrayAsSlice:

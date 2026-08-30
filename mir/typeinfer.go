@@ -161,6 +161,15 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return f.ValueType(in.CopyVal)
+	case OpCopyToDomainTry:
+		if !m.isHandleType(f, in.Domain) || !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		copied, ok := f.ValueType(in.CopyVal)
+		if !ok {
+			return NoType, false
+		}
+		return m.Result(copied, in.TypeOp), true
 
 	case OpCleanupScopeBegin:
 		return m.CleanupScope(), true
@@ -238,6 +247,28 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return t, true
+	case OpVecTryGrow:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec || !m.isHandleType(f, in.Domain) || !m.isU64(f, in.Capacity) || !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		return m.Result(t, in.TypeOp), true
+	case OpBytesAsSlice:
+		if !m.isType(f, in.Slice, m.Bytes()) {
+			return NoType, false
+		}
+		return m.Slice(TypeU8), true
+	case OpStringAsBytes:
+		if !m.isType(f, in.Slice, m.String()) {
+			return NoType, false
+		}
+		return m.Slice(TypeU8), true
+	case OpBytesTryFromVec:
+		t, ok := f.ValueType(in.Slice)
+		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec || m.Types[t].Elem != TypeU8 || !m.isHandleType(f, in.Domain) || !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		return m.Result(m.Bytes(), in.TypeOp), true
 	case OpVecLen, OpVecCapacity:
 		t, ok := f.ValueType(in.Slice)
 		if !ok || !m.ValidType(t) || m.Types[t].Kind != TypeVec {

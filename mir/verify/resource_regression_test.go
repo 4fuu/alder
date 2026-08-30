@@ -676,8 +676,8 @@ done:
 `, "carries a function-local domain handle or reference across a loop backedge")
 	})
 
-	t.Run("external allocation remains forbidden as block parameter", func(t *testing.T) {
-		requireRejectedWith(t, `mir 1
+	t.Run("external parameter-domain allocation remains stable as block parameter", func(t *testing.T) {
+		requireAccepted(t, `mir 1
 fn @f(%d: domain_handle, %n: u64, %again: bool) {
 entry:
   %initial = alloc %d, u8, %n
@@ -688,7 +688,7 @@ loop(%current: safe_mut(u8)):
 done:
   return
 }
-`, "carries a function-local domain handle or reference across a backedge")
+`)
 	})
 
 	t.Run("external allocation remains forbidden through dereference", func(t *testing.T) {
@@ -704,6 +704,20 @@ done:
   return
 }
 `, "lifetime-bearing values may not be stored through dereference places")
+	})
+
+	t.Run("materialized allocation may be stored through dereference", func(t *testing.T) {
+		requireAccepted(t, `mir 4
+const @one: u64 = 1
+fn @f(%out: safe_mut(safe_mut(u8)), %d: domain_handle) {
+entry:
+  %one = const.get @one
+  %source = alloc %d, u8, %one
+  %copy = copy_to_domain %d, %source
+  store deref %out, %copy
+  return
+}
+`)
 	})
 
 	t.Run("possible external parent destruction keeps cyclic store conservative", func(t *testing.T) {
@@ -1070,4 +1084,40 @@ entry:
 }
 `, "use of %mb after reset or destruction")
 	})
+}
+
+func TestFallibleRelocationOperationsRequireStableCapacityErrors(t *testing.T) {
+	const prefix = `mir 4
+enum @CapacityError {
+  OutOfMemory
+  Limit
+}
+`
+	requireAccepted(t, prefix+`
+fn @grow(%d: domain_handle, %v: vec(u8), %n: u64) -> result(vec(u8), @CapacityError) {
+bb0:
+  %r = vec.try_grow %v, %d, %n, @CapacityError
+  return %r
+}
+fn @copy(%d: domain_handle, %v: vec(u8)) -> result(vec(u8), @CapacityError) {
+bb0:
+  %r = copy_to_domain.try %d, %v, @CapacityError
+  return %r
+}
+fn @bytes(%d: domain_handle, %v: vec(u8)) -> result(bytes, @CapacityError) {
+bb0:
+  %r = bytes.try_from_vec %d, %v, @CapacityError
+  return %r
+}
+`)
+	requireRejectedWith(t, `mir 4
+enum @BadError {
+  Failed
+}
+fn @grow(%d: domain_handle, %v: vec(u8), %n: u64) -> result(vec(u8), @BadError) {
+bb0:
+  %r = vec.try_grow %v, %d, %n, @BadError
+  return %r
+}
+`, "vec.try_grow requires a CapacityError-shaped error type")
 }

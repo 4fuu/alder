@@ -136,6 +136,11 @@ fn mir_op_vec_storage() -> U64 { return 61 }
 fn mir_op_vec_as_slice() -> U64 { return 62 }
 fn mir_op_vec_as_mut_slice() -> U64 { return 63 }
 fn mir_op_array_as_slice() -> U64 { return 64 }
+fn mir_op_copy_to_domain_try() -> U64 { return 65 }
+fn mir_op_vec_try_grow() -> U64 { return 66 }
+fn mir_op_bytes_as_slice() -> U64 { return 67 }
+fn mir_op_string_as_bytes() -> U64 { return 68 }
+fn mir_op_bytes_try_from_vec() -> U64 { return 69 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }
@@ -329,20 +334,20 @@ type MirOperandRec {
 }
 
 type MirStore {
-    names: __s0_Buffer(U8)
-    types: __s0_Buffer(MirTypeRec)
-    type_parts: __s0_Buffer(MirTypePartRec)
-    imports: __s0_Buffer(MirImportRec)
-    constants: __s0_Buffer(MirConstRec)
-    functions: __s0_Buffer(MirFunctionRec)
-    params: __s0_Buffer(MirParamRec)
-    locals: __s0_Buffer(MirLocalRec)
-    blocks: __s0_Buffer(MirBlockRec)
-    values: __s0_Buffer(MirValueRec)
-    places: __s0_Buffer(MirPlaceRec)
-    instructions: __s0_Buffer(MirInstrRec)
-    terminators: __s0_Buffer(MirTermRec)
-    operands: __s0_Buffer(MirOperandRec)
+    names: Vec(U8)
+    types: Vec(MirTypeRec)
+    type_parts: Vec(MirTypePartRec)
+    imports: Vec(MirImportRec)
+    constants: Vec(MirConstRec)
+    functions: Vec(MirFunctionRec)
+    params: Vec(MirParamRec)
+    locals: Vec(MirLocalRec)
+    blocks: Vec(MirBlockRec)
+    values: Vec(MirValueRec)
+    places: Vec(MirPlaceRec)
+    instructions: Vec(MirInstrRec)
+    terminators: Vec(MirTermRec)
+    operands: Vec(MirOperandRec)
 }
 
 type MirTypeStep {

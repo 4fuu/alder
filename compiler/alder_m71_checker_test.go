@@ -19,8 +19,9 @@ func TestAlderM71CheckerModelContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{
-		"16 __s0_String, 17 Vec, and 18 MutSlice",
+		"16 [U8], 17 Vec, 18 MutSlice, and 19 CapacityError",
 		"18 Vec.new, 19 Vec.from_array, 20 len, 21 Vec.push, 22 get",
+		"26 Vec.try_reserve, 27 Vec.try_push, 28 Bytes.try_from_vec",
 	} {
 		if !strings.Contains(string(model), fact) {
 			t.Fatalf("model is missing M7.1 contract %q", fact)
@@ -39,7 +40,7 @@ func TestAlderM71CheckerModelContract(t *testing.T) {
 		`builtin = 24`,
 		`builtin = 25`,
 		`fn parameter_type_compatible`,
-		`category.contains_scoped`,
+		`category.contains_nonimmutable_scoped`,
 	} {
 		if !strings.Contains(string(checker), fact) {
 			t.Fatalf("checker is missing M7.1 graph fact %q", fact)
@@ -50,7 +51,22 @@ func TestAlderM71CheckerModelContract(t *testing.T) {
 func runAlderM71CheckerBehavior(t *testing.T, exe string) {
 	t.Helper()
 	accept := map[string]string{
-		"collections.al": `fn accepted() -> U64 {
+		"collections.al": `type ViewBox { view: [U64] }
+enum ViewChoice {
+ Empty
+ Values(value: ViewBox)
+}
+
+fn boxed(values: [U64]) -> ViewBox { return ViewBox(view: values) }
+fn chosen(values: [U64]) -> ViewChoice { return Values(ViewBox(view: values)) }
+fn listed(values: [U64]) -> Array([U64], 1) { return [values] }
+fn collected(values: [U64]) -> Vec(ViewBox) {
+ var result = Vec.new(ViewBox)
+ result.push(ViewBox(view: values))
+ return result
+}
+
+fn accepted() -> U64 {
  let seed: Array(U64, 2) = [1, 2]
  var values: Vec(U64) = Vec.from_array(U64, seed)
  { let first = values.slice(0, 1)
@@ -91,9 +107,9 @@ func runAlderM71CheckerBehavior(t *testing.T, exe string) {
 		{"mutable-reassign", "fn f() -> Unit { var a: Array(U64, 1) = [1]\n var b: Array(U64, 1) = [2]\n var first = a.slice_mut(0, 1)\n var second = b.slice_mut(0, 1)\n second = first }\n", 104},
 		{"temporary-view-not-final", "fn use(view: MutSlice(U64), value: U64) -> Unit {}\nfn f() -> Unit { var a: Array(U64, 1) = [1]\n use(a.slice_mut(0, 1), a[0]) }\n", 104},
 		{"temporary-borrow-not-final", "fn use(view: [U64], mutation: Unit) -> Unit {}\nfn f() -> Unit { var a = Vec.from_array(U64, [1])\n use(a, a.push(2)) }\n", 104},
-		{"aggregate-scoped", "type Box { view: [U64] }\nfn f(values: [U64]) -> Unit { let box = Box(view: values) }\n", 104},
-		{"array-scoped", "fn f(values: [U64]) -> Unit { let stored = [values] }\n", 104},
-		{"variant-scoped", "fn f(values: [U64]) -> Unit { let stored: Option([U64]) = Some(values) }\n", 104},
+		{"aggregate-mutable-scoped", "type Box { view: MutSlice(U64) }\nfn f(values: MutSlice(U64)) -> Unit { let box = Box(view: values) }\n", 104},
+		{"array-mutable-scoped", "fn f(values: MutSlice(U64)) -> Unit { let stored = [values] }\n", 104},
+		{"variant-mutable-scoped", "fn f(values: MutSlice(U64)) -> Unit { let stored: Option(MutSlice(U64)) = Some(values) }\n", 104},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

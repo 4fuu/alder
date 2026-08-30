@@ -3,13 +3,13 @@
 fn cgen_value_type(store: MirStore, indexes: MirVIndexes, function: U64, value: U64) -> U64 {
     let id = mir_vindex_value(indexes, function, value)
     if id == 0 { return 0 }
-    return __s0_buffer_get(MirValueRec, store.values, id - 1).value_type
+    return (store.values)[id - 1].value_type
 }
 
 fn cgen_local_type(store: MirStore, indexes: MirVIndexes, function: U64, local: U64) -> U64 {
     let id = mir_vindex_local(indexes, function, local)
     if id == 0 { return 0 }
-    return __s0_buffer_get(MirLocalRec, store.locals, id - 1).local_type
+    return (store.locals)[id - 1].local_type
 }
 
 fn cgen_block_param(store: MirStore, indexes: MirVIndexes, function: U64, block: U64, ordinal: U64) -> MirParamRec {
@@ -18,12 +18,12 @@ fn cgen_block_param(store: MirStore, indexes: MirVIndexes, function: U64, block:
     while at < count {
         let id = mir_vindex_param(indexes, function, at)
         if id != 0 {
-            let item = __s0_buffer_get(MirParamRec, store.params, id - 1)
+            let item = (store.params)[id - 1]
             if item.kind == mir_param_block() && item.block == block && item.ordinal == ordinal { return item }
         }
         at = at + 1
     }
-    return __s0_buffer_get(MirParamRec, store.params, 0)
+    return (store.params)[0]
 }
 
 fn cgen_op_list_count(indexes: MirVIndexes, kind: U64, owner: U64) -> U64 {
@@ -46,7 +46,7 @@ fn cgen_operand_count(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U
     while at < total {
         let id = cgen_op_list_id(indexes, kind, owner, at)
         if id != 0 {
-            let item = __s0_buffer_get(MirOperandRec, store.operands, id - 1)
+            let item = (store.operands)[id - 1]
             if item.kind == kind && item.edge == edge { count = count + 1 }
         }
         at = at + 1
@@ -57,8 +57,8 @@ fn cgen_operand_count(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U
 fn cgen_operand_id(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U64, edge: U64, ordinal: U64) -> U64 {
     if kind == mir_operand_import_param() {
         var at: U64 = 0
-        while at < __s0_buffer_len(MirOperandRec, store.operands) {
-            let item = __s0_buffer_get(MirOperandRec, store.operands, at)
+        while at < (store.operands).len() {
+            let item = (store.operands)[at]
             if item.kind == kind && item.owner == owner && item.edge == edge && item.ordinal == ordinal { return at + 1 }
             at = at + 1
         }
@@ -69,7 +69,7 @@ fn cgen_operand_id(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U64,
     while at < total {
         let id = cgen_op_list_id(indexes, kind, owner, at)
         if id != 0 {
-            let item = __s0_buffer_get(MirOperandRec, store.operands, id - 1)
+            let item = (store.operands)[id - 1]
             if item.kind == kind && item.edge == edge && item.ordinal == ordinal { return id }
         }
         at = at + 1
@@ -79,8 +79,8 @@ fn cgen_operand_id(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U64,
 
 fn cgen_operand(store: MirStore, indexes: MirVIndexes, kind: U64, owner: U64, edge: U64, ordinal: U64) -> MirOperandRec {
     let id = cgen_operand_id(store, indexes, kind, owner, edge, ordinal)
-    if id == 0 { return __s0_buffer_get(MirOperandRec, store.operands, 0) }
-    return __s0_buffer_get(MirOperandRec, store.operands, id - 1)
+    if id == 0 { return (store.operands)[0] }
+    return (store.operands)[id - 1]
 }
 
 fn cgen_term(store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -> MirBuildStep {
@@ -103,13 +103,13 @@ fn cgen_put_local(d: Domain, writer: CgenWriter, local: U64) -> Result(CgenWrite
 }
 
 fn cgen_place_type(store: MirStore, indexes: MirVIndexes, function: U64, place: U64) -> U64 {
-    let item = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    let item = (store.places)[place - 1]
     if item.kind == mir_place_local() { return cgen_local_type(store, indexes, function, item.local) }
-    if item.kind == mir_place_deref() { return __s0_buffer_get(MirTypeRec, store.types, cgen_value_type(store, indexes, function, item.deref_value) - 1).elem }
+    if item.kind == mir_place_deref() { return (store.types)[cgen_value_type(store, indexes, function, item.deref_value) - 1].elem }
     let base_type = cgen_place_type(store, indexes, function, item.base)
     var at: U64 = 0
     while at < mir_vindex_type_part_count(indexes, base_type) {
-        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, base_type, at) - 1)
+        let part = (store.type_parts)[mir_vindex_type_part(indexes, base_type, at) - 1]
         if part.kind == mir_type_part_field() && mir_vname_equal(store, part.name_start, part.name_end, item.field_start, item.field_end) { return part.part_type }
         at = at + 1
     }
@@ -119,7 +119,7 @@ fn cgen_place_type(store: MirStore, indexes: MirVIndexes, function: U64, place: 
 fn cgen_field_ordinal(store: MirStore, indexes: MirVIndexes, owner: U64, start: U64, end: U64) -> U64 {
     var at: U64 = 0
     while at < mir_vindex_type_part_count(indexes, owner) {
-        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, owner, at) - 1)
+        let part = (store.type_parts)[mir_vindex_type_part(indexes, owner, at) - 1]
         if part.kind == mir_type_part_field() && mir_vname_equal(store, part.name_start, part.name_end, start, end) { return part.ordinal }
         at = at + 1
     }
@@ -127,7 +127,7 @@ fn cgen_field_ordinal(store: MirStore, indexes: MirVIndexes, owner: U64, start: 
 }
 
 fn cgen_put_place(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64, place: U64) -> Result(CgenWriter, __s0_Error) {
-    let item = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    let item = (store.places)[place - 1]
     if item.kind == mir_place_local() { return cgen_put_local(d, writer, item.local) }
     if item.kind == mir_place_field() {
         let base_type = cgen_place_type(store, indexes, function, item.base)
@@ -136,7 +136,7 @@ fn cgen_put_place(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVI
         return cgen_put_u64(d, out, cgen_field_ordinal(store, indexes, base_type, item.field_start, item.field_end))
     }
     let reference_type = cgen_value_type(store, indexes, function, item.deref_value)
-    let reference = __s0_buffer_get(MirTypeRec, store.types, reference_type - 1)
+    let reference = (store.types)[reference_type - 1]
     var out = try cgen_put(d, writer, "(*(")
     out = try cgen_put_type(d, out, store, reference.elem)
     out = try cgen_put(d, out, " *)")
@@ -146,7 +146,7 @@ fn cgen_put_place(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVI
 }
 
 fn cgen_variant_ordinal(store: MirStore, indexes: MirVIndexes, type_id: U64, start: U64, end: U64) -> U64 {
-    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    let item = (store.types)[type_id - 1]
     if item.kind == mir_type_kind_option() {
         if mir_vname_word(store, start, end, "some") { return 1 }
         return 0
@@ -157,7 +157,7 @@ fn cgen_variant_ordinal(store: MirStore, indexes: MirVIndexes, type_id: U64, sta
     }
     var at: U64 = 0
     while at < mir_vindex_type_part_count(indexes, type_id) {
-        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        let part = (store.type_parts)[mir_vindex_type_part(indexes, type_id, at) - 1]
         if part.kind == mir_type_part_variant() && mir_vname_equal(store, part.name_start, part.name_end, start, end) { return part.ordinal }
         at = at + 1
     }
@@ -165,7 +165,7 @@ fn cgen_variant_ordinal(store: MirStore, indexes: MirVIndexes, type_id: U64, sta
 }
 
 fn cgen_variant_payload(store: MirStore, type_id: U64, ordinal: U64) -> U64 {
-    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    let item = (store.types)[type_id - 1]
     if item.kind == mir_type_kind_option() {
         if ordinal == 1 { return item.elem }
         return mir_type_unit()
@@ -179,7 +179,7 @@ fn cgen_variant_payload(store: MirStore, type_id: U64, ordinal: U64) -> U64 {
 
 fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
     if type_id <= mir_primitive_type_count() { return true }
-    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    let item = (store.types)[type_id - 1]
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_vec() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return false }
     if item.kind == mir_type_kind_domain_handle() || item.kind == mir_type_kind_domain_mark() || item.kind == mir_type_kind_cleanup_scope() || item.kind == mir_type_kind_cleanup_id() || item.kind == mir_type_kind_table() || item.kind == mir_type_kind_table_view() || item.kind == mir_type_kind_table_mut_view() || item.kind == mir_type_kind_raw_ptr() { return false }
     if item.kind == mir_type_kind_array() { return cgen_copy_trivial(store, item.elem) }
@@ -200,7 +200,7 @@ fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
 
 fn cgen_copy_supported(store: MirStore, type_id: U64) -> Bool {
     if cgen_copy_trivial(store, type_id) || type_id <= mir_primitive_type_count() { return true }
-    let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    let item = (store.types)[type_id - 1]
     if item.kind == mir_type_kind_domain_handle() || item.kind == mir_type_kind_domain_mark() || item.kind == mir_type_kind_cleanup_scope() || item.kind == mir_type_kind_cleanup_id() || item.kind == mir_type_kind_table() || item.kind == mir_type_kind_table_view() || item.kind == mir_type_kind_table_mut_view() || item.kind == mir_type_kind_raw_ptr() { return false }
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return cgen_copy_supported(store, item.elem) }
     if item.kind == mir_type_kind_vec() { return cgen_copy_supported(store, item.elem) }
@@ -222,10 +222,10 @@ fn cgen_copy_supported(store: MirStore, type_id: U64) -> Bool {
 
 fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_array_as_slice() { return false }
-        if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
+    while at < (store.instructions).len() {
+        let item = (store.instructions)[at]
+        if item.op > mir_op_bytes_try_from_vec() { return false }
+        if (item.op == mir_op_copy_to_domain() || item.op == mir_op_copy_to_domain_try()) && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
     return true
@@ -306,7 +306,7 @@ fn cgen_put_int_limit(d: Domain, writer: CgenWriter, signed: Bool, width: U64, m
     return cgen_put(d, writer, "UINT64_MAX")
 }
 
-fn cgen_put_tmp(d: Domain, writer: CgenWriter, value: U64, suffix: __s0_String) -> Result(CgenWriter, __s0_Error) {
+fn cgen_put_tmp(d: Domain, writer: CgenWriter, value: U64, suffix: [U8]) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, writer, "alder_t")
     out = try cgen_put_u64(d, out, value - 1)
     return cgen_put(d, out, suffix)
@@ -522,7 +522,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
             let field = cgen_operand(store, indexes, mir_operand_aggregate_field(), instruction, 0, ordinal)
             out = try cgen_put(d, out, "  ")
             out = try cgen_put_value(d, out, item.result)
-            if __s0_buffer_get(MirTypeRec, store.types, item.type_op - 1).kind == mir_type_kind_array() {
+            if (store.types)[item.type_op - 1].kind == mir_type_kind_array() {
                 out = try cgen_put(d, out, ".alder_e[")
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, "]")
@@ -617,6 +617,47 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         if !cgen_copy_trivial(store, type_id) { out = try cgen_put(d, out, ")") }
         return cgen_put(d, out, ";\n")
     }
+    if item.op == mir_op_copy_to_domain_try() {
+        let type_id = cgen_value_type(store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_type(d, out, store, type_id)
+        out = try cgen_put(d, out, " ")
+        out = try cgen_put_tmp(d, out, item.result, "copied")
+        out = try cgen_put(d, out, ";\n  uint8_t ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        if cgen_copy_trivial(store, type_id) {
+            out = try cgen_put(d, out, " = (uint8_t)0;\n  ")
+            out = try cgen_put_tmp(d, out, item.result, "copied")
+            out = try cgen_put(d, out, " = ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+            out = try cgen_put(d, out, ";\n")
+        } else {
+            out = try cgen_put(d, out, " = alder_try_copy_ty")
+            out = try cgen_put_u64(d, out, type_id - 1)
+            out = try cgen_put(d, out, "(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ", ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+            out = try cgen_put(d, out, ", &")
+            out = try cgen_put_tmp(d, out, item.result, "copied")
+            out = try cgen_put(d, out, ");\n")
+        }
+        out = try cgen_put(d, out, "  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)0; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p0 = ")
+        out = try cgen_put_tmp(d, out, item.result, "copied")
+        out = try cgen_put(d, out, "; } else { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1.alder_tag = (uint32_t)(")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        return cgen_put(d, out, " == (uint8_t)1 ? 0 : 1); }\n")
+    }
     if item.op == mir_op_cleanup_scope_begin() {
         out = try cgen_put(d, out, "  if (!alder_cleanup_scope_begin(&alder_scope_")
         out = try cgen_put_u64(d, out, instruction - 1)
@@ -674,7 +715,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     }
     if item.op == mir_op_slice_index_checked() || item.op == mir_op_slice_range_checked() {
         let source_type = cgen_value_type(store, indexes, item.function, item.a)
-        let elem = __s0_buffer_get(MirTypeRec, store.types, source_type - 1).elem
+        let elem = (store.types)[source_type - 1].elem
         out = try cgen_put(d, out, "  if (!alder_slice_")
         if item.op == mir_op_slice_index_checked() { out = try cgen_put(d, out, "index_checked(") } else { out = try cgen_put(d, out, "range_checked(") }
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
@@ -726,8 +767,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_array_index_checked() {
         let source_type = cgen_value_type(store, indexes, item.function, item.a)
         var array_type = source_type
-        if __s0_buffer_get(MirTypeRec, store.types, source_type - 1).kind == mir_type_kind_safe_mut() { array_type = __s0_buffer_get(MirTypeRec, store.types, source_type - 1).elem }
-        let array = __s0_buffer_get(MirTypeRec, store.types, array_type - 1)
+        if (store.types)[source_type - 1].kind == mir_type_kind_safe_mut() { array_type = (store.types)[source_type - 1].elem }
+        let array = (store.types)[array_type - 1]
         out = try cgen_put(d, out, "  if (")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
         out = try cgen_put(d, out, " >= (uint64_t)")
@@ -753,8 +794,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_array_as_slice() {
         let source_type = cgen_value_type(store, indexes, item.function, item.a)
         var array_type = source_type
-        if __s0_buffer_get(MirTypeRec, store.types, source_type - 1).kind != mir_type_kind_array() { array_type = __s0_buffer_get(MirTypeRec, store.types, source_type - 1).elem }
-        let array = __s0_buffer_get(MirTypeRec, store.types, array_type - 1)
+        if (store.types)[source_type - 1].kind != mir_type_kind_array() { array_type = (store.types)[source_type - 1].elem }
+        let array = (store.types)[array_type - 1]
         out = try cgen_put(d, out, "  ")
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = (AlderSlice){ (void *)")
@@ -791,7 +832,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     }
     if item.op == mir_op_vec_grow_checked() {
         let vec_type = cgen_value_type(store, indexes, item.function, item.a)
-        let elem = __s0_buffer_get(MirTypeRec, store.types, vec_type - 1).elem
+        let elem = (store.types)[vec_type - 1].elem
         out = try cgen_put(d, out, "  if (")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
         out = try cgen_put(d, out, " < ")
@@ -855,6 +896,187 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, ".len, ")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
         return cgen_put(d, out, " };\n")
+    }
+    if item.op == mir_op_vec_try_grow() {
+        let vec_type = cgen_value_type(store, indexes, item.function, item.a)
+        let elem = (store.types)[vec_type - 1].elem
+        out = try cgen_put(d, out, "  uint8_t ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)0;\n  uint64_t ")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, " = (uint64_t)0;\n  void *")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = NULL;\n  AlderVec ")
+        out = try cgen_put_tmp(d, out, item.result, "grown")
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ";\n  if (")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
+        out = try cgen_put(d, out, " < ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".len || !alder_u64_mul_checked(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
+        out = try cgen_put(d, out, ", (uint64_t)sizeof(")
+        out = try cgen_put_type(d, out, store, elem)
+        out = try cgen_put(d, out, "), &")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, ") || ")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, " > (uint64_t)SIZE_MAX) { ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)2; }\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { ")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = alder_domain_alloc(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ", (size_t)")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, ", _Alignof(")
+        out = try cgen_put_type(d, out, store, elem)
+        out = try cgen_put(d, out, ")); if (")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " == NULL) { ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)1; } }\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0 && ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".len != (uint64_t)0 && ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".data == NULL) { alder_runtime_panic(\"vec.try_grow: null source\"); }\n")
+        if cgen_copy_trivial(store, elem) {
+            out = try cgen_put(d, out, "  if (")
+            out = try cgen_put_tmp(d, out, item.result, "status")
+            out = try cgen_put(d, out, " == (uint8_t)0 && ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ".len != (uint64_t)0) { uint64_t alder_n; if (!alder_u64_mul_checked(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ".len, (uint64_t)sizeof(")
+            out = try cgen_put_type(d, out, store, elem)
+            out = try cgen_put(d, out, "), &alder_n) || alder_n > (uint64_t)SIZE_MAX) { ")
+            out = try cgen_put_tmp(d, out, item.result, "status")
+            out = try cgen_put(d, out, " = (uint8_t)2; } else { memcpy(")
+            out = try cgen_put_tmp(d, out, item.result, "p")
+            out = try cgen_put(d, out, ", ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ".data, (size_t)alder_n); } }\n")
+        } else {
+            out = try cgen_put(d, out, "  if (")
+            out = try cgen_put_tmp(d, out, item.result, "status")
+            out = try cgen_put(d, out, " == (uint8_t)0) { for (uint64_t alder_i = (uint64_t)0; alder_i < ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ".len; alder_i++) { ")
+            out = try cgen_put_tmp(d, out, item.result, "status")
+            out = try cgen_put(d, out, " = alder_try_copy_ty")
+            out = try cgen_put_u64(d, out, elem - 1)
+            out = try cgen_put(d, out, "(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+            out = try cgen_put(d, out, ", ((")
+            out = try cgen_put_type(d, out, store, elem)
+            out = try cgen_put(d, out, " *)")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ".data)[alder_i], &((")
+            out = try cgen_put_type(d, out, store, elem)
+            out = try cgen_put(d, out, " *)")
+            out = try cgen_put_tmp(d, out, item.result, "p")
+            out = try cgen_put(d, out, ")[alder_i]); if (")
+            out = try cgen_put_tmp(d, out, item.result, "status")
+            out = try cgen_put(d, out, " != (uint8_t)0) { break; } } }\n")
+        }
+        out = try cgen_put(d, out, "  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { ")
+        out = try cgen_put_tmp(d, out, item.result, "grown")
+        out = try cgen_put(d, out, " = (AlderVec){ ")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".len, ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.c)
+        out = try cgen_put(d, out, " }; }\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)0; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p0 = ")
+        out = try cgen_put_tmp(d, out, item.result, "grown")
+        out = try cgen_put(d, out, "; } else { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1.alder_tag = (uint32_t)(")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        return cgen_put(d, out, " == (uint8_t)1 ? 0 : 1); }\n")
+    }
+    if item.op == mir_op_bytes_as_slice() || item.op == mir_op_string_as_bytes() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderSlice){ (void *)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".data, ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ".len };\n")
+    }
+    if item.op == mir_op_bytes_try_from_vec() {
+        out = try cgen_put(d, out, "  uint8_t ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)0;\n  void *")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = NULL;\n  AlderBytes ")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, " = (AlderBytes){ NULL, (uint64_t)0 };\n  if (")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len != (uint64_t)0 && ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".data == NULL) { alder_runtime_panic(\"bytes.try_from_vec: null source\"); }\n  if (")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len != (uint64_t)0) { if (")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len > (uint64_t)SIZE_MAX) { ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)2; } else { ")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " = alder_domain_alloc(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", (size_t)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len, _Alignof(uint8_t)); if (")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, " == NULL) { ")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " = (uint8_t)1; } } }\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { if (")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len != (uint64_t)0) { memcpy(")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".data, (size_t)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len); } ")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, " = (AlderBytes){ (const uint8_t *)")
+        out = try cgen_put_tmp(d, out, item.result, "p")
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ".len }; }\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        out = try cgen_put(d, out, " == (uint8_t)0) { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)0; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p0 = ")
+        out = try cgen_put_tmp(d, out, item.result, "bytes")
+        out = try cgen_put(d, out, "; } else { ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1; ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1.alder_tag = (uint32_t)(")
+        out = try cgen_put_tmp(d, out, item.result, "status")
+        return cgen_put(d, out, " == (uint8_t)1 ? 0 : 1); }\n")
     }
     if item.op == mir_op_vec_len() || item.op == mir_op_vec_capacity() {
         out = try cgen_put(d, out, "  ")
@@ -1068,7 +1290,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     }
     if item.op == mir_op_const_get() {
         let constant_id = cgen_const_id(store, indexes, item.name_start, item.name_end)
-        let constant = __s0_buffer_get(MirConstRec, store.constants, constant_id - 1)
+        let constant = (store.constants)[constant_id - 1]
         if constant.const_type == mir_type_unit() { return Ok(out) }
         if constant.kind == mir_const_string() {
             out = try cgen_put(d, out, "  ")
@@ -1099,12 +1321,12 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_call() || item.op == mir_op_ffi_call_unsafe() {
         out = try cgen_put(d, out, "  ")
         var result_type: U64 = 0
-        if item.op == mir_op_call() { result_type = __s0_buffer_get(MirFunctionRec, store.functions, item.target - 1).result_type }
-        else { result_type = __s0_buffer_get(MirImportRec, store.imports, item.target - 1).result_type }
+        if item.op == mir_op_call() { result_type = (store.functions)[item.target - 1].result_type }
+        else { result_type = (store.imports)[item.target - 1].result_type }
         if result_type != mir_type_unit() { out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = ") }
         if item.op == mir_op_call() { out = try cgen_emit_function_name(d, out, store, item.target) } else { out = try cgen_put(d, out, "(")
-        let imported = __s0_buffer_get(MirImportRec, store.imports, item.target - 1)
+        let imported = (store.imports)[item.target - 1]
         out = try cgen_put_name(d, out, store, imported.name_start, imported.name_end)
         out = try cgen_put(d, out, ")") }
         out = try cgen_put(d, out, "(")
@@ -1139,7 +1361,7 @@ fn cgen_emit_terminator(d: Domain, initial: CgenWriter, store: MirStore, indexes
         var ordinal: U64 = 0
         while ordinal < count {
             let case_id = cgen_operand_id(store, indexes, mir_operand_switch_case(), terminator, 0, ordinal)
-            let case = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
+            let case = (store.operands)[case_id - 1]
             var variant: U64 = 0
             if case.name_start == case.name_end { out = try cgen_put(d, out, "  default:\n") } else { variant = cgen_variant_ordinal(store, indexes, type_id, case.name_start, case.name_end)
             out = try cgen_put(d, out, "  case (uint32_t)")
@@ -1162,7 +1384,7 @@ fn cgen_emit_terminator(d: Domain, initial: CgenWriter, store: MirStore, indexes
         return cgen_put(d, out, "  }\n")
     }
     if item.kind == mir_term_return() || item.kind == mir_term_fail() {
-        let result_type = __s0_buffer_get(MirFunctionRec, store.functions, item.function - 1).result_type
+        let result_type = (store.functions)[item.function - 1].result_type
         if result_type == mir_type_unit() { return cgen_put(d, out, "  return;\n") }
         out = try cgen_put(d, out, "  return ")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.value)
@@ -1173,7 +1395,7 @@ fn cgen_emit_terminator(d: Domain, initial: CgenWriter, store: MirStore, indexes
 }
 
 fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(CgenWriter, __s0_Error) {
-    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    let item = (store.functions)[function - 1]
     var out = try cgen_put(d, initial, "static ALDER_MAYBE_UNUSED ")
     if item.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, item.result_type) }
     out = try cgen_put(d, out, " ")
@@ -1181,9 +1403,20 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
     out = try cgen_put(d, out, "(")
     out = try cgen_emit_function_params(d, out, store, indexes, function)
     out = try cgen_put(d, out, ") {\n")
+    let param_count = cgen_function_param_count(store, indexes, function)
+    var param_ordinal: U64 = 0
+    while param_ordinal < param_count {
+        let param = cgen_function_param(store, indexes, function, param_ordinal)
+        if param.param_type != mir_type_unit() {
+            out = try cgen_put(d, out, "  (void)alder_v")
+            out = try cgen_put_u64(d, out, param_ordinal)
+            out = try cgen_put(d, out, ";\n")
+        }
+        param_ordinal = param_ordinal + 1
+    }
     var at: U64 = 0
-    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-        let instruction = __s0_buffer_get(MirInstrRec, store.instructions, at)
+    while at < (store.instructions).len() {
+        let instruction = (store.instructions)[at]
         if instruction.function == function && instruction.op == mir_op_domain_create() {
             out = try cgen_put(d, out, "  AlderDomain alder_domain_")
             out = try cgen_put_u64(d, out, at)
@@ -1204,8 +1437,8 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        let value = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < (store.values).len() {
+        let value = (store.values)[at]
         if value.function == function && value.def_kind != mir_value_def_function_param() && value.value_type != mir_type_unit() {
             out = try cgen_put(d, out, "  ALDER_MAYBE_UNUSED ")
             out = try cgen_put_type(d, out, store, value.value_type)
@@ -1216,8 +1449,8 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        let local = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < (store.locals).len() {
+        let local = (store.locals)[at]
         if local.function == function {
             out = try cgen_put(d, out, "  ALDER_MAYBE_UNUSED ")
             out = try cgen_put_type(d, out, store, local.local_type)
@@ -1247,11 +1480,11 @@ fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, inde
         var instruction_ordinal: U64 = 0
         while instruction_ordinal < icount {
             let instruction = mir_vindex_instr(indexes, function, block, instruction_ordinal)
-            out = try cgen_emit_instruction(d, out, store, indexes, instruction, __s0_buffer_get(MirInstrRec, store.instructions, instruction - 1))
+            out = try cgen_emit_instruction(d, out, store, indexes, instruction, (store.instructions)[instruction - 1])
             instruction_ordinal = instruction_ordinal + 1
         }
         let term = cgen_term(store, indexes, function, block)
-        out = try cgen_emit_terminator(d, out, store, indexes, term.id, __s0_buffer_get(MirTermRec, store.terminators, term.id - 1))
+        out = try cgen_emit_terminator(d, out, store, indexes, term.id, (store.terminators)[term.id - 1])
         block = block + 1
     }
     return cgen_put(d, out, "}\n\n")
@@ -1261,7 +1494,7 @@ fn cgen_emit_bodies(d: Domain, initial: CgenWriter, store: MirStore) -> Result(C
     var out = initial
     let indexes = try mir_vindex_build(d, store)
     var function: U64 = 1
-    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
+    while function <= (store.functions).len() {
         out = try cgen_emit_function_body(d, out, store, indexes, function)
         function = function + 1
     }

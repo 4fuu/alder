@@ -879,8 +879,11 @@ func (p *parser) parseOp() (Instr, error) {
 			err = p.parseOptionalElse(t, &in)
 		}
 
-	case "copy_to_domain":
+	case "copy_to_domain", "copy_to_domain.try":
 		in.Op = OpCopyToDomain
+		if t.text == "copy_to_domain.try" {
+			in.Op = OpCopyToDomainTry
+		}
 		if in.Domain, err = p.parseValueRef(); err != nil {
 			return in, err
 		}
@@ -888,6 +891,11 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		in.CopyVal, err = p.parseValueRef()
+		if err == nil && in.Op == OpCopyToDomainTry {
+			if err = p.expectComma(); err == nil {
+				in.TypeOp, err = p.parseType()
+			}
+		}
 
 	case "cleanup.scope.begin":
 		in.Op = OpCleanupScopeBegin
@@ -1022,8 +1030,11 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		err = p.parseOptionalElse(t, &in)
-	case "vec.grow.checked":
+	case "vec.grow.checked", "vec.try_grow":
 		in.Op = OpVecGrowChecked
+		if t.text == "vec.try_grow" {
+			in.Op = OpVecTryGrow
+		}
 		if in.Slice, err = p.parseValueRef(); err != nil {
 			return in, err
 		}
@@ -1039,7 +1050,13 @@ func (p *parser) parseOp() (Instr, error) {
 		if in.Capacity, err = p.parseValueRef(); err != nil {
 			return in, err
 		}
-		err = p.parseOptionalElse(t, &in)
+		if in.Op == OpVecTryGrow {
+			if err = p.expectComma(); err == nil {
+				in.TypeOp, err = p.parseType()
+			}
+		} else {
+			err = p.parseOptionalElse(t, &in)
+		}
 	case "vec.len", "vec.capacity", "vec.storage", "vec.as_slice", "vec.as_mut_slice":
 		switch t.text {
 		case "vec.len":
@@ -1054,6 +1071,27 @@ func (p *parser) parseOp() (Instr, error) {
 			in.Op = OpVecAsMutSlice
 		}
 		in.Slice, err = p.parseValueRef()
+	case "bytes.as_slice", "string.as_bytes":
+		if t.text == "bytes.as_slice" {
+			in.Op = OpBytesAsSlice
+		} else {
+			in.Op = OpStringAsBytes
+		}
+		in.Slice, err = p.parseValueRef()
+	case "bytes.try_from_vec":
+		in.Op = OpBytesTryFromVec
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Slice, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err == nil {
+			in.TypeOp, err = p.parseType()
+		}
 	case "array.as_slice":
 		in.Op = OpArrayAsSlice
 		in.Array, err = p.parseValueRef()

@@ -5,7 +5,7 @@
 fn mir_id_valid(id: U64, length: U64) -> Bool { return id > 0 && id <= length }
 
 fn mir_name_range_valid(store: MirStore, start: U64, end: U64) -> Bool {
-    return start <= end && end <= __s0_buffer_len(U8, store.names)
+    return start <= end && end <= (store.names).len()
 }
 
 fn mir_ident_start(byte: U8) -> Bool {
@@ -19,7 +19,7 @@ fn mir_name_valid(store: MirStore, start: U64, end: U64, dotted: Bool) -> Bool {
     var at = start
     var segment_start = true
     while at < end {
-        let byte = __s0_buffer_get(U8, store.names, at)
+        let byte = (store.names)[at]
         if segment_start {
             if !mir_ident_start(byte) { return false }
             segment_start = false
@@ -33,15 +33,15 @@ fn mir_name_valid(store: MirStore, start: U64, end: U64, dotted: Bool) -> Bool {
     return !segment_start
 }
 
-fn mir_type_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, __s0_buffer_len(MirTypeRec, store.types)) }
-fn mir_function_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, __s0_buffer_len(MirFunctionRec, store.functions)) }
-fn mir_import_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, __s0_buffer_len(MirImportRec, store.imports)) }
+fn mir_type_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, (store.types).len()) }
+fn mir_function_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, (store.functions).len()) }
+fn mir_import_valid(store: MirStore, id: U64) -> Bool { return mir_id_valid(id, (store.imports).len()) }
 
 fn mir_value_count(store: MirStore, function: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        if __s0_buffer_get(MirValueRec, store.values, at).function == function { count = count + 1 }
+    while at < (store.values).len() {
+        if (store.values)[at].function == function { count = count + 1 }
         at = at + 1
     }
     return count
@@ -50,8 +50,8 @@ fn mir_value_count(store: MirStore, function: U64) -> U64 {
 fn mir_block_count(store: MirStore, function: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        if __s0_buffer_get(MirBlockRec, store.blocks, at).function == function { count = count + 1 }
+    while at < (store.blocks).len() {
+        if (store.blocks)[at].function == function { count = count + 1 }
         at = at + 1
     }
     return count
@@ -60,8 +60,8 @@ fn mir_block_count(store: MirStore, function: U64) -> U64 {
 fn mir_local_count(store: MirStore, function: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        if __s0_buffer_get(MirLocalRec, store.locals, at).function == function { count = count + 1 }
+    while at < (store.locals).len() {
+        if (store.locals)[at].function == function { count = count + 1 }
         at = at + 1
     }
     return count
@@ -71,8 +71,8 @@ fn mir_value_valid(store: MirStore, function: U64, id: U64) -> Bool {
     if id == 0 { return false }
     var found: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        let rec = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < (store.values).len() {
+        let rec = (store.values)[at]
         if rec.function == function && rec.ordinal + 1 == id { found = found + 1 }
         at = at + 1
     }
@@ -83,8 +83,8 @@ fn mir_block_valid(store: MirStore, function: U64, id: U64) -> Bool {
     if id == 0 { return false }
     var found: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        let rec = __s0_buffer_get(MirBlockRec, store.blocks, at)
+    while at < (store.blocks).len() {
+        let rec = (store.blocks)[at]
         if rec.function == function && rec.ordinal + 1 == id { found = found + 1 }
         at = at + 1
     }
@@ -95,8 +95,8 @@ fn mir_local_valid(store: MirStore, function: U64, id: U64) -> Bool {
     if id == 0 { return false }
     var found: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        let rec = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < (store.locals).len() {
+        let rec = (store.locals)[at]
         if rec.function == function && rec.ordinal + 1 == id { found = found + 1 }
         at = at + 1
     }
@@ -106,8 +106,8 @@ fn mir_local_valid(store: MirStore, function: U64, id: U64) -> Bool {
 fn mir_operand_count(store: MirStore, kind: U64, owner: U64, edge: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirOperandRec, store.operands) {
-        let rec = __s0_buffer_get(MirOperandRec, store.operands, at)
+    while at < (store.operands).len() {
+        let rec = (store.operands)[at]
         if rec.kind == kind && rec.owner == owner && rec.edge == edge { count = count + 1 }
         at = at + 1
     }
@@ -117,8 +117,8 @@ fn mir_operand_count(store: MirStore, kind: U64, owner: U64, edge: U64) -> U64 {
 fn mir_operand_ordinal_once(store: MirStore, kind: U64, owner: U64, edge: U64, ordinal: U64) -> Bool {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirOperandRec, store.operands) {
-        let rec = __s0_buffer_get(MirOperandRec, store.operands, at)
+    while at < (store.operands).len() {
+        let rec = (store.operands)[at]
         if rec.kind == kind && rec.owner == owner && rec.edge == edge && rec.ordinal == ordinal { count = count + 1 }
         at = at + 1
     }
@@ -138,8 +138,8 @@ fn mir_operand_group_valid(store: MirStore, kind: U64, owner: U64, edge: U64) ->
 fn mir_type_part_count(store: MirStore, owner: U64, kind: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let rec = (store.type_parts)[at]
         if rec.owner == owner && rec.kind == kind { count = count + 1 }
         at = at + 1
     }
@@ -149,8 +149,8 @@ fn mir_type_part_count(store: MirStore, owner: U64, kind: U64) -> U64 {
 fn mir_type_part_ordinal_once(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> Bool {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let rec = (store.type_parts)[at]
         if rec.owner == owner && rec.kind == kind && rec.ordinal == ordinal { count = count + 1 }
         at = at + 1
     }
@@ -168,11 +168,11 @@ fn mir_type_part_group_valid(store: MirStore, owner: U64, kind: U64) -> Bool {
 }
 
 fn mir_validate_types(store: MirStore) -> Bool {
-    let length = __s0_buffer_len(MirTypeRec, store.types)
+    let length = (store.types).len()
     if length < mir_primitive_type_count() { return false }
     var at: U64 = 0
     while at < length {
-        let rec = __s0_buffer_get(MirTypeRec, store.types, at)
+        let rec = (store.types)[at]
         let id = at + 1
         if at < mir_primitive_type_count() {
             if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
@@ -193,10 +193,10 @@ fn mir_validate_types(store: MirStore) -> Bool {
                     if rec.part_count == 0 {
                         if rec.first_part != 0 { return false }
                     } else {
-                        if !mir_id_valid(rec.first_part, __s0_buffer_len(MirTypePartRec, store.type_parts)) || rec.part_count > __s0_buffer_len(MirTypePartRec, store.type_parts) - rec.first_part + 1 { return false }
+                        if !mir_id_valid(rec.first_part, (store.type_parts).len()) || rec.part_count > (store.type_parts).len() - rec.first_part + 1 { return false }
                         var part_at: U64 = 0
                         while part_at < rec.part_count {
-                            let part = __s0_buffer_get(MirTypePartRec, store.type_parts, rec.first_part - 1 + part_at)
+                            let part = (store.type_parts)[rec.first_part - 1 + part_at]
                             if part.kind != mir_type_part_function_param() || part.owner != id || part.ordinal != part_at { return false }
                             part_at = part_at + 1
                         }
@@ -215,10 +215,10 @@ fn mir_validate_types(store: MirStore) -> Bool {
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let part = (store.type_parts)[at]
         if !mir_type_valid(store, part.owner) || !mir_type_valid(store, part.part_type) { return false }
-        let owner = __s0_buffer_get(MirTypeRec, store.types, part.owner - 1)
+        let owner = (store.types)[part.owner - 1]
         if part.kind == mir_type_part_field() {
             if owner.kind != mir_type_kind_aggregate() || !mir_name_valid(store, part.name_start, part.name_end, true) { return false }
         }
@@ -237,8 +237,8 @@ fn mir_validate_types(store: MirStore) -> Bool {
 fn mir_param_group_count(store: MirStore, kind: U64, function: U64, block: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirParamRec, store.params) {
-        let rec = __s0_buffer_get(MirParamRec, store.params, at)
+    while at < (store.params).len() {
+        let rec = (store.params)[at]
         if rec.kind == kind && rec.function == function && rec.block == block { count = count + 1 }
         at = at + 1
     }
@@ -251,8 +251,8 @@ fn mir_param_group_valid(store: MirStore, kind: U64, function: U64, block: U64) 
     while ordinal < count {
         var found: U64 = 0
         var at: U64 = 0
-        while at < __s0_buffer_len(MirParamRec, store.params) {
-            let rec = __s0_buffer_get(MirParamRec, store.params, at)
+        while at < (store.params).len() {
+            let rec = (store.params)[at]
             if rec.kind == kind && rec.function == function && rec.block == block && rec.ordinal == ordinal { found = found + 1 }
             at = at + 1
         }
@@ -265,8 +265,8 @@ fn mir_param_group_valid(store: MirStore, kind: U64, function: U64, block: U64) 
 fn mir_instr_group_count(store: MirStore, function: U64, block: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-        let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
+    while at < (store.instructions).len() {
+        let rec = (store.instructions)[at]
         if rec.function == function && rec.block == block { count = count + 1 }
         at = at + 1
     }
@@ -279,8 +279,8 @@ fn mir_instr_group_valid(store: MirStore, function: U64, block: U64) -> Bool {
     while ordinal < count {
         var found: U64 = 0
         var at: U64 = 0
-        while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-            let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        while at < (store.instructions).len() {
+            let rec = (store.instructions)[at]
             if rec.function == function && rec.block == block && rec.ordinal == ordinal { found = found + 1 }
             at = at + 1
         }
@@ -300,16 +300,16 @@ fn mir_instr_checked(op: U64) -> Bool {
 
 fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
     if rec.op == mir_op_load() || rec.op == mir_op_store() || rec.op == mir_op_borrow() || rec.op == mir_op_borrow_mut() {
-        if !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) || __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).function != rec.function { return false }
+        if !mir_id_valid(rec.place, (store.places).len()) || (store.places)[rec.place - 1].function != rec.function { return false }
         if rec.op == mir_op_store() && !mir_value_valid(store, rec.function, rec.a) { return false }
     }
     if rec.op == mir_op_aggregate_construct() {
         if !mir_type_valid(store, rec.type_op) || !mir_operand_group_valid(store, mir_operand_aggregate_field(), id, 0) { return false }
     }
-    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() {
+    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_bytes_as_slice() || rec.op == mir_op_string_as_bytes() {
         if !mir_value_valid(store, rec.function, rec.a) { return false }
     }
-    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() {
+    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() || rec.op == mir_op_copy_to_domain_try() || rec.op == mir_op_bytes_try_from_vec() {
         if !mir_value_valid(store, rec.function, rec.a) || !mir_value_valid(store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {
@@ -324,7 +324,7 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
     if rec.op == mir_op_vec_new() {
         if !mir_type_valid(store, rec.type_op) { return false }
     }
-    if rec.op == mir_op_vec_construct_checked() || rec.op == mir_op_vec_grow_checked() {
+    if rec.op == mir_op_vec_construct_checked() || rec.op == mir_op_vec_grow_checked() || rec.op == mir_op_vec_try_grow() {
         if !mir_value_valid(store, rec.function, rec.a) || !mir_value_valid(store, rec.function, rec.b) || !mir_value_valid(store, rec.function, rec.c) { return false }
     }
     if rec.op == mir_op_enum_payload_checked() {
@@ -345,16 +345,16 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
 }
 
 fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_array_as_slice() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
+    if rec.op > mir_op_bytes_try_from_vec() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
     var may_omit_result = false
-    if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
-    if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
+    if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && (store.functions)[rec.target - 1].result_type == mir_type_unit() { may_omit_result = true }
+    if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && (store.imports)[rec.target - 1].result_type == mir_type_unit() { may_omit_result = true }
     if mir_instr_produces(rec.op) && !may_omit_result {
         if !mir_value_valid(store, rec.function, rec.result) { return false }
     }
     if may_omit_result && rec.result != 0 { return false }
     if !mir_instr_produces(rec.op) && rec.result != 0 { return false }
-    if rec.place != 0 && !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) { return false }
+    if rec.place != 0 && !mir_id_valid(rec.place, (store.places).len()) { return false }
     if rec.type_op != 0 && !mir_type_valid(store, rec.type_op) { return false }
     if rec.a != 0 && !mir_value_valid(store, rec.function, rec.a) { return false }
     if rec.b != 0 && !mir_value_valid(store, rec.function, rec.b) { return false }
@@ -380,8 +380,8 @@ fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> 
 
 fn mir_validate_functions(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirFunctionRec, store.functions) {
-        let rec = __s0_buffer_get(MirFunctionRec, store.functions, at)
+    while at < (store.functions).len() {
+        let rec = (store.functions)[at]
         let function = at + 1
         if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_type_valid(store, rec.result_type) || !mir_param_group_valid(store, mir_param_function(), function, 0) { return false }
         let blocks = mir_block_count(store, function)
@@ -397,8 +397,8 @@ fn mir_validate_functions(store: MirStore) -> Bool {
             if !mir_block_valid(store, function, block) || !mir_param_group_valid(store, mir_param_block(), function, block) || !mir_instr_group_valid(store, function, block) { return false }
             var terms: U64 = 0
             var term_at: U64 = 0
-            while term_at < __s0_buffer_len(MirTermRec, store.terminators) {
-                let term = __s0_buffer_get(MirTermRec, store.terminators, term_at)
+            while term_at < (store.terminators).len() {
+                let term = (store.terminators)[term_at]
                 if term.function == function && term.block == block { terms = terms + 1 }
                 term_at = term_at + 1
             }
@@ -413,20 +413,20 @@ fn mir_validate_functions(store: MirStore) -> Bool {
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        let rec = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < (store.locals).len() {
+        let rec = (store.locals)[at]
         if !mir_function_valid(store, rec.function) || !mir_name_valid(store, rec.name_start, rec.name_end, false) || !mir_type_valid(store, rec.local_type) { return false }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        let rec = __s0_buffer_get(MirBlockRec, store.blocks, at)
+    while at < (store.blocks).len() {
+        let rec = (store.blocks)[at]
         if !mir_function_valid(store, rec.function) || !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirParamRec, store.params) {
-        let rec = __s0_buffer_get(MirParamRec, store.params, at)
+    while at < (store.params).len() {
+        let rec = (store.params)[at]
         if !mir_function_valid(store, rec.function) || !mir_name_valid(store, rec.name_start, rec.name_end, false) || !mir_type_valid(store, rec.param_type) || !mir_value_valid(store, rec.function, rec.value) { return false }
         if rec.kind == mir_param_function() {
             if rec.block != 0 { return false }
@@ -437,8 +437,8 @@ fn mir_validate_functions(store: MirStore) -> Bool {
         if rec.kind != mir_param_function() && rec.kind != mir_param_block() { return false }
         var links: U64 = 0
         var value_at: U64 = 0
-        while value_at < __s0_buffer_len(MirValueRec, store.values) {
-            let value = __s0_buffer_get(MirValueRec, store.values, value_at)
+        while value_at < (store.values).len() {
+            let value = (store.values)[value_at]
             var want_kind = mir_value_def_block_param()
             if rec.kind == mir_param_function() { want_kind = mir_value_def_function_param() }
             if value.function == rec.function && value.ordinal + 1 == rec.value && value.def_kind == want_kind && value.block == rec.block && value.item == rec.ordinal + 1 { links = links + 1 }
@@ -448,15 +448,15 @@ fn mir_validate_functions(store: MirStore) -> Bool {
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        let rec = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < (store.values).len() {
+        let rec = (store.values)[at]
         if !mir_function_valid(store, rec.function) || !mir_name_valid(store, rec.name_start, rec.name_end, false) || !mir_type_valid(store, rec.value_type) || rec.def_kind > mir_value_def_switch_case() || rec.item == 0 { return false }
         if rec.def_kind != mir_value_def_function_param() && !mir_block_valid(store, rec.function, rec.block) { return false }
         if rec.def_kind == mir_value_def_instruction() {
             var links: U64 = 0
             var instruction_at: U64 = 0
-            while instruction_at < __s0_buffer_len(MirInstrRec, store.instructions) {
-                let instruction = __s0_buffer_get(MirInstrRec, store.instructions, instruction_at)
+            while instruction_at < (store.instructions).len() {
+                let instruction = (store.instructions)[instruction_at]
                 if instruction.function == rec.function && instruction.block == rec.block && instruction.ordinal + 1 == rec.item && instruction.result == rec.ordinal + 1 { links = links + 1 }
                 instruction_at = instruction_at + 1
             }
@@ -469,14 +469,14 @@ fn mir_validate_functions(store: MirStore) -> Bool {
 
 fn mir_validate_places(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirPlaceRec, store.places) {
-        let rec = __s0_buffer_get(MirPlaceRec, store.places, at)
+    while at < (store.places).len() {
+        let rec = (store.places)[at]
         if !mir_function_valid(store, rec.function) { return false }
         if rec.kind == mir_place_local() {
             if !mir_local_valid(store, rec.function, rec.local) || rec.base != 0 || rec.field_start != 0 || rec.field_end != 0 || rec.deref_value != 0 { return false }
         }
         if rec.kind == mir_place_field() {
-            if !mir_id_valid(rec.base, __s0_buffer_len(MirPlaceRec, store.places)) || rec.base >= at + 1 || __s0_buffer_get(MirPlaceRec, store.places, rec.base - 1).function != rec.function || !mir_name_valid(store, rec.field_start, rec.field_end, true) || rec.local != 0 || rec.deref_value != 0 { return false }
+            if !mir_id_valid(rec.base, (store.places).len()) || rec.base >= at + 1 || (store.places)[rec.base - 1].function != rec.function || !mir_name_valid(store, rec.field_start, rec.field_end, true) || rec.local != 0 || rec.deref_value != 0 { return false }
         }
         if rec.kind == mir_place_deref() {
             if !mir_value_valid(store, rec.function, rec.deref_value) || rec.local != 0 || rec.base != 0 || rec.field_start != 0 || rec.field_end != 0 { return false }
@@ -489,14 +489,14 @@ fn mir_validate_places(store: MirStore) -> Bool {
 
 fn mir_validate_declarations(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirImportRec, store.imports) {
-        let rec = __s0_buffer_get(MirImportRec, store.imports, at)
+    while at < (store.imports).len() {
+        let rec = (store.imports)[at]
         if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_type_valid(store, rec.result_type) || !mir_operand_group_valid(store, mir_operand_import_param(), at + 1, 0) { return false }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirConstRec, store.constants) {
-        let rec = __s0_buffer_get(MirConstRec, store.constants, at)
+    while at < (store.constants).len() {
+        let rec = (store.constants)[at]
         if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_type_valid(store, rec.const_type) || rec.kind > mir_const_string() || !mir_name_range_valid(store, rec.string_start, rec.string_end) { return false }
         if rec.kind != mir_const_string() && rec.string_start != rec.string_end { return false }
         if rec.kind == mir_const_bool() && rec.bool_value > 1 { return false }
@@ -508,8 +508,8 @@ fn mir_validate_declarations(store: MirStore) -> Bool {
 
 fn mir_validate_terminators(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTermRec, store.terminators) {
-        let rec = __s0_buffer_get(MirTermRec, store.terminators, at)
+    while at < (store.terminators).len() {
+        let rec = (store.terminators)[at]
         let id = at + 1
         if !mir_function_valid(store, rec.function) || !mir_block_valid(store, rec.function, rec.block) || rec.kind > mir_term_panic() { return false }
         if rec.kind == mir_term_jump() {
@@ -534,8 +534,8 @@ fn mir_validate_terminators(store: MirStore) -> Bool {
 
 fn mir_validate_operands(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirOperandRec, store.operands) {
-        let rec = __s0_buffer_get(MirOperandRec, store.operands, at)
+    while at < (store.operands).len() {
+        let rec = (store.operands)[at]
         if rec.kind < mir_operand_type_part() || rec.kind > mir_operand_aggregate_field() { return false }
         if rec.kind == mir_operand_type_part() {
             if !mir_type_valid(store, rec.owner) || !mir_type_valid(store, rec.operand_type) { return false }
@@ -544,21 +544,21 @@ fn mir_validate_operands(store: MirStore) -> Bool {
             if !mir_import_valid(store, rec.owner) || !mir_type_valid(store, rec.operand_type) { return false }
         }
         if rec.kind == mir_operand_instruction() || rec.kind == mir_operand_checked_edge_arg() || rec.kind == mir_operand_aggregate_field() {
-            if !mir_id_valid(rec.owner, __s0_buffer_len(MirInstrRec, store.instructions)) { return false }
-            let instruction = __s0_buffer_get(MirInstrRec, store.instructions, rec.owner - 1)
+            if !mir_id_valid(rec.owner, (store.instructions).len()) { return false }
+            let instruction = (store.instructions)[rec.owner - 1]
             if rec.value != 0 && !mir_value_valid(store, instruction.function, rec.value) { return false }
             if rec.kind == mir_operand_checked_edge_arg() && rec.target != instruction.target { return false }
             if rec.kind == mir_operand_aggregate_field() {
                 if instruction.op != mir_op_aggregate_construct() || !mir_type_valid(store, instruction.type_op) { return false }
-                let aggregate = __s0_buffer_get(MirTypeRec, store.types, instruction.type_op - 1)
+                let aggregate = (store.types)[instruction.type_op - 1]
                 if aggregate.kind == mir_type_kind_array() {
                     if rec.name_start != 0 || rec.name_end != 0 { return false }
                 } else { if !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false } }
             }
         }
         if rec.kind == mir_operand_terminator_arg() || rec.kind == mir_operand_switch_case() {
-            if !mir_id_valid(rec.owner, __s0_buffer_len(MirTermRec, store.terminators)) { return false }
-            let term = __s0_buffer_get(MirTermRec, store.terminators, rec.owner - 1)
+            if !mir_id_valid(rec.owner, (store.terminators).len()) { return false }
+            let term = (store.terminators)[rec.owner - 1]
             if rec.value != 0 && !mir_value_valid(store, term.function, rec.value) { return false }
             if !mir_block_valid(store, term.function, rec.target) { return false }
             if rec.kind == mir_operand_terminator_arg() {
@@ -574,8 +574,8 @@ fn mir_validate_operands(store: MirStore) -> Bool {
                 if rec.value != 0 {
                     var links: U64 = 0
                     var value_at: U64 = 0
-                    while value_at < __s0_buffer_len(MirValueRec, store.values) {
-                        let value = __s0_buffer_get(MirValueRec, store.values, value_at)
+                    while value_at < (store.values).len() {
+                        let value = (store.values)[value_at]
                         if value.function == term.function && value.ordinal + 1 == rec.value && value.def_kind == mir_value_def_switch_case() && value.block == term.block && value.item == rec.ordinal + 1 { links = links + 1 }
                         value_at = value_at + 1
                     }
@@ -584,10 +584,10 @@ fn mir_validate_operands(store: MirStore) -> Bool {
             }
         }
         if rec.kind == mir_operand_switch_case_arg() {
-            if !mir_id_valid(rec.owner, __s0_buffer_len(MirOperandRec, store.operands)) { return false }
-            let case = __s0_buffer_get(MirOperandRec, store.operands, rec.owner - 1)
+            if !mir_id_valid(rec.owner, (store.operands).len()) { return false }
+            let case = (store.operands)[rec.owner - 1]
             if case.kind != mir_operand_switch_case() || rec.target != case.target { return false }
-            let term = __s0_buffer_get(MirTermRec, store.terminators, case.owner - 1)
+            let term = (store.terminators)[case.owner - 1]
             if !mir_value_valid(store, term.function, rec.value) { return false }
         }
         at = at + 1
@@ -598,8 +598,8 @@ fn mir_validate_operands(store: MirStore) -> Bool {
 fn mir_store_valid(store: MirStore) -> Bool {
     if mir_format_version() != 4 || !mir_validate_types(store) || !mir_validate_declarations(store) || !mir_validate_functions(store) || !mir_validate_places(store) { return false }
     var at: U64 = 0
-    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
-        let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
+    while at < (store.instructions).len() {
+        let rec = (store.instructions)[at]
         if !mir_validate_instruction_refs(store, at + 1, rec) { return false }
         at = at + 1
     }
@@ -634,18 +634,18 @@ fn mir_out_hex_byte(byte: U8) -> Bool {
 }
 
 fn mir_utf8_width(store: MirStore, at: U64, end: U64) -> U64 {
-    let first = __s0_buffer_get(U8, store.names, at)
+    let first = (store.names)[at]
     if first < 128 { return 1 }
-    if first >= 194 && first <= 223 && at + 1 < end && __s0_buffer_get(U8, store.names, at + 1) >= 128 && __s0_buffer_get(U8, store.names, at + 1) <= 191 { return 2 }
+    if first >= 194 && first <= 223 && at + 1 < end && (store.names)[at + 1] >= 128 && (store.names)[at + 1] <= 191 { return 2 }
     if first >= 224 && first <= 239 && at + 2 < end {
-        let b1 = __s0_buffer_get(U8, store.names, at + 1)
-        let b2 = __s0_buffer_get(U8, store.names, at + 2)
+        let b1 = (store.names)[at + 1]
+        let b2 = (store.names)[at + 2]
         if b2 >= 128 && b2 <= 191 && ((first == 224 && b1 >= 160 && b1 <= 191) || (first == 237 && b1 >= 128 && b1 <= 159) || ((first >= 225 && first <= 236 || first >= 238) && b1 >= 128 && b1 <= 191)) { return 3 }
     }
     if first >= 240 && first <= 244 && at + 3 < end {
-        let b1 = __s0_buffer_get(U8, store.names, at + 1)
-        let b2 = __s0_buffer_get(U8, store.names, at + 2)
-        let b3 = __s0_buffer_get(U8, store.names, at + 3)
+        let b1 = (store.names)[at + 1]
+        let b2 = (store.names)[at + 2]
+        let b3 = (store.names)[at + 3]
         if b2 >= 128 && b2 <= 191 && b3 >= 128 && b3 <= 191 && ((first == 240 && b1 >= 144 && b1 <= 191) || (first >= 241 && first <= 243 && b1 >= 128 && b1 <= 191) || (first == 244 && b1 >= 128 && b1 <= 143)) { return 4 }
     }
     return 0
@@ -655,7 +655,7 @@ fn mir_out_quoted(store: MirStore, start: U64, end: U64) -> Bool {
     if !out(34) { return false }
     var at = start
     while at < end {
-        let byte = __s0_buffer_get(U8, store.names, at)
+        let byte = (store.names)[at]
         var handled = false
         if byte == 34 || byte == 92 {
             if !out(92) || !out(byte) { return false }
@@ -713,8 +713,8 @@ fn mir_out_quoted(store: MirStore, start: U64, end: U64) -> Bool {
 
 fn mir_out_type_part_type(store: MirStore, owner: U64, kind: U64, ordinal: U64, depth: U64) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let rec = (store.type_parts)[at]
         if rec.owner == owner && rec.kind == kind && rec.ordinal == ordinal { return mir_out_type(store, rec.part_type, depth) }
         at = at + 1
     }
@@ -735,7 +735,7 @@ fn mir_out_type(store: MirStore, id: U64, depth: U64) -> Bool {
     if id == mir_type_u64() { return out_string("u64") }
     if id == mir_type_f32() { return out_string("f32") }
     if id == mir_type_f64() { return out_string("f64") }
-    let rec = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+    let rec = (store.types)[id - 1]
     if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() { return out(64) && mir_out_name(store, rec.name_start, rec.name_end) }
     if rec.kind == mir_type_kind_option() { return out_string("option(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_result() { return out_string("result(") && mir_out_type(store, rec.ok_type, depth - 1) && out_string(", ") && mir_out_type(store, rec.err_type, depth - 1) && out(41) }
@@ -770,8 +770,8 @@ fn mir_out_type(store: MirStore, id: U64, depth: U64) -> Bool {
 
 fn mir_out_value(store: MirStore, function: U64, id: U64) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        let rec = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < (store.values).len() {
+        let rec = (store.values)[at]
         if rec.function == function && rec.ordinal + 1 == id { return out(37) && mir_out_name(store, rec.name_start, rec.name_end) }
         at = at + 1
     }
@@ -780,8 +780,8 @@ fn mir_out_value(store: MirStore, function: U64, id: U64) -> Bool {
 
 fn mir_out_block_name(store: MirStore, function: U64, id: U64) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        let rec = __s0_buffer_get(MirBlockRec, store.blocks, at)
+    while at < (store.blocks).len() {
+        let rec = (store.blocks)[at]
         if rec.function == function && rec.ordinal + 1 == id { return mir_out_name(store, rec.name_start, rec.name_end) }
         at = at + 1
     }
@@ -790,8 +790,8 @@ fn mir_out_block_name(store: MirStore, function: U64, id: U64) -> Bool {
 
 fn mir_out_local_name(store: MirStore, function: U64, id: U64) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        let rec = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < (store.locals).len() {
+        let rec = (store.locals)[at]
         if rec.function == function && rec.ordinal + 1 == id { return mir_out_name(store, rec.name_start, rec.name_end) }
         at = at + 1
     }
@@ -799,7 +799,7 @@ fn mir_out_local_name(store: MirStore, function: U64, id: U64) -> Bool {
 }
 
 fn mir_out_place(store: MirStore, function: U64, id: U64) -> Bool {
-    let rec = __s0_buffer_get(MirPlaceRec, store.places, id - 1)
+    let rec = (store.places)[id - 1]
     if rec.kind == mir_place_local() { return out_string("local %") && mir_out_local_name(store, function, rec.local) }
     if rec.kind == mir_place_field() { return out_string("field(") && mir_out_place(store, function, rec.base) && out_string(", ") && mir_out_name(store, rec.field_start, rec.field_end) && out(41) }
     return out_string("deref ") && mir_out_value(store, function, rec.deref_value)
@@ -810,8 +810,8 @@ fn mir_out_operand_values(store: MirStore, kind: U64, owner: U64, edge: U64, fun
     var ordinal: U64 = 0
     while ordinal < count {
         var at: U64 = 0
-        while at < __s0_buffer_len(MirOperandRec, store.operands) {
-            let rec = __s0_buffer_get(MirOperandRec, store.operands, at)
+        while at < (store.operands).len() {
+            let rec = (store.operands)[at]
             if rec.kind == kind && rec.owner == owner && rec.edge == edge && rec.ordinal == ordinal {
                 if ordinal > 0 && !out_string(", ") { return false }
                 if !mir_out_value(store, function, rec.value) { return false }
@@ -830,12 +830,12 @@ fn mir_out_block_ref(store: MirStore, function: U64, target: U64, kind: U64, own
 }
 
 fn mir_out_function_name(store: MirStore, id: U64) -> Bool {
-    let rec = __s0_buffer_get(MirFunctionRec, store.functions, id - 1)
+    let rec = (store.functions)[id - 1]
     return mir_out_name(store, rec.name_start, rec.name_end)
 }
 
 fn mir_out_import_name(store: MirStore, id: U64) -> Bool {
-    let rec = __s0_buffer_get(MirImportRec, store.imports, id - 1)
+    let rec = (store.imports)[id - 1]
     return mir_out_name(store, rec.name_start, rec.name_end)
 }
 
@@ -904,7 +904,12 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 61 { return out_string("vec.storage") }
     if op == 62 { return out_string("vec.as_slice") }
     if op == 63 { return out_string("vec.as_mut_slice") }
-    return out_string("array.as_slice")
+    if op == 64 { return out_string("array.as_slice") }
+    if op == 65 { return out_string("copy_to_domain.try") }
+    if op == 66 { return out_string("vec.try_grow") }
+    if op == 67 { return out_string("bytes.as_slice") }
+    if op == 68 { return out_string("string.as_bytes") }
+    return out_string("bytes.try_from_vec")
 }
 
 fn mir_out_fail_edge(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
@@ -923,16 +928,16 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         if !out(32) || !mir_out_place(store, rec.function, rec.place) || !out_string(", ") || !mir_out_value(store, rec.function, rec.a) { return false }
     }
     if rec.op == mir_op_aggregate_construct() {
-        if !out(32) || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out_string(" { ") { return false }
+        if !out(32) || !mir_out_type(store, rec.type_op, (store.types).len() + 1) || !out_string(" { ") { return false }
         let count = mir_operand_count(store, mir_operand_aggregate_field(), id, 0)
         var ordinal: U64 = 0
         while ordinal < count {
             var at: U64 = 0
-            while at < __s0_buffer_len(MirOperandRec, store.operands) {
-                let field = __s0_buffer_get(MirOperandRec, store.operands, at)
+            while at < (store.operands).len() {
+                let field = (store.operands)[at]
                 if field.kind == mir_operand_aggregate_field() && field.owner == id && field.ordinal == ordinal {
                     if ordinal > 0 && !out_string(", ") { return false }
-                    let aggregate = __s0_buffer_get(MirTypeRec, store.types, rec.type_op - 1)
+                    let aggregate = (store.types)[rec.type_op - 1]
                     if aggregate.kind != mir_type_kind_array() && (!mir_out_name(store, field.name_start, field.name_end) || !out_string(": ")) { return false }
                     if !mir_out_value(store, rec.function, field.value) { return false }
                 }
@@ -942,18 +947,21 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         }
         if !out_string(" }") { return false }
     }
-    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() {
+    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_bytes_as_slice() || rec.op == mir_op_string_as_bytes() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) { return false }
     }
     if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {
-        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) { return false }
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(store, rec.type_op, (store.types).len() + 1) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) { return false }
         if rec.op == mir_op_alloc_checked() && !mir_out_fail_edge(store, id, rec) { return false }
     }
     if rec.op == mir_op_copy_to_domain() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) { return false }
+    }
+    if rec.op == mir_op_copy_to_domain_try() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !out_string(", ") || !mir_out_type(store, rec.type_op, (store.types).len() + 1) { return false }
     }
     if rec.op == mir_op_cleanup_push() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", @") || !mir_out_function_name(store, rec.target) || !out_string(", (") || !mir_out_operand_values(store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
@@ -971,23 +979,29 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !out_string(", ") || !mir_out_value(store, rec.function, rec.c) || !mir_out_fail_edge(store, id, rec) { return false }
     }
     if rec.op == mir_op_vec_new() {
-        if !out(32) || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+        if !out(32) || !mir_out_type(store, rec.type_op, (store.types).len() + 1) { return false }
     }
     if rec.op == mir_op_vec_construct_checked() || rec.op == mir_op_vec_grow_checked() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !out_string(", ") || !mir_out_value(store, rec.function, rec.c) || !mir_out_fail_edge(store, id, rec) { return false }
+    }
+    if rec.op == mir_op_vec_try_grow() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !out_string(", ") || !mir_out_value(store, rec.function, rec.c) || !out_string(", ") || !mir_out_type(store, rec.type_op, (store.types).len() + 1) { return false }
+    }
+    if rec.op == mir_op_bytes_try_from_vec() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) || !out_string(", ") || !mir_out_type(store, rec.type_op, (store.types).len() + 1) { return false }
     }
     if rec.op == mir_op_enum_payload_checked() {
         if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_name(store, rec.name_start, rec.name_end) || !mir_out_fail_edge(store, id, rec) { return false }
     }
     if rec.op == mir_op_enum_construct() {
-        if !out(32) || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out_string(", ") || !mir_out_name(store, rec.name_start, rec.name_end) { return false }
+        if !out(32) || !mir_out_type(store, rec.type_op, (store.types).len() + 1) || !out_string(", ") || !mir_out_name(store, rec.name_start, rec.name_end) { return false }
         if rec.a != 0 && (!out_string(", ") || !mir_out_value(store, rec.function, rec.a)) { return false }
     }
     if rec.op == mir_op_table_create() {
-        if !out(32) || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out_string(", ") || !mir_out_value(store, rec.function, rec.a) { return false }
+        if !out(32) || !mir_out_type(store, rec.type_op, (store.types).len() + 1) || !out_string(", ") || !mir_out_value(store, rec.function, rec.a) { return false }
     }
     if rec.op >= mir_op_int_trunc() && rec.op <= mir_op_float_from_int() {
-        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(store, rec.type_op, (store.types).len() + 1) { return false }
     }
     if rec.op == mir_op_const_get() {
         if !out_string(" @") || !mir_out_name(store, rec.name_start, rec.name_end) { return false }
@@ -1017,8 +1031,8 @@ fn mir_out_terminator(store: MirStore, id: U64, rec: MirTermRec) -> Bool {
         var ordinal: U64 = 0
         while ordinal < count {
             var at: U64 = 0
-            while at < __s0_buffer_len(MirOperandRec, store.operands) {
-                let case = __s0_buffer_get(MirOperandRec, store.operands, at)
+            while at < (store.operands).len() {
+                let case = (store.operands)[at]
                 if case.kind == mir_operand_switch_case() && case.owner == id && case.ordinal == ordinal {
                     if !out_string("    ") { return false }
                     if case.name_start == case.name_end {
@@ -1054,11 +1068,11 @@ fn mir_out_param_group(store: MirStore, kind: U64, function: U64, block: U64) ->
     var ordinal: U64 = 0
     while ordinal < count {
         var at: U64 = 0
-        while at < __s0_buffer_len(MirParamRec, store.params) {
-            let rec = __s0_buffer_get(MirParamRec, store.params, at)
+        while at < (store.params).len() {
+            let rec = (store.params)[at]
             if rec.kind == kind && rec.function == function && rec.block == block && rec.ordinal == ordinal {
                 if ordinal > 0 && !out_string(", ") { return false }
-                if !out(37) || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(": ") || !mir_out_type(store, rec.param_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                if !out(37) || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(": ") || !mir_out_type(store, rec.param_type, (store.types).len() + 1) { return false }
             }
             at = at + 1
         }
@@ -1069,8 +1083,8 @@ fn mir_out_param_group(store: MirStore, kind: U64, function: U64, block: U64) ->
 
 fn mir_out_type_declarations(store: MirStore) -> Bool {
     var id = mir_primitive_type_count() + 1
-    while id <= __s0_buffer_len(MirTypeRec, store.types) {
-        let rec = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+    while id <= (store.types).len() {
+        let rec = (store.types)[id - 1]
         if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() {
             if rec.kind == mir_type_kind_aggregate() && !out_string("\ntype @") { return false }
             if rec.kind == mir_type_kind_enum() && !out_string("\nenum @") { return false }
@@ -1081,14 +1095,14 @@ fn mir_out_type_declarations(store: MirStore) -> Bool {
             var ordinal: U64 = 0
             while ordinal < count {
                 var at: U64 = 0
-                while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-                    let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+                while at < (store.type_parts).len() {
+                    let part = (store.type_parts)[at]
                     if part.owner == id && part.kind == kind && part.ordinal == ordinal {
                         if !out_string("  ") || !mir_out_name(store, part.name_start, part.name_end) { return false }
                         if kind == mir_type_part_field() {
-                            if !out_string(": ") || !mir_out_type(store, part.part_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                            if !out_string(": ") || !mir_out_type(store, part.part_type, (store.types).len() + 1) { return false }
                         }
-                        if kind == mir_type_part_variant() && part.part_type != mir_type_unit() && (!out(40) || !mir_out_type(store, part.part_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(41)) { return false }
+                        if kind == mir_type_part_variant() && part.part_type != mir_type_unit() && (!out(40) || !mir_out_type(store, part.part_type, (store.types).len() + 1) || !out(41)) { return false }
                         if !out(10) { return false }
                     }
                     at = at + 1
@@ -1104,9 +1118,9 @@ fn mir_out_type_declarations(store: MirStore) -> Bool {
 
 fn mir_out_declarations(store: MirStore) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(MirConstRec, store.constants) {
-        let rec = __s0_buffer_get(MirConstRec, store.constants, at)
-        if !out_string("\nconst @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(": ") || !mir_out_type(store, rec.const_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out_string(" = ") { return false }
+    while at < (store.constants).len() {
+        let rec = (store.constants)[at]
+        if !out_string("\nconst @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(": ") || !mir_out_type(store, rec.const_type, (store.types).len() + 1) || !out_string(" = ") { return false }
         if rec.kind == mir_const_unit() {
             if !out_string("()") { return false }
         }
@@ -1125,24 +1139,24 @@ fn mir_out_declarations(store: MirStore) -> Bool {
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirImportRec, store.imports) {
-        let rec = __s0_buffer_get(MirImportRec, store.imports, at)
+    while at < (store.imports).len() {
+        let rec = (store.imports)[at]
         if !out_string("\nimport @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(": fn(") { return false }
         let count = mir_operand_count(store, mir_operand_import_param(), at + 1, 0)
         var ordinal: U64 = 0
         while ordinal < count {
             var operand_at: U64 = 0
-            while operand_at < __s0_buffer_len(MirOperandRec, store.operands) {
-                let operand = __s0_buffer_get(MirOperandRec, store.operands, operand_at)
+            while operand_at < (store.operands).len() {
+                let operand = (store.operands)[operand_at]
                 if operand.kind == mir_operand_import_param() && operand.owner == at + 1 && operand.ordinal == ordinal {
                     if ordinal > 0 && !out_string(", ") { return false }
-                    if !mir_out_type(store, operand.operand_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                    if !mir_out_type(store, operand.operand_type, (store.types).len() + 1) { return false }
                 }
                 operand_at = operand_at + 1
             }
             ordinal = ordinal + 1
         }
-        if !out_string(") -> ") || !mir_out_type(store, rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
+        if !out_string(") -> ") || !mir_out_type(store, rec.result_type, (store.types).len() + 1) || !out(10) { return false }
         at = at + 1
     }
     return true
@@ -1150,19 +1164,19 @@ fn mir_out_declarations(store: MirStore) -> Bool {
 
 fn mir_out_functions(store: MirStore) -> Bool {
     var function: U64 = 1
-    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
-        let rec = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    while function <= (store.functions).len() {
+        let rec = (store.functions)[function - 1]
         if !out_string("\nfn @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out(40) || !mir_out_param_group(store, mir_param_function(), function, 0) || !out(41) { return false }
-        if rec.result_type != mir_type_unit() && (!out_string(" -> ") || !mir_out_type(store, rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1)) { return false }
+        if rec.result_type != mir_type_unit() && (!out_string(" -> ") || !mir_out_type(store, rec.result_type, (store.types).len() + 1)) { return false }
         if !out_string(" {\n") { return false }
         let local_count = mir_local_count(store, function)
         var ordinal: U64 = 0
         while ordinal < local_count {
             var at: U64 = 0
-            while at < __s0_buffer_len(MirLocalRec, store.locals) {
-                let local = __s0_buffer_get(MirLocalRec, store.locals, at)
+            while at < (store.locals).len() {
+                let local = (store.locals)[at]
                 if local.function == function && local.ordinal == ordinal {
-                    if !out_string("  local %") || !mir_out_name(store, local.name_start, local.name_end) || !out_string(": ") || !mir_out_type(store, local.local_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
+                    if !out_string("  local %") || !mir_out_name(store, local.name_start, local.name_end) || !out_string(": ") || !mir_out_type(store, local.local_type, (store.types).len() + 1) || !out(10) { return false }
                 }
                 at = at + 1
             }
@@ -1181,16 +1195,16 @@ fn mir_out_functions(store: MirStore) -> Bool {
             var instruction_ordinal: U64 = 0
             while instruction_ordinal < instruction_count {
                 var instruction_at: U64 = 0
-                while instruction_at < __s0_buffer_len(MirInstrRec, store.instructions) {
-                    let instruction = __s0_buffer_get(MirInstrRec, store.instructions, instruction_at)
+                while instruction_at < (store.instructions).len() {
+                    let instruction = (store.instructions)[instruction_at]
                     if instruction.function == function && instruction.block == block && instruction.ordinal == instruction_ordinal && !mir_out_instruction(store, instruction_at + 1, instruction) { return false }
                     instruction_at = instruction_at + 1
                 }
                 instruction_ordinal = instruction_ordinal + 1
             }
             var term_at: U64 = 0
-            while term_at < __s0_buffer_len(MirTermRec, store.terminators) {
-                let term = __s0_buffer_get(MirTermRec, store.terminators, term_at)
+            while term_at < (store.terminators).len() {
+                let term = (store.terminators)[term_at]
                 if term.function == function && term.block == block && !mir_out_terminator(store, term_at + 1, term) { return false }
                 term_at = term_at + 1
             }

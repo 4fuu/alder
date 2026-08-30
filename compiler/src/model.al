@@ -145,11 +145,11 @@ type TypeParamRec {
 // Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
 // 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
 // 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, 15 Array,
-// 16 __s0_String, 17 Vec, and 18 MutSlice. Primitive targets
+// 16 [U8], 17 Vec, 18 MutSlice, and 19 CapacityError. Primitive targets
 // 1..12 identify Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, and
 // Unit directly. An Array record has one type argument and stores its fixed
 // length in target. String and Bytes retain source identities distinct from
-// slice(U8); __s0_String is the private bootstrap slice(U8) facility. Vec has
+// slice(U8); [U8] is the private bootstrap slice(U8) facility. Vec has
 // recursively copyable value semantics; slice and MutSlice are scoped views.
 // Canonical records have no source ownership (syntax is zero);
 // source occurrences are retained by
@@ -164,12 +164,14 @@ type CheckedTypeRec {
 
 // Source value categories are 1 copyable, 2 affine owner, and 3 scoped
 // capability. contains_scoped remains true when an affine aggregate also
-// contains a scoped component, so owner flow and capability escape checks do
-// not erase one another's facts. Category zero means a type parameter remains
-// unresolved and is never valid at a lowering boundary.
+// contains a scoped component. contains_nonimmutable_scoped distinguishes
+// exclusive/non-relocatable capabilities from immutable views that inferred
+// storage may materialize inside ordinary aggregates. Category zero means a
+// type parameter remains unresolved and is never valid at a lowering boundary.
 type TypeCategoryRec {
     category: U64
     contains_scoped: Bool
+    contains_nonimmutable_scoped: Bool
 }
 
 // Per-owner structured flow validation uses states 0 available and 1
@@ -276,7 +278,9 @@ type CheckedExprChildRec {
 // builtin is zero for kinds 1..4, a stable builtin identity for kind 5,
 // and 5 OutOfMemory or 6 Limit for kind 6. Collection builtin identities are
 // 18 Vec.new, 19 Vec.from_array, 20 len, 21 Vec.push, 22 get,
-// 23 immutable slice/range, 24 mutable slice, and 25 mutable subview.
+// 23 immutable slice/range, 24 mutable slice, 25 mutable subview,
+// 26 Vec.try_reserve, 27 Vec.try_push, 28 Bytes.try_from_vec,
+// 29 Bytes.as_slice, and 30 String.as_bytes.
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -395,14 +399,20 @@ type CheckedCleanupRec {
 }
 
 type CheckedControlStore {
-    blocks: __s0_Buffer(CheckedBlockRec)
-    statement_links: __s0_Buffer(CheckedStatementLinkRec)
-    statements: __s0_Buffer(CheckedStatementRec)
-    places: __s0_Buffer(CheckedPlaceRec)
-    matches: __s0_Buffer(CheckedMatchRec)
-    match_arms: __s0_Buffer(CheckedMatchArmRec)
-    tries: __s0_Buffer(CheckedTryRec)
-    cleanups: __s0_Buffer(CheckedCleanupRec)
+    blocks: Vec(CheckedBlockRec)
+    statement_links: Vec(CheckedStatementLinkRec)
+    statements: Vec(CheckedStatementRec)
+    places: Vec(CheckedPlaceRec)
+    matches: Vec(CheckedMatchRec)
+    match_arms: Vec(CheckedMatchArmRec)
+    tries: Vec(CheckedTryRec)
+    cleanups: Vec(CheckedCleanupRec)
+}
+
+fn vec_appended(T: type, values: Vec(T), value: T) -> Result(Vec(T), CapacityError) {
+    var result = values
+    try result.try_push(value)
+    return Ok(result)
 }
 
 // Bindings are recorded per function in canonical declaration order. kind is 1
@@ -505,12 +515,12 @@ type DiagnosticTypeRec {
 }
 
 type State {
-    paths: __s0_Buffer(U8)
-    texts: __s0_Buffer(U8)
-    values: __s0_Buffer(U8)
-    sources: __s0_Buffer(SourceRec)
-    tokens: __s0_Buffer(TokenRec)
-    diagnostics: __s0_Buffer(LexDiagRec)
+    paths: Vec(U8)
+    texts: Vec(U8)
+    values: Vec(U8)
+    sources: Vec(SourceRec)
+    tokens: Vec(TokenRec)
+    diagnostics: Vec(LexDiagRec)
 }
 
 enum LexResult {

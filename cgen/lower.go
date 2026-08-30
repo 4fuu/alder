@@ -163,9 +163,11 @@ func (g *gen) emitFunction(b *strings.Builder, f *mir.Function) {
 		b.WriteString("  AlderCtx_" + strconv.Itoa(s) + " alder_ctx_" + strconv.Itoa(s) + " = {0};\n")
 	}
 	// Function parameters cannot carry indeterminate values, so an explicit
-	// void use safely suppresses strict unused-parameter warnings.
+	// void use safely suppresses strict unused-parameter warnings. Emit it for
+	// every parameter because MIR-only domain uses can erase completely during
+	// C lowering.
 	for vi := range f.Params {
-		if f.Params[vi].Type != mir.TypeUnit && !g.valueRead[vi] {
+		if f.Params[vi].Type != mir.TypeUnit {
 			b.WriteString("  (void)" + g.val(mir.ValueId(vi)) + ";\n")
 		}
 	}

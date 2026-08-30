@@ -46,7 +46,7 @@ func phase10Backend(m *mir.Module) []Error {
 							break
 						}
 					}
-				case mir.OpCopyToDomain:
+				case mir.OpCopyToDomain, mir.OpCopyToDomainTry:
 					t, ok := f.ValueType(in.CopyVal)
 					if !ok {
 						break

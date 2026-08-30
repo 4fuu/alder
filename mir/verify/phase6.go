@@ -58,7 +58,7 @@ func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupA
 				loc := locInstr(f, b, ii, in)
 				if in.Op == mir.OpStore {
 					if _, deref := placeDerefRoot(&in.Place); deref {
-						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored) {
+						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored) && !materializedForDerefStore(f, in.StoreVal) {
 							errs = append(errs, Error{Loc: loc, Msg: "lifetime-bearing values may not be stored through dereference places in the current MIR profile"})
 						}
 					}
@@ -152,7 +152,7 @@ func applyResourceEffect(m *mir.Module, f *mir.Function, bi mir.BlockId, ii int,
 	case mir.OpDomainMark:
 		ensureResource(st)
 		delete(st.invalidMarks, in.Result)
-	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
+	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpCopyToDomainTry, mir.OpBytesTryFromVec, mir.OpTableCreate:
 		clearProducedRoots(info, in.Result, bi, ii, st)
 	case mir.OpDomainDestroy:
 		kill(in.Domain, false, mir.NoValue)
@@ -418,7 +418,7 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 			}
 		}
 		changed = addDep(out, defKey{v.Def.Block, v.Def.Instr}) || changed
-	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpTableCreate:
+	case mir.OpAlloc, mir.OpAllocChecked, mir.OpCopyToDomain, mir.OpCopyToDomainTry, mir.OpBytesTryFromVec, mir.OpTableCreate:
 		merge(in.Domain)
 		// copy_to_domain materializes an independent value. Its lifetime is
 		// rooted only in the destination domain; retaining source provenance
@@ -444,8 +444,10 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		merge(in.Slice)
 	case mir.OpVecConstructChecked, mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
 		merge(in.Slice)
-	case mir.OpVecGrowChecked:
+	case mir.OpVecGrowChecked, mir.OpVecTryGrow:
 		merge(in.Domain)
+		merge(in.Slice)
+	case mir.OpBytesAsSlice, mir.OpStringAsBytes:
 		merge(in.Slice)
 	case mir.OpArrayIndexChecked:
 		merge(in.Array)
@@ -490,6 +492,26 @@ func typeRequiresLocalStore(m *mir.Module, t mir.TypeId) bool {
 		}
 	}
 	return false
+}
+func materializedForDerefStore(f *mir.Function, value mir.ValueId) bool {
+	if int(value) >= len(f.Values) {
+		return false
+	}
+	def := f.Values[value].Def
+	if def.Kind == mir.ValueDefInstr && int(def.Block) < len(f.Blocks) && def.Instr >= 0 && def.Instr < len(f.Blocks[def.Block].Instrs) {
+		op := f.Blocks[def.Block].Instrs[def.Instr].Op
+		return op == mir.OpCopyToDomain || op == mir.OpCopyToDomainTry
+	}
+	if def.Kind != mir.ValueDefSwitchCase || int(def.Block) >= len(f.Blocks) || def.Case < 0 || def.Case >= len(f.Blocks[def.Block].Term.Cases) {
+		return false
+	}
+	term := f.Blocks[def.Block].Term
+	if term.Cases[def.Case].Variant != "ok" || int(term.Value) >= len(f.Values) {
+		return false
+	}
+	resultDef := f.Values[term.Value].Def
+	return resultDef.Kind == mir.ValueDefInstr && int(resultDef.Block) < len(f.Blocks) && resultDef.Instr >= 0 &&
+		resultDef.Instr < len(f.Blocks[resultDef.Block].Instrs) && f.Blocks[resultDef.Block].Instrs[resultDef.Instr].Op == mir.OpCopyToDomainTry
 }
 func addDep(i *domainInfo, d defKey) bool {
 	if i.deps == nil {
@@ -717,7 +739,7 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 					for r := range i.roots {
 						local = local || r.param < 0
 					}
-					if local {
+					if local && !stableParameterDomainLoopValue(m, f, info, effect, args[v.Def.Param]) {
 						errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %s carries a function-local domain handle or reference across a backedge", valueName(f, mir.ValueId(vi)))})
 					}
 				}
@@ -754,7 +776,11 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 // conflated across iterations. As elsewhere in the verifier, unsafe foreign
 // code is responsible for honoring the declared safe boundary.
 func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr) bool {
-	if _, ok := localPlaceKey(&in.Place); !ok {
+	return stableParameterDomainLoopValue(m, f, info, effect, in.StoreVal)
+}
+
+func stableParameterDomainLoopValue(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, value mir.ValueId) bool {
+	if int(value) >= len(info) {
 		return false
 	}
 	for _, yes := range effect.destroys {
@@ -767,7 +793,7 @@ func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domai
 			return false
 		}
 	}
-	valueInfo := info[in.StoreVal]
+	valueInfo := info[value]
 	for d := range valueInfo.deps {
 		if d.blk != mir.NoBlock {
 			return false

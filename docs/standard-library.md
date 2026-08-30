@@ -17,6 +17,8 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 
 - [`core.collection` public snapshot v1](api/core.collection-v1.md), covering
   the Milestone 7.1 `Vec(T)` surface;
+- [`core.collection` public snapshot v2](api/core.collection-v2.md), adding
+  Milestone 7.3 fallible capacity operations and immutable byte views;
 - [`core.slice` public snapshot v1](api/core.slice-v1.md), covering the
   Milestone 7.1 immutable and mutable view surface.
 

@@ -37,7 +37,7 @@ fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I
 fn run_verify(d: Domain, mir: MirStore) -> I32 {
     var hosted = false
     if driver_command() == 3 && (!project_mode() || project_binary()) { hosted = true }
-    return match mir_verify_complete(d, mir, 3, hosted) {
+    return match mir_verify_complete(d, mir, 4, hosted) {
         Err(error) => storage_error()
         Ok(result) => finish_verify(d, mir, result)
     }
@@ -79,125 +79,67 @@ fn run_check(d: Domain, output: ParseOutput, store: CheckStore) -> I32 {
     }
 }
 
-fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec), expression_children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 {
-    return match __s0_buffer_new(CheckedBlockRec, d) {
-        Err(error) => storage_error()
-        Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) {
-            Err(error) => storage_error()
-            Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) {
-                Err(error) => storage_error()
-                Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) {
-                    Err(error) => storage_error()
-                    Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) {
-                        Err(error) => storage_error()
-                        Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) {
-                            Err(error) => storage_error()
-                            Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) {
-                                Err(error) => storage_error()
-                                Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) {
-                                    Err(error) => storage_error()
-                                    Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) {
-                                        Err(error) => storage_error()
-                                        Ok(diagnostics) => match __s0_buffer_new(CheckerUseIndexRec, d) {
-                                            Err(error) => storage_error()
-                                            Ok(use_indexes) => match __s0_buffer_new(U64, d) {
-                                                Err(error) => storage_error()
-                                                Ok(use_order) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: diagnostics))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec), environments: Vec(EnvironmentRec), expressions: Vec(CheckedExprRec), call_annotations: Vec(CallAnnotationRec), expression_children: Vec(CheckedExprChildRec), returns: Vec(CheckedReturnRec)) -> I32 {
+    let blocks = Vec.new(CheckedBlockRec)
+    let links = Vec.new(CheckedStatementLinkRec)
+    let statements = Vec.new(CheckedStatementRec)
+    let places = Vec.new(CheckedPlaceRec)
+    let matches = Vec.new(CheckedMatchRec)
+    let arms = Vec.new(CheckedMatchArmRec)
+    let tries = Vec.new(CheckedTryRec)
+    let cleanups = Vec.new(CheckedCleanupRec)
+    let diagnostics = Vec.new(CheckDiagRec)
+    let use_indexes = Vec.new(CheckerUseIndexRec)
+    let use_order = Vec.new(U64)
+    return run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: diagnostics))
 }
 
-fn init_check_returns(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec), expression_children: __s0_Buffer(CheckedExprChildRec)) -> I32 {
-    return match __s0_buffer_new(CheckedReturnRec, d) {
-        Err(error) => storage_error()
-        Ok(returns) => init_check_diagnostics(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, expression_children, returns)
-    }
+fn init_check_returns(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec), environments: Vec(EnvironmentRec), expressions: Vec(CheckedExprRec), call_annotations: Vec(CallAnnotationRec), expression_children: Vec(CheckedExprChildRec)) -> I32 {
+    return init_check_diagnostics(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, expression_children, Vec.new(CheckedReturnRec))
 }
 
-fn init_check_expression_children(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec), call_annotations: __s0_Buffer(CallAnnotationRec)) -> I32 {
-    return match __s0_buffer_new(CheckedExprChildRec, d) {
-        Err(error) => storage_error()
-        Ok(children) => init_check_returns(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, children)
-    }
+fn init_check_expression_children(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec), environments: Vec(EnvironmentRec), expressions: Vec(CheckedExprRec), call_annotations: Vec(CallAnnotationRec)) -> I32 {
+    return init_check_returns(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, call_annotations, Vec.new(CheckedExprChildRec))
 }
 
-fn init_check_call_annotations(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec), expressions: __s0_Buffer(CheckedExprRec)) -> I32 {
-    return match __s0_buffer_new(CallAnnotationRec, d) {
-        Err(error) => storage_error()
-        Ok(annotations) => init_check_expression_children(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, annotations)
-    }
+fn init_check_call_annotations(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec), environments: Vec(EnvironmentRec), expressions: Vec(CheckedExprRec)) -> I32 {
+    return init_check_expression_children(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions, Vec.new(CallAnnotationRec))
 }
 
-fn init_check_expressions(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), environments: __s0_Buffer(EnvironmentRec)) -> I32 {
-    return match __s0_buffer_new(CheckedExprRec, d) {
-        Err(error) => storage_error()
-        Ok(expressions) => init_check_call_annotations(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, expressions)
-    }
+fn init_check_expressions(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec), environments: Vec(EnvironmentRec)) -> I32 {
+    return init_check_call_annotations(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments, Vec.new(CheckedExprRec))
 }
 
-fn init_check_environments(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec)) -> I32 {
-    return match __s0_buffer_new(EnvironmentRec, d) {
-        Err(error) => storage_error()
-        Ok(environments) => init_check_expressions(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, environments)
-    }
+fn init_check_environments(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec), locals: Vec(LocalRec)) -> I32 {
+    return init_check_expressions(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals, Vec.new(EnvironmentRec))
 }
 
-fn init_check_locals(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec)) -> I32 {
-    return match __s0_buffer_new(LocalRec, d) {
-        Err(error) => storage_error()
-        Ok(locals) => init_check_environments(d, output, symbols, type_params, types, type_args, type_annotations, uses, locals)
-    }
+fn init_check_locals(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec), uses: Vec(DeclTypeUseRec)) -> I32 {
+    return init_check_environments(d, output, symbols, type_params, types, type_args, type_annotations, uses, Vec.new(LocalRec))
 }
 
-fn init_check_uses(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64), type_annotations: __s0_Buffer(CheckedTypeAnnotationRec)) -> I32 {
-    return match __s0_buffer_new(DeclTypeUseRec, d) {
-        Err(error) => storage_error()
-        Ok(uses) => init_check_locals(d, output, symbols, type_params, types, type_args, type_annotations, uses)
-    }
+fn init_check_uses(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64), type_annotations: Vec(CheckedTypeAnnotationRec)) -> I32 {
+    return init_check_locals(d, output, symbols, type_params, types, type_args, type_annotations, Vec.new(DeclTypeUseRec))
 }
 
-fn init_check_type_args(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec)) -> I32 {
-    return match __s0_buffer_new(U64, d) {
-        Err(error) => storage_error()
-        Ok(type_args) => init_check_type_annotations(d, output, symbols, type_params, types, type_args)
-    }
+fn init_check_type_args(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec)) -> I32 {
+    return init_check_type_annotations(d, output, symbols, type_params, types, Vec.new(U64))
 }
 
-fn init_check_type_annotations(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), type_args: __s0_Buffer(U64)) -> I32 {
-    return match __s0_buffer_new(CheckedTypeAnnotationRec, d) {
-        Err(error) => storage_error()
-        Ok(annotations) => init_check_uses(d, output, symbols, type_params, types, type_args, annotations)
-    }
+fn init_check_type_annotations(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec), types: Vec(CheckedTypeRec), type_args: Vec(U64)) -> I32 {
+    return init_check_uses(d, output, symbols, type_params, types, type_args, Vec.new(CheckedTypeAnnotationRec))
 }
 
-fn init_check_types(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec), type_params: __s0_Buffer(TypeParamRec)) -> I32 {
-    return match __s0_buffer_new(CheckedTypeRec, d) {
-        Err(error) => storage_error()
-        Ok(types) => init_check_type_args(d, output, symbols, type_params, types)
-    }
+fn init_check_types(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec), type_params: Vec(TypeParamRec)) -> I32 {
+    return init_check_type_args(d, output, symbols, type_params, Vec.new(CheckedTypeRec))
 }
 
-fn init_check_type_params(d: Domain, output: ParseOutput, symbols: __s0_Buffer(SymbolRec)) -> I32 {
-    return match __s0_buffer_new(TypeParamRec, d) {
-        Err(error) => storage_error()
-        Ok(type_params) => init_check_types(d, output, symbols, type_params)
-    }
+fn init_check_type_params(d: Domain, output: ParseOutput, symbols: Vec(SymbolRec)) -> I32 {
+    return init_check_types(d, output, symbols, Vec.new(TypeParamRec))
 }
 
 fn init_check_symbols(d: Domain, output: ParseOutput) -> I32 {
-    return match __s0_buffer_new(SymbolRec, d) {
-        Err(error) => storage_error()
-        Ok(symbols) => init_check_type_params(d, output, symbols)
-    }
+    return init_check_type_params(d, output, Vec.new(SymbolRec))
 }
 
 fn finish_parse(d: Domain, result: ParseResult) -> I32 {
@@ -223,32 +165,20 @@ fn run_parse(d: Domain, state: State, store: ParseStore) -> I32 {
     }
 }
 
-fn init_parse_diagnostics(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64)) -> I32 {
-    return match __s0_buffer_new(ParseDiagRec, d) {
-        Err(error) => storage_error()
-        Ok(diagnostics) => run_parse(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics))
-    }
+fn init_parse_diagnostics(d: Domain, state: State, nodes: Vec(SyntaxRec), links: Vec(SyntaxLinkRec), roots: Vec(U64)) -> I32 {
+    return run_parse(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: Vec.new(ParseDiagRec)))
 }
 
-fn init_parse_roots(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec)) -> I32 {
-    return match __s0_buffer_new(U64, d) {
-        Err(error) => storage_error()
-        Ok(roots) => init_parse_diagnostics(d, state, nodes, links, roots)
-    }
+fn init_parse_roots(d: Domain, state: State, nodes: Vec(SyntaxRec), links: Vec(SyntaxLinkRec)) -> I32 {
+    return init_parse_diagnostics(d, state, nodes, links, Vec.new(U64))
 }
 
-fn init_parse_links(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec)) -> I32 {
-    return match __s0_buffer_new(SyntaxLinkRec, d) {
-        Err(error) => storage_error()
-        Ok(links) => init_parse_roots(d, state, nodes, links)
-    }
+fn init_parse_links(d: Domain, state: State, nodes: Vec(SyntaxRec)) -> I32 {
+    return init_parse_roots(d, state, nodes, Vec.new(SyntaxLinkRec))
 }
 
 fn init_parse_nodes(d: Domain, state: State) -> I32 {
-    return match __s0_buffer_new(SyntaxRec, d) {
-        Err(error) => storage_error()
-        Ok(nodes) => init_parse_links(d, state, nodes)
-    }
+    return init_parse_links(d, state, Vec.new(SyntaxRec))
 }
 
 fn run(d: Domain, state: State) -> I32 {
@@ -258,46 +188,28 @@ fn run(d: Domain, state: State) -> I32 {
     }
 }
 
-fn init_diagnostics(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8), sources: __s0_Buffer(SourceRec), tokens: __s0_Buffer(TokenRec)) -> I32 {
-    return match __s0_buffer_new(LexDiagRec, d) {
-        Err(error) => storage_error()
-        Ok(diagnostics) => run(d, State(paths: paths, texts: texts, values: values, sources: sources, tokens: tokens, diagnostics: diagnostics))
-    }
+fn init_diagnostics(d: Domain, paths: Vec(U8), texts: Vec(U8), values: Vec(U8), sources: Vec(SourceRec), tokens: Vec(TokenRec)) -> I32 {
+    return run(d, State(paths: paths, texts: texts, values: values, sources: sources, tokens: tokens, diagnostics: Vec.new(LexDiagRec)))
 }
 
-fn init_tokens(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8), sources: __s0_Buffer(SourceRec)) -> I32 {
-    return match __s0_buffer_new(TokenRec, d) {
-        Err(error) => storage_error()
-        Ok(tokens) => init_diagnostics(d, paths, texts, values, sources, tokens)
-    }
+fn init_tokens(d: Domain, paths: Vec(U8), texts: Vec(U8), values: Vec(U8), sources: Vec(SourceRec)) -> I32 {
+    return init_diagnostics(d, paths, texts, values, sources, Vec.new(TokenRec))
 }
 
-fn init_sources(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8), values: __s0_Buffer(U8)) -> I32 {
-    return match __s0_buffer_new(SourceRec, d) {
-        Err(error) => storage_error()
-        Ok(sources) => init_tokens(d, paths, texts, values, sources)
-    }
+fn init_sources(d: Domain, paths: Vec(U8), texts: Vec(U8), values: Vec(U8)) -> I32 {
+    return init_tokens(d, paths, texts, values, Vec.new(SourceRec))
 }
 
-fn init_values(d: Domain, paths: __s0_Buffer(U8), texts: __s0_Buffer(U8)) -> I32 {
-    return match __s0_buffer_new(U8, d) {
-        Err(error) => storage_error()
-        Ok(values) => init_sources(d, paths, texts, values)
-    }
+fn init_values(d: Domain, paths: Vec(U8), texts: Vec(U8)) -> I32 {
+    return init_sources(d, paths, texts, Vec.new(U8))
 }
 
-fn init_texts(d: Domain, paths: __s0_Buffer(U8)) -> I32 {
-    return match __s0_buffer_new(U8, d) {
-        Err(error) => storage_error()
-        Ok(texts) => init_values(d, paths, texts)
-    }
+fn init_texts(d: Domain, paths: Vec(U8)) -> I32 {
+    return init_values(d, paths, Vec.new(U8))
 }
 
 fn project_compile_prepared(d: Domain) -> I32 {
-    return match __s0_buffer_new(U8, d) {
-        Err(error) => storage_error()
-        Ok(paths) => init_texts(d, paths)
-    }
+    return init_texts(d, Vec.new(U8))
 }
 
 fn main(d: Domain) -> I32 {

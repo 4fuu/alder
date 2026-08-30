@@ -62,6 +62,8 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, A
   ALDER_MAYBE_UNUSED AlderTy16 alder_v13;
   ALDER_MAYBE_UNUSED AlderTy14 alder_v14;
   ALDER_MAYBE_UNUSED AlderTy16 alder_v15;
+  (void)alder_v0;
+  (void)alder_v1;
 
   void *alder_t2p = alder_domain_alloc(alder_v0, sizeof(AlderTable), _Alignof(AlderTable));
   if (alder_t2p == NULL) { alder_runtime_panic("table.create: out of memory"); }

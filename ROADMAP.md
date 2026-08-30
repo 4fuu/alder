@@ -782,10 +782,12 @@ are rejected. Mutable views and aggregates containing views remain
 non-escaping, and their overlap, mutation, and invalidation checks are
 unchanged.
 
-Slice 3 still owns migration and qualification of the complete Milestone 7
-value/view surface: private explicit bootstrap storage and `__s0_String`
-remain, direct immutable view results are not yet generalized to nested
-ordinary aggregates, and this milestone is not complete.
+Slice 3 has generalized immutable-view materialization and results through
+ordinary records, variants, arrays, collections, and concrete generic
+applications while preserving mutable-view escape and exclusivity rejection.
+Private explicit bootstrap storage and `__s0_String` still remain in the
+Alder-written compiler core, so the complete surface migration is not yet
+qualified and this milestone is not complete.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate

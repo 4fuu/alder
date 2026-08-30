@@ -60,10 +60,11 @@ scopes are exclusive. The compiler rejects escaping or overlapping accesses
 when it cannot prove validity.
 
 No public lifetime parameter syntax is required. For immutable views derived
-from copyable values, inferred result storage may keep the immutable backing
-alive in the caller. A view derived from an affine owner cannot outlive the
-verified owner access scope. When inference cannot prove an early end, it keeps
-storage alive longer rather than accepting a dangling view.
+from copyable values, inferred storage may keep the immutable backing alive in
+the caller or recursively materialize it inside an ordinary aggregate,
+variant, array, or collection. A view derived from an affine owner cannot
+outlive the verified owner access scope. When inference cannot prove an early
+end, it keeps storage alive longer rather than accepting a dangling view.
 
 ## Inferred storage domains
 
@@ -145,6 +146,12 @@ Copying a mutable collection has value semantics. Implementations may use
 copy-on-write, but the first mutation must preserve independence. Collection
 growth is geometric with checked size arithmetic; no capacity calculation may
 wrap or narrow into C `size_t` unchecked.
+
+`Vec.try_reserve` and `Vec.try_push` report stable `OutOfMemory` and `Limit`
+capacity errors. Every failure is transactional: receiver representation and
+active-view validity are unchanged, including when recursive element
+relocation fails. Successful potential mutation participates in the same
+view-exclusivity and invalidation rules as infallible `push`.
 
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
 uses eager deep copy. This temporary restriction keeps ordinary vector APIs

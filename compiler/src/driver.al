@@ -39,17 +39,17 @@ fn driver_out_json_byte(byte: U8) -> Bool {
     return out(byte)
 }
 
-fn driver_out_json_bytes(bytes: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn driver_out_json_bytes(bytes: Vec(U8), start: U64, end: U64) -> Bool {
     var at = start
     while at < end {
-        if !driver_out_json_byte(__s0_buffer_get(U8, bytes, at)) { return false }
+        if !driver_out_json_byte(bytes[at]) { return false }
         at = at + 1
     }
     return true
 }
 
 fn driver_out_json_path(state: State, source: U64) -> Bool {
-    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let rec = (state.sources)[source]
     return driver_out_json_bytes(state.paths, rec.path_start, rec.path_end)
 }
 
@@ -83,7 +83,7 @@ fn driver_utf8_width(state: State, source: SourceRec, at: U64) -> U64 {
 }
 
 fn driver_position(state: State, source_id: U64, offset: U64) -> DriverPosition {
-    let source = __s0_buffer_get(SourceRec, state.sources, source_id)
+    let source = (state.sources)[source_id]
     var line: U64 = 1
     var column: U64 = 1
     var at: U64 = 0
@@ -117,7 +117,7 @@ fn driver_out_human_range(state: State, source: U64, start: U64) -> Bool {
 }
 
 fn driver_out_source_text(state: State, source: U64, start: U64, end: U64, json: Bool) -> Bool {
-    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let rec = (state.sources)[source]
     var at = start
     while at < end {
         let byte = text_byte(state, rec, at)
@@ -130,10 +130,10 @@ fn driver_out_source_text(state: State, source: U64, start: U64, end: U64, json:
 
 fn driver_node_at(state: State, parse: ParseStore, source: U64, start: U64) -> U64 {
     var at: U64 = 0
-    while at < __s0_buffer_len(SyntaxRec, parse.nodes) {
-        let node = __s0_buffer_get(SyntaxRec, parse.nodes, at)
+    while at < (parse.nodes).len() {
+        let node = (parse.nodes)[at]
         if node.source == source && node.token != 0 {
-            let token = __s0_buffer_get(TokenRec, state.tokens, node.token - 1)
+            let token = (state.tokens)[node.token - 1]
             if token.start == start && node.name_end > node.name_start { return at + 1 }
         }
         at = at + 1
@@ -144,7 +144,7 @@ fn driver_node_at(state: State, parse: ParseStore, source: U64, start: U64) -> U
 fn driver_out_node_name(state: State, parse: ParseStore, source: U64, start: U64, fallback_end: U64, json: Bool) -> Bool {
     let found = driver_node_at(state, parse, source, start)
     if found != 0 {
-        let node = __s0_buffer_get(SyntaxRec, parse.nodes, found - 1)
+        let node = (parse.nodes)[found - 1]
         return driver_out_source_text(state, node.source, node.name_start, node.name_end, json)
     }
     return driver_out_source_text(state, source, start, fallback_end, json)
@@ -152,12 +152,12 @@ fn driver_out_node_name(state: State, parse: ParseStore, source: U64, start: U64
 
 fn driver_out_function_for_body(state: State, parse: ParseStore, source: U64, start: U64, json: Bool) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(SyntaxRec, parse.nodes) {
-        let node = __s0_buffer_get(SyntaxRec, parse.nodes, at)
+    while at < (parse.nodes).len() {
+        let node = (parse.nodes)[at]
         if node.kind == 12 && node.source == source && node.children != 0 {
-            let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
-            let body = __s0_buffer_get(SyntaxRec, parse.nodes, body_link.node - 1)
-            let token = __s0_buffer_get(TokenRec, state.tokens, body.token - 1)
+            let body_link = (parse.links)[node.children - 1]
+            let body = (parse.nodes)[body_link.node - 1]
+            let token = (state.tokens)[body.token - 1]
             if token.start == start { return driver_out_source_text(state, source, node.name_start, node.name_end, json) }
         }
         at = at + 1
@@ -345,21 +345,21 @@ fn driver_diagnostic(state: State, parse: ParseStore, phase: U64, kind: U64, sou
 }
 
 fn driver_lex_diagnostic(state: State, parse: ParseStore) -> I32 {
-    let rec = __s0_buffer_get(LexDiagRec, state.diagnostics, 0)
+    let rec = (state.diagnostics)[0]
     return driver_diagnostic(state, parse, 1, rec.kind, rec.source, rec.start, rec.end, 0, 0, 0, rec.detail_start, 0, 0, 0)
 }
 
 fn driver_parse_diagnostic(state: State, store: ParseStore) -> I32 {
-    let rec = __s0_buffer_get(ParseDiagRec, store.diagnostics, 0)
+    let rec = (store.diagnostics)[0]
     return driver_diagnostic(state, store, 2, rec.kind, rec.source, rec.start, rec.end, 0, 0, 0, 0, 0, 0, 0)
 }
 
 fn driver_check_diagnostic(state: State, parse: ParseStore, store: CheckStore) -> I32 {
-    let rec = __s0_buffer_get(CheckDiagRec, store.diagnostics, 0)
+    let rec = (store.diagnostics)[0]
     return driver_diagnostic(state, parse, 3, rec.kind, rec.source, rec.start, rec.end, rec.related_source, rec.related_start, rec.related_end, rec.detail_a, rec.detail_b, rec.detail_c, rec.detail_d)
 }
 
-fn driver_failure(status: U64, kind: __s0_String, message: __s0_String) -> I32 {
+fn driver_failure(status: U64, kind: [U8], message: [U8]) -> I32 {
     if driver_json() {
         if !driver_reset_response() || !driver_select(0) || !out_string("{\"version\":1,\"command\":\"") { return 3 }
         if driver_command() == 1 { if !out_string("check") { return 3 } } else { if !out_string("compile") { return 3 } }
@@ -383,7 +383,7 @@ fn driver_success_check() -> I32 {
     return 0
 }
 
-fn driver_artifact_start(kind: __s0_String) -> Bool {
+fn driver_artifact_start(kind: [U8]) -> Bool {
     if driver_json() {
         if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"compile\",\"success\":true,\"diagnostics\":[],\"artifact\":{\"kind\":\"") || !out_string(kind) { return false }
         if unsafe c { alderhost_output_path_len() } != 0 {

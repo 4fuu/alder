@@ -20,6 +20,7 @@ const (
 	tVec
 	tMutSlice
 	tS0Error
+	tCapacityError
 	tStruct
 	tEnum
 	tDomain
@@ -191,6 +192,8 @@ func (t *Type) display() string {
 		return "__s0_Buffer(" + t.elem.display() + ")"
 	case tS0Error:
 		return "__s0_Error"
+	case tCapacityError:
+		return "CapacityError"
 	case tStruct:
 		if len(t.args) == 0 {
 			return t.decl.decl.Name
@@ -263,6 +266,8 @@ func (t *Type) mangledName() string {
 		return "__s0_Buffer.c1." + t.elem.mangledName()
 	case tS0Error:
 		return "__s0_Error"
+	case tCapacityError:
+		return "CapacityError"
 	case tPtr:
 		return "Ptr.c1." + t.elem.mangledName()
 	case tPrim:
@@ -280,7 +285,7 @@ func (t *Type) mangledName() string {
 // enumLike reports whether the type supports variants: a declared enum,
 // Option, or Result.
 func (t *Type) enumLike() bool {
-	return t != nil && (t.kind == tEnum || t.kind == tOption || t.kind == tResult || t.kind == tS0Error)
+	return t != nil && (t.kind == tEnum || t.kind == tOption || t.kind == tResult || t.kind == tS0Error || t.kind == tCapacityError)
 }
 
 // variantsOf returns the variants of an enum-like type.
@@ -291,8 +296,17 @@ func (t *Type) variantsOf() []*variantType {
 	case tOption:
 		return []*variantType{{name: "None"}, {name: "Some", payload: t.elem}}
 	case tResult:
-		return []*variantType{{name: "Ok", payload: t.ok}, {name: "Err", payload: t.err}}
+		var okPayload, errPayload = t.ok, t.err
+		if okPayload.kind == tPrim && okPayload.prim == pUnit {
+			okPayload = nil
+		}
+		if errPayload.kind == tPrim && errPayload.prim == pUnit {
+			errPayload = nil
+		}
+		return []*variantType{{name: "Ok", payload: okPayload}, {name: "Err", payload: errPayload}}
 	case tS0Error:
+		return []*variantType{{name: "OutOfMemory"}, {name: "Limit"}}
+	case tCapacityError:
 		return []*variantType{{name: "OutOfMemory"}, {name: "Limit"}}
 	}
 	return nil
@@ -380,6 +394,55 @@ func (t *Type) containsScopedViewSeen(seen map[*typeDecl]bool) bool {
 		}
 	}
 	return false
+}
+
+// containsMutableView reports whether the type contains an exclusive view at
+// any depth. Immutable views may be materialized when they enter an ordinary
+// aggregate; mutable views remain lexical capabilities and cannot be stored or
+// returned through one.
+func (t *Type) containsMutableView() bool {
+	return t.containsMutableViewSeen(make(map[*typeDecl]bool))
+}
+
+func (t *Type) containsMutableViewSeen(seen map[*typeDecl]bool) bool {
+	if t == nil {
+		return false
+	}
+	switch t.kind {
+	case tMutSlice:
+		return true
+	case tAlloc, tPtr, tOption, tBuffer, tArray, tVec, tSlice:
+		return t.elem.containsMutableViewSeen(seen)
+	case tResult:
+		return t.ok.containsMutableViewSeen(seen) || t.err.containsMutableViewSeen(seen)
+	case tMap:
+		return t.key.containsMutableViewSeen(seen) || t.val.containsMutableViewSeen(seen)
+	case tStruct, tEnum:
+		if seen[t.decl] {
+			return false
+		}
+		seen[t.decl] = true
+		defer delete(seen, t.decl)
+		bindings := structBindings(t)
+		for _, field := range t.decl.fields {
+			if substType(field, bindings).containsMutableViewSeen(seen) {
+				return true
+			}
+		}
+		for _, variant := range t.decl.variants {
+			if variant.payload != nil && substType(variant.payload, bindings).containsMutableViewSeen(seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// needsMaterializedCopy identifies ordinary values whose storage-backed
+// children must be recursively copied to preserve value independence. A direct
+// immutable view remains a lexical capability rather than becoming owned.
+func (t *Type) needsMaterializedCopy() bool {
+	return t != nil && t.kind != tSlice && t.kind != tMutSlice && (t.containsVec() || t.containsScopedView())
 }
 
 // containsVec reports whether copying the type requires an eager Vec deep
@@ -524,7 +587,7 @@ func typeEqual(a, b *Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tString, tBytes, tS0String:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tCapacityError, tString, tBytes, tS0String:
 		return true
 	case tTypeParam:
 		return a.name == b.name
@@ -575,7 +638,7 @@ func unify(pattern, actual *Type, out map[string]*Type) bool {
 			}
 		}
 		return true
-	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tString, tBytes, tS0String:
+	case tDomain, tDomainMark, tCleanupScope, tCleanupID, tS0Error, tCapacityError, tString, tBytes, tS0String:
 		return true
 	case tTypeParam:
 		return pattern.name == actual.name

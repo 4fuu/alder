@@ -27,6 +27,12 @@ static ALDER_MAYBE_UNUSED int64_t alder_fn_arithmetic_0(int64_t alder_v0, int64_
   ALDER_MAYBE_UNUSED bool alder_v23;
   ALDER_MAYBE_UNUSED int64_t alder_v24;
   AlderCleanupScope alder_scope_0 = {0};
+  (void)alder_v0;
+  (void)alder_v1;
+  (void)alder_v2;
+  (void)alder_v3;
+  (void)alder_v4;
+  (void)alder_v5;
 
   if (!alder_cleanup_scope_begin(&alder_scope_0)) { alder_runtime_panic("cleanup.scope.begin failed"); }
   alder_v6 = &alder_scope_0;

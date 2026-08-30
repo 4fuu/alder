@@ -103,7 +103,7 @@ type MirVerifyDiagRec {
     reference: U64
 }
 type MirVerifyOutput {
-    diagnostics: __s0_Buffer(MirVerifyDiagRec)
+    diagnostics: Vec(MirVerifyDiagRec)
 }
 // complete is the sole positive V10 gate. Consumers must receive this output
 // from mir_verify_complete and check complete before producing any bytes.
@@ -111,7 +111,7 @@ type MirVerifyOutput {
 // external 1-based Function ID of main. Every failure and unhosted result has
 // entry zero. V1 owns duplicate function-name rejection, including main.
 type MirVerifyCompleteOutput {
-    diagnostics: __s0_Buffer(MirVerifyDiagRec)
+    diagnostics: Vec(MirVerifyDiagRec)
     complete: Bool
     hosted: Bool
     entry: U64

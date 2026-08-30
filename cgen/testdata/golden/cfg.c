@@ -30,6 +30,9 @@ static ALDER_MAYBE_UNUSED int64_t alder_fn_cfg_0(bool alder_v0, int64_t alder_v1
   ALDER_MAYBE_UNUSED int64_t alder_v13;
   ALDER_MAYBE_UNUSED int64_t alder_v14;
   ALDER_MAYBE_UNUSED int64_t alder_v15;
+  (void)alder_v0;
+  (void)alder_v1;
+  (void)alder_v2;
 
   alder_v3 = (int64_t)(0LL);
   alder_v4 = (int64_t)(1LL);

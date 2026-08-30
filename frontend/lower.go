@@ -15,15 +15,16 @@ type lowerer struct {
 	ann        map[*checkedFn]map[Expr]*annInfo
 	importSigs map[string]*checkSig
 
-	fnID         map[*checkedFn]mir.FunctionId
-	fnByName     map[string]*checkedFn
-	tyCache      map[string]mir.TypeId
-	hashEq       map[string]*hashEqIDs
-	consts       map[string]string
-	constSeq     int
-	mapCache     map[string]*mapHelpers
-	bufferCache  map[string]*bufferHelpers
-	hiddenDomain bool
+	fnID        map[*checkedFn]mir.FunctionId
+	fnByName    map[string]*checkedFn
+	tyCache     map[string]mir.TypeId
+	hashEq      map[string]*hashEqIDs
+	consts      map[string]string
+	constSeq    int
+	mapCache    map[string]*mapHelpers
+	bufferCache map[string]*bufferHelpers
+	storageFn   map[*checkedFn]bool
+	domainFn    map[*checkedFn]bool
 }
 
 // hashEqIDs are the per-key hash and equality helpers.
@@ -56,17 +57,35 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 		consts:      make(map[string]string),
 		mapCache:    make(map[string]*mapHelpers),
 		bufferCache: make(map[string]*bufferHelpers),
+		storageFn:   make(map[*checkedFn]bool),
+		domainFn:    make(map[*checkedFn]bool),
 	}
-	for _, anns := range cm.ann {
+	for cf, anns := range cm.ann {
 		for _, a := range anns {
-			if a.typ != nil && a.typ.containsVec() {
-				l.hiddenDomain = true
+			if a.typ != nil && a.typ.needsMaterializedCopy() {
+				l.storageFn[cf] = true
+				l.domainFn[cf] = true
 			}
 		}
 	}
 	for _, cf := range cm.fns {
-		if cf.result.kind == tSlice {
-			l.hiddenDomain = true
+		if !strings.HasPrefix(cf.decl.Name, "__s0_") && cf.result.containsScopedView() && cf.result.copyToDomainAllowed() {
+			l.domainFn[cf] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for caller, anns := range cm.ann {
+			if l.domainFn[caller] {
+				continue
+			}
+			for _, a := range anns {
+				if a.call != nil && a.call.kind == callUser && l.domainFn[a.call.fn] {
+					l.domainFn[caller] = true
+					changed = true
+					break
+				}
+			}
 		}
 	}
 	// Imports in source order.
@@ -86,7 +105,7 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 	for _, cf := range cm.fns {
 		params := make([]mir.Param, 0, len(cf.params))
 		aliasesDomain := cf.decl.Name == "main" && len(cf.params) > 0 && cf.params[0].kind == tDomain
-		if l.hiddenDomain && !aliasesDomain {
+		if l.domainFn[cf] && !aliasesDomain {
 			params = append(params, mir.Param{Name: "__domain", Type: l.m.DomainHandle()})
 		}
 		pi := 0
@@ -145,6 +164,8 @@ func (l *lowerer) ty(t *Type) mir.TypeId {
 		return l.bufferType(t)
 	case tS0Error:
 		return l.s0ErrorType()
+	case tCapacityError:
+		return l.capacityErrorType()
 	case tStruct, tEnum:
 		return l.structType(t)
 	case tDomain:
@@ -249,6 +270,16 @@ type bufferHelpers struct{ newID, lenID, appendID, getID, setID, sliceID mir.Fun
 
 func (l *lowerer) s0ErrorType() mir.TypeId {
 	const key = "__s0_Error"
+	if id, ok := l.tyCache[key]; ok {
+		return id
+	}
+	id := l.m.AddEnum(key, []mir.Variant{{Name: "OutOfMemory", Payload: mir.TypeUnit}, {Name: "Limit", Payload: mir.TypeUnit}})
+	l.tyCache[key] = id
+	return id
+}
+
+func (l *lowerer) capacityErrorType() mir.TypeId {
+	const key = "CapacityError"
 	if id, ok := l.tyCache[key]; ok {
 		return id
 	}
@@ -953,23 +984,24 @@ func (l *lowerer) lowerMapRemove(h *mapHelpers, mapTy, slotsTy, kt mir.TypeId) {
 
 // fb builds one MIR function body.
 type fb struct {
-	l           *lowerer
-	f           *mir.Function
-	ann         map[Expr]*annInfo
-	result      *Type
-	cur         *mir.Block
-	terminated  bool
-	nval        int
-	nlocal      int
-	locals      map[string]mir.LocalId
-	values      map[string]mir.ValueId
-	usedVals    map[string]bool
-	usedLocals  map[string]bool
-	usedBlocks  map[string]bool
-	scopes      []mir.ValueId
-	localDomain mir.ValueId
-	panicBlk    mir.BlockId
-	panicBlks   map[string]mir.BlockId
+	l            *lowerer
+	f            *mir.Function
+	ann          map[Expr]*annInfo
+	result       *Type
+	cur          *mir.Block
+	terminated   bool
+	nval         int
+	nlocal       int
+	locals       map[string]mir.LocalId
+	values       map[string]mir.ValueId
+	usedVals     map[string]bool
+	usedLocals   map[string]bool
+	usedBlocks   map[string]bool
+	scopes       []mir.ValueId
+	localDomain  mir.ValueId
+	panicBlk     mir.BlockId
+	panicBlks    map[string]mir.BlockId
+	suppressCopy int
 }
 
 func (l *lowerer) newFB(f *mir.Function) *fb {
@@ -1140,7 +1172,7 @@ func (b *fb) destroyLocalDomain() {
 }
 
 func (b *fb) retainExitValue(v mir.ValueId) mir.ValueId {
-	if v == mir.NoValue || !b.l.hiddenDomain || b.result == nil || !b.result.copyToDomainAllowed() {
+	if v == mir.NoValue || b.result == nil || !b.result.copyToDomainAllowed() {
 		return v
 	}
 	domain, ok := b.values["__result_domain"]
@@ -1196,7 +1228,18 @@ func (b *fb) storePlace(p mir.Place, v mir.ValueId) {
 }
 
 func (b *fb) copyValue(v mir.ValueId, typ *Type) mir.ValueId {
-	if typ == nil || !typ.containsVec() {
+	if b.suppressCopy != 0 || typ == nil || !typ.needsMaterializedCopy() {
+		return v
+	}
+	return b.materializeValue(v, typ)
+}
+
+// materializeValue recursively copies storage-backed children into the
+// current inferred function domain. It is used when an immutable view enters
+// an ordinary aggregate or collection, severing its lexical backing before
+// later owner mutation or scope exit.
+func (b *fb) materializeValue(v mir.ValueId, typ *Type) mir.ValueId {
+	if b.suppressCopy != 0 || typ == nil || !typ.copyToDomainAllowed() {
 		return v
 	}
 	domain, ok := b.values["__domain"]
@@ -1208,17 +1251,32 @@ func (b *fb) copyValue(v mir.ValueId, typ *Type) mir.ValueId {
 	return copy
 }
 
-// directExpr reads a named owner without applying ordinary Vec copy
-// semantics. Collection methods and indexing use it only for the duration of
-// one checked access; every value-producing read still goes through expr.
+// directExpr reads a named owner or one of its fields without applying
+// ordinary collection copy semantics. Collection methods and indexing use it
+// only for the duration of one checked access; every value-producing read
+// still goes through expr.
 func (b *fb) directExpr(e Expr) (mir.ValueId, error) {
-	if id, ok := e.(*Ident); ok {
-		if local, exists := b.locals[id.Name]; exists {
+	switch x := e.(type) {
+	case *Ident:
+		if local, exists := b.locals[x.Name]; exists {
 			return b.loadPlace(mir.Place{Kind: mir.PlaceLocal, Local: local}, b.f.Locals[local].Type), nil
 		}
-		if value, exists := b.values[id.Name]; exists {
+		if value, exists := b.values[x.Name]; exists {
 			return value, nil
 		}
+	case *Field:
+		if p, ok := b.place(x); ok {
+			return b.loadPlace(p, b.l.ty(b.ann[e].typ)), nil
+		}
+		base, err := b.directExpr(x.Base)
+		if err != nil {
+			return 0, err
+		}
+		baseType := b.ann[x.Base].typ
+		local := b.f.AddLocal(b.localName("direct"), b.l.ty(baseType))
+		place := mir.Place{Kind: mir.PlaceLocal, Local: local}
+		b.storePlace(place, base)
+		return b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &place, Field: x.Name}, b.l.ty(b.ann[e].typ)), nil
 	}
 	return b.expr(e)
 }
@@ -1297,12 +1355,13 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 	b.ann = l.ann[cf]
 	b.result = cf.result
 	pi := 0
+	hasDomain := l.domainFn[cf]
 	aliasesDomain := cf.decl.Name == "main" && len(cf.params) > 0 && cf.params[0].kind == tDomain
-	if l.hiddenDomain && !aliasesDomain {
+	if hasDomain && !aliasesDomain {
 		b.values["__result_domain"] = 0
 		pi = 1
 	}
-	if l.hiddenDomain && aliasesDomain {
+	if hasDomain && aliasesDomain {
 		b.values["__result_domain"] = 0
 	}
 	for _, p := range cf.decl.Params {
@@ -1313,11 +1372,29 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 		pi++
 	}
 	b.start("bb0")
-	if l.hiddenDomain {
+	localStorage := hasDomain && l.storageFn[cf]
+	// A value carried around a source loop may name storage allocated by any
+	// iteration. Retain such allocations in the caller-visible result domain;
+	// the current MIR verifier intentionally does not merge dynamic
+	// function-local domain identities across backedges.
+	if blockHasLoop(cf.decl.Body) {
+		localStorage = false
+	}
+	// A function that carries an identity-bearing parameter through its CFG
+	// cannot assign that parameter false child-domain provenance. Retain its
+	// ordinary allocations in caller-visible storage instead.
+	for _, param := range cf.params {
+		if !param.copyToDomainAllowed() {
+			localStorage = false
+		}
+	}
+	if localStorage {
 		local := b.res(l.m.DomainHandle())
 		b.emit(mir.Instr{Op: mir.OpDomainCreate, Result: local, Domain: b.values["__result_domain"]})
 		b.localDomain = local
 		b.values["__domain"] = local
+	} else if hasDomain {
+		b.values["__domain"] = b.values["__result_domain"]
 	}
 	if err := b.stmts(cf.decl.Body.Stmts); err != nil {
 		return err
@@ -1326,6 +1403,23 @@ func (l *lowerer) lowerFn(cf *checkedFn) error {
 		b.ret(mir.NoValue)
 	}
 	return nil
+}
+
+func blockHasLoop(block *Block) bool {
+	if block == nil {
+		return false
+	}
+	for _, statement := range block.Stmts {
+		switch statement := statement.(type) {
+		case *WhileStmt, *ForStmt:
+			return true
+		case *IfStmt:
+			if blockHasLoop(statement.Then) || blockHasLoop(statement.Else) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // stmts lowers a statement list. The checker guarantees no statements after
@@ -1602,7 +1696,7 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 		}
 		id := b.res(b.l.ty(b.ann[e].typ))
 		b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: b.l.ty(b.ann[e].typ), AggFields: fields})
-		return id, nil
+		return b.copyValue(id, b.ann[e].typ), nil
 	case *IntLit:
 		typ := b.ann[e].typ
 		return b.constGet(typ, mir.ConstValue{Kind: mir.ConstInt, Int: x.Value}), nil
@@ -1683,7 +1777,7 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 			value := b.loadPlace(mir.Place{Kind: mir.PlaceField, Base: &mir.Place{Kind: mir.PlaceDeref, Deref: ref}, Field: x.Name}, b.l.ty(b.ann[e].typ))
 			return b.copyValue(value, b.ann[e].typ), nil
 		}
-		base, err := b.expr(x.Base)
+		base, err := b.directExpr(x.Base)
 		if err != nil {
 			return 0, err
 		}
@@ -1718,16 +1812,40 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 		errBlk, _ := b.addBlock("bb_err", nil)
 		okBlk, _ := b.addBlock("bb_ok", nil)
 		errBinding := b.f.AddValue(b.valueName("v"), b.l.ty(resTy.err), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: 0})
-		okBinding := b.f.AddValue(b.valueName("v"), b.l.ty(resTy.ok), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: 1})
+		okBinding := mir.NoValue
+		if b.l.ty(resTy.ok) != mir.TypeUnit {
+			okBinding = b.f.AddValue(b.valueName("v"), b.l.ty(resTy.ok), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: 1})
+		}
 		cases := []mir.SwitchCase{
 			{Variant: "err", Binding: errBinding, Target: blkID(b.f, errBlk)},
 			{Variant: "ok", Binding: okBinding, Target: blkID(b.f, okBlk)},
 		}
 		switchBlk.SetTerm(mir.Terminator{Kind: mir.TermSwitch, Value: r, Cases: cases})
 		b.setCur(errBlk)
+		failure := errBinding
+		if resTy.err.kind == tCapacityError && b.result.err.kind == tS0Error {
+			s0Type := b.l.s0ErrorType()
+			oomBlk, _ := b.addBlock("bb_capacity_oom", nil)
+			limitBlk, _ := b.addBlock("bb_capacity_limit", nil)
+			mappedBlk, mapped := b.addBlock("bb_capacity_mapped", []mir.Param{{Name: "error", Type: s0Type}})
+			b.cur.SetTerm(mir.Terminator{Kind: mir.TermSwitch, Value: errBinding, Cases: []mir.SwitchCase{
+				{Variant: "OutOfMemory", Binding: mir.NoValue, Target: blkID(b.f, oomBlk)},
+				{Variant: "Limit", Binding: mir.NoValue, Target: blkID(b.f, limitBlk)},
+			}})
+			b.setCur(oomBlk)
+			oom := b.res(s0Type)
+			b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: oom, TypeOp: s0Type, Variant: "OutOfMemory"})
+			b.jump(blkID(b.f, mappedBlk), []mir.ValueId{oom})
+			b.setCur(limitBlk)
+			limit := b.res(s0Type)
+			b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: limit, TypeOp: s0Type, Variant: "Limit"})
+			b.jump(blkID(b.f, mappedBlk), []mir.ValueId{limit})
+			b.setCur(mappedBlk)
+			failure = mapped[0]
+		}
 		fnRes := b.l.ty(b.result)
 		errVal := b.res(fnRes)
-		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: errVal, TypeOp: fnRes, Variant: "err", Payload: errBinding})
+		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: errVal, TypeOp: fnRes, Variant: "err", Payload: failure})
 		b.fail(errVal)
 		b.setCur(okBlk)
 		return okBinding, nil
@@ -1908,7 +2026,7 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		runtime := x.Args[ai.explicitArgs:]
 		args := make([]mir.ValueId, 0, len(runtime)+1)
 		calleeAliases := ai.fn.decl.Name == "main" && len(ai.fn.params) > 0 && ai.fn.params[0].kind == tDomain
-		if b.l.hiddenDomain && !calleeAliases {
+		if b.l.domainFn[ai.fn] && !calleeAliases {
 			if d, ok := b.values["__domain"]; ok {
 				args = append(args, d)
 			} else {
@@ -1931,7 +2049,17 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 					v, err = b.arrayView(a)
 				}
 			} else {
+				// A view-only aggregate remains a scoped capability while it is
+				// passed to its checked parameter. Do not materialize its view
+				// fields as owned storage merely to cross the call boundary.
+				argumentType := b.ann[a].typ
+				if argumentType != nil && argumentType.containsScopedView() && !argumentType.containsVec() {
+					b.suppressCopy++
+				}
 				v, err = b.expr(a)
+				if argumentType != nil && argumentType.containsScopedView() && !argumentType.containsVec() {
+					b.suppressCopy--
+				}
 			}
 			if err != nil {
 				return 0, err
@@ -1977,7 +2105,7 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		}
 		id := b.res(b.l.ty(ai.ctorType))
 		b.emit(mir.Instr{Op: mir.OpAggregateConstruct, Result: id, AggType: b.l.ty(ai.ctorType), AggFields: fields})
-		return id, nil
+		return b.copyValue(id, ai.ctorType), nil
 
 	case callMap:
 		d, err := b.expr(ai.orderedArgs[0])
@@ -2002,7 +2130,7 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 		id := b.res(enumTy)
 		in.Result = id
 		b.emit(in)
-		return id, nil
+		return b.copyValue(id, ai.enumType), nil
 
 	case callBuiltin:
 		return b.builtinCall(x, ai.builtin)
@@ -2013,6 +2141,17 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 }
 
 func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
+	if ai.builtin == "bytes_try_from_vec" {
+		b.suppressCopy++
+		values, err := b.directExpr(x.Args[0])
+		b.suppressCopy--
+		if err != nil {
+			return 0, err
+		}
+		result := b.res(b.l.ty(b.ann[x].typ))
+		b.emit(mir.Instr{Op: mir.OpBytesTryFromVec, Result: result, Domain: b.values["__domain"], Slice: values, TypeOp: b.l.capacityErrorType()})
+		return result, nil
+	}
 	if ai.builtin == "new" {
 		id := b.res(b.l.ty(b.ann[x].typ))
 		b.emit(mir.Instr{Op: mir.OpVecNew, Result: id, TypeOp: b.l.ty(b.ann[x].typ)})
@@ -2037,6 +2176,7 @@ func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
 			source := b.res(b.l.m.SafeMut(b.l.ty(at.elem)))
 			b.emit(mir.Instr{Op: mir.OpArrayIndexChecked, Result: source, Array: borrow, Index: index, FailTarget: b.panicBlock()})
 			value := b.loadPlace(mir.Place{Kind: mir.PlaceDeref, Deref: source}, b.l.ty(at.elem))
+			value = b.materializeValue(value, at.elem)
 			target := b.res(b.l.m.SafeMut(b.l.ty(at.elem)))
 			b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: target, Slice: storage, Index: index, FailTarget: b.panicBlock()})
 			b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: target}, value)
@@ -2058,7 +2198,13 @@ func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
 	}
 	args := make([]mir.ValueId, len(x.Args))
 	for i, a := range x.Args {
+		if ai.builtin == "try_push" {
+			b.suppressCopy++
+		}
 		args[i], err = b.expr(a)
+		if ai.builtin == "try_push" {
+			b.suppressCopy--
+		}
 		if err != nil {
 			return 0, err
 		}
@@ -2073,6 +2219,7 @@ func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
 		b.emit(mir.Instr{Op: op, Result: id, Slice: recv})
 		return id, nil
 	case "push":
+		args[0] = b.materializeValue(args[0], receiverType.elem)
 		length := b.res(mir.TypeU64)
 		b.emit(mir.Instr{Op: mir.OpVecLen, Result: length, Slice: recv})
 		capacity := b.res(mir.TypeU64)
@@ -2120,9 +2267,22 @@ func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
 		b.emit(mir.Instr{Op: mir.OpVecCapacity, Result: newCapacity, Slice: joined[0]})
 		updated := b.res(b.l.ty(receiverType))
 		b.emit(mir.Instr{Op: mir.OpVecConstructChecked, Result: updated, Slice: storage, Lo: newLength, Capacity: newCapacity, FailTarget: b.panicBlock()})
-		receiver := ai.receiver.(*Ident)
-		b.storePlace(mir.Place{Kind: mir.PlaceLocal, Local: b.locals[receiver.Name]}, updated)
+		receiverPlace, ok := b.place(ai.receiver)
+		if !ok {
+			return 0, diag(ai.receiver.exprPos(), "internal: mutable Vec receiver is not a static local place")
+		}
+		b.storePlace(receiverPlace, updated)
 		return mir.NoValue, nil
+	case "try_reserve", "try_push":
+		return b.tryVecMutation(x, ai, recv, args[0])
+	case "as_slice", "as_bytes":
+		result := b.res(b.l.m.Slice(mir.TypeU8))
+		op := mir.OpBytesAsSlice
+		if ai.builtin == "as_bytes" {
+			op = mir.OpStringAsBytes
+		}
+		b.emit(mir.Instr{Op: op, Result: result, Slice: recv})
+		return result, nil
 	case "get":
 		length := b.res(mir.TypeU64)
 		if receiverType.kind == tVec {
@@ -2173,6 +2333,138 @@ func (b *fb) methodCall(x *Call, ai *callAnn) (mir.ValueId, error) {
 		return id, nil
 	}
 	return 0, diag(x.P, "internal: method %s lowering is unavailable", ai.builtin)
+}
+
+func (b *fb) capacityResultValue(resultType, errorType mir.TypeId, variant string) mir.ValueId {
+	if variant == "" {
+		result := b.res(resultType)
+		b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: result, TypeOp: resultType, Variant: "ok"})
+		return result
+	}
+	err := b.res(errorType)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: err, TypeOp: errorType, Variant: variant})
+	result := b.res(resultType)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: result, TypeOp: resultType, Variant: "err", Payload: err})
+	return result
+}
+
+func (b *fb) tryVecMutation(x *Call, ai *callAnn, recv, argument mir.ValueId) (mir.ValueId, error) {
+	receiverType := b.ann[ai.receiver].typ
+	vecType := b.l.ty(receiverType)
+	errorType := b.l.capacityErrorType()
+	resultType := b.l.ty(b.ann[x].typ)
+	operationResult := b.l.m.Result(vecType, errorType)
+	join, joined := b.addBlock("bb_vec_try_result", []mir.Param{{Name: "result", Type: resultType}})
+	limit, _ := b.addBlock("bb_vec_try_limit", nil)
+	enough, _ := b.addBlock("bb_vec_try_enough", nil)
+	grow, _ := b.addBlock("bb_vec_try_grow", nil)
+
+	length := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpVecLen, Result: length, Slice: recv})
+	additional := argument
+	if ai.builtin == "try_push" {
+		additional = b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 1})
+	}
+	required := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntAddChecked, Result: required, A: length, B: additional, FailTarget: blkID(b.f, limit)})
+	capacity := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpVecCapacity, Result: capacity, Slice: recv})
+	hasCapacity := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntGe, Result: hasCapacity, A: capacity, B: required})
+	b.branch(hasCapacity, blkID(b.f, enough), blkID(b.f, grow))
+
+	b.setCur(limit)
+	b.jump(blkID(b.f, join), []mir.ValueId{b.capacityResultValue(resultType, errorType, "Limit")})
+
+	doubleFallback, _ := b.addBlock("bb_vec_try_exact", nil)
+	doubledBlock, doubledValues := b.addBlock("bb_vec_try_doubled", []mir.Param{{Name: "capacity", Type: mir.TypeU64}})
+	minimumBlock, minimumValues := b.addBlock("bb_vec_try_capacity", []mir.Param{{Name: "capacity", Type: mir.TypeU64}})
+	b.setCur(grow)
+	two := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 2})
+	doubled := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpIntMulChecked, Result: doubled, A: required, B: two, FailTarget: blkID(b.f, doubleFallback)})
+	b.jump(blkID(b.f, doubledBlock), []mir.ValueId{doubled})
+	b.setCur(doubleFallback)
+	b.jump(blkID(b.f, doubledBlock), []mir.ValueId{required})
+	b.setCur(doubledBlock)
+	four := b.constGet(prim(pU64), mir.ConstValue{Kind: mir.ConstInt, Int: 4})
+	belowMinimum := b.res(mir.TypeBool)
+	b.emit(mir.Instr{Op: mir.OpIntLt, Result: belowMinimum, A: doubledValues[0], B: four})
+	useMinimum, _ := b.addBlock("bb_vec_try_minimum", nil)
+	useCandidate, _ := b.addBlock("bb_vec_try_candidate", nil)
+	b.branch(belowMinimum, blkID(b.f, useMinimum), blkID(b.f, useCandidate))
+	b.setCur(useMinimum)
+	b.jump(blkID(b.f, minimumBlock), []mir.ValueId{four})
+	b.setCur(useCandidate)
+	b.jump(blkID(b.f, minimumBlock), []mir.ValueId{doubledValues[0]})
+
+	b.setCur(minimumBlock)
+	grownResult := b.res(operationResult)
+	b.emit(mir.Instr{Op: mir.OpVecTryGrow, Result: grownResult, Slice: recv, Domain: b.values["__domain"], Capacity: minimumValues[0], TypeOp: errorType})
+	growSwitch := b.cur
+	growSwitchID := blkID(b.f, growSwitch)
+	growOK, _ := b.addBlock("bb_vec_try_grown", nil)
+	growErr, _ := b.addBlock("bb_vec_try_grow_error", nil)
+	grownBinding := b.f.AddValue(b.valueName("vec"), vecType, mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: growSwitchID, Case: 0})
+	growErrBinding := b.f.AddValue(b.valueName("error"), errorType, mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: growSwitchID, Case: 1})
+	growSwitch.SetTerm(mir.Terminator{Kind: mir.TermSwitch, Value: grownResult, Cases: []mir.SwitchCase{
+		{Variant: "ok", Binding: grownBinding, Target: blkID(b.f, growOK)},
+		{Variant: "err", Binding: growErrBinding, Target: blkID(b.f, growErr)},
+	}})
+	b.setCur(growErr)
+	growFailure := b.res(resultType)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: growFailure, TypeOp: resultType, Variant: "err", Payload: growErrBinding})
+	b.jump(blkID(b.f, join), []mir.ValueId{growFailure})
+
+	ready, readyValues := b.addBlock("bb_vec_try_ready", []mir.Param{{Name: "vec", Type: vecType}})
+	b.setCur(enough)
+	b.jump(blkID(b.f, ready), []mir.ValueId{recv})
+	b.setCur(growOK)
+	b.jump(blkID(b.f, ready), []mir.ValueId{grownBinding})
+	b.setCur(ready)
+
+	receiverPlace, ok := b.place(ai.receiver)
+	if !ok {
+		return 0, diag(ai.receiver.exprPos(), "internal: mutable Vec receiver is not a static local place")
+	}
+	if ai.builtin == "try_reserve" {
+		b.storePlace(receiverPlace, readyValues[0])
+		b.jump(blkID(b.f, join), []mir.ValueId{b.capacityResultValue(resultType, errorType, "")})
+		b.setCur(join)
+		return joined[0], nil
+	}
+
+	copyResultType := b.l.m.Result(b.l.ty(receiverType.elem), errorType)
+	copiedResult := b.res(copyResultType)
+	b.emit(mir.Instr{Op: mir.OpCopyToDomainTry, Result: copiedResult, Domain: b.values["__domain"], CopyVal: argument, TypeOp: errorType})
+	copySwitch := b.cur
+	copySwitchID := blkID(b.f, copySwitch)
+	copyOK, _ := b.addBlock("bb_vec_try_copy", nil)
+	copyErr, _ := b.addBlock("bb_vec_try_copy_error", nil)
+	copiedBinding := b.f.AddValue(b.valueName("value"), b.l.ty(receiverType.elem), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: copySwitchID, Case: 0})
+	copyErrBinding := b.f.AddValue(b.valueName("error"), errorType, mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: copySwitchID, Case: 1})
+	copySwitch.SetTerm(mir.Terminator{Kind: mir.TermSwitch, Value: copiedResult, Cases: []mir.SwitchCase{
+		{Variant: "ok", Binding: copiedBinding, Target: blkID(b.f, copyOK)},
+		{Variant: "err", Binding: copyErrBinding, Target: blkID(b.f, copyErr)},
+	}})
+	b.setCur(copyErr)
+	copyFailure := b.res(resultType)
+	b.emit(mir.Instr{Op: mir.OpEnumConstruct, Result: copyFailure, TypeOp: resultType, Variant: "err", Payload: copyErrBinding})
+	b.jump(blkID(b.f, join), []mir.ValueId{copyFailure})
+	b.setCur(copyOK)
+	storage := b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+	b.emit(mir.Instr{Op: mir.OpVecStorage, Result: storage, Slice: readyValues[0]})
+	target := b.res(b.l.m.SafeMut(b.l.ty(receiverType.elem)))
+	b.emit(mir.Instr{Op: mir.OpSliceIndexChecked, Result: target, Slice: storage, Index: length, FailTarget: b.panicBlock()})
+	b.storePlace(mir.Place{Kind: mir.PlaceDeref, Deref: target}, copiedBinding)
+	newCapacity := b.res(mir.TypeU64)
+	b.emit(mir.Instr{Op: mir.OpVecCapacity, Result: newCapacity, Slice: readyValues[0]})
+	updated := b.res(vecType)
+	b.emit(mir.Instr{Op: mir.OpVecConstructChecked, Result: updated, Slice: storage, Lo: required, Capacity: newCapacity, FailTarget: b.panicBlock()})
+	b.storePlace(receiverPlace, updated)
+	b.jump(blkID(b.f, join), []mir.ValueId{b.capacityResultValue(resultType, errorType, "")})
+	b.setCur(join)
+	return joined[0], nil
 }
 
 // builtinCall lowers a builtin call. Alloc and Push skip their compile-time

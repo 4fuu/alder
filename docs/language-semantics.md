@@ -47,11 +47,12 @@ does not turn ordinary values into a move-oriented language.
 ### Scoped capabilities
 
 Immutable slices, mutable slices, table views, and similar accesses are tied to
-an owner and a lexical access scope. A direct immutable slice result is allowed
-when lowering can materialize caller-result storage; mutable views and nested
-aggregates containing views cannot be returned. Capabilities cannot otherwise
-be stored in longer-lived values, retained by unknown code, or used after
-invalidation. Mutable capabilities are exclusive.
+an owner and a lexical access scope. An immutable slice may enter and return
+inside an ordinary record, enum, array, option, result, or vector when lowering
+can recursively materialize independent inferred storage. Mutable views cannot
+be stored or returned, directly or through an aggregate. Capabilities cannot
+otherwise be retained by unknown code or used after invalidation. Mutable
+capabilities are exclusive.
 
 No user-written lifetime parameters are required in Alder 1.0.
 
@@ -168,6 +169,9 @@ value. `[T]` is an immutable scoped view of contiguous elements.
 `MutSlice(T)` is an exclusive mutable scoped view. `Vec(T)` is a growable value
 collection. `Map(K, V)` and `Set(T)` are insertion-ordered value collections
 with trait-defined hashing and equality; neither is S0's fixed bootstrap map.
+`String.as_bytes` and `Bytes.as_slice` expose immutable scoped byte views
+without enabling integer indexing on either owned type. `Bytes.try_from_vec`
+copies `Vec(U8)` into independent immutable storage.
 
 Copying an owned collection has value semantics. An implementation may avoid
 eager copies through proven uniqueness or immutable sharing, but later mutation

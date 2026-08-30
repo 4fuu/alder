@@ -88,7 +88,7 @@ var builtinFnNames = []string{
 var builtinTypeNames = []string{
 	"Bool", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
 	"F32", "F64", "Unit", "String", "Bytes", "Option", "Result", "Map", "Ptr",
-	"Domain", "DomainMark", "Array", "Vec", "MutSlice", "__s0_String", "__s0_Buffer", "__s0_Error",
+	"Domain", "DomainMark", "Array", "Vec", "MutSlice", "CapacityError", "__s0_String", "__s0_Buffer", "__s0_Error",
 }
 
 // variantReserved are reserved in the value namespace.
@@ -506,6 +506,8 @@ func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 			return &Type{kind: tDomainMark}, nil
 		case "__s0_Error":
 			return &Type{kind: tS0Error}, nil
+		case "CapacityError":
+			return &Type{kind: tCapacityError}, nil
 		}
 		if tp, ok := tps[t.Name]; ok {
 			return tp, nil
@@ -601,7 +603,7 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 		if len(args) != 1 {
 			return nil, diag(p, "%s expects 1 type argument, got %d", name, len(args))
 		}
-		if args[0].containsSlice() {
+		if name == "MutSlice" && args[0].containsSlice() || name == "Vec" && (args[0].containsMutableView() || !args[0].copyToDomainAllowed()) {
 			return nil, diag(p, "%s element type %s is affine or scoped", name, args[0].display())
 		}
 		kind := tVec
@@ -956,6 +958,24 @@ func (k *bodyChecker) checkOwnerMutation(p pos, name string) error {
 	return nil
 }
 
+// mutableVecReceiver accepts only a named mutable local or a static field
+// projection rooted at one. It deliberately excludes parameters, indexes,
+// dereferences, temporaries, and other computed places.
+func (k *bodyChecker) mutableVecReceiver(e Expr) (string, bool) {
+	cur := e
+	for {
+		switch x := cur.(type) {
+		case *Field:
+			cur = x.Base
+		case *Ident:
+			binding := k.env[x.Name]
+			return x.Name, binding != nil && binding.kind == bindLocal && binding.mut
+		default:
+			return "", false
+		}
+	}
+}
+
 func cloneBindings(src map[string]*binding) map[string]*binding {
 	dst := make(map[string]*binding, len(src))
 	for name, b := range src {
@@ -1213,11 +1233,10 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		if !typeEqual(vt, k.result) {
 			return k.mismatch(st.P, "return", k.result, vt)
 		}
-		// M7.3 permits a direct immutable view result. Lowering either keeps
-		// its ordinary backing in caller-result storage or materializes a
-		// deterministic cross-domain copy there. Mutable and nested views
-		// remain scoped until the final value/view-surface migration.
-		if vt.containsScopedView() && vt.kind != tSlice && !strings.HasPrefix(k.cf.decl.Name, "__s0_") {
+		// Immutable views nested in ordinary values are recursively
+		// materialized in caller-result storage. Exclusive mutable views stay
+		// lexical and cannot escape directly or through an aggregate.
+		if (vt.kind == tMutSlice || vt.containsMutableView()) && !strings.HasPrefix(k.cf.decl.Name, "__s0_") {
 			return diag(st.P, "scoped view %s cannot be returned", vt.display())
 		}
 		return nil
@@ -1227,6 +1246,15 @@ func (k *bodyChecker) checkStmt(s Stmt) error {
 		case *Call, *Match, *UnsafeC:
 			_, err := k.checkExpr(st.X, nil)
 			return err
+		case *Try:
+			t, err := k.checkExpr(st.X, prim(pUnit))
+			if err != nil {
+				return err
+			}
+			if !typeEqual(t, prim(pUnit)) {
+				return k.mismatch(st.P, "try expression statement", prim(pUnit), t)
+			}
+			return nil
 		}
 		return diag(st.P, "expression statement has no effect (only calls and match may be statements)")
 
@@ -1280,7 +1308,7 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 				return nil, k.mismatch(item.exprPos(), "array element", elem, it)
 			}
 		}
-		if elem.containsScopedView() {
+		if elem.containsMutableView() {
 			return nil, diag(x.P, "scoped view %s cannot be stored in an array", elem.display())
 		}
 		t := &Type{kind: tArray, elem: elem, length: uint64(len(x.Elems))}
@@ -1311,7 +1339,7 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 
 	case *StrLit:
 		t := &Type{kind: tString}
-		if expected != nil && (expected.kind == tString || expected.kind == tBytes || expected.kind == tS0String) {
+		if expected != nil && (expected.kind == tString || expected.kind == tBytes || expected.kind == tS0String || expected.kind == tSlice && typeEqual(expected.elem, prim(pU8))) {
 			t = expected
 		}
 		if t.kind == tString && !utf8.ValidString(x.Value) {
@@ -1449,7 +1477,7 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		if xt.kind != tResult {
 			return nil, diag(x.P, "try requires a Result expression, got %s", xt.display())
 		}
-		if !typeEqual(xt.err, k.result.err) {
+		if !typeEqual(xt.err, k.result.err) && !(xt.err.kind == tCapacityError && k.result.err.kind == tS0Error) {
 			return nil, diag(x.P, "try error type %s does not match function error type %s", xt.err.display(), k.result.err.display())
 		}
 		k.note(e, xt.ok)
@@ -1662,7 +1690,7 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 			if len(x.Args) != 1 {
 				return nil, diag(x.P, "variant %q expects 1 payload argument, got %d", name, len(x.Args))
 			}
-			if payload.containsScopedView() {
+			if payload.containsMutableView() {
 				return nil, diag(x.Args[0].exprPos(), "scoped view %s cannot be stored in variant %q", payload.display(), name)
 			}
 			at, err := k.checkExpr(x.Args[0], payload)
@@ -1680,6 +1708,21 @@ func (k *bodyChecker) checkCall(x *Call, expected *Type) (*Type, error) {
 }
 
 func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
+	if id, ok := field.Base.(*Ident); ok && id.Name == "Bytes" {
+		if field.Name != "try_from_vec" || len(x.Args) != 1 {
+			return nil, diag(x.P, "Bytes.try_from_vec expects one Vec(U8) argument")
+		}
+		got, err := k.checkExpr(x.Args[0], &Type{kind: tVec, elem: prim(pU8)})
+		if err != nil {
+			return nil, err
+		}
+		if got.kind != tVec || !typeEqual(got.elem, prim(pU8)) {
+			return nil, diag(x.Args[0].exprPos(), "Bytes.try_from_vec requires Vec(U8)")
+		}
+		result := &Type{kind: tResult, ok: &Type{kind: tBytes}, err: &Type{kind: tCapacityError}}
+		k.noteCall(x, result, &callAnn{kind: callMethod, builtin: "bytes_try_from_vec", ctorType: &Type{kind: tBytes}})
+		return result, nil
+	}
 	if id, ok := field.Base.(*Ident); ok && id.Name == "Vec" {
 		if field.Name != "new" && field.Name != "from_array" {
 			return nil, diag(x.P, "unknown Vec constructor %q", field.Name)
@@ -1695,7 +1738,7 @@ func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
 		if err != nil {
 			return nil, err
 		}
-		if elem.containsSlice() {
+		if elem.containsMutableView() || !elem.copyToDomainAllowed() {
 			return nil, diag(x.P, "Vec element type %s is affine or scoped", elem.display())
 		}
 		result := &Type{kind: tVec, elem: elem}
@@ -1731,6 +1774,7 @@ func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
 	}
 	result := recv
 	receiverID, receiverIsID := field.Base.(*Ident)
+	mutationOwner, mutableReceiver := k.mutableVecReceiver(field.Base)
 	switch field.Name {
 	case "len":
 		if len(x.Args) != 0 || (recv.kind != tVec && recv.kind != tSlice && recv.kind != tMutSlice) {
@@ -1744,13 +1788,31 @@ func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
 		if err := arg(0, recv.elem); err != nil {
 			return nil, err
 		}
-		if !receiverIsID || !k.env[receiverID.Name].mut {
+		if !mutableReceiver {
 			return nil, diag(field.P, "method push requires a mutable Vec binding")
 		}
-		if err := k.checkOwnerMutation(field.P, receiverID.Name); err != nil {
+		if err := k.checkOwnerMutation(field.P, mutationOwner); err != nil {
 			return nil, err
 		}
 		result = prim(pUnit)
+	case "try_reserve", "try_push":
+		if recv.kind != tVec || len(x.Args) != 1 {
+			return nil, diag(x.P, "method %s expects one argument on Vec", field.Name)
+		}
+		want := prim(pU64)
+		if field.Name == "try_push" {
+			want = recv.elem
+		}
+		if err := arg(0, want); err != nil {
+			return nil, err
+		}
+		if !mutableReceiver {
+			return nil, diag(field.P, "method %s requires a mutable Vec binding", field.Name)
+		}
+		if err := k.checkOwnerMutation(field.P, mutationOwner); err != nil {
+			return nil, err
+		}
+		result = &Type{kind: tResult, ok: prim(pUnit), err: &Type{kind: tCapacityError}}
 	case "get":
 		if (recv.kind != tVec && recv.kind != tSlice && recv.kind != tMutSlice) || len(x.Args) != 1 {
 			return nil, diag(x.P, "method get expects one index argument")
@@ -1788,13 +1850,22 @@ func (k *bodyChecker) checkMethodCall(x *Call, field *Field) (*Type, error) {
 		} else {
 			result = &Type{kind: tMutSlice, elem: recv.elem}
 		}
+	case "as_slice", "as_bytes":
+		valid := field.Name == "as_slice" && recv.kind == tBytes || field.Name == "as_bytes" && recv.kind == tString
+		if !valid || len(x.Args) != 0 {
+			return nil, diag(x.P, "method %s is not available on %s", field.Name, recv.display())
+		}
+		if !receiverIsID {
+			return nil, diag(field.P, "scoped view formation requires a named lexical owner")
+		}
+		result = &Type{kind: tSlice, elem: prim(pU8)}
 	default:
 		return nil, diag(x.P, "unknown method %q on %s", field.Name, recv.display())
 	}
 	annotation := &callAnn{kind: callMethod, builtin: field.Name, receiver: field.Base}
-	if field.Name == "slice" || field.Name == "slice_mut" || field.Name == "subview" {
+	if field.Name == "slice" || field.Name == "slice_mut" || field.Name == "subview" || field.Name == "as_slice" || field.Name == "as_bytes" {
 		annotation.viewOwner = receiverID.Name
-		annotation.viewMutable = field.Name != "slice"
+		annotation.viewMutable = field.Name == "slice_mut" || field.Name == "subview"
 	}
 	k.noteCall(x, result, annotation)
 	return result, nil
@@ -2164,7 +2235,7 @@ func (k *bodyChecker) checkConstruction(x *Call, ty *Type) (*Type, error) {
 		bindings := structBindings(ty)
 		for i, arg := range ordered {
 			ft := substType(ty.decl.fields[i], bindings)
-			if ft.containsScopedView() {
+			if ft.containsMutableView() {
 				return nil, diag(arg.exprPos(), "scoped view %s cannot be stored in field %q", ft.display(), ty.decl.decl.Fields[i].Name)
 			}
 			at, err := k.checkExpr(arg, ft)

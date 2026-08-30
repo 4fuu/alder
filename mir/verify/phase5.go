@@ -147,9 +147,21 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "element type operand is out of range"})
 		}
 
-	case mir.OpCopyToDomain:
+	case mir.OpCopyToDomain, mir.OpCopyToDomainTry:
 		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
 		// Result type equals the copied operand's type; checked below.
+		if in.Op == mir.OpCopyToDomainTry && !capacityErrorType(m, in.TypeOp) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "copy_to_domain.try requires a CapacityError-shaped error type"})
+		}
+
+	case mir.OpVecTryGrow:
+		if !capacityErrorType(m, in.TypeOp) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "vec.try_grow requires a CapacityError-shaped error type"})
+		}
+	case mir.OpBytesTryFromVec:
+		if !capacityErrorType(m, in.TypeOp) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "bytes.try_from_vec requires a CapacityError-shaped error type"})
+		}
 
 	case mir.OpCleanupScopeBegin:
 		// no operands
@@ -372,6 +384,20 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		}
 	}
 	return c.errs
+}
+
+func capacityErrorType(m *mir.Module, t mir.TypeId) bool {
+	if !m.ValidType(t) || m.Types[t].Kind != mir.TypeEnum || len(m.Types[t].Variants) != 2 {
+		return false
+	}
+	oom, okOOM := m.VariantIndex(t, "OutOfMemory")
+	limit, okLimit := m.VariantIndex(t, "Limit")
+	if !okOOM || !okLimit || oom == limit {
+		return false
+	}
+	oomPayload, _ := m.VariantPayload(t, oom)
+	limitPayload, _ := m.VariantPayload(t, limit)
+	return oomPayload == mir.TypeUnit && limitPayload == mir.TypeUnit
 }
 
 func checkEdgeArgTypes(c *typeChecker, target *mir.Block, args []mir.ValueId) {

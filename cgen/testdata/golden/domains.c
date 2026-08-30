@@ -32,6 +32,7 @@ static ALDER_MAYBE_UNUSED void alder_cleanup_1(void *alder_ctx) {
 }
 
 static ALDER_MAYBE_UNUSED void alder_fn_domain_destroy_0(AlderDomain * alder_v0) {
+  (void)alder_v0;
 
   alder_domain_destroy(alder_v0);
   return;
@@ -52,6 +53,7 @@ static ALDER_MAYBE_UNUSED int64_t alder_fn_scoped_1(AlderDomain * alder_v0) {
   AlderCleanupScope alder_scope_0 = {0};
   AlderCtx_0 alder_ctx_0 = {0};
   AlderCtx_1 alder_ctx_1 = {0};
+  (void)alder_v0;
 
   if (!alder_cleanup_scope_begin(&alder_scope_0)) { alder_runtime_panic("cleanup.scope.begin failed"); }
   alder_v1 = &alder_scope_0;

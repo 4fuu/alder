@@ -1,33 +1,33 @@
-fn mir_vadd(d: Domain, diagnostics: __s0_Buffer(MirVerifyDiagRec), item: MirVerifyDiagRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
-    return __s0_buffer_append(MirVerifyDiagRec, d, diagnostics, item)
+fn mir_vadd(d: Domain, diagnostics: Vec(MirVerifyDiagRec), item: MirVerifyDiagRec) -> Result(Vec(MirVerifyDiagRec), __s0_Error) {
+    return Ok(try vec_appended(MirVerifyDiagRec, diagnostics, item))
 }
 fn mir_vid_valid(id: U64, count: U64) -> Bool { return id > 0 && id <= count }
 fn mir_vrange_valid(start: U64, end: U64, count: U64) -> Bool { return start <= end && end <= count }
 fn mir_vname_equal(store: MirStore, a_start: U64, a_end: U64, b_start: U64, b_end: U64) -> Bool {
-    if !mir_vrange_valid(a_start, a_end, __s0_buffer_len(U8, store.names)) || !mir_vrange_valid(b_start, b_end, __s0_buffer_len(U8, store.names)) { return false }
+    if !mir_vrange_valid(a_start, a_end, (store.names).len()) || !mir_vrange_valid(b_start, b_end, (store.names).len()) { return false }
     if a_end - a_start != b_end - b_start { return false }
     var at: U64 = 0
     while at < a_end - a_start {
-        if __s0_buffer_get(U8, store.names, a_start + at) != __s0_buffer_get(U8, store.names, b_start + at) { return false }
+        if (store.names)[a_start + at] != (store.names)[b_start + at] { return false }
         at = at + 1
     }
     return true
 }
-fn mir_vname_word(store: MirStore, start: U64, end: U64, word: __s0_String) -> Bool {
-    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) || end - start != len(word) { return false }
+fn mir_vname_word(store: MirStore, start: U64, end: U64, word: [U8]) -> Bool {
+    if !mir_vrange_valid(start, end, (store.names).len()) || end - start != len(word) { return false }
     var at: U64 = 0
     while at < len(word) {
-        if __s0_buffer_get(U8, store.names, start + at) != word[at] { return false }
+        if (store.names)[start + at] != word[at] { return false }
         at = at + 1
     }
     return true
 }
 fn mir_vname_valid(store: MirStore, start: U64, end: U64, dotted: Bool) -> Bool {
-    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) || start == end { return false }
+    if !mir_vrange_valid(start, end, (store.names).len()) || start == end { return false }
     var at = start
     var segment_start = true
     while at < end {
-        let c = __s0_buffer_get(U8, store.names, at)
+        let c = (store.names)[at]
         if dotted && c == 46 {
             if segment_start || at + 1 == end { return false }
             segment_start = true
@@ -42,13 +42,13 @@ fn mir_vname_valid(store: MirStore, start: U64, end: U64, dotted: Bool) -> Bool 
     }
     return !segment_start
 }
-fn mir_vfunction_exists(store: MirStore, id: U64) -> Bool { return mir_vid_valid(id, __s0_buffer_len(MirFunctionRec, store.functions)) }
-fn mir_vtype_exists(store: MirStore, id: U64) -> Bool { return mir_vid_valid(id, __s0_buffer_len(MirTypeRec, store.types)) }
+fn mir_vfunction_exists(store: MirStore, id: U64) -> Bool { return mir_vid_valid(id, (store.functions).len()) }
+fn mir_vtype_exists(store: MirStore, id: U64) -> Bool { return mir_vid_valid(id, (store.types).len()) }
 fn mir_vblock_index(store: MirStore, function: U64, block: U64) -> U64 {
     if block == 0 { return 0 }
     var at: U64 = 0
-    while at < __s0_buffer_len(MirBlockRec, store.blocks) {
-        let item = __s0_buffer_get(MirBlockRec, store.blocks, at)
+    while at < (store.blocks).len() {
+        let item = (store.blocks)[at]
         if item.function == function && item.ordinal + 1 == block { return at + 1 }
         at = at + 1
     }
@@ -57,8 +57,8 @@ fn mir_vblock_index(store: MirStore, function: U64, block: U64) -> U64 {
 fn mir_vvalue_index(store: MirStore, function: U64, value: U64) -> U64 {
     if value == 0 { return 0 }
     var at: U64 = 0
-    while at < __s0_buffer_len(MirValueRec, store.values) {
-        let item = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < (store.values).len() {
+        let item = (store.values)[at]
         if item.function == function && item.ordinal + 1 == value { return at + 1 }
         at = at + 1
     }
@@ -67,8 +67,8 @@ fn mir_vvalue_index(store: MirStore, function: U64, value: U64) -> U64 {
 fn mir_vlocal_index(store: MirStore, function: U64, local: U64) -> U64 {
     if local == 0 { return 0 }
     var at: U64 = 0
-    while at < __s0_buffer_len(MirLocalRec, store.locals) {
-        let item = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < (store.locals).len() {
+        let item = (store.locals)[at]
         if item.function == function && item.ordinal + 1 == local { return at + 1 }
         at = at + 1
     }
@@ -77,8 +77,8 @@ fn mir_vlocal_index(store: MirStore, function: U64, local: U64) -> U64 {
 fn mir_vcount_params(store: MirStore, function: U64, block: U64, kind: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirParamRec, store.params) {
-        let item = __s0_buffer_get(MirParamRec, store.params, at)
+    while at < (store.params).len() {
+        let item = (store.params)[at]
         if item.function == function && item.block == block && item.kind == kind { count = count + 1 }
         at = at + 1
     }
@@ -87,8 +87,8 @@ fn mir_vcount_params(store: MirStore, function: U64, block: U64, kind: U64) -> U
 fn mir_vcount_operands(store: MirStore, kind: U64, owner: U64, edge: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirOperandRec, store.operands) {
-        let item = __s0_buffer_get(MirOperandRec, store.operands, at)
+    while at < (store.operands).len() {
+        let item = (store.operands)[at]
         if item.kind == kind && item.owner == owner && item.edge == edge { count = count + 1 }
         at = at + 1
     }
@@ -97,8 +97,8 @@ fn mir_vcount_operands(store: MirStore, kind: U64, owner: U64, edge: U64) -> U64
 fn mir_vcount_type_parts(store: MirStore, owner: U64, kind: U64) -> U64 {
     var count: U64 = 0
     var at: U64 = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-        let item = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+    while at < (store.type_parts).len() {
+        let item = (store.type_parts)[at]
         if item.owner == owner && item.kind == kind { count = count + 1 }
         at = at + 1
     }
@@ -106,7 +106,7 @@ fn mir_vcount_type_parts(store: MirStore, owner: U64, kind: U64) -> U64 {
 }
 fn mir_vtype_kind(store: MirStore, id: U64) -> U64 {
     if !mir_vtype_exists(store, id) { return 999 }
-    return __s0_buffer_get(MirTypeRec, store.types, id - 1).kind
+    return (store.types)[id - 1].kind
 }
 
 // Per-function dense indexes built in O(F + T) by counting records per
@@ -116,99 +116,99 @@ fn mir_vtype_kind(store: MirStore, id: U64) -> U64 {
 // only empty slots (first match wins), matching the legacy scan helpers
 // (mir_vblock_index/mir_vvalue_index/mir_vlocal_index) on every input.
 type MirVIndexes {
-    block_pos: __s0_Buffer(U64)
-    block_span: __s0_Buffer(U64)
-    value_pos: __s0_Buffer(U64)
-    value_span: __s0_Buffer(U64)
-    local_pos: __s0_Buffer(U64)
-    local_span: __s0_Buffer(U64)
-    term_pos: __s0_Buffer(U64)
-    term_span: __s0_Buffer(U64)
-    block_count: __s0_Buffer(U64)
-    value_count: __s0_Buffer(U64)
-    local_count: __s0_Buffer(U64)
-    instr_span: __s0_Buffer(U64)
-    instr_count: __s0_Buffer(U64)
-    instr_off: __s0_Buffer(U64)
-    instr_ids: __s0_Buffer(U64)
-    param_span: __s0_Buffer(U64)
-    param_ids: __s0_Buffer(U64)
-    op_instr_start: __s0_Buffer(U64)
-    op_instr_count: __s0_Buffer(U64)
-    op_instr_ids: __s0_Buffer(U64)
-    op_term_start: __s0_Buffer(U64)
-    op_term_count: __s0_Buffer(U64)
-    op_term_ids: __s0_Buffer(U64)
-    op_case_start: __s0_Buffer(U64)
-    op_case_count: __s0_Buffer(U64)
-    op_case_ids: __s0_Buffer(U64)
-    tp_start: __s0_Buffer(U64)
-    tp_count: __s0_Buffer(U64)
-    tp_field_count: __s0_Buffer(U64)
-    tp_ids: __s0_Buffer(U64)
-    const_slot: __s0_Buffer(U64)
-    type_first: __s0_Buffer(U64)
-    type_unary: __s0_Buffer(U64)
-    place_root: __s0_Buffer(U64)
-    place_depth: __s0_Buffer(U64)
-    place_deref: __s0_Buffer(U64)
+    block_pos: Vec(U64)
+    block_span: Vec(U64)
+    value_pos: Vec(U64)
+    value_span: Vec(U64)
+    local_pos: Vec(U64)
+    local_span: Vec(U64)
+    term_pos: Vec(U64)
+    term_span: Vec(U64)
+    block_count: Vec(U64)
+    value_count: Vec(U64)
+    local_count: Vec(U64)
+    instr_span: Vec(U64)
+    instr_count: Vec(U64)
+    instr_off: Vec(U64)
+    instr_ids: Vec(U64)
+    param_span: Vec(U64)
+    param_ids: Vec(U64)
+    op_instr_start: Vec(U64)
+    op_instr_count: Vec(U64)
+    op_instr_ids: Vec(U64)
+    op_term_start: Vec(U64)
+    op_term_count: Vec(U64)
+    op_term_ids: Vec(U64)
+    op_case_start: Vec(U64)
+    op_case_count: Vec(U64)
+    op_case_ids: Vec(U64)
+    tp_start: Vec(U64)
+    tp_count: Vec(U64)
+    tp_field_count: Vec(U64)
+    tp_ids: Vec(U64)
+    const_slot: Vec(U64)
+    type_first: Vec(U64)
+    type_unary: Vec(U64)
+    place_root: Vec(U64)
+    place_depth: Vec(U64)
+    place_deref: Vec(U64)
 }
 
 // Intermediate results of a per-table index build. Buffers are assembled here
 // and copied into MirVIndexes by mir_vindex_build.
 type MirVIndexTableRec {
-    pos: __s0_Buffer(U64)
-    span: __s0_Buffer(U64)
-    count: __s0_Buffer(U64)
+    pos: Vec(U64)
+    span: Vec(U64)
+    count: Vec(U64)
 }
 
 type MirVIndexInstrRec {
-    span: __s0_Buffer(U64)
-    count: __s0_Buffer(U64)
-    off: __s0_Buffer(U64)
-    ids: __s0_Buffer(U64)
+    span: Vec(U64)
+    count: Vec(U64)
+    off: Vec(U64)
+    ids: Vec(U64)
 }
 
 type MirVIndexParamRec {
-    span: __s0_Buffer(U64)
-    ids: __s0_Buffer(U64)
+    span: Vec(U64)
+    ids: Vec(U64)
 }
 
 type MirVIndexOpsRec {
-    instr_start: __s0_Buffer(U64)
-    instr_count: __s0_Buffer(U64)
-    instr_ids: __s0_Buffer(U64)
-    term_start: __s0_Buffer(U64)
-    term_count: __s0_Buffer(U64)
-    term_ids: __s0_Buffer(U64)
-    case_start: __s0_Buffer(U64)
-    case_count: __s0_Buffer(U64)
-    case_ids: __s0_Buffer(U64)
+    instr_start: Vec(U64)
+    instr_count: Vec(U64)
+    instr_ids: Vec(U64)
+    term_start: Vec(U64)
+    term_count: Vec(U64)
+    term_ids: Vec(U64)
+    case_start: Vec(U64)
+    case_count: Vec(U64)
+    case_ids: Vec(U64)
 }
 
 type MirVIndexTypePartsRec {
-    start: __s0_Buffer(U64)
-    count: __s0_Buffer(U64)
-    field_count: __s0_Buffer(U64)
-    ids: __s0_Buffer(U64)
+    start: Vec(U64)
+    count: Vec(U64)
+    field_count: Vec(U64)
+    ids: Vec(U64)
 }
 
 type MirVIndexConstRec {
-    slots: __s0_Buffer(U64)
+    slots: Vec(U64)
 }
 
 type MirVIndexPlaceRec {
-    root: __s0_Buffer(U64)
-    depth: __s0_Buffer(U64)
-    deref: __s0_Buffer(U64)
+    root: Vec(U64)
+    depth: Vec(U64)
+    deref: Vec(U64)
 }
 
 fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let total = __s0_buffer_len(MirBlockRec, store.blocks)
-    var pos = try __s0_buffer_new(U64, d)
-    var span = try __s0_buffer_new(U64, d)
-    var count = try __s0_buffer_new(U64, d)
+    let fcount = (store.functions).len()
+    let total = (store.blocks).len()
+    var pos = Vec.new(U64)
+    var span = Vec.new(U64)
+    var count = Vec.new(U64)
     var cnt = __s0_alloc(U64, d, fcount + 1)
     var base = __s0_alloc(U64, d, fcount + 1)
     var z: U64 = 0
@@ -217,7 +217,7 @@ fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirBlockRec, store.blocks, i).function
+        let f = (store.blocks)[i].function
         if f >= 1 && f <= fcount { cnt[f] = cnt[f] + 1 }
         i = i + 1
     }
@@ -230,7 +230,7 @@ fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirBlockRec, store.blocks, i)
+        let rec = (store.blocks)[i]
         let f2 = rec.function
         if f2 >= 1 && f2 <= fcount {
             let key = rec.ordinal
@@ -243,24 +243,24 @@ fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     }
     f = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(U64, pos))
+        try span.try_push((pos).len())
         var k: U64 = 0
         while k < cnt[f] {
-            pos = try __s0_buffer_append(U64, d, pos, ids[base[f] + k])
+            try pos.try_push(ids[base[f] + k])
             k = k + 1
         }
-        count = try __s0_buffer_append(U64, d, count, cnt[f])
+        try count.try_push(cnt[f])
         f = f + 1
     }
     return Ok(MirVIndexTableRec(pos: pos, span: span, count: count))
 }
 
 fn mir_vindex_build_values(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let total = __s0_buffer_len(MirValueRec, store.values)
-    var pos = try __s0_buffer_new(U64, d)
-    var span = try __s0_buffer_new(U64, d)
-    var count = try __s0_buffer_new(U64, d)
+    let fcount = (store.functions).len()
+    let total = (store.values).len()
+    var pos = Vec.new(U64)
+    var span = Vec.new(U64)
+    var count = Vec.new(U64)
     var cnt = __s0_alloc(U64, d, fcount + 1)
     var base = __s0_alloc(U64, d, fcount + 1)
     var z: U64 = 0
@@ -269,7 +269,7 @@ fn mir_vindex_build_values(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirValueRec, store.values, i).function
+        let f = (store.values)[i].function
         if f >= 1 && f <= fcount { cnt[f] = cnt[f] + 1 }
         i = i + 1
     }
@@ -282,7 +282,7 @@ fn mir_vindex_build_values(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirValueRec, store.values, i)
+        let rec = (store.values)[i]
         let f2 = rec.function
         if f2 >= 1 && f2 <= fcount {
             let key = rec.ordinal
@@ -295,24 +295,24 @@ fn mir_vindex_build_values(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     }
     f = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(U64, pos))
+        try span.try_push((pos).len())
         var k: U64 = 0
         while k < cnt[f] {
-            pos = try __s0_buffer_append(U64, d, pos, ids[base[f] + k])
+            try pos.try_push(ids[base[f] + k])
             k = k + 1
         }
-        count = try __s0_buffer_append(U64, d, count, cnt[f])
+        try count.try_push(cnt[f])
         f = f + 1
     }
     return Ok(MirVIndexTableRec(pos: pos, span: span, count: count))
 }
 
 fn mir_vindex_build_locals(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let total = __s0_buffer_len(MirLocalRec, store.locals)
-    var pos = try __s0_buffer_new(U64, d)
-    var span = try __s0_buffer_new(U64, d)
-    var count = try __s0_buffer_new(U64, d)
+    let fcount = (store.functions).len()
+    let total = (store.locals).len()
+    var pos = Vec.new(U64)
+    var span = Vec.new(U64)
+    var count = Vec.new(U64)
     var cnt = __s0_alloc(U64, d, fcount + 1)
     var base = __s0_alloc(U64, d, fcount + 1)
     var z: U64 = 0
@@ -321,7 +321,7 @@ fn mir_vindex_build_locals(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirLocalRec, store.locals, i).function
+        let f = (store.locals)[i].function
         if f >= 1 && f <= fcount { cnt[f] = cnt[f] + 1 }
         i = i + 1
     }
@@ -334,7 +334,7 @@ fn mir_vindex_build_locals(d: Domain, store: MirStore) -> Result(MirVIndexTableR
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirLocalRec, store.locals, i)
+        let rec = (store.locals)[i]
         let f2 = rec.function
         if f2 >= 1 && f2 <= fcount {
             let key = rec.ordinal
@@ -347,24 +347,24 @@ fn mir_vindex_build_locals(d: Domain, store: MirStore) -> Result(MirVIndexTableR
     }
     f = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(U64, pos))
+        try span.try_push((pos).len())
         var k: U64 = 0
         while k < cnt[f] {
-            pos = try __s0_buffer_append(U64, d, pos, ids[base[f] + k])
+            try pos.try_push(ids[base[f] + k])
             k = k + 1
         }
-        count = try __s0_buffer_append(U64, d, count, cnt[f])
+        try count.try_push(cnt[f])
         f = f + 1
     }
     return Ok(MirVIndexTableRec(pos: pos, span: span, count: count))
 }
 
 fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let total = __s0_buffer_len(MirTermRec, store.terminators)
-    var pos = try __s0_buffer_new(U64, d)
-    var span = try __s0_buffer_new(U64, d)
-    var count = try __s0_buffer_new(U64, d)
+    let fcount = (store.functions).len()
+    let total = (store.terminators).len()
+    var pos = Vec.new(U64)
+    var span = Vec.new(U64)
+    var count = Vec.new(U64)
     var cnt = __s0_alloc(U64, d, fcount + 1)
     var base = __s0_alloc(U64, d, fcount + 1)
     var z: U64 = 0
@@ -373,7 +373,7 @@ fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRe
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirTermRec, store.terminators, i).function
+        let f = (store.terminators)[i].function
         if f >= 1 && f <= fcount { cnt[f] = cnt[f] + 1 }
         i = i + 1
     }
@@ -386,7 +386,7 @@ fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRe
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirTermRec, store.terminators, i)
+        let rec = (store.terminators)[i]
         let f2 = rec.function
         if f2 >= 1 && f2 <= fcount && rec.block >= 1 {
             let key = rec.block - 1
@@ -399,13 +399,13 @@ fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRe
     }
     f = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(U64, pos))
+        try span.try_push((pos).len())
         var k: U64 = 0
         while k < cnt[f] {
-            pos = try __s0_buffer_append(U64, d, pos, ids[base[f] + k])
+            try pos.try_push(ids[base[f] + k])
             k = k + 1
         }
-        count = try __s0_buffer_append(U64, d, count, cnt[f])
+        try count.try_push(cnt[f])
         f = f + 1
     }
     return Ok(MirVIndexTableRec(pos: pos, span: span, count: count))
@@ -416,9 +416,9 @@ fn mir_vindex_build_terms(d: Domain, store: MirStore) -> Result(MirVIndexTableRe
 // by that slot, instr_ids is flat per function (blocks ascending, ordinals
 // ascending), and instr_span[function - 1] is the function's base offset.
 fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec) -> Result(MirVIndexInstrRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let btotal = __s0_buffer_len(U64, blocks.pos)
-    let itotal = __s0_buffer_len(MirInstrRec, store.instructions)
+    let fcount = (store.functions).len()
+    let btotal = (blocks.pos).len()
+    let itotal = (store.instructions).len()
     var icnt = __s0_alloc(U64, d, btotal)
     var ioff = __s0_alloc(U64, d, btotal + 1)
     var z: U64 = 0
@@ -429,10 +429,10 @@ fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec
         z = z + 1 }
     var i: U64 = 0
     while i < itotal {
-        let ins = __s0_buffer_get(MirInstrRec, store.instructions, i)
+        let ins = (store.instructions)[i]
         let f = ins.function
-        if f >= 1 && f <= fcount && ins.block >= 1 && ins.block <= __s0_buffer_get(U64, blocks.count, f - 1) {
-            let slot = __s0_buffer_get(U64, blocks.span, f - 1) + ins.block - 1
+        if f >= 1 && f <= fcount && ins.block >= 1 && ins.block <= (blocks.count)[f - 1] {
+            let slot = (blocks.span)[f - 1] + ins.block - 1
             if slot < btotal { icnt[slot] = icnt[slot] + 1 }
         }
         i = i + 1
@@ -446,10 +446,10 @@ fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec
         w = w + 1 }
     i = 0
     while i < itotal {
-        let ins = __s0_buffer_get(MirInstrRec, store.instructions, i)
+        let ins = (store.instructions)[i]
         let f2 = ins.function
-        if f2 >= 1 && f2 <= fcount && ins.block >= 1 && ins.block <= __s0_buffer_get(U64, blocks.count, f2 - 1) {
-            let slot = __s0_buffer_get(U64, blocks.span, f2 - 1) + ins.block - 1
+        if f2 >= 1 && f2 <= fcount && ins.block >= 1 && ins.block <= (blocks.count)[f2 - 1] {
+            let slot = (blocks.span)[f2 - 1] + ins.block - 1
             if slot < btotal && ins.ordinal < icnt[slot] {
                 let pos = ioff[slot] + ins.ordinal
                 if ids[pos] == 0 { ids[pos] = i + 1 }
@@ -457,28 +457,28 @@ fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec
         }
         i = i + 1
     }
-    var span = try __s0_buffer_new(U64, d)
-    var count = try __s0_buffer_new(U64, d)
-    var off = try __s0_buffer_new(U64, d)
-    var ids_buf = try __s0_buffer_new(U64, d)
+    var span = Vec.new(U64)
+    var count = Vec.new(U64)
+    var off = Vec.new(U64)
+    var ids_buf = Vec.new(U64)
     var f: U64 = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, ioff[__s0_buffer_get(U64, blocks.span, f - 1)])
+        try span.try_push(ioff[(blocks.span)[f - 1]])
         f = f + 1
     }
     var fb: U64 = 1
     s = 0
     while s < btotal {
-        while fb < fcount && s >= __s0_buffer_get(U64, blocks.span, fb - 1) + __s0_buffer_get(U64, blocks.count, fb - 1) { fb = fb + 1 }
-        count = try __s0_buffer_append(U64, d, count, icnt[s])
-        off = try __s0_buffer_append(U64, d, off, ioff[s] - ioff[__s0_buffer_get(U64, blocks.span, fb - 1)])
+        while fb < fcount && s >= (blocks.span)[fb - 1] + (blocks.count)[fb - 1] { fb = fb + 1 }
+        try count.try_push(icnt[s])
+        try off.try_push(ioff[s] - ioff[(blocks.span)[fb - 1]])
         s = s + 1
     }
     s = 0
     while s < btotal {
         var k: U64 = 0
         while k < icnt[s] {
-            ids_buf = try __s0_buffer_append(U64, d, ids_buf, ids[ioff[s] + k])
+            try ids_buf.try_push(ids[ioff[s] + k])
             k = k + 1
         }
         s = s + 1
@@ -488,8 +488,8 @@ fn mir_vindex_build_instrs(d: Domain, store: MirStore, blocks: MirVIndexTableRec
 
 // Params per function, store order preserved within each function.
 fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamRec, __s0_Error) {
-    let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-    let total = __s0_buffer_len(MirParamRec, store.params)
+    let fcount = (store.functions).len()
+    let total = (store.params).len()
     var cnt = __s0_alloc(U64, d, fcount + 1)
     var start = __s0_alloc(U64, d, fcount + 1)
     var z: U64 = 0
@@ -498,7 +498,7 @@ fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamR
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirParamRec, store.params, i).function
+        let f = (store.params)[i].function
         if f >= 1 && f <= fcount { cnt[f] = cnt[f] + 1 }
         i = i + 1
     }
@@ -515,7 +515,7 @@ fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamR
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirParamRec, store.params, i)
+        let rec = (store.params)[i]
         let f2 = rec.function
         if f2 >= 1 && f2 <= fcount {
             let pos = start[f2] + used[f2]
@@ -524,14 +524,14 @@ fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamR
         }
         i = i + 1
     }
-    var span = try __s0_buffer_new(U64, d)
-    var ids_buf = try __s0_buffer_new(U64, d)
+    var span = Vec.new(U64)
+    var ids_buf = Vec.new(U64)
     f = 1
     while f <= fcount {
-        span = try __s0_buffer_append(U64, d, span, start[f])
+        try span.try_push(start[f])
         var k: U64 = 0
         while k < cnt[f] {
-            ids_buf = try __s0_buffer_append(U64, d, ids_buf, ids[start[f] + k])
+            try ids_buf.try_push(ids[start[f] + k])
             k = k + 1
         }
         f = f + 1
@@ -546,9 +546,9 @@ fn mir_vindex_build_params(d: Domain, store: MirStore) -> Result(MirVIndexParamR
 // operand ids stay in store (ascending id) order. Operands whose owner is 0
 // or exceeds the owner space are skipped; no query can ever address them.
 fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, __s0_Error) {
-    let icount = __s0_buffer_len(MirInstrRec, store.instructions)
-    let tcount = __s0_buffer_len(MirTermRec, store.terminators)
-    let ocount = __s0_buffer_len(MirOperandRec, store.operands)
+    let icount = (store.instructions).len()
+    let tcount = (store.terminators).len()
+    let ocount = (store.operands).len()
     var icnt = __s0_alloc(U64, d, icount + 1)
     var tcnt = __s0_alloc(U64, d, tcount + 1)
     var ccnt = __s0_alloc(U64, d, ocount + 1)
@@ -566,7 +566,7 @@ fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, _
     var total_c: U64 = 0
     var i: U64 = 0
     while i < ocount {
-        let o = __s0_buffer_get(MirOperandRec, store.operands, i)
+        let o = (store.operands)[i]
         if o.kind == mir_operand_instruction() || o.kind == mir_operand_aggregate_field() || o.kind == mir_operand_checked_edge_arg() {
             if o.owner >= 1 && o.owner <= icount { icnt[o.owner] = icnt[o.owner] + 1
                 total_i = total_i + 1 }
@@ -628,7 +628,7 @@ fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, _
         w = w + 1 }
     i = 0
     while i < ocount {
-        let o = __s0_buffer_get(MirOperandRec, store.operands, i)
+        let o = (store.operands)[i]
         if o.kind == mir_operand_instruction() || o.kind == mir_operand_aggregate_field() || o.kind == mir_operand_checked_edge_arg() {
             if o.owner >= 1 && o.owner <= icount {
                 let pos = istart[o.owner] + iused[o.owner]
@@ -652,56 +652,56 @@ fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, _
         }
         i = i + 1
     }
-    var instr_start = try __s0_buffer_new(U64, d)
-    var instr_count = try __s0_buffer_new(U64, d)
-    var instr_ids = try __s0_buffer_new(U64, d)
-    var term_start = try __s0_buffer_new(U64, d)
-    var term_count = try __s0_buffer_new(U64, d)
-    var term_ids = try __s0_buffer_new(U64, d)
-    var case_start = try __s0_buffer_new(U64, d)
-    var case_count = try __s0_buffer_new(U64, d)
-    var case_ids = try __s0_buffer_new(U64, d)
+    var instr_start = Vec.new(U64)
+    var instr_count = Vec.new(U64)
+    var instr_ids = Vec.new(U64)
+    var term_start = Vec.new(U64)
+    var term_count = Vec.new(U64)
+    var term_ids = Vec.new(U64)
+    var case_start = Vec.new(U64)
+    var case_count = Vec.new(U64)
+    var case_ids = Vec.new(U64)
     owner = 1
     while owner <= icount {
-        instr_start = try __s0_buffer_append(U64, d, instr_start, istart[owner])
-        instr_count = try __s0_buffer_append(U64, d, instr_count, icnt[owner])
+        try instr_start.try_push(istart[owner])
+        try instr_count.try_push(icnt[owner])
         owner = owner + 1
     }
     owner = 1
     while owner <= icount {
         var k: U64 = 0
         while k < icnt[owner] {
-            instr_ids = try __s0_buffer_append(U64, d, instr_ids, iids[istart[owner] + k])
+            try instr_ids.try_push(iids[istart[owner] + k])
             k = k + 1
         }
         owner = owner + 1
     }
     owner = 1
     while owner <= tcount {
-        term_start = try __s0_buffer_append(U64, d, term_start, tstart[owner])
-        term_count = try __s0_buffer_append(U64, d, term_count, tcnt[owner])
+        try term_start.try_push(tstart[owner])
+        try term_count.try_push(tcnt[owner])
         owner = owner + 1
     }
     owner = 1
     while owner <= tcount {
         var k: U64 = 0
         while k < tcnt[owner] {
-            term_ids = try __s0_buffer_append(U64, d, term_ids, tids[tstart[owner] + k])
+            try term_ids.try_push(tids[tstart[owner] + k])
             k = k + 1
         }
         owner = owner + 1
     }
     owner = 1
     while owner <= ocount {
-        case_start = try __s0_buffer_append(U64, d, case_start, cstart[owner])
-        case_count = try __s0_buffer_append(U64, d, case_count, ccnt[owner])
+        try case_start.try_push(cstart[owner])
+        try case_count.try_push(ccnt[owner])
         owner = owner + 1
     }
     owner = 1
     while owner <= ocount {
         var k: U64 = 0
         while k < ccnt[owner] {
-            case_ids = try __s0_buffer_append(U64, d, case_ids, cids[cstart[owner] + k])
+            try case_ids.try_push(cids[cstart[owner] + k])
             k = k + 1
         }
         owner = owner + 1
@@ -711,8 +711,8 @@ fn mir_vindex_build_ops(d: Domain, store: MirStore) -> Result(MirVIndexOpsRec, _
 
 // Type parts per owner type id, ascending id order.
 fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTypePartsRec, __s0_Error) {
-    let tcount = __s0_buffer_len(MirTypeRec, store.types)
-    let total = __s0_buffer_len(MirTypePartRec, store.type_parts)
+    let tcount = (store.types).len()
+    let total = (store.type_parts).len()
     var cnt = __s0_alloc(U64, d, tcount + 1)
     var field_cnt = __s0_alloc(U64, d, tcount + 1)
     var start = __s0_alloc(U64, d, tcount + 1)
@@ -723,9 +723,9 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
         z = z + 1 }
     var i: U64 = 0
     while i < total {
-        let f = __s0_buffer_get(MirTypePartRec, store.type_parts, i).owner
+        let f = (store.type_parts)[i].owner
         if f >= 1 && f <= tcount { cnt[f] = cnt[f] + 1
-            if __s0_buffer_get(MirTypePartRec, store.type_parts, i).kind == mir_type_part_field() { field_cnt[f] = field_cnt[f] + 1 } }
+            if (store.type_parts)[i].kind == mir_type_part_field() { field_cnt[f] = field_cnt[f] + 1 } }
         i = i + 1
     }
     var f: U64 = 1
@@ -741,7 +741,7 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
         w = w + 1 }
     i = 0
     while i < total {
-        let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, i)
+        let rec = (store.type_parts)[i]
         let f2 = rec.owner
         if f2 >= 1 && f2 <= tcount {
             let pos = start[f2] + used[f2]
@@ -750,22 +750,22 @@ fn mir_vindex_build_type_parts(d: Domain, store: MirStore) -> Result(MirVIndexTy
         }
         i = i + 1
     }
-    var start_buf = try __s0_buffer_new(U64, d)
-    var count_buf = try __s0_buffer_new(U64, d)
-    var field_count_buf = try __s0_buffer_new(U64, d)
-    var ids_buf = try __s0_buffer_new(U64, d)
+    var start_buf = Vec.new(U64)
+    var count_buf = Vec.new(U64)
+    var field_count_buf = Vec.new(U64)
+    var ids_buf = Vec.new(U64)
     f = 1
     while f <= tcount {
-        start_buf = try __s0_buffer_append(U64, d, start_buf, start[f])
-        count_buf = try __s0_buffer_append(U64, d, count_buf, cnt[f])
-        field_count_buf = try __s0_buffer_append(U64, d, field_count_buf, field_cnt[f])
+        try start_buf.try_push(start[f])
+        try count_buf.try_push(cnt[f])
+        try field_count_buf.try_push(field_cnt[f])
         f = f + 1
     }
     f = 1
     while f <= tcount {
         var k: U64 = 0
         while k < cnt[f] {
-            ids_buf = try __s0_buffer_append(U64, d, ids_buf, ids[start[f] + k])
+            try ids_buf.try_push(ids[start[f] + k])
             k = k + 1
         }
         f = f + 1
@@ -801,7 +801,7 @@ fn mir_vindex_hash_add(left: U64, right: U64, modulus: U64) -> U64 {
 
 fn mir_vindex_name_hash(store: MirStore, start: U64, end: U64, buckets: U64) -> U64 {
     if buckets == 0 { return 0 }
-    if !mir_vrange_valid(start, end, __s0_buffer_len(U8, store.names)) { return 0 }
+    if !mir_vrange_valid(start, end, (store.names).len()) { return 0 }
     var hash: U64 = 0
     var at = start
     while at < end { let original = hash
@@ -810,7 +810,7 @@ fn mir_vindex_name_hash(store: MirStore, start: U64, end: U64, buckets: U64) -> 
         while bit < 8 { shifted = mir_vindex_hash_add(shifted, shifted, buckets)
             bit = bit + 1 }
         hash = mir_vindex_hash_add(shifted, original, buckets)
-        let byte = mir_vindex_hash_byte(__s0_buffer_get(U8, store.names, at)) % buckets
+        let byte = mir_vindex_hash_byte((store.names)[at]) % buckets
         hash = mir_vindex_hash_add(hash, byte, buckets)
         at = at + 1
     }
@@ -818,12 +818,12 @@ fn mir_vindex_name_hash(store: MirStore, start: U64, end: U64, buckets: U64) -> 
 }
 
 fn mir_vindex_build_constants(d: Domain, store: MirStore) -> Result(MirVIndexConstRec, __s0_Error) {
-    let count = __s0_buffer_len(MirConstRec, store.constants)
+    let count = (store.constants).len()
     let bucket_count = count * 2 + 1
-    var hashes = try __s0_buffer_new(U64, d)
+    var hashes = Vec.new(U64)
     var at: U64 = 0
-    while at < count { let item = __s0_buffer_get(MirConstRec, store.constants, at)
-        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count))
+    while at < count { let item = (store.constants)[at]
+        try hashes.try_push(mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count))
         at = at + 1
     }
     var slots = __s0_alloc(U64, d, bucket_count)
@@ -833,34 +833,34 @@ fn mir_vindex_build_constants(d: Domain, store: MirStore) -> Result(MirVIndexCon
     }
     at = 1
     while at <= count {
-        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var slot = hashes[at - 1]
         var placed = false
         while !placed {
             if slots[slot] == 0 { slots[slot] = at
                 placed = true } else {
-                let existing = __s0_buffer_get(MirConstRec, store.constants, slots[slot] - 1)
-                let current = __s0_buffer_get(MirConstRec, store.constants, at - 1)
+                let existing = (store.constants)[slots[slot] - 1]
+                let current = (store.constants)[at - 1]
                 if mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
             }
         }
         at = at + 1
     }
-    var slot_buf = try __s0_buffer_new(U64, d)
+    var slot_buf = Vec.new(U64)
     at = 0
-    while at < bucket_count { slot_buf = try __s0_buffer_append(U64, d, slot_buf, slots[at])
+    while at < bucket_count { try slot_buf.try_push(slots[at])
         at = at + 1
     }
     return Ok(MirVIndexConstRec(slots: slot_buf))
 }
 
-fn mir_vindex_build_value_names(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let count = __s0_buffer_len(MirValueRec, store.values)
+fn mir_vindex_build_value_names(d: Domain, store: MirStore) -> Result(Vec(U64), __s0_Error) {
+    let count = (store.values).len()
     let bucket_count = count * 2 + 1
-    var hashes = try __s0_buffer_new(U64, d)
+    var hashes = Vec.new(U64)
     var at: U64 = 0
-    while at < count { let item = __s0_buffer_get(MirValueRec, store.values, at)
+    while at < count { let item = (store.values)[at]
         let name_hash = mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count)
-        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
+        try hashes.try_push(mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
         at = at + 1
     }
     var slots = __s0_alloc(U64, d, bucket_count)
@@ -870,34 +870,34 @@ fn mir_vindex_build_value_names(d: Domain, store: MirStore) -> Result(__s0_Buffe
     }
     at = 1
     while at <= count {
-        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var slot = hashes[at - 1]
         var placed = false
         while !placed {
             if slots[slot] == 0 { slots[slot] = at
                 placed = true } else {
-                let existing = __s0_buffer_get(MirValueRec, store.values, slots[slot] - 1)
-                let current = __s0_buffer_get(MirValueRec, store.values, at - 1)
+                let existing = (store.values)[slots[slot] - 1]
+                let current = (store.values)[at - 1]
                 if current.function == existing.function && mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
             }
         }
         at = at + 1
     }
-    var out = try __s0_buffer_new(U64, d)
+    var out = Vec.new(U64)
     at = 0
-    while at < bucket_count { out = try __s0_buffer_append(U64, d, out, slots[at])
+    while at < bucket_count { try out.try_push(slots[at])
         at = at + 1
     }
     return Ok(out)
 }
 
-fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
-    let count = __s0_buffer_len(MirLocalRec, store.locals)
+fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(Vec(U64), __s0_Error) {
+    let count = (store.locals).len()
     let bucket_count = count * 2 + 1
-    var hashes = try __s0_buffer_new(U64, d)
+    var hashes = Vec.new(U64)
     var at: U64 = 0
-    while at < count { let item = __s0_buffer_get(MirLocalRec, store.locals, at)
+    while at < count { let item = (store.locals)[at]
         let name_hash = mir_vindex_name_hash(store, item.name_start, item.name_end, bucket_count)
-        hashes = try __s0_buffer_append(U64, d, hashes, mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
+        try hashes.try_push(mir_vindex_hash_add(name_hash, item.function % bucket_count, bucket_count))
         at = at + 1
     }
     var slots = __s0_alloc(U64, d, bucket_count)
@@ -907,27 +907,27 @@ fn mir_vindex_build_local_names(d: Domain, store: MirStore) -> Result(__s0_Buffe
     }
     at = 1
     while at <= count {
-        var slot = __s0_buffer_get(U64, hashes, at - 1)
+        var slot = hashes[at - 1]
         var placed = false
         while !placed {
             if slots[slot] == 0 { slots[slot] = at
                 placed = true } else {
-                let existing = __s0_buffer_get(MirLocalRec, store.locals, slots[slot] - 1)
-                let current = __s0_buffer_get(MirLocalRec, store.locals, at - 1)
+                let existing = (store.locals)[slots[slot] - 1]
+                let current = (store.locals)[at - 1]
                 if current.function == existing.function && mir_vname_equal(store, current.name_start, current.name_end, existing.name_start, existing.name_end) { placed = true } else { slot = (slot + 1) % bucket_count }
             }
         }
         at = at + 1
     }
-    var out = try __s0_buffer_new(U64, d)
+    var out = Vec.new(U64)
     at = 0
-    while at < bucket_count { out = try __s0_buffer_append(U64, d, out, slots[at])
+    while at < bucket_count { try out.try_push(slots[at])
         at = at + 1
     }
     return Ok(out)
 }
 
-fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(Vec(U64), __s0_Error) {
     let kind_count = mir_type_kind_vec() + 1
     var first = __s0_alloc(U64, d, kind_count)
     var at: U64 = 0
@@ -935,21 +935,21 @@ fn mir_vindex_build_type_first(d: Domain, store: MirStore) -> Result(__s0_Buffer
         at = at + 1
     }
     at = 1
-    while at <= __s0_buffer_len(MirTypeRec, store.types) { let item = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+    while at <= (store.types).len() { let item = (store.types)[at - 1]
         if item.kind < kind_count && first[item.kind] == 0 { first[item.kind] = at }
         at = at + 1
     }
-    var out = try __s0_buffer_new(U64, d)
+    var out = Vec.new(U64)
     at = 0
-    while at < kind_count { out = try __s0_buffer_append(U64, d, out, first[at])
+    while at < kind_count { try out.try_push(first[at])
         at = at + 1
     }
     return Ok(out)
 }
 
-fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(Vec(U64), __s0_Error) {
     let kind_count = mir_type_kind_vec() + 1
-    let type_count = __s0_buffer_len(MirTypeRec, store.types)
+    let type_count = (store.types).len()
     let slot_count = kind_count * type_count
     var first = __s0_alloc(U64, d, slot_count)
     var at: U64 = 0
@@ -957,24 +957,24 @@ fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer
         at = at + 1
     }
     at = 1
-    while at <= type_count { let item = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+    while at <= type_count { let item = (store.types)[at - 1]
         if item.kind < kind_count && item.elem >= 1 && item.elem <= type_count { let slot = item.kind * type_count + item.elem - 1
             if first[slot] == 0 { first[slot] = at } }
         at = at + 1
     }
-    var out = try __s0_buffer_new(U64, d)
+    var out = Vec.new(U64)
     at = 0
-    while at < slot_count { out = try __s0_buffer_append(U64, d, out, first[at])
+    while at < slot_count { try out.try_push(first[at])
         at = at + 1
     }
     return Ok(out)
 }
 
 fn mir_vindex_build_places(d: Domain, store: MirStore) -> Result(MirVIndexPlaceRec, __s0_Error) {
-    let total = __s0_buffer_len(MirPlaceRec, store.places)
-    var roots = try __s0_buffer_new(U64, d)
-    var depths = try __s0_buffer_new(U64, d)
-    var derefs = try __s0_buffer_new(U64, d)
+    let total = (store.places).len()
+    var roots = Vec.new(U64)
+    var depths = Vec.new(U64)
+    var derefs = Vec.new(U64)
     var at: U64 = 1
     while at <= total {
         var current = at
@@ -983,16 +983,16 @@ fn mir_vindex_build_places(d: Domain, store: MirStore) -> Result(MirVIndexPlaceR
         var deref: U64 = 0
         var steps: U64 = 0
         while current != 0 && current <= total && steps <= total {
-            let place = __s0_buffer_get(MirPlaceRec, store.places, current - 1)
+            let place = (store.places)[current - 1]
             if place.kind == mir_place_local() { root = place.local
                 current = 0 } else { if place.kind == mir_place_field() { depth = depth + 1
                     current = place.base } else { if place.kind == mir_place_deref() { deref = 1 }
                     current = 0 } }
             steps = steps + 1
         }
-        roots = try __s0_buffer_append(U64, d, roots, root)
-        depths = try __s0_buffer_append(U64, d, depths, depth)
-        derefs = try __s0_buffer_append(U64, d, derefs, deref)
+        try roots.try_push(root)
+        try depths.try_push(depth)
+        try derefs.try_push(deref)
         at = at + 1
     }
     return Ok(MirVIndexPlaceRec(root: roots, depth: depths, deref: derefs))
@@ -1015,27 +1015,27 @@ fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Erro
 }
 
 fn mir_vindex_block(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.block_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.block_count, function - 1)
+    if function == 0 || function > (indexes.block_count).len() { return 0 }
+    let count = (indexes.block_count)[function - 1]
     if block == 0 || block > count { return 0 }
-    return __s0_buffer_get(U64, indexes.block_pos, __s0_buffer_get(U64, indexes.block_span, function - 1) + block - 1)
+    return (indexes.block_pos)[(indexes.block_span)[function - 1] + block - 1]
 }
 
 fn mir_vindex_value(indexes: MirVIndexes, function: U64, value: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.value_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.value_count, function - 1)
+    if function == 0 || function > (indexes.value_count).len() { return 0 }
+    let count = (indexes.value_count)[function - 1]
     if value == 0 || value > count { return 0 }
-    return __s0_buffer_get(U64, indexes.value_pos, __s0_buffer_get(U64, indexes.value_span, function - 1) + value - 1)
+    return (indexes.value_pos)[(indexes.value_span)[function - 1] + value - 1]
 }
 
-fn mir_vindex_const_slots(store: MirStore, slots: __s0_Buffer(U64), start: U64, end: U64) -> U64 {
-    let buckets = __s0_buffer_len(U64, slots)
+fn mir_vindex_const_slots(store: MirStore, slots: Vec(U64), start: U64, end: U64) -> U64 {
+    let buckets = (slots).len()
     if buckets == 0 { return 0 }
     var slot = mir_vindex_name_hash(store, start, end, buckets)
     var probes: U64 = 0
-    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+    while probes < buckets { let id = slots[slot]
         if id == 0 { return 0 }
-        let item = __s0_buffer_get(MirConstRec, store.constants, id - 1)
+        let item = (store.constants)[id - 1]
         if mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
         slot = (slot + 1) % buckets
         probes = probes + 1
@@ -1047,15 +1047,15 @@ fn mir_vindex_const(store: MirStore, indexes: MirVIndexes, start: U64, end: U64)
     return mir_vindex_const_slots(store, indexes.const_slot, start, end)
 }
 
-fn mir_vindex_value_name(store: MirStore, slots: __s0_Buffer(U64), function: U64, start: U64, end: U64) -> U64 {
-    let buckets = __s0_buffer_len(U64, slots)
+fn mir_vindex_value_name(store: MirStore, slots: Vec(U64), function: U64, start: U64, end: U64) -> U64 {
+    let buckets = (slots).len()
     if buckets == 0 { return 0 }
     let name_hash = mir_vindex_name_hash(store, start, end, buckets)
     var slot = mir_vindex_hash_add(name_hash, function % buckets, buckets)
     var probes: U64 = 0
-    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+    while probes < buckets { let id = slots[slot]
         if id == 0 { return 0 }
-        let item = __s0_buffer_get(MirValueRec, store.values, id - 1)
+        let item = (store.values)[id - 1]
         if item.function == function && mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
         slot = (slot + 1) % buckets
         probes = probes + 1
@@ -1063,15 +1063,15 @@ fn mir_vindex_value_name(store: MirStore, slots: __s0_Buffer(U64), function: U64
     return 0
 }
 
-fn mir_vindex_local_name(store: MirStore, slots: __s0_Buffer(U64), function: U64, start: U64, end: U64) -> U64 {
-    let buckets = __s0_buffer_len(U64, slots)
+fn mir_vindex_local_name(store: MirStore, slots: Vec(U64), function: U64, start: U64, end: U64) -> U64 {
+    let buckets = (slots).len()
     if buckets == 0 { return 0 }
     let name_hash = mir_vindex_name_hash(store, start, end, buckets)
     var slot = mir_vindex_hash_add(name_hash, function % buckets, buckets)
     var probes: U64 = 0
-    while probes < buckets { let id = __s0_buffer_get(U64, slots, slot)
+    while probes < buckets { let id = slots[slot]
         if id == 0 { return 0 }
-        let item = __s0_buffer_get(MirLocalRec, store.locals, id - 1)
+        let item = (store.locals)[id - 1]
         if item.function == function && mir_vname_equal(store, start, end, item.name_start, item.name_end) { return id }
         slot = (slot + 1) % buckets
         probes = probes + 1
@@ -1080,152 +1080,152 @@ fn mir_vindex_local_name(store: MirStore, slots: __s0_Buffer(U64), function: U64
 }
 
 fn mir_vindex_type_kind(indexes: MirVIndexes, kind: U64) -> U64 {
-    if kind >= __s0_buffer_len(U64, indexes.type_first) { return 0 }
-    return __s0_buffer_get(U64, indexes.type_first, kind)
+    if kind >= (indexes.type_first).len() { return 0 }
+    return (indexes.type_first)[kind]
 }
 
 fn mir_vindex_type_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 {
-    let kind_count = __s0_buffer_len(U64, indexes.type_first)
-    let type_count = __s0_buffer_len(U64, indexes.type_unary) / kind_count
+    let kind_count = (indexes.type_first).len()
+    let type_count = (indexes.type_unary).len() / kind_count
     if kind >= kind_count || elem == 0 || elem > type_count { return 0 }
-    return __s0_buffer_get(U64, indexes.type_unary, kind * type_count + elem - 1)
+    return (indexes.type_unary)[kind * type_count + elem - 1]
 }
 
 fn mir_vindex_place_root(indexes: MirVIndexes, place: U64) -> U64 {
-    if place == 0 || place > __s0_buffer_len(U64, indexes.place_root) { return 0 }
-    return __s0_buffer_get(U64, indexes.place_root, place - 1)
+    if place == 0 || place > (indexes.place_root).len() { return 0 }
+    return (indexes.place_root)[place - 1]
 }
 
 fn mir_vindex_place_depth(indexes: MirVIndexes, place: U64) -> U64 {
-    if place == 0 || place > __s0_buffer_len(U64, indexes.place_depth) { return 0 }
-    return __s0_buffer_get(U64, indexes.place_depth, place - 1)
+    if place == 0 || place > (indexes.place_depth).len() { return 0 }
+    return (indexes.place_depth)[place - 1]
 }
 
 fn mir_vindex_place_deref(indexes: MirVIndexes, place: U64) -> Bool {
-    if place == 0 || place > __s0_buffer_len(U64, indexes.place_deref) { return false }
-    return __s0_buffer_get(U64, indexes.place_deref, place - 1) != 0
+    if place == 0 || place > (indexes.place_deref).len() { return false }
+    return (indexes.place_deref)[place - 1] != 0
 }
 
 fn mir_vindex_local(indexes: MirVIndexes, function: U64, local: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.local_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.local_count, function - 1)
+    if function == 0 || function > (indexes.local_count).len() { return 0 }
+    let count = (indexes.local_count)[function - 1]
     if local == 0 || local > count { return 0 }
-    return __s0_buffer_get(U64, indexes.local_pos, __s0_buffer_get(U64, indexes.local_span, function - 1) + local - 1)
+    return (indexes.local_pos)[(indexes.local_span)[function - 1] + local - 1]
 }
 
 fn mir_vindex_term(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.block_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.block_count, function - 1)
+    if function == 0 || function > (indexes.block_count).len() { return 0 }
+    let count = (indexes.block_count)[function - 1]
     if block == 0 || block > count { return 0 }
-    return __s0_buffer_get(U64, indexes.term_pos, __s0_buffer_get(U64, indexes.term_span, function - 1) + block - 1)
+    return (indexes.term_pos)[(indexes.term_span)[function - 1] + block - 1]
 }
 
 fn mir_vindex_block_count(indexes: MirVIndexes, function: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.block_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.block_count, function - 1)
+    if function == 0 || function > (indexes.block_count).len() { return 0 }
+    return (indexes.block_count)[function - 1]
 }
 
 // 1-based instruction record id for (function, block, ordinal); 0 when the
 // key is out of range. ordinal is 0-based.
 fn mir_vindex_instr(indexes: MirVIndexes, function: U64, block: U64, ordinal: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.block_count) { return 0 }
-    let bcount = __s0_buffer_get(U64, indexes.block_count, function - 1)
+    if function == 0 || function > (indexes.block_count).len() { return 0 }
+    let bcount = (indexes.block_count)[function - 1]
     if block == 0 || block > bcount { return 0 }
-    let slot = __s0_buffer_get(U64, indexes.block_span, function - 1) + block - 1
-    let icount = __s0_buffer_get(U64, indexes.instr_count, slot)
+    let slot = (indexes.block_span)[function - 1] + block - 1
+    let icount = (indexes.instr_count)[slot]
     if ordinal >= icount { return 0 }
-    return __s0_buffer_get(U64, indexes.instr_ids, __s0_buffer_get(U64, indexes.instr_span, function - 1) + __s0_buffer_get(U64, indexes.instr_off, slot) + ordinal)
+    return (indexes.instr_ids)[(indexes.instr_span)[function - 1] + (indexes.instr_off)[slot] + ordinal]
 }
 
 fn mir_vindex_instr_count(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.block_count) { return 0 }
-    let bcount = __s0_buffer_get(U64, indexes.block_count, function - 1)
+    if function == 0 || function > (indexes.block_count).len() { return 0 }
+    let bcount = (indexes.block_count)[function - 1]
     if block == 0 || block > bcount { return 0 }
-    let slot = __s0_buffer_get(U64, indexes.block_span, function - 1) + block - 1
-    return __s0_buffer_get(U64, indexes.instr_count, slot)
+    let slot = (indexes.block_span)[function - 1] + block - 1
+    return (indexes.instr_count)[slot]
 }
 
 fn mir_vindex_param_count(indexes: MirVIndexes, function: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.param_span) { return 0 }
-    if function < __s0_buffer_len(U64, indexes.param_span) {
-        return __s0_buffer_get(U64, indexes.param_span, function) - __s0_buffer_get(U64, indexes.param_span, function - 1)
+    if function == 0 || function > (indexes.param_span).len() { return 0 }
+    if function < (indexes.param_span).len() {
+        return (indexes.param_span)[function] - (indexes.param_span)[function - 1]
     }
-    return __s0_buffer_len(U64, indexes.param_ids) - __s0_buffer_get(U64, indexes.param_span, function - 1)
+    return (indexes.param_ids).len() - (indexes.param_span)[function - 1]
 }
 
 // at is 0-based; params are returned in ascending store order.
 fn mir_vindex_param(indexes: MirVIndexes, function: U64, at: U64) -> U64 {
-    if function == 0 || function > __s0_buffer_len(U64, indexes.param_span) { return 0 }
-    let base = __s0_buffer_get(U64, indexes.param_span, function - 1)
+    if function == 0 || function > (indexes.param_span).len() { return 0 }
+    let base = (indexes.param_span)[function - 1]
     var count: U64 = 0
-    if function < __s0_buffer_len(U64, indexes.param_span) {
-        count = __s0_buffer_get(U64, indexes.param_span, function) - base
+    if function < (indexes.param_span).len() {
+        count = (indexes.param_span)[function] - base
     } else {
-        count = __s0_buffer_len(U64, indexes.param_ids) - base
+        count = (indexes.param_ids).len() - base
     }
     if at >= count { return 0 }
-    return __s0_buffer_get(U64, indexes.param_ids, base + at)
+    return (indexes.param_ids)[base + at]
 }
 
 fn mir_vindex_op_instr_count(indexes: MirVIndexes, instr_id: U64) -> U64 {
-    if instr_id == 0 || instr_id > __s0_buffer_len(U64, indexes.op_instr_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.op_instr_count, instr_id - 1)
+    if instr_id == 0 || instr_id > (indexes.op_instr_count).len() { return 0 }
+    return (indexes.op_instr_count)[instr_id - 1]
 }
 
 // Operand ids owned by instruction instr_id with kind in
 // {instruction, aggregate_field, checked_edge_arg}, ascending operand-id
 // order; at is 0-based.
 fn mir_vindex_op_instr(indexes: MirVIndexes, instr_id: U64, at: U64) -> U64 {
-    if instr_id == 0 || instr_id > __s0_buffer_len(U64, indexes.op_instr_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.op_instr_count, instr_id - 1)
+    if instr_id == 0 || instr_id > (indexes.op_instr_count).len() { return 0 }
+    let count = (indexes.op_instr_count)[instr_id - 1]
     if at >= count { return 0 }
-    return __s0_buffer_get(U64, indexes.op_instr_ids, __s0_buffer_get(U64, indexes.op_instr_start, instr_id - 1) + at)
+    return (indexes.op_instr_ids)[(indexes.op_instr_start)[instr_id - 1] + at]
 }
 
 fn mir_vindex_op_term_count(indexes: MirVIndexes, term_id: U64) -> U64 {
-    if term_id == 0 || term_id > __s0_buffer_len(U64, indexes.op_term_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.op_term_count, term_id - 1)
+    if term_id == 0 || term_id > (indexes.op_term_count).len() { return 0 }
+    return (indexes.op_term_count)[term_id - 1]
 }
 
 // Operand ids owned by terminator term_id with kind in
 // {terminator_arg, switch_case}, ascending operand-id order; at is 0-based.
 fn mir_vindex_op_term(indexes: MirVIndexes, term_id: U64, at: U64) -> U64 {
-    if term_id == 0 || term_id > __s0_buffer_len(U64, indexes.op_term_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.op_term_count, term_id - 1)
+    if term_id == 0 || term_id > (indexes.op_term_count).len() { return 0 }
+    let count = (indexes.op_term_count)[term_id - 1]
     if at >= count { return 0 }
-    return __s0_buffer_get(U64, indexes.op_term_ids, __s0_buffer_get(U64, indexes.op_term_start, term_id - 1) + at)
+    return (indexes.op_term_ids)[(indexes.op_term_start)[term_id - 1] + at]
 }
 
 fn mir_vindex_op_case_count(indexes: MirVIndexes, case_operand_id: U64) -> U64 {
-    if case_operand_id == 0 || case_operand_id > __s0_buffer_len(U64, indexes.op_case_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.op_case_count, case_operand_id - 1)
+    if case_operand_id == 0 || case_operand_id > (indexes.op_case_count).len() { return 0 }
+    return (indexes.op_case_count)[case_operand_id - 1]
 }
 
 // Operand ids of kind switch_case_arg owned by the switch-case operand
 // case_operand_id, ascending operand-id order; at is 0-based.
 fn mir_vindex_op_case(indexes: MirVIndexes, case_operand_id: U64, at: U64) -> U64 {
-    if case_operand_id == 0 || case_operand_id > __s0_buffer_len(U64, indexes.op_case_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.op_case_count, case_operand_id - 1)
+    if case_operand_id == 0 || case_operand_id > (indexes.op_case_count).len() { return 0 }
+    let count = (indexes.op_case_count)[case_operand_id - 1]
     if at >= count { return 0 }
-    return __s0_buffer_get(U64, indexes.op_case_ids, __s0_buffer_get(U64, indexes.op_case_start, case_operand_id - 1) + at)
+    return (indexes.op_case_ids)[(indexes.op_case_start)[case_operand_id - 1] + at]
 }
 
 fn mir_vindex_type_part_count(indexes: MirVIndexes, owner_type_id: U64) -> U64 {
-    if owner_type_id == 0 || owner_type_id > __s0_buffer_len(U64, indexes.tp_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.tp_count, owner_type_id - 1)
+    if owner_type_id == 0 || owner_type_id > (indexes.tp_count).len() { return 0 }
+    return (indexes.tp_count)[owner_type_id - 1]
 }
 
 fn mir_vindex_type_field_count(indexes: MirVIndexes, owner_type_id: U64) -> U64 {
-    if owner_type_id == 0 || owner_type_id > __s0_buffer_len(U64, indexes.tp_field_count) { return 0 }
-    return __s0_buffer_get(U64, indexes.tp_field_count, owner_type_id - 1)
+    if owner_type_id == 0 || owner_type_id > (indexes.tp_field_count).len() { return 0 }
+    return (indexes.tp_field_count)[owner_type_id - 1]
 }
 
 // MirTypePartRec ids owned by owner_type_id, ascending id order; at is 0-based.
 fn mir_vindex_type_part(indexes: MirVIndexes, owner_type_id: U64, at: U64) -> U64 {
-    if owner_type_id == 0 || owner_type_id > __s0_buffer_len(U64, indexes.tp_count) { return 0 }
-    let count = __s0_buffer_get(U64, indexes.tp_count, owner_type_id - 1)
+    if owner_type_id == 0 || owner_type_id > (indexes.tp_count).len() { return 0 }
+    let count = (indexes.tp_count)[owner_type_id - 1]
     if at >= count { return 0 }
-    return __s0_buffer_get(U64, indexes.tp_ids, __s0_buffer_get(U64, indexes.tp_start, owner_type_id - 1) + at)
+    return (indexes.tp_ids)[(indexes.tp_start)[owner_type_id - 1] + at]
 }
 
 type MirVP4PointCfg {
@@ -1234,39 +1234,39 @@ type MirVP4PointCfg {
     node_count: U64
     boundary_count: U64
     entry: U64
-    boundary_offset: __s0_Buffer(U64)
-    block_instr_count: __s0_Buffer(U64)
-    succ: __s0_Buffer(U64)
-    succ_start: __s0_Buffer(U64)
-    succ_count: __s0_Buffer(U64)
-    pred: __s0_Buffer(U64)
-    pred_start: __s0_Buffer(U64)
-    pred_count: __s0_Buffer(U64)
-    case_edge: __s0_Buffer(U64)
+    boundary_offset: Vec(U64)
+    block_instr_count: Vec(U64)
+    succ: Vec(U64)
+    succ_start: Vec(U64)
+    succ_count: Vec(U64)
+    pred: Vec(U64)
+    pred_start: Vec(U64)
+    pred_count: Vec(U64)
+    case_edge: Vec(U64)
 }
 
 fn mir_vp4_cfg_empty(d: Domain, function: U64) -> Result(MirVP4PointCfg, __s0_Error) {
-    let empty = try __s0_buffer_new(U64, d)
+    let empty = Vec.new(U64)
     return Ok(MirVP4PointCfg(function: function, block_count: 0, node_count: 0, boundary_count: 0, entry: 0, boundary_offset: empty, block_instr_count: empty, succ: empty, succ_start: empty, succ_count: empty, pred: empty, pred_start: empty, pred_count: empty, case_edge: empty))
 }
 
 fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(MirVP4PointCfg, __s0_Error) {
     let block_count = mir_vindex_block_count(indexes, function)
     if block_count == 0 { return mir_vp4_cfg_empty(d, function) }
-    var boundary_offset = try __s0_buffer_new(U64, d)
-    var block_instr_count = try __s0_buffer_new(U64, d)
+    var boundary_offset = Vec.new(U64)
+    var block_instr_count = Vec.new(U64)
     var offset: U64 = 1
     var b: U64 = 1
     while b <= block_count {
         let count = mir_vindex_instr_count(indexes, function, b)
-        boundary_offset = try __s0_buffer_append(U64, d, boundary_offset, offset)
-        block_instr_count = try __s0_buffer_append(U64, d, block_instr_count, count)
+        try boundary_offset.try_push(offset)
+        try block_instr_count.try_push(count)
         offset = offset + count + 1
         b = b + 1
     }
     let boundary_count = offset - 1
-    var edge_from = try __s0_buffer_new(U64, d)
-    var edge_to = try __s0_buffer_new(U64, d)
+    var edge_from = Vec.new(U64)
+    var edge_to = Vec.new(U64)
     // case_edge[block - 1] = 1-based index of the block's first switch-case
     // edge node, or 0 when the block has no switch with valid cases. Built in
     // a local array and emitted once at the end.
@@ -1276,39 +1276,39 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
         z = z + 1 }
     b = 1
     while b <= block_count {
-        let count = __s0_buffer_get(U64, block_instr_count, b - 1)
-        let base = __s0_buffer_get(U64, boundary_offset, b - 1)
+        let count = block_instr_count[b - 1]
+        let base = boundary_offset[b - 1]
         var p: U64 = 0
         while p < count {
             let ins_id = mir_vindex_instr(indexes, function, b, p)
             if ins_id != 0 {
-                let ins = __s0_buffer_get(MirInstrRec, store.instructions, ins_id - 1)
+                let ins = (store.instructions)[ins_id - 1]
                 if mir_vop_checked(ins.op) && mir_vindex_block(indexes, function, ins.target) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + p)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, ins.target)
+                    try edge_from.try_push(base + p)
+                    try edge_to.try_push(ins.target)
                 }
             }
             p = p + 1
         }
         let term_id = mir_vindex_term(indexes, function, b)
         if term_id != 0 {
-            let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            let t = (store.terminators)[term_id - 1]
             if t.kind == mir_term_jump() && mir_vindex_block(indexes, function, t.target) != 0 {
-                edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                edge_to = try __s0_buffer_append(U64, d, edge_to, t.target)
+                try edge_from.try_push(base + count)
+                try edge_to.try_push(t.target)
             }
             if t.kind == mir_term_branch() {
                 if mir_vindex_block(indexes, function, t.then_block) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, t.then_block)
+                    try edge_from.try_push(base + count)
+                    try edge_to.try_push(t.then_block)
                 }
                 if mir_vindex_block(indexes, function, t.else_block) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, t.else_block)
+                    try edge_from.try_push(base + count)
+                    try edge_to.try_push(t.else_block)
                 }
             }
             if t.kind == mir_term_switch() {
-                let first_case = __s0_buffer_len(U64, edge_from)
+                let first_case = (edge_from).len()
                 // Switch cases are the switch_case-kind operands of this
                 // terminator in ascending operand-id order, which on a
                 // validated store is their ordinal order.
@@ -1316,26 +1316,26 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
                 var at: U64 = 0
                 while at < ccount {
                     let case_id = mir_vindex_op_term(indexes, term_id, at)
-                    let c = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
+                    let c = (store.operands)[case_id - 1]
                     if c.kind == mir_operand_switch_case() && mir_vindex_block(indexes, function, c.target) != 0 {
-                        edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                        edge_to = try __s0_buffer_append(U64, d, edge_to, c.target)
+                        try edge_from.try_push(base + count)
+                        try edge_to.try_push(c.target)
                     }
                     at = at + 1
                 }
-                if __s0_buffer_len(U64, edge_from) > first_case {
+                if (edge_from).len() > first_case {
                     case_edge_arr[b - 1] = first_case + 1
                 }
             }
         }
         b = b + 1
     }
-    let edge_count = __s0_buffer_len(U64, edge_from)
+    let edge_count = (edge_from).len()
     let node_count = boundary_count + edge_count
     if node_count == 0 { return mir_vp4_cfg_empty(d, function) }
-    var succ = try __s0_buffer_new(U64, d)
-    var succ_start = try __s0_buffer_new(U64, d)
-    var succ_count = try __s0_buffer_new(U64, d)
+    var succ = Vec.new(U64)
+    var succ_start = Vec.new(U64)
+    var succ_count = Vec.new(U64)
     // Boundary nodes ascending: a linear successor n + 1 unless n is the
     // terminator position of its block, plus the edge nodes whose edge_from
     // equals n. edge_from is non-decreasing, so a cursor replaces the per-node
@@ -1344,27 +1344,27 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
     var e: U64 = 0
     var n: U64 = 1
     while n <= boundary_count {
-        let start = __s0_buffer_len(U64, succ)
-        while bb < block_count && n > __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) { bb = bb + 1 }
-        if n != __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) {
-            succ = try __s0_buffer_append(U64, d, succ, n + 1)
+        let start = (succ).len()
+        while bb < block_count && n > boundary_offset[bb - 1] + block_instr_count[bb - 1] { bb = bb + 1 }
+        if n != boundary_offset[bb - 1] + block_instr_count[bb - 1] {
+            try succ.try_push(n + 1)
         }
-        while e < edge_count && __s0_buffer_get(U64, edge_from, e) < n { e = e + 1 }
-        while e < edge_count && __s0_buffer_get(U64, edge_from, e) == n {
-            succ = try __s0_buffer_append(U64, d, succ, boundary_count + 1 + e)
+        while e < edge_count && edge_from[e] < n { e = e + 1 }
+        while e < edge_count && edge_from[e] == n {
+            try succ.try_push(boundary_count + 1 + e)
             e = e + 1
         }
-        succ_start = try __s0_buffer_append(U64, d, succ_start, start)
-        succ_count = try __s0_buffer_append(U64, d, succ_count, __s0_buffer_len(U64, succ) - start)
+        try succ_start.try_push(start)
+        try succ_count.try_push((succ).len() - start)
         n = n + 1
     }
     n = 1
     while n <= edge_count {
-        let start = __s0_buffer_len(U64, succ)
-        let target = __s0_buffer_get(U64, edge_to, n - 1)
-        succ = try __s0_buffer_append(U64, d, succ, __s0_buffer_get(U64, boundary_offset, target - 1))
-        succ_start = try __s0_buffer_append(U64, d, succ_start, start)
-        succ_count = try __s0_buffer_append(U64, d, succ_count, 1)
+        let start = (succ).len()
+        let target = edge_to[n - 1]
+        try succ.try_push(boundary_offset[target - 1])
+        try succ_start.try_push(start)
+        try succ_count.try_push(1)
         n = n + 1
     }
     // Pred lists: a non-entry boundary node n > 1 has the single linear pred
@@ -1373,9 +1373,9 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
     // edge node boundary_count + e has the single pred edge_from[e]. This is
     // the exact inverse of the succ lists above, with preds in ascending
     // source order like the old per-node scan.
-    var pred = try __s0_buffer_new(U64, d)
-    var pred_start = try __s0_buffer_new(U64, d)
-    var pred_count = try __s0_buffer_new(U64, d)
+    var pred = Vec.new(U64)
+    var pred_start = Vec.new(U64)
+    var pred_count = Vec.new(U64)
     var edge_cnt = __s0_alloc(U64, d, block_count + 1)
     var edge_base = __s0_alloc(U64, d, block_count + 1)
     z = 0
@@ -1384,7 +1384,7 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
         z = z + 1 }
     var e2: U64 = 0
     while e2 < edge_count {
-        let target = __s0_buffer_get(U64, edge_to, e2)
+        let target = edge_to[e2]
         edge_cnt[target] = edge_cnt[target] + 1
         e2 = e2 + 1
     }
@@ -1401,7 +1401,7 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
         z = z + 1 }
     e2 = 0
     while e2 < edge_count {
-        let target = __s0_buffer_get(U64, edge_to, e2)
+        let target = edge_to[e2]
         let pos = edge_base[target] + edge_used[target]
         edge_ids[pos] = e2 + 1
         edge_used[target] = edge_used[target] + 1
@@ -1410,54 +1410,54 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
     bb = 1
     n = 1
     while n <= boundary_count {
-        let start = __s0_buffer_len(U64, pred)
-        while bb < block_count && n > __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) { bb = bb + 1 }
-        let offb = __s0_buffer_get(U64, boundary_offset, bb - 1)
-        if n > 1 && n != offb { pred = try __s0_buffer_append(U64, d, pred, n - 1) }
+        let start = (pred).len()
+        while bb < block_count && n > boundary_offset[bb - 1] + block_instr_count[bb - 1] { bb = bb + 1 }
+        let offb = boundary_offset[bb - 1]
+        if n > 1 && n != offb { try pred.try_push(n - 1) }
         if n == offb {
             var k: U64 = 0
             while k < edge_cnt[bb] {
                 let eid = edge_ids[edge_base[bb] + k]
-                pred = try __s0_buffer_append(U64, d, pred, boundary_count + eid)
+                try pred.try_push(boundary_count + eid)
                 k = k + 1
             }
         }
-        pred_start = try __s0_buffer_append(U64, d, pred_start, start)
-        pred_count = try __s0_buffer_append(U64, d, pred_count, __s0_buffer_len(U64, pred) - start)
+        try pred_start.try_push(start)
+        try pred_count.try_push((pred).len() - start)
         n = n + 1
     }
     e2 = 0
     while e2 < edge_count {
-        let start = __s0_buffer_len(U64, pred)
-        pred = try __s0_buffer_append(U64, d, pred, __s0_buffer_get(U64, edge_from, e2))
-        pred_start = try __s0_buffer_append(U64, d, pred_start, start)
-        pred_count = try __s0_buffer_append(U64, d, pred_count, __s0_buffer_len(U64, pred) - start)
+        let start = (pred).len()
+        try pred.try_push(edge_from[e2])
+        try pred_start.try_push(start)
+        try pred_count.try_push((pred).len() - start)
         e2 = e2 + 1
     }
-    var case_edge = try __s0_buffer_new(U64, d)
+    var case_edge = Vec.new(U64)
     var ci: U64 = 0
     while ci < block_count {
-        case_edge = try __s0_buffer_append(U64, d, case_edge, case_edge_arr[ci])
+        try case_edge.try_push(case_edge_arr[ci])
         ci = ci + 1
     }
     return Ok(MirVP4PointCfg(function: function, block_count: block_count, node_count: node_count, boundary_count: boundary_count, entry: 1, boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge))
 }
 
 type MirVP4Dom {
-    idom: __s0_Buffer(U64)
-    rpo_index: __s0_Buffer(U64)
-    dom_in: __s0_Buffer(U64)
-    dom_out: __s0_Buffer(U64)
+    idom: Vec(U64)
+    rpo_index: Vec(U64)
+    dom_in: Vec(U64)
+    dom_out: Vec(U64)
 }
 
 fn mir_vp4_dom_empty(d: Domain) -> Result(MirVP4Dom, __s0_Error) {
-    let empty = try __s0_buffer_new(U64, d)
+    let empty = Vec.new(U64)
     return Ok(MirVP4Dom(idom: empty, rpo_index: empty, dom_in: empty, dom_out: empty))
 }
 
-fn mir_vp4_u64_at(buf: __s0_Buffer(U64), index: U64) -> U64 {
-    if index == 0 || index > __s0_buffer_len(U64, buf) { return 0 }
-    return __s0_buffer_get(U64, buf, index - 1)
+fn mir_vp4_u64_at(buf: Vec(U64), index: U64) -> U64 {
+    if index == 0 || index > (buf).len() { return 0 }
+    return buf[index - 1]
 }
 
 fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_Error) {
@@ -1481,7 +1481,7 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
         phase[z] = 0
         stack[z] = 0
         z = z + 1 }
-    var post = try __s0_buffer_new(U64, d)
+    var post = Vec.new(U64)
     stack[0] = entry
     phase[0] = 0
     seen[entry] = 1
@@ -1495,7 +1495,7 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
             let count = mir_vp4_u64_at(cfg.succ_count, v)
             var k: U64 = 0
             while k < count {
-                let s = __s0_buffer_get(U64, cfg.succ, base + k)
+                let s = (cfg.succ)[base + k]
                 if s != 0 && seen[s] == 0 {
                     seen[s] = 1
                     stack[top] = s
@@ -1505,26 +1505,26 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
                 k = k + 1
             }
         } else {
-            post = try __s0_buffer_append(U64, d, post, v)
+            try post.try_push(v)
             plen = plen + 1
             top = top - 1
         }
     }
     // rpo is the reverse postorder; rpo_index maps a node to its 1-based rpo
     // position. All alloc stores below are constants or arithmetic results.
-    var rpo = try __s0_buffer_new(U64, d)
+    var rpo = Vec.new(U64)
     var rpo_index = __s0_alloc(U64, d, n + 1)
     z = 0
     while z <= n { rpo_index[z] = 0
         z = z + 1 }
     var i: U64 = 0
     while i < plen {
-        rpo = try __s0_buffer_append(U64, d, rpo, __s0_buffer_get(U64, post, plen - 1 - i))
+        try rpo.try_push(post[plen - 1 - i])
         i = i + 1
     }
     i = 0
     while i < plen {
-        rpo_index[__s0_buffer_get(U64, rpo, i)] = i + 1
+        rpo_index[rpo[i]] = i + 1
         i = i + 1
     }
     // idom fixpoint: identical iteration order and semantics to the buffer
@@ -1541,13 +1541,13 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
         changed = false
         i = 1
         while i < plen {
-            let b = __s0_buffer_get(U64, rpo, i)
+            let b = rpo[i]
             var new_idom: U64 = 0
             let base = mir_vp4_u64_at(cfg.pred_start, b)
             let count = mir_vp4_u64_at(cfg.pred_count, b)
             var k: U64 = 0
             while k < count {
-                let p = __s0_buffer_get(U64, cfg.pred, base + k)
+                let p = (cfg.pred)[base + k]
                 if idom[p] != 0 {
                     if new_idom == 0 {
                         new_idom = p
@@ -1606,13 +1606,13 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
         if p != 0 && p != v { counts[p] = counts[p] + 1 }
         v = v + 1
     }
-    var child_count = try __s0_buffer_new(U64, d)
+    var child_count = Vec.new(U64)
     var start: U64 = 0
     v = 1
     while v <= n {
         child_start[v] = start
         let count = counts[v]
-        child_count = try __s0_buffer_append(U64, d, child_count, count)
+        try child_count.try_push(count)
         start = start + count
         v = v + 1
     }
@@ -1659,7 +1659,7 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
             edata[etop - 1] = stamp
             dom_in[v2] = stamp
             let base = child_start[v2]
-            let count = __s0_buffer_get(U64, child_count, v2 - 1)
+            let count = child_count[v2 - 1]
             var k: U64 = 0
             while k < count {
                 let c = children[base + k]
@@ -1676,16 +1676,16 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
         }
     }
     // Emit the arrays as buffers so MirVP4Dom keeps its buffer field types.
-    var idom_buf = try __s0_buffer_new(U64, d)
-    var rpo_index_buf = try __s0_buffer_new(U64, d)
-    var dom_in_buf = try __s0_buffer_new(U64, d)
-    var dom_out_buf = try __s0_buffer_new(U64, d)
+    var idom_buf = Vec.new(U64)
+    var rpo_index_buf = Vec.new(U64)
+    var dom_in_buf = Vec.new(U64)
+    var dom_out_buf = Vec.new(U64)
     var i2: U64 = 1
     while i2 <= n {
-        idom_buf = try __s0_buffer_append(U64, d, idom_buf, idom[i2])
-        rpo_index_buf = try __s0_buffer_append(U64, d, rpo_index_buf, rpo_index[i2])
-        dom_in_buf = try __s0_buffer_append(U64, d, dom_in_buf, dom_in[i2])
-        dom_out_buf = try __s0_buffer_append(U64, d, dom_out_buf, dom_out[i2])
+        try idom_buf.try_push(idom[i2])
+        try rpo_index_buf.try_push(rpo_index[i2])
+        try dom_in_buf.try_push(dom_in[i2])
+        try dom_out_buf.try_push(dom_out[i2])
         i2 = i2 + 1
     }
     return Ok(MirVP4Dom(idom: idom_buf, rpo_index: rpo_index_buf, dom_in: dom_in_buf, dom_out: dom_out_buf))
@@ -1693,14 +1693,14 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
 
 fn mir_vp4_boundary_node(cfg: MirVP4PointCfg, block: U64, position: U64) -> U64 {
     if block == 0 || block > cfg.block_count { return 0 }
-    let count = __s0_buffer_get(U64, cfg.block_instr_count, block - 1)
+    let count = (cfg.block_instr_count)[block - 1]
     if position > count { return 0 }
-    return __s0_buffer_get(U64, cfg.boundary_offset, block - 1) + position
+    return (cfg.boundary_offset)[block - 1] + position
 }
 
 fn mir_vp4_case_edge_node(cfg: MirVP4PointCfg, block: U64, case_ordinal: U64) -> U64 {
     if block == 0 || block > cfg.block_count { return 0 }
-    let first = __s0_buffer_get(U64, cfg.case_edge, block - 1)
+    let first = (cfg.case_edge)[block - 1]
     if first == 0 { return 0 }
     let node = cfg.boundary_count + first + case_ordinal
     if node == 0 || node > cfg.node_count { return 0 }

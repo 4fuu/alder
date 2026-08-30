@@ -1,22 +1,22 @@
 // Deterministic byte writer shared by declaration conformance and production
-// body generation. Bytes are retained until validation and allocation finish;
-// callers can therefore reject malformed MIR without partial output.
+// body generation. Complete verification and the unsupported-operation
+// preflight finish before construction, so the writer can stream through the
+// host output contract without retaining a second compiler-sized byte vector.
 
 type CgenWriter {
-    bytes: __s0_Buffer(U8)
+    valid: Bool
 }
 
 fn cgen_writer_new(d: Domain) -> Result(CgenWriter, __s0_Error) {
-    let bytes = try __s0_buffer_new(U8, d)
-    return Ok(CgenWriter(bytes: bytes))
+    return Ok(CgenWriter(valid: true))
 }
 
 fn cgen_put_byte(d: Domain, writer: CgenWriter, byte: U8) -> Result(CgenWriter, __s0_Error) {
-    let bytes = try __s0_buffer_append(U8, d, writer.bytes, byte)
-    return Ok(CgenWriter(bytes: bytes))
+    if !writer.valid { return Ok(writer) }
+    return Ok(CgenWriter(valid: out(byte)))
 }
 
-fn cgen_put(d: Domain, writer: CgenWriter, text: __s0_String) -> Result(CgenWriter, __s0_Error) {
+fn cgen_put(d: Domain, writer: CgenWriter, text: [U8]) -> Result(CgenWriter, __s0_Error) {
     var out = writer
     var at: U64 = 0
     while at < len(text) {
@@ -30,7 +30,7 @@ fn cgen_put_name(d: Domain, writer: CgenWriter, store: MirStore, start: U64, end
     var out = writer
     var at = start
     while at < end {
-        out = try cgen_put_byte(d, out, __s0_buffer_get(U8, store.names, at))
+        out = try cgen_put_byte(d, out, (store.names)[at])
         at = at + 1
     }
     return Ok(out)
@@ -40,7 +40,7 @@ fn cgen_put_name_fragment(d: Domain, writer: CgenWriter, store: MirStore, start:
     var out = writer
     var at = start
     while at < end {
-        let byte = __s0_buffer_get(U8, store.names, at)
+        let byte = (store.names)[at]
         if mir_ident_continue(byte) { out = try cgen_put_byte(d, out, byte) } else { out = try cgen_put_byte(d, out, 95) }
         at = at + 1
     }
@@ -111,11 +111,11 @@ fn cgen_put_octal_digit(d: Domain, writer: CgenWriter, value: U8) -> Result(Cgen
     return cgen_put_byte(d, writer, 55)
 }
 
-fn cgen_put_c_bytes(d: Domain, writer: CgenWriter, bytes: __s0_Buffer(U8), start: U64, end: U64) -> Result(CgenWriter, __s0_Error) {
+fn cgen_put_c_bytes(d: Domain, writer: CgenWriter, bytes: Vec(U8), start: U64, end: U64) -> Result(CgenWriter, __s0_Error) {
     var out = writer
     var at = start
     while at < end {
-        let byte = __s0_buffer_get(U8, bytes, at)
+        let byte = (bytes)[at]
         var escaped = false
         if byte == 34 { out = try cgen_put(d, out, "\\\"")
         escaped = true }
@@ -141,10 +141,5 @@ fn cgen_put_c_bytes(d: Domain, writer: CgenWriter, bytes: __s0_Buffer(U8), start
 }
 
 fn cgen_flush(writer: CgenWriter) -> Bool {
-    var at: U64 = 0
-    while at < __s0_buffer_len(U8, writer.bytes) {
-        if !out(__s0_buffer_get(U8, writer.bytes, at)) { return false }
-        at = at + 1
-    }
-    return true
+    return writer.valid
 }

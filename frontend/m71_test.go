@@ -30,6 +30,78 @@ fn main() -> I32 {
 	}
 }
 
+func TestM73MutableVecFieldReceiver(t *testing.T) {
+	m := compileStr(t, `
+type Inner { values: Vec(U64) }
+type Outer { inner: Inner }
+fn main() -> I32 {
+    var state = Outer(inner: Inner(values: Vec.new(U64)))
+    let pushed = match state.inner.values.try_push(7) {
+        Ok => true
+        Err(error) => false
+    }
+    let reserved = match state.inner.values.try_reserve(3) {
+        Ok => true
+        Err(error) => false
+    }
+    if !pushed || !reserved { return 2 }
+    if state.inner.values.len() != 1 || state.inner.values[0] != 7 { return 1 }
+    return 0
+}
+`)
+	printed := mir.Print(m)
+	if !strings.Contains(printed, "store field(field(local %state, inner), values)") {
+		t.Fatalf("field mutation did not store directly through the nested place:\n%s", printed)
+	}
+
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{"immutable root", `type Box { values: Vec(U64) }
+fn bad() -> Result(Unit, CapacityError) {
+    let box = Box(values: Vec.new(U64))
+    return box.values.try_push(1)
+}`},
+		{"parameter root", `type Box { values: Vec(U64) }
+fn bad(box: Box) -> Result(Unit, CapacityError) { return box.values.try_push(1) }`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Compile(tc.src)
+			if err == nil || !strings.Contains(err.Error(), "requires a mutable Vec binding") {
+				t.Fatalf("Compile error = %v", err)
+			}
+		})
+	}
+}
+
+func TestM73FieldProjectionMaterializesOnlySelectedField(t *testing.T) {
+	m := compileStr(t, `
+type Leaf { values: Vec(U64) }
+type Outer {
+    leaf: Leaf
+    sibling: Vec(U64)
+}
+fn make() -> Outer {
+    return Outer(leaf: Leaf(values: Vec.new(U64)), sibling: Vec.new(U64))
+}
+fn selected(input: Outer) -> Vec(U64) { return input.leaf.values }
+fn temporary() -> Vec(U64) { return make().leaf.values }
+`)
+	printed := mir.Print(m)
+	selectedID, ok := m.Function("selected")
+	if !ok {
+		t.Fatal("missing selected function")
+	}
+	selectedText := mir.Print(&mir.Module{FormatVersion: m.FormatVersion, Types: m.Types, Constants: m.Constants, Functions: []*mir.Function{m.Functions[selectedID]}})
+	if got := strings.Count(selectedText, "copy_to_domain"); got != 2 {
+		t.Fatalf("nested field projection materialized %d values, want only the selected Vec's local and return copies:\n%s", got, selectedText)
+	}
+	if got := strings.Count(printed, "call @make"); got != 1 {
+		t.Fatalf("temporary field base evaluated %d times, want once:\n%s", got, printed)
+	}
+}
+
 func TestM71LexicalViewRejections(t *testing.T) {
 	tests := []struct {
 		name string
@@ -72,6 +144,26 @@ func TestM71LexicalViewRejections(t *testing.T) {
     var values: Vec(U64) = Vec.from_array(U64, [1, 2])
     let view: [U64] = values.slice(0, 1)
     values.push(3)
+    return 0
+}`,
+			want: `cannot mutate "values" while an immutable view is active`,
+		},
+		{
+			name: "fallible push potentially invalidates view",
+			src: `fn main() -> I32 {
+    var values: Vec(U64) = Vec.from_array(U64, [1, 2])
+    let view: [U64] = values.slice(0, 1)
+    let result = values.try_push(3)
+    return 0
+}`,
+			want: `cannot mutate "values" while an immutable view is active`,
+		},
+		{
+			name: "fallible reserve potentially invalidates view",
+			src: `fn main() -> I32 {
+    var values: Vec(U64) = Vec.from_array(U64, [1, 2])
+    let view: [U64] = values.slice(0, 1)
+    let result = values.try_reserve(3)
     return 0
 }`,
 			want: `cannot mutate "values" while an immutable view is active`,
@@ -135,17 +227,19 @@ fn main() -> I32 {
 			want: "scoped view MutSlice(U64) cannot be returned",
 		},
 		{
-			name: "view stored in record",
-			src: `type Box { values: [U64] }
-fn main(values: [U64]) -> I32 {
-    let box = Box(values: values)
+			name: "mutable view stored in record",
+			src: `type Box { values: MutSlice(U64) }
+fn main() -> I32 {
+    var values: Array(U64, 1) = [1]
+	var view = values.slice_mut(0, 1)
+	let box = Box(values: view)
     return 0
 }`,
-			want: `scoped view [U64] cannot be stored in field "values"`,
+			want: `scoped view MutSlice(U64) cannot be stored in field "values"`,
 		},
 		{
-			name: "nested view stored in record",
-			src: `type Inner { values: [U64] }
+			name: "nested mutable view stored in record",
+			src: `type Inner { values: MutSlice(U64) }
 type Outer { inner: Inner }
 fn bad(inner: Inner) -> I32 {
     let outer = Outer(inner: inner)
@@ -154,26 +248,30 @@ fn bad(inner: Inner) -> I32 {
 			want: `scoped view Inner cannot be stored in field "inner"`,
 		},
 		{
-			name: "nested view return",
-			src: `type Box { values: [U64] }
+			name: "nested mutable view return",
+			src: `type Box { values: MutSlice(U64) }
 fn bad(box: Box) -> Box { return box }`,
 			want: "scoped view Box cannot be returned",
 		},
 		{
-			name: "view stored in array",
-			src: `fn bad(values: [U64]) -> I32 {
-    let stored = [values]
+			name: "mutable view stored in array",
+			src: `fn bad() -> I32 {
+    var values: Array(U64, 1) = [1]
+	var view = values.slice_mut(0, 1)
+	let stored = [view]
     return 0
 }`,
-			want: "scoped view [U64] cannot be stored in an array",
+			want: "scoped view MutSlice(U64) cannot be stored in an array",
 		},
 		{
-			name: "view stored in variant",
-			src: `fn bad(values: [U64]) -> I32 {
-    let stored: Option([U64]) = Some(values)
+			name: "mutable view stored in variant",
+			src: `fn bad() -> I32 {
+    var values: Array(U64, 1) = [1]
+	var view = values.slice_mut(0, 1)
+	let stored: Option(MutSlice(U64)) = Some(view)
     return 0
 }`,
-			want: `scoped view [U64] cannot be stored in variant "Some"`,
+			want: `scoped view MutSlice(U64) cannot be stored in variant "Some"`,
 		},
 		{
 			name: "affine Vec element",

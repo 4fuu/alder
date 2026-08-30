@@ -1,6 +1,6 @@
 fn out(byte: U8) -> Bool { return unsafe c { alderhost_stdout_byte(byte) } }
 
-fn out_string(value: __s0_String) -> Bool {
+fn out_string(value: [U8]) -> Bool {
     var at: U64 = 0
     while at < len(value) {
         if !out(value[at]) { return false }
@@ -27,10 +27,10 @@ fn out_digit(value: U64) -> Bool {
     return out(57)
 }
 
-fn out_bytes(bytes: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn out_bytes(bytes: Vec(U8), start: U64, end: U64) -> Bool {
     var at = start
     while at < end {
-        if !out(__s0_buffer_get(U8, bytes, at)) { return false }
+        if !out(bytes[at]) { return false }
         at = at + 1
     }
     return true
@@ -55,10 +55,10 @@ fn out_hex_nibble(value: U8) -> Bool {
     return out(102)
 }
 
-fn out_hex(bytes: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
+fn out_hex(bytes: Vec(U8), start: U64, end: U64) -> Bool {
     var at = start
     while at < end {
-        let byte = __s0_buffer_get(U8, bytes, at)
+        let byte = bytes[at]
         if !out_hex_nibble(byte / 16) || !out_hex_nibble(byte % 16) { return false }
         at = at + 1
     }
@@ -66,14 +66,14 @@ fn out_hex(bytes: __s0_Buffer(U8), start: U64, end: U64) -> Bool {
 }
 
 fn out_path(state: State, source: U64) -> Bool {
-    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let rec = (state.sources)[source]
     return out_bytes(state.paths, rec.path_start, rec.path_end)
 }
 
 fn emit_sources(state: State) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(SourceRec, state.sources) {
-        let source = __s0_buffer_get(SourceRec, state.sources, at)
+    while at < (state.sources).len() {
+        let source = (state.sources)[at]
         if !out_string("S ") || !out_u64(at) || !out(32) || !out_path(state, at) || !out(32) || !out_u64(source.text_end - source.text_start) || !out(10) { return false }
         at = at + 1
     }
@@ -82,8 +82,8 @@ fn emit_sources(state: State) -> Bool {
 
 fn emit_tokens(state: State) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(TokenRec, state.tokens) {
-        let token = __s0_buffer_get(TokenRec, state.tokens, at)
+    while at < (state.tokens).len() {
+        let token = (state.tokens)[at]
         if !out_string("T ") || !out_u64(token.source) || !out(32) || !out_u64(token.kind) || !out(32) || !out_u64(token.keyword) || !out(32) || !out_u64(token.start) || !out(32) || !out_u64(token.end) || !out(32) || !out_u64(token.leading_start) || !out(32) || !out_u64(token.leading_end) || !out(32) || !out_hex(state.values, token.value_start, token.value_end) || !out(10) { return false }
         at = at + 1
     }
@@ -92,8 +92,8 @@ fn emit_tokens(state: State) -> Bool {
 
 fn emit_diagnostics(state: State) -> Bool {
     var at: U64 = 0
-    while at < __s0_buffer_len(LexDiagRec, state.diagnostics) {
-        let diag = __s0_buffer_get(LexDiagRec, state.diagnostics, at)
+    while at < (state.diagnostics).len() {
+        let diag = (state.diagnostics)[at]
         if !out_string("D LEX0001 ") || !out_u64(diag.kind) || !out(32) || !out_path(state, diag.source) || !out(32) || !out_u64(diag.start) || !out(32) || !out_u64(diag.end) || !out(10) { return false }
         at = at + 1
     }

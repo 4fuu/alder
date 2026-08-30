@@ -38,77 +38,77 @@ type StorageViewRec {
 // 3 malformed constraint, 4 malformed view, and 5 invalidated view. issue_index
 // is the stable 1-based record ID in the corresponding input table.
 type StoragePlan {
-    placements: __s0_Buffer(U64)
-    valid_views: __s0_Buffer(Bool)
-    retained: __s0_Buffer(U64)
+    placements: Vec(U64)
+    valid_views: Vec(Bool)
+    retained: Vec(U64)
     issue_kind: U64
     issue_index: U64
     promotions: U64
 }
 
 fn storage_bad(d: Domain, kind: U64, index: U64) -> Result(StoragePlan, __s0_Error) {
-    let placements = try __s0_buffer_new(U64, d)
-    let views = try __s0_buffer_new(Bool, d)
-    let retained = try __s0_buffer_new(U64, d)
+    let placements = Vec.new(U64)
+    let views = Vec.new(Bool)
+    let retained = Vec.new(U64)
     return Ok(StoragePlan(placements: placements, valid_views: views, retained: retained, issue_kind: kind, issue_index: index, promotions: 0))
 }
 
-fn storage_domain_ancestor(domains: __s0_Buffer(StorageDomainRec), ancestor: U64, domain: U64) -> Bool {
+fn storage_domain_ancestor(domains: Vec(StorageDomainRec), ancestor: U64, domain: U64) -> Bool {
     var at = domain
     while at != 0 {
         if at == ancestor { return true }
-        at = __s0_buffer_get(StorageDomainRec, domains, at - 1).parent
+        at = domains[at - 1].parent
     }
     return false
 }
 
 // Return the nearest common ancestor. Validated parent-before-child IDs make
 // depth construction linear and exclude cyclic walks.
-fn storage_join(domains: __s0_Buffer(StorageDomainRec), depths: __s0_Buffer(U64), left: U64, right: U64) -> U64 {
+fn storage_join(domains: Vec(StorageDomainRec), depths: Vec(U64), left: U64, right: U64) -> U64 {
     var a = left
     var b = right
-    while __s0_buffer_get(U64, depths, a) > __s0_buffer_get(U64, depths, b) { a = __s0_buffer_get(StorageDomainRec, domains, a - 1).parent }
-    while __s0_buffer_get(U64, depths, b) > __s0_buffer_get(U64, depths, a) { b = __s0_buffer_get(StorageDomainRec, domains, b - 1).parent }
+    while depths[a] > depths[b] { a = domains[a - 1].parent }
+    while depths[b] > depths[a] { b = domains[b - 1].parent }
     while a != b {
-        a = __s0_buffer_get(StorageDomainRec, domains, a - 1).parent
-        b = __s0_buffer_get(StorageDomainRec, domains, b - 1).parent
+        a = domains[a - 1].parent
+        b = domains[b - 1].parent
     }
     return a
 }
 
-fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocations: __s0_Buffer(StorageAllocationRec), constraints: __s0_Buffer(StorageConstraintRec), views: __s0_Buffer(StorageViewRec)) -> Result(StoragePlan, __s0_Error) {
-    let domain_count = __s0_buffer_len(StorageDomainRec, domains)
-    let allocation_count = __s0_buffer_len(StorageAllocationRec, allocations)
+fn storage_analyze(d: Domain, domains: Vec(StorageDomainRec), allocations: Vec(StorageAllocationRec), constraints: Vec(StorageConstraintRec), views: Vec(StorageViewRec)) -> Result(StoragePlan, __s0_Error) {
+    let domain_count = (domains).len()
+    let allocation_count = (allocations).len()
     if domain_count == 0 { return storage_bad(d, 1, 1) }
 
-    var depths = try __s0_buffer_new(U64, d)
-    depths = try __s0_buffer_append(U64, d, depths, 0)
+    var depths = Vec.new(U64)
+    try depths.try_push(0)
     var at: U64 = 0
     while at < domain_count {
-        let item = __s0_buffer_get(StorageDomainRec, domains, at)
+        let item = domains[at]
         let id = at + 1
         if (id == 1 && item.parent != 0) || (id != 1 && (item.parent == 0 || item.parent >= id)) { return storage_bad(d, 1, id) }
-        depths = try __s0_buffer_append(U64, d, depths, __s0_buffer_get(U64, depths, item.parent) + 1)
+        try depths.try_push(depths[item.parent] + 1)
         at = at + 1
     }
 
-    var placements = try __s0_buffer_new(U64, d)
+    var placements = Vec.new(U64)
     at = 0
     while at < allocation_count {
-        let item = __s0_buffer_get(StorageAllocationRec, allocations, at)
+        let item = allocations[at]
         if item.candidate == 0 || item.candidate > domain_count { return storage_bad(d, 2, at + 1) }
-        placements = try __s0_buffer_append(U64, d, placements, item.candidate)
+        try placements.try_push(item.candidate)
         at = at + 1
     }
 
     // Direct lifetime requirements and conservative fallback are applied
     // before dependency propagation, so every worklist edge observes a safe
     // lower bound even when constraints are not topologically ordered.
-    var retained = try __s0_buffer_new(U64, d)
+    var retained = Vec.new(U64)
     var promotions: U64 = 0
     at = 0
-    while at < __s0_buffer_len(StorageConstraintRec, constraints) {
-        let item = __s0_buffer_get(StorageConstraintRec, constraints, at)
+    while at < (constraints).len() {
+        let item = constraints[at]
         let direct = item.domain != 0
         let dependent = item.dependency != 0
         if item.allocation == 0 || item.allocation > allocation_count || (direct && dependent) || (item.fallback && (direct || dependent)) || (!item.fallback && !direct && !dependent) || (direct && item.domain > domain_count) || (dependent && item.dependency > allocation_count) {
@@ -117,39 +117,39 @@ fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocation
         if direct || item.fallback {
             var required = item.domain
             if item.fallback { required = 1 }
-            let old = __s0_buffer_get(U64, placements, item.allocation - 1)
+            let old = placements[item.allocation - 1]
             let joined = storage_join(domains, depths, old, required)
             if joined != old {
-                __s0_buffer_set(U64, placements, item.allocation - 1, joined)
+                placements[item.allocation - 1] = joined
                 promotions = promotions + 1
             }
-            if item.fallback { retained = try __s0_buffer_append(U64, d, retained, item.source) }
+            if item.fallback { try retained.try_push(item.source) }
         }
         at = at + 1
     }
 
-    var valid_views = try __s0_buffer_new(Bool, d)
-    var view_roots = try __s0_buffer_new(U64, d)
+    var valid_views = Vec.new(Bool)
+    var view_roots = Vec.new(U64)
     at = 0
-    while at < __s0_buffer_len(StorageViewRec, views) {
-        let item = __s0_buffer_get(StorageViewRec, views, at)
+    while at < (views).len() {
+        let item = views[at]
         let direct = item.allocation != 0
         let derived = item.parent_view != 0
         if (direct && derived) || (!direct && !derived) || (direct && item.allocation > allocation_count) || (derived && item.parent_view >= at + 1) || item.use_domain == 0 || item.use_domain > domain_count { return storage_bad(d, 4, at + 1) }
         if item.invalidated { return storage_bad(d, 5, at + 1) }
         var root = item.allocation
         if derived {
-            if !__s0_buffer_get(Bool, valid_views, item.parent_view - 1) { return storage_bad(d, 5, at + 1) }
-            root = __s0_buffer_get(U64, view_roots, item.parent_view - 1)
+            if !valid_views[item.parent_view - 1] { return storage_bad(d, 5, at + 1) }
+            root = view_roots[item.parent_view - 1]
         }
-        let old = __s0_buffer_get(U64, placements, root - 1)
+        let old = placements[root - 1]
         let joined = storage_join(domains, depths, old, item.use_domain)
         if joined != old {
-            __s0_buffer_set(U64, placements, root - 1, joined)
+            placements[root - 1] = joined
             promotions = promotions + 1
         }
-        view_roots = try __s0_buffer_append(U64, d, view_roots, root)
-        valid_views = try __s0_buffer_append(Bool, d, valid_views, true)
+        try view_roots.try_push(root)
+        try valid_views.try_push(true)
         at = at + 1
     }
 
@@ -167,8 +167,8 @@ fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocation
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(StorageConstraintRec, constraints) {
-        let edge = __s0_buffer_get(StorageConstraintRec, constraints, at)
+    while at < (constraints).len() {
+        let edge = constraints[at]
         if edge.dependency != 0 { edge_count[edge.dependency] = edge_count[edge.dependency] + 1 }
         at = at + 1
     }
@@ -182,8 +182,8 @@ fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocation
     }
     var edge_ids = __s0_alloc(U64, d, edge_total + 1)
     at = 0
-    while at < __s0_buffer_len(StorageConstraintRec, constraints) {
-        let edge = __s0_buffer_get(StorageConstraintRec, constraints, at)
+    while at < (constraints).len() {
+        let edge = constraints[at]
         if edge.dependency != 0 {
             edge_ids[edge_cursor[edge.dependency]] = at
             edge_cursor[edge.dependency] = edge_cursor[edge.dependency] + 1
@@ -194,32 +194,32 @@ fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocation
     // Seed every allocation once. Thereafter a dependency is revisited only
     // when its placement moves outward. in_queue bounds duplicate work while
     // the finite parent lattice bounds successful promotions.
-    var queue = try __s0_buffer_new(U64, d)
+    var queue = Vec.new(U64)
     var in_queue = __s0_alloc(U64, d, allocation_count + 1)
     in_queue[0] = 0
     at = 1
     while at <= allocation_count {
-        queue = try __s0_buffer_append(U64, d, queue, at)
+        try queue.try_push(at)
         in_queue[at] = 1
         at = at + 1
     }
     var head: U64 = 0
-    while head < __s0_buffer_len(U64, queue) {
-        let dependency = __s0_buffer_get(U64, queue, head)
+    while head < (queue).len() {
+        let dependency = queue[head]
         head = head + 1
         in_queue[dependency] = 0
         var edge_at: U64 = 0
         while edge_at < edge_count[dependency] {
             let edge_id = edge_ids[edge_start[dependency] + edge_at]
-            let edge = __s0_buffer_get(StorageConstraintRec, constraints, edge_id)
-            let old = __s0_buffer_get(U64, placements, edge.allocation - 1)
-            let required = __s0_buffer_get(U64, placements, dependency - 1)
+            let edge = constraints[edge_id]
+            let old = placements[edge.allocation - 1]
+            let required = placements[dependency - 1]
             let joined = storage_join(domains, depths, old, required)
             if joined != old {
-                __s0_buffer_set(U64, placements, edge.allocation - 1, joined)
+                placements[edge.allocation - 1] = joined
                 promotions = promotions + 1
                 if in_queue[edge.allocation] == 0 {
-                    queue = try __s0_buffer_append(U64, d, queue, edge.allocation)
+                    try queue.try_push(edge.allocation)
                     in_queue[edge.allocation] = 1
                 }
             }
@@ -231,10 +231,10 @@ fn storage_analyze(d: Domain, domains: __s0_Buffer(StorageDomainRec), allocation
     // worklist state. A failure here is an analyzer invariant violation rather
     // than a request for unsafe lowering repair.
     at = 0
-    while at < __s0_buffer_len(StorageViewRec, views) {
-        let item = __s0_buffer_get(StorageViewRec, views, at)
-        let root = __s0_buffer_get(U64, view_roots, at)
-        let placement = __s0_buffer_get(U64, placements, root - 1)
+    while at < (views).len() {
+        let item = views[at]
+        let root = view_roots[at]
+        let placement = placements[root - 1]
         if !storage_domain_ancestor(domains, placement, item.use_domain) { return storage_bad(d, 4, at + 1) }
         at = at + 1
     }

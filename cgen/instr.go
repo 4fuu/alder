@@ -165,6 +165,18 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			b.WriteString("  " + g.val(in.Result) + " = alder_copy_ty" + strconv.Itoa(int(t)) +
 				"(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.CopyVal) + ");\n")
 		}
+	case mir.OpCopyToDomainTry:
+		t, _ := g.f.ValueType(in.CopyVal)
+		status := g.tmp(in, "status")
+		copied := g.tmp(in, "copied")
+		b.WriteString("  " + g.cType(t) + " " + copied + ";\n")
+		if g.copyTrivial(t) {
+			b.WriteString("  uint8_t " + status + " = (uint8_t)0;\n")
+			b.WriteString("  " + copied + " = " + g.valueExpr(in.CopyVal) + ";\n")
+		} else {
+			b.WriteString("  uint8_t " + status + " = " + g.tryCopyCall(t) + "(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.CopyVal) + ", &" + copied + ");\n")
+		}
+		g.emitCapacityResult(b, in, status, copied, t)
 
 	case mir.OpCleanupScopeBegin:
 		b.WriteString("  if (!alder_cleanup_scope_begin(&alder_scope_" + strconv.Itoa(g.scopeUsed) +
@@ -261,6 +273,40 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < " + g.valueExpr(in.Slice) + ".len; alder_i++) { ((" + g.cType(elem) + " *)" + g.tmp(in, "p") + ")[alder_i] = " + g.copyCall(elem) + "(" + g.valueExpr(in.Domain) + ", ((" + g.cType(elem) + " *)" + g.valueExpr(in.Slice) + ".data)[alder_i]); }\n")
 		}
 		b.WriteString("  " + g.val(in.Result) + " = (AlderVec){ " + g.tmp(in, "p") + ", " + g.valueExpr(in.Slice) + ".len, " + g.valueExpr(in.Capacity) + " };\n")
+	case mir.OpVecTryGrow:
+		t, _ := g.f.ValueType(in.Slice)
+		elem := g.m.Types[t].Elem
+		status := g.tmp(in, "status")
+		bytes := g.tmp(in, "bytes")
+		ptr := g.tmp(in, "p")
+		grown := g.tmp(in, "grown")
+		b.WriteString("  uint8_t " + status + " = (uint8_t)0;\n")
+		b.WriteString("  uint64_t " + bytes + " = (uint64_t)0;\n")
+		b.WriteString("  void *" + ptr + " = NULL;\n")
+		b.WriteString("  AlderVec " + grown + " = " + g.valueExpr(in.Slice) + ";\n")
+		b.WriteString("  if (" + g.valueExpr(in.Capacity) + " < " + g.valueExpr(in.Slice) + ".len || !alder_u64_mul_checked(" + g.valueExpr(in.Capacity) + ", " + g.typeSize(elem) + ", &" + bytes + ") || " + bytes + " > (uint64_t)SIZE_MAX) { " + status + " = (uint8_t)2; }\n")
+		b.WriteString("  if (" + status + " == (uint8_t)0) { " + ptr + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + bytes + ", (size_t)" + g.typeAlign(elem) + "); if (" + ptr + " == NULL) { " + status + " = (uint8_t)1; } }\n")
+		b.WriteString("  if (" + status + " == (uint8_t)0 && " + g.valueExpr(in.Slice) + ".len != (uint64_t)0 && " + g.valueExpr(in.Slice) + ".data == NULL) { alder_runtime_panic(\"vec.try_grow: null source\"); }\n")
+		if g.copyTrivial(elem) {
+			b.WriteString("  if (" + status + " == (uint8_t)0 && " + g.valueExpr(in.Slice) + ".len != (uint64_t)0) { uint64_t alder_n; if (!alder_u64_mul_checked(" + g.valueExpr(in.Slice) + ".len, " + g.typeSize(elem) + ", &alder_n) || alder_n > (uint64_t)SIZE_MAX) { " + status + " = (uint8_t)2; } else { memcpy(" + ptr + ", " + g.valueExpr(in.Slice) + ".data, (size_t)alder_n); } }\n")
+		} else {
+			b.WriteString("  if (" + status + " == (uint8_t)0) { for (uint64_t alder_i = (uint64_t)0; alder_i < " + g.valueExpr(in.Slice) + ".len; alder_i++) { " + status + " = " + g.tryCopyCall(elem) + "(" + g.valueExpr(in.Domain) + ", ((" + g.cType(elem) + " *)" + g.valueExpr(in.Slice) + ".data)[alder_i], &((" + g.cType(elem) + " *)" + ptr + ")[alder_i]); if (" + status + " != (uint8_t)0) { break; } } }\n")
+		}
+		b.WriteString("  if (" + status + " == (uint8_t)0) { " + grown + " = (AlderVec){ " + ptr + ", " + g.valueExpr(in.Slice) + ".len, " + g.valueExpr(in.Capacity) + " }; }\n")
+		g.emitCapacityResult(b, in, status, grown, t)
+	case mir.OpBytesAsSlice, mir.OpStringAsBytes:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderSlice){ (void *)" + g.valueExpr(in.Slice) + ".data, " + g.valueExpr(in.Slice) + ".len };\n")
+	case mir.OpBytesTryFromVec:
+		status := g.tmp(in, "status")
+		ptr := g.tmp(in, "p")
+		converted := g.tmp(in, "bytes")
+		b.WriteString("  uint8_t " + status + " = (uint8_t)0;\n")
+		b.WriteString("  void *" + ptr + " = NULL;\n")
+		b.WriteString("  AlderBytes " + converted + " = (AlderBytes){ NULL, (uint64_t)0 };\n")
+		b.WriteString("  if (" + g.valueExpr(in.Slice) + ".len != (uint64_t)0 && " + g.valueExpr(in.Slice) + ".data == NULL) { alder_runtime_panic(\"bytes.try_from_vec: null source\"); }\n")
+		b.WriteString("  if (" + g.valueExpr(in.Slice) + ".len != (uint64_t)0) { if (" + g.valueExpr(in.Slice) + ".len > (uint64_t)SIZE_MAX) { " + status + " = (uint8_t)2; } else { " + ptr + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + g.valueExpr(in.Slice) + ".len, _Alignof(uint8_t)); if (" + ptr + " == NULL) { " + status + " = (uint8_t)1; } } }\n")
+		b.WriteString("  if (" + status + " == (uint8_t)0) { if (" + g.valueExpr(in.Slice) + ".len != (uint64_t)0) { memcpy(" + ptr + ", " + g.valueExpr(in.Slice) + ".data, (size_t)" + g.valueExpr(in.Slice) + ".len); } " + converted + " = (AlderBytes){ (const uint8_t *)" + ptr + ", " + g.valueExpr(in.Slice) + ".len }; }\n")
+		g.emitCapacityResult(b, in, status, converted, g.m.Bytes())
 	case mir.OpVecLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
 	case mir.OpVecCapacity:
@@ -757,6 +803,24 @@ func intLiteral(v int64) string {
 		return "-9223372036854775807LL - 1"
 	}
 	return strconv.FormatInt(v, 10) + "LL"
+}
+
+func (g *gen) emitCapacityResult(b *strings.Builder, in *mir.Instr, status, value string, valueType mir.TypeId) {
+	resultType, _ := g.f.ValueType(in.Result)
+	ok, _ := g.m.VariantIndex(resultType, "ok")
+	errResult, _ := g.m.VariantIndex(resultType, "err")
+	oom, _ := g.m.VariantIndex(in.TypeOp, "OutOfMemory")
+	limit, _ := g.m.VariantIndex(in.TypeOp, "Limit")
+	b.WriteString("  if (" + status + " == (uint8_t)0) {\n")
+	b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)" + strconv.Itoa(ok) + ";\n")
+	if valueType != mir.TypeUnit {
+		b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p" + strconv.Itoa(ok) + " = " + value + ";\n")
+	}
+	b.WriteString("  } else {\n")
+	b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)" + strconv.Itoa(errResult) + ";\n")
+	errorValue := g.val(in.Result) + ".alder_u.alder_p" + strconv.Itoa(errResult)
+	b.WriteString("    " + errorValue + ".alder_tag = (uint32_t)((" + status + " == (uint8_t)1) ? " + strconv.Itoa(oom) + " : " + strconv.Itoa(limit) + ");\n")
+	b.WriteString("  }\n")
 }
 
 // floatLiteral renders a double constant in a form valid in C, preserving

@@ -319,7 +319,8 @@ literal requires an expected `Array(T, 0)` type. Arrays and vectors borrow as
 `[T]` for a call; constructing an owned vector remains explicit, for example
 `Vec.from_array(U64, [1, 2, 3])`. `Vec.new(T)` names the element type when no
 value argument can infer it. The exact implemented collection and view calls
-are frozen in the [`core.collection`](api/core.collection-v1.md) and
+are frozen in the [`core.collection` v1](api/core.collection-v1.md), additive
+[`core.collection` v2](api/core.collection-v2.md), and
 [`core.slice`](api/core.slice-v1.md) snapshots. Raw strings, character
 literals, user-defined suffixes, and collection comprehensions are deferred.
 

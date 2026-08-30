@@ -86,6 +86,11 @@ const (
 	OpVecAsSlice
 	OpVecAsMutSlice
 	OpArrayAsSlice
+	OpCopyToDomainTry
+	OpVecTryGrow
+	OpBytesAsSlice
+	OpStringAsBytes
+	OpBytesTryFromVec
 )
 
 // String returns the canonical textual name of the operation.
@@ -221,6 +226,16 @@ func (k OpKind) String() string {
 		return "vec.as_mut_slice"
 	case OpArrayAsSlice:
 		return "array.as_slice"
+	case OpCopyToDomainTry:
+		return "copy_to_domain.try"
+	case OpVecTryGrow:
+		return "vec.try_grow"
+	case OpBytesAsSlice:
+		return "bytes.as_slice"
+	case OpStringAsBytes:
+		return "string.as_bytes"
+	case OpBytesTryFromVec:
+		return "bytes.try_from_vec"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

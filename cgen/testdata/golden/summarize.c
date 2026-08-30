@@ -42,21 +42,33 @@ static ALDER_MAYBE_UNUSED void alder_cleanup_0(void *alder_ctx) {
   alder_fn_domain_destroy_0(alder_c->alder_f0);
 }
 
-static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v) {
+static ALDER_MAYBE_UNUSED uint8_t alder_try_copy_ty12(AlderDomain *, AlderSlice, AlderSlice *);
+static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *, AlderSlice);
+
+static ALDER_MAYBE_UNUSED uint8_t alder_try_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v, AlderSlice *alder_out) {
   uint64_t alder_t;
-  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)(uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic("copy_to_domain: size overflow"); }
-  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic("copy_to_domain: size exceeds size_t"); }
+  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)(uint64_t)sizeof(uint8_t), &alder_t)) { return (uint8_t)2; }
+  if (alder_t > (uint64_t)SIZE_MAX) { return (uint8_t)2; }
   if (alder_v.len > (uint64_t)0) {
     if (alder_v.data == NULL) { alder_runtime_panic("copy_to_domain: null source"); }
     void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)(uint64_t)_Alignof(uint8_t));
-    if (alder_p == NULL) { alder_runtime_panic("copy_to_domain: out of memory"); }
+    if (alder_p == NULL) { return (uint8_t)1; }
     memcpy(alder_p, alder_v.data, (size_t)alder_t);
     alder_v.data = alder_p;
   }
-  return alder_v;
+  *alder_out = alder_v;
+  return (uint8_t)0;
+}
+static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v) {
+  AlderSlice alder_out;
+  uint8_t alder_s = alder_try_copy_ty12(alder_d, alder_v, &alder_out);
+  if (alder_s == (uint8_t)1) { alder_runtime_panic("copy_to_domain: out of memory"); }
+  if (alder_s != (uint8_t)0) { alder_runtime_panic("copy_to_domain: size limit"); }
+  return alder_out;
 }
 
 static ALDER_MAYBE_UNUSED void alder_fn_domain_destroy_0(AlderDomain * alder_v0) {
+  (void)alder_v0;
 
   alder_domain_destroy(alder_v0);
   return;
@@ -74,6 +86,8 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_summarize_1(AlderDomain * alder_v0,
   AlderDomain alder_domain_0 = {0};
   AlderCleanupScope alder_scope_0 = {0};
   AlderCtx_0 alder_ctx_0 = {0};
+  (void)alder_v0;
+  (void)alder_v1;
 
   if (!alder_cleanup_scope_begin(&alder_scope_0)) { alder_runtime_panic("cleanup.scope.begin failed"); }
   alder_v2 = &alder_scope_0;

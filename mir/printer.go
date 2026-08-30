@@ -247,8 +247,11 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 			printFailEdge(b, f, in)
 		}
 
-	case OpCopyToDomain:
+	case OpCopyToDomain, OpCopyToDomainTry:
 		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.CopyVal))
+		if in.Op == OpCopyToDomainTry {
+			b.WriteString(", " + m.TypeString(in.TypeOp))
+		}
 
 	case OpCleanupScopeBegin:
 		// no operands
@@ -290,6 +293,12 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpVecGrowChecked:
 		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Domain) + ", " + valueName(f, in.Capacity))
 		printFailEdge(b, f, in)
+	case OpVecTryGrow:
+		b.WriteString(" " + valueName(f, in.Slice) + ", " + valueName(f, in.Domain) + ", " + valueName(f, in.Capacity) + ", " + m.TypeString(in.TypeOp))
+	case OpBytesAsSlice, OpStringAsBytes:
+		b.WriteString(" " + valueName(f, in.Slice))
+	case OpBytesTryFromVec:
+		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.Slice) + ", " + m.TypeString(in.TypeOp))
 	case OpVecLen, OpVecCapacity, OpVecStorage, OpVecAsSlice, OpVecAsMutSlice:
 		b.WriteString(" " + valueName(f, in.Slice))
 	case OpArrayAsSlice:

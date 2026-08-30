@@ -485,6 +485,102 @@ int main(void) {
 	}
 }
 
+func TestVecFallibleGrowthIsTransactionalAndRetryable(t *testing.T) {
+	src := `
+import c test_clear_domain_alloc_failure: fn() -> Unit
+import c test_fail_domain_alloc_after: fn(U64) -> Unit
+
+fn clear_failure() -> I32 {
+    unsafe c { test_clear_domain_alloc_failure() }
+    return 0
+}
+
+fn main() -> I32 {
+    var values: Vec(U64) = Vec.new(U64)
+    let failed: I32 = match values.try_push(7) {
+        Ok => 1
+        Err(error) => match error {
+            OutOfMemory => clear_failure()
+            Limit => 2
+        }
+    }
+    if failed != 0 || values.len() != 0 { return 3 }
+    let retried = match values.try_push(7) {
+        Ok => true
+        Err(error) => false
+    }
+    if !retried || values.len() != 1 || values[0] != 7 { return 4 }
+    let limited = match values.try_reserve(9223372036854775807) {
+        Ok => false
+        Err(error) => match error {
+            OutOfMemory => false
+            Limit => true
+        }
+    }
+    if !limited || values.len() != 1 || values[0] != 7 { return 5 }
+
+    var inner: Vec(U64) = Vec.new(U64)
+    inner.push(9)
+    var outer: Vec(Vec(U64)) = Vec.new(Vec(U64))
+    unsafe c { test_fail_domain_alloc_after(1) }
+    let nested_failed = match outer.try_push(inner) {
+        Ok => false
+        Err(error) => match error {
+            OutOfMemory => true
+            Limit => false
+        }
+    }
+    unsafe c { test_clear_domain_alloc_failure() }
+    if !nested_failed || outer.len() != 0 || inner.len() != 1 || inner[0] != 9 { return 6 }
+    let nested_retry = match outer.try_push(inner) {
+        Ok => true
+        Err(error) => false
+    }
+    inner[0] = 10
+    if !nested_retry || outer.len() != 1 || outer[0][0] != 9 || inner[0] != 10 { return 7 }
+    return 0
+}
+`
+	gen, m := compileAndGenerate(t, src)
+	mainID, ok := m.Function("main")
+	if !ok {
+		t.Fatal("fixture has no main function")
+	}
+	driver := fmt.Sprintf(`#include "gen.c"
+void test_clear_domain_alloc_failure(void) { alder_runtime_test_clear_domain_alloc_failure(); }
+void test_fail_domain_alloc_after(uint64_t count) { alder_runtime_test_fail_domain_alloc_after(count); }
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) return 1;
+    alder_runtime_test_fail_domain_alloc_after((uint64_t)0);
+    if (alder_fn_main_%d(&root) != (int32_t)0) return 2;
+    alder_domain_destroy(&root);
+    return alder_runtime_live_allocations() == (size_t)0 ? 0 : 3;
+}
+`, mainID)
+	for _, cc := range findCCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			genPath, driverPath := writeFiles(t, "vec_fallible", gen, driver)
+			exe := filepath.Join(t.TempDir(), "vec_fallible.exe")
+			args := []string{
+				"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+				"-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING",
+				"-I", filepath.Dir(genPath),
+				"-I", filepath.Join("..", "runtime", "c"),
+				genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+				"-o", exe,
+			}
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("strict compile failed: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run failed: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 // TestE2ERoundTrip prints each fixture's MIR, re-parses it, and verifies the
 // printed form is stable and valid.
 func TestE2ERoundTrip(t *testing.T) {
