@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +53,7 @@ type productionEnvelope struct {
 
 type sharedProductionBuildResult struct {
 	dir, object, exe string
+	cached           bool
 	err              error
 }
 
@@ -60,12 +63,19 @@ var (
 )
 
 // TestMain keeps the ordinary tests' shared compiler executable alive until
-// every parallel package test has finished, without caching between go test
-// processes.
+// every parallel package test has finished. Cached entries live under the
+// user cache directory and outlive the process; only directories this
+// process built outside the cache are removed.
 func TestMain(m *testing.M) {
 	code := m.Run()
-	if sharedProductionBuild.dir != "" {
+	if sharedProductionBuild.dir != "" && !sharedProductionBuild.cached {
 		_ = os.RemoveAll(sharedProductionBuild.dir)
+	}
+	scratchMu.Lock()
+	dirs := scratchDirs
+	scratchMu.Unlock()
+	for _, dir := range dirs {
+		_ = os.RemoveAll(dir)
 	}
 	os.Exit(code)
 }
@@ -73,7 +83,7 @@ func TestMain(m *testing.M) {
 func getSharedProductionBuild(t *testing.T, cc, root string) (object, exe, dir string) {
 	t.Helper()
 	sharedProductionBuildOnce.Do(func() {
-		sharedProductionBuild = buildSharedProductionCompiler(cc, root)
+		sharedProductionBuild = buildSharedProductionCompiler(t, cc, root)
 	})
 	if sharedProductionBuild.err != nil {
 		t.Fatalf("build shared production compiler: %v", sharedProductionBuild.err)
@@ -81,52 +91,81 @@ func getSharedProductionBuild(t *testing.T, cc, root string) (object, exe, dir s
 	return sharedProductionBuild.object, sharedProductionBuild.exe, sharedProductionBuild.dir
 }
 
-func buildSharedProductionCompiler(cc, root string) sharedProductionBuildResult {
+func buildSharedProductionCompiler(t *testing.T, cc, root string) sharedProductionBuildResult {
 	result := sharedProductionBuildResult{}
-	dir, err := os.MkdirTemp("", "alder-production-test-")
-	if err != nil {
-		result.err = err
-		return result
+	digest := sha256.New()
+	for _, name := range compilerSourceManifest {
+		fmt.Fprintln(digest, name)
+		if err := hashFile(digest, filepath.Join(root, "compiler", "src", name)); err != nil {
+			result.err = err
+			return result
+		}
 	}
-	result.dir = dir
+	for _, rel := range []string{
+		filepath.Join("runtime", "c", "alder.c"),
+		filepath.Join("bootstrap", "alder_host.c"),
+	} {
+		if err := hashFile(digest, filepath.Join(root, rel)); err != nil {
+			result.err = err
+			return result
+		}
+	}
+	key := artifactKey(t, "production-compiler",
+		hex.EncodeToString(digest.Sum(nil)),
+		compilerVersion(t, cc),
+		strings.Join(strictC11Flags(), " "),
+		strings.Join(alder1LinkFlags(), " "),
+		root,
+	)
+	result.dir = loadOrBuild(t, key, func(dir string) ([]string, error) {
+		if err := writeProductionCompiler(dir, cc, root, &result); err != nil {
+			return nil, err
+		}
+		return []string{"compiler.c", "compiler.c.o", "alder1"}, nil
+	})
+	result.cached = cacheEnabled()
+	result.object = filepath.Join(result.dir, "compiler.c.o")
+	result.exe = filepath.Join(result.dir, "alder1")
+	return result
+}
+
+// writeProductionCompiler performs the actual build into dir: one Go-side
+// compile of the compiler source root, then a strict C compile and link.
+func writeProductionCompiler(dir, cc, root string, result *sharedProductionBuildResult) error {
 	var sources []frontend.Source
 	for i, name := range compilerSourceManifest {
 		text, readErr := os.ReadFile(filepath.Join(root, "compiler", "src", name))
 		if readErr != nil {
-			result.err = readErr
-			return result
+			return readErr
 		}
 		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
 	}
 	compiled, compileErr := Compile(Request{Sources: sources, Emit: EmitC})
 	if compileErr != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
-		result.err = fmt.Errorf("compile production root: result=%+v error=%v", compiled, compileErr)
-		return result
+		return fmt.Errorf("compile production root: result=%+v error=%v", compiled, compileErr)
 	}
 	cfile := filepath.Join(dir, "compiler.c")
 	result.object = cfile + ".o"
 	result.exe = filepath.Join(dir, "alder1")
-	if err = os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
-		result.err = err
-		return result
+	if err := os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
+		return err
 	}
 	strict := strictC11Flags()
 	compileArgs := append(append([]string{}, strict...), "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", cfile, "-o", result.object)
 	if output, commandErr := exec.Command(cc, compileArgs...).CombinedOutput(); commandErr != nil {
-		result.err = fmt.Errorf("strict C11 compile: %w\n%s", commandErr, output)
-		return result
+		return fmt.Errorf("strict C11 compile: %w\n%s", commandErr, output)
 	}
 	linkArgs := append(append([]string{}, strict...), alder1LinkFlags()...)
 	linkArgs = append(linkArgs,
-		fmt.Sprintf("-DALDER_HOST_RUNTIME_C=\"%s\"", filepath.Join(root, "runtime", "c", "alder.c")),
-		fmt.Sprintf("-DALDER_HOST_RUNTIME_INCLUDE_DIR=\"%s\"", filepath.Join(root, "runtime", "c")),
-		fmt.Sprintf("-DALDER_HOST_INCLUDE_DIR=\"%s\"", filepath.Join(root, "bootstrap")),
+		fmt.Sprintf("-DALDER_HOST_RUNTIME_C=%q", filepath.Join(root, "runtime", "c", "alder.c")),
+		fmt.Sprintf("-DALDER_HOST_RUNTIME_INCLUDE_DIR=%q", filepath.Join(root, "runtime", "c")),
+		fmt.Sprintf("-DALDER_HOST_INCLUDE_DIR=%q", filepath.Join(root, "bootstrap")),
 	)
 	linkArgs = append(linkArgs, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), result.object, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", result.exe)
 	if output, commandErr := exec.Command(cc, linkArgs...).CombinedOutput(); commandErr != nil {
-		result.err = fmt.Errorf("strict C11 link: %w\n%s", commandErr, output)
+		return fmt.Errorf("strict C11 link: %w\n%s", commandErr, output)
 	}
-	return result
+	return nil
 }
 
 func TestAlderProductionDriverEndToEnd(t *testing.T) {

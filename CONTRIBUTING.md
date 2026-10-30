@@ -93,6 +93,16 @@ stage-0 binary from the ignored `.alder-cache/` directory and removes no check.
 
 These are the canonical build, format, and test commands; keep them synchronized with `AGENTS.md`.
 
+The `compiler` package tests reuse identical build artifacts across `go test`
+processes through a content-hash cache under the user cache directory. Set
+`ALDER_TEST_CACHE=0` to disable reuse and rebuild everything. The cache is on
+by default, is keyed on the test binary plus the Alder and C sources, the C
+compiler and its version, and the exact build flags, and verifies a SHA-256
+digest of every artifact before reusing it; any doubt rebuilds. Every assertion
+in the affected tests runs on every invocation either way, so the cache changes
+how long the gate takes, never what it checks. Entries unused for 14 days are
+pruned.
+
 ## C Runtime and Backend Standards
 
 - Generated and handwritten C must target portable C11.

@@ -84,4 +84,6 @@ Canonical source-bootstrap check (run before committing compiler-source or boots
 
 - `bootstrap/regenerate.sh` must validate the source inventory and reproduce `bootstrap/alder.c` byte-for-byte using only the committed source bootstrap, runtime, host shim, system C11 compiler, and common POSIX-host utilities. Its default run is cold and hermetic; `ALDER_BOOTSTRAP_CACHE=1` may reuse a keyed stage-0 binary from the ignored `.alder-cache/` directory and removes no check.
 
+The `compiler` package tests reuse identical build artifacts across `go test` processes through a content-hash cache under the user cache directory. `ALDER_TEST_CACHE=0` disables reuse and rebuilds everything. The cache is on by default, is keyed on the test binary plus the Alder and C sources, the C compiler and its version, and the exact build flags, and verifies a SHA-256 digest of every artifact before reusing it; any doubt rebuilds. Every assertion in the affected tests runs on every invocation either way, so the cache changes how long the gate takes, never what it checks.
+
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.

@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,6 +261,45 @@ fn lower_mode(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> 
 ` + coreConformanceDispatch
 }
 
+// writeCoreConformance builds the core conformance artifacts into dir: the
+// printed MIR, the generated C, and the strict C11 executable. The printed
+// MIR is kept so a cached entry can be re-parsed for the module assertions
+// without repeating the Go-side compile.
+func writeCoreConformance(dir string, t *testing.T, cc, root string, sources []frontend.Source) ([]string, error) {
+	t.Helper()
+	module, diagnostics, err := frontend.CompileSources(sources)
+	if err != nil || module == nil || len(diagnostics) != 0 {
+		return nil, fmt.Errorf("compile core closure: module=%v diagnostics=%v error=%v", module, diagnostics, err)
+	}
+	generated, err := cgen.GenerateProgramTrusted(module)
+	if err != nil {
+		return nil, fmt.Errorf("generate core conformance C: %v", err)
+	}
+	mirText := mir.Print(module)
+	if err := os.WriteFile(filepath.Join(dir, "core-conformance.mir"), []byte(mirText), 0o644); err != nil {
+		return nil, err
+	}
+	cfile := filepath.Join(dir, "core-conformance.c")
+	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
+		return nil, err
+	}
+	exe := filepath.Join(dir, "core-conformance.exe")
+	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe, "-DALDER_HOST_CONFORMANCE")
+	return []string{"core-conformance.mir", "core-conformance.c", "core-conformance.exe"}, nil
+}
+
+// loadCoreConformanceModule re-parses the printed MIR of a core conformance
+// entry. Printing and re-parsing is the same round trip TestE2ERoundTrip
+// pins, so the module assertions see the module the entry was built from.
+func loadCoreConformanceModule(t *testing.T, dir string) (*mir.Module, error) {
+	t.Helper()
+	text, err := os.ReadFile(filepath.Join(dir, "core-conformance.mir"))
+	if err != nil {
+		return nil, err
+	}
+	return mir.Parse(string(text))
+}
+
 func TestAlderCoreConformance(t *testing.T) {
 	parallel := os.Getenv("UPDATE_GOLDEN") == ""
 	if parallel {
@@ -291,9 +333,32 @@ func TestAlderCoreConformance(t *testing.T) {
 	// determinism at the shared Compile-to-CompileSources canonicalization
 	// boundary. Checker and production argv permutations plus repeated printer
 	// and verifier processes retain executable-level determinism coverage here.
-	module, diagnostics, err := frontend.CompileSources(sources)
-	if err != nil || module == nil || len(diagnostics) != 0 {
-		t.Fatalf("compile core closure: module=%v diagnostics=%v error=%v", module, diagnostics, err)
+	digest := sha256.New()
+	for _, source := range sources {
+		fmt.Fprintln(digest, source.Path)
+		fmt.Fprintln(digest, source.Text)
+	}
+	for _, rel := range []string{
+		filepath.Join("runtime", "c", "alder.c"),
+		filepath.Join("bootstrap", "alder_host.c"),
+	} {
+		if err := hashFile(digest, filepath.Join(root, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := artifactKey(t, "core-conformance",
+		hex.EncodeToString(digest.Sum(nil)),
+		compilerVersion(t, cc),
+		strings.Join(strictC11Flags(), " "),
+		"-DALDER_HOST_CONFORMANCE",
+		root,
+	)
+	dir := loadOrBuild(t, key, func(dir string) ([]string, error) {
+		return writeCoreConformance(dir, t, cc, root, sources)
+	})
+	module, err := loadCoreConformanceModule(t, dir)
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, name := range []string{"collect_cycle_edges", "reject_value_cycles", "interpreted_type_equal", "interpreted_may_reach_ancestry", "direct_type_concrete", "interpreted_contains_reference", "interpreted_map_key_ok", "validate_concrete_type", "revalidate_aggregate_roots"} {
 		id, ok := module.Function(name)
@@ -309,17 +374,7 @@ func TestAlderCoreConformance(t *testing.T) {
 		}
 	}
 
-	generated, err := cgen.GenerateProgramTrusted(module)
-	if err != nil {
-		t.Fatalf("generate core conformance C: %v", err)
-	}
-	dir := t.TempDir()
-	cfile := filepath.Join(dir, "core-conformance.c")
 	exe := filepath.Join(dir, "core-conformance.exe")
-	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe, "-DALDER_HOST_CONFORMANCE")
 
 	t.Run("checker", func(t *testing.T) {
 		if parallel {
