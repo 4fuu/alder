@@ -517,10 +517,43 @@ Exit-criteria evidence on the fixed 28-file source root:
   lookup semantics, stable diagnostics, and table-order output;
 - a native `alder1 check` of all 28 sources completes in 168.55 seconds on the
   measured Linux/GCC host, and `alder1` emits the next compiler C in 182.68
-  seconds, with approximately 2.5 GiB peak memory;
+  seconds, with approximately 2.5 GiB peak memory. After the compile-speed work
+  recorded below, the same 30-source corpus measures 256.43 s for `check` and
+  267.64 s for `compile --emit=c` on the 2026-10 Amp orb host, with 3.35 GiB and
+  3.47 GiB peak RSS respectively — a 4.64x reduction in `check` time against
+  the 1189.17 s measured on that host before the change;
 - `ALDER_BOOTSTRAP_SELFCOMPILE=1 go test ./compiler -run
   '^TestAlder1CompilesCompilerSource$' -count=1` passes the complete source,
   verification, C generation, native build, and next-stage execution path.
+
+#### Compile-speed work on the self-hosted compiler
+
+Phase-level instrumentation of the native `alder1 check` over the fixed
+30-source corpus attributes 67% of wall time to the checker, 30% to the MIR
+verifier and 3% to lowering; lexing and parsing together are 0.02%. A gprof
+profile of the same run attributes 26% of sampled time to the checked-arithmetic
+and bounds-check runtime helpers and a further 15% to `__s0_buffer_get`
+monomorphisations, roughly 63 billion calls into out-of-line functions in a
+separate translation unit.
+
+Three changes landed:
+
+- the checker reads `SymbolRec.inherent_owner`, already computed once per symbol
+  by `collect_symbols`, instead of re-walking the parse roots per candidate in
+  `symbol_named` — fixed point regenerated;
+- the checked leaf helpers move from `runtime/c/alder.c` into `runtime/c/alder.h`
+  as `static inline`, so the generated compiler C — which already includes that
+  header — inlines them. No check is removed and the trap behaviour is unchanged.
+  This is a pure C-runtime change: it needs no regeneration, and it is the single
+  largest win;
+- the parser rejects expression nesting deeper than 64 levels with a normal
+  syntax diagnostic, so deeply nested input can no longer exhaust the native
+  stack — fixed point regenerated.
+
+Measured on the 2026-10 Amp orb host (30 sources, `-O2`): `check` 1189.17 s to
+256.43 s, `compile --emit=c` 267.64 s, peak RSS unchanged at about 3.4 GiB.
+Peak memory is dominated by the never-freed doubling domain segments and is not
+addressed by this work.
 
 #### Bootstrap execution policy
 
@@ -552,7 +585,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `314709c7a2138f0285563ed47de4dbd98f01c256b0452d597653cd90135bf08f`;
+  `026d31f21e6b7303274c0686b80fb8c1f999556b6c1b24778b1c3ee344bcb3d4`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -633,7 +666,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `314709c7a2138f0285563ed47de4dbd98f01c256b0452d597653cd90135bf08f`.
+  `026d31f21e6b7303274c0686b80fb8c1f999556b6c1b24778b1c3ee344bcb3d4`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
