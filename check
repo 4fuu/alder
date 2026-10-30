@@ -56,7 +56,7 @@ step "gcc -fsyntax-only runtime/c/alder.c" \
 step "go test ./... -count=1" go test ./... -count=1
 
 if [ "$bootstrap" = true ]; then
-    echo "== bootstrap/regenerate.sh (this takes about 21 minutes)"
+    echo "== bootstrap/regenerate.sh (this takes about 4 minutes)"
     step "bootstrap/regenerate.sh" ./bootstrap/regenerate.sh
 else
     echo "== bootstrap/regenerate.sh (skipped; pass --bootstrap to run it)"
