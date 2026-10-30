@@ -1693,12 +1693,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let active = lower_open_block(base.state.mir, function, block)
         let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
         let base_type = try lower_type(d, source_state, store, base.state, base_expression.checked_type)
-        var ordinal: U64 = 0
-        var local_at: U64 = 0
-        while local_at < __s0_buffer_len(MirLocalRec, base_type.state.mir.locals) {
-            if __s0_buffer_get(MirLocalRec, base_type.state.mir.locals, local_at).function == function { ordinal = ordinal + 1 }
-            local_at = local_at + 1
-        }
+        let ordinal = lower_local_count(base_type.state.mir, function)
         let temporary = try mir_add_local(d, base_type.state.mir, function, ordinal, try lower_decimal_name(d, "field_tmp", expression_id), base_type.id)
         let local_place = try mir_add_place(d, temporary.store, MirPlaceRec(function: function, kind: mir_place_local(), local: temporary.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
         let stored = try lower_add_instr(d, lower_with_mir(base_type.state, local_place.store), function, active, mir_op_store(), 0, local_place.id, 0, base.id, 0, 0, "")
