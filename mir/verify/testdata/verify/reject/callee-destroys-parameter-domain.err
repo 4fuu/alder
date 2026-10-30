@@ -1,0 +1,3 @@
+fn @f: block bb_loop: op store #1: store of %buf carries a function-local domain handle or reference across a loop backedge
+fn @f: block bb_loop: op call #0: use of %root after reset or destruction of its domain
+fn @f: block bb_loop: op store #1: use of %buf after reset or destruction of its domain

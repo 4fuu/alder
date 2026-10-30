@@ -63,6 +63,7 @@ func TestRunFixtures(t *testing.T) {
 			for _, rf := range runFixtures {
 				rf := rf
 				t.Run(rf.mir, func(t *testing.T) {
+					t.Parallel()
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
 					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
@@ -366,6 +367,7 @@ func TestRunFixturesSanitizers(t *testing.T) {
 			for _, rf := range runFixtures {
 				rf := rf
 				t.Run(rf.mir, func(t *testing.T) {
+					t.Parallel()
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
 					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))

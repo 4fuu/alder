@@ -89,18 +89,22 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	_, exe, _ := getSharedProductionBuild(t, cc, root)
 	noGo := noGoEnv(t, cc)
 	t.Run("i64-min", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"i64min.al": "fn main() -> I32 {\n    if -9223372036854775808 == -9223372036854775807 - 1 { return 0 }\n    return 1\n}\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "i64min.al", "", 0)
 	})
 	t.Run("s0-error-limit", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"limit.al": "fn f() -> Result(U64, __s0_Error) { return Err(Limit) }\nfn main() -> I32 { return 0 }\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "limit.al", "", 0)
 	})
 	t.Run("buffer-new-without-slice", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"noslice.al": "fn make(d: Domain) -> Result(__s0_Buffer(U64), __s0_Error) {\n    let b = try __s0_buffer_new(U64, d)\n    return Ok(b)\n}\nfn main() -> I32 { return 0 }\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "noslice.al", "", 0)
 	})
 	t.Run("buffer-match-result", func(t *testing.T) {
+		t.Parallel()
 		files := map[string]string{"matchbuf.al": "fn consume(b: __s0_Buffer(U64)) -> I32 { return 0 }\nfn main(d: Domain) -> I32 {\n    return match __s0_buffer_new(U64, d) {\n        Err(error) => 1\n        Ok(b) => consume(b)\n    }\n}\n"}
 		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "matchbuf.al", "", 0)
 	})
@@ -108,6 +112,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	for _, name := range bootstrapAcceptFixtures {
 		name := name
 		t.Run("accept/"+name, func(t *testing.T) {
+			t.Parallel()
 			text := readBootstrapFixture(t, root, filepath.Join("frontend", "testdata", "accept", name+".al"))
 			files := map[string]string{name + ".al": text}
 			assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, name+".al", extraSymbolsFor(name), 0)
@@ -116,6 +121,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	for _, name := range bootstrapE2EFixtures {
 		name := name
 		t.Run("e2e/"+name, func(t *testing.T) {
+			t.Parallel()
 			text := readBootstrapFixture(t, root, filepath.Join("frontend", "testdata", "e2e", name+".al"))
 			files := map[string]string{name + ".al": text}
 			assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, name+".al", extraSymbolsFor(name), 0)
@@ -124,6 +130,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	for _, name := range bootstrapRejectFixtures {
 		name := name
 		t.Run("reject/"+name, func(t *testing.T) {
+			t.Parallel()
 			text := readBootstrapFixture(t, root, filepath.Join("frontend", "testdata", "reject", name+".al"))
 			files := map[string]string{name + ".al": text}
 			assertAlder1RejectsLikeGo(t, exe, noGo, files, name+".al")

@@ -90,6 +90,7 @@ func TestRuntimePrograms(t *testing.T) {
 	for _, name := range testPrograms {
 		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			compileAndRun(t, cc, name)
 		})
 	}
@@ -127,6 +128,7 @@ func TestRuntimeSanitizers(t *testing.T) {
 	for _, name := range testPrograms {
 		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			compileAndRun(t, cc, name,
 				"-fsanitize=address,undefined",
 				"-g", "-fno-omit-frame-pointer")

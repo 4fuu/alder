@@ -106,6 +106,7 @@ func TestStrictCompile(t *testing.T) {
 			for _, name := range goldenSources {
 				name := name
 				t.Run(name, func(t *testing.T) {
+					t.Parallel()
 					gen := writeGenerated(t, name)
 					out, err := exec.Command(cc, strictArgs(gen)...).CombinedOutput()
 					if err != nil {

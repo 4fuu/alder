@@ -1,0 +1,24 @@
+mir 1
+
+const @one_u64: u64 = 1
+
+fn @f(%root: domain_handle) -> unit {
+  local %slot: safe_mut(u8)
+
+bb0:
+  %n = const.get @one_u64
+  %buf = alloc %root, u8, %n
+  store local %slot, %buf
+  jump bb_loop
+
+bb_loop:
+  call @release(%root)
+  store local %slot, %buf
+  jump bb_loop
+}
+
+fn @release(%root: domain_handle) -> unit {
+bb0:
+  domain.destroy %root
+  return
+}

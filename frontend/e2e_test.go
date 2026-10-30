@@ -110,6 +110,7 @@ func TestE2E(t *testing.T) {
 			for _, e2e := range e2eFixtures {
 				e2e := e2e
 				t.Run(e2e.src, func(t *testing.T) {
+					t.Parallel()
 					src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".al"))
 					gen, m := compileAndGenerate(t, src)
 					driver := ""
@@ -288,6 +289,7 @@ fn main(d: Domain) -> I32 {
 			for _, tc := range tests {
 				tc := tc
 				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
 					gen, m := compileAndGenerate(t, tc.src)
 					driver, err := defaultDriver(m)
 					if err != nil {
