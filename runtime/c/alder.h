@@ -141,14 +141,55 @@ typedef struct {
     uint64_t capacity;
 } AlderVec;
 
-bool alder_vec_construct_checked(AlderSlice storage, uint64_t len,
-                                 uint64_t capacity, AlderVec *out);
+/*
+ * The leaf helpers below are defined here as static inline rather than in
+ * runtime/c/alder.c so that the generated compiler C, which includes this
+ * header, can inline them. Generated code performs tens of billions of
+ * bounds checks and checked integer operations per self-compilation, so an
+ * out-of-line call per operation dominated the profile. The bodies are
+ * byte-for-byte the ones that used to live in the runtime source, and the
+ * checks and trap behaviour are unchanged: every failure still returns false
+ * and still panics through alder_runtime_panic at the call site.
+ */
+
+static inline bool alder_i64_from_twos_bits(uint64_t bits, int64_t *out) {
+    if (out == NULL) {
+        return false;
+    }
+    if (bits <= (uint64_t)INT64_MAX) {
+        *out = (int64_t)bits;
+        return true;
+    }
+    uint64_t magnitude = (uint64_t)0 - bits;
+    if (magnitude == (uint64_t)INT64_MAX + 1u) {
+        *out = INT64_MIN;
+    } else {
+        *out = -(int64_t)magnitude;
+    }
+    return true;
+}
+
+static inline bool alder_vec_construct_checked(AlderSlice storage, uint64_t len,
+                                               uint64_t capacity, AlderVec *out) {
+    if (out == NULL || len > capacity || capacity > storage.len ||
+        (capacity != 0 && storage.data == NULL)) {
+        return false;
+    }
+    *out = (AlderVec){storage.data, len, capacity};
+    return true;
+}
 
 /* Bounds checks used by slice.index.checked and slice.range.checked. A NULL
  * data pointer is valid only for a zero-length slice; its sole valid range is
  * [0, 0), while indexing and every range of {NULL, len>0} fail. */
-bool alder_slice_index_checked(AlderSlice slice, uint64_t index);
-bool alder_slice_range_checked(AlderSlice slice, uint64_t lo, uint64_t hi);
+static inline bool alder_slice_index_checked(AlderSlice slice, uint64_t index) {
+    return slice.data != NULL && index < slice.len;
+}
+
+static inline bool alder_slice_range_checked(AlderSlice slice, uint64_t lo, uint64_t hi) {
+    return lo <= hi && hi <= slice.len &&
+           (slice.data != NULL || slice.len == 0);
+}
 
 /* ------------------------------------------------------------------ */
 /* Checked integer arithmetic                                          */
@@ -165,18 +206,127 @@ bool alder_slice_range_checked(AlderSlice slice, uint64_t lo, uint64_t hi);
  * Shift semantics: left shifts wrap (two's complement bit pattern);
  * right shifts are arithmetic for signed values and logical for unsigned.
  */
-bool alder_i64_add_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_i64_sub_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_i64_mul_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_i64_div_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_i64_shl_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_i64_shr_checked(int64_t a, int64_t b, int64_t *out);
-bool alder_u64_add_checked(uint64_t a, uint64_t b, uint64_t *out);
-bool alder_u64_sub_checked(uint64_t a, uint64_t b, uint64_t *out);
-bool alder_u64_mul_checked(uint64_t a, uint64_t b, uint64_t *out);
-bool alder_u64_div_checked(uint64_t a, uint64_t b, uint64_t *out);
-bool alder_u64_shl_checked(uint64_t a, uint64_t b, uint64_t *out);
-bool alder_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out);
+static inline bool alder_i64_add_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL || (b > 0 && a > INT64_MAX - b) ||
+        (b < 0 && a < INT64_MIN - b)) {
+        return false;
+    }
+    *out = a + b;
+    return true;
+}
+
+static inline bool alder_i64_sub_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL || (b > 0 && a < INT64_MIN + b) ||
+        (b < 0 && a > INT64_MAX + b)) {
+        return false;
+    }
+    *out = a - b;
+    return true;
+}
+
+static inline bool alder_i64_mul_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL) {
+        return false;
+    }
+    if (a == 0 || b == 0) {
+        *out = 0;
+        return true;
+    }
+    if ((a == INT64_MIN && b == -1) || (a == -1 && b == INT64_MIN)) {
+        return false;
+    }
+    bool neg = (a < 0) != (b < 0);
+    uint64_t ua = a < 0 ? (uint64_t)0 - (uint64_t)a : (uint64_t)a;
+    uint64_t ub = b < 0 ? (uint64_t)0 - (uint64_t)b : (uint64_t)b;
+    uint64_t limit = neg ? ((uint64_t)INT64_MAX + (uint64_t)1)
+                         : (uint64_t)INT64_MAX;
+    if (ua > limit / ub) {
+        return false;
+    }
+    uint64_t prod = ua * ub;
+    if (neg) {
+        prod = (uint64_t)0 - prod; /* two's complement negation, defined in
+                                      unsigned arithmetic */
+    }
+    return alder_i64_from_twos_bits(prod, out);
+}
+
+static inline bool alder_i64_div_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL || b == 0 || (a == INT64_MIN && b == -1)) {
+        return false;
+    }
+    *out = a / b;
+    return true;
+}
+
+static inline bool alder_i64_shl_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL || b < 0 || b >= 64) {
+        return false;
+    }
+    uint64_t r = (uint64_t)a << (unsigned)b; /* unsigned shift is defined */
+    return alder_i64_from_twos_bits(r, out);
+}
+
+static inline bool alder_i64_shr_checked(int64_t a, int64_t b, int64_t *out) {
+    if (out == NULL || b < 0 || b >= 64) {
+        return false;
+    }
+    uint64_t u = (uint64_t)a >> (unsigned)b;
+    if (a < 0 && b > 0) {
+        /* Arithmetic shift: sign-extend the shifted-out bits. */
+        u |= ~(UINT64_MAX >> (unsigned)b);
+    }
+    return alder_i64_from_twos_bits(u, out);
+}
+
+static inline bool alder_u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || a > UINT64_MAX - b) {
+        return false;
+    }
+    *out = a + b;
+    return true;
+}
+
+static inline bool alder_u64_sub_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || a < b) {
+        return false;
+    }
+    *out = a - b;
+    return true;
+}
+
+static inline bool alder_u64_mul_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || (a != 0 && b > UINT64_MAX / a)) {
+        return false;
+    }
+    *out = a * b;
+    return true;
+}
+
+static inline bool alder_u64_div_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    (void)a;
+    if (out == NULL || b == 0) {
+        return false;
+    }
+    *out = a / b;
+    return true;
+}
+
+static inline bool alder_u64_shl_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || b >= 64) {
+        return false;
+    }
+    *out = a << (unsigned)b;
+    return true;
+}
+
+static inline bool alder_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || b >= 64) {
+        return false;
+    }
+    *out = a >> (unsigned)b;
+    return true;
+}
 
 /*
  * Defined float-to-integer conversion for int.from_float lowering. Returns
