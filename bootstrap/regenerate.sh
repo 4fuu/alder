@@ -26,6 +26,13 @@ strict='-std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion'
 bootstrap_cflags=${BOOTSTRAP_CFLAGS-"-O2"}
 bootstrap_ldflags=${BOOTSTRAP_LDFLAGS:-}
 host_flags=
+
+# The inventory verifier build is the only long stage that can overlap a
+# check, so it starts first and the order-file cross-check finishes while it
+# compiles.
+"$cc" $strict bootstrap/inventory_verify.c -o "$tmp/alder-inventory-verify" &
+inventory_build=$!
+
 if [ -z "${BOOTSTRAP_CFLAGS+x}" ]; then
     compiler_macros=$("$cc" -dM -E - </dev/null)
     case "$compiler_macros" in
@@ -38,9 +45,6 @@ case $(uname -s) in
     MINGW*|MSYS*) bootstrap_ldflags="$bootstrap_ldflags -Wl,--stack,33554432" ;;
 esac
 
-"$cc" $strict bootstrap/inventory_verify.c -o "$tmp/alder-inventory-verify"
-"$tmp/alder-inventory-verify" bootstrap/compiler-sources.manifest .
-
 awk '
     NR == FNR {
         if (NR > 1 && $1 != "sha256") { inventory[$3] = 1; inventory_count++ }
@@ -51,9 +55,14 @@ awk '
     { seen[$0] = 1; order_count++ }
     END { if (inventory_count != order_count) exit 1 }
 ' bootstrap/compiler-sources.manifest bootstrap/compiler-sources.order || {
+    kill "$inventory_build" 2>/dev/null || true
+    wait "$inventory_build" 2>/dev/null || true
     echo "bootstrap: compiler source order is not covered by the inventory" >&2
     exit 1
 }
+
+wait "$inventory_build"
+"$tmp/alder-inventory-verify" bootstrap/compiler-sources.manifest .
 
 "$cc" $strict $bootstrap_cflags $host_flags \
     -I runtime/c -I bootstrap \
