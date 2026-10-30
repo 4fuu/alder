@@ -1009,7 +1009,7 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         let inherent_owner = inherent_owner_node(parse, node_id)
         while previous < __s0_buffer_len(SymbolRec, store.symbols) {
             let first = __s0_buffer_get(SymbolRec, store.symbols, previous)
-            let first_owner = inherent_owner_node(parse, first.node)
+            let first_owner = first.inherent_owner
             if same_name(state, node.source, node.name_start, node.name_end, first.source, first.name_start, first.name_end) && same_inherent_owner(state, parse, inherent_owner, first_owner) && (module_source == 0 || first.module_source == module_source) {
                 let related = __s0_buffer_get(SyntaxRec, parse.nodes, first.node - 1)
                 return check_token_related_fail(d, state, store, 1, node, related)
@@ -2689,7 +2689,7 @@ fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: Syntax
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if inherent_owner_node(parse, symbol.node) == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
+        if symbol.inherent_owner == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
         at = at + 1
     }
     if module_source == 0 { return 0 }
@@ -2757,7 +2757,7 @@ fn inherent_symbol_named(state: State, parse: ParseStore, store: CheckStore, nam
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        let owner_id = inherent_owner_node(parse, symbol.node)
+        let owner_id = symbol.inherent_owner
         if owner_id != 0 && same_name(state, name.source, name.name_start, name.name_end, symbol.source, symbol.name_start, symbol.name_end) {
             let owner = __s0_buffer_get(SyntaxRec, parse.nodes, owner_id - 1)
             if same_name(state, owner.source, owner.name_start, owner.name_end, owner_symbol.source, owner_symbol.name_start, owner_symbol.name_end) {
