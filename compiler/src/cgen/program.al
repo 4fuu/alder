@@ -157,12 +157,40 @@ fn cgen_emit_imports(d: Domain, initial: CgenWriter, store: MirStore) -> Result(
     return Ok(out)
 }
 
+fn cgen_name_has_prefix(store: MirStore, start: U64, end: U64, prefix: __s0_String) -> Bool {
+    if start >= end || len(prefix) == 0 || len(prefix) > end - start { return false }
+    if end > __s0_buffer_len(U8, store.names) { return false }
+    var at: U64 = 0
+    while at < len(prefix) {
+        if __s0_buffer_get(U8, store.names, start + at) != prefix[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// The buffer accessor monomorphisations are tiny, and a compiler-sized program
+// calls them billions of times, so the out-of-line call and its argument copy
+// were a large fraction of run time. Declaring them `static inline` lets GCC
+// inline them; the body, every bounds check and every trap is unchanged, and a
+// `static inline` definition that GCC declines to inline is emitted exactly as
+// the plain `static` one was.
+fn cgen_function_inlinable(store: MirStore, function: U64) -> Bool {
+    if function == 0 || function > __s0_buffer_len(MirFunctionRec, store.functions) { return false }
+    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    return cgen_name_has_prefix(store, item.name_start, item.name_end, "buffer_get_") || cgen_name_has_prefix(store, item.name_start, item.name_end, "buffer_len_") || cgen_name_has_prefix(store, item.name_start, item.name_end, "buffer_set_") || cgen_name_has_prefix(store, item.name_start, item.name_end, "buffer_slice_")
+}
+
+fn cgen_put_function_linkage(d: Domain, initial: CgenWriter, store: MirStore, function: U64) -> Result(CgenWriter, __s0_Error) {
+    if cgen_function_inlinable(store, function) { return cgen_put(d, initial, "static inline ALDER_MAYBE_UNUSED ") }
+    return cgen_put(d, initial, "static ALDER_MAYBE_UNUSED ")
+}
+
 fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
     while at < __s0_buffer_len(MirFunctionRec, store.functions) {
         let item = __s0_buffer_get(MirFunctionRec, store.functions, at)
-        out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED ")
+        out = try cgen_put_function_linkage(d, out, store, at + 1)
         if item.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, item.result_type) }
         out = try cgen_put(d, out, " ")
         out = try cgen_emit_function_name(d, out, store, at + 1)

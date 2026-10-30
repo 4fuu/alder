@@ -518,9 +518,9 @@ Exit-criteria evidence on the fixed 28-file source root:
 - a native `alder1 check` of all 28 sources completes in 168.55 seconds on the
   measured Linux/GCC host, and `alder1` emits the next compiler C in 182.68
   seconds, with approximately 2.5 GiB peak memory. After the compile-speed work
-  recorded below, the same 30-source corpus measures 213.54 s for `check` and
-  227.91 s for `compile --emit=c` on the 2026-10 Amp orb host, with 3.36 GiB and
-  3.48 GiB peak RSS respectively — a 5.57x reduction in `check` time against
+  recorded below, the same 30-source corpus measures 142.70 s for `check` and
+  148.66 s for `compile --emit=c` on the 2026-10 Amp orb host, with 3.36 GiB and
+  3.48 GiB peak RSS respectively — an 8.33x reduction in `check` time against
   the 1189.17 s measured on that host before the change;
 - `ALDER_BOOTSTRAP_SELFCOMPILE=1 go test ./compiler -run
   '^TestAlder1CompilesCompilerSource$' -count=1` passes the complete source,
@@ -536,7 +536,7 @@ and bounds-check runtime helpers and a further 15% to `__s0_buffer_get`
 monomorphisations, roughly 63 billion calls into out-of-line functions in a
 separate translation unit.
 
-Five changes landed:
+Six changes landed:
 
 - the checker reads `SymbolRec.inherent_owner`, already computed once per symbol
   by `collect_symbols`, instead of re-walking the parse roots per candidate in
@@ -560,12 +560,20 @@ Five changes landed:
   to visited-types times all parts. Lowering now keeps an owner-keyed index over
   the part table in `LowerState`, extended lazily as parts are appended, so a
   visited type costs only its own part count. Fixed point regenerated; every MIR
-  and generated-C golden is byte-identical, so this is output-neutral.
+  and generated-C golden is byte-identical, so this is output-neutral;
+- the monomorphised `__s0_buffer_get` / `len` / `set` / `slice` accessors were
+  emitted as out-of-line `static` functions, and a compiler-sized program calls
+  them billions of times. The C backend now declares those four accessors
+  `static inline`, which lets GCC inline them. No body, bounds check or trap
+  changes: the generated C for every program is identical except for the added
+  `inline` qualifier on those declarations and definitions. Because the change
+  is in the backend rather than in the compiled source, the fixed point needed a
+  second regeneration round to settle.
 
 Measured on the 2026-10 Amp orb host (30 sources, `-O2`): `check` 1189.17 s to
-256.43 s with the first three changes, to 219.73 s with the fourth, and to
-213.54 s with the fifth, `compile --emit=c` 267.64 s to 227.91 s, peak RSS
-unchanged at about 3.4 GiB.
+256.43 s with the first three changes, to 219.73 s with the fourth, to 213.54 s
+with the fifth, and to 142.70 s with the sixth, `compile --emit=c` 267.64 s to
+148.66 s, peak RSS unchanged at about 3.4 GiB.
 Peak memory is dominated by the never-freed doubling domain segments and is not
 addressed by this work.
 
@@ -599,7 +607,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `31c6985b69612d98a4cea65a3cb7fd2fca933fd5057ba0b029b619d5c237d131`;
+  `6fb97d7b2e9b177e5d059d6b69fc12af34785e88e7ffc2fe0f95e9ca79667e4e`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -680,7 +688,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `31c6985b69612d98a4cea65a3cb7fd2fca933fd5057ba0b029b619d5c237d131`.
+  `6fb97d7b2e9b177e5d059d6b69fc12af34785e88e7ffc2fe0f95e9ca79667e4e`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 

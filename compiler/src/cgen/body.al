@@ -1174,7 +1174,7 @@ fn cgen_emit_terminator(d: Domain, initial: CgenWriter, store: MirStore, indexes
 
 fn cgen_emit_function_body(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(CgenWriter, __s0_Error) {
     let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
-    var out = try cgen_put(d, initial, "static ALDER_MAYBE_UNUSED ")
+    var out = try cgen_put_function_linkage(d, initial, store, function)
     if item.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, item.result_type) }
     out = try cgen_put(d, out, " ")
     out = try cgen_emit_function_name(d, out, store, function)
