@@ -88,4 +88,6 @@ The `compiler` package tests reuse identical build artifacts across `go test` pr
 
 `.github/workflows/ci.yml` runs these checks on pushes to `main` and on pull requests as three independent jobs: the Go checks, the strict C syntax check, and `bootstrap/regenerate.sh`. The bootstrap job is gated on the paths `regenerate.sh` consumes (`bootstrap/`, `compiler/src/`, `runtime/c/`) because it takes about 21 minutes and 2.5 GiB, and it defaults to running whenever the path comparison cannot be made. Keep the workflow in step with the commands above.
 
+`./check` runs the same commands in one shot for the inner loop. It is a thin wrapper with no extra flags: `--bootstrap` adds `bootstrap/regenerate.sh`, `--no-cache` sets `ALDER_TEST_CACHE=0`, and every step runs and is reported even when an earlier one fails, so a single invocation shows the whole picture.
+
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.

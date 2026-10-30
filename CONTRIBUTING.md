@@ -111,6 +111,11 @@ it takes about 21 minutes and 2.5 GiB, and it defaults to running whenever the
 path comparison cannot be made. Keep the workflow in step with the commands
 above.
 
+`./check` runs the same commands in one shot for the inner loop. It is a thin
+wrapper with no extra flags: `--bootstrap` adds `bootstrap/regenerate.sh`,
+`--no-cache` sets `ALDER_TEST_CACHE=0`, and every step runs and is reported
+even when an earlier one fails, so a single invocation shows the whole picture.
+
 ## C Runtime and Backend Standards
 
 - Generated and handwritten C must target portable C11.
