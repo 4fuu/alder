@@ -41,6 +41,19 @@ type LowerLocalIndex {
     ids: __s0_Buffer(U64)
 }
 
+// Owner-keyed index over MirStore.type_parts. The MIR type table only grows
+// during lowering, so the index is extended lazily instead of being rebuilt:
+// head[owner] is the 1-based position of that owner's most recently linked
+// part and next[p - 1] chains to the previous one, which visits an owner's
+// parts in reverse table order. mir_add_type_part and mir_intern_type only
+// ever append a part whose owner is a type id that already exists, so an
+// owner is always within range when its part is linked.
+type LowerPartIndex {
+    head: __s0_Buffer(U64)
+    next: __s0_Buffer(U64)
+    indexed: U64
+}
+
 type LowerState {
     mir: MirStore
     types: __s0_Buffer(LowerTypeMapRec)
@@ -52,12 +65,18 @@ type LowerState {
     values: __s0_Buffer(LowerValueMapRec)
     bridges: __s0_Buffer(LowerBridgeRec)
     storage: __s0_Buffer(U64)
+    part_index: LowerPartIndex
     valid: Bool
 }
 
 type LowerStep {
     state: LowerState
     id: U64
+}
+
+type LowerVecStep {
+    state: LowerState
+    value: Bool
 }
 
 type LowerFlowStep {
@@ -73,35 +92,39 @@ enum LowerResult {
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: false)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: false)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, bridges: state.bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
 }
 
 fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: bridges, storage: state.storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: bridges, storage: state.storage, part_index: state.part_index, valid: state.valid)
+}
+
+fn lower_with_part_index(state: LowerState, index: LowerPartIndex) -> LowerState {
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: index, valid: state.valid)
 }
 
 fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
@@ -1202,8 +1225,39 @@ fn lower_token_for_span(state: State, span: CheckedSpanRec) -> U64 {
     return 0
 }
 
-fn lower_mir_type_contains_vec(d: Domain, store: MirStore, root: U64) -> Result(Bool, __s0_Error) {
-    let count = __s0_buffer_len(MirTypeRec, store.types)
+// Extend the owner-keyed type-part index to cover every part currently in the
+// MIR store. Only the parts appended since the last call are linked, so the
+// total work over a whole lowering run is proportional to the table.
+fn lower_part_index_sync(d: Domain, state0: LowerState) -> Result(LowerState, __s0_Error) {
+    var state = state0
+    var index = state.part_index
+    let total = __s0_buffer_len(MirTypeRec, state.mir.types)
+    var head_len = __s0_buffer_len(U64, index.head)
+    while head_len <= total {
+        index.head = try __s0_buffer_append(U64, d, index.head, 0)
+        head_len = head_len + 1
+    }
+    let parts = __s0_buffer_len(MirTypePartRec, state.mir.type_parts)
+    while index.indexed < parts {
+        let at = index.indexed
+        let part = __s0_buffer_get(MirTypePartRec, state.mir.type_parts, at)
+        var link: U64 = 0
+        if part.owner >= 1 && part.owner <= total { link = __s0_buffer_get(U64, index.head, part.owner) }
+        index.next = try __s0_buffer_append(U64, d, index.next, link)
+        if part.owner >= 1 && part.owner <= total { __s0_buffer_set(U64, index.head, part.owner, at + 1) }
+        index.indexed = at + 1
+    }
+    return Ok(lower_with_part_index(state, index))
+}
+
+// Does the type rooted at `root` reach a Vec? The walk is a closure over the
+// elem / ok / err / result edges plus every type part of each visited type.
+// The part edges come from the owner-keyed index, so a visited type costs its
+// own part count rather than a scan of the whole part table.
+fn lower_mir_type_contains_vec(d: Domain, state0: LowerState, root: U64) -> Result(LowerVecStep, __s0_Error) {
+    var state = try lower_part_index_sync(d, state0)
+    let count = __s0_buffer_len(MirTypeRec, state.mir.types)
+    if root < 1 || root > count { return Ok(LowerVecStep(state: state, value: false)) }
     var seen = __s0_alloc(U64, d, count + 1)
     var zero: U64 = 0
     while zero <= count { seen[zero] = 0
@@ -1211,26 +1265,31 @@ fn lower_mir_type_contains_vec(d: Domain, store: MirStore, root: U64) -> Result(
     var work = try __s0_buffer_new(U64, d)
     work = try __s0_buffer_append(U64, d, work, root)
     var at: U64 = 0
+    var found = false
     while at < __s0_buffer_len(U64, work) {
         let id = __s0_buffer_get(U64, work, at)
         if id >= 1 && id <= count && seen[id] == 0 {
             seen[id] = 1
-            let typ = __s0_buffer_get(MirTypeRec, store.types, id - 1)
-            if typ.kind == mir_type_kind_vec() { return Ok(true) }
-            if typ.elem != 0 { work = try __s0_buffer_append(U64, d, work, typ.elem) }
-            if typ.ok_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.ok_type) }
-            if typ.err_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.err_type) }
-            if typ.result_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.result_type) }
-            var part_at: U64 = 0
-            while part_at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
-                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_at)
-                if part.owner == id && part.part_type != 0 { work = try __s0_buffer_append(U64, d, work, part.part_type) }
-                part_at = part_at + 1
+            let typ = __s0_buffer_get(MirTypeRec, state.mir.types, id - 1)
+            if typ.kind == mir_type_kind_vec() {
+                found = true
+                at = __s0_buffer_len(U64, work)
+            } else {
+                if typ.elem != 0 { work = try __s0_buffer_append(U64, d, work, typ.elem) }
+                if typ.ok_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.ok_type) }
+                if typ.err_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.err_type) }
+                if typ.result_type != 0 { work = try __s0_buffer_append(U64, d, work, typ.result_type) }
+                var part_at = __s0_buffer_get(U64, state.part_index.head, id)
+                while part_at != 0 {
+                    let part = __s0_buffer_get(MirTypePartRec, state.mir.type_parts, part_at - 1)
+                    if part.part_type != 0 { work = try __s0_buffer_append(U64, d, work, part.part_type) }
+                    part_at = __s0_buffer_get(U64, state.part_index.next, part_at - 1)
+                }
             }
         }
         at = at + 1
     }
-    return Ok(false)
+    return Ok(LowerVecStep(state: state, value: found))
 }
 
 fn lower_mir_type_copy_relocatable(d: Domain, store: MirStore, root: U64) -> Result(Bool, __s0_Error) {
@@ -1266,10 +1325,11 @@ fn lower_mir_type_copy_relocatable(d: Domain, store: MirStore, root: U64) -> Res
 
 fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
-    if !(try lower_mir_type_contains_vec(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
-    let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
-    if domain == 0 { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
-    let result = try lower_add_typed_result(d, typ.state, function, block, typ.id)
+    let vec = try lower_mir_type_contains_vec(d, typ.state, typ.id)
+    if !vec.value { return Ok(LowerStep(state: vec.state, id: value)) }
+    let domain = lower_storage_domain_value(vec.state, store, owner, expression_id)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(vec.state), id: 0)) }
+    let result = try lower_add_typed_result(d, vec.state, function, block, typ.id)
     let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
     return Ok(LowerStep(state: copied.state, id: result.id))
 }
@@ -4540,7 +4600,9 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     let roots = try lower_root_indexes(d, store)
     let binding_statements = try lower_binding_statement_indexes(d, store)
     let locals = try lower_local_indexes(d, store)
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, bridges: bridges, storage: storage, valid: true)
+    let part_head = try __s0_buffer_new(U64, d)
+    let part_next = try __s0_buffer_new(U64, d)
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), valid: true)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)
