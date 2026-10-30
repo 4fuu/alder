@@ -87,7 +87,9 @@ requires byte-identical C output. It also requires the common host utilities
 listed in `bootstrap/compiler-source-inventory.md`. Use
 `bootstrap/regenerate.sh --write` only for an intentional reviewed bootstrap
 update; then update the pinned `bootstrap/alder.c` digest in the compiler test.
-The measured Linux/GCC run requires about 2.5 GiB of memory.
+The measured Linux/GCC run requires about 2.5 GiB of memory. The default run is
+cold and hermetic; `ALDER_BOOTSTRAP_CACHE=1` may reuse a previously built
+stage-0 binary from the ignored `.alder-cache/` directory and removes no check.
 
 These are the canonical build, format, and test commands; keep them synchronized with `AGENTS.md`.
 

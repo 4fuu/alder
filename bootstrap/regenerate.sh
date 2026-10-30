@@ -26,10 +26,16 @@ strict='-std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion'
 bootstrap_cflags=${BOOTSTRAP_CFLAGS-"-O2"}
 bootstrap_ldflags=${BOOTSTRAP_LDFLAGS:-}
 host_flags=
+cache=false
+if [ "${ALDER_BOOTSTRAP_CACHE:-}" = "1" ]; then
+    cache=true
+fi
+cache_dir=$root/.alder-cache
+cache_key=
+cache_file=
 
 # The inventory verifier build is the only long stage that can overlap a
-# check, so it starts first and the order-file cross-check finishes while it
-# compiles.
+# check, so it starts first and the cheap checks finish while it compiles.
 "$cc" $strict bootstrap/inventory_verify.c -o "$tmp/alder-inventory-verify" &
 inventory_build=$!
 
@@ -44,6 +50,37 @@ case $(uname -s) in
     Linux) host_flags=-DALDER_HOST_LARGE_STACK ;;
     MINGW*|MSYS*) bootstrap_ldflags="$bootstrap_ldflags -Wl,--stack,33554432" ;;
 esac
+
+# Opt-in stage-0 cache. The key covers every input of the committed compiler
+# build: the three C sources, the whole flag set, and the host compiler
+# identity, so a changed source, flag, or toolchain always misses. An entry
+# replaces only the C compile; the regeneration and the byte-for-byte
+# comparison below always run, and every failure falls back to a full build.
+alder_bin=$tmp/alder
+if [ "$cache" = true ]; then
+    if command -v sha256sum >/dev/null 2>&1; then
+        cc_version=$("$cc" -dumpfullversion 2>/dev/null ||
+            "$cc" -dumpversion 2>/dev/null || echo unknown)
+        cc_machine=$("$cc" -dumpmachine 2>/dev/null || echo unknown)
+        cc_path=$(command -v "$cc" 2>/dev/null || echo "$cc")
+        cache_key=$(
+            printf 'cc=%s\nversion=%s\nmachine=%s\nstrict=%s\ncflags=%s\nhost=%s\nldflags=%s\nincludes=%s\n' \
+                "$cc_path" "$cc_version" "$cc_machine" \
+                "$strict" "$bootstrap_cflags" "$host_flags" "$bootstrap_ldflags" \
+                '-I runtime/c -I bootstrap'
+            sha256sum bootstrap/alder.c bootstrap/alder_host.c runtime/c/alder.c
+        )
+        cache_key=$(printf '%s\n' "$cache_key" | sha256sum)
+        cache_key=${cache_key%% *}
+        cache_file=$cache_dir/alder-stage0-$cache_key
+        if [ -s "$cache_file" ] && [ -x "$cache_file" ]; then
+            alder_bin=$cache_file
+            echo "bootstrap: reused stage-0 cache $cache_key" >&2
+        fi
+    else
+        echo "bootstrap: stage-0 cache needs sha256sum; building without it" >&2
+    fi
+fi
 
 awk '
     NR == FNR {
@@ -64,10 +101,20 @@ awk '
 wait "$inventory_build"
 "$tmp/alder-inventory-verify" bootstrap/compiler-sources.manifest .
 
-"$cc" $strict $bootstrap_cflags $host_flags \
-    -I runtime/c -I bootstrap \
-    bootstrap/alder.c bootstrap/alder_host.c runtime/c/alder.c \
-    $bootstrap_ldflags -o "$tmp/alder"
+if [ "$alder_bin" = "$tmp/alder" ]; then
+    "$cc" $strict $bootstrap_cflags $host_flags \
+        -I runtime/c -I bootstrap \
+        bootstrap/alder.c bootstrap/alder_host.c runtime/c/alder.c \
+        $bootstrap_ldflags -o "$tmp/alder"
+    if [ "$cache" = true ] && [ -n "$cache_file" ]; then
+        if mkdir -p "$cache_dir" &&
+            mv -f "$tmp/alder" "$cache_dir/alder-stage0-$cache_key.partial" &&
+            mv -f "$cache_dir/alder-stage0-$cache_key.partial" "$cache_file"; then
+            alder_bin=$cache_file
+            echo "bootstrap: stored stage-0 cache $cache_key" >&2
+        fi
+    fi
+fi
 
 set --
 while IFS= read -r source; do
@@ -77,7 +124,7 @@ while IFS= read -r source; do
     set -- "$@" "$source"
 done < bootstrap/compiler-sources.order
 
-"$tmp/alder" compile --emit=c "$@" > "$tmp/alder.c"
+"$alder_bin" compile --emit=c "$@" > "$tmp/alder.c"
 different=false
 if ! cmp -s bootstrap/alder.c "$tmp/alder.c"; then
     different=true

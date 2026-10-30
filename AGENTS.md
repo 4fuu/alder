@@ -82,6 +82,6 @@ Canonical C checks (run before committing runtime changes; keep the flag set syn
 
 Canonical source-bootstrap check (run before committing compiler-source or bootstrap-artifact changes; keep synchronized with `CONTRIBUTING.md`):
 
-- `bootstrap/regenerate.sh` must validate the source inventory and reproduce `bootstrap/alder.c` byte-for-byte using only the committed source bootstrap, runtime, host shim, system C11 compiler, and common POSIX-host utilities.
+- `bootstrap/regenerate.sh` must validate the source inventory and reproduce `bootstrap/alder.c` byte-for-byte using only the committed source bootstrap, runtime, host shim, system C11 compiler, and common POSIX-host utilities. Its default run is cold and hermetic; `ALDER_BOOTSTRAP_CACHE=1` may reuse a keyed stage-0 binary from the ignored `.alder-cache/` directory and removes no check.
 
 Orb lifecycle scripts (`.agents/setup`, `.agents/resume`) are used only in the Amp environment and are not part of the normal build process. They must remain non-interactive and idempotent. `.agents/setup` installs missing prerequisites; `.agents/resume` only performs fast checks and must not install dependencies.
