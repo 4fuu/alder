@@ -35,9 +35,25 @@ func findCompiler(t *testing.T) string {
 	return ""
 }
 
-// compileAndRun builds one test program with the strict warning set and runs
-// it, failing the test on any compiler warning, build error, or nonzero exit.
-func compileAndRun(t *testing.T, cc, name string, extra ...string) {
+// buildRuntimeObject compiles the runtime once under the strict warning set
+// and returns the object path, so the behavior fixtures link the runtime
+// instead of recompiling the same source for every case. Call it from a
+// top-level test and pass the path down: the object lives in that test's
+// temporary directory, which outlives its parallel subtests. extra must carry
+// the same flags the caller links with, so a sanitizer run links a sanitized
+// runtime rather than silently dropping instrumentation.
+func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
+	t.Helper()
+	object := filepath.Join(t.TempDir(), "alder.o")
+	args := append(append([]string{}, strictFlags...), extra...)
+	args = append(args, "-I", filepath.Join("c"), "-c", filepath.Join("c", "alder.c"), "-o", object)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of the runtime: %v\n%s", err, out)
+	}
+	return object
+}
+
+func compileAndRun(t *testing.T, cc, object, name string, extra ...string) {
 	t.Helper()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, name+".exe")
@@ -46,7 +62,7 @@ func compileAndRun(t *testing.T, cc, name string, extra ...string) {
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join("c"),
 		filepath.Join("testdata", name+".c"),
-		filepath.Join("c", "alder.c"), "-o", exe)
+		object, "-o", exe)
 	out, err := exec.Command(cc, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("compile %s.c failed: %v\n%s", name, err, out)
@@ -87,11 +103,12 @@ func TestRuntimePanic(t *testing.T) {
 // warning set.
 func TestRuntimePrograms(t *testing.T) {
 	cc := findCompiler(t)
+	object := buildRuntimeObject(t, cc)
 	for _, name := range testPrograms {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			compileAndRun(t, cc, name)
+			compileAndRun(t, cc, object, name)
 		})
 	}
 }
@@ -125,11 +142,12 @@ func TestRuntimeSanitizers(t *testing.T) {
 	if !sanitizersSupported(t, cc) {
 		t.Skip("ASan/UBSan not supported by this host toolchain")
 	}
+	object := buildRuntimeObject(t, cc, "-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer")
 	for _, name := range testPrograms {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			compileAndRun(t, cc, name,
+			compileAndRun(t, cc, object, name,
 				"-fsanitize=address,undefined",
 				"-g", "-fno-omit-frame-pointer")
 		})

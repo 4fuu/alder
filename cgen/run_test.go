@@ -27,15 +27,37 @@ var runFixtures = []struct {
 	{"regressions", "regressions_driver.c"},
 }
 
+// buildRuntimeObject compiles the runtime once under the strict warning set
+// and returns the object path, so the behavior fixtures link the runtime
+// instead of recompiling the same source for every case. Call it from a
+// top-level test and pass the path down: the object lives in that test's
+// temporary directory, which outlives its parallel subtests. extra must carry
+// the same flags the caller links with, so a sanitizer run links a sanitized
+// runtime rather than silently dropping instrumentation.
+func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
+	t.Helper()
+	object := filepath.Join(t.TempDir(), "alder.o")
+	args := append([]string{
+		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+		"-Wshadow", "-Wconversion",
+	}, extra...)
+	args = append(args, "-I", filepath.Join("..", "runtime", "c"),
+		"-c", filepath.Join("..", "runtime", "c", "alder.c"), "-o", object)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of the runtime: %v\n%s", err, out)
+	}
+	return object
+}
+
 // runArgs builds the strict compile command for a behavior fixture: the
-// generated file, the driver, and the runtime.
-func runArgs(gen, driver string) []string {
+// generated file, the driver, and the runtime object.
+func runArgs(gen, driver, object string) []string {
 	return []string{
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
 		"-Wshadow", "-Wconversion",
 		"-I", filepath.Dir(gen),
 		"-I", filepath.Join("..", "runtime", "c"),
-		gen, driver, filepath.Join("..", "runtime", "c", "alder.c"),
+		gen, driver, object,
 	}
 }
 
@@ -60,13 +82,14 @@ func TestRunFixtures(t *testing.T) {
 	for _, cc := range findCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
 			for _, rf := range runFixtures {
 				rf := rf
 				t.Run(rf.mir, func(t *testing.T) {
 					t.Parallel()
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
-					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
+					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver), object)
 					args = append(args, "-o", exe)
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("compile %s failed: %v\n%s", rf.mir, err, out)
@@ -133,6 +156,7 @@ bb_fail:
 	for _, cc := range findCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
 			dir := t.TempDir()
 			gen := filepath.Join(dir, "gen.c")
 			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
@@ -157,7 +181,7 @@ int main(void) {
 				t.Fatal(err)
 			}
 			exe := filepath.Join(dir, "alloc_checked.exe")
-			args := runArgs(gen, driver)
+			args := runArgs(gen, driver, object)
 			args = append(args, "-o", exe)
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 				t.Fatalf("compile alloc.checked fixture: %v\n%s", err, out)
@@ -203,6 +227,7 @@ bb_fail:
 	for _, cc := range findCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
 			dir := t.TempDir()
 			gen := filepath.Join(dir, "gen.c")
 			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
@@ -223,7 +248,7 @@ int main(void) {
 				t.Fatal(err)
 			}
 			exe := filepath.Join(dir, "array.exe")
-			args := runArgs(gen, driver)
+			args := runArgs(gen, driver, object)
 			args = append(args, "-o", exe)
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 				t.Fatalf("compile fixed array fixture: %v\n%s", err, out)
@@ -287,6 +312,7 @@ fail:
 	for _, cc := range findCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
 			dir := t.TempDir()
 			gen := filepath.Join(dir, "gen.c")
 			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
@@ -308,7 +334,7 @@ int main(void) {
 				t.Fatal(err)
 			}
 			exe := filepath.Join(dir, "loop_carried_allocations.exe")
-			args := runArgs(gen, driver)
+			args := runArgs(gen, driver, object)
 			args = append(args, "-o", exe)
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 				t.Fatalf("compile loop-carried allocation fixture: %v\n%s", err, out)
@@ -326,6 +352,7 @@ func TestFloatNarrowingPanics(t *testing.T) {
 	for _, cc := range findCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
 			gen := generateRun(t, "checked")
 			driver := filepath.Join(t.TempDir(), "float_narrow_panic.c")
 			const source = `#include "gen.c"
@@ -339,7 +366,7 @@ int main(void) {
 				t.Fatal(err)
 			}
 			exe := filepath.Join(t.TempDir(), "float_narrow_panic.exe")
-			args := runArgs(gen, driver)
+			args := runArgs(gen, driver, object)
 			args = append(args, "-o", exe)
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 				t.Fatalf("compile float narrowing panic fixture: %v\n%s", err, out)
@@ -364,13 +391,14 @@ func TestRunFixturesSanitizers(t *testing.T) {
 			if !sanitizersSupported(t, cc) {
 				t.Skip("ASan/UBSan not supported by this toolchain")
 			}
+			object := buildRuntimeObject(t, cc, "-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer")
 			for _, rf := range runFixtures {
 				rf := rf
 				t.Run(rf.mir, func(t *testing.T) {
 					t.Parallel()
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
-					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver))
+					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver), object)
 					args = append(args,
 						"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer",
 						"-o", exe)

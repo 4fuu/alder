@@ -87,26 +87,27 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	object := buildRuntimeObject(t, cc, root)
 	noGo := noGoEnv(t, cc)
 	t.Run("i64-min", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{"i64min.al": "fn main() -> I32 {\n    if -9223372036854775808 == -9223372036854775807 - 1 { return 0 }\n    return 1\n}\n"}
-		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "i64min.al", "", 0)
+		assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, "i64min.al", "", 0)
 	})
 	t.Run("s0-error-limit", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{"limit.al": "fn f() -> Result(U64, __s0_Error) { return Err(Limit) }\nfn main() -> I32 { return 0 }\n"}
-		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "limit.al", "", 0)
+		assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, "limit.al", "", 0)
 	})
 	t.Run("buffer-new-without-slice", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{"noslice.al": "fn make(d: Domain) -> Result(__s0_Buffer(U64), __s0_Error) {\n    let b = try __s0_buffer_new(U64, d)\n    return Ok(b)\n}\nfn main() -> I32 { return 0 }\n"}
-		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "noslice.al", "", 0)
+		assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, "noslice.al", "", 0)
 	})
 	t.Run("buffer-match-result", func(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{"matchbuf.al": "fn consume(b: __s0_Buffer(U64)) -> I32 { return 0 }\nfn main(d: Domain) -> I32 {\n    return match __s0_buffer_new(U64, d) {\n        Err(error) => 1\n        Ok(b) => consume(b)\n    }\n}\n"}
-		assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, "matchbuf.al", "", 0)
+		assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, "matchbuf.al", "", 0)
 	})
 
 	for _, name := range bootstrapAcceptFixtures {
@@ -115,7 +116,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 			t.Parallel()
 			text := readBootstrapFixture(t, root, filepath.Join("frontend", "testdata", "accept", name+".al"))
 			files := map[string]string{name + ".al": text}
-			assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, name+".al", extraSymbolsFor(name), 0)
+			assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, name+".al", extraSymbolsFor(name), 0)
 		})
 	}
 	for _, name := range bootstrapE2EFixtures {
@@ -124,7 +125,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 			t.Parallel()
 			text := readBootstrapFixture(t, root, filepath.Join("frontend", "testdata", "e2e", name+".al"))
 			files := map[string]string{name + ".al": text}
-			assertAlder1VerifiedArtifact(t, exe, cc, root, noGo, files, name+".al", extraSymbolsFor(name), 0)
+			assertAlder1VerifiedArtifact(t, exe, cc, root, object, noGo, files, name+".al", extraSymbolsFor(name), 0)
 		})
 	}
 	for _, name := range bootstrapRejectFixtures {
@@ -169,7 +170,7 @@ func buildAlder1(t *testing.T, cc, root string) string {
 	return exe
 }
 
-func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root string, noGo []string, files map[string]string, source string, extra string, want int) {
+func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root, object string, noGo []string, files map[string]string, source string, extra string, want int) {
 	t.Helper()
 	first := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", source)
 	second := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", source)
@@ -189,10 +190,10 @@ func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root string, noGo []str
 		t.Fatalf("C failed or was nondeterministic: first=%+v second=%+v", cFirst, cSecond)
 	}
 	if extra == "" {
-		compileAndRunProductionArtifact(t, cc, root, cFirst.stdout, want)
+		compileAndRunProductionArtifact(t, cc, root, object, cFirst.stdout, want)
 		return
 	}
-	compileAndRunWithExtras(t, cc, root, cFirst.stdout, extra, want)
+	compileAndRunWithExtras(t, cc, root, object, cFirst.stdout, extra, want)
 }
 
 func assertAlder1RejectsLikeGo(t *testing.T, exe string, noGo []string, files map[string]string, source string) {
@@ -260,7 +261,7 @@ int64_t read_counter(void) { return g_count; }
 	}
 }
 
-func compileAndRunWithExtras(t *testing.T, cc, root, generated, extra string, want int) {
+func compileAndRunWithExtras(t *testing.T, cc, root, object, generated, extra string, want int) {
 	t.Helper()
 	dir := t.TempDir()
 	cfile := filepath.Join(dir, "program.c")
@@ -277,7 +278,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 	if err := os.WriteFile(driver, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict generated C compile: %v\n%s", err, output)
 	}

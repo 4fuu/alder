@@ -87,6 +87,30 @@ func generateC(m *mir.Module) (string, error) {
 	return cgen.Generate(m)
 }
 
+// buildRuntimeObject compiles the runtime once under the strict warning set
+// and returns the object path, so the end-to-end fixtures link the runtime
+// instead of recompiling the same source for every case. Call it from a
+// top-level test and pass the path down: the object lives in that test's
+// temporary directory, which outlives its parallel subtests. extra must carry
+// the same flags the caller links with, because flags such as
+// -DALDER_RUNTIME_TESTING select which runtime entry points exist.
+func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
+	t.Helper()
+	object := filepath.Join(t.TempDir(), "alder.o")
+	args := append([]string{
+		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+		"-Wshadow", "-Wconversion",
+	}, extra...)
+	args = append(args,
+		"-I", filepath.Join("..", "runtime", "c"),
+		"-c", filepath.Join("..", "runtime", "c", "alder.c"), "-o", object,
+	)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of the runtime: %v\n%s", err, out)
+	}
+	return object
+}
+
 func writeFiles(t *testing.T, name, gen, driver string) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -107,6 +131,7 @@ func TestE2E(t *testing.T) {
 	for _, cc := range findCCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			runtimeObject := buildRuntimeObject(t, cc)
 			for _, e2e := range e2eFixtures {
 				e2e := e2e
 				t.Run(e2e.src, func(t *testing.T) {
@@ -137,7 +162,7 @@ func TestE2E(t *testing.T) {
 						"-Wshadow", "-Wconversion",
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
-						genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+						genPath, driverPath, runtimeObject,
 						"-o", exe,
 					}
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
@@ -175,6 +200,7 @@ void note(int64_t x) { (void)fprintf(stderr, "cleanup:%%lld\n", (long long)x); }
 int main(void) { return (int)alder_fn_main_%d(); }
 `, id)
 	for _, cc := range findCCompilers(t) {
+		runtimeObject := buildRuntimeObject(t, cc)
 		genPath, driverPath := writeFiles(t, "checked_panic", gen, driver)
 		exe := filepath.Join(t.TempDir(), "checked_panic.exe")
 		args := []string{
@@ -182,7 +208,7 @@ int main(void) { return (int)alder_fn_main_%d(); }
 			"-Wshadow", "-Wconversion",
 			"-I", filepath.Dir(genPath),
 			"-I", filepath.Join("..", "runtime", "c"),
-			genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+			genPath, driverPath, runtimeObject,
 			"-o", exe,
 		}
 		if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
@@ -286,6 +312,7 @@ fn main(d: Domain) -> I32 {
 	for _, cc := range findCCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			runtimeObject := buildRuntimeObject(t, cc)
 			for _, tc := range tests {
 				tc := tc
 				t.Run(tc.name, func(t *testing.T) {
@@ -302,7 +329,7 @@ fn main(d: Domain) -> I32 {
 						"-Wshadow", "-Wconversion",
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
-						genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+						genPath, driverPath, runtimeObject,
 						"-o", exe,
 					}
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
@@ -467,6 +494,7 @@ int main(void) {
 	for _, cc := range findCCompilers(t) {
 		cc := cc
 		t.Run(filepath.Base(cc), func(t *testing.T) {
+			runtimeObject := buildRuntimeObject(t, cc, "-DALDER_RUNTIME_TESTING")
 			genPath, driverPath := writeFiles(t, "buffer_failures", gen, driver)
 			exe := filepath.Join(t.TempDir(), "buffer_failures.exe")
 			args := []string{
@@ -474,7 +502,7 @@ int main(void) {
 				"-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING",
 				"-I", filepath.Dir(genPath),
 				"-I", filepath.Join("..", "runtime", "c"),
-				genPath, driverPath, filepath.Join("..", "runtime", "c", "alder.c"),
+				genPath, driverPath, runtimeObject,
 				"-o", exe,
 			}
 			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
