@@ -231,6 +231,26 @@ MIR 3 `alloc.checked` and the private buffer expose recoverable OOM where the
 bootstrap compiler specifically needs it. This is implementation evidence for
 the 1.0 fallible-allocation contract, not a general S0 allocation API.
 
+### Expression nesting limit
+
+The S0 parser rejects an expression nested deeper than 64 levels with the
+normal syntax diagnostic `SYN0001` kind 19. Nesting is counted for parenthesised
+expressions, call arguments, index expressions, array literals and match arms,
+and separately for the length of a single operator chain, because a chain of
+`a + b + c + ...` builds one left-nested node per operator.
+
+The limit exists because the parser, the checker and lowering all recurse over
+the same tree. Without it, deeply nested input exhausted the native stack and
+killed the compiler with a segmentation fault; the host raises `RLIMIT_STACK` to
+64 MiB, which still only reached roughly 150 levels. Rejecting the input keeps
+the failure a normal diagnostic instead of a crash. The limit is far above real
+source: the deepest expression in `compiler/src` nests 16 unclosed parentheses,
+and the longest operator chain on one line is 13 operators.
+
+This limit covers expression nesting only. Block and statement nesting is not
+capped, because `parse_block` and `parse_statement` do not thread `depth`; that
+is a known gap rather than a deliberate exclusion.
+
 ## C bridge
 
 S0 declares one concrete symbol:

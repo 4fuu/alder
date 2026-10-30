@@ -405,6 +405,8 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"assign-field-index.al", "fn bad() -> U64 {\n x.field[index] = value\n}\n", 14, "x.field[index]", 0, 1},
 		{"assign-index-chain.al", "fn bad() -> U64 {\n x[index][other] = value\n}\n", 14, "x[index][other]", 0, 1},
 		{"assign-group.al", "fn bad() -> U64 {\n (x + y) = value\n}\n", 14, "(x + y)", 0, 1},
+		{"nesting-group-depth.al", "fn bad() -> U64 { return " + strings.Repeat("(", 65) + "X" + strings.Repeat(")", 65) + " }", 19, "X", 0, 1},
+		{"nesting-chain-depth.al", "fn bad() -> U64 { return 1" + strings.Repeat(" + 1", 64) + " + X }", 19, "+ X", 0, 1},
 	}
 	for _, tc := range syntaxRejects {
 		t.Run(tc.name, func(t *testing.T) {

@@ -224,6 +224,20 @@ fn expression_line_ok(state: State, cursor: ParseCursor, depth: U64) -> Bool {
     return depth != 0 || !line_break_before(state, cursor)
 }
 
+// Bootstrap nesting limit. Every recursive descent that can grow without
+// bound funnels through here: parenthesised expressions, call arguments,
+// index expressions, array literals and match arms raise `depth`, and a
+// single operator chain builds one left-nested node per iteration. Without a
+// cap, deeply nested input exhausts the native stack and segfaults the
+// compiler; the checker and lowering recurse over the same tree, so bounding
+// the parser also bounds them. The limit is far above any real source and far
+// below the observed stack exhaustion point (roughly 150 levels).
+fn parse_depth_limit() -> U64 { return 64 }
+
+fn parse_depth_reject(d: Domain, state: State, cursor: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    return reject_parse(d, state, cursor, 19)
+}
+
 fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let pattern = parse_token(state, initial)
     let wildcard = token_ident(state, initial) && token_text(state, pattern, "_")
@@ -333,6 +347,7 @@ fn parse_array_literal(d: Domain, state: State, initial: ParseCursor, depth: U64
 
 fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
+    if depth > parse_depth_limit() { return parse_depth_reject(d, state, initial) }
     if token.keyword == 13 { return parse_match(d, state, initial, depth) }
     if token.keyword == 19 { return parse_unsafe_c(d, state, initial, depth) }
     if token_punct(state, initial, "[") { return parse_array_literal(d, state, initial, depth) }
@@ -517,9 +532,12 @@ fn parse_binary(d: Domain, state: State, initial: ParseCursor, depth: U64, minim
     if parse_step_bad(first) { return Ok(first) }
     var value = parse_step_value(first)
     var more = true
+    var chain: U64 = 0
     while more {
         let precedence = expression_precedence(state, value.cursor)
         if precedence == 0 || precedence < minimum { more = false } else {
+            chain = chain + 1
+            if chain > parse_depth_limit() { return parse_depth_reject(d, state, value.cursor) }
             if !expression_line_ok(state, value.cursor, depth) { return reject_parse(d, state, value.cursor, 13) }
             let operator_cursor = value.cursor
             let operator = parse_token(state, operator_cursor)
