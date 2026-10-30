@@ -103,6 +103,14 @@ in the affected tests runs on every invocation either way, so the cache changes
 how long the gate takes, never what it checks. Entries unused for 14 days are
 pruned.
 
+`.github/workflows/ci.yml` runs these checks on pushes to `main` and on pull
+requests as three independent jobs: the Go checks, the strict C syntax check,
+and `bootstrap/regenerate.sh`. The bootstrap job is gated on the paths
+`regenerate.sh` consumes (`bootstrap/`, `compiler/src/`, `runtime/c/`) because
+it takes about 21 minutes and 2.5 GiB, and it defaults to running whenever the
+path comparison cannot be made. Keep the workflow in step with the commands
+above.
+
 ## C Runtime and Backend Standards
 
 - Generated and handwritten C must target portable C11.
