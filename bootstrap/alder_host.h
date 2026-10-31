@@ -15,6 +15,7 @@ uint64_t alderhost_source_text_len(uint64_t source);
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset);
 uint64_t alderhost_command(void);
 bool alderhost_project_mode(void);
+bool alderhost_bootstrap_private(void);
 uint64_t alderhost_project_action(void);
 uint64_t alderhost_manifest_len(void);
 uint8_t alderhost_manifest_byte(uint64_t offset);

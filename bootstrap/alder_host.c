@@ -68,6 +68,7 @@ struct AlderHostContext {
     size_t source_capacity;
     uint64_t command;
     bool project_mode;
+    bool bootstrap_private;
     uint64_t project_action;
     uint8_t *manifest;
     uint64_t manifest_len;
@@ -185,6 +186,10 @@ uint64_t alderhost_command(void) {
 
 bool alderhost_project_mode(void) {
     return alderhost_active_context != NULL && alderhost_active_context->project_mode;
+}
+
+bool alderhost_bootstrap_private(void) {
+    return alderhost_active_context != NULL && alderhost_active_context->bootstrap_private;
 }
 
 uint64_t alderhost_project_action(void) {
@@ -852,6 +857,13 @@ static int alderhost_parse_request(int argc, char **argv,
                 profile_set = true;
                 continue;
             }
+            if (strcmp(arg, "--bootstrap-private") == 0) {
+                if (context->bootstrap_private) {
+                    return alderhost_fail(context->command, context->json, 2, "usage", "bootstrap-private specified more than once");
+                }
+                context->bootstrap_private = true;
+                continue;
+            }
             if (alderhost_option(arg, "format", &value)) {
                 if (value == NULL) {
                     if (++i >= argc) {
@@ -992,9 +1004,17 @@ static int alderhost_parse_request(int argc, char **argv,
 #ifdef ALDER_HOST_CONFORMANCE
 static int alderhost_parse_conformance(int argc, char **argv,
                                        struct AlderHostContext *context) {
-    size_t count = argc > 1 ? (size_t)(argc - 1) : (size_t)0;
+    int arg;
+    size_t count = 0;
     size_t i;
     context->command = UINT64_C(2);
+    for (arg = 1; arg < argc; arg++) {
+        if (strcmp(argv[arg], "--bootstrap-private") == 0) {
+            context->bootstrap_private = true;
+            continue;
+        }
+        count++;
+    }
     context->sources = (struct AlderHostSource *)calloc(
         count != 0 ? count : (size_t)1, sizeof(*context->sources));
     if (context->sources == NULL) {
@@ -1005,8 +1025,15 @@ static int alderhost_parse_conformance(int argc, char **argv,
         (void)fputs("alder host: too many sources\n", stderr);
         return EXIT_FAILURE;
     }
+    i = 0;
+    for (arg = 1; arg < argc; arg++) {
+        if (strcmp(argv[arg], "--bootstrap-private") == 0) {
+            continue;
+        }
+        context->sources[i].path = argv[arg];
+        i++;
+    }
     for (i = 0; i < count; i++) {
-        context->sources[i].path = argv[i + (size_t)1];
         if (!alderhost_size_to_u64(strlen(context->sources[i].path),
                                    &context->sources[i].path_len)) {
             (void)fputs("alder host: source path too large\n", stderr);

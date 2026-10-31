@@ -1368,6 +1368,9 @@ func runResourceCgenCompiler(t *testing.T, exe string, files map[string]string, 
 		}
 	}
 	args := append([]string{"!alder-core-cgen-resources"}, order...)
+	if privateProfileLowerSources(files) {
+		args = append([]string{"--bootstrap-private"}, args...)
+	}
 	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
 	cmd.Env = append(cmd.Environ(), "TMPDIR="+t.TempDir())
@@ -1426,6 +1429,17 @@ func runMalformedLowerCompiler(t *testing.T, exe string) {
 	}
 }
 
+// privateProfileLowerSources reports whether a lower-conformance source set
+// still uses the S0 bridges and needs the private bootstrap profile.
+func privateProfileLowerSources(files map[string]string) bool {
+	for _, text := range files {
+		if strings.Contains(text, "__s0_") || strings.Contains(text, "Domain") || strings.Contains(text, "Map(") {
+			return true
+		}
+	}
+	return false
+}
+
 func runLowerCompiler(t *testing.T, exe string, files map[string]string, order []string) []byte {
 	t.Helper()
 	dir := t.TempDir()
@@ -1438,6 +1452,9 @@ func runLowerCompiler(t *testing.T, exe string, files map[string]string, order [
 		}
 	}
 	args := append([]string{"!alder-core-lower"}, order...)
+	if privateProfileLowerSources(files) {
+		args = append([]string{"--bootstrap-private"}, args...)
+	}
 	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = dir
 	cmd.Env = append(cmd.Environ(), "TMPDIR="+t.TempDir())

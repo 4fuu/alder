@@ -214,6 +214,12 @@ platforms' UI stacks. See the [Roadmap](../ROADMAP.md#post-10-native-ui-package)
 - `Domain`, `DomainMark`, `__s0_*`, fixed-capacity S0 Map, S0 Buffer,
   private `__s0_String = [U8]`, callback-bearing `using`, global source sets,
   and direct C symbol declarations are removal-gated bridges.
+- Since M7.3 slice 3 the bootstrap bridges are compiler-private: an ordinary
+  compilation rejects them, and only the private bootstrap profile
+  (`--bootstrap-private`) keeps them available for `compiler/src`, the
+  bootstrap spike, and bridge test fixtures. The public language constructs
+  ordinary values through inferred storage, and the profile flag itself is
+  removed together with the bridges.
 - Self-hosting and fixed-point source bootstrap precede broad implementation
   of the 1.0 product profile, but they do not narrow that profile.
 

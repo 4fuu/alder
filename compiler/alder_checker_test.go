@@ -1529,6 +1529,20 @@ func checkerOwnersBlocks(v []checkerBlock) []int {
 	return r
 }
 
+// privateProfileSources reports whether a checker-conformance source set
+// still uses the S0 bootstrap bridges and needs the private bootstrap
+// profile. The ordinary-mode gate itself is pinned by the production-driver
+// and frontend reject fixtures, not by these conformance runs.
+func privateProfileSources(files map[string]string) bool {
+	for _, text := range files {
+		if strings.Contains(text, "__s0_") || strings.Contains(text, "Domain") || strings.Contains(text, "Map(") ||
+			strings.Contains(text, "Get(") || strings.Contains(text, "Set(") || strings.Contains(text, "Remove(") {
+			return true
+		}
+	}
+	return false
+}
+
 func runAlderChecker(t *testing.T, exe string, files map[string]string, order []string, fail bool) string {
 	t.Helper()
 	d := t.TempDir()
@@ -1541,7 +1555,11 @@ func runAlderChecker(t *testing.T, exe string, files map[string]string, order []
 			t.Fatal(e)
 		}
 	}
-	cmd := conformanceCommand(exe, append([]string{sentinel}, order...)...)
+	args := append([]string{sentinel}, order...)
+	if privateProfileSources(files) {
+		args = append([]string{"--bootstrap-private"}, args...)
+	}
+	cmd := conformanceCommand(exe, args...)
 	cmd.Dir = d
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

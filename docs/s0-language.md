@@ -92,7 +92,10 @@ methods.
 
 The hosted entry forms are temporarily `fn main() -> I32` and
 `fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim
-and are not the 1.0 entry contract.
+and are not the 1.0 entry contract. The `root: Domain` parameter form is
+available only under the private bootstrap profile (see below); ordinary
+programs always use the parameterless form and receive the hidden root
+domain through inferred storage.
 
 ## Lexical and layout rules
 
@@ -131,6 +134,10 @@ Composite/bootstrap types:
 - fixed-capacity bootstrap `Map(K, V)`;
 - raw `Ptr(T)` for C imports;
 - temporary `Domain`, `DomainMark`, `__s0_Buffer(T)`, and `__s0_Error`.
+
+The bootstrap-only types above (and the fixed `Map`) are private to the
+bootstrap profile; ordinary programs reach `String`, `Bytes`, `Array(T, N)`,
+`Vec(T)`, `[T]`, and `MutSlice(T)` instead.
 
 `String` requires valid UTF-8 and `Bytes` preserves arbitrary bytes. Neither is
 an integer-indexable slice. Compiler implementation sources temporarily use the
@@ -181,7 +188,12 @@ table identity, modules, `pub`, async, and the 1.0 standard library are absent.
 
 ## Temporary memory and cleanup bridges
 
-S0 exposes:
+S0 exposes the following names only under the **private bootstrap profile**
+(request flag `--bootstrap-private` on the `alder` CLI or the matching host
+request bit). An ordinary compilation rejects every one of them with a stable
+`bootstrap type/operation ... is private to the compiler's bootstrap sources`
+diagnostic, because ordinary programs construct values through inferred
+storage (M7.3):
 
 ```text
 __s0_domain_create
@@ -197,6 +209,15 @@ __s0_buffer_get
 __s0_buffer_set
 __s0_buffer_slice
 ```
+
+The same boundary covers the `Domain` and `DomainMark` types, the fixed
+`Map(K, V)` type with its `Get`/`Set`/`Remove` operations, `__s0_Error`,
+`__s0_Buffer(T)`, `__s0_String`, and the `fn main(root: Domain)` entry form;
+a parameterless `fn main() -> I32` remains the ordinary hosted entry. The
+profile exists only so `compiler/src/*.al`, `bootstrap/spike/*.al`, and the
+test fixtures that still exercise these runtime mechanisms can compile. The
+flag itself is not a supported language feature and is removed together with
+the bootstrap bridges; ordinary user programs must not depend on it.
 
 These names directly exercise MIR/runtime mechanisms needed by bootstrap
 compiler code. They are reserved and must not appear in public 1.0 APIs.
@@ -361,7 +382,9 @@ executable tests for the exact implemented boundary.
 
 ## Removal gates
 
-Bootstrap bridges are removed when their 1.0 owners exist:
+Bootstrap bridges are removed when their 1.0 owners exist. Since M7.3 slice 3
+they are reachable only under the private bootstrap profile rather than in
+ordinary programs:
 
 | Bootstrap construct | Removed after |
 |---|---|

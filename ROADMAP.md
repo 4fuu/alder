@@ -625,7 +625,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `788777ba5f3c11935e006f9405b74100eb1ee4f80f59b321dbcd0251c1d342c2`;
+  `a6eefe53f35dbb59fa72b0e5419fb915ae5f2984cac51dcecf3e5005a385e3f6`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -706,7 +706,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `788777ba5f3c11935e006f9405b74100eb1ee4f80f59b321dbcd0251c1d342c2`.
+  `a6eefe53f35dbb59fa72b0e5419fb915ae5f2984cac51dcecf3e5005a385e3f6`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -856,9 +856,14 @@ non-escaping, and their overlap, mutation, and invalidation checks are
 unchanged.
 
 Slice 3 still owns migration and qualification of the complete Milestone 7
-value/view surface: private explicit bootstrap storage and `__s0_String`
-remain, direct immutable view results are not yet generalized to nested
-ordinary aggregates, and this milestone is not complete.
+value/view surface. Its public-surface half has landed: the bootstrap
+bridges are now compiler-private, accepted only under a private bootstrap
+profile (`--bootstrap-private`) that exists to compile `compiler/src`,
+`bootstrap/spike`, and the bridge test fixtures, while ordinary programs
+construct values through inferred storage with a parameterless hosted entry.
+What remains for slice 3 is the sibling half: direct immutable view results
+are not yet generalized to nested ordinary aggregates, and this milestone is
+not complete.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate

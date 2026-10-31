@@ -302,6 +302,14 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 94 { return out_string("affine owner must be transferred on every reachable path or on none") }
     if kind == 95 { return out_string("affine owner cannot be mutable or overwritten; transfer or clean it up first") }
     if kind == 99 { return out_string("String literal is not valid UTF-8") }
+    if kind == 100 {
+        if !out_string("bootstrap type ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" is private to the compiler's bootstrap sources (--bootstrap-private)")
+    }
+    if kind == 101 {
+        if !out_string("bootstrap operation ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" is private to the compiler's bootstrap sources (--bootstrap-private)")
+    }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

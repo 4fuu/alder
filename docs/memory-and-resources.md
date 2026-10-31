@@ -253,5 +253,8 @@ The full scheduling, cancellation, and task-safety contract is in
 
 The current `Domain`, `DomainMark`, `__s0_*` allocation/buffer operations,
 fixed-capacity map, callback-bearing `using ... with ...`, and MIR table
-operations are implementation evidence only. They are not the 1.0 source API.
+operations are implementation evidence only. They are not the 1.0 source API,
+and since M7.3 they are not even ordinary source: the compiler accepts them
+only under the private bootstrap profile that exists to compile its own
+sources, while ordinary programs construct values through inferred storage.
 See [Alder S0](s0-language.md).

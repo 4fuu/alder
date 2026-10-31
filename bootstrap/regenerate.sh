@@ -124,7 +124,11 @@ while IFS= read -r source; do
     set -- "$@" "$source"
 done < bootstrap/compiler-sources.order
 
-"$alder_bin" compile --emit=c "$@" > "$tmp/alder.c"
+# The private bootstrap profile carries the self-compile: compiler/src still
+# uses the S0 bridges. The stage-0 binary links this tree's host shim, which
+# owns argv, so a stage-0 compiler that predates the flag simply never queries
+# it and the transition needs no special case here.
+"$alder_bin" compile --emit=c --bootstrap-private "$@" > "$tmp/alder.c"
 different=false
 if ! cmp -s bootstrap/alder.c "$tmp/alder.c"; then
     different=true

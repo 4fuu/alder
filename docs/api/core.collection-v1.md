@@ -67,9 +67,10 @@ one of these domains for vector allocation, growth, and copies; returned values
 are copied into caller-result storage when needed. Hosted entry creates the
 outer root and destroys it after the source entry returns. A source
 `main(root: Domain)` binds that source parameter to the same hidden MIR value;
-a parameterless source `main` still receives the hidden MIR root. Unhosted
-generated functions keep the explicit hidden MIR parameter. Source signatures,
-calls, and vector representations do not expose this mechanism.
+that entry form is private to the compiler's bootstrap profile, so ordinary
+programs use the parameterless `main` and still receive the hidden MIR root.
+Unhosted generated functions keep the explicit hidden MIR parameter. Source
+signatures, calls, and vector representations do not expose this mechanism.
 
 M7.1 rejects `Vec(T)` deterministically when `T` is affine or scoped, including
 through a nested aggregate. Affine-element cleanup and transfer are owned by
