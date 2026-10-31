@@ -1,0 +1,1 @@
+line 1, column 15: bootstrap type "DomainMark" is private to the compiler's bootstrap sources (--bootstrap-private)

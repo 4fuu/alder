@@ -267,7 +267,7 @@ fn lower_mode(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> 
 // without repeating the Go-side compile.
 func writeCoreConformance(dir string, t *testing.T, cc, root string, sources []frontend.Source) ([]string, error) {
 	t.Helper()
-	module, diagnostics, err := frontend.CompileSources(sources)
+	module, diagnostics, err := frontend.CompileSourcesPrivate(sources)
 	if err != nil || module == nil || len(diagnostics) != 0 {
 		return nil, fmt.Errorf("compile core closure: module=%v diagnostics=%v error=%v", module, diagnostics, err)
 	}

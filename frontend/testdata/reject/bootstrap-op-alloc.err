@@ -1,0 +1,1 @@
+line 2, column 15: bootstrap operation "__s0_alloc" is private to the compiler's bootstrap sources (--bootstrap-private)

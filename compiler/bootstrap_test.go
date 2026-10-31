@@ -74,6 +74,16 @@ var bootstrapRejectFixtures = []string{
 	"type-parameter-after-runtime",
 }
 
+// privateProfileReject keeps testing its original diagnostic under the
+// private bootstrap profile.
+var privateProfileReject = map[string]bool{
+	"alloc-as-slice-param.al": true,
+	"bind-mark.al":            true,
+	"bind-unit.al":            true,
+	"map-key-signed.al":       true,
+	"map-value-string.al":     true,
+}
+
 func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -156,7 +166,7 @@ func buildAlder1(t *testing.T, cc, root string) string {
 		}
 		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
 	}
-	compiled, err := Compile(Request{Sources: sources, Emit: EmitC})
+	compiled, err := Compile(Request{Sources: sources, Emit: EmitC, BootstrapPrivate: true})
 	if err != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatalf("compile production root: result=%+v error=%v", compiled, err)
 	}
@@ -199,7 +209,11 @@ func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root, object string, no
 func assertAlder1RejectsLikeGo(t *testing.T, exe string, noGo []string, files map[string]string, source string) {
 	t.Helper()
 	text := files[source]
-	oracle, diagnostics, err := frontend.CompileSource(frontend.Source{ID: 1, Path: source, Text: text})
+	compileOracle := frontend.CompileSource
+	if privateProfileReject[source] {
+		compileOracle = frontend.CompileSourcePrivate
+	}
+	oracle, diagnostics, err := compileOracle(frontend.Source{ID: 1, Path: source, Text: text})
 	if err != nil || oracle != nil || len(diagnostics) == 0 {
 		t.Fatalf("Go diagnostic oracle: module=%v diagnostics=%+v error=%v", oracle, diagnostics, err)
 	}

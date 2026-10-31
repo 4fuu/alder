@@ -94,6 +94,32 @@ var builtinTypeNames = []string{
 // variantReserved are reserved in the value namespace.
 var variantReserved = []string{"None", "Some", "Ok", "Err"}
 
+// The private bootstrap profile keeps the explicit S0 storage, buffer, map,
+// and __s0_String bridge names available. Ordinary programs construct values
+// through inferred storage, so the names below are rejected outside that
+// profile; the Alder-written checker enforces the same boundary. The profile
+// exists only to compile the compiler's own bootstrap sources and to keep
+// this Go oracle aligned with them.
+var bootstrapPrivatePrimTypes = []string{"Domain", "DomainMark", "__s0_Error", "__s0_String"}
+var bootstrapPrivateAppTypes = []string{"Map", "__s0_Buffer"}
+var bootstrapPrivateOps = []string{
+	"__s0_alloc", "__s0_domain_create", "__s0_domain_mark", "__s0_domain_reset", "__s0_domain_destroy",
+	"__s0_map_create", "Get", "Set", "Remove",
+	"__s0_buffer_new", "__s0_buffer_len", "__s0_buffer_append", "__s0_buffer_get", "__s0_buffer_set", "__s0_buffer_slice",
+}
+
+const bootstrapTypeDiag = "bootstrap type %q is private to the compiler's bootstrap sources (--bootstrap-private)"
+const bootstrapOpDiag = "bootstrap operation %q is private to the compiler's bootstrap sources (--bootstrap-private)"
+
+func bootstrapPrivateName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 // typeEnv is the type-parameter scope of a generic declaration.
 type typeEnv map[string]*Type
 
@@ -128,6 +154,10 @@ type checker struct {
 	importSigs map[string]*checkSig
 	builtins   map[string]bool
 
+	// bootstrapPrivate enables the private bootstrap profile (see
+	// bootstrapPrivatePrimTypes above). Ordinary compilations leave it off.
+	bootstrapPrivate bool
+
 	checked   []*checkedFn
 	fnCache   map[string]*checkedFn
 	typeCache map[string]*Type
@@ -142,17 +172,18 @@ type topLevelDecl struct {
 }
 
 // checkModule type-checks and monomorphizes all declarations.
-func checkModule(decls []Decl) (*checkedModule, error) {
+func checkModule(decls []Decl, bootstrapPrivate bool) (*checkedModule, error) {
 	c := &checker{
-		types:      make(map[string]*typeDecl),
-		fns:        make(map[string]*FnDecl),
-		imports:    make(map[string]*ImportDecl),
-		importSigs: make(map[string]*checkSig),
-		builtins:   make(map[string]bool),
-		fnCache:    make(map[string]*checkedFn),
-		typeCache:  make(map[string]*Type),
-		activeFn:   make(map[*FnDecl]string),
-		ann:        make(map[*checkedFn]map[Expr]*annInfo),
+		types:            make(map[string]*typeDecl),
+		fns:              make(map[string]*FnDecl),
+		imports:          make(map[string]*ImportDecl),
+		importSigs:       make(map[string]*checkSig),
+		builtins:         make(map[string]bool),
+		bootstrapPrivate: bootstrapPrivate,
+		fnCache:          make(map[string]*checkedFn),
+		typeCache:        make(map[string]*Type),
+		activeFn:         make(map[*FnDecl]string),
+		ann:              make(map[*checkedFn]map[Expr]*annInfo),
 	}
 	for _, n := range builtinFnNames {
 		c.builtins[n] = true
@@ -487,6 +518,9 @@ func primOf(name string) (primType, bool) {
 func (c *checker) resolveType(e TypeExpr, tps typeEnv) (*Type, error) {
 	switch t := e.(type) {
 	case *PrimType:
+		if !c.bootstrapPrivate && bootstrapPrivateName(bootstrapPrivatePrimTypes, t.Name) {
+			return nil, diag(t.P, bootstrapTypeDiag, t.Name)
+		}
 		if t.Name == "String" {
 			return &Type{kind: tString}, nil
 		}
@@ -573,6 +607,9 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 		}
 		return &Type{kind: tResult, ok: args[0], err: args[1]}, nil
 	case "Map":
+		if !c.bootstrapPrivate {
+			return nil, diag(p, bootstrapTypeDiag, name)
+		}
 		if len(args) != 2 {
 			return nil, diag(p, "Map expects 2 type arguments, got %d", len(args))
 		}
@@ -584,6 +621,9 @@ func (c *checker) resolveApp(name string, args []*Type, p pos) (*Type, error) {
 		}
 		return mt, nil
 	case "__s0_Buffer":
+		if !c.bootstrapPrivate {
+			return nil, diag(p, bootstrapTypeDiag, name)
+		}
 		if len(args) != 1 {
 			return nil, diag(p, "__s0_Buffer expects 1 type argument, got %d", len(args))
 		}
@@ -2304,6 +2344,13 @@ func (k *bodyChecker) checkMatch(x *Match, expected *Type) (*Type, error) {
 
 // checkBuiltinCall checks a builtin call.
 func (k *bodyChecker) checkBuiltinCall(x *Call, name string) (*Type, error) {
+	if !k.c.bootstrapPrivate && bootstrapPrivateName(bootstrapPrivateOps, name) {
+		p := x.P
+		if ident, ok := x.Callee.(*Ident); ok {
+			p = ident.P
+		}
+		return nil, diag(p, bootstrapOpDiag, name)
+	}
 	args := x.Args
 	expect := func(n int) error {
 		if len(args) != n {

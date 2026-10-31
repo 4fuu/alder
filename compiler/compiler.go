@@ -25,6 +25,12 @@ const (
 type Request struct {
 	Sources []frontend.Source
 	Emit    EmitKind
+	// BootstrapPrivate enables the private bootstrap profile: the reserved
+	// bootstrap storage, buffer, map, and __s0_String bridge names stay
+	// available. Ordinary compilations construct values through inferred
+	// storage and leave this off; the profile exists only to compile the
+	// compiler's own bootstrap sources and oracle-equivalent fixtures.
+	BootstrapPrivate bool
 }
 
 type Artifact struct {
@@ -96,7 +102,13 @@ func Compile(req Request) (Result, error) {
 		}
 		ids[source.ID] = true
 	}
-	m, diagnostics, err := frontend.CompileSources(sources)
+	var compile func([]frontend.Source) (*mir.Module, []frontend.Diagnostic, error)
+	if req.BootstrapPrivate {
+		compile = frontend.CompileSourcesPrivate
+	} else {
+		compile = frontend.CompileSources
+	}
+	m, diagnostics, err := compile(sources)
 	if err != nil {
 		return Result{}, internalError("frontend failure", err)
 	}

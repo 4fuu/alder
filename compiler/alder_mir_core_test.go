@@ -257,7 +257,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 	orders := [][]frontend.Source{{model, build, wrapper}, {wrapper, build, model}}
 	artifacts := make([]string, len(orders))
 	for i, sources := range orders {
-		result, compileErr := Compile(Request{Sources: sources, Emit: EmitMIR})
+		result, compileErr := Compile(Request{Sources: sources, Emit: EmitMIR, BootstrapPrivate: true})
 		if compileErr != nil || result.Artifact == nil || len(result.Diagnostics) != 0 {
 			t.Fatalf("compile MIR core order %d: result=%+v error=%v", i, result, compileErr)
 		}

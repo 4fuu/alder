@@ -140,7 +140,7 @@ func writeProductionCompiler(dir, cc, root string, result *sharedProductionBuild
 		}
 		sources = append(sources, frontend.Source{ID: frontend.SourceID(i + 1), Path: "compiler/src/" + name, Text: string(text)})
 	}
-	compiled, compileErr := Compile(Request{Sources: sources, Emit: EmitC})
+	compiled, compileErr := Compile(Request{Sources: sources, Emit: EmitC, BootstrapPrivate: true})
 	if compileErr != nil || compiled.Artifact == nil || len(compiled.Diagnostics) != 0 {
 		return fmt.Errorf("compile production root: result=%+v error=%v", compiled, compileErr)
 	}

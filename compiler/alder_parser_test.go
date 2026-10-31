@@ -194,8 +194,8 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
 		rev[i], rev[j] = rev[j], rev[i]
 	}
-	forward, forwardErr := Compile(Request{Sources: sources, Emit: EmitMIR})
-	reversed, reversedErr := Compile(Request{Sources: rev, Emit: EmitMIR})
+	forward, forwardErr := Compile(Request{Sources: sources, Emit: EmitMIR, BootstrapPrivate: true})
+	reversed, reversedErr := Compile(Request{Sources: rev, Emit: EmitMIR, BootstrapPrivate: true})
 	if forwardErr != nil || reversedErr != nil || forward.Artifact == nil || reversed.Artifact == nil || len(forward.Diagnostics) != 0 || len(reversed.Diagnostics) != 0 {
 		t.Fatalf("compile parser MIR: forward=%+v/%v reversed=%+v/%v", forward, forwardErr, reversed, reversedErr)
 	}

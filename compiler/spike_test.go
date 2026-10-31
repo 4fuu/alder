@@ -44,8 +44,8 @@ func TestDeclarationSpikeEndToEnd(t *testing.T) {
 	for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
 		reversed[left], reversed[right] = reversed[right], reversed[left]
 	}
-	forward, forwardErr := Compile(Request{Sources: spike, Emit: EmitMIR})
-	reversedResult, reversedErr := Compile(Request{Sources: reversed, Emit: EmitMIR})
+	forward, forwardErr := Compile(Request{Sources: spike, Emit: EmitMIR, BootstrapPrivate: true})
+	reversedResult, reversedErr := Compile(Request{Sources: reversed, Emit: EmitMIR, BootstrapPrivate: true})
 	if forwardErr != nil || reversedErr != nil || forward.Artifact == nil || reversedResult.Artifact == nil || len(forward.Diagnostics) != 0 || len(reversedResult.Diagnostics) != 0 {
 		t.Fatalf("compile spike MIR: forward=%+v/%v reversed=%+v/%v", forward, forwardErr, reversedResult, reversedErr)
 	}

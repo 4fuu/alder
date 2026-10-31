@@ -32,9 +32,10 @@ fn main() -> I32 {
 
 func TestM71LexicalViewRejections(t *testing.T) {
 	tests := []struct {
-		name string
-		src  string
-		want string
+		name    string
+		src     string
+		want    string
+		private bool
 	}{
 		{
 			name: "immutable view blocks owner mutation",
@@ -176,9 +177,10 @@ fn bad(box: Box) -> Box { return box }`,
 			want: `scoped view [U64] cannot be stored in variant "Some"`,
 		},
 		{
-			name: "affine Vec element",
-			src:  `fn bad(values: Vec(Domain)) -> I32 { return 0 }`,
-			want: "Vec element type Domain is affine or scoped",
+			name:    "affine Vec element",
+			src:     `fn bad(values: Vec(Domain)) -> I32 { return 0 }`,
+			want:    "Vec element type Domain is affine or scoped",
+			private: true,
 		},
 		{
 			name: "immutable indexed assignment",
@@ -191,11 +193,15 @@ fn bad(box: Box) -> Box { return box }`,
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Compile(tc.src)
+			compile := Compile
+			if tc.private {
+				compile = CompilePrivate
+			}
+			_, err := compile(tc.src)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Compile error = %v, want substring %q", err, tc.want)
 			}
-			_, again := Compile(tc.src)
+			_, again := compile(tc.src)
 			if again == nil || again.Error() != err.Error() {
 				t.Fatalf("diagnostic is not deterministic: %v then %v", err, again)
 			}

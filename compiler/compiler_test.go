@@ -28,6 +28,16 @@ func TestValidLogicalPath(t *testing.T) {
 	}
 }
 
+// privateProfileE2E reports whether an e2e fixture file still exercises the
+// S0 bootstrap bridges and compiles under the private bootstrap profile only.
+func privateProfileE2E(base string) bool {
+	switch base {
+	case "domains.al", "maps.al", "buffer.al":
+		return true
+	}
+	return false
+}
+
 func TestCompileEmits(t *testing.T) {
 	for _, kind := range []EmitKind{EmitNone, EmitMIR, EmitC} {
 		r, err := Compile(Request{Sources: []frontend.Source{{ID: 1, Path: "src/main.al", Text: valid}}, Emit: kind})
@@ -53,7 +63,7 @@ func TestExistingE2ECorpusIsDeterministicThroughService(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, kind := range []EmitKind{EmitMIR, EmitC} {
-				req := Request{Sources: []frontend.Source{{ID: 9, Path: "fixture.al", Text: string(text)}}, Emit: kind}
+				req := Request{Sources: []frontend.Source{{ID: 9, Path: "fixture.al", Text: string(text)}}, Emit: kind, BootstrapPrivate: privateProfileE2E(filepath.Base(file))}
 				first, err := Compile(req)
 				if err != nil || len(first.Diagnostics) != 0 || first.Artifact == nil {
 					t.Fatalf("first %s compile: result=%+v err=%v", kind, first, err)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/4fuu/alder/mir"
@@ -24,10 +25,30 @@ func allCompileSources(t *testing.T) []string {
 	return files
 }
 
+// privateProfilePath reports whether the fixture at path needs the private
+// bootstrap profile (see privateBootstrapAccept and e2eFixtures).
+func privateProfilePath(path string) bool {
+	name := strings.TrimSuffix(filepath.Base(path), ".al")
+	switch name {
+	case "domains", "maps":
+		return filepath.Base(filepath.Dir(path)) == "e2e"
+	case "buffer":
+		if filepath.Base(filepath.Dir(path)) == "accept" {
+			return privateBootstrapAccept[name]
+		}
+		return filepath.Base(filepath.Dir(path)) == "e2e"
+	}
+	return false
+}
+
 func compileDigest(t *testing.T, path string) string {
 	t.Helper()
 	src := readFixture(t, path)
-	m, err := Compile(src)
+	compile := Compile
+	if privateProfilePath(path) {
+		compile = CompilePrivate
+	}
+	m, err := compile(src)
 	if err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
@@ -67,7 +88,11 @@ func TestCompileHelper(t *testing.T) {
 	var b []byte
 	for _, path := range allCompileSources(t) {
 		src := readFixture(t, path)
-		m, err := Compile(src)
+		compile := Compile
+		if privateProfilePath(path) {
+			compile = CompilePrivate
+		}
+		m, err := compile(src)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "helper: %s: %v\n", path, err)
 			os.Exit(2)

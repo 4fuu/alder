@@ -16,31 +16,48 @@ import (
 // e2eFixtures are the end-to-end source programs. Each must define main
 // returning I32 (0 = success). A fixture may declare a `main(d: Domain)`
 // parameter; the driver provides a root domain. Optional FFI symbols are
-// provided by the per-fixture C driver file.
+// provided by the per-fixture C driver file. Fixtures marked private still
+// exercise the S0 bootstrap bridges as runtime implementation evidence and
+// compile under the private bootstrap profile only.
 var e2eFixtures = []struct {
-	src    string
-	driver string // C driver content; "default" generates a plain driver
+	src     string
+	driver  string // C driver content; "default" generates a plain driver
+	private bool
 }{
-	{"arith", "default"},
-	{"structs", "default"},
-	{"enums", "default"},
-	{"option", "default"},
-	{"strings", "default"},
-	{"generic", "default"},
-	{"domains", "default"},
-	{"maps", "default"},
-	{"buffer", "default"},
-	{"collections", "default"},
-	{"storage", "default"},
-	{"cleanup", "cleanup_driver.c"},
-	{"ffi", "ffi_driver.c"},
+	{"arith", "default", false},
+	{"structs", "default", false},
+	{"enums", "default", false},
+	{"option", "default", false},
+	{"strings", "default", false},
+	{"generic", "default", false},
+	{"domains", "default", true},
+	{"maps", "default", true},
+	{"buffer", "default", true},
+	{"collections", "default", false},
+	{"storage", "default", false},
+	{"cleanup", "cleanup_driver.c", false},
+	{"ffi", "ffi_driver.c", false},
 }
 
 // compileAndGenerate compiles source text and lowers it to C, requiring the
 // lowered MIR to pass the verifier unchanged.
 func compileAndGenerate(t *testing.T, src string) (string, *mir.Module) {
+	return compileAndGenerateProfile(t, src, false)
+}
+
+// compileAndGeneratePrivate is compileAndGenerate under the private bootstrap
+// profile.
+func compileAndGeneratePrivate(t *testing.T, src string) (string, *mir.Module) {
+	return compileAndGenerateProfile(t, src, true)
+}
+
+func compileAndGenerateProfile(t *testing.T, src string, bootstrapPrivate bool) (string, *mir.Module) {
 	t.Helper()
-	m, err := Compile(src)
+	compile := Compile
+	if bootstrapPrivate {
+		compile = CompilePrivate
+	}
+	m, err := compile(src)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -137,7 +154,7 @@ func TestE2E(t *testing.T) {
 				t.Run(e2e.src, func(t *testing.T) {
 					t.Parallel()
 					src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".al"))
-					gen, m := compileAndGenerate(t, src)
+					gen, m := compileAndGenerateProfile(t, src, e2e.private)
 					driver := ""
 					if e2e.driver == "default" {
 						d, err := defaultDriver(m)
@@ -230,8 +247,9 @@ int main(void) { return (int)alder_fn_main_%d(); }
 
 func TestCheckedBoundaryFailuresPanic(t *testing.T) {
 	tests := []struct {
-		name string
-		src  string
+		name    string
+		src     string
+		private bool
 	}{
 		{
 			name: "u8_overflow",
@@ -244,7 +262,8 @@ fn main() -> I32 {
 `,
 		},
 		{
-			name: "map_capacity",
+			name:    "map_capacity",
+			private: true,
 			src: `
 fn main(d: Domain) -> I32 {
     var m = __s0_map_create(Map(U64, U64), d)
@@ -258,7 +277,8 @@ fn main(d: Domain) -> I32 {
 `,
 		},
 		{
-			name: "buffer_empty_get",
+			name:    "buffer_empty_get",
+			private: true,
 			src: `
 fn read_empty(b: __s0_Buffer(U64)) -> I32 {
     let value = __s0_buffer_get(U64, b, 0)
@@ -273,7 +293,8 @@ fn main(d: Domain) -> I32 {
 `,
 		},
 		{
-			name: "buffer_empty_set",
+			name:    "buffer_empty_set",
+			private: true,
 			src: `
 fn write_empty(b: __s0_Buffer(U64)) -> I32 {
     __s0_buffer_set(U64, b, 0, 7)
@@ -288,7 +309,8 @@ fn main(d: Domain) -> I32 {
 `,
 		},
 		{
-			name: "buffer_one_past_get",
+			name:    "buffer_one_past_get",
+			private: true,
 			src: `
 fn read_one_past(b: __s0_Buffer(U64)) -> I32 {
     let value = __s0_buffer_get(U64, b, 1)
@@ -317,7 +339,7 @@ fn main(d: Domain) -> I32 {
 				tc := tc
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					gen, m := compileAndGenerate(t, tc.src)
+					gen, m := compileAndGenerateProfile(t, tc.src, tc.private)
 					driver, err := defaultDriver(m)
 					if err != nil {
 						t.Fatal(err)
@@ -398,7 +420,7 @@ fn main(d: Domain) -> I32 {
     }
 }
 `
-	gen, m := compileAndGenerate(t, src)
+	gen, m := compileAndGeneratePrivate(t, src)
 	mainID, ok := m.Function("main")
 	if !ok {
 		t.Fatal("fixture has no main function")
@@ -522,7 +544,11 @@ func TestE2ERoundTrip(t *testing.T) {
 		e2e := e2e
 		t.Run(e2e.src, func(t *testing.T) {
 			src := readFixture(t, filepath.Join("testdata", "e2e", e2e.src+".al"))
-			m, err := Compile(src)
+			compile := Compile
+			if e2e.private {
+				compile = CompilePrivate
+			}
+			m, err := compile(src)
 			if err != nil {
 				t.Fatal(err)
 			}

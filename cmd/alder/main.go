@@ -82,6 +82,11 @@ func run(args []string, stdout, stderr io.Writer, cwd string) int {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	format := fs.String("format", "human", "")
+	// bootstrap-private enables the private bootstrap profile: the reserved
+	// bootstrap storage, buffer, map, and __s0_String bridge names stay
+	// available. It exists only to compile the compiler's own bootstrap
+	// sources; it is not a language feature.
+	bootstrapPrivate := fs.Bool("bootstrap-private", false, "")
 	var emit, output *string
 	if command == "compile" {
 		emit = fs.String("emit", "c", "")
@@ -134,7 +139,7 @@ func run(args []string, stdout, stderr io.Writer, cwd string) int {
 		sources = append(sources, source)
 		sourceByID[source.ID] = source
 	}
-	result, err := compiler.Compile(compiler.Request{Sources: sources, Emit: kind})
+	result, err := compiler.Compile(compiler.Request{Sources: sources, Emit: kind, BootstrapPrivate: *bootstrapPrivate})
 	if err != nil {
 		var service *compiler.ServiceError
 		code := exitInternal

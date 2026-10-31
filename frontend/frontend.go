@@ -15,7 +15,23 @@ import (
 // deterministic and must pass mir/verify unchanged; the cgen package enforces
 // that gate on its own.
 func Compile(src string) (*mir.Module, error) {
-	m, sourceErr, err := compileSources([]Source{{Text: src}})
+	m, sourceErr, err := compileSources([]Source{{Text: src}}, false)
+	if err != nil {
+		return nil, err
+	}
+	if sourceErr != nil {
+		return nil, sourceErr
+	}
+	return m, nil
+}
+
+// CompilePrivate compiles one source with the private bootstrap profile: the
+// reserved bootstrap storage, buffer, map, and __s0_String bridge names stay
+// available. It exists only to compile the compiler's own bootstrap sources
+// and to keep this Go oracle aligned with the Alder-written checker; it is
+// not a language feature.
+func CompilePrivate(src string) (*mir.Module, error) {
+	m, sourceErr, err := compileSources([]Source{{Text: src}}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -32,11 +48,27 @@ func CompileSource(source Source) (*mir.Module, []Diagnostic, error) {
 	return CompileSources([]Source{source})
 }
 
+// CompileSourcePrivate is CompileSource with the private bootstrap profile
+// (see CompilePrivate).
+func CompileSourcePrivate(source Source) (*mir.Module, []Diagnostic, error) {
+	return CompileSourcesPrivate([]Source{source})
+}
+
 // CompileSources compiles an explicit source set as one global compilation
 // unit. Sources are ordered by canonical logical path and declarations retain
 // their lexical order within each source. User source failures are returned as
 // diagnostics; invariant and internal failures remain Go errors.
 func CompileSources(sources []Source) (*mir.Module, []Diagnostic, error) {
+	return compileSourcesChecked(sources, false)
+}
+
+// CompileSourcesPrivate is CompileSources with the private bootstrap profile
+// (see CompilePrivate).
+func CompileSourcesPrivate(sources []Source) (*mir.Module, []Diagnostic, error) {
+	return compileSourcesChecked(sources, true)
+}
+
+func compileSourcesChecked(sources []Source, bootstrapPrivate bool) (*mir.Module, []Diagnostic, error) {
 	ordered := append([]Source(nil), sources...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		if ordered[i].Path != ordered[j].Path {
@@ -44,7 +76,7 @@ func CompileSources(sources []Source) (*mir.Module, []Diagnostic, error) {
 		}
 		return ordered[i].ID < ordered[j].ID
 	})
-	m, sourceErr, err := compileSources(ordered)
+	m, sourceErr, err := compileSources(ordered, bootstrapPrivate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -54,7 +86,7 @@ func CompileSources(sources []Source) (*mir.Module, []Diagnostic, error) {
 	return m, nil, nil
 }
 
-func compileSources(sources []Source) (*mir.Module, *astError, error) {
+func compileSources(sources []Source, bootstrapPrivate bool) (*mir.Module, *astError, error) {
 	if len(sources) == 0 {
 		return nil, nil, fmt.Errorf("frontend: no sources")
 	}
@@ -66,7 +98,7 @@ func compileSources(sources []Source) (*mir.Module, *astError, error) {
 		}
 		decls = append(decls, parsed...)
 	}
-	cm, err := checkModule(decls)
+	cm, err := checkModule(decls, bootstrapPrivate)
 	if err != nil {
 		return splitSourceError(err)
 	}

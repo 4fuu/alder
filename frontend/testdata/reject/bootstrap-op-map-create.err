@@ -1,0 +1,1 @@
+line 2, column 13: bootstrap operation "__s0_map_create" is private to the compiler's bootstrap sources (--bootstrap-private)

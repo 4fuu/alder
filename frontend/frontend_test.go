@@ -20,6 +20,18 @@ func compileStr(t *testing.T, src string) *mir.Module {
 	return m
 }
 
+func compileStrPrivate(t *testing.T, src string) *mir.Module {
+	t.Helper()
+	m, err := CompilePrivate(src)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if errs := verify.Module(m); len(errs) > 0 {
+		t.Fatalf("lowered MIR failed verification:\n%s", verify.Errors(errs).String())
+	}
+	return m
+}
+
 func TestSplitSourceErrorClassifiesInternalASTErrors(t *testing.T) {
 	source := &astError{msg: "ordinary source failure"}
 	_, gotSource, gotInternal := splitSourceError(source)
@@ -189,7 +201,7 @@ fn main() -> I32 {
 }
 
 func TestGenericAggregateRestrictionsUseConcreteFields(t *testing.T) {
-	compileStr(t, `
+	compileStrPrivate(t, `
 type Key(T: type) {
     value: T
 }
@@ -202,7 +214,7 @@ fn main(d: Domain) -> I32 {
 }
 `)
 
-	_, err := Compile(`
+	_, err := CompilePrivate(`
 type Box(T: type) {
     value: T
 }
@@ -218,7 +230,7 @@ fn main(d: Domain) -> I32 {
 		t.Fatalf("expected concrete generic allocation restriction, got %v", err)
 	}
 
-	_, err = Compile(`
+	_, err = CompilePrivate(`
 fn make(K: type, V: type, d: Domain) -> Map(K, V) {
     return __s0_map_create(Map(K, V), d)
 }
@@ -261,13 +273,20 @@ fn main() -> I32 {
 }
 
 func TestChainedCallsRejected(t *testing.T) {
-	tests := []string{
-		"fn f(x: I64) -> I64 { return x }\nfn main() -> I64 { return f(1)(2) }",
-		"fn main(d: Domain) -> I32 {\n let m = __s0_map_create(Map(U64, I64), d)\n Set(m, 1, 1)(2)\n return 0\n}",
-		"type Pair(T: type) { value: T }\nfn main() -> I32 {\n let p = Pair(I64)(value: 1)(value: 2)\n return 0\n}",
+	tests := []struct {
+		src     string
+		private bool
+	}{
+		{src: "fn f(x: I64) -> I64 { return x }\nfn main() -> I64 { return f(1)(2) }"},
+		{src: "fn main(d: Domain) -> I32 {\n let m = __s0_map_create(Map(U64, I64), d)\n Set(m, 1, 1)(2)\n return 0\n}", private: true},
+		{src: "type Pair(T: type) { value: T }\nfn main() -> I32 {\n let p = Pair(I64)(value: 1)(value: 2)\n return 0\n}"},
 	}
-	for _, src := range tests {
-		_, err := Compile(src)
+	for _, tc := range tests {
+		compile := Compile
+		if tc.private {
+			compile = CompilePrivate
+		}
+		_, err := compile(tc.src)
 		if err == nil || !strings.Contains(err.Error(), "chained calls") {
 			t.Fatalf("expected chained-call rejection, got %v", err)
 		}
@@ -379,7 +398,8 @@ fn main() -> I32 {
 	compileStr(t, src)
 }
 
-// TestSmokeDomainSlice exercises domains, alloc, and slices.
+// TestSmokeDomainSlice exercises domains, alloc, and slices under the
+// private bootstrap profile.
 func TestSmokeDomainSlice(t *testing.T) {
 	src := `
 fn fill(d: Domain, n: U64) -> I64 {
@@ -400,7 +420,7 @@ fn main(d: Domain) -> I32 {
     return 0
 }
 `
-	compileStr(t, src)
+	compileStrPrivate(t, src)
 }
 
 // TestSmokeGeneric exercises generic functions and inference.
@@ -430,7 +450,8 @@ fn main() -> I32 {
 	compileStr(t, src)
 }
 
-// TestSmokeMap exercises map construction and lookups.
+// TestSmokeMap exercises map construction and lookups under the private
+// bootstrap profile.
 func TestSmokeMap(t *testing.T) {
 	src := `
 fn main(d: Domain) -> I32 {
@@ -465,7 +486,7 @@ fn main(d: Domain) -> I32 {
     return 0
 }
 `
-	compileStr(t, src)
+	compileStrPrivate(t, src)
 }
 
 // TestSmokeCleanup exercises scoped cleanup with an observable side effect.
@@ -511,27 +532,32 @@ fn main() -> I32 {
 
 	rejects := []struct {
 		name, src, want string
+		private         bool
 	}{
-		{"semicolon", "fn main() -> I32 { return 0; }", "semicolons are not allowed"},
-		{"same line", "fn main() -> I32 {\n let x = 1 return x\n}", "physical line break"},
-		{"same-line declarations", "type A {} type B {}", "declarations must be separated"},
-		{"expression before operator line break", "fn main() -> I32 {\n let x = 1\n + 2\n return 0\n}", "only inside delimiters"},
-		{"expression after operator line break", "fn main() -> I32 {\n let x = 1 +\n 2\n return 0\n}", "only inside delimiters"},
-		{"postfix line break", "fn f(x: I64) -> I64 { return x }\nfn main() -> I32 {\n let x = f\n (1)\n return 0\n}", "only inside delimiters"},
-		{"braced comma", "type T { a: I64, b: I64 }", "separated by line breaks"},
-		{"field without separator after multiline type", "type T {\n a: Map(\n  U64,\n  I64\n ) b: I64\n}", "fields must be separated"},
-		{"positional record", "type T { a: I64 }\nfn main() -> I32 {\n let x = T(1)\n return 0\n}", "requires named fields"},
-		{"unlabeled payload", "enum E { Bad(I64) }", "requires a label"},
-		{"quoted match wildcard", "fn main() -> I32 {\n return match 0 {\n  \"_\" => 0\n }\n}", "variant name or \"_\""},
-		{"import outside unsafe", "import c f: fn() -> I64\nfn main() -> I32 {\n let x = f()\n return 0\n}", "only be called inside unsafe c"},
-		{"user call inside unsafe", "fn f() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f() }\n return 0\n}", "direct call to an imported C symbol"},
-		{"nested call inside unsafe", "import c f: fn(I64) -> I64\nfn value() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f(value()) }\n return 0\n}", "cannot contain nested calls"},
-		{"reserved prefix", "fn __s0_user() -> I32 { return 0 }", "reserved function name"},
-		{"old storage alias", "fn main(d: Domain) -> I32 {\n let x = Alloc(I64, d, 1)\n return 0\n}", "unknown function or type \"Alloc\""},
+		{"semicolon", "fn main() -> I32 { return 0; }", "semicolons are not allowed", false},
+		{"same line", "fn main() -> I32 {\n let x = 1 return x\n}", "physical line break", false},
+		{"same-line declarations", "type A {} type B {}", "declarations must be separated", false},
+		{"expression before operator line break", "fn main() -> I32 {\n let x = 1\n + 2\n return 0\n}", "only inside delimiters", false},
+		{"expression after operator line break", "fn main() -> I32 {\n let x = 1 +\n 2\n return 0\n}", "only inside delimiters", false},
+		{"postfix line break", "fn f(x: I64) -> I64 { return x }\nfn main() -> I32 {\n let x = f\n (1)\n return 0\n}", "only inside delimiters", false},
+		{"braced comma", "type T { a: I64, b: I64 }", "separated by line breaks", false},
+		{"field without separator after multiline type", "type T {\n a: Map(\n  U64,\n  I64\n ) b: I64\n}", "fields must be separated", false},
+		{"positional record", "type T { a: I64 }\nfn main() -> I32 {\n let x = T(1)\n return 0\n}", "requires named fields", false},
+		{"unlabeled payload", "enum E { Bad(I64) }", "requires a label", false},
+		{"quoted match wildcard", "fn main() -> I32 {\n return match 0 {\n  \"_\" => 0\n }\n}", "variant name or \"_\"", false},
+		{"import outside unsafe", "import c f: fn() -> I64\nfn main() -> I32 {\n let x = f()\n return 0\n}", "only be called inside unsafe c", false},
+		{"user call inside unsafe", "fn f() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f() }\n return 0\n}", "direct call to an imported C symbol", false},
+		{"nested call inside unsafe", "import c f: fn(I64) -> I64\nfn value() -> I64 { return 1 }\nfn main() -> I32 {\n let x = unsafe c { f(value()) }\n return 0\n}", "cannot contain nested calls", false},
+		{"reserved prefix", "fn __s0_user() -> I32 { return 0 }", "reserved function name", false},
+		{"old storage alias", "fn main(d: Domain) -> I32 {\n let x = Alloc(I64, d, 1)\n return 0\n}", "unknown function or type \"Alloc\"", true},
 	}
 	for _, tc := range rejects {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Compile(tc.src)
+			compile := Compile
+			if tc.private {
+				compile = CompilePrivate
+			}
+			_, err := compile(tc.src)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want diagnostic containing %q", err, tc.want)
 			}
@@ -757,7 +783,7 @@ fn main(d: Bool) -> I32 {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Compile(tc.src)
+			_, err := CompilePrivate(tc.src)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want diagnostic containing %q", err, tc.want)
 			}
