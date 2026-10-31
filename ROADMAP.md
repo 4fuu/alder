@@ -807,7 +807,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.3: Inferred Hierarchical Storage
 
-Status: **in progress — slices 1 and 2 complete**
+Status: **complete**
 
 Complete the foundational value and view model with compiler-inferred
 hierarchical storage. Placement chooses the smallest domain proven to outlive
@@ -855,17 +855,25 @@ are rejected. Mutable views and aggregates containing views remain
 non-escaping, and their overlap, mutation, and invalidation checks are
 unchanged.
 
-Slice 3 still owns migration and qualification of the complete Milestone 7
-value/view surface. Its public-surface half has landed: the bootstrap
-bridges are now compiler-private, accepted only under a private bootstrap
-profile (`--bootstrap-private`) that exists to compile `compiler/src`,
-`bootstrap/spike`, and the bridge test fixtures, while ordinary programs
-construct values through inferred storage with a parameterless hosted entry.
-The Alder production driver also verifies its own output at the current MIR
-format version again, and the self-hosted e2e corpus now includes the
-`collections` and `storage` Vec programs. What remains for slice 3 is the
-sibling half: direct immutable view results are not yet generalized to
-nested ordinary aggregates, and this milestone is not complete.
+Slice 3 migrated and qualified the complete Milestone 7 value/view surface.
+Its public-surface half made the bootstrap bridges compiler-private, accepted
+only under a private bootstrap profile (`--bootstrap-private`) that exists to
+compile `compiler/src`, `bootstrap/spike`, and the bridge test fixtures,
+while ordinary programs construct values through inferred storage with a
+parameterless hosted entry; the Alder production driver verifies its own
+output at the current MIR format version, and the self-hosted e2e corpus
+includes the `collections` and `storage` Vec programs. Its storage half
+generalized direct immutable view results to nested ordinary aggregates:
+construction and return admit a record, enum, `Option`, `Result`, or array
+whose scoped leaves are all immutable slices, lowering materializes those
+view parts into caller-result storage, and match scrutinees, aggregate view
+parameters, aggregate view `using` initializers, and local view-aggregate
+bindings stay rejected so overlap, mutation, and invalidation checks are
+unchanged. Two pre-existing bugs surfaced and were fixed on the way: the
+checked array-literal child window shifted later elements whenever an
+element carried its own child records, and generic member types were not
+substituted below the top level, refusing every generic record with a
+parameterized view field.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate
@@ -875,6 +883,33 @@ layered inputs must terminate with deterministic diagnostics, MIR, and C.
 Generated MIR/C must preserve deterministic evaluation and independent value
 behavior, and the public language may no longer expose `String = [U8]` or
 explicit bootstrap storage as the way to construct ordinary values.
+
+Exit-criteria evidence:
+
+- slice 1's solver conformance pins nested candidate domains, dependency
+  promotion, root fallback retention records, invalidated-view rejection, and
+  a 2048-allocation layered case; slice 2's Go and Alder-written conformance
+  pins direct immutable `[T]` results, cross-domain `copy_to_domain` copies,
+  nested `Vec` deep copies, failed-`try` retention, and growth/mutation
+  independence through generated C;
+- the M7.3 storage-side conformance pins backend slice-part aggregate support
+  (verify plus generated recursive copy helpers), Alder checker acceptance
+  and rejection of nested view-aggregate results and every untracked escape,
+  lowered hidden placement domains with `copy_to_domain` return roots, the
+  array-literal child-window regression, and generic view-field substitution
+  through distinct concrete instances;
+- the Alder production qualification compiles and runs ordinary-surface
+  programs end to end: returned view aggregates over arrays and grown
+  vectors with mutation independence after materialization, `Option` and
+  `Result`-`Err` view-aggregate results, generic monomorphization, a
+  120-level retention-fallback chain of forwarded view results, identical
+  MIR and C across repeated processes and source permutations, and
+  production-driver rejections for mutable-view aggregates, view-aggregate
+  bindings and scrutinees, owner mutation under an active view, and
+  overlapping mutable views;
+- `gofmt -l .`, `go vet ./...`, `go test ./...`, the strict runtime C11
+  syntax check, and the Go-free `bootstrap/regenerate.sh` byte-for-byte
+  fixed-point gate pass with the updated source inventory and digest pins.
 
 ## Milestone 7.5: Static Abstraction, Resources, and Identity
 
