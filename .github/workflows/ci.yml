@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     # bootstrap/regenerate.sh builds the committed C bootstrap at -O2 and then
     # runs the self-hosted compiler over the 30-source root, which needs about
-    # 2.5 GiB and takes roughly 21 minutes on one core. It only has to run when
+    # 3.5 GiB and takes about 3 minutes. It only has to run when
     # something it validates changes, so gate it on the touched paths instead
     # of putting it on every pull request's critical path.
     steps:
@@ -56,13 +56,21 @@ jobs:
             echo run=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          base="${{ github.event.repository.default_branch }}"
-          git fetch --no-tags --depth=1 origin "$base"
-          # regenerate.sh consumes bootstrap/, compiler/src/ and runtime/c/
-          # only. Default to running it when the comparison cannot be made, so
-          # a shallow-clone edge case fails safe instead of silently skipping
-          # the gate.
-          if ! changed=$(git diff --name-only "origin/$base" HEAD); then
+          # A push compares against the commit it replaced; a pull request
+          # compares against its base branch. Comparing a push to main against
+          # origin/main would always see no changes, because they are the same
+          # commit. Default to running it when the comparison cannot be made,
+          # so a shallow-clone or new-branch edge case fails safe instead of
+          # silently skipping the gate. regenerate.sh consumes bootstrap/,
+          # compiler/src/ and runtime/c/ only.
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ] ||
+             ! git fetch --no-tags --depth=1 origin "$base" ||
+             ! changed=$(git diff --name-only "$base" HEAD); then
             echo run=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
