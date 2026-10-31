@@ -283,6 +283,59 @@ fn lower_has_storage(store: CheckStore) -> Bool {
         if (use.role == 6 || use.role == 8) && __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1).kind == 8 { return true }
         at = at + 1
     }
+    // A result type that reaches a slice through ordinary aggregate structure
+    // also needs inferred storage: its views must be materialized into
+    // caller-result storage before the function domain is destroyed. The
+    // private __s0_String bridge keeps explicit storage management and stays
+    // outside this gate. Depth exhaustion conservatively enables storage.
+    at = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.role == 6 || use.role == 8 {
+            if lower_type_reaches_storage(store, use.checked_type, 0, 0, 0) { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// True when a slice or vector is reachable from checked_type through ordinary
+// aggregate structure. Fields are substituted through the concrete
+// application, so generic records resolve their members without a separate
+// environment. The bound on depth keeps a malformed cyclic store from
+// hanging the lowerer; valid stores reject value recursion earlier.
+fn lower_type_reaches_storage(store: CheckStore, checked_type: U64, declaration: U64, application: U64, depth: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    if depth >= 64 { return true }
+    // A bare type parameter appears only in generic declaration signatures,
+    // which never lower; concrete instances carry their own result uses.
+    if application == 0 && __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1).kind == 6 { return false }
+    let bound = lower_bound_checked_type(store, checked_type, declaration, application)
+    if bound == 0 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, bound - 1)
+    if checked.kind == 8 || checked.kind == 17 { return true }
+    if checked.kind == 9 || checked.kind == 13 || checked.kind == 15 || checked.kind == 18 {
+        if checked.arg_count != 1 { return false }
+        return lower_type_reaches_storage(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), 0, 0, depth + 1)
+    }
+    if checked.kind == 10 || checked.kind == 11 {
+        var child: U64 = 0
+        while child < checked.arg_count {
+            if lower_type_reaches_storage(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), 0, 0, depth + 1) { return true }
+            child = child + 1
+        }
+        return false
+    }
+    if checked.kind == 7 {
+        var at: U64 = 0
+        while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+            if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+                if lower_type_reaches_storage(store, use.checked_type, checked.target, bound, depth + 1) { return true }
+            }
+            at = at + 1
+        }
+    }
     return false
 }
 
