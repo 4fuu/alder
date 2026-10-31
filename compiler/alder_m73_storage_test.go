@@ -66,6 +66,40 @@ fn main() -> I32 {
 		t.Fatalf("window does not carry the hidden placement domain as its first parameter")
 	}
 
+	// Generic records substitute their member type parameters at any depth:
+	// Span(T) { head: [T] } must lower distinct concrete instances whose
+	// fields are resolved element types, not unresolved parameters.
+	genericFiles := map[string]string{
+		"generic.al": `type Span(T: type) {
+    head: [T]
+}
+fn span_of(T: type, values: Array(T, 2)) -> Span(T) {
+    return Span(head: values.slice(1, 2))
+}
+fn main() -> I32 {
+    var wide: Array(U64, 2) = [4, 9]
+    var narrow: Array(U8, 2) = [4, 9]
+    if span_of(U64, wide).head[0] != 9 { return 1 }
+    if span_of(U8, narrow).head[0] != 9 { return 2 }
+    return 0
+}
+`,
+	}
+	genericLowered := runLowerCompiler(t, exe, genericFiles, []string{"generic.al"})
+	genericModule, err := mir.Parse(string(genericLowered))
+	if err != nil {
+		t.Fatalf("parse generic view-aggregate MIR: %v\n%s", err, genericLowered)
+	}
+	if diagnostics := verify.Module(genericModule); len(diagnostics) != 0 {
+		t.Fatalf("verify generic view-aggregate MIR: %s\n%s", verify.Errors(diagnostics).String(), genericLowered)
+	}
+	genericPrinted := string(genericLowered)
+	for _, want := range []string{"head: slice(u64)", "head: slice(u8)"} {
+		if !strings.Contains(genericPrinted, want) {
+			t.Fatalf("generic view-aggregate MIR is missing %q:\n%s", want, genericPrinted)
+		}
+	}
+
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")

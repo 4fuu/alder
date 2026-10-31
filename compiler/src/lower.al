@@ -547,6 +547,23 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
     return Ok(LowerStep(state: lower_invalid(state), id: 0))
 }
 
+fn lower_bound_checked_type(store: CheckStore, checked_type: U64, declaration: U64, application: U64) -> U64 {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 6 { return checked_type }
+    let applied = __s0_buffer_get(CheckedTypeRec, store.types, application - 1)
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let parameter = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if parameter.owner == declaration {
+            if at + 1 == checked.target { return __s0_buffer_get(U64, store.type_args, applied.first_arg - 1 + ordinal) }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return 0
+}
+
 fn lower_type_bound(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, declaration: U64, application: U64) -> Result(LowerStep, __s0_Error) {
     if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
@@ -569,17 +586,58 @@ fn lower_type_bound(d: Domain, source_state: State, store: CheckStore, state: Lo
     return Ok(LowerStep(state: lower_invalid(state), id: 0))
 }
 
-fn lower_bound_checked_type(store: CheckStore, checked_type: U64, declaration: U64, application: U64) -> U64 {
+// Resolve a declared member type through the concrete application,
+// substituting type-parameter references at any depth. The substituted
+// shape must already exist as a canonical checked type: constructing the
+// aggregate required a value of that shape, so the checker interned it. Zero
+// marks an unresolvable reference and refuses the model.
+fn lower_bound_checked_deep(store: CheckStore, checked_type: U64, declaration: U64, application: U64, depth: U64) -> U64 {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind != 6 { return checked_type }
-    let applied = __s0_buffer_get(CheckedTypeRec, store.types, application - 1)
-    var ordinal: U64 = 0
+    if checked.kind == 6 {
+        if application == 0 || application > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+        let applied = __s0_buffer_get(CheckedTypeRec, store.types, application - 1)
+        var ordinal: U64 = 0
+        var at: U64 = 0
+        while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+            let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+            if param.owner == declaration {
+                if at + 1 == checked.target {
+                    if ordinal >= applied.arg_count { return 0 }
+                    return __s0_buffer_get(U64, store.type_args, applied.first_arg - 1 + ordinal)
+                }
+                ordinal = ordinal + 1
+            }
+            at = at + 1
+        }
+        return 0
+    }
+    if checked.arg_count == 0 || depth >= 64 { return checked_type }
+    var first = checked.first_arg
+    var child: U64 = 0
+    var same = true
+    while child < checked.arg_count {
+        let resolved = lower_bound_checked_deep(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), declaration, application, depth + 1)
+        if resolved == 0 { return 0 }
+        if resolved != __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child) {
+            same = false
+            if child == 0 { first = __s0_buffer_len(U64, store.type_args) + 1 }
+        }
+        child = child + 1
+    }
+    if same { return checked_type }
     var at: U64 = 0
-    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
-        let parameter = __s0_buffer_get(TypeParamRec, store.type_params, at)
-        if parameter.owner == declaration {
-            if at + 1 == checked.target { return __s0_buffer_get(U64, store.type_args, applied.first_arg - 1 + ordinal) }
-            ordinal = ordinal + 1
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let candidate = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if candidate.kind == checked.kind && candidate.target == checked.target && candidate.arg_count == checked.arg_count {
+            var matched = true
+            child = 0
+            while child < checked.arg_count {
+                let resolved = lower_bound_checked_deep(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), declaration, application, depth + 1)
+                if resolved != __s0_buffer_get(U64, store.type_args, candidate.first_arg - 1 + child) { matched = false }
+                child = child + 1
+            }
+            if matched { return at + 1 }
         }
         at = at + 1
     }
@@ -602,7 +660,9 @@ fn lower_named_parts(d: Domain, source_state: State, store: CheckStore, state: L
                 if use.owner == checked.target && (use.role == 1 || use.role == 2) {
                     var part_type = mir_type_unit()
                     if use.checked_type != 0 {
-                        let lowered = try lower_type_bound(d, source_state, store, current, use.checked_type, checked.target, checked_id)
+                        let substituted = lower_bound_checked_deep(store, use.checked_type, checked.target, checked_id, 0)
+                        if substituted == 0 { return Ok(lower_invalid(current)) }
+                        let lowered = try lower_type(d, source_state, store, current, substituted)
                         current = lowered.state
                         part_type = lowered.id
                     }
