@@ -48,8 +48,13 @@ does not turn ordinary values into a move-oriented language.
 
 Immutable slices, mutable slices, table views, and similar accesses are tied to
 an owner and a lexical access scope. A direct immutable slice result is allowed
-when lowering can materialize caller-result storage; mutable views and nested
-aggregates containing views cannot be returned. Capabilities cannot otherwise
+when lowering can materialize caller-result storage; the same holds for an
+ordinary aggregate result (record, enum, `Option`, `Result`, or array) whose
+scoped parts are all immutable slices, which lowering materializes piecewise
+into caller-result storage. Mutable views and aggregates containing them
+cannot be returned, and a view-holding aggregate cannot be stored into a
+local binding, call argument, match scrutinee, or cleanup initializer.
+Capabilities cannot otherwise
 be stored in longer-lived values, retained by unknown code, or used after
 invalidation. Mutable capabilities are exclusive.
 

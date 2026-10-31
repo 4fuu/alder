@@ -6,11 +6,122 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/4fuu/alder/mir"
 	"github.com/4fuu/alder/mir/verify"
 )
+
+// M7.3 slice 3 storage-side lowering contract: view-aggregate results lower
+// to hidden caller-result domains, copy_to_domain at return roots, and
+// generated C keeps the materialized views independent of the caller's
+// source storage.
+func runAlderM73LowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{
+		"views.al": `type Window {
+    prefix: [U64]
+    data: [U64]
+}
+fn window(values: Array(U64, 4)) -> Window {
+    return Window(prefix: values.slice(0, 2), data: values.slice(2, 4))
+}
+fn nested(values: Array(U64, 4)) -> Window {
+    return window(values)
+}
+fn main() -> I32 {
+    return 0
+}
+`,
+	}
+	first := runLowerCompiler(t, exe, files, []string{"views.al"})
+	second := runLowerCompiler(t, exe, files, []string{"views.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("view-aggregate lowered MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse view-aggregate MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify view-aggregate MIR: %s\n%s", verify.Errors(diagnostics).String(), first)
+	}
+	printed := string(first)
+	for _, want := range []string{
+		"prefix: slice(u64)",
+		"data: slice(u64)",
+		"copy_to_domain",
+		"%__domain: domain_handle",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Fatalf("view-aggregate lowered MIR is missing %q:\n%s", want, printed)
+		}
+	}
+	windowID, ok := module.Function("window")
+	if !ok {
+		t.Fatalf("view-aggregate MIR has no window function:\n%s", printed)
+	}
+	if len(module.Functions[windowID].Params) != 2 || module.Functions[windowID].Params[0].Type != module.DomainHandle() {
+		t.Fatalf("window does not carry the hidden placement domain as its first parameter")
+	}
+
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"views.al"})
+	nestedID, ok := module.Function("nested")
+	if !ok {
+		t.Fatalf("view-aggregate MIR has no nested function:\n%s", printed)
+	}
+	object := buildRuntimeObject(t, cc, root)
+	dir := t.TempDir()
+	genPath := filepath.Join(dir, "gen.c")
+	driverPath := filepath.Join(dir, "driver.c")
+	program := filepath.Join(dir, "views.exe")
+	if err := os.WriteFile(genPath, generated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := fmt.Sprintf(`#include "gen.c"
+#include <stdint.h>
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) { return 2; }
+    AlderTy15 values = {.alder_e = {3, 5, 7, 11}};
+    AlderTy12 window = alder_fn_window_%d(&root, values);
+    const uint64_t *prefix = (const uint64_t *)window.alder_f0.data;
+    const uint64_t *data = (const uint64_t *)window.alder_f1.data;
+    if (window.alder_f0.len != 2 || window.alder_f1.len != 2) { return 3; }
+    if (prefix[0] != 3 || prefix[1] != 5) { return 4; }
+    if (data[0] != 7 || data[1] != 11) { return 5; }
+    /* The materialized views live in the caller-result domain, so mutating
+     * the caller's source array cannot change them. */
+    values.alder_e[0] = 99;
+    if (prefix[0] != 3) { return 6; }
+    AlderTy12 forwarded = alder_fn_nested_%d(&root, values);
+    const uint64_t *forwarded_prefix = (const uint64_t *)forwarded.alder_f0.data;
+    if (forwarded_prefix[0] != 99 || forwarded_prefix[1] != 5) { return 7; }
+    alder_domain_destroy(&root);
+    return alder_runtime_live_allocations() == (size_t)0 ? 0 : 8;
+}
+`, windowID, nestedID)
+	if err := os.WriteFile(driverPath, []byte(driver), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+		"-I", filepath.Dir(genPath), "-I", filepath.Join(root, "runtime", "c"), genPath, driverPath, object, "-o", program}
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("compile view-aggregate generated C: %v\n%s", err, out)
+	}
+	if out, err := exec.Command(program).CombinedOutput(); err != nil {
+		t.Fatalf("run view-aggregate generated C: %v\n%s", err, out)
+	}
+}
 
 // M7.3 slice 3 storage-side checker contract: ordinary aggregates whose
 // scoped parts are all immutable views can be constructed and returned,

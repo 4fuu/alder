@@ -156,7 +156,14 @@ growth, and copy sites. Function domains are destroyed on every return,
 failure, and panic path; return and failed-`try` values with relocatable storage
 are recursively copied to caller-result storage before that destruction.
 Identity-bearing resources are not relocatable and retain their real
-provenance instead of passing through `copy_to_domain`. Domains remain
+provenance instead of passing through `copy_to_domain`. M7.3 slice 3
+generalizes direct immutable-view results to ordinary aggregates: a record,
+enum, `Option`, `Result`, or array result whose scoped parts are all
+immutable slices is admitted when every scoped leaf is materializable, and
+its view parts are recursively materialized into caller-result storage.
+Mutable views and view-holding aggregates stay non-escaping at bindings,
+arguments, match scrutinees, and cleanup initializers, so their exclusivity,
+overlap, and invalidation checks are unchanged. Domains remain
 absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.

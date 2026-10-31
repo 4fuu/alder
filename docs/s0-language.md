@@ -146,10 +146,16 @@ ordinary source does not share that identity. The S0 map, buffer, domain, and
 pointer rules are not the 1.0 `Map`, `Vec`, inferred-storage, or C binding
 contracts.
 
-Current representation restrictions reject nested lifetime-bearing values in
-aggregate storage, infinite value recursion, unsupported map keys/values,
+Current representation restrictions reject mutable-view and other
+non-materializable lifetime-bearing values in aggregate storage, aggregate
+view results whose scoped leaves are not all immutable slices, infinite value
+recursion, unsupported map keys/values,
 unsupported C signatures, and specialization-expanding polymorphic recursion.
-The exact restrictions are pinned by `frontend` acceptance/rejection tests and
+Ordinary aggregates may declare immutable-view fields and return them: M7.3
+lowering materializes such results into caller-result storage, while local
+bindings, arguments, match scrutinees, and cleanup initializers still reject
+view-holding aggregates. The exact restrictions are pinned by `frontend`
+acceptance/rejection tests and
 the active Alder checker conformance harness.
 
 ## Statements and expressions
