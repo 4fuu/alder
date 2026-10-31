@@ -999,6 +999,24 @@ distribution acceptance.
 
 No earlier milestone may call the language or toolchain Alder 1.0.
 
+## Post-1.0: Native UI Package
+
+Status: **planned after Milestone 14; official Git package, not `std`**
+
+Build a native desktop UI toolkit as an official package, with the native UI
+of [MyGo](https://github.com/egoist/mygo) as the reference design
+([D021](docs/design-decisions.md#d021--native-ui-is-an-official-package-after-10)).
+It depends on the 1.0 closures, resources, C bindings with callbacks, and
+cross-thread wakeup, and is sequenced so the deterministic core lands first:
+
+1. a pure-Alder core: views rebuilt from state each frame, element identity
+   and per-element state, flexbox and grid layout, a display list, a
+   deterministic CPU rasterizer, and a windowless tester with golden images;
+2. Linux windows through GTK with Pango text, presented from the CPU renderer;
+3. input methods, ATK accessibility, and an OpenGL renderer checked against
+   the CPU renderer;
+4. macOS (Metal, Core Text) and Windows (Direct3D 11, DirectWrite).
+
 ## Deferred Work
 
 The following items are not part of the current implementation scope:

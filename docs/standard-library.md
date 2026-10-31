@@ -219,7 +219,8 @@ never silently narrow into an Alder number.
 
 Compression, regular expressions, database clients, GUI frameworks, and
 application protocols beyond HTTP are suitable official or third-party Git
-packages, not required `std` modules for 1.0.
+packages, not required `std` modules for 1.0. A native desktop UI toolkit is
+planned as an official package after 1.0 ([D021](design-decisions.md#d021--native-ui-is-an-official-package-after-10)).
 
 ## C support
 

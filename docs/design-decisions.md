@@ -192,6 +192,22 @@ locations, credentials, and transport aliases are provenance rather than
 semantic identity. Workspace inputs stay below an explicit snapshot root and
 Git inputs use exact commits plus independently verified canonical trees.
 
+### D021 — Native UI is an official package after 1.0
+
+Status: **Deferred**
+
+A native desktop UI toolkit is planned as an official Git package, not a `std`
+module, and its development starts only after Alder 1.0. The reference design
+is the native UI of [MyGo](https://github.com/egoist/mygo) (MIT): a view is a
+function of application state rebuilt each frame, element identity keys
+per-element state across frames, flexbox and grid layout produce a
+platform-independent display list, and a deterministic CPU rasterizer plus a
+windowless tester render and drive views without a display. GPU renderers,
+platform text engines, input methods, and accessibility bridges sit behind
+that boundary. Linux comes first. Keeping it outside `std` keeps 1.0
+qualification and compatibility promises independent of three desktop
+platforms' UI stacks. See the [Roadmap](../ROADMAP.md#post-10-native-ui-package).
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.
