@@ -222,6 +222,9 @@ func TestM73StorageProductionQualification(t *testing.T) {
 		{"view-aggregate-binding.al", "checker diagnostic 104", "type Window {\n    prefix: [U64]\n}\nfn f(values: [U64]) -> I32 {\n    let holder = Window(prefix: values)\n    return 0\n}\nfn main() -> I32 { return 0 }\n"},
 		{"view-aggregate-scrutinee.al", "checker diagnostic 104", "type Window {\n    prefix: [U64]\n}\nenum Pick {\n    Chosen(window: Window)\n    Empty\n}\nfn pick(values: [U64]) -> Pick {\n    return Chosen(Window(prefix: values))\n}\nfn f(values: [U64]) -> U64 {\n    return match pick(values) {\n        Chosen(window) => window.prefix[0]\n        Empty => 0\n    }\n}\nfn main() -> I32 { return 0 }\n"},
 		{"immutable-view-owner-mutation.al", "exclusive or owning access", "fn main() -> I32 {\n    var values: Array(U64, 2) = [1, 2]\n    let view: [U64] = values.slice(0, 2)\n    values[0] = 3\n    return 0\n}\n"},
+		// Diagnostic 101 must keep its own meaning in ordinary programs; it
+		// once shared a message with the private bootstrap-operation gate.
+		{"immutable-vec-receiver-push.al", "checker diagnostic 101", "fn add(values: Vec(U64)) -> I32 {\n    values.push(1)\n    return 0\n}\nfn main() -> I32 { return 0 }\n"},
 		{"overlapping-mutable-views.al", "exclusive or owning access", "fn main() -> I32 {\n    var values: Array(U64, 3) = [1, 2, 3]\n    var left: MutSlice(U64) = values.slice_mut(0, 2)\n    var right: MutSlice(U64) = values.slice_mut(1, 3)\n    return 0\n}\n"},
 	}
 	for _, tc := range rejections {

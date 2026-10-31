@@ -484,7 +484,9 @@ type EnvironmentRec {
 // scoped match scrutinees, aggregate view parameters, and aggregate view
 // `using` initializers. Direct immutable slice results and ordinary
 // aggregates whose scoped parts are all immutable views are materialized into
-// caller-result storage by M7.3 lowering. kind is the
+// caller-result storage by M7.3 lowering. Outside the private bootstrap
+// profile, 105 rejects a bootstrap type and 106 a bootstrap operation.
+// kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.

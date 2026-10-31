@@ -1649,7 +1649,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         let builtin = builtin_type_kind(state, node)
         if builtin == 1 { return Ok(CheckGood(try append_checked_type(d, store, owner, 1, node_id, primitive_type_target(state, node), 0, 0))) }
         if builtin == 2 || builtin == 14 { return Ok(CheckGood(try append_checked_type(d, store, owner, builtin, node_id, 0, 0, 0))) }
-        if builtin != 0 && !check_bootstrap_private() { return check_fail(d, store, 100, node, 0, 0, 0) }
+        if builtin != 0 && !check_bootstrap_private() { return check_fail(d, store, 105, node, 0, 0, 0) }
         if builtin != 0 { return Ok(CheckGood(try append_checked_type(d, store, owner, builtin, node_id, 0, 0, 0))) }
         let declaration = instance_declaration(store, owner)
         let param = find_type_param(state, store, declaration, node)
@@ -1715,7 +1715,7 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         arity = 1 }
     if node_word(state, node, "MutSlice") { kind = 18
         arity = 1 }
-    if (kind == 11 || kind == 13) && !check_bootstrap_private() { return check_fail(d, store, 100, node, 0, 0, 0) }
+    if (kind == 11 || kind == 13) && !check_bootstrap_private() { return check_fail(d, store, 105, node, 0, 0, 0) }
     var target: U64 = 0
     if kind == 0 {
         target = find_declared_type(state, parse, current, node)
@@ -4440,11 +4440,11 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     }
     if callee.kind == 24 && (node_word(state, callee, "len") || node_word(state, callee, "range")) { return check_slice_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if node_word(state, callee, "Get") || node_word(state, callee, "Set") || node_word(state, callee, "Remove") {
-        if !check_bootstrap_private() { return expr_token_fail(d, state, base, 101, callee) }
+        if !check_bootstrap_private() { return expr_token_fail(d, state, base, 106, callee) }
         return check_map_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
     }
     if node_word(state, callee, "__s0_alloc") || node_word(state, callee, "__s0_domain_create") || node_word(state, callee, "__s0_domain_mark") || node_word(state, callee, "__s0_domain_reset") || node_word(state, callee, "__s0_domain_destroy") || node_word(state, callee, "__s0_map_create") || node_word(state, callee, "__s0_buffer_new") || node_word(state, callee, "__s0_buffer_len") || node_word(state, callee, "__s0_buffer_append") || node_word(state, callee, "__s0_buffer_get") || node_word(state, callee, "__s0_buffer_set") || node_word(state, callee, "__s0_buffer_slice") {
-        if !check_bootstrap_private() { return expr_token_fail(d, state, base, 101, callee) }
+        if !check_bootstrap_private() { return expr_token_fail(d, state, base, 106, callee) }
         return check_s0_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
     }
     if node_word(state, callee, "Some") || node_word(state, callee, "Ok") || node_word(state, callee, "Err") {
