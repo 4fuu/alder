@@ -14,6 +14,7 @@ jobs:
   go:
     name: go (gofmt, vet, test)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -46,7 +47,10 @@ jobs:
     # runs the self-hosted compiler over the 30-source root, which needs about
     # 3.5 GiB and takes about 3 minutes. It only has to run when
     # something it validates changes, so gate it on the touched paths instead
-    # of putting it on every pull request's critical path.
+    # of putting it on every pull request's critical path. The timeout is
+    # several times the usual run, so a compiler performance regression
+    # fails here instead of silently stretching every run.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Decide whether the source bootstrap is affected
