@@ -184,6 +184,7 @@ type checkerDiagnostic struct {
 
 func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m71-collections", func(t *testing.T) { runAlderM71CheckerBehavior(t, exe) })
+	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73CheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))

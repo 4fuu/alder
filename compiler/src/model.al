@@ -479,9 +479,12 @@ type EnvironmentRec {
 // length, 99 rejects invalid UTF-8 for String, 100 rejects a non-copyable Vec
 // element, 101 rejects mutation through a non-mutable sequence receiver, 102
 // rejects binding MutSlice through `let`, 103 rejects indexed mutation through
-// an immutable scoped view, and 104 rejects mutable/nested scoped-view escape
-// by return or any scoped-view escape through aggregate storage. A direct
-// immutable slice result is retained by M7.3 lowering. kind is the
+// an immutable scoped view, and 104 rejects mutable/unprovable scoped-view
+// escape by return, any scoped-view escape through local aggregate storage,
+// scoped match scrutinees, aggregate view parameters, and aggregate view
+// `using` initializers. Direct immutable slice results and ordinary
+// aggregates whose scoped parts are all immutable views are materialized into
+// caller-result storage by M7.3 lowering. kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
 // rendered with a stable note selected by kind, independently of any CLI.

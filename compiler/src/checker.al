@@ -652,6 +652,56 @@ fn checked_type_contains_scoped(d: Domain, state: State, parse: ParseStore, stor
     return Ok(category.contains_scoped)
 }
 
+// M7.3 slice 3: true when every scoped capability reachable from
+// checked_type is an immutable slice inside ordinary aggregate structure.
+// Such a value can be constructed and returned, because lowering
+// materializes its view parts into caller-result storage. Any Domain,
+// DomainMark, raw pointer, or MutSlice leaf keeps the aggregate
+// non-materializable, and an unresolved type parameter can never prove
+// materializability at a lowering boundary.
+fn checked_type_views_materializable(d: Domain, state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    var bindings = try __s0_buffer_new(TypeBindingRec, d)
+    let first_work = try __s0_buffer_new(InterpWorkRec, d)
+    var work = try __s0_buffer_append(InterpWorkRec, d, first_work, InterpWorkRec(checked_type: checked_type, env: 0, ancestry: 0))
+    var ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+    var memo = try __s0_buffer_new(ExpansionMemoRec, d)
+    var seen = try __s0_buffer_new(InterpStateRec, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(InterpWorkRec, work) {
+        let item = __s0_buffer_get(InterpWorkRec, work, at)
+        let norm = normalize_interp(store, bindings, item.checked_type, item.env, item.ancestry)
+        let checked = __s0_buffer_get(CheckedTypeRec, store.types, norm.checked_type - 1)
+        var inspect = true
+        if checked.kind != 7 {
+            inspect = !interp_state_seen(seen, 0, norm.checked_type, norm.env, norm.ancestry)
+            if inspect { seen = try __s0_buffer_append(InterpStateRec, d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
+        }
+        if inspect {
+            if checked.kind == 3 || checked.kind == 4 || checked.kind == 12 || checked.kind == 18 { return Ok(false) }
+            if checked.kind == 6 { return Ok(false) }
+            if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 || checked.kind == 13 || checked.kind == 15 || checked.kind == 17 {
+                var child: U64 = 0
+                while child < checked.arg_count {
+                    work = try __s0_buffer_append(InterpWorkRec, d, work, InterpWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), env: norm.env, ancestry: norm.ancestry))
+                    child = child + 1
+                }
+            }
+            if checked.kind == 7 {
+                if !(try expansion_seen(d, state, parse, store, bindings, memo, 0, norm.checked_type, norm.env)) {
+                    memo = try remember_expansion(d, memo, 0, checked.target, norm.checked_type, norm.env)
+                    let old_len = __s0_buffer_len(TypeBindingRec, bindings)
+                    bindings = try build_target_env(d, store, bindings, checked.target, checked, norm.env, norm.ancestry)
+                    let target_env = declaration_env_head(bindings, old_len)
+                    ancestry = try __s0_buffer_append(DeclAncestryRec, d, ancestry, DeclAncestryRec(target: checked.target, env: target_env, parent: norm.ancestry))
+                    work = try push_decl_members(d, store, work, checked.target, target_env, __s0_buffer_len(DeclAncestryRec, ancestry))
+                }
+            }
+        }
+        at = at + 1
+    }
+    return Ok(true)
+}
+
 fn primitive_map_key(state: State, parse: ParseStore, checked: CheckedTypeRec) -> Bool {
     return checked.kind == 1 && (checked.target == 1 || (checked.target >= 6 && checked.target <= 9))
 }
@@ -3226,6 +3276,12 @@ fn check_positional_call_args(d: Domain, state: State, parse: ParseStore, base: 
     }
     if draft.deferred { return expr_deferred(base) }
     if !(try parameter_type_compatible(d, state, parse, current, parameter.checked_type, draft.checked_type)) { return expr_token_fail(d, state, base, mismatch, arg) }
+    // An aggregate parameter that contains a scoped view is a capability the
+    // callee could retain, so it stays non-escaping. Exact slice, MutSlice,
+    // and bootstrap capability parameters are not aggregates and keep their
+    // own call-borrow rules.
+    let parameter_kind = __s0_buffer_get(CheckedTypeRec, current.types, parameter.checked_type - 1).kind
+    if (parameter_kind == 7 || parameter_kind == 9 || parameter_kind == 10 || parameter_kind == 11 || parameter_kind == 13 || parameter_kind == 15 || parameter_kind == 17) && (try checked_type_contains_scoped(d, state, parse, current, parameter.checked_type)) { return expr_token_fail(d, state, base, 104, arg) }
     if ordinal + 1 < count && call_argument_requires_final(current, parameter.checked_type, draft.expression) { return expr_token_fail(d, state, base, 104, arg) }
     let mode = try check_call_argument_mode(d, state, parse, base, current, owner, arg, parameter, draft.expression)
     let mode_store = match mode {
@@ -3301,7 +3357,7 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(CallInferenceDefer) }
-    if try checked_type_contains_scoped(d, state, parse, current, draft.checked_type) {
+    if !(try checked_type_views_materializable(d, state, parse, current, draft.checked_type)) {
         let failed = try check_token_fail(d, state, base, 104, payload_node)
         return Ok(CallInferenceBad(match failed {
             CheckGood(value) => value
@@ -3660,7 +3716,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
             param_at = param_at + 1
         }
         let applied = try concrete_decl_application(d, current, target, bindings)
-        if try checked_type_contains_scoped(d, state, parse, applied.store, applied.checked_type) { return expr_token_fail(d, state, base, 104, call) }
+        if !(try checked_type_views_materializable(d, state, parse, applied.store, applied.checked_type)) { return expr_token_fail(d, state, base, 104, call) }
         if expected != 0 && !(try expression_type_equal(d, state, parse, applied.store, applied.checked_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
         return append_call_expression(d, state, parse, applied.store, owner, call_id, 9, applied.checked_type, 3, target, 0, call, 2, site_kind, site_syntax)
     }
@@ -3682,7 +3738,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
         current = try append_checked_type(d, current, 0, 7, 0, target, 0, 0)
         constructed = canonical_type_id(current, 7, target, 0, 0)
     }
-    if try checked_type_contains_scoped(d, state, parse, current, constructed) { return expr_token_fail(d, state, base, 104, call) }
+    if !(try checked_type_views_materializable(d, state, parse, current, constructed)) { return expr_token_fail(d, state, base, 104, call) }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, constructed, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
     return append_call_expression(d, state, parse, current, owner, call_id, 9, constructed, 3, target, 0, call, 2, site_kind, site_syntax)
 }
@@ -3808,7 +3864,7 @@ fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckSto
         payload_store = concrete.store
         payload_type = concrete.checked_type
     }
-    if try checked_type_contains_scoped(d, state, parse, payload_store, payload_type) { return expr_token_fail(d, state, base, 104, arg) }
+    if !(try checked_type_views_materializable(d, state, parse, payload_store, payload_type)) { return expr_token_fail(d, state, base, 104, arg) }
     let payload = try check_value_expression_inner(d, state, parse, base, payload_store, owner, arg, arg_link.node, payload_type, 50, arg, 0, 0)
     let current = match payload {
         ExprGood(item) => item.store
@@ -4411,7 +4467,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             payload_type = __s0_buffer_get(U64, store.type_args, concrete.first_arg)
         }
         if kind == 0 { return expr_token_fail(d, state, base, 40, call) }
-        if try checked_type_contains_scoped(d, state, parse, store, payload_type) { return expr_token_fail(d, state, base, 104, call) }
+        if !(try checked_type_views_materializable(d, state, parse, store, payload_type)) { return expr_token_fail(d, state, base, 104, call) }
         let argument_link = call_link_at(parse, call, 1)
         let argument = __s0_buffer_get(SyntaxRec, parse.nodes, argument_link.node - 1)
         let checked_argument = try check_value_expression_inner(d, state, parse, base, store, owner, argument, argument_link.node, payload_type, mismatch_kind, mismatch_node, 0, 0)
@@ -4525,11 +4581,11 @@ fn check_array_elements(d: Domain, state: State, parse: ParseStore, base: CheckS
     if draft.deferred { return Ok(ArrayElementsDefer) }
     var actual_element = prior.element_type
     if actual_element == 0 { actual_element = draft.checked_type }
-    var first = prior.first_child
-    if prior.child_count == 0 { first = __s0_buffer_len(CheckedExprChildRec, current.expression_children) + 1 }
-    let children = try __s0_buffer_append(CheckedExprChildRec, d, current.expression_children, CheckedExprChildRec(expression: draft.expression))
-    let next = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: children, returns: current.returns, control: current.control, diagnostics: current.diagnostics)
-    return Ok(ArrayElementsGood(ArrayElementsRec(store: next, element_type: actual_element, first_child: first, child_count: prior.child_count + 1)))
+    // Element child records are appended by the array-literal branch after
+    // every element is checked, so the literal's child window stays
+    // contiguous and in source order even when elements have their own
+    // child records.
+    return Ok(ArrayElementsGood(ArrayElementsRec(store: current, element_type: actual_element, first_child: 0, child_count: prior.child_count + 1)))
 }
 
 fn append_array_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, first_child: U64, child_count: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
@@ -4570,7 +4626,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             ArrayElementsBad(value) => false
             ArrayElementsDefer => true
         } { return expr_deferred(base) }
-        if try checked_type_contains_scoped(d, state, parse, values.store, values.element_type) { return expr_token_fail(d, state, base, 104, expression) }
+        if !(try checked_type_views_materializable(d, state, parse, values.store, values.element_type)) { return expr_token_fail(d, state, base, 104, expression) }
         var current = values.store
         if array_type == 0 {
             array_type = canonical_single_arg(current, 15, count, values.element_type)
@@ -4582,7 +4638,23 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                 array_type = canonical_single_arg(current, 15, count, values.element_type)
             }
         }
-        return append_array_expression(d, current, owner, expression_id, array_type, values.first_child, values.child_count, site_kind, site_syntax)
+        var children = current.expression_children
+        var first_child: U64 = 0
+        var child_count: U64 = 0
+        var ordinal: U64 = 0
+        let link_count = call_link_count(parse, expression)
+        while ordinal < link_count {
+            let link = call_link_at(parse, expression, ordinal)
+            let element = expression_for_syntax(current, owner, link.node)
+            if element != 0 {
+                if child_count == 0 { first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1 }
+                children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: element))
+                child_count = child_count + 1
+            }
+            ordinal = ordinal + 1
+        }
+        let with_children = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: children, returns: current.returns, control: current.control, diagnostics: current.diagnostics)
+        return append_array_expression(d, with_children, owner, expression_id, array_type, first_child, child_count, site_kind, site_syntax)
     }
     if expression.kind == 29 {
         let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, expression.children - 1)
@@ -4829,6 +4901,10 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         if scrutinee.deferred { return expr_deferred(base) }
         let scrutinee_type = __s0_buffer_get(CheckedTypeRec, current.types, scrutinee.checked_type - 1)
         if scrutinee_type.kind != 5 && scrutinee_type.kind != 7 && scrutinee_type.kind != 9 && scrutinee_type.kind != 10 { return expr_token_fail(d, state, base, 70, expression) }
+        // Match arm payload bindings are not tracked as active views, so a
+        // scrutinee type containing a scoped view can never be matched, even
+        // when every view is immutable.
+        if try checked_type_contains_scoped(d, state, parse, current, scrutinee.checked_type) { return expr_token_fail(d, state, base, 104, expression) }
         if arm_head.next == 0 { return expr_token_fail(d, state, base, 78, expression) }
         let drafts = try __s0_buffer_new(MatchArmDraftRec, d)
         let checked_arms = try check_match_arm_links(d, state, parse, base, current, owner, expression.children, scrutinee.checked_type, expected, drafts, expression)
@@ -5350,10 +5426,12 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
         let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, result_use.checked_type, 0, 0)
-        // M7.3 slice 2 admits a direct immutable slice result. Mutable views
-        // and aggregates containing a scoped capability remain rejected until
-        // the final value/view-surface migration.
-        if category.contains_scoped && result_type.kind != 8 { return body_token_fail(d, state, current, 104, statement) }
+        // M7.3 slice 2 admitted a direct immutable slice result; slice 3
+        // generalizes that to ordinary aggregates whose scoped parts are all
+        // immutable views, materialized into caller-result storage. Mutable
+        // views and aggregates with unprovable capability leaves stay
+        // rejected.
+        if category.contains_scoped && !(try checked_type_views_materializable(d, state, parse, current, result_use.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
         let returned = __s0_buffer_get(CheckedExprRec, current.expressions, expression - 1)
         if returned.kind == 1 || returned.kind == 5 {
             let binding = __s0_buffer_get(LocalRec, current.locals, returned.parameter_use - 1)
@@ -5418,6 +5496,11 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if initializer.deferred { return body_token_fail(d, state, current, 87, initializer_node) }
+    // A using binding keeps its value for the whole scope, so an aggregate
+    // containing a scoped view cannot be registered there; its views are not
+    // tracked for invalidation.
+    let using_kind = __s0_buffer_get(CheckedTypeRec, current.types, initializer.checked_type - 1).kind
+    if (using_kind == 7 || using_kind == 9 || using_kind == 10 || using_kind == 11 || using_kind == 13 || using_kind == 15 || using_kind == 17) && (try checked_type_contains_scoped(d, state, parse, current, initializer.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
     let cleanup_node = __s0_buffer_get(SyntaxRec, parse.nodes, cleanup_link.node - 1)
     let callback = symbol_named(state, parse, current, cleanup_node)
     if callback == 0 || __s0_buffer_get(SymbolRec, current.symbols, callback - 1).kind != 12 { return body_fail(d, current, 83, cleanup_node) }
