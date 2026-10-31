@@ -346,6 +346,125 @@ int main(void) {
 	}
 }
 
+// TestSlicePartAggregateBehavior pins the MIR/C backend contract that
+// inferred-storage lowering needs for generalized immutable-view results:
+// an aggregate type may carry slice parts, aggregate.construct accepts
+// slice-valued fields, field loads read them back, and copy_to_domain
+// recursively materializes every slice part into the destination domain so
+// the returned value stays valid after the source domain is destroyed.
+func TestSlicePartAggregateBehavior(t *testing.T) {
+	const text = `mir 4
+
+type @Window.c0 {
+  head: slice(u64)
+  tail: slice(u64)
+}
+
+const @zero: u64 = 0
+const @two: u64 = 2
+const @four: u64 = 4
+const @w0: u64 = 3
+const @w1: u64 = 5
+const @w2: u64 = 7
+const @w3: u64 = 11
+
+fn @window_from_inner(%root: domain_handle, %seed: u64) -> @Window.c0 {
+bb0:
+  %inner = domain.create %root
+  %a0 = const.get @w0
+  %a1 = const.get @w1
+  %a2 = const.get @w2
+  %a3 = const.get @w3
+  %array = aggregate.construct array(u64, 4) { %a0, %a1, %a2, %a3 }
+  %all = array.as_slice %array
+  %lo = const.get @zero
+  %mid = const.get @two
+  %hi = const.get @four
+  %head = slice.range.checked %all, %lo, %mid else bb_fail
+  %tail = slice.range.checked %all, %mid, %hi else bb_fail
+  %window = aggregate.construct @Window.c0 { head: %head, tail: %tail }
+  %kept = copy_to_domain %root, %window
+  domain.destroy %inner
+  return %kept
+
+bb_fail:
+  domain.destroy %inner
+  panic
+}
+
+fn @window_field(%root: domain_handle, %window: @Window.c0) -> u64 {
+  local %copy: @Window.c0
+
+bb0:
+  store local %copy, %window
+  %head = load field(local %copy, head)
+  %zero = const.get @zero
+  %first = slice.index.checked %head, %zero else bb_none
+  %value = load deref %first
+  return %value
+
+bb_none:
+  panic
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := Generate(m)
+	if err != nil {
+		t.Fatalf("generate slice-part aggregate fixture: %v", err)
+	}
+	for _, cc := range findCompilers(t) {
+		cc := cc
+		t.Run(filepath.Base(cc), func(t *testing.T) {
+			object := buildRuntimeObject(t, cc)
+			dir := t.TempDir()
+			gen := filepath.Join(dir, "gen.c")
+			if err := os.WriteFile(gen, []byte(generated), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			driver := filepath.Join(dir, "driver.c")
+			const source = `#include "gen.c"
+#include <stdint.h>
+int main(void) {
+    AlderDomain root = {0};
+    if (!alder_domain_init(&root, NULL)) { return 2; }
+    AlderTy13 window = alder_fn_window_from_inner_0(&root, (uint64_t)0);
+    /* Both slice parts were materialized into the root domain even though
+     * the function destroyed its inner domain before returning. */
+    if (window.alder_f0.len != 2 || window.alder_f0.data == NULL) { return 3; }
+    if (window.alder_f1.len != 2 || window.alder_f1.data == NULL) { return 4; }
+    const uint64_t *head = (const uint64_t *)window.alder_f0.data;
+    const uint64_t *tail = (const uint64_t *)window.alder_f1.data;
+    if (head[0] != 3 || head[1] != 5) { return 5; }
+    if (tail[0] != 7 || tail[1] != 11) { return 6; }
+    /* The parts are independent destination-domain storage, not aliases of
+     * each other. */
+    if (window.alder_f0.data == window.alder_f1.data) { return 7; }
+    /* A slice part read back through a field load and checked index still
+     * observes the copied values. */
+    if (alder_fn_window_field_1(&root, window) != (uint64_t)3) { return 8; }
+    alder_domain_destroy(&root);
+    return alder_runtime_live_allocations() == (size_t)0 ? 0 : 9;
+}
+`
+			if err := os.WriteFile(driver, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			exe := filepath.Join(dir, "slice_part.exe")
+			args := runArgs(gen, driver, object)
+			args = append(args, "-o", exe)
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("compile slice-part aggregate fixture: %v\n%s", err, out)
+			}
+			if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+				t.Fatalf("run slice-part aggregate fixture: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
 // TestFloatNarrowingPanics proves the f64-to-f32 guard executes before an
 // out-of-range C cast. The ordinary checked fixture covers the in-range path.
 func TestFloatNarrowingPanics(t *testing.T) {
