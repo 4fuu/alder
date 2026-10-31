@@ -625,7 +625,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `a6eefe53f35dbb59fa72b0e5419fb915ae5f2984cac51dcecf3e5005a385e3f6`;
+  `c189eee87bc20224f83ff927a222698f4cc485c9c236685583d734cbddc7aadc`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -706,7 +706,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `a6eefe53f35dbb59fa72b0e5419fb915ae5f2984cac51dcecf3e5005a385e3f6`.
+  `c189eee87bc20224f83ff927a222698f4cc485c9c236685583d734cbddc7aadc`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -861,9 +861,11 @@ bridges are now compiler-private, accepted only under a private bootstrap
 profile (`--bootstrap-private`) that exists to compile `compiler/src`,
 `bootstrap/spike`, and the bridge test fixtures, while ordinary programs
 construct values through inferred storage with a parameterless hosted entry.
-What remains for slice 3 is the sibling half: direct immutable view results
-are not yet generalized to nested ordinary aggregates, and this milestone is
-not complete.
+The Alder production driver also verifies its own output at the current MIR
+format version again, and the self-hosted e2e corpus now includes the
+`collections` and `storage` Vec programs. What remains for slice 3 is the
+sibling half: direct immutable view results are not yet generalized to
+nested ordinary aggregates, and this milestone is not complete.
 
 Exit requires focused acceptance/rejection tests for storage retention
 fallback, returned immutable views, cross-domain copies, nested candidate

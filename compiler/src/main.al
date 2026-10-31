@@ -37,7 +37,7 @@ fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I
 fn run_verify(d: Domain, mir: MirStore) -> I32 {
     var hosted = false
     if driver_command() == 3 && (!project_mode() || project_binary()) { hosted = true }
-    return match mir_verify_complete(d, mir, 3, hosted) {
+    return match mir_verify_complete(d, mir, mir_format_version(), hosted) {
         Err(error) => storage_error()
         Ok(result) => finish_verify(d, mir, result)
     }

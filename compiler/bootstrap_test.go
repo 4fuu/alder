@@ -36,6 +36,8 @@ var bootstrapE2EFixtures = []string{
 	"domains",
 	"maps",
 	"buffer",
+	"collections",
+	"storage",
 	"cleanup",
 	"ffi",
 }
@@ -504,7 +506,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "a6eefe53f35dbb59fa72b0e5419fb915ae5f2984cac51dcecf3e5005a385e3f6"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "c189eee87bc20224f83ff927a222698f4cc485c9c236685583d734cbddc7aadc"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }
