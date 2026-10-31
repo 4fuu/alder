@@ -387,13 +387,15 @@ func TestAtomicOutputReplacementAndIsolation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "shared.mir.alder-tmp-0"), []byte("reserved"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Write b.al once: rewriting it while earlier writers are still reading
+	// it can hand them an empty source.
+	source(t, dir, "b.al", "B")
 	const processes = 16
 	commands := make([]*exec.Cmd, 0, processes)
 	for i := 0; i < processes; i++ {
 		name := "a.al"
 		if i%2 != 0 {
 			name = "b.al"
-			source(t, dir, name, "B")
 		}
 		command := exec.Command(exe, "compile", "--emit=mir", "-o", "shared.mir", name)
 		command.Dir = dir
