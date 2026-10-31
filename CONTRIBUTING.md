@@ -107,7 +107,7 @@ pruned.
 requests as three independent jobs: the Go checks, the strict C syntax check,
 and `bootstrap/regenerate.sh`. The bootstrap job is gated on the paths
 `regenerate.sh` consumes (`bootstrap/`, `compiler/src/`, `runtime/c/`) because
-it takes about 4 minutes and up to 3.5 GiB, and it defaults to running whenever the
+it takes about 3 minutes and up to 3.5 GiB, and it defaults to running whenever the
 path comparison cannot be made. Keep the workflow in step with the commands
 above.
 
