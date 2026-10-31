@@ -113,6 +113,14 @@ type MirV6ConsumerIndex {
     tail: __s0_Buffer(U64)
     target: __s0_Buffer(U64)
     next: __s0_Buffer(U64)
+    merged: __s0_Buffer(U64)
+}
+
+// Result of a merge: the updated durable state plus the last source fact
+// position this merge reached, for the caller to record on its resume slot.
+type MirV6MergeStep {
+    durable: MirV6Durable
+    merged: U64
 }
 
 fn mir_v6_fact_start(analysis: MirV6Analysis, function: U64, value: U64) -> U64 { let kb = analysis.fact_key_base
@@ -467,6 +475,64 @@ while at != 0 {
 }
 return Ok(durable) }
 
+// Bound on the consumer-edge chain walk. A source's edge list is its set of
+// merge targets, which is small in practice; the cap only guards against a
+// pathological fan-out, and a walk that reaches it simply merges from the head.
+// Measured on the compiler's own sources: the longest chain is 500 edges and
+// every merge site is present in its source's chain, so 1024 gives full resume
+// coverage with two times headroom.
+fn mir_v6_merge_chain_limit() -> U64 { return 1024 }
+
+// Merge `source` into `target`, resuming from the last position an earlier merge
+// of the same (function, target, source) reached. The resume state lives on the
+// consumer edge for that pair, found by walking the source key's edge chain.
+//
+// The consumer index is a superset of the merge sites, not an exact mirror:
+// mir_v6_consumer_add records x.a for vec_grow_checked where transfer_value
+// merges x.b, and an extra x.b edge for copy_to_domain. Both only cost resume
+// coverage on those sites. Correctness never depends on coverage — an edge is
+// only ever read by a merge with the same (target, source), and any merge of
+// that pair is semantically identical.
+fn mir_v6_merge_edge(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, consumers: MirV6ConsumerIndex, function: U64, target: U64, source: U64) -> Result(MirV6Durable, __s0_Error) {
+    var edge: U64 = 0
+    let key = mir_v6_round_fact_key(index, function, source)
+    if key != 0 && key < __s0_buffer_len(U64, consumers.head) {
+        var at = __s0_buffer_get(U64, consumers.head, key)
+        var steps: U64 = 0
+        while at != 0 && edge == 0 && steps < mir_v6_merge_chain_limit() {
+            if __s0_buffer_get(U64, consumers.target, at - 1) == target { edge = at } else { at = __s0_buffer_get(U64, consumers.next, at - 1) }
+            steps = steps + 1
+        }
+    }
+    var after: U64 = 0
+    if edge != 0 { after = __s0_buffer_get(U64, consumers.merged, edge - 1) }
+    let step = try mir_v6_merge_from(d, durable0, index, function, target, source, after)
+    if edge != 0 { __s0_buffer_set(U64, consumers.merged, edge - 1, step.merged) }
+    return Ok(step.durable)
+}
+
+fn mir_v6_merge_from(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, function: U64, target: U64, source: U64, after: U64) -> Result(MirV6MergeStep, __s0_Error) {
+    var durable = durable0
+    let key = mir_v6_round_fact_key(index, function, source)
+    if key == 0 { return Ok(MirV6MergeStep(durable: durable, merged: 0)) }
+    let stop = __s0_buffer_get(U64, index.fact_key_tail, key)
+    var at = mir_v6_round_fact_start(index, function, source)
+    var merged: U64 = 0
+    while at != 0 && at <= after {
+        merged = at
+        at = mir_v6_round_fact_next(durable, at)
+    }
+    while at != 0 {
+        let x = mir_v6_round_fact_at(durable, at)
+        let next = mir_v6_round_fact_next(durable, at)
+        durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: target, kind: x.kind, a: x.a, b: x.b, c: x.c))
+        merged = at
+        if at == stop { return Ok(MirV6MergeStep(durable: durable, merged: merged)) }
+        at = next
+    }
+    return Ok(MirV6MergeStep(durable: durable, merged: merged))
+}
+
 fn mir_v6_type_contains(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64, wanted: U64) -> Result(Bool, __s0_Error) { var work = try __s0_buffer_new(U64, d)
 work = try __s0_buffer_append(U64, d, work, root)
 // O(1) visited probe; the linear seen scan was quadratic on the dense type
@@ -669,6 +735,7 @@ fn mir_v6_consumer_add(d: Domain, index: MirV6RoundIndex, consumers0: MirV6Consu
     let old_tail = __s0_buffer_get(U64, consumers.tail, key)
     consumers.target = try __s0_buffer_append(U64, d, consumers.target, target)
     consumers.next = try __s0_buffer_append(U64, d, consumers.next, 0)
+    consumers.merged = try __s0_buffer_append(U64, d, consumers.merged, 0)
     let edge = __s0_buffer_len(U64, consumers.target)
     if old_tail == 0 { __s0_buffer_set(U64, consumers.head, key, edge) }
     else { __s0_buffer_set(U64, consumers.next, old_tail - 1, edge) }
@@ -685,7 +752,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
         tail = try __s0_buffer_append(U64, d, tail, 0)
         key = key + 1
     }
-    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d))
+    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d), merged: try __s0_buffer_new(U64, d))
     var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         var value_id: U64 = 1
@@ -758,7 +825,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
     return Ok(consumers)
 }
 
-fn mir_v6_transfer_value(d: Domain, store: MirStore, indexes: MirVIndexes, transfer: MirV6TransferIndex, index: MirV6RoundIndex, durable0: MirV6Durable, function: U64, value_id: U64) -> Result(MirV6Durable, __s0_Error) { var durable = durable0
+fn mir_v6_transfer_value(d: Domain, store: MirStore, indexes: MirVIndexes, transfer: MirV6TransferIndex, index: MirV6RoundIndex, consumers: MirV6ConsumerIndex, durable0: MirV6Durable, function: U64, value_id: U64) -> Result(MirV6Durable, __s0_Error) { var durable = durable0
 let vi = mir_vindex_value(indexes, function, value_id)
 let value = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if value.def_kind == mir_value_def_function_param() { let parameter = mir_v6_function_param_ordinal(store, indexes, function, value_id)
@@ -778,7 +845,7 @@ if value.def_kind == mir_value_def_block_param() {
         let count = __s0_buffer_get(U64, transfer.incoming_count, parameter - 1)
         var incoming: U64 = 0
         while incoming < count {
-            durable = try mir_v6_merge_value(d, durable, index, function, value_id, __s0_buffer_get(U64, transfer.incoming_sources, start + incoming))
+            durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, __s0_buffer_get(U64, transfer.incoming_sources, start + incoming))
             incoming = incoming + 1
         }
     }
@@ -786,7 +853,7 @@ if value.def_kind == mir_value_def_block_param() {
 }
 if value.def_kind == mir_value_def_switch_case() { let term_id = mir_vindex_term(indexes, function, value.block)
 if term_id != 0 { let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
-durable = try mir_v6_merge_value(d, durable, index, function, value_id, t.value) }
+durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, t.value) }
 return Ok(durable) }
 let iid = mir_v6_instruction_for_value(store, indexes, value)
 if iid == 0 { return Ok(durable) }
@@ -799,10 +866,10 @@ durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, v
 // A cross-domain copy has independent value/storage provenance. The source is
 // intentionally not merged: destroying its inner domain cannot invalidate the
 // copy rooted in the destination domain.
-if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a)
+if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
 durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1)) }
 if x.op == mir_op_load() { let p = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
-if p.kind == mir_place_deref() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, p.deref_value) }
+if p.kind == mir_place_deref() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, p.deref_value) }
 // Stores retain their original block/ordinal order without materializing the
 // potentially quadratic load-by-aliasing-store cross product.
 let first_store = __s0_buffer_get(U64, transfer.store_start, function - 1)
@@ -813,19 +880,19 @@ let load_depth = mir_vindex_place_depth(indexes, x.place)
 var store_at: U64 = 0
 while store_at < store_count { let store_id = __s0_buffer_get(U64, transfer.stores, first_store + store_at)
 let placed = __s0_buffer_get(MirInstrRec, store.instructions, store_id - 1)
-if mir_v6_places_alias(store, indexes, x.place, load_deref, load_root, load_depth, placed.place) { durable = try mir_v6_merge_value(d, durable, index, function, value_id, placed.a) }
+if mir_v6_places_alias(store, indexes, x.place, load_deref, load_root, load_depth, placed.place) { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, placed.a) }
 store_at = store_at + 1 } }
 if x.op == mir_op_aggregate_construct() { let total = mir_vindex_op_instr_count(indexes, iid)
 var oi: U64 = 0
 while oi < total { let o = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_instr(indexes, iid, oi) - 1)
-if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, o.value) }
+if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, o.value) }
 oi = oi + 1 } }
-if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.a) }
-if x.op == mir_op_vec_grow_checked() { durable = try mir_v6_merge_value(d, durable, index, function, value_id, x.b) }
+if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a) }
+if x.op == mir_op_vec_grow_checked() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.b) }
 if x.op == mir_op_call() { var e = mir_v6_round_effect_start(index, x.target)
 while e != 0 { let effect = mir_v6_round_effect_at(durable, e)
 if effect.kind == mir_v6_effect_result_from() || effect.kind == mir_v6_effect_result_alloc() { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)
-durable = try mir_v6_merge_value(d, durable, index, function, value_id, arg)
+durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, arg)
 if effect.kind == mir_v6_effect_result_alloc() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: arg, b: x.block, c: x.ordinal + 1)) } }
 e = mir_v6_round_effect_next(durable, e) } }
 return Ok(durable) }
@@ -885,7 +952,7 @@ while needs_pass {
     while mir_vindex_value(indexes, function, value) != 0 {
     __s0_buffer_set(U64, processed, value, generation)
     let function_facts = __s0_buffer_len(MirV6Fact, durable.facts)
-    durable = try mir_v6_transfer_value(d, store, indexes, transfer, index, durable, function, value)
+    durable = try mir_v6_transfer_value(d, store, indexes, transfer, index, consumers, durable, function, value)
     if function_facts != __s0_buffer_len(MirV6Fact, durable.facts) {
         let key = mir_v6_round_fact_key(index, function, value)
         var edge = __s0_buffer_get(U64, consumers.head, key)

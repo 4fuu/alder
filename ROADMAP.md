@@ -518,9 +518,9 @@ Exit-criteria evidence on the fixed 28-file source root:
 - a native `alder1 check` of all 28 sources completes in 168.55 seconds on the
   measured Linux/GCC host, and `alder1` emits the next compiler C in 182.68
   seconds, with approximately 2.5 GiB peak memory. After the compile-speed work
-  recorded below, the same 30-source corpus measures 142.70 s for `check` and
-  148.66 s for `compile --emit=c` on the 2026-10 Amp orb host, with 3.36 GiB and
-  3.48 GiB peak RSS respectively — an 8.33x reduction in `check` time against
+  recorded below, the same 30-source corpus measures 85.02 s for `check` and
+  89.32 s for `compile --emit=c` on the 2026-10 Amp orb host, with 3.48 GiB peak
+  RSS for `check` — an 13.99x reduction in `check` time against
   the 1189.17 s measured on that host before the change;
 - `ALDER_BOOTSTRAP_SELFCOMPILE=1 go test ./compiler -run
   '^TestAlder1CompilesCompilerSource$' -count=1` passes the complete source,
@@ -570,10 +570,28 @@ Six changes landed:
   is in the backend rather than in the compiled source, the fixed point needed a
   second regeneration round to settle.
 
+A seventh change landed after the integration branch: phase 6's `merge_value`
+re-walked a source's whole per-key fact list on every merge, and each fact it
+re-added was already present, because the target's fact list is append-only and
+insertion-ordered while the source's is only ever appended to. Once a merge of a
+given (function, target, source) has reached fact position `p`, every fact at or
+before `p` is already in the target. `MirV6ConsumerIndex` now carries one `merged`
+resume slot per consumer edge, `mir_v6_merge_edge` finds that edge by walking the
+source key's edge chain for the matching target, and `mir_v6_merge_from`
+fast-forwards past the already-merged prefix instead of re-adding it. The
+sequence of effective adds is unchanged, so fact order and all output are
+identical. Two consumer-index mismatches — `vec_grow_checked` records `x.a`
+where `transfer_value` merges `x.b`, and `copy_to_domain` records an extra `x.b`
+edge — are left as they are; they only cost resume coverage, never correctness.
+The chain walk is capped at 1024 edges: the longest chain on the compiler's own
+sources measures 500 and every merge site is present in its source's chain, so
+the cap is never reached here.
+
 Measured on the 2026-10 Amp orb host (30 sources, `-O2`): `check` 1189.17 s to
 256.43 s with the first three changes, to 219.73 s with the fourth, to 213.54 s
-with the fifth, and to 142.70 s with the sixth, `compile --emit=c` 267.64 s to
-148.66 s, peak RSS unchanged at about 3.4 GiB.
+with the fifth, to 142.70 s with the sixth, and to 85.02 s with the seventh,
+`compile --emit=c` 267.64 s to 89.32 s, peak RSS unchanged at about 3.4 GiB
+(+7.3 MB for the consumer-index resume slots).
 Peak memory is dominated by the never-freed doubling domain segments and is not
 addressed by this work.
 
@@ -607,7 +625,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `6fb97d7b2e9b177e5d059d6b69fc12af34785e88e7ffc2fe0f95e9ca79667e4e`;
+  `788777ba5f3c11935e006f9405b74100eb1ee4f80f59b321dbcd0251c1d342c2`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -688,7 +706,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `6fb97d7b2e9b177e5d059d6b69fc12af34785e88e7ffc2fe0f95e9ca79667e4e`.
+  `788777ba5f3c11935e006f9405b74100eb1ee4f80f59b321dbcd0251c1d342c2`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
