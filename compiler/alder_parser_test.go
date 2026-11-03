@@ -384,7 +384,9 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"unsafe-not-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x", 18, "unsafe", 0, 6},
 		{"unsafe-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { f()", 18, "", 0, 0},
 		{"for-missing-in.al", "fn bad(xs: U64) -> U64 {\n for x xs {}\n}\n", 4, "xs {}", 0, 2},
-		{"using-missing-with.al", "fn bad() -> U64 {\n using x = make() Cleanup\n}\n", 4, "Cleanup", 0, 7},
+		// `using x = expr` without a `with` clause is the M7.5 public form, so
+		// the trailing token now fails later as a statement, not at `with`.
+		{"using-missing-with.al", "fn bad() -> U64 {\n using x = make() Cleanup\n}\n", 11, "Cleanup", 0, 7},
 		{"if-missing-block.al", "fn bad() -> U64 {\n if true", 4, "", 0, 0},
 		{"call-empty-eof.al", "fn bad() -> U64 {\n return f(", 12, "", 0, 0},
 		{"call-value-eof.al", "fn bad() -> U64 {\n return f(x", 4, "", 0, 0},

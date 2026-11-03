@@ -145,12 +145,17 @@ type TypeParamRec {
 // Checked type kinds: 1 primitive, 2 String, 3 Domain, 4 DomainMark,
 // 5 __s0_Error, 6 type parameter, 7 declared type, 8 slice, 9 Option,
 // 10 Result, 11 Map, 12 Ptr, 13 __s0_Buffer, 14 Bytes, 15 Array,
-// 16 __s0_String, 17 Vec, and 18 MutSlice. Primitive targets
+// 16 __s0_String, 17 Vec, 18 MutSlice, 19 Table, 20 TableId, 21 TableView,
+// and 22 TableMutView. Primitive targets
 // 1..12 identify Bool, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, and
 // Unit directly. An Array record has one type argument and stores its fixed
 // length in target. String and Bytes retain source identities distinct from
 // slice(U8); __s0_String is the private bootstrap slice(U8) facility. Vec has
 // recursively copyable value semantics; slice and MutSlice are scoped views.
+// Table(T) is the affine generational identity owner, TableId(T) is the
+// copyable `T.Id` handle, and TableView/TableMutView are the scoped `get`
+// and `get_mut` payloads; view kinds never name a source type position and
+// appear only as Option payloads of table lookups.
 // Canonical records have no source ownership (syntax is zero);
 // source occurrences are retained by
 // CheckedTypeAnnotationRec.
@@ -277,6 +282,8 @@ type CheckedExprChildRec {
 // and 5 OutOfMemory or 6 Limit for kind 6. Collection builtin identities are
 // 18 Vec.new, 19 Vec.from_array, 20 len, 21 Vec.push, 22 get,
 // 23 immutable slice/range, 24 mutable slice, and 25 mutable subview.
+// Table builtin identities are 26 Table.new, 27 insert, 28 get, 29 get_mut,
+// and 45 remove (30-44 are the ordered Map/Set and function-value builtins).
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -344,6 +351,9 @@ type CheckedPlaceRec {
 // declared enum variant, 1 None, 2 Some, 3 Ok, 4 Err, 5 OutOfMemory, 6 Limit,
 // and 7 wildcard. Declared variants carry variant_use; builtins and wildcard do
 // not. Arm bodies are checked expressions, including statement-form matches.
+// block is zero for an expression body; a nonzero block names the arm's
+// CheckedBlockRec statement body, whose statements were checked under the
+// table-view or Unit block-arm rules.
 // Expression kinds 14..17 are concrete None, Some, Ok, and Err constructors;
 // payload constructors own exactly one ordered expression child.
 type CheckedMatchRec {
@@ -365,6 +375,7 @@ type CheckedMatchArmRec {
     binding: U64
     environment: U64
     body: U64
+    block: U64
 }
 
 type CheckedTryRec {
@@ -379,7 +390,11 @@ type CheckedTryRec {
 // A cleanup record is owned by one concrete function instance and one using
 // statement. environment is the lexical environment before the binding is
 // introduced; binding and initializer are concrete checker IDs, and callback
-// is the concrete nongeneric function instance. The exit facts tell lowering
+// is the concrete nongeneric function instance. A zero callback marks the
+// builtin owner form of M7.5, whose initializer type is exactly Table(T):
+// lowering registers a compiler-synthesized release callback, so the owner is
+// exempt from the must-transfer exit rule and a transfer disarms the entry.
+// The exit facts tell lowering
 // that this scope must run on lexical fallthrough, return, and Result `try`
 // propagation without predicting MIR blocks or CFG IDs.
 type CheckedCleanupRec {
@@ -394,6 +409,19 @@ type CheckedCleanupRec {
     try_exit: U64
 }
 
+// A table-view registration is owned by one concrete function instance.
+// binding is the arm binding local of table view type, root is the viewed
+// owning table local, and mutable_view distinguishes get_mut from get. The
+// buffer is appended when the arm binding is created, before the arm body is
+// checked, so the lexical access-conflict checks see the live view; it is not
+// manifest output.
+type CheckedTableViewRec {
+    owner: U64
+    binding: U64
+    root: U64
+    mutable_view: U64
+}
+
 type CheckedControlStore {
     blocks: __s0_Buffer(CheckedBlockRec)
     statement_links: __s0_Buffer(CheckedStatementLinkRec)
@@ -403,6 +431,7 @@ type CheckedControlStore {
     match_arms: __s0_Buffer(CheckedMatchArmRec)
     tries: __s0_Buffer(CheckedTryRec)
     cleanups: __s0_Buffer(CheckedCleanupRec)
+    table_views: __s0_Buffer(CheckedTableViewRec)
 }
 
 // Bindings are recorded per function in canonical declaration order. kind is 1
@@ -486,6 +515,14 @@ type EnvironmentRec {
 // aggregates whose scoped parts are all immutable views are materialized into
 // caller-result storage by M7.3 lowering. Outside the private bootstrap
 // profile, 105 rejects a bootstrap type and 106 a bootstrap operation.
+// Table diagnostics (M7.5): 130 rejects a Table element that is not concrete
+// copyable data, 131 a table operation whose receiver is not a named owning
+// binding, 132 a table lookup used anywhere but a match scrutinee or matched
+// without an explicit Some binding, 133 a table-view arm region violation
+// (control flow, a fallible operation, a non-copy statement, or a view used
+// as a value), 134 an overlapping table access against a live view, 135 mixed
+// block and expression match arms, and 136 a callback-free `using` whose
+// initializer is not a builtin Table owner.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

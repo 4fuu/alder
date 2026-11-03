@@ -257,9 +257,14 @@ while
 for name in slice
 return
 using name = value with cleanup_function
+using name = value
 block
 match expression statement
 ```
+
+The second `using` form is the M7.5 public surface: it accepts exactly a
+`Table(T)` owner, registers the builtin release, and keeps the
+`with cleanup_function` clause as the bootstrap-private bridge.
 
 `while`/`for` do not yet support `break` or `continue`. Assignment targets are
 restricted to the implemented identifier/field/index shapes. Every non-`Unit`
@@ -272,13 +277,21 @@ Implemented expressions include:
 - checked arithmetic, shifts, comparisons, equality for supported primitives,
   and short-circuit Boolean operators;
 - calls, record/variant construction, field access, index and range;
-- exhaustive `match` over enums, `Option`, and `Result`;
+- exhaustive `match` over enums, `Option`, and `Result`, including statement
+  arms (`=> { ... }`) whose bodies may hold ordinary statements;
 - prefix `try` with the exact same error type;
 - a single direct imported call in `unsafe c { ... }`;
-- S0 domain, allocation, buffer, and map intrinsics.
+- M7.5 table identity: `Table(T)` over concrete copyable elements,
+  `Table.new(T)`, `t.insert(value) -> T.Id`, `t.remove(id) -> Bool`, and
+  `t.get(id)`/`t.get_mut(id)` consumed only as a match scrutinee, where the
+  `Some` arm binds a scoped view usable for field reads (and field writes
+  through `get_mut`) inside a straight-line fail-free arm body;
+- the callback-free `using name = Table.new(T)` registration, whose owner is
+  cleanup-covered at every exit and disarmed on transfer.
 
-Bitwise source operators, trait methods, closures, ordinary owned vectors,
-table identity, modules, `pub`, async, and the 1.0 standard library are absent.
+Bitwise source operators, trait methods, closures, affine aggregate and
+element composition, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0
+standard library are absent.
 
 ## Temporary memory and cleanup bridges
 

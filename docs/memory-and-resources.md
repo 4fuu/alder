@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **MIR/runtime mechanisms exist; the source model and inference are not implemented**
+Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, and callback-free `using` cleanup for table owners. Affine aggregate and element composition, `Cleanup`/`AsyncCleanup` selection for user types, and the remaining resource model are not implemented.**
 
 Alder separates ordinary data, resource ownership, scoped access, and
 long-lived identity. It does not force one ownership mechanism onto every

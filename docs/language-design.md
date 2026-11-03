@@ -187,7 +187,7 @@ as `defer`.
 | Exact-width numerics and checked operations | Yes | S0/MIR/C implemented, with current full-`U64` frontend limits documented in S0 |
 | `String`, `Bytes`, arrays, slices, `Vec`, ordered `Map`/`Set` | Required for 1.0 | M7 implements fixed arrays and distinct owned `String`/`Bytes`; M7.1 implements `Vec`, immutable views, and exclusive mutable views; M7.5 implements the ordered `Map`/`Set` with insertion-ordered linear lookup |
 | Inferred invisible storage | Required for 1.0 | Explicit bootstrap domains and MIR operations exist; inference is not implemented |
-| `Table(T)` and `T.Id` | Required for 1.0 | MIR/runtime implemented; source surface not implemented |
+| `Table(T)` and `T.Id` | Required for 1.0 | M7.5 implements the source surface: `Table.new(T)`, `insert`, `remove`, `get`/`get_mut` scrutinee matches with staleness and overlap rejection, and callback-free `using` cleanup for table owners (concrete copyable elements; affine element composition is gated) |
 | Resource-selected `using` | Required for 1.0 | S0 callback form is bootstrap-only |
 | Inherent methods | Required for 1.0 | M7 implements inherent methods, associated functions, and receiver modes |
 | Static traits and safe closures | Required for 1.0 | Not implemented in S0 |

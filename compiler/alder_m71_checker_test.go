@@ -19,7 +19,7 @@ func TestAlderM71CheckerModelContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, fact := range []string{
-		"16 __s0_String, 17 Vec, and 18 MutSlice",
+		"16 __s0_String, 17 Vec, 18 MutSlice, 19 Table, 20 TableId, 21 TableView,",
 		"18 Vec.new, 19 Vec.from_array, 20 len, 21 Vec.push, 22 get",
 	} {
 		if !strings.Contains(string(model), fact) {

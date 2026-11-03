@@ -45,7 +45,7 @@ fn checker_parsed(d: Domain, result: ParseResult, store: CheckStore) -> I32 { re
  ParseBad(output) => checker_parse_bad(output.state, output.store)
  ParseLexBad(output) => checker_lex_bad(output.state)
 } }
-fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match empty_trait_store(d) { Err(e) => 3 Ok(traits) => match empty_closure_store(d) { Err(e) => 3 Ok(closures) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b, traits: traits, closures: closures)) } } } } } } } } } } } } } } }
+fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match __s0_buffer_new(CheckedTableViewRec, d) { Err(e) => 3 Ok(table_views) => match empty_trait_store(d) { Err(e) => 3 Ok(traits) => match empty_closure_store(d) { Err(e) => 3 Ok(closures) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups, table_views: table_views), diagnostics: b, traits: traits, closures: closures)) } } } } } } } } } } } } } } } }
 fn ci_returns(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec)) -> I32 { return match __s0_buffer_new(CheckedReturnRec, d) { Err(e) => 3 Ok(b) => ci_diag(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,children,b) } }
 fn ci_children(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec)) -> I32 { return match __s0_buffer_new(CheckedExprChildRec, d) { Err(e) => 3 Ok(b) => ci_returns(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,b) } }
 fn ci_calls(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec)) -> I32 { return match __s0_buffer_new(CallAnnotationRec, d) { Err(e) => 3 Ok(b) => ci_children(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,b) } }
@@ -141,7 +141,7 @@ type checkerBlock struct {
 }
 
 type checkerMatch struct{ id, owner, syntax, scrutinee, scrutineeType, checkedType, firstArm, armCount int }
-type checkerMatchArm struct{ id, owner, syntax, checkedMatch, variantUse, variantKind, binding, environment, body int }
+type checkerMatchArm struct{ id, owner, syntax, checkedMatch, variantUse, variantKind, binding, environment, body, block int }
 type checkerTry struct{ id, owner, syntax, expression, resultType, okType, errorType int }
 type checkerCleanup struct {
 	id, owner, syntax, environment, binding, initializer, callback int
@@ -188,6 +188,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
 	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorCheckerBehavior(t, exe) })
+	t.Run("m75-tables", func(t *testing.T) { runAlderM75TableCheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
@@ -1388,7 +1389,7 @@ func runMatchTryCheckerConformance(t *testing.T, exe string) {
 			value        string
 		}{
 			{"M owner", "M", 2, "999"}, {"M syntax reciprocity", "M", 3, "999"}, {"M scrutinee reciprocity", "M", 4, "999"}, {"M type reference", "M", 5, "999"},
-			{"W owner", "W", 2, "999"}, {"W match reference", "W", 4, "999"}, {"W variant kind", "W", 6, "8"}, {"W body ownership", "W", 9, "999"},
+			{"W owner", "W", 2, "999"}, {"W match reference", "W", 4, "999"}, {"W variant kind", "W", 6, "8"}, {"W body ownership", "W", 9, "999"}, {"W block reference", "W", 10, "999"},
 			{"X owner", "X", 2, "999"}, {"X expression reference", "X", 4, "999"}, {"X result type", "X", 5, "999"},
 		}
 		for _, fixture := range malformed {
@@ -1601,7 +1602,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		return m, errors.New("manifest has no final line break")
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 14" || lines[len(lines)-1] != "END" {
+	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 15" || lines[len(lines)-1] != "END" {
 		return m, errors.New("invalid checker manifest envelope")
 	}
 	phase := 0
@@ -1725,10 +1726,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.matches = append(m.matches, checkerMatch{id: numbers[0], owner: numbers[1], syntax: numbers[2], scrutinee: numbers[3], scrutineeType: numbers[4], checkedType: numbers[5], firstArm: numbers[6], armCount: numbers[7]})
 		case "W":
-			if err != nil || len(numbers) != 9 {
+			if err != nil || len(numbers) != 10 {
 				return m, fmt.Errorf("line %d has invalid W record", lineNumber+2)
 			}
-			m.matchArms = append(m.matchArms, checkerMatchArm{id: numbers[0], owner: numbers[1], syntax: numbers[2], checkedMatch: numbers[3], variantUse: numbers[4], variantKind: numbers[5], binding: numbers[6], environment: numbers[7], body: numbers[8]})
+			m.matchArms = append(m.matchArms, checkerMatchArm{id: numbers[0], owner: numbers[1], syntax: numbers[2], checkedMatch: numbers[3], variantUse: numbers[4], variantKind: numbers[5], binding: numbers[6], environment: numbers[7], body: numbers[8], block: numbers[9]})
 		case "X":
 			if err != nil || len(numbers) != 7 {
 				return m, fmt.Errorf("line %d has invalid X record", lineNumber+2)
@@ -1902,7 +1903,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 && checked.kind != 23 && checked.kind != 24 && checked.kind != 25 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 25 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
@@ -1927,7 +1928,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		switch checked.kind {
 		case 7:
 			wantCount = m.symbols[checked.target-1].arity
-		case 8, 9, 12, 13, 15, 17, 18, 24:
+		case 8, 9, 12, 13, 15, 17, 18, 19, 20, 21, 22, 24:
 			wantCount = 1
 		case 10, 11, 23:
 			wantCount = 2
@@ -2111,6 +2112,10 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		rootType := m.locals[place.root-1].checkedType
 		valueType := rootType
+		// A table-view root mutates the element type's fields.
+		if m.types[rootType-1].kind == 21 || m.types[rootType-1].kind == 22 {
+			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
+		}
 		if place.kind >= 3 {
 			if rootType < 1 || rootType > len(m.types) || (m.types[rootType-1].kind != 8 && m.types[rootType-1].kind != 15 && m.types[rootType-1].kind != 17 && m.types[rootType-1].kind != 18) || m.types[rootType-1].count != 1 {
 				return fmt.Errorf("checked place has nonslice indexed root %+v", place)
@@ -2207,6 +2212,18 @@ func validateCheckerManifest(m checkerManifest) error {
 				validBody = false
 			}
 		}
+		// A statement-arm block is parented by its match arm, not by a
+		// statement body.
+		if statement.kind == 5 && statement.expression >= 1 && statement.expression <= len(m.expressions) {
+			if m.expressions[statement.expression-1].kind == 12 && m.expressions[statement.expression-1].parameterUse >= 1 && m.expressions[statement.expression-1].parameterUse <= len(m.matches) {
+				match := m.matches[m.expressions[statement.expression-1].parameterUse-1]
+				for armAt := match.firstArm; armAt < match.firstArm+match.armCount; armAt++ {
+					if m.matchArms[armAt-1].block >= 1 && m.matchArms[armAt-1].block <= len(m.blocks) {
+						childBlockOwners[m.matchArms[armAt-1].block-1]++
+					}
+				}
+			}
+		}
 		validAlternative := statement.alternative == 0
 		if statement.alternative >= 1 && statement.alternative <= len(m.blocks) {
 			alternative := m.blocks[statement.alternative-1]
@@ -2234,6 +2251,12 @@ func validateCheckerManifest(m checkerManifest) error {
 			validInitializer = m.expressions[cleanup.initializer-1].owner == cleanup.owner && m.expressions[cleanup.initializer-1].checkedType == m.locals[cleanup.binding-1].checkedType
 		}
 		validCallback := cleanup.callback >= 1 && cleanup.callback <= len(m.symbols) && m.symbols[cleanup.callback-1].kind == 12 && m.symbols[cleanup.callback-1].arity == 0
+		// The M7.5 builtin owner form carries callback 0; its binding type
+		// must then be exactly a one-argument Table.
+		if cleanup.callback == 0 && validBinding {
+			bindingType := m.types[m.locals[cleanup.binding-1].checkedType-1]
+			validCallback = bindingType.kind == 19 && bindingType.count == 1
+		}
 		if cleanup.id != i+1 || !checkerConcreteOwner(m, cleanup.owner) || !validEnvironment || !validBinding || !validInitializer || !validCallback || cleanup.normalExit != 1 || cleanup.returnExit != 1 || cleanup.tryExit != 1 || cleanupOwners[i] != 1 {
 			return fmt.Errorf("invalid checked cleanup %+v", cleanup)
 		}
@@ -2257,8 +2280,20 @@ func validateCheckerManifest(m checkerManifest) error {
 			linkOwners[link-1]++
 			statementOwners[item.statement-1]++
 			statement := m.statements[item.statement-1]
-			if statement.body != 0 && statement.body >= block.id || statement.alternative != 0 && statement.alternative >= block.id {
+			if statement.kind != 10 && statement.body != 0 && statement.body >= block.id || statement.alternative != 0 && statement.alternative >= block.id {
 				return fmt.Errorf("checked statement child block is not acyclic %+v", statement)
+			}
+			// Statement-arm blocks are children of their match statement.
+			if statement.kind == 5 && statement.expression >= 1 && statement.expression <= len(m.expressions) && m.expressions[statement.expression-1].kind == 12 {
+				armMatch := m.matches[m.expressions[statement.expression-1].parameterUse-1]
+				if armMatch.firstArm+armMatch.armCount-1 > len(m.matchArms) {
+					return fmt.Errorf("checked statement arm range %+v", armMatch)
+				}
+				for armAt := armMatch.firstArm; armAt < armMatch.firstArm+armMatch.armCount; armAt++ {
+					if m.matchArms[armAt-1].block >= block.id {
+						return fmt.Errorf("checked statement arm block is not acyclic %+v", statement)
+					}
+				}
 			}
 			if item.next != 0 && m.statements[m.statementLinks[item.next-1].statement-1].syntax >= m.statements[item.statement-1].syntax {
 				return fmt.Errorf("checked statement link is not in source order %+v", item)
@@ -2338,7 +2373,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.builtin >= 30 && annotation.builtin <= 44) || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 29 || annotation.builtin >= 30 && annotation.builtin <= 45) || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2416,6 +2451,13 @@ func validateCheckerManifest(m checkerManifest) error {
 			field := m.uses[expression.parameterUse-1]
 			base := m.expressions[expression.left-1]
 			validPayload = field.role == 1 && base.owner == expression.owner && base.checkedType >= 1 && base.checkedType <= len(m.types) && m.types[base.checkedType-1].kind == 7 && m.types[base.checkedType-1].target == field.owner
+			if validPayload == false && base.owner == expression.owner && base.checkedType >= 1 && base.checkedType <= len(m.types) {
+				baseType := m.types[base.checkedType-1]
+				if (baseType.kind == 21 || baseType.kind == 22) && baseType.count == 1 {
+					element := checkerDirectArgs(m, baseType)[0].checkedType
+					validPayload = field.role == 1 && m.types[element-1].kind == 7 && m.types[element-1].target == field.owner
+				}
+			}
 		}
 		if expression.kind == 4 {
 			payloadKind := 0
@@ -2614,10 +2656,19 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		for at := 0; valid && at < checkedMatch.armCount; at++ {
 			arm := m.matchArms[checkedMatch.firstArm-1+at]
-			valid = arm.id == checkedMatch.firstArm+at && arm.owner == checkedMatch.owner && arm.checkedMatch == checkedMatch.id && arm.variantKind >= 0 && arm.variantKind <= 7 && arm.body >= 1 && arm.body <= len(m.expressions) && m.expressions[arm.body-1].owner == checkedMatch.owner && m.expressions[arm.body-1].checkedType == checkedMatch.checkedType
+			valid = arm.id == checkedMatch.firstArm+at && arm.owner == checkedMatch.owner && arm.checkedMatch == checkedMatch.id && arm.variantKind >= 0 && arm.variantKind <= 7
+			if valid && arm.block != 0 {
+				// A block arm carries no body expression and must reference a
+				// block of the same owner; the match result stays Unit.
+				valid = arm.body == 0 && arm.block >= 1 && arm.block <= len(m.blocks) && m.blocks[arm.block-1].owner == checkedMatch.owner && m.types[checkedMatch.checkedType-1].kind == 1 && m.types[checkedMatch.checkedType-1].target == 12
+			} else if valid {
+				valid = arm.body >= 1 && arm.body <= len(m.expressions) && m.expressions[arm.body-1].owner == checkedMatch.owner && m.expressions[arm.body-1].checkedType == checkedMatch.checkedType
+			}
 			if valid {
 				armOwners[arm.id-1]++
-				expressionOwners[arm.body-1]++
+				if arm.body != 0 {
+					expressionOwners[arm.body-1]++
+				}
 			}
 		}
 		if !valid {
@@ -3033,12 +3084,12 @@ func assertCheckerDiagnostic(t *testing.T, m checkerManifest, kind int, path str
 
 func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	inputs := map[string]string{"a.al": "x"}
-	valid := "ALDER-CHECKER-MANIFEST 14\nS 0 612e616c 1\nEND\n"
+	valid := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nEND\n"
 	if _, err := decodeCheckerManifest(valid, inputs); err != nil {
 		t.Fatalf("valid minimal manifest: %v", err)
 	}
 	malformed := map[string]string{
-		"version 13 envelope":         strings.Replace(valid, "MANIFEST 14", "MANIFEST 13", 1),
+		"version 14 envelope":         strings.Replace(valid, "MANIFEST 15", "MANIFEST 14", 1),
 		"record after diagnostics":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nD 4 0 0 1 0\nC 1 1 0 1 0 0\nEND\n",
 		"invalid primitive target":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nC 1 1 0 0 0 0\nD 4 0 0 1 0\nEND\n",
 		"duplicate canonical type":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nC 1 1 0 1 0 0\nC 2 1 0 1 0 0\nD 4 0 0 1 0\nEND\n",
@@ -3049,10 +3100,10 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"truncated match":             "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nM 1 1\nEND\n",
 		"truncated match arm":         "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nW 1 1\nEND\n",
 		"truncated try":               "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nX 1 1\nEND\n",
-		"truncated source span":       "ALDER-CHECKER-MANIFEST 14\nS 0 612e616c 1\nZ 1 0\nEND\n",
-		"truncated cleanup":           "ALDER-CHECKER-MANIFEST 14\nS 0 612e616c 1\nG 1 1\nEND\n",
+		"truncated source span":       "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nZ 1 0\nEND\n",
+		"truncated cleanup":           "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nG 1 1\nEND\n",
 	}
-	bodyPrefix := "ALDER-CHECKER-MANIFEST 14\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
+	bodyPrefix := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
 	validUnaryBody := bodyPrefix + "E 1 1 6 1 1 1 0 0 0 0 0 0 0 0 0\nE 2 1 8 6 1 0 0 0 0 0 1 1 1 3 7\nH 1 1\nR 1 1 7 2 2\nJ 1 1 7 4 1 2 0 0 0 0\nK 1 1 0\nB 1 1 8 1 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validUnaryBody, inputs); err != nil {
 		t.Fatalf("valid unary body manifest: %v", err)
@@ -3066,7 +3117,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["instance declaration mismatch"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 2 0 0 0", 1)
 	malformed["instance argument range"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 1 1 0", 1)
 	malformed["instance discovery cycle"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 0 0 1", 1)
-	validCallBody := "ALDER-CHECKER-MANIFEST 14\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
+	validCallBody := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validCallBody, inputs); err != nil {
 		t.Fatalf("valid call body manifest: %v", err)
 	}
@@ -3080,7 +3131,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["expression missing call annotation"] = strings.Replace(validCallBody, "E 1 1 4 8 1 0 0 0 0 1", "E 1 1 4 8 1 0 0 0 0 0", 1)
 	malformed["call annotation after expression"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5", "E 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nQ 1 1 1 1 1 0 0", 1)
 	controlPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 12 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\n"
-	controlPrefix = strings.Replace(controlPrefix, "MANIFEST 11", "MANIFEST 14", 1)
+	controlPrefix = strings.Replace(controlPrefix, "MANIFEST 11", "MANIFEST 15", 1)
 	validControlBody := controlPrefix + "B 1 1 4 0 0 0\nEND\n"
 	if _, err := decodeCheckerManifest(validControlBody, inputs); err != nil {
 		t.Fatalf("valid control body manifest: %v", err)
@@ -3090,17 +3141,17 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["statement link unknown statement"] = controlPrefix + "K 1 1 0\nB 1 1 4 0 1 0\nEND\n"
 	malformed["block unknown environment"] = strings.Replace(validControlBody, "B 1 1 4 0 0 0", "B 1 1 4 1 0 0", 1)
 	assignmentPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nT 1 1 2 1\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\nE 1 1 6 1 1 1 0 0 0 0 0 0 0 2 7\nV 1 1 5 1 1 0 0 1\nJ 1 1 7 3 1 1 1 0 0 0\nK 1 1 0\nB 1 1 8 1 1 0\nEND\n"
-	assignmentPrefix = strings.Replace(assignmentPrefix, "MANIFEST 11", "MANIFEST 14", 1)
+	assignmentPrefix = strings.Replace(assignmentPrefix, "MANIFEST 11", "MANIFEST 15", 1)
 	if _, err := decodeCheckerManifest(assignmentPrefix, inputs); err != nil {
 		t.Fatalf("valid assignment control manifest: %v", err)
 	}
 	genericFieldBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 2 1 0 0 1 1 0 0 0 0\nY 2 12 4 0 0 1 0 2 0 0 0\nP 1 1 2 0 0 1\nC 1 1 0 9 0 0\nC 2 6 0 1 0 0\nC 3 7 0 1 1 1\nC 4 1 0 12 0 0\nA 1 1\nT 1 1 5 2\nT 2 2 6 3\nT 3 2 7 4\nU 1 1 1 0 3 0 0 1 5 2\nU 2 2 5 0 5 0 0 1 6 3\nU 3 2 6 0 6 0 0 0 7 4\nI 1 2 2 0 0 0\nL 1 2 1 5 0 0 1 0 3\nN 1 2 0 1\nE 1 2 8 3 1 0 0 0 0 0 0 0 0 2 9\nV 1 2 7 2 1 1 0 1\nJ 1 2 9 3 1 1 1 0 0 0\nK 1 1 0\nB 1 2 10 1 1 0\nEND\n"
-	genericFieldBody = strings.Replace(genericFieldBody, "MANIFEST 11", "MANIFEST 14", 1)
+	genericFieldBody = strings.Replace(genericFieldBody, "MANIFEST 11", "MANIFEST 15", 1)
 	if _, err := decodeCheckerManifest(genericFieldBody, inputs); err != nil {
 		t.Fatalf("valid generic field control manifest: %v", err)
 	}
 	indexedBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nC 3 8 0 0 1 1\nA 1 1\nT 1 1 2 3\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 3\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 3\nN 1 1 0 1\nE 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2 1 0 0 0\nK 1 1 0\nB 1 1 9 1 1 0\nEND\n"
-	indexedBody = strings.Replace(indexedBody, "MANIFEST 11", "MANIFEST 14", 1)
+	indexedBody = strings.Replace(indexedBody, "MANIFEST 11", "MANIFEST 15", 1)
 	if _, err := decodeCheckerManifest(indexedBody, inputs); err != nil {
 		t.Fatalf("valid indexed control manifest: %v", err)
 	}

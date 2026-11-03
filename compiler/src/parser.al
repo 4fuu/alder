@@ -308,7 +308,14 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     }
     let arrow = try expect_punct(d, state, cursor, "=>")
     if parse_step_bad(arrow) { return Ok(arrow) }
-    let body = try parse_expression(d, state, parse_step_cursor(arrow), depth)
+    // An arm body is one expression, or a `{ ... }` statement block for the
+    // statement form of match used by table-view arms.
+    var body: ParseStep = Rejected(parse_step_cursor(arrow))
+    if token_punct(state, parse_step_cursor(arrow), "{") {
+        body = try parse_block(d, state, parse_step_cursor(arrow))
+    } else {
+        body = try parse_expression(d, state, parse_step_cursor(arrow), depth)
+    }
     if parse_step_bad(body) { return Ok(body) }
     let value = parse_step_value(body)
     cursor = try add_link(d, value.cursor, value.node, children)
@@ -829,16 +836,25 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         if parse_step_bad(expr) { return Ok(expr) }
         let ev = parse_step_value(expr)
         cursor = ev.cursor
-        if parse_token(state, cursor).keyword != 15 { return reject_parse(d, state, cursor, 4) }
-        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-        if !expression_line_ok(state, cursor, 0) { return reject_parse(d, state, cursor, 13) }
-        if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
-        let cleanup = parse_token(state, cursor)
-        let cleanup_node = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 24, cursor.token + 1, cleanup.source, cleanup.start, cleanup.end, cleanup.start, cleanup.end, 0)
-        cursor = try add_link(d, cleanup_node.cursor, ev.node, 0)
-        let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-        cursor = try add_link(d, cursor, cleanup_node.node, children)
-        let node = try add_syntax(d, cursor, 35, initial.token + 1, start.source, start.start, cleanup.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        var end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1).end
+        // The `with cleanup_function` clause is the bootstrap-private bridge
+        // form; the M7.5 public form registers the builtin owner cleanup and
+        // ends the statement after the initializer. The initializer links
+        // exactly once in either shape.
+        if parse_token(state, cursor).keyword == 15 {
+            let with_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            if !expression_line_ok(state, with_cursor, 0) { return reject_parse(d, state, with_cursor, 13) }
+            if !token_ident(state, with_cursor) { return reject_parse(d, state, with_cursor, 3) }
+            let cleanup = parse_token(state, with_cursor)
+            let cleanup_node = try add_syntax(d, ParseCursor(token: with_cursor.token + 1, store: with_cursor.store), 24, with_cursor.token + 1, cleanup.source, cleanup.start, cleanup.end, cleanup.start, cleanup.end, 0)
+            cursor = try add_link(d, cleanup_node.cursor, ev.node, 0)
+            let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            cursor = try add_link(d, cursor, cleanup_node.node, children)
+            end = cleanup.end
+        } else {
+            cursor = try add_link(d, cursor, ev.node, 0)
+        }
+        let node = try add_syntax(d, cursor, 35, initial.token + 1, start.source, start.start, end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
         return Ok(Parsed(node))
     }
     if start.keyword == 5 || start.keyword == 6 {

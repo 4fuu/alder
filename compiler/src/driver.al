@@ -370,6 +370,17 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string(" is not snapshot-copyable; captures are ordinary copyable values or function values") }
     if kind == 147 { if !out_string("closure ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" has an unsupported shape; annotate parameter types and give a body") }
+    if kind == 130 { return out_string("table element type is not concrete copyable data") }
+    if kind == 131 { return out_string("table operation requires a named owning or exclusive table receiver") }
+    if kind == 132 { return out_string("table lookup must be the scrutinee of a match with an explicit Some binding") }
+    if kind == 133 { return out_string("table-view match arm may contain only straight-line copy statements without fallible operations") }
+    if kind == 134 { return out_string("overlapping table access: a live table view excludes this operation") }
+    if kind == 135 { return out_string("match arms must be all expression bodies or all statement blocks") }
+    if kind == 136 { return out_string("using requires an affine owner implementing Cleanup") }
+    if kind == 137 { return out_string("the with-cleanup clause is private to the compiler's bootstrap sources; use Cleanup selection") }
+    if kind == 138 { return out_string("an AsyncCleanup owner cannot be cleaned by synchronous using; async cleanup arrives with the async runtime") }
+    if kind == 139 { return out_string("a type may implement Cleanup or AsyncCleanup, not both") }
+    if kind == 140 { return out_string("Cleanup selection requires a nongeneric cleanup(take self) -> Unit method") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

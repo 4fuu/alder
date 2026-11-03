@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `605a3da1c6b33cdeb6b8bc6e1d2840ac3141c9855f2289aeb1e3691590874c0c`;
+  `4e91fe3e6d7e8211ac1b5f1e92522ea4499f0fa8b0f373b5a8531b8f39a94121`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `605a3da1c6b33cdeb6b8bc6e1d2840ac3141c9855f2289aeb1e3691590874c0c`.
+  `4e91fe3e6d7e8211ac1b5f1e92522ea4499f0fa8b0f373b5a8531b8f39a94121`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
