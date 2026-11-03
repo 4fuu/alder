@@ -4002,7 +4002,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let item = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 12 && item.kind != 13 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 12 && item.kind != 13 && item.kind != 50 { return false }
         if item.node == 0 || item.node > __s0_buffer_len(CheckedSpanRec, spans) { return false }
         if !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
         if item.kind == 13 {
@@ -4065,8 +4065,14 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if symbol.kind != 13 && type_param_counts[at + 1] != symbol.type_arity { return false }
-        if symbol.kind == 13 && type_param_counts[at + 1] != 0 { return false }
+        if symbol.kind == 50 {
+            // Traits add one implicit trailing `Self` parameter beyond their
+            // declared arity.
+            if type_param_counts[at + 1] != symbol.type_arity && type_param_counts[at + 1] != symbol.type_arity + 1 { return false }
+        } else {
+            if symbol.kind != 13 && type_param_counts[at + 1] != symbol.type_arity { return false }
+            if symbol.kind == 13 && type_param_counts[at + 1] != 0 { return false }
+        }
         at = at + 1
     }
     at = 0

@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Not implemented in Alder S0**
+Availability: **Partially implemented; see Alder S0**
 
 Traits provide static library abstraction without changing Alder into a
 runtime object system. Closures provide familiar higher-order APIs without

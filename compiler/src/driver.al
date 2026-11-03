@@ -226,6 +226,9 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
     return (left == 2 || left == 3) && (right == 2 || right == 3)
 }
 
+// Checker diagnostic kinds 107 through 129 are reserved for the Milestone
+// 7.5 static-abstraction half (traits, constraints, closures, function
+// values, Map/Set); 130 and above are reserved for the resource half.
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
@@ -310,6 +313,27 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("bootstrap operation ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" is private to the compiler's bootstrap sources (--bootstrap-private)")
     }
+    if kind == 107 {
+        if !out_string("conflicting implementations of trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(": exactly one implementation may exist for a trait application")
+    }
+    if kind == 108 { if !out_string("unknown trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string("") }
+    if kind == 109 { if !out_string("trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" expects a different number of type arguments") }
+    if kind == 110 { return out_string("trait implementations target a non-generic declared record or enum type") }
+    if kind == 111 {
+        if !out_string("type does not implement a trait required here") { return false }
+        return out_string("")
+    }
+    if kind == 112 { if !out_string("constraint parameter ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" is not a type parameter of this declaration") }
+    if kind == 113 { return out_string("where clauses on trait implementations are not supported yet") }
+    if kind == 114 { if !out_string("trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" is a trait, not a type") }
+    if kind == 116 { return out_string("trait implementation arguments must be concrete types") }
+    if kind == 117 { return out_string("Self is only available inside a trait or trait implementation") }
+    if kind == 118 { return out_string("trait methods cannot declare their own type parameters yet") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

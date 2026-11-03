@@ -509,6 +509,48 @@ type DiagnosticTypeRec {
     target: U64
 }
 
+// Static trait model for Milestone 7.5. Builtin standard traits use stable
+// IDs (1 Eq, 2 Hash, 3 Iterator, 4 IntoIterator, 5 Cleanup, 6 AsyncCleanup);
+// user-declared traits are symbols whose syntax kind is 50 and are referenced
+// by symbol ID. A trait reference stores trait_builtin or trait_symbol; the
+// other stays zero. Syntax kinds: 50 trait declaration, 51 trait method
+// requirement (optional default body), 52 where clause, 53 trait
+// implementation block, 55 single where constraint, and 56 the `Self` type
+// reference. Trait-implementation methods are ordinary kind-12 function
+// symbols whose inherent_owner names the kind-53 impl node.
+type TraitConstraintRec {
+    owner: U64
+    param: U64
+    trait_builtin: U64
+    trait_symbol: U64
+    first_arg: U64
+    arg_count: U64
+    syntax: U64
+}
+
+// first_method names the first kind-12 method symbol of the impl; impl
+// methods are consecutive symbols because the parser roots them together.
+type TraitImplRec {
+    trait_builtin: U64
+    trait_symbol: U64
+    first_arg: U64
+    arg_count: U64
+    self_type: U64
+    owner_node: U64
+    first_method: U64
+    method_count: U64
+}
+
+// impl_index holds trait-impl record IDs sorted by (trait reference, trait
+// arguments) for binary-search lookup and adjacent coherence checks. It is
+// built once after impl collection and never rescanned per expression site.
+type TraitStoreRec {
+    constraints: __s0_Buffer(TraitConstraintRec)
+    impls: __s0_Buffer(TraitImplRec)
+    impl_index: __s0_Buffer(U64)
+    args: __s0_Buffer(U64)
+}
+
 type State {
     paths: __s0_Buffer(U8)
     texts: __s0_Buffer(U8)

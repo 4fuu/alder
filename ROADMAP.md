@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `253279574c8496510b3c253408ab94fbaa3f107f8e109753df262fbe3ca603bd`;
+  `ebafc281cc0ba6c000c7f32cc9908003f18a9ddc36d50d23959364a24988ce86`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `253279574c8496510b3c253408ab94fbaa3f107f8e109753df262fbe3ca603bd`.
+  `ebafc281cc0ba6c000c7f32cc9908003f18a9ddc36d50d23959364a24988ce86`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -941,6 +941,16 @@ staleness and overlapping access, resource composition, generic
 monomorphization, and compiler-scale layered DAGs. The public language and
 generated MIR/C may no longer expose `__s0_*`, `Domain`, `DomainMark`, fixed S0
 Map/Buffer, or callback-bearing bootstrap cleanup forms.
+
+Exit-criteria evidence (in progress):
+
+- the static-abstraction half adds `trait`/`where`/`impl Trait(...) for`
+  declaration checking with builtin standard-trait names
+  (`Eq`, `Hash`, `Iterator`, `IntoIterator`, `Cleanup`, `AsyncCleanup`),
+  per-unit coherence over a once-built sorted impl index, `Self` resolution,
+  and constraint-gated generic instantiation and concrete applications;
+  trait-method dispatch, closures, function values, and the ordered
+  `Map`/`Set` are still open.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

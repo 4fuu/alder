@@ -87,8 +87,37 @@ Function parameters use ordinary copy/borrow semantics by default. `mut`
 permits mutation through a mutable argument or receiver, while `take`
 transfers an affine value and invalidates the source on that path. Inherent
 `impl Type { ... }` blocks provide `self`, `mut self`, and `take self`
-receivers plus associated functions. They do not provide traits or extension
-methods.
+receivers plus associated functions. They do not provide extension methods.
+
+Milestone 7.5 adds the static trait surface of
+[Traits and Closures](traits-and-closures.md) up to constraint gating:
+
+- `trait Name(Params) where ... { ... }` declares a trait. Method
+  requirements are `fn` signatures; a requirement with a body carries a
+  default implementation. `Self` names the implementing type inside a trait
+  or one of its implementations, and trait methods cannot declare their own
+  type parameters yet.
+- `impl Trait(Arguments) for Type { ... }` implements a trait for a
+  non-generic declared record or enum type with concrete trait arguments.
+  Methods are ordinary functions; their bodies are checked and lowered even
+  before trait-method dispatch exists.
+- `where Param: Trait + Trait, ...` constraints may follow function,
+  record, enum, and trait signatures. Constraint arguments resolve in the
+  declaration's scope.
+- The builtin standard traits `Eq`, `Hash`, `Iterator(Item)`,
+  `IntoIterator(IteratorType, Item)`, `Cleanup`, and `AsyncCleanup` exist
+  without source declarations; `Order`, `Display`, and `Error` are reserved
+  names without implementations until their APIs are designed with the
+  standard library.
+- Coherence holds per compilation unit: exactly one implementation may exist
+  for a concrete trait application. Orphan-rule enforcement across a package
+  graph waits for the module system.
+- Instantiating a constrained generic function requires an implementation for
+  every constraint; the lookup uses one impl index built after collection.
+
+Trait-method dispatch through constraints, closures, function values, and
+trait-backed collections are not implemented yet and remain later Milestone
+7.5 work.
 
 The hosted entry forms are temporarily `fn main() -> I32` and
 `fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim

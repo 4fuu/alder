@@ -116,6 +116,12 @@ fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: __s0_String)
 
 fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let first = parse_token(state, initial)
+    // `Self` is a keyword type reference resolved against the enclosing trait
+    // declaration or trait implementation by the checker.
+    if first.kind == 1 && first.keyword == 29 {
+        let node = try add_syntax(d, ParseCursor(token: initial.token + 1, store: initial.store), 56, initial.token + 1, first.source, first.start, first.end, first.start, first.end, 0)
+        return Ok(Parsed(node))
+    }
     if token_punct(state, initial, "[") {
         let inner = try parse_type(d, state, ParseCursor(token: initial.token + 1, store: initial.store))
         if parse_step_bad(inner) { return Ok(inner) }
@@ -736,6 +742,217 @@ fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
     return Ok(Parsed(node))
 }
 
+// A single `where` constraint is `Param: TraitApplication + TraitApplication`.
+// The constraint node names the constrained parameter and carries the trait
+// application type nodes as children.
+fn parse_constraint(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    if !token_ident(state, initial) { return reject_parse(d, state, initial, 3) }
+    let param = parse_token(state, initial)
+    let colon = try expect_punct(d, state, ParseCursor(token: initial.token + 1, store: initial.store), ":")
+    if parse_step_bad(colon) { return Ok(colon) }
+    var cursor = parse_step_cursor(colon)
+    var children: U64 = 0
+    var application: ParseStep = Rejected(cursor)
+    application = try parse_type(d, state, cursor)
+    if parse_step_bad(application) { return Ok(application) }
+    let first = parse_step_value(application)
+    cursor = try add_link(d, first.cursor, first.node, children)
+    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    while token_punct(state, cursor, "+") {
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        var next: ParseStep = Rejected(cursor)
+        next = try parse_type(d, state, cursor)
+        if parse_step_bad(next) { return Ok(next) }
+        let value = parse_step_value(next)
+        cursor = try add_link(d, value.cursor, value.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    }
+    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    let node = try add_syntax(d, cursor, 55, initial.token + 1, param.source, param.start, end, param.start, param.end, children)
+    return Ok(Parsed(node))
+}
+
+// A `where` clause is a comma-separated constraint list following a
+// declaration signature or head. The returned node keeps source order.
+fn parse_where(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    var children: U64 = 0
+    var constraint: ParseStep = Rejected(cursor)
+    constraint = try parse_constraint(d, state, cursor)
+    if parse_step_bad(constraint) { return Ok(constraint) }
+    let first = parse_step_value(constraint)
+    cursor = try add_link(d, first.cursor, first.node, children)
+    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    while token_punct(state, cursor, ",") {
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        var next: ParseStep = Rejected(cursor)
+        next = try parse_constraint(d, state, cursor)
+        if parse_step_bad(next) { return Ok(next) }
+        let value = parse_step_value(next)
+        cursor = try add_link(d, value.cursor, value.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    }
+    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    let node = try add_syntax(d, cursor, 52, initial.token + 1, start.source, start.start, end, 0, 0, children)
+    return Ok(Parsed(node))
+}
+
+// Trait method requirements look like functions, but the body is optional:
+// a present body is the default implementation used by impls that omit the
+// method. Receivers are always the trait's `Self` node.
+fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_type: U64) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+    let name = parse_token(state, cursor)
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    let open = try expect_punct(d, state, cursor, "(")
+    if parse_step_bad(open) { return Ok(open) }
+    cursor = parse_step_cursor(open)
+    var children: U64 = 0
+    var runtime = false
+    if !token_punct(state, cursor, ")") {
+        var more = true
+        while more {
+            var parameter_kind: U64 = 13
+            if parse_token(state, cursor).keyword == 23 {
+                parameter_kind = 47
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            } else {
+                if parse_token(state, cursor).keyword == 24 {
+                    parameter_kind = 48
+                    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                }
+            }
+            let receiver = parse_token(state, cursor).keyword == 26
+            if !token_ident(state, cursor) && !receiver { return reject_parse(d, state, cursor, 3) }
+            let param = parse_token(state, cursor)
+            var pnode: ParseValue = ParseValue(cursor: cursor, node: 0)
+            if receiver {
+                if runtime { return reject_parse(d, state, cursor, 10) }
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                let owner = __s0_buffer_get(SyntaxRec, cursor.store.nodes, receiver_type - 1)
+                let copied = try add_syntax(d, cursor, owner.kind, owner.token, owner.source, owner.start, owner.end, owner.name_start, owner.name_end, owner.children)
+                let linked = try add_link(d, copied.cursor, copied.node, 0)
+                pnode = try add_syntax(d, linked, parameter_kind, cursor.token, param.source, param.start, param.end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                runtime = true
+            } else {
+                let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                let colon = try expect_punct(d, state, colon_cursor, ":")
+                if parse_step_bad(colon) { return Ok(colon) }
+                cursor = parse_step_cursor(colon)
+                if parse_token(state, cursor).keyword == 2 {
+                    if runtime { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: colon_cursor.store), 10) }
+                    pnode = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 7, colon_cursor.token, param.source, param.start, parse_token(state, cursor).end, param.start, param.end, 0)
+                } else {
+                    let ty = try parse_type(d, state, cursor)
+                    if parse_step_bad(ty) { return Ok(ty) }
+                    let tv = parse_step_value(ty)
+                    let linked = try add_link(d, tv.cursor, tv.node, 0)
+                    pnode = try add_syntax(d, linked, parameter_kind, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+                    runtime = true
+                }
+            }
+            cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, ")") { more = false }
+            } else { more = false }
+        }
+    }
+    let close = try expect_punct(d, state, cursor, ")")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    let arrow = try expect_punct(d, state, cursor, "->")
+    if parse_step_bad(arrow) { return Ok(arrow) }
+    let result = try parse_type(d, state, parse_step_cursor(arrow))
+    if parse_step_bad(result) { return Ok(result) }
+    let rv = parse_step_value(result)
+    cursor = try add_link(d, rv.cursor, rv.node, children)
+    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    if parse_token(state, cursor).keyword == 28 {
+        let clause = try parse_where(d, state, cursor)
+        if parse_step_bad(clause) { return Ok(clause) }
+        let cv = parse_step_value(clause)
+        cursor = try add_link(d, cv.cursor, cv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    }
+    var end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    if token_punct(state, cursor, "{") {
+        let body = try parse_block(d, state, cursor)
+        if parse_step_bad(body) { return Ok(body) }
+        let bv = parse_step_value(body)
+        cursor = try add_link(d, bv.cursor, bv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let block = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1)
+        end = block.end
+    }
+    let node = try add_syntax(d, cursor, 51, initial.token + 1, start.source, start.start, end, name.start, name.end, children)
+    return Ok(Parsed(node))
+}
+
+fn parse_trait(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+    let name = parse_token(state, cursor)
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    var children: U64 = 0
+    if token_punct(state, cursor, "(") {
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        var more = true
+        while more {
+            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            let param = parse_token(state, cursor)
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            if !token_punct(state, cursor, ":") { return reject_parse(d, state, cursor, 4) }
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            if parse_token(state, cursor).keyword != 2 { return reject_parse(d, state, cursor, 4) }
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            let pnode = try add_syntax(d, cursor, 7, cursor.token - 2, param.source, param.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, param.start, param.end, 0)
+            cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, ")") { more = false }
+            } else { more = false }
+        }
+        let close = try expect_punct(d, state, cursor, ")")
+        if parse_step_bad(close) { return Ok(close) }
+        cursor = parse_step_cursor(close)
+    }
+    if parse_token(state, cursor).keyword == 28 {
+        let clause = try parse_where(d, state, cursor)
+        if parse_step_bad(clause) { return Ok(clause) }
+        let cv = parse_step_value(clause)
+        cursor = try add_link(d, cv.cursor, cv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    }
+    let open = try expect_punct(d, state, cursor, "{")
+    if parse_step_bad(open) { return Ok(open) }
+    cursor = parse_step_cursor(open)
+    // The `Self` reference node is synthesized once per trait; every method
+    // receiver copies it so the checker can resolve `Self` uniformly.
+    let self_node = try add_syntax(d, cursor, 56, cursor.token, name.source, name.start, name.end, name.start, name.end, 0)
+    cursor = self_node.cursor
+    while !token_punct(state, cursor, "}") {
+        if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 4) }
+        let method = try parse_trait_method(d, state, cursor, self_node.node)
+        if parse_step_bad(method) { return Ok(method) }
+        let value = parse_step_value(method)
+        cursor = try add_link(d, value.cursor, value.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 7) }
+    }
+    let close = try expect_punct(d, state, cursor, "}")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    let node = try add_syntax(d, cursor, 50, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, name.start, name.end, children)
+    return Ok(Parsed(node))
+}
+
 fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_type: U64) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
@@ -808,6 +1025,13 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
     let rv = parse_step_value(result)
     cursor = try add_link(d, rv.cursor, rv.node, children)
     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    if parse_token(state, cursor).keyword == 28 {
+        let clause = try parse_where(d, state, cursor)
+        if parse_step_bad(clause) { return Ok(clause) }
+        let cv = parse_step_value(clause)
+        cursor = try add_link(d, cv.cursor, cv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    }
     let body = try parse_block(d, state, cursor)
     if parse_step_bad(body) { return Ok(body) }
     let bv = parse_step_value(body)
@@ -827,6 +1051,45 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if parse_step_bad(owner) { return Ok(owner) }
     let owner_value = parse_step_value(owner)
     var cursor = owner_value.cursor
+    // `impl Trait(Arguments) for Type { ... }` declares a trait
+    // implementation; the trait application is linked first and the
+    // implemented type second, so both stay reachable from the impl node.
+    if parse_token(state, cursor).keyword == 10 {
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        cursor = try add_link(d, cursor, owner_value.node, 0)
+        var trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let impl_type = try parse_type(d, state, cursor)
+        if parse_step_bad(impl_type) { return Ok(impl_type) }
+        let impl_value = parse_step_value(impl_type)
+        cursor = try add_link(d, impl_value.cursor, impl_value.node, trait_children)
+        trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        if parse_token(state, cursor).keyword == 28 {
+            let clause = try parse_where(d, state, cursor)
+            if parse_step_bad(clause) { return Ok(clause) }
+            let cv = parse_step_value(clause)
+            cursor = try add_link(d, cv.cursor, cv.node, trait_children)
+            trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        }
+        let trait_open = try expect_punct(d, state, cursor, "{")
+        if parse_step_bad(trait_open) { return Ok(trait_open) }
+        cursor = parse_step_cursor(trait_open)
+        while !token_punct(state, cursor, "}") {
+            if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 4) }
+            let method = try parse_function_owned(d, state, cursor, impl_value.node)
+            if parse_step_bad(method) { return Ok(method) }
+            let value = parse_step_value(method)
+            cursor = try add_root(d, value.cursor, value.node)
+            cursor = try add_link(d, cursor, value.node, trait_children)
+            trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 7) }
+        }
+        let trait_close = try expect_punct(d, state, cursor, "}")
+        if parse_step_bad(trait_close) { return Ok(trait_close) }
+        cursor = parse_step_cursor(trait_close)
+        let trait_head = __s0_buffer_get(SyntaxRec, cursor.store.nodes, owner_value.node - 1)
+        let trait_node = try add_syntax(d, cursor, 53, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, trait_head.name_start, trait_head.name_end, trait_children)
+        return Ok(Parsed(trait_node))
+    }
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
@@ -931,7 +1194,7 @@ fn parse_public_decl(d: Domain, state: State, initial: ParseCursor) -> Result(Pa
     if parse_step_bad(declaration) { return Ok(declaration) }
     let value = parse_step_value(declaration)
     let declared = __s0_buffer_get(SyntaxRec, value.cursor.store.nodes, value.node - 1)
-    if declared.kind != 2 && declared.kind != 3 && declared.kind != 12 { return reject_parse(d, state, next, 1) }
+    if declared.kind != 2 && declared.kind != 3 && declared.kind != 12 && declared.kind != 50 { return reject_parse(d, state, next, 1) }
     let linked = try add_link(d, value.cursor, value.node, 0)
     let node = try add_syntax(d, linked, 45, initial.token + 1, start.source, start.start, declared.end, declared.name_start, declared.name_end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
     return Ok(Parsed(node))
@@ -942,6 +1205,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if start.keyword == 20 { return parse_module_decl(d, state, initial) }
     if start.keyword == 21 { return parse_public_decl(d, state, initial) }
     if start.keyword == 25 { return parse_impl(d, state, initial) }
+    if start.keyword == 27 { return parse_trait(d, state, initial) }
     let is_import = start.keyword == 1
     let is_struct = start.keyword == 2
     let is_enum = start.keyword == 3
@@ -1021,6 +1285,13 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         let close = try expect_punct(d, state, cursor, ")")
         if parse_step_bad(close) { return Ok(close) }
         cursor = parse_step_value(close).cursor
+    }
+    if parse_token(state, cursor).keyword == 28 {
+        let clause = try parse_where(d, state, cursor)
+        if parse_step_bad(clause) { return Ok(clause) }
+        let cv = parse_step_value(clause)
+        cursor = try add_link(d, cv.cursor, cv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
     }
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }

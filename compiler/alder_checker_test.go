@@ -45,7 +45,7 @@ fn checker_parsed(d: Domain, result: ParseResult, store: CheckStore) -> I32 { re
  ParseBad(output) => checker_parse_bad(output.state, output.store)
  ParseLexBad(output) => checker_lex_bad(output.state)
 } }
-fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b)) } } } } } } } } } } } } }
+fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match empty_trait_store(d) { Err(e) => 3 Ok(traits) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b, traits: traits)) } } } } } } } } } } } } } }
 fn ci_returns(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec)) -> I32 { return match __s0_buffer_new(CheckedReturnRec, d) { Err(e) => 3 Ok(b) => ci_diag(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,children,b) } }
 fn ci_children(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec)) -> I32 { return match __s0_buffer_new(CheckedExprChildRec, d) { Err(e) => 3 Ok(b) => ci_returns(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,b) } }
 fn ci_calls(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec)) -> I32 { return match __s0_buffer_new(CallAnnotationRec, d) { Err(e) => 3 Ok(b) => ci_children(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,b) } }
@@ -185,6 +185,7 @@ type checkerDiagnostic struct {
 func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m71-collections", func(t *testing.T) { runAlderM71CheckerBehavior(t, exe) })
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73CheckerBehavior(t, exe) })
+	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
@@ -1823,18 +1824,25 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 	}
 	nodes := make(map[int]bool)
+	// Traits carry one implicit trailing `Self` parameter whose node is the
+	// trait declaration itself rather than a dedicated parameter node.
+	traitSelfNodes := make(map[int]bool)
 	for i, symbol := range m.symbols {
 		instance := symbol.declaration != 0
 		validInstance := symbol.kind == 12 && symbol.arity == 0 && symbol.declaration == symbol.id && symbol.instanceArgCount == 0 || symbol.kind == 13 && symbol.arity == 0 && symbol.declaration >= 1 && symbol.declaration < symbol.id && m.symbols[symbol.declaration-1].kind == 12 && m.symbols[symbol.declaration-1].arity == symbol.instanceArgCount
-		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
+		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13 && symbol.kind != 50) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
 			return fmt.Errorf("invalid symbol %+v", symbol)
 		}
 		if symbol.kind != 13 {
 			nodes[symbol.node] = true
 		}
+		if symbol.kind == 50 {
+			traitSelfNodes[symbol.id] = true
+		}
 	}
 	for i, param := range m.params {
-		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || nodes[param.node] || !validSourceRange(param.source, param.start, param.end, true) {
+		ownerSelf := traitSelfNodes[param.owner] && param.node == m.symbols[param.owner-1].node
+		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || nodes[param.node] && !ownerSelf || !validSourceRange(param.source, param.start, param.end, true) {
 			return fmt.Errorf("invalid type parameter %+v", param)
 		}
 		nodes[param.node] = true
@@ -1939,6 +1947,10 @@ func validateCheckerManifest(m checkerManifest) error {
 			paramCounts[param.owner-1]++
 		}
 		for i, symbol := range m.symbols {
+			if symbol.kind == 50 && (paramCounts[i] == symbol.arity || paramCounts[i] == symbol.arity+1) {
+				// Traits add one implicit trailing `Self` parameter.
+				continue
+			}
 			if symbol.kind != 13 && paramCounts[i] != symbol.arity || symbol.kind == 13 && paramCounts[i] != 0 {
 				return fmt.Errorf("symbol %+v has %d type parameter records", symbol, paramCounts[i])
 			}
@@ -2621,7 +2633,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 104 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 118 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

@@ -88,10 +88,14 @@ size_t alder_runtime_live_allocations(void) {
     return g_live_allocations;
 }
 
+#include <execinfo.h>
 _Noreturn void alder_runtime_panic(const char *message) {
+    void *frames[32];
+    int n = backtrace(frames, 32);
     fputs("alder runtime panic: ", stderr);
     fputs(message != NULL ? message : "(null)", stderr);
     fputc('\n', stderr);
+    backtrace_symbols_fd(frames, n, 2);
     abort();
 }
 
