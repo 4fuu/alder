@@ -356,18 +356,80 @@ func domainsMayAlias(info []domainInfo, a, b mir.ValueId) bool {
 func updateDomainInfo(m *mir.Module, f *mir.Function, effects []functionEffect, info []domainInfo) {
 	loadStores := aliasingStores(f)
 	paramEdges := incomingEdgeArgs(f)
+	free := provenanceFreeTypes(m)
 	changed := true
 	for changed {
 		changed = false
 		for vi := range info {
-			if transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects, loadStores, &info[vi]) {
+			if transferDomain(m, f, mir.ValueId(vi), info, paramEdges, effects, loadStores, free, &info[vi]) {
 				changed = true
 			}
 		}
 	}
 }
 
-func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId, out *domainInfo) bool {
+// provenanceFreeTypes memoizes, per module type, whether a value of that type
+// can carry storage-domain provenance at all. A type is provenance-free when
+// it contains no slice, view, reference, pointer, handle, vec, table, string,
+// bytes, or function part at any depth: loading such a value copies plain
+// bits with no lifetime tie to the storage it was read from.
+func provenanceFreeTypes(m *mir.Module) []bool {
+	free := make([]bool, len(m.Types))
+	visiting := make([]bool, len(m.Types))
+	var walk func(t mir.TypeId) bool
+	walk = func(t mir.TypeId) bool {
+		if !m.ValidType(t) {
+			return false
+		}
+		if free[t] {
+			return true
+		}
+		if visiting[t] {
+			return false
+		}
+		visiting[t] = true
+		ok := false
+		switch m.Types[t].Kind {
+		case mir.TypeOption, mir.TypeArray:
+			ok = walk(m.Types[t].Elem)
+		case mir.TypeResult:
+			ok = walk(m.Types[t].OK) && walk(m.Types[t].Err)
+		case mir.TypeAggregate:
+			ok = true
+			for _, fld := range m.Types[t].Fields {
+				if !walk(fld.Type) {
+					ok = false
+					break
+				}
+			}
+		case mir.TypeEnum:
+			ok = true
+			for _, v := range m.Types[t].Variants {
+				if !walk(v.Payload) {
+					ok = false
+					break
+				}
+			}
+		case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeRawPtr, mir.TypeTable,
+			mir.TypeID, mir.TypeTableView, mir.TypeTableMutView, mir.TypeFunction, mir.TypeString,
+			mir.TypeBytes, mir.TypeDomainHandle, mir.TypeDomainMark, mir.TypeCleanupScope, mir.TypeCleanupID:
+			// Containers, references, handles, and text carry storage or
+			// identity provenance no matter what their element is.
+			ok = false
+		default:
+			ok = true
+		}
+		visiting[t] = false
+		free[t] = ok
+		return ok
+	}
+	for t := range m.Types {
+		walk(mir.TypeId(t))
+	}
+	return free
+}
+
+func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId, free []bool, out *domainInfo) bool {
 	v := &f.Values[vid]
 	changed := false
 	merge := func(x mir.ValueId) {
@@ -426,6 +488,14 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		// is destroyed.
 		changed = addRoot(out, domainRoot{handle: in.Domain, allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1}) || changed
 	case mir.OpLoad:
+		if int(v.Type) < len(free) && free[v.Type] {
+			// A load of a provenance-free type copies plain bits. The value
+			// has no lifetime tie to the storage domain it was read from, so
+			// it can flow through loops and locals without tracking that
+			// domain: a later reset or destroy of the domain cannot dangle
+			// plain bits. Storage-carrying types keep the merges below.
+			return changed
+		}
 		if in.Place.Kind == mir.PlaceDeref {
 			merge(in.Place.Deref)
 		}

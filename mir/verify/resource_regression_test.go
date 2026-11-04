@@ -495,6 +495,79 @@ entry:
 `, "use of %loaded after reset or destruction")
 	})
 
+	t.Run("scalar load in local-domain loop binds local", func(t *testing.T) {
+		requireAccepted(t, `mir 1
+fn @f(%root: domain_handle, %n: u64, %again: bool) -> u64 {
+  local %item: u64
+entry:
+  %d = domain.create %root
+  %p = alloc %d, u64, %n
+  jump loop
+loop:
+  %x = load deref %p
+  store local %item, %x
+  branch %again, loop, done
+done:
+  %result = load local %item
+  domain.destroy %d
+  return %result
+}
+`)
+	})
+
+	t.Run("vector element load in loop binds local", func(t *testing.T) {
+		requireAccepted(t, `mir 4
+const @m75_zero: u64 = 0
+const @m75_one: u64 = 1
+const @m75_four: u64 = 4
+fn @f(%root: domain_handle, %again: bool) -> u64 {
+  local %v: vec(u64)
+  local %item: u64
+entry:
+  %zero = const.get @m75_zero
+  %one = const.get @m75_one
+  %four = const.get @m75_four
+  %d = domain.create %root
+  %data = alloc %d, u64, %four
+  %vec = vec.construct.checked %data, %one, %four else failed
+  store local %v, %vec
+  jump loop
+loop:
+  %current = load local %v
+  %storage = vec.storage %current
+  %at = slice.index.checked %storage, %zero else failed
+  %x = load deref %at
+  store local %item, %x
+  branch %again, loop, done
+done:
+  %result = load local %item
+  domain.destroy %d
+  return %result
+failed:
+  panic
+}
+`)
+	})
+
+	t.Run("slice load in loop across backedge still rejected", func(t *testing.T) {
+		requireRejectedWith(t, `mir 4
+fn @f(%root: domain_handle, %n: u64, %again: bool) {
+  local %view: slice(u8)
+entry:
+  %d = domain.create %root
+  %p = alloc %d, slice(u8), %n
+  jump loop
+loop:
+  %s = load deref %p
+  store local %view, %s
+  branch %again, loop, done
+done:
+  domain.destroy %d
+  return
+}
+`, "carries a function-local domain handle or reference across a loop backedge")
+	})
+
 	t.Run("parallel edges retain every argument", func(t *testing.T) {
 		requireRejectedWith(t, `mir 1
 fn @f(%root: domain_handle, %n: u64, %a: i64) {

@@ -107,6 +107,7 @@ type MirV6TransferIndex {
     store_start: __s0_Buffer(U64)
     store_count: __s0_Buffer(U64)
     stores: __s0_Buffer(U64)
+    type_free: __s0_Buffer(U64)
 }
 type MirV6ConsumerIndex {
     head: __s0_Buffer(U64)
@@ -625,6 +626,62 @@ fn mir_v6_incoming_parameter(store: MirStore, indexes: MirVIndexes, operand: Mir
     return mir_v6_block_param_record(store, indexes, function, operand.target, operand.ordinal)
 }
 
+// Per-type provenance freedom: a value of such a type carries no storage-
+// domain provenance at all, because it contains no slice, view, reference,
+// pointer, handle, vec, table, string, bytes, or function part at any depth.
+// Loading such a value copies plain bits with no lifetime tie to the storage
+// it was read from, so the load transfer below skips the domain merges for
+// it. Composite kinds start optimistic and the fixpoint propagates zeroes,
+// which also converges on cyclic type graphs.
+fn mir_v6_provenance_free_types(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(__s0_Buffer(U64), __s0_Error) {
+    let total = __s0_buffer_len(MirTypeRec, store.types)
+    var free = try __s0_buffer_new(U64, d)
+    var t: U64 = 1
+    while t <= total {
+        let typ = __s0_buffer_get(MirTypeRec, store.types, t - 1)
+        var seed: U64 = 1
+        if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_raw_ptr() || typ.kind == mir_type_kind_table() || typ.kind == mir_type_kind_id() || typ.kind == mir_type_kind_table_view() || typ.kind == mir_type_kind_table_mut_view() || typ.kind == mir_type_kind_function() || typ.kind == mir_type_kind_string() || typ.kind == mir_type_kind_bytes() || typ.kind == mir_type_kind_domain_handle() || typ.kind == mir_type_kind_domain_mark() || typ.kind == mir_type_kind_cleanup_scope() || typ.kind == mir_type_kind_cleanup_id() { seed = 0 }
+        free = try __s0_buffer_append(U64, d, free, seed)
+        t = t + 1
+    }
+    var changed = true
+    while changed {
+        changed = false
+        t = 1
+        while t <= total {
+            if __s0_buffer_get(U64, free, t - 1) != 0 {
+                let typ = __s0_buffer_get(MirTypeRec, store.types, t - 1)
+                var still = true
+                if typ.kind == mir_type_kind_option() || typ.kind == mir_type_kind_array() {
+                    if typ.elem != 0 && typ.elem <= total && __s0_buffer_get(U64, free, typ.elem - 1) == 0 { still = false }
+                }
+                if typ.kind == mir_type_kind_result() {
+                    if typ.ok_type != 0 && typ.ok_type <= total && __s0_buffer_get(U64, free, typ.ok_type - 1) == 0 { still = false }
+                    if typ.err_type != 0 && typ.err_type <= total && __s0_buffer_get(U64, free, typ.err_type - 1) == 0 { still = false }
+                }
+                if typ.kind == mir_type_kind_aggregate() || typ.kind == mir_type_kind_enum() {
+                    var kind = mir_type_part_variant()
+                    if typ.kind == mir_type_kind_aggregate() { kind = mir_type_part_field() }
+                    let count = mir_vindex_type_part_count(indexes, t)
+                    var at: U64 = 0
+                    while at < count {
+                        let pid = mir_vindex_type_part(indexes, t, at)
+                        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, pid - 1)
+                        if part.kind == kind && part.part_type != 0 && part.part_type <= total && __s0_buffer_get(U64, free, part.part_type - 1) == 0 { still = false }
+                        at = at + 1
+                    }
+                }
+                if !still {
+                    __s0_buffer_set(U64, free, t - 1, 0)
+                    changed = true
+                }
+            }
+            t = t + 1
+        }
+    }
+    return Ok(free)
+}
+
 fn mir_v6_transfer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(MirV6TransferIndex, __s0_Error) {
     var store_start = try __s0_buffer_new(U64, d)
     var store_count = try __s0_buffer_new(U64, d)
@@ -725,7 +782,8 @@ fn mir_v6_transfer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes)
         }
         p = p + 1
     }
-    return Ok(MirV6TransferIndex(incoming_start: incoming_start, incoming_count: incoming_count, incoming_sources: incoming_sources, store_start: store_start, store_count: store_count, stores: store_ids))
+    var type_free = try mir_v6_provenance_free_types(d, store, indexes)
+    return Ok(MirV6TransferIndex(incoming_start: incoming_start, incoming_count: incoming_count, incoming_sources: incoming_sources, store_start: store_start, store_count: store_count, stores: store_ids, type_free: type_free))
 }
 
 fn mir_v6_consumer_add(d: Domain, index: MirV6RoundIndex, consumers0: MirV6ConsumerIndex, function: U64, source: U64, target: U64) -> Result(MirV6ConsumerIndex, __s0_Error) {
@@ -868,7 +926,12 @@ durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, v
 // copy rooted in the destination domain.
 if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
 durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1)) }
-if x.op == mir_op_load() { let p = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
+if x.op == mir_op_load() {
+// A load of a provenance-free type copies plain bits: the value has no
+// lifetime tie to the storage domain it was read from, so a later reset or
+// destroy of that domain cannot dangle it and the merges below are skipped.
+if value.value_type != 0 && value.value_type <= __s0_buffer_len(U64, transfer.type_free) && __s0_buffer_get(U64, transfer.type_free, value.value_type - 1) != 0 { return Ok(durable) }
+let p = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
 if p.kind == mir_place_deref() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, p.deref_value) }
 // Stores retain their original block/ordinal order without materializing the
 // potentially quadratic load-by-aliasing-store cross product.
