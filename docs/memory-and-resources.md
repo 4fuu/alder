@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `AsyncCleanup` types are affine and rejected by synchronous `using` until the async runtime arrives; the callback `with` clause is bootstrap-private. Vec elements and remaining resource composition are not implemented.**
+Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `Vec(T)` over a `Cleanup` owner is affine: elements enter by transfer through `push` or `from_array`, element reads and views are rejected, and a registration drains every element at scope exit. `AsyncCleanup` types are affine and rejected by synchronous `using` until the async runtime arrives; the callback `with` clause is bootstrap-private. Tables as `Vec` elements await heap-storage rules for table handles.**
 
 Alder separates ordinary data, resource ownership, scoped access, and
 long-lived identity. It does not force one ownership mechanism onto every
@@ -282,6 +282,13 @@ repeatedly canceled before it can join/release. Task groups require an
 
 Resources may be grouped in ordinary affine records. Such a record either
 implements `Cleanup` or must transfer/clean each owner before its scope ends.
+
+Resources may also be grouped in a `Vec(T)` of `Cleanup` owners. Elements
+enter only by transfer (`push`, `from_array`) and leave only through the drain:
+element reads, slices, and views would duplicate an owner and are rejected.
+A vector grows through a plain local binding; the binding registered with
+`using` is immutable, because the registration captured the vector at
+registration time. Grow first, then register the whole vector.
 
 ## Allocation and OOM
 

@@ -144,8 +144,8 @@ type checkerMatch struct{ id, owner, syntax, scrutinee, scrutineeType, checkedTy
 type checkerMatchArm struct{ id, owner, syntax, checkedMatch, variantUse, variantKind, binding, environment, body, block int }
 type checkerTry struct{ id, owner, syntax, expression, resultType, okType, errorType int }
 type checkerCleanup struct {
-	id, owner, syntax, environment, binding, initializer, callback int
-	normalExit, returnExit, tryExit                                int
+	id, owner, syntax, environment, binding, initializer, callback, drain int
+	normalExit, returnExit, tryExit                                       int
 }
 
 type checkerManifest struct {
@@ -189,6 +189,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorCheckerBehavior(t, exe) })
 	t.Run("m75-tables", func(t *testing.T) { runAlderM75TableCheckerBehavior(t, exe) })
+	t.Run("m75-vecs", func(t *testing.T) { runAlderM75VecCheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
@@ -1610,7 +1611,7 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 		return m, errors.New("manifest has no final line break")
 	}
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 15" || lines[len(lines)-1] != "END" {
+	if len(lines) < 2 || lines[0] != "ALDER-CHECKER-MANIFEST 16" || lines[len(lines)-1] != "END" {
 		return m, errors.New("invalid checker manifest envelope")
 	}
 	phase := 0
@@ -1744,10 +1745,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.tries = append(m.tries, checkerTry{id: numbers[0], owner: numbers[1], syntax: numbers[2], expression: numbers[3], resultType: numbers[4], okType: numbers[5], errorType: numbers[6]})
 		case "G":
-			if err != nil || len(numbers) != 10 {
+			if err != nil || len(numbers) != 11 {
 				return m, fmt.Errorf("line %d has invalid G record", lineNumber+2)
 			}
-			m.cleanups = append(m.cleanups, checkerCleanup{id: numbers[0], owner: numbers[1], syntax: numbers[2], environment: numbers[3], binding: numbers[4], initializer: numbers[5], callback: numbers[6], normalExit: numbers[7], returnExit: numbers[8], tryExit: numbers[9]})
+			m.cleanups = append(m.cleanups, checkerCleanup{id: numbers[0], owner: numbers[1], syntax: numbers[2], environment: numbers[3], binding: numbers[4], initializer: numbers[5], callback: numbers[6], drain: numbers[7], normalExit: numbers[8], returnExit: numbers[9], tryExit: numbers[10]})
 		case "V":
 			if err != nil || len(numbers) != 8 {
 				return m, fmt.Errorf("line %d has invalid V record", lineNumber+2)
@@ -2259,11 +2260,16 @@ func validateCheckerManifest(m checkerManifest) error {
 			validInitializer = m.expressions[cleanup.initializer-1].owner == cleanup.owner && m.expressions[cleanup.initializer-1].checkedType == m.locals[cleanup.binding-1].checkedType
 		}
 		validCallback := cleanup.callback >= 1 && cleanup.callback <= len(m.symbols) && m.symbols[cleanup.callback-1].kind == 12 && m.symbols[cleanup.callback-1].arity == 0
-		// The M7.5 builtin owner form carries callback 0; its binding type
-		// must then be exactly a one-argument Table.
+		// The M7.5 builtin owner form carries callback 0: a Table binding
+		// drains through the compiler-synthesized release (drain zero), and
+		// an affine-element Vec binding records the element Cleanup method
+		// in drain.
 		if cleanup.callback == 0 && validBinding {
 			bindingType := m.types[m.locals[cleanup.binding-1].checkedType-1]
-			validCallback = bindingType.kind == 19 && bindingType.count == 1
+			validCallback = bindingType.kind == 19 && bindingType.count == 1 && cleanup.drain == 0
+			if bindingType.kind == 17 && bindingType.count == 1 && cleanup.drain >= 1 && cleanup.drain <= len(m.symbols) && m.symbols[cleanup.drain-1].kind == 12 {
+				validCallback = true
+			}
 		}
 		if cleanup.id != i+1 || !checkerConcreteOwner(m, cleanup.owner) || !validEnvironment || !validBinding || !validInitializer || !validCallback || cleanup.normalExit != 1 || cleanup.returnExit != 1 || cleanup.tryExit != 1 || cleanupOwners[i] != 1 {
 			return fmt.Errorf("invalid checked cleanup %+v", cleanup)
@@ -3092,12 +3098,12 @@ func assertCheckerDiagnostic(t *testing.T, m checkerManifest, kind int, path str
 
 func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	inputs := map[string]string{"a.al": "x"}
-	valid := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nEND\n"
+	valid := "ALDER-CHECKER-MANIFEST 16\nS 0 612e616c 1\nEND\n"
 	if _, err := decodeCheckerManifest(valid, inputs); err != nil {
 		t.Fatalf("valid minimal manifest: %v", err)
 	}
 	malformed := map[string]string{
-		"version 14 envelope":         strings.Replace(valid, "MANIFEST 15", "MANIFEST 14", 1),
+		"version 14 envelope":         strings.Replace(valid, "MANIFEST 16", "MANIFEST 14", 1),
 		"record after diagnostics":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nD 4 0 0 1 0\nC 1 1 0 1 0 0\nEND\n",
 		"invalid primitive target":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nC 1 1 0 0 0 0\nD 4 0 0 1 0\nEND\n",
 		"duplicate canonical type":    "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nC 1 1 0 1 0 0\nC 2 1 0 1 0 0\nD 4 0 0 1 0\nEND\n",
@@ -3108,10 +3114,10 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"truncated match":             "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nM 1 1\nEND\n",
 		"truncated match arm":         "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nW 1 1\nEND\n",
 		"truncated try":               "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nX 1 1\nEND\n",
-		"truncated source span":       "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nZ 1 0\nEND\n",
-		"truncated cleanup":           "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nG 1 1\nEND\n",
+		"truncated source span":       "ALDER-CHECKER-MANIFEST 16\nS 0 612e616c 1\nZ 1 0\nEND\n",
+		"truncated cleanup":           "ALDER-CHECKER-MANIFEST 16\nS 0 612e616c 1\nG 1 1\nEND\n",
 	}
-	bodyPrefix := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
+	bodyPrefix := "ALDER-CHECKER-MANIFEST 16\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 1 0 0\nT 1 1 2 1\nT 2 1 3 1\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 1\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\n"
 	validUnaryBody := bodyPrefix + "E 1 1 6 1 1 1 0 0 0 0 0 0 0 0 0\nE 2 1 8 6 1 0 0 0 0 0 1 1 1 3 7\nH 1 1\nR 1 1 7 2 2\nJ 1 1 7 4 1 2 0 0 0 0\nK 1 1 0\nB 1 1 8 1 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validUnaryBody, inputs); err != nil {
 		t.Fatalf("valid unary body manifest: %v", err)
@@ -3125,7 +3131,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["instance declaration mismatch"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 2 0 0 0", 1)
 	malformed["instance argument range"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 1 1 0", 1)
 	malformed["instance discovery cycle"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 0 0 1", 1)
-	validCallBody := "ALDER-CHECKER-MANIFEST 15\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
+	validCallBody := "ALDER-CHECKER-MANIFEST 16\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validCallBody, inputs); err != nil {
 		t.Fatalf("valid call body manifest: %v", err)
 	}
@@ -3139,7 +3145,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["expression missing call annotation"] = strings.Replace(validCallBody, "E 1 1 4 8 1 0 0 0 0 1", "E 1 1 4 8 1 0 0 0 0 0", 1)
 	malformed["call annotation after expression"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5", "E 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nQ 1 1 1 1 1 0 0", 1)
 	controlPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 12 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\n"
-	controlPrefix = strings.Replace(controlPrefix, "MANIFEST 11", "MANIFEST 15", 1)
+	controlPrefix = strings.Replace(controlPrefix, "MANIFEST 11", "MANIFEST 16", 1)
 	validControlBody := controlPrefix + "B 1 1 4 0 0 0\nEND\n"
 	if _, err := decodeCheckerManifest(validControlBody, inputs); err != nil {
 		t.Fatalf("valid control body manifest: %v", err)
@@ -3149,17 +3155,17 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["statement link unknown statement"] = controlPrefix + "K 1 1 0\nB 1 1 4 0 1 0\nEND\n"
 	malformed["block unknown environment"] = strings.Replace(validControlBody, "B 1 1 4 0 0 0", "B 1 1 4 1 0 0", 1)
 	assignmentPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nT 1 1 2 1\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\nE 1 1 6 1 1 1 0 0 0 0 0 0 0 2 7\nV 1 1 5 1 1 0 0 1\nJ 1 1 7 3 1 1 1 0 0 0\nK 1 1 0\nB 1 1 8 1 1 0\nEND\n"
-	assignmentPrefix = strings.Replace(assignmentPrefix, "MANIFEST 11", "MANIFEST 15", 1)
+	assignmentPrefix = strings.Replace(assignmentPrefix, "MANIFEST 11", "MANIFEST 16", 1)
 	if _, err := decodeCheckerManifest(assignmentPrefix, inputs); err != nil {
 		t.Fatalf("valid assignment control manifest: %v", err)
 	}
 	genericFieldBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 2 1 0 0 1 1 0 0 0 0\nY 2 12 4 0 0 1 0 2 0 0 0\nP 1 1 2 0 0 1\nC 1 1 0 9 0 0\nC 2 6 0 1 0 0\nC 3 7 0 1 1 1\nC 4 1 0 12 0 0\nA 1 1\nT 1 1 5 2\nT 2 2 6 3\nT 3 2 7 4\nU 1 1 1 0 3 0 0 1 5 2\nU 2 2 5 0 5 0 0 1 6 3\nU 3 2 6 0 6 0 0 0 7 4\nI 1 2 2 0 0 0\nL 1 2 1 5 0 0 1 0 3\nN 1 2 0 1\nE 1 2 8 3 1 0 0 0 0 0 0 0 0 2 9\nV 1 2 7 2 1 1 0 1\nJ 1 2 9 3 1 1 1 0 0 0\nK 1 1 0\nB 1 2 10 1 1 0\nEND\n"
-	genericFieldBody = strings.Replace(genericFieldBody, "MANIFEST 11", "MANIFEST 15", 1)
+	genericFieldBody = strings.Replace(genericFieldBody, "MANIFEST 11", "MANIFEST 16", 1)
 	if _, err := decodeCheckerManifest(genericFieldBody, inputs); err != nil {
 		t.Fatalf("valid generic field control manifest: %v", err)
 	}
 	indexedBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nC 3 8 0 0 1 1\nA 1 1\nT 1 1 2 3\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 3\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 3\nN 1 1 0 1\nE 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2 1 0 0 0\nK 1 1 0\nB 1 1 9 1 1 0\nEND\n"
-	indexedBody = strings.Replace(indexedBody, "MANIFEST 11", "MANIFEST 15", 1)
+	indexedBody = strings.Replace(indexedBody, "MANIFEST 11", "MANIFEST 16", 1)
 	if _, err := decodeCheckerManifest(indexedBody, inputs); err != nil {
 		t.Fatalf("valid indexed control manifest: %v", err)
 	}

@@ -607,6 +607,137 @@ fn lower_table_release_function(d: Domain, source_state: State, store: CheckStor
     return Ok(LowerStep(state: lower_with_mir(table_type.state, term.store), id: made.id))
 }
 
+// lower_vec_drain_function synthesizes (once per affine-element vector type
+// per module) the callback-free using drain shell:
+// fn __alder_vec_drain_N(domain, vector: vec(T)) -> Unit. Only the function
+// and its parameters exist here; the body is filled after every source
+// function lowers, when the element cleanup target is resolvable, mirroring
+// the buffer and map helper bodies.
+fn lower_vec_drain_function(d: Domain, source_state: State, store: CheckStore, state: LowerState, vec_checked_type: U64) -> Result(LowerStep, __s0_Error) {
+    let vec_type = try lower_type(d, source_state, store, state, vec_checked_type)
+    if !vec_type.state.valid { return Ok(vec_type) }
+    let name = try lower_decimal_name(d, "__alder_vec_drain_", vec_type.id)
+    let existing = lower_release_function_named(vec_type.state.mir, name)
+    if existing != 0 { return Ok(LowerStep(state: vec_type.state, id: existing)) }
+    let made = try mir_add_function(d, vec_type.state.mir, name, mir_type_unit())
+    var current = lower_with_mir(vec_type.state, made.store)
+    var ordinal: U64 = 0
+    if current.has_storage {
+        let domain_type = try lower_domain_mir_type(d, current)
+        let domain_param = try mir_add_function_param(d, domain_type.state.mir, made.id, 0, "__domain", domain_type.id)
+        current = lower_with_mir(domain_type.state, domain_param.store)
+        ordinal = 1
+    }
+    let parameter = try mir_add_function_param(d, current.mir, made.id, ordinal, "vector", vec_type.id)
+    return Ok(LowerStep(state: lower_with_mir(current, parameter.store), id: made.id))
+}
+
+// lower_vec_drain_body fills one drain: walk the captured vector front to
+// back and hand every element to its cleanup, then return. A Table element
+// drains through its synthesized release; a Cleanup element through its
+// trait method. Later registrations of the same vector type find the body
+// already filled. The vector storage itself follows the domain lifecycle,
+// exactly like the builtin table release.
+fn lower_vec_drain_body(d: Domain, source_state: State, store: CheckStore, state: LowerState, cleanup: CheckedCleanupRec) -> Result(LowerState, __s0_Error) {
+    if cleanup.initializer == 0 || cleanup.initializer > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(lower_invalid(state)) }
+    let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1)
+    let owner_type = __s0_buffer_get(CheckedTypeRec, store.types, initializer.checked_type - 1)
+    if owner_type.kind != 17 || owner_type.arg_count != 1 { return Ok(state) }
+    let vec_type = try lower_type(d, source_state, store, state, initializer.checked_type)
+    if !vec_type.state.valid { return Ok(vec_type.state) }
+    var current = vec_type.state
+    let drain_name = try lower_decimal_name(d, "__alder_vec_drain_", vec_type.id)
+    let function = lower_release_function_named(current.mir, drain_name)
+    if function == 0 { return Ok(lower_invalid(current)) }
+    var filled: U64 = 0
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(MirBlockRec, current.mir.blocks) {
+        if __s0_buffer_get(MirBlockRec, current.mir.blocks, block_at).function == function { filled = 1 }
+        block_at = block_at + 1
+    }
+    if filled != 0 { return Ok(current) }
+    let element_checked = __s0_buffer_get(U64, store.type_args, owner_type.first_arg - 1)
+    let element_type = try lower_type(d, source_state, store, current, element_checked)
+    if !element_type.state.valid { return Ok(element_type.state) }
+    current = element_type.state
+    if cleanup.drain == 0 || cleanup.drain > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(lower_invalid(current)) }
+    var element_fn: U64 = 0
+    var element_domain: U64 = 0
+    element_fn = lower_owner_lookup(current.owners, cleanup.drain)
+    if element_fn == 0 { return Ok(lower_invalid(current)) }
+    if current.has_storage && !lower_owner_aliases_domain(source_state, store, cleanup.drain) { element_domain = 1 }
+    // The drain shell's own parameters: the hidden domain first when storage
+    // exists, then the captured vector. The storage flag is read into a plain
+    // integer before the loop: a short-circuit join inside a loop may not
+    // carry a value loaded from function-local state across the backedge.
+    var first_is_domain: U64 = 0
+    if current.has_storage { first_is_domain = 1 }
+    var domain_value: U64 = 0
+    var vector_value: U64 = 0
+    var param_at: U64 = 0
+    while param_at < __s0_buffer_len(MirParamRec, current.mir.params) {
+        let parameter = __s0_buffer_get(MirParamRec, current.mir.params, param_at)
+        if parameter.function == function {
+            if parameter.kind == mir_param_function() {
+                if parameter.ordinal == 0 && first_is_domain == 1 && domain_value == 0 { domain_value = parameter.value } else {
+                    if vector_value == 0 { vector_value = parameter.value }
+                }
+            }
+        }
+        param_at = param_at + 1
+    }
+    if vector_value == 0 { return Ok(lower_invalid(current)) }
+    let entry = try mir_add_block(d, current.mir, function, 0, "bb_entry")
+    let head = try mir_add_block(d, entry.store, function, 1, "bb_head")
+    let body = try mir_add_block(d, head.store, function, 2, "bb_body")
+    let done = try mir_add_block(d, body.store, function, 3, "bb_done")
+    let fail = try mir_add_block(d, done.store, function, 4, "bb_fail")
+    let fail_term = try mir_add_terminator(d, fail.store, MirTermRec(function: function, block: fail.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
+    current = lower_with_mir(current, fail_term.store)
+    let index_param = try mir_add_block_param(d, current.mir, function, head.id, 0, "index", mir_type_u64())
+    current = lower_with_mir(current, index_param.store)
+    let zero_name = try lower_decimal_name(d, "vec_drain_const_", vec_type.id * 100)
+    let zero_const = try mir_add_const(d, current.mir, zero_name, mir_type_u64(), mir_const_int(), 0, 0, 0, "")
+    let zero_value = try lower_add_typed_result(d, lower_with_mir(current, zero_const.store), function, entry.id, mir_type_u64())
+    let zero_instr = try lower_add_instr(d, zero_value.state, function, entry.id, mir_op_const_get(), zero_value.id, 0, 0, 0, 0, 0, zero_name)
+    current = try lower_jump_value(d, zero_instr.state, function, entry.id, head.id, zero_value.id)
+    let length_value = try lower_add_typed_result(d, current, function, head.id, mir_type_u64())
+    let length_instr = try lower_add_instr(d, length_value.state, function, head.id, mir_op_vec_len(), length_value.id, 0, 0, vector_value, 0, 0, "")
+    let keep_going = try lower_add_typed_result(d, length_instr.state, function, head.id, mir_type_bool())
+    let compare = try lower_add_instr(d, keep_going.state, function, head.id, mir_op_int_lt(), keep_going.id, 0, 0, index_param.id, length_value.id, 0, "")
+    current = try lower_branch(d, compare.state, function, head.id, keep_going.id, body.id, done.id)
+    let empty = try __s0_buffer_new(U64, d)
+    let slice_type = try mir_intern_type(d, current.mir, mir_type_kind_slice(), element_type.id, 0, 0, empty, 0)
+    current = lower_with_mir(current, slice_type.store)
+    let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), element_type.id, 0, 0, empty, 0)
+    current = lower_with_mir(current, ref_type.store)
+    let slice_value = try lower_add_typed_result(d, current, function, body.id, slice_type.type_id)
+    let slice_instr = try lower_add_instr(d, slice_value.state, function, body.id, mir_op_vec_as_slice(), slice_value.id, 0, 0, vector_value, 0, 0, "")
+    let ref_value = try lower_add_typed_result(d, slice_instr.state, function, body.id, ref_type.type_id)
+    let indexed = try lower_add_instr(d, ref_value.state, function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, slice_value.id, index_param.id, fail.id, "")
+    let element_place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
+    current = lower_with_mir(indexed.state, element_place.store)
+    let element_value = try lower_add_typed_result(d, current, function, body.id, element_type.id)
+    let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, element_place.id, 0, 0, 0, 0, "")
+    let cleaned = try lower_add_instr(d, loaded.state, function, body.id, mir_op_call(), 0, 0, 0, 0, 0, element_fn, "")
+    current = cleaned.state
+    var argument_ordinal: U64 = 0
+    if element_domain != 0 {
+        current = try lower_add_instr_operand(d, current, cleaned.id, 0, domain_value, mir_operand_instruction(), "")
+        argument_ordinal = 1
+    }
+    current = try lower_add_instr_operand(d, current, cleaned.id, argument_ordinal, element_value.id, mir_operand_instruction(), "")
+    let one_name = try lower_decimal_name(d, "vec_drain_const_", vec_type.id * 100 + 1)
+    let one_const = try mir_add_const(d, current.mir, one_name, mir_type_u64(), mir_const_int(), 0, 1, 0, "")
+    let one_value = try lower_add_typed_result(d, lower_with_mir(current, one_const.store), function, body.id, mir_type_u64())
+    let one_instr = try lower_add_instr(d, one_value.state, function, body.id, mir_op_const_get(), one_value.id, 0, 0, 0, 0, 0, one_name)
+    let next_index = try lower_add_typed_result(d, one_instr.state, function, body.id, mir_type_u64())
+    let added = try lower_add_instr(d, next_index.state, function, body.id, mir_op_int_add_checked(), next_index.id, 0, 0, index_param.id, one_value.id, fail.id, "")
+    current = try lower_jump_value(d, added.state, function, body.id, head.id, next_index.id)
+    let done_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: done.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(lower_with_mir(current, done_term.store))
+}
+
 fn lower_storage_domain_value(state: LowerState, store: CheckStore, owner: U64, expression: U64) -> U64 {
     if expression >= 1 && expression <= __s0_buffer_len(U64, state.storage) && __s0_buffer_get(U64, state.storage, expression - 1) == 1 {
         return lower_result_domain_value(state, store, owner)
@@ -3792,22 +3923,32 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let cleanup_value = try mir_add_value(d, cleanup_type.store, function, try lower_result_name(d, cleanup_type.store, function, try lower_decimal_name(d, "cleanup_id", statement.binding)), cleanup_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(cleanup_type.store, function, active) + 1)
         let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, statement.body - 1)
         var callback = lower_owner_lookup(current.owners, cleanup.callback)
+        var vec_drain = false
         if cleanup.callback == 0 {
             // Builtin owner cleanup: a Table registration pushes the
-            // pre-synthesized release function for its table type. Release
-            // functions are created once, before body lowering, so per-record
-            // ordinals stay append-only per function.
+            // pre-synthesized release function for its table type, and an
+            // affine-element Vec registration pushes the pre-synthesized
+            // per-element drain for its vector type. Both are created once,
+            // before body lowering, so per-record ordinals stay append-only
+            // per function.
             let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1)
-            let table_type = try lower_type(d, source_state, store, current, initializer.checked_type)
-            if !table_type.state.valid { return Ok(LowerFlowStep(state: table_type.state, block: active, terminated: true)) }
-            let release_name = try lower_decimal_name(d, "__alder_table_release_", table_type.id)
-            callback = lower_release_function_named(current.mir, release_name)
+            let owner_type = __s0_buffer_get(CheckedTypeRec, store.types, initializer.checked_type - 1)
+            let owner_step = try lower_type(d, source_state, store, current, initializer.checked_type)
+            if !owner_step.state.valid { return Ok(LowerFlowStep(state: owner_step.state, block: active, terminated: true)) }
+            if owner_type.kind == 17 {
+                vec_drain = true
+                let drain_name = try lower_decimal_name(d, "__alder_vec_drain_", owner_step.id)
+                callback = lower_release_function_named(current.mir, drain_name)
+            } else {
+                let release_name = try lower_decimal_name(d, "__alder_table_release_", owner_step.id)
+                callback = lower_release_function_named(current.mir, release_name)
+            }
         }
         if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
         let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, 0, 0, scope_value.id, 0, callback, "")
         current = pushed.state
         var cleanup_ordinal: U64 = 0
-        if cleanup.callback != 0 && state.has_storage && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {
+        if (cleanup.callback != 0 || vec_drain) && state.has_storage && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {
             let domain = lower_domain_value(current, store, owner)
             if domain == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
             current = try lower_add_instr_operand(d, current, pushed.id, 0, domain, mir_operand_instruction(), "")
@@ -4173,6 +4314,15 @@ fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpa
             if !current.valid { return Ok(current) }
         }
         owner = owner + 1
+    }
+    var drain_at: U64 = 0
+    while drain_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, drain_at)
+        if cleanup.callback == 0 {
+            current = try lower_vec_drain_body(d, source_state, store, current, cleanup)
+            if !current.valid { return Ok(current) }
+        }
+        drain_at = drain_at + 1
     }
     var bridge_at: U64 = 0
     while bridge_at < __s0_buffer_len(LowerBridgeRec, current.bridges) {
@@ -5964,11 +6114,19 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if initializer.owner != item.owner || !lower_checked_abi_equal(store, initializer.checked_type, binding.checked_type) || initializer.site_kind != 8 || initializer.site_syntax != item.syntax { return false }
         if item.callback == 0 {
             // The M7.5 builtin owner form: the initializer type is exactly a
-            // concrete Table, and lowering registers the synthesized release
-            // callback. The activation and single-owner invariants below
-            // apply unchanged.
+            // concrete Table (drain stays zero; lowering registers the
+            // synthesized release callback) or an affine-element Vec of a
+            // Cleanup owner (drain is its concrete cleanup method). The
+            // activation and single-owner invariants below apply unchanged.
             let owner_type = __s0_buffer_get(CheckedTypeRec, store.types, binding.checked_type - 1)
-            if owner_type.kind != 19 || owner_type.arg_count != 1 { return false }
+            if owner_type.kind == 19 && owner_type.arg_count == 1 {
+                if item.drain != 0 { return false }
+            } else {
+                if owner_type.kind != 17 || owner_type.arg_count != 1 { return false }
+                let element = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, owner_type.first_arg - 1) - 1)
+                if element.kind != 7 || type_cleanup_impls(store, element.target) != 1 { return false }
+                if item.drain == 0 || item.drain > __s0_buffer_len(SymbolRec, store.symbols) || __s0_buffer_get(SymbolRec, store.symbols, item.drain - 1).kind != 12 { return false }
+            }
         } else {
         let callback = __s0_buffer_get(SymbolRec, store.symbols, item.callback - 1)
         if callback.kind != 12 || callback.type_arity != 0 || callback.declaration != item.callback { return false }
@@ -6045,9 +6203,16 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     while release_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
         let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, release_at)
         if cleanup.callback == 0 && cleanup.initializer >= 1 && cleanup.initializer <= __s0_buffer_len(CheckedExprRec, store.expressions) {
-            let release = try lower_table_release_function(d, source_state, store, state, cleanup.owner, cleanup.initializer)
-            if !release.state.valid { return Ok(LowerBad) }
-            state = release.state
+            let owner_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1).checked_type - 1)
+            if owner_type.kind == 17 {
+                let drain = try lower_vec_drain_function(d, source_state, store, state, __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1).checked_type)
+                if !drain.state.valid { return Ok(LowerBad) }
+                state = drain.state
+            } else {
+                let release = try lower_table_release_function(d, source_state, store, state, cleanup.owner, cleanup.initializer)
+                if !release.state.valid { return Ok(LowerBad) }
+                state = release.state
+            }
         }
         release_at = release_at + 1
     }

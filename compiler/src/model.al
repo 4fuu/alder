@@ -390,7 +390,10 @@ type CheckedTryRec {
 // A cleanup record is owned by one concrete function instance and one using
 // statement. environment is the lexical environment before the binding is
 // introduced; binding and initializer are concrete checker IDs, and callback
-// is the concrete nongeneric function instance. A zero callback marks the
+// is the concrete nongeneric function instance. drain is the element Cleanup
+// method symbol recorded for an affine-element Vec registration (the callback
+// then names the compiler-synthesized per-element drain function). A zero
+// callback with a zero drain marks the
 // builtin owner form of M7.5, whose initializer type is exactly Table(T):
 // lowering registers a compiler-synthesized release callback, so the owner is
 // exempt from the must-transfer exit rule and a transfer disarms the entry.
@@ -404,6 +407,7 @@ type CheckedCleanupRec {
     binding: U64
     initializer: U64
     callback: U64
+    drain: U64
     normal_exit: U64
     return_exit: U64
     try_exit: U64
@@ -525,8 +529,11 @@ type EnvironmentRec {
 // initializer is not an affine Cleanup owner, 137 the bootstrap-private
 // `with cleanup_function` clause outside the private profile, 138 an
 // AsyncCleanup owner in synchronous `using`, 139 a type implementing both
-// cleanup traits, and 140 a Cleanup implementation without a usable
-// nongeneric `cleanup(take self) -> Unit` method.
+// cleanup traits, 140 a Cleanup implementation without a usable
+// nongeneric `cleanup(take self) -> Unit` method, 141 an element read or
+// view on an affine-element vector, 142 a push into a vector whose binding
+// already carries a using registration, and 143 a Table element inside a
+// vector, whose heap-stored handle awaits MIR storage rules.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

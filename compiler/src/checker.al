@@ -2422,7 +2422,10 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
     if kind == 17 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         let child = __s0_buffer_get(U64, appended.type_args, checked.first_arg - 1)
         let category = try interpreted_type_category(d, state, parse, appended, empty, no_ancestry, child, 0, 0)
-        if category.category != 1 { return check_type_detail_fail(d, appended, 100, syntax_diag_node(state, parse, node_id), child) }
+        if category.category != 1 && !vec_element_allows_affine(state, appended, child) {
+            if __s0_buffer_get(CheckedTypeRec, store.types, child - 1).kind == 19 { return check_type_detail_fail(d, appended, 143, syntax_diag_node(state, parse, node_id), child) }
+            return check_type_detail_fail(d, appended, 100, syntax_diag_node(state, parse, node_id), child)
+        }
     }
     if kind == 19 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         // A table is always affine even when its element is copyable. M7.5
@@ -3673,6 +3676,7 @@ fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node
     if node_word(state, node, "__s0_Buffer") { return CheckedTypeRec(kind: 13, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "Vec") { return CheckedTypeRec(kind: 17, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "MutSlice") { return CheckedTypeRec(kind: 18, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
+    if node_word(state, node, "Table") { return CheckedTypeRec(kind: 19, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     let declared = find_declared_type(state, parse, store, node)
     if declared != 0 { return CheckedTypeRec(kind: 7, syntax: 0, target: declared, first_arg: 0, arg_count: __s0_buffer_get(SymbolRec, store.symbols, declared - 1).type_arity) }
     return CheckedTypeRec(kind: 0, syntax: 0, target: 0, first_arg: 0, arg_count: 0)
@@ -5349,7 +5353,10 @@ fn check_vec_static_builtin(d: Domain, state: State, parse: ParseStore, base: Ch
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, element, 0, 0)
-    if category.category != 1 { return expr_token_single_type_fail(d, state, current, 100, __s0_buffer_get(SyntaxRec, parse.nodes, type_link.node - 1), element) }
+    if category.category != 1 && !vec_element_allows_affine(state, current, element) {
+        if __s0_buffer_get(CheckedTypeRec, current.types, element - 1).kind == 19 { return expr_token_single_type_fail(d, state, current, 143, __s0_buffer_get(SyntaxRec, parse.nodes, type_link.node - 1), element) }
+        return expr_token_single_type_fail(d, state, current, 100, __s0_buffer_get(SyntaxRec, parse.nodes, type_link.node - 1), element)
+    }
     let vector = try canonical_application(d, current, owner, 17, element, 0, 1)
     current = vector.store
     if identity == 19 {
@@ -5382,6 +5389,14 @@ fn check_vec_static_builtin(d: Domain, state: State, parse: ParseStore, base: Ch
         }
         let array = __s0_buffer_get(CheckedTypeRec, current.types, actual - 1)
         if array.kind != 15 || array.arg_count != 1 || !(try expression_type_equal(d, state, parse, current, element, __s0_buffer_get(U64, current.type_args, array.first_arg - 1))) { return expr_token_fail(d, state, base, 42, value_node) }
+        if vec_element_allows_affine(state, current, element) {
+            // The array of affine owners transfers into the vector, exactly
+            // like an aggregate construction part.
+            current = try transfer_owned_argument(d, state, parse, current, owner, match checked {
+                ExprGood(value) => value.draft.expression
+                ExprBad(value) => 0
+            })
+        }
     }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, vector.checked_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, vector.checked_type) }
     return append_builtin_expression(d, parse, current, owner, call_id, vector.checked_type, identity, call, 1, site_kind, site_syntax)
@@ -5555,10 +5570,34 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if builtin == 23 && sequence.kind == 18 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 24 && sequence.kind != 15 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 25 && sequence.kind != 18 { return expr_token_fail(d, state, base, 61, callee) }
+    let element = sequence_element_type(state, parse, store, receiver_type_id)
+    // Affine-element vectors transfer elements in and drain them at scope
+    // exit: per-element reads and views would duplicate an owner, so only
+    // push, len, and whole-vector transfer exist for them.
+    var affine_elements = false
+    if sequence.kind == 17 && element != 0 && element <= __s0_buffer_len(CheckedTypeRec, store.types) {
+        let empty_vec = try __s0_buffer_new(TypeBindingRec, d)
+        let no_ancestry_vec = try __s0_buffer_new(DeclAncestryRec, d)
+        let element_category = try interpreted_type_category(d, state, parse, store, empty_vec, no_ancestry_vec, element, 0, 0)
+        if element_category.category == 2 && vec_element_allows_affine(state, store, element) { affine_elements = true }
+    }
+    if affine_elements && (builtin == 22 || builtin == 23 || builtin == 24 || builtin == 25) { return expr_token_fail(d, state, base, 141, callee) }
     if builtin == 21 || builtin == 24 {
         if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
         let local_id = local_lookup(store, owner, receiver_node, state)
-        if local_id == 0 || __s0_buffer_get(LocalRec, store.locals, local_id - 1).mutable == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+        if local_id == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+        let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+        var may_mutate = local.mutable == 1
+        // An affine-element vector has no mutable binding form (rule 95), so
+        // push targets its owning local binding. A registration captures the
+        // vector header at `using` time and a parameter binding has no slot
+        // to write a grown header back to, so both stay immutable: grow a
+        // plain binding first, then register or transfer the whole vector.
+        if affine_elements && builtin == 21 {
+            may_mutate = local.kind == 2
+            if may_mutate && cleanup_binding_registered(store, owner, local_id) { return expr_token_fail(d, state, base, 142, receiver_node) }
+        }
+        if !may_mutate { return expr_token_fail(d, state, base, 101, receiver_node) }
     }
     if receiver_node.kind == 24 {
         let local_id = local_lookup(store, owner, receiver_node, state)
@@ -5568,7 +5607,6 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         if builtin == 24 || builtin == 25 { mode = 4 }
         if local_id != 0 && lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
     }
-    let element = sequence_element_type(state, parse, store, receiver_type_id)
     let u64_type = primitive_type_id(state, parse, store, "U64")
     var current = store
     var first_expression: U64 = 0
@@ -5593,6 +5631,11 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         }
         if draft.deferred { return expr_deferred(base) }
         first_expression = draft.expression
+        if affine_elements && builtin == 21 {
+            // The pushed element transfers into the vector, exactly like an
+            // aggregate construction part.
+            current = try transfer_owned_argument(d, state, parse, current, owner, first_expression)
+        }
     }
     if arity == 2 {
         let link = call_link_at(parse, call, 3)
@@ -7334,6 +7377,41 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
     return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, false)
 }
 
+// vec_element_cleanup_story reports whether a Vec element type may join an
+// affine vector: 0 no (the copyable-only rule stays), or the element's
+// concrete Cleanup method symbol id. AsyncCleanup elements stay out until
+// the async runtime, and Table elements stay out until the MIR storage rules
+// admit heap-stored table handles (the phase-6 verifier rejects the deref
+// store today); a Table owner registers with using directly instead.
+fn vec_element_cleanup_story(state: State, store: CheckStore, element: U64) -> U64 {
+    if element == 0 || element > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, element - 1)
+    if checked.kind == 7 {
+        let bits = type_cleanup_impls(store, checked.target)
+        if bits == 1 { return type_cleanup_method_symbol(state, store, checked.target) }
+    }
+    return 0
+}
+
+// vec_element_allows_affine admits an affine Vec element with a cleanup
+// story; copyable elements stay admitted and scoped ones never are.
+fn vec_element_allows_affine(state: State, store: CheckStore, element: U64) -> Bool {
+    return vec_element_cleanup_story(state, store, element) != 0
+}
+
+// cleanup_binding_registered reports whether a local binding is the binding
+// of a using registration. Cleanups are one per using statement, so this walk
+// stays bounded by the program's registration count.
+fn cleanup_binding_registered(store: CheckStore, owner: U64, binding: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+        let item = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, at)
+        if item.owner == owner && item.binding == binding { return true }
+        at = at + 1
+    }
+    return false
+}
+
 // symbol_is_cleanup_hook reports whether a function symbol is the cleanup
 // method of a Cleanup or AsyncCleanup implementation. Such a hook consumes
 // its receiver by value as the disposal itself, so its take-self parameter
@@ -7452,6 +7530,7 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
     let using_kind = __s0_buffer_get(CheckedTypeRec, current.types, initializer.checked_type - 1).kind
     if (using_kind == 7 || using_kind == 9 || using_kind == 10 || using_kind == 11 || using_kind == 13 || using_kind == 15 || using_kind == 17) && (try checked_type_contains_scoped(d, state, parse, current, initializer.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
     var callback: U64 = 0
+    var drain: U64 = 0
     if child_count == 2 {
         // The `with cleanup_function` clause is the bootstrap-private MIR
         // callback bridge; ordinary programs select cleanup through the
@@ -7485,10 +7564,25 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
         // implementing Cleanup registers its trait method. Registration
         // exempts the owner from the must-transfer exit rule; a transfer
         // disarms the entry.
+        // A whole-aggregate read of an owning local is consumed here exactly
+        // like an argument pass, so a received owner can be registered.
+        current = try transfer_owned_argument(d, state, parse, current, owner, initializer.expression)
         let using_checked = __s0_buffer_get(CheckedTypeRec, current.types, initializer.checked_type - 1)
         var builtin_table = false
         if using_kind == 19 { builtin_table = true }
-        if !builtin_table {
+        var vec_drain: U64 = 0
+        if using_kind == 17 {
+            // An affine-element vector registers a per-element drain: the
+            // callback names the compiler-synthesized drain function and
+            // drain records the element Cleanup method symbol.
+            let vec_element = __s0_buffer_get(U64, current.type_args, using_checked.first_arg - 1)
+            let story = vec_element_cleanup_story(state, current, vec_element)
+            if story != 0 {
+                vec_drain = 1
+                drain = story
+            }
+        }
+        if !builtin_table && vec_drain == 0 {
             if using_kind != 7 { return body_token_fail(d, state, current, 136, statement) }
             let bits = type_cleanup_impls(current, using_checked.target)
             if bits == 3 { return body_token_fail(d, state, current, 139, statement) }
@@ -7513,7 +7607,7 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
     let binding = __s0_buffer_len(LocalRec, locals)
     let environments = try __s0_buffer_append(EnvironmentRec, d, current.environments, EnvironmentRec(owner: owner, parent: environment, binding: binding))
     current = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: locals, environments: environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures)
-    let cleanups = try __s0_buffer_append(CheckedCleanupRec, d, current.control.cleanups, CheckedCleanupRec(owner: owner, syntax: statement_id, environment: environment, binding: binding, initializer: initializer.expression, callback: callback, normal_exit: 1, return_exit: 1, try_exit: 1))
+    let cleanups = try __s0_buffer_append(CheckedCleanupRec, d, current.control.cleanups, CheckedCleanupRec(owner: owner, syntax: statement_id, environment: environment, binding: binding, initializer: initializer.expression, callback: callback, drain: drain, normal_exit: 1, return_exit: 1, try_exit: 1))
     current = with_control(current, CheckedControlStore(blocks: current.control.blocks, statement_links: current.control.statement_links, statements: current.control.statements, places: current.control.places, matches: current.control.matches, match_arms: current.control.match_arms, tries: current.control.tries, cleanups: cleanups, table_views: current.control.table_views))
     return append_checked_statement(d, current, owner, statement_id, 10, environment, initializer.expression, 0, binding, __s0_buffer_len(CheckedCleanupRec, cleanups), 0, false)
 }
@@ -8205,7 +8299,7 @@ fn emit_checked_control(store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
         let rec = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, at)
-        if !out_string("G ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.initializer) || !out(32) || !out_u64(rec.callback) || !out(32) || !out_u64(rec.normal_exit) || !out(32) || !out_u64(rec.return_exit) || !out(32) || !out_u64(rec.try_exit) || !out(10) { return false }
+        if !out_string("G ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.initializer) || !out(32) || !out_u64(rec.callback) || !out(32) || !out_u64(rec.drain) || !out(32) || !out_u64(rec.normal_exit) || !out(32) || !out_u64(rec.return_exit) || !out(32) || !out_u64(rec.try_exit) || !out(10) { return false }
         at = at + 1
     }
     at = 0
@@ -8317,7 +8411,7 @@ fn emit_check_diagnostic(rec: CheckDiagRec) -> Bool {
 fn emit_check_manifest(state: State, parse: ParseStore, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 15\n") || !emit_check_sources(state) || !emit_check_spans(parse) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 16\n") || !emit_check_sources(state) || !emit_check_spans(parse) { return false }
     if !emit_checked_symbols(store) { return false }
     if !emit_checked_types(store) { return false }
     if !emit_checked_bindings(store) { return false }

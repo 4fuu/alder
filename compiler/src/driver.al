@@ -381,6 +381,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 138 { return out_string("an AsyncCleanup owner cannot be cleaned by synchronous using; async cleanup arrives with the async runtime") }
     if kind == 139 { return out_string("a type may implement Cleanup or AsyncCleanup, not both") }
     if kind == 140 { return out_string("Cleanup selection requires a nongeneric cleanup(take self) -> Unit method") }
+    if kind == 141 { return out_string("a Vec of affine elements supports push and len only; element access would duplicate an owner") }
+    if kind == 142 { return out_string("a registered vector owner is immutable; grow a plain binding first, then register it with using") }
+    if kind == 143 { return out_string("a Table cannot be a Vec element yet: heap-storing a table handle awaits storage rules; register the table with using directly") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }
