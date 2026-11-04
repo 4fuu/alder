@@ -334,6 +334,24 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 116 { return out_string("trait implementation arguments must be concrete types") }
     if kind == 117 { return out_string("Self is only available inside a trait or trait implementation") }
     if kind == 118 { return out_string("trait methods cannot declare their own type parameters yet") }
+    if kind == 119 {
+        if !out_string("trait method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" is provided by multiple implementations for this receiver type")
+    }
+    if kind == 120 {
+        if !out_string("trait method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" has no implementation here and default bodies are not callable yet")
+    }
+    if kind == 121 {
+        if !out_string("trait implementation is missing a required method; expected ") { return false }
+        return out_string("")
+    }
+    if kind == 122 {
+        if !out_string("trait implementation method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" matches no trait requirement")
+    }
+    if kind == 123 { return out_string("trait implementation method does not match the trait requirement signature") }
+    if kind == 124 { return out_string("generic trait implementation methods are not supported yet") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

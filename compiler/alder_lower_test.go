@@ -21,6 +21,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("arrays", func(t *testing.T) { runArrayLowerConformance(t, exe) })
 	t.Run("m71-collections", func(t *testing.T) { runM71LowerConformance(t, exe) })
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73LowerBehavior(t, exe) })
+	t.Run("m75-trait-dispatch", func(t *testing.T) { runAlderM75LowerBehavior(t, exe) })
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
 type Pair {

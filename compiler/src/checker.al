@@ -947,7 +947,8 @@ fn empty_trait_store(d: Domain) -> Result(TraitStoreRec, __s0_Error) {
     let impls = try __s0_buffer_new(TraitImplRec, d)
     let index = try __s0_buffer_new(U64, d)
     let args = try __s0_buffer_new(U64, d)
-    return Ok(TraitStoreRec(constraints: constraints, impls: impls, impl_index: index, args: args))
+    let receiver_index = try __s0_buffer_new(U64, d)
+    return Ok(TraitStoreRec(constraints: constraints, impls: impls, impl_index: index, args: args, receiver_index: receiver_index))
 }
 
 fn check_fail(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec, related_source: U64, related_start: U64, related_end: U64) -> Result(CheckResult, __s0_Error) {
@@ -1226,7 +1227,7 @@ fn resolve_trait_arg_links(d: Domain, state: State, parse: ParseStore, store: Ch
         CheckBad(value) => true
     } { return Ok(TraitRefBad(current)) }
     let args = try __s0_buffer_append(U64, d, current.traits.args, checked_type_for_syntax(current, owner, link.node))
-    let with_args = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: TraitStoreRec(constraints: current.traits.constraints, impls: current.traits.impls, impl_index: current.traits.impl_index, args: args))
+    let with_args = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: TraitStoreRec(constraints: current.traits.constraints, impls: current.traits.impls, impl_index: current.traits.impl_index, args: args, receiver_index: current.traits.receiver_index))
     if prior.arg_count == 0 {
         return Ok(TraitRefGood(TraitRefStoreRec(store: with_args, reference: TraitRefRec(builtin: 0, symbol: 0, first_arg: __s0_buffer_len(U64, args), arg_count: 1))))
     }
@@ -4673,7 +4674,15 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)
-        if target == 0 { return expr_token_fail(d, state, base, 61, callee) }
+        if target == 0 {
+            // Static trait dispatch: inherent methods win, then the unique
+            // trait implementation providing this method name resolves.
+            let trait_method = trait_receiver_method(state, parse, current, receiver_type, callee)
+            if trait_method.ambiguous { return expr_token_fail(d, state, base, 119, callee) }
+            if trait_method.target != 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+            if trait_method.defaulted { return expr_token_fail(d, state, base, 120, callee) }
+            return expr_token_fail(d, state, base, 61, callee)
+        }
         return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
     }
     if callee.kind == 24 && (node_word(state, callee, "len") || node_word(state, callee, "range")) { return check_slice_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
@@ -6257,7 +6266,16 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(functions) }
-    let public_signatures = try check_public_signatures(d, state, parse, after_functions)
+    let trait_impls_valid = try validate_trait_impls(d, state, parse, after_functions)
+    let after_trait_impls = match trait_impls_valid {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match trait_impls_valid {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(trait_impls_valid) }
+    let public_signatures = try check_public_signatures(d, state, parse, after_trait_impls)
     let after_public_signatures = match public_signatures {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -6552,7 +6570,7 @@ fn check_constraint_traits(d: Domain, state: State, parse: ParseStore, store: Ch
         TraitRefBad(value) => TraitRefRec(builtin: 0, symbol: 0, first_arg: 0, arg_count: 0)
     }
     let constraints = try __s0_buffer_append(TraitConstraintRec, d, current.traits.constraints, TraitConstraintRec(owner: owner, param: param, trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, syntax: constraint_node))
-    let recorded = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: TraitStoreRec(constraints: constraints, impls: current.traits.impls, impl_index: current.traits.impl_index, args: current.traits.args))
+    let recorded = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: TraitStoreRec(constraints: constraints, impls: current.traits.impls, impl_index: current.traits.impl_index, args: current.traits.args, receiver_index: current.traits.receiver_index))
     return check_constraint_traits(d, state, parse, recorded, owner, param, constraint_node, item.next, constraint_at, continue_at, initial)
 }
 
@@ -6659,9 +6677,12 @@ fn trait_impl_self_node(parse: ParseStore, root: SyntaxRec) -> U64 {
     return 0
 }
 
+// Coherence keys are (trait reference, implementing type, trait
+// arguments): exactly one implementation per concrete combination.
 fn trait_impl_key_less(store: CheckStore, left: TraitImplRec, right: TraitImplRec) -> Bool {
     if left.trait_builtin != right.trait_builtin { return left.trait_builtin < right.trait_builtin }
     if left.trait_symbol != right.trait_symbol { return left.trait_symbol < right.trait_symbol }
+    if left.self_type != right.self_type { return left.self_type < right.self_type }
     var at: U64 = 0
     while at < left.arg_count && at < right.arg_count {
         let left_type = __s0_buffer_get(U64, store.traits.args, left.first_arg - 1 + at)
@@ -6669,12 +6690,11 @@ fn trait_impl_key_less(store: CheckStore, left: TraitImplRec, right: TraitImplRe
         if left_type != right_type { return left_type < right_type }
         at = at + 1
     }
-    if left.arg_count != right.arg_count { return left.arg_count < right.arg_count }
-    return left.self_type < right.self_type
+    return left.arg_count < right.arg_count
 }
 
 fn trait_impl_key_equal(store: CheckStore, left: TraitImplRec, right: TraitImplRec) -> Bool {
-    if left.trait_builtin != right.trait_builtin || left.trait_symbol != right.trait_symbol || left.arg_count != right.arg_count { return false }
+    if left.trait_builtin != right.trait_builtin || left.trait_symbol != right.trait_symbol || left.self_type != right.self_type || left.arg_count != right.arg_count { return false }
     var at: U64 = 0
     while at < left.arg_count {
         if __s0_buffer_get(U64, store.traits.args, left.first_arg - 1 + at) != __s0_buffer_get(U64, store.traits.args, right.first_arg - 1 + at) { return false }
@@ -6683,11 +6703,370 @@ fn trait_impl_key_equal(store: CheckStore, left: TraitImplRec, right: TraitImplR
     return true
 }
 
-fn trait_store_with(store: CheckStore, impls: __s0_Buffer(TraitImplRec), index: __s0_Buffer(U64)) -> CheckStore {
-    return CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: TraitStoreRec(constraints: store.traits.constraints, impls: impls, impl_index: index, args: store.traits.args))
+fn trait_impl_receiver_type_symbol(store: CheckStore, rec: TraitImplRec) -> U64 {
+    if rec.self_type == 0 { return 0 }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, rec.self_type - 1)
+    if checked.kind != 7 { return 0 }
+    return checked.target
 }
 
-// Resolve one trait-implementation head and record it. The implementing
+fn trait_impl_receiver_less(store: CheckStore, left: TraitImplRec, right: TraitImplRec) -> Bool {
+    let left_target = trait_impl_receiver_type_symbol(store, left)
+    let right_target = trait_impl_receiver_type_symbol(store, right)
+    if left_target != right_target { return left_target < right_target }
+    if left.trait_builtin != right.trait_builtin { return left.trait_builtin < right.trait_builtin }
+    return left.trait_symbol < right.trait_symbol
+}
+
+// Resolve one method name for a concrete nominal receiver: inherent methods
+// win, then the unique trait implementation providing that method name.
+// Returns the resolved method symbol; ambiguous marks two impls providing
+// the same name for one receiver type.
+type TraitMethodRec {
+    target: U64
+    ambiguous: Bool
+    defaulted: Bool
+}
+
+fn trait_impl_method_symbol(state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, name: SyntaxRec) -> U64 {
+    var at = rec.first_method
+    while at < rec.first_method + rec.method_count {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at - 1)
+        if same_name(state, name.source, name.name_start, name.name_end, symbol.source, symbol.name_start, symbol.name_end) { return at }
+        at = at + 1
+    }
+    return 0
+}
+
+fn trait_method_has_default(state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, name: SyntaxRec) -> Bool {
+    if rec.trait_symbol == 0 { return false }
+    let trait_symbol = __s0_buffer_get(SymbolRec, store.symbols, rec.trait_symbol - 1)
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, trait_symbol.node - 1)
+    var link_at = root.children
+    while link_at != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 51 && same_name(state, name.source, name.name_start, name.name_end, child.source, child.name_start, child.name_end) {
+            // A requirement with a block carries the default body.
+            var body_at = child.children
+            var has_block = false
+            while body_at != 0 {
+                let body_item = __s0_buffer_get(SyntaxLinkRec, parse.links, body_at - 1)
+                if __s0_buffer_get(SyntaxRec, parse.nodes, body_item.node - 1).kind == 14 { has_block = true }
+                body_at = body_item.next
+            }
+            return has_block
+        }
+        link_at = item.next
+    }
+    return false
+}
+
+fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, receiver: CheckedTypeRec, name: SyntaxRec) -> TraitMethodRec {
+    var found: U64 = 0
+    var ambiguous = false
+    var defaulted = false
+    if receiver.kind != 7 || __s0_buffer_len(U64, store.traits.receiver_index) == 0 { return TraitMethodRec(target: 0, ambiguous: false, defaulted: false) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, store.traits.receiver_index) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) == receiver.target {
+            let method = trait_impl_method_symbol(state, parse, store, rec, name)
+            if method != 0 {
+                if found != 0 { ambiguous = true } else { found = method }
+            } else {
+                if trait_method_has_default(state, parse, store, rec, name) { defaulted = true }
+            }
+        }
+        at = at + 1
+    }
+    return TraitMethodRec(target: found, ambiguous: ambiguous, defaulted: defaulted)
+}
+
+fn trait_store_with(store: CheckStore, impls: __s0_Buffer(TraitImplRec), index: __s0_Buffer(U64)) -> CheckStore {
+    return CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: TraitStoreRec(constraints: store.traits.constraints, impls: impls, impl_index: index, args: store.traits.args, receiver_index: store.traits.receiver_index))
+}
+
+// Structural type comparison substituting trait-space references through
+// one impl: trait parameters become the impl's concrete arguments and the
+// implicit Self parameter becomes the implementing type. Pure comparison;
+// no store mutation.
+fn trait_impl_type_matches(store: CheckStore, trait_symbol_id: U64, requirement: U64, impl_type: U64, first_arg: U64, arg_count: U64, self_type: U64, depth: U64) -> Bool {
+    if requirement == 0 || impl_type == 0 || depth > 16 { return false }
+    let req = __s0_buffer_get(CheckedTypeRec, store.types, requirement - 1)
+    let got = __s0_buffer_get(CheckedTypeRec, store.types, impl_type - 1)
+    if req.kind == 6 {
+        // type_param_ordinal counts from zero and the requirement's
+        // parameters always belong to the trait.
+        var substituted: U64 = 0
+        let ordinal = type_param_ordinal(store, trait_symbol_id, req.target)
+        if ordinal < arg_count { substituted = __s0_buffer_get(U64, store.traits.args, first_arg - 1 + ordinal) } else {
+            let self_param = trait_self_param(store, trait_symbol_id)
+            if self_param != 0 && req.target == self_param { substituted = self_type }
+        }
+        if substituted == 0 { return false }
+        let sub = __s0_buffer_get(CheckedTypeRec, store.types, substituted - 1)
+        return got.kind == sub.kind && got.target == sub.target && got.arg_count == sub.arg_count
+    }
+    if req.kind != got.kind || req.target != got.target || req.arg_count != got.arg_count { return false }
+    var at: U64 = 0
+    while at < req.arg_count {
+        if !trait_impl_type_matches(store, trait_symbol_id, __s0_buffer_get(U64, store.type_args, req.first_arg - 1 + at), __s0_buffer_get(U64, store.type_args, got.first_arg - 1 + at), first_arg, arg_count, self_type, depth + 1) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn symbol_name_matches_word(state: State, symbol: SymbolRec, word: __s0_String) -> Bool {
+    let source = __s0_buffer_get(SourceRec, state.sources, symbol.source)
+    return source_word(state, source, symbol.name_start, symbol.name_end, word)
+}
+
+// The receiver parameter kind one method declares: 13 for a plain `self`,
+// 47 for `mut self`, 48 for `take self`, and 0 when the first runtime
+// parameter is not a receiver.
+fn method_receiver_kind(state: State, parse: ParseStore, store: CheckStore, owner: U64) -> U64 {
+    let first = use_by_ordinal(store, owner, 5, 0)
+    if first == 0 { return 0 }
+    let use = __s0_buffer_get(DeclTypeUseRec, store.uses, first - 1)
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, use.node - 1)
+    if !node_word(state, node, "self") { return 0 }
+    return node.kind
+}
+
+// Validate one impl method against one builtin or user-trait requirement.
+// Receiver mode, runtime arity, and every resolved type must agree after
+// trait-parameter substitution.
+fn trait_requirement_node(state: State, parse: ParseStore, requirement_node: U64) -> SyntaxRec {
+    return __s0_buffer_get(SyntaxRec, parse.nodes, requirement_node - 1)
+}
+
+fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: CheckStore, rec: TraitImplRec) -> Result(CheckResult, __s0_Error) {
+    var store = initial
+    let impl_node = __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1)
+    var method_at = rec.first_method
+    while method_at < rec.first_method + rec.method_count {
+        let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
+        if method.type_arity != 0 { return check_token_fail(d, state, store, 124, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        method_at = method_at + 1
+    }
+    // Builtin traits have exactly one fixed requirement each.
+    if rec.trait_builtin != 0 {
+        var word: __s0_String = "cleanup"
+        var receiver_kind: U64 = 13
+        var runtime_params: U64 = 0
+        var first_param_type: U64 = 0
+        var result_type = canonical_type_id(store, 1, 12, 0, 0)
+        if rec.trait_builtin == 1 {
+            word = "eq"
+            runtime_params = 1
+            first_param_type = rec.self_type
+            result_type = canonical_type_id(store, 1, 1, 0, 0)
+        }
+        if rec.trait_builtin == 2 {
+            word = "hash"
+            result_type = canonical_type_id(store, 1, 9, 0, 0)
+        }
+        if rec.trait_builtin == 3 {
+            word = "next"
+            receiver_kind = 47
+            result_type = canonical_single_arg(store, 9, 0, __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1))
+        }
+        if rec.trait_builtin == 4 {
+            word = "into_iterator"
+            result_type = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1)
+        }
+        if rec.trait_builtin == 5 || rec.trait_builtin == 6 {
+            receiver_kind = 48
+        }
+        var found: U64 = 0
+        method_at = rec.first_method
+        while method_at < rec.first_method + rec.method_count {
+            let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
+            if symbol_name_matches_word(state, method, word) { found = method_at }
+            method_at = method_at + 1
+        }
+        if found == 0 { return check_token_fail(d, state, store, 121, impl_node) }
+        let method = __s0_buffer_get(SymbolRec, store.symbols, found - 1)
+        if method_receiver_kind(state, parse, store, found) != receiver_kind { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        if use_count(store, found, 5) != runtime_params + 1 { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        if runtime_params != 0 {
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_by_ordinal(store, found, 5, 1) - 1)
+            if !trait_impl_type_matches(store, 0, first_param_type, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        }
+        let result_use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_by_ordinal(store, found, 6, 0) - 1)
+        if !trait_impl_type_matches(store, 0, result_type, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        return Ok(CheckGood(store))
+    }
+    // User traits: every kind-51 requirement must be provided or defaulted,
+    // and every impl method must match some requirement.
+    let trait_symbol = __s0_buffer_get(SymbolRec, store.symbols, rec.trait_symbol - 1)
+    let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, trait_symbol.node - 1)
+    let user_validated = try validate_user_requirements(d, state, parse, store, rec, trait_node.children)
+    if match user_validated {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(user_validated) }
+    var current = match user_validated {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    // Every impl method must match some requirement name (no calls).
+    var extra_at = rec.first_method
+    while extra_at < rec.first_method + rec.method_count {
+        let method = __s0_buffer_get(SymbolRec, current.symbols, extra_at - 1)
+        var matched = false
+        var link_at = trait_node.children
+        while link_at != 0 {
+            let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+            let requirement = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+            if requirement.kind == 51 && same_name(state, requirement.source, requirement.name_start, requirement.name_end, method.source, method.name_start, method.name_end) { matched = true }
+            link_at = item.next
+        }
+        if !matched { return check_token_fail(d, state, current, 122, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        extra_at = extra_at + 1
+    }
+    return Ok(CheckGood(current))
+}
+
+// Walk the trait's requirements recursively: resolved requirement types
+// carry storage, so they must not cross loop backedges.
+fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, link_at: U64) -> Result(CheckResult, __s0_Error) {
+    if link_at == 0 { return Ok(CheckGood(store)) }
+    let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+    let requirement = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+    if requirement.kind != 51 { return validate_user_requirements(d, state, parse, store, rec, item.next) }
+    var found: U64 = 0
+    var method_at = rec.first_method
+    while method_at < rec.first_method + rec.method_count {
+        let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
+        if same_name(state, requirement.source, requirement.name_start, requirement.name_end, method.source, method.name_start, method.name_end) { found = method_at }
+        method_at = method_at + 1
+    }
+    if found == 0 {
+        // A requirement with a block may fall back to its default body.
+        var has_default = false
+        var body_at = requirement.children
+        while body_at != 0 {
+            let body_item = __s0_buffer_get(SyntaxLinkRec, parse.links, body_at - 1)
+            if __s0_buffer_get(SyntaxRec, parse.nodes, body_item.node - 1).kind == 14 { has_default = true }
+            body_at = body_item.next
+        }
+        if !has_default { return check_token_fail(d, state, store, 121, __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1)) }
+        return validate_user_requirements(d, state, parse, store, rec, item.next)
+    }
+    // Receiver mode and runtime arity (no calls).
+    var want_receiver: U64 = 13
+    var want_params: U64 = 0
+    var req_at = requirement.children
+    while req_at != 0 {
+        let req_item = __s0_buffer_get(SyntaxLinkRec, parse.links, req_at - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, req_item.node - 1)
+        if child.kind == 13 || child.kind == 47 || child.kind == 48 {
+            if node_word(state, child, "self") { want_receiver = child.kind } else { want_params = want_params + 1 }
+        }
+        req_at = req_item.next
+    }
+    let method = __s0_buffer_get(SymbolRec, store.symbols, found - 1)
+    let method_node = __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)
+    if method_receiver_kind(state, parse, store, found) != want_receiver { return check_token_fail(d, state, store, 123, method_node) }
+    if use_count(store, found, 5) != want_params + 1 { return check_token_fail(d, state, store, 123, method_node) }
+    // Runtime parameter and result types resolve recursively in the trait's
+    // scope and compare through the impl substitution.
+    let compared = try validate_requirement_params(d, state, parse, store, rec, found, requirement, requirement.children, 1)
+    if match compared {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(compared) }
+    let with_params = match compared {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    var result_at = requirement.children
+    while result_at != 0 {
+        let result_item = __s0_buffer_get(SyntaxLinkRec, parse.links, result_at - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, result_item.node - 1)
+        if child.kind == 4 || child.kind == 5 || child.kind == 6 || child.kind == 56 {
+            // Result types were annotated during trait checking; reuse first.
+            var want = checked_type_for_syntax(with_params, rec.trait_symbol, result_item.node)
+            var current = with_params
+            if want == 0 {
+                let resolved = try resolve_type(d, state, parse, with_params, rec.trait_symbol, result_item.node)
+                if match resolved {
+                    CheckGood(value) => false
+                    CheckBad(value) => true
+                } { return Ok(resolved) }
+                current = match resolved {
+                    CheckGood(value) => value
+                    CheckBad(value) => value
+                }
+                want = checked_type_for_syntax(current, rec.trait_symbol, result_item.node)
+            }
+            let result_use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 6, 0) - 1)
+            if !trait_impl_type_matches(current, rec.trait_symbol, want, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, current, 123, method_node) }
+            return validate_user_requirements(d, state, parse, current, rec, item.next)
+        }
+        result_at = result_item.next
+    }
+    return validate_user_requirements(d, state, parse, with_params, rec, item.next)
+}
+
+fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, found: U64, requirement: SyntaxRec, req_at: U64, param_ordinal: U64) -> Result(CheckResult, __s0_Error) {
+    if req_at == 0 { return Ok(CheckGood(store)) }
+    let req_item = __s0_buffer_get(SyntaxLinkRec, parse.links, req_at - 1)
+    let child = __s0_buffer_get(SyntaxRec, parse.nodes, req_item.node - 1)
+    if !((child.kind == 13 || child.kind == 47 || child.kind == 48) && !node_word(state, child, "self")) {
+        return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal)
+    }
+    if child.children != 0 {
+        let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
+        // Trait checking already annotated requirement types; reuse before
+        // resolving so annotations stay unique per (owner, syntax).
+        var want = checked_type_for_syntax(store, rec.trait_symbol, head.node)
+        var current = store
+        if want == 0 {
+            let resolved = try resolve_type(d, state, parse, store, rec.trait_symbol, head.node)
+            if match resolved {
+                CheckGood(value) => false
+                CheckBad(value) => true
+            } { return Ok(resolved) }
+            current = match resolved {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }
+            want = checked_type_for_syntax(current, rec.trait_symbol, head.node)
+        }
+        let use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 5, param_ordinal) - 1)
+        if !trait_impl_type_matches(current, rec.trait_symbol, want, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) {
+            return check_token_fail(d, state, current, 123, __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SymbolRec, current.symbols, found - 1).node - 1))
+        }
+        return validate_requirement_params(d, state, parse, current, rec, found, requirement, req_item.next, param_ordinal + 1)
+    }
+    return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal + 1)
+}
+
+// Validate every trait implementation once method signatures are resolved.
+// Recursion is bounded by the impl count.
+fn validate_trait_impls_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, at: U64) -> Result(CheckResult, __s0_Error) {
+    if at >= __s0_buffer_len(TraitImplRec, store.traits.impls) { return Ok(CheckGood(store)) }
+    let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, at)
+    let validated = try validate_one_trait_impl(d, state, parse, store, rec)
+    if match validated {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(validated) }
+    let current = match validated {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return validate_trait_impls_at(d, state, parse, current, at + 1)
+}
+
+fn validate_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    return validate_trait_impls_at(d, state, parse, store, 0)
+}
+
+// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing
 // type must be a non-generic declared nominal type; its symbol gives trait
 // arguments a parameter-free resolution scope.
 fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
@@ -6793,7 +7172,7 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(resolved) }
-    let current = match resolved {
+    var current = match resolved {
         CheckGood(value) => value
         CheckBad(value) => value
     }
@@ -6825,18 +7204,45 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
         at = at + 1
     }
     let indexed = trait_store_with(current, impls, index)
+    // Receiver-side index: the same records sorted by implementing type
+    // symbol, then trait, for method resolution.
+    var receiver_index = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < __s0_buffer_len(TraitImplRec, impls) {
+        let record_id = at + 1
+        let record = __s0_buffer_get(TraitImplRec, impls, at)
+        var merged = try __s0_buffer_new(U64, d)
+        var placed = false
+        var walk: U64 = 0
+        while walk < __s0_buffer_len(U64, receiver_index) {
+            let other_id = __s0_buffer_get(U64, receiver_index, walk)
+            if !placed {
+                let other = __s0_buffer_get(TraitImplRec, impls, other_id - 1)
+                if trait_impl_receiver_less(current, record, other) {
+                    merged = try __s0_buffer_append(U64, d, merged, record_id)
+                    placed = true
+                }
+            }
+            merged = try __s0_buffer_append(U64, d, merged, other_id)
+            walk = walk + 1
+        }
+        if !placed { merged = try __s0_buffer_append(U64, d, merged, record_id) }
+        receiver_index = merged
+        at = at + 1
+    }
+    current = CheckStore(symbols: indexed.symbols, type_params: indexed.type_params, types: indexed.types, type_args: indexed.type_args, type_annotations: indexed.type_annotations, uses: indexed.uses, indexes: indexed.indexes, locals: indexed.locals, environments: indexed.environments, expressions: indexed.expressions, call_annotations: indexed.call_annotations, expression_children: indexed.expression_children, returns: indexed.returns, control: indexed.control, diagnostics: indexed.diagnostics, traits: TraitStoreRec(constraints: indexed.traits.constraints, impls: indexed.traits.impls, impl_index: indexed.traits.impl_index, args: indexed.traits.args, receiver_index: receiver_index))
     // Coherence: exactly one implementation per concrete trait application.
     var order: U64 = 1
     while order < __s0_buffer_len(U64, index) {
         let left = __s0_buffer_get(TraitImplRec, impls, __s0_buffer_get(U64, index, order - 1) - 1)
         let right = __s0_buffer_get(TraitImplRec, impls, __s0_buffer_get(U64, index, order) - 1)
-        if trait_impl_key_equal(indexed, left, right) {
+        if trait_impl_key_equal(current, left, right) {
             let related = __s0_buffer_get(SyntaxRec, parse.nodes, right.owner_node - 1)
-            return check_token_related_fail(d, state, indexed, 107, __s0_buffer_get(SyntaxRec, parse.nodes, left.owner_node - 1), related)
+            return check_token_related_fail(d, state, current, 107, __s0_buffer_get(SyntaxRec, parse.nodes, left.owner_node - 1), related)
         }
         order = order + 1
     }
-    return Ok(CheckGood(indexed))
+    return Ok(CheckGood(current))
 }
 
 // Concrete trait-argument lookup for one constraint whose parameterized
@@ -6855,7 +7261,7 @@ fn trait_constraint_application_arg(store: CheckStore, constraint: TraitConstrai
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, id - 1)
     if checked.kind == 6 {
         let param_ordinal = type_param_ordinal(store, declaration, checked.target)
-        if param_ordinal != 0 && param_ordinal <= application.arg_count { return __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + param_ordinal - 1) }
+        if param_ordinal < application.arg_count { return __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + param_ordinal) }
         return 0
     }
     return id
@@ -6864,6 +7270,8 @@ fn trait_constraint_application_arg(store: CheckStore, constraint: TraitConstrai
 fn trait_key_less_binding(store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
     if rec.trait_builtin != constraint.trait_builtin { return rec.trait_builtin < constraint.trait_builtin }
     if rec.trait_symbol != constraint.trait_symbol { return rec.trait_symbol < constraint.trait_symbol }
+    let receiver = inference_lookup(bindings, constraint.param)
+    if rec.self_type != receiver { return rec.self_type < receiver }
     var at: U64 = 0
     while at < rec.arg_count && at < constraint.arg_count {
         let left = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + at)
@@ -6876,6 +7284,7 @@ fn trait_key_less_binding(store: CheckStore, rec: TraitImplRec, constraint: Trai
 
 fn trait_key_equal_binding(store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
     if rec.trait_builtin != constraint.trait_builtin || rec.trait_symbol != constraint.trait_symbol || rec.arg_count != constraint.arg_count { return false }
+    if rec.self_type != inference_lookup(bindings, constraint.param) { return false }
     var at: U64 = 0
     while at < rec.arg_count {
         if __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + at) != trait_constraint_binding_arg(store, constraint, at, bindings) { return false }
@@ -6887,6 +7296,10 @@ fn trait_key_equal_binding(store: CheckStore, rec: TraitImplRec, constraint: Tra
 fn trait_key_less_application(store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, declaration: U64, application: CheckedTypeRec) -> Bool {
     if rec.trait_builtin != constraint.trait_builtin { return rec.trait_builtin < constraint.trait_builtin }
     if rec.trait_symbol != constraint.trait_symbol { return rec.trait_symbol < constraint.trait_symbol }
+    let receiver_ordinal = type_param_ordinal(store, declaration, constraint.param)
+    var receiver: U64 = 0
+    if receiver_ordinal < application.arg_count { receiver = __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + receiver_ordinal) }
+    if rec.self_type != receiver { return rec.self_type < receiver }
     var at: U64 = 0
     while at < rec.arg_count && at < constraint.arg_count {
         let left = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + at)
@@ -6899,6 +7312,9 @@ fn trait_key_less_application(store: CheckStore, rec: TraitImplRec, constraint: 
 
 fn trait_key_equal_application(store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, declaration: U64, application: CheckedTypeRec) -> Bool {
     if rec.trait_builtin != constraint.trait_builtin || rec.trait_symbol != constraint.trait_symbol || rec.arg_count != constraint.arg_count { return false }
+    let receiver_ordinal = type_param_ordinal(store, declaration, constraint.param)
+    if receiver_ordinal >= application.arg_count { return false }
+    if rec.self_type != __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + receiver_ordinal) { return false }
     var at: U64 = 0
     while at < rec.arg_count {
         if __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + at) != trait_constraint_application_arg(store, constraint, at, declaration, application) { return false }

@@ -2633,7 +2633,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 118 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 124 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

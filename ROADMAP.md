@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `ebafc281cc0ba6c000c7f32cc9908003f18a9ddc36d50d23959364a24988ce86`;
+  `4f14349449052ce801d254af8736dd7b664bb98312c7077acaf063cc45f35660`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `ebafc281cc0ba6c000c7f32cc9908003f18a9ddc36d50d23959364a24988ce86`.
+  `4f14349449052ce801d254af8736dd7b664bb98312c7077acaf063cc45f35660`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -949,8 +949,14 @@ Exit-criteria evidence (in progress):
   (`Eq`, `Hash`, `Iterator`, `IntoIterator`, `Cleanup`, `AsyncCleanup`),
   per-unit coherence over a once-built sorted impl index, `Self` resolution,
   and constraint-gated generic instantiation and concrete applications;
-  trait-method dispatch, closures, function values, and the ordered
-  `Map`/`Set` are still open.
+- the dispatch half resolves dot-calls to inherent methods first and then to
+  the unique trait implementation for the receiver's concrete type, validates
+  every impl against its trait's receiver modes, arity, and substituted
+  signature, and lowers resolved methods as ordinary monomorphized functions
+  (`take_first8`-style names), pinned through generated strict-C11 programs
+  that dispatch a constrained generic at two receiver types; closures,
+  function values, default-method dispatch, and the ordered `Map`/`Set` are
+  still open.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

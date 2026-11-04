@@ -91,6 +91,48 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"dispatch.al": `type UserCursor {
+    row: U64
+}
+
+type AdminCursor {
+    row: U64
+}
+
+trait Walker(Item: type) {
+    fn next(self) -> Option(Item)
+}
+
+impl Walker(U64) for UserCursor {
+    fn next(self) -> Option(U64) {
+        if self.row == 0 { return None }
+        return Some(self.row)
+    }
+}
+
+impl Walker(U64) for AdminCursor {
+    fn next(self) -> Option(U64) {
+        return Some(self.row + 100)
+    }
+}
+
+fn take_first(W: type, walker: W) -> U64
+where W: Walker(U64) {
+    let value = walker.next()
+    return match value {
+        Some(v) => v
+        None => 0
+    }
+}
+
+fn main() -> I32 {
+    let user = UserCursor(row: 3)
+    let admin = AdminCursor(row: 4)
+    if take_first(UserCursor, user) != 3 { return 1 }
+    if take_first(AdminCursor, admin) != 104 { return 2 }
+    return 0
+}
+`,
 	}
 	for name, source := range accept {
 		t.Run("accept-"+name, func(t *testing.T) {
@@ -117,6 +159,12 @@ fn main() -> I32 {
 		{"trait-as-type", "trait Mark { }\nfn f(m: Mark) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 114},
 		{"self-outside-trait", "fn f(v: Self) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 117},
 		{"trait-method-params", "trait Mark {\n    fn m(A: type, v: A) -> U64\n}\nfn main() -> I32 { return 0 }\n", 118},
+		{"ambiguous-method", "type Box { v: U64 }\ntrait A { fn fetch(self) -> U64 }\ntrait B { fn fetch(self) -> U64 }\nimpl A for Box { fn fetch(self) -> U64 { return self.v } }\nimpl B for Box { fn fetch(self) -> U64 { return self.v } }\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 119},
+		{"default-not-callable", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64 {\n        return 0\n    }\n}\nimpl Getter for Box {\n}\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 120},
+		{"missing-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n}\nfn main() -> I32 { return 0 }\n", 121},
+		{"extra-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> U64 { return self.v }\n    fn other(self) -> U64 { return 0 }\n}\nfn main() -> I32 { return 0 }\n", 122},
+		{"signature-mismatch", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> Bool { return true }\n}\nfn main() -> I32 { return 0 }\n", 123},
+		{"generic-impl-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(A: type, self) -> U64 { return self.v }\n}\nfn main() -> I32 { return 0 }\n", 124},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

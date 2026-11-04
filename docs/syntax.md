@@ -104,11 +104,10 @@ test
 ```
 
 There are no mutable globals or executable top-level initializers. Trait
-declarations, `impl Trait(Arguments) for Type` blocks, and `where`
-constraints are implemented for declaration, coherence, and instantiation
-gating; trait-method dispatch, closures, and async contracts are not
-implemented in S0 and are defined in
-[Traits and Closures](traits-and-closures.md) and
+declarations, `impl Trait(Arguments) for Type` blocks, `where` constraints,
+and static trait-method dispatch through generic monomorphization are
+implemented; closures and async contracts are not implemented in S0 and are
+defined in [Traits and Closures](traits-and-closures.md) and
 [Async and Structured Concurrency](async.md).
 
 `type Name { ... }` is the single record declaration spelling. Alder does not

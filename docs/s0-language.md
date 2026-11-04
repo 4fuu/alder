@@ -114,10 +114,22 @@ Milestone 7.5 adds the static trait surface of
   graph waits for the module system.
 - Instantiating a constrained generic function requires an implementation for
   every constraint; the lookup uses one impl index built after collection.
+  The coherence key is the concrete (trait, implementing type, trait
+  arguments) combination.
+- Every implementation is validated: required methods must be present with
+  exactly the trait's receiver mode, runtime arity, and substituted
+  parameter/result types, and impl methods that match no requirement are
+  rejected. Generic impl methods and calling defaulted methods are not
+  supported yet.
+- Trait-method dispatch is static: a dot-call resolves inherent methods
+  first, then the unique trait implementation providing that method name for
+  the receiver's concrete type. Because generic bodies are checked per
+  concrete instance, a constrained call site dispatches to that instance's
+  implementation with no vtable; resolved impl methods lower as ordinary
+  monomorphized functions named `<method><owner-symbol-id>`.
 
-Trait-method dispatch through constraints, closures, function values, and
-trait-backed collections are not implemented yet and remain later Milestone
-7.5 work.
+Closures, function values, default-method dispatch, and trait-backed
+collections are not implemented yet and remain later Milestone 7.5 work.
 
 The hosted entry forms are temporarily `fn main() -> I32` and
 `fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim

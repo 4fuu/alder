@@ -542,13 +542,17 @@ type TraitImplRec {
 }
 
 // impl_index holds trait-impl record IDs sorted by (trait reference, trait
-// arguments) for binary-search lookup and adjacent coherence checks. It is
-// built once after impl collection and never rescanned per expression site.
+// arguments) for binary-search lookup and adjacent coherence checks.
+// receiver_index holds the same IDs sorted by (implementing type symbol,
+// trait reference) so method resolution finds candidate impls for a receiver
+// without scanning the impl table. Both are built once after impl collection
+// and never rescanned per expression site.
 type TraitStoreRec {
     constraints: __s0_Buffer(TraitConstraintRec)
     impls: __s0_Buffer(TraitImplRec)
     impl_index: __s0_Buffer(U64)
     args: __s0_Buffer(U64)
+    receiver_index: __s0_Buffer(U64)
 }
 
 type State {
