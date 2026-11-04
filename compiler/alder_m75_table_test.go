@@ -56,6 +56,38 @@ fn main() -> I32 {
  return 0
 }
 `,
+		"cleanup-trait.al": `import c counter: fn(U64) -> Unit
+type Res {
+ n: U64
+}
+impl Cleanup for Res {
+ fn cleanup(take self) -> Unit {
+  unsafe c { counter(self.n) }
+  return
+ }
+}
+fn make(n: U64) -> Res { return Res(n: n) }
+fn relay(take r: Res) -> Res { return r }
+fn main() -> I32 {
+ using r = make(7)
+ relay(r)
+ using late = make(9)
+ if late.n != 9 { return 1 }
+ return 0
+}
+`,
+		"cleanup-affine-record.al": `type Guard {
+ table: Table(U64)
+}
+impl Cleanup for Guard {
+ fn cleanup(take self) -> Unit { return }
+}
+fn main() -> I32 {
+ using t = Table.new(U64)
+ using g = Guard(table: t)
+ return 0
+}
+`,
 		"table-compose.al": `type Holder {
  table: Table(U64)
  n: U64
@@ -129,6 +161,13 @@ fn main() -> I32 {
 		{"table-remove-under-view", "fn f(mut t: Table(U64), id: U64.Id) -> Unit {\n match t.get(id) {\n  Some(value) => { let gone = t.remove(id) }\n  None => {}\n }\n}\n", 134},
 		{"using-non-table", "fn f() -> Unit { using value = 5 }\n", 136},
 		{"table-untransferred-let", "fn f() -> Unit { let t = Table.new(U64) }\n", 93},
+		// The gated `with` clause is not rejected here: the corpus detector
+		// runs any callback-form program under the private profile, where it
+		// is legal again. The production qualification pins rejection 137.
+		{"cleanup-async-only", "type Res {\n n: U64\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n using r = Res(n: 1)\n return 0\n}\n", 138},
+		{"cleanup-both-traits", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n using r = Res(n: 1)\n return 0\n}\n", 139},
+		{"cleanup-copyable-owner", "fn main() -> I32 {\n using value = 5\n return 0\n}\n", 136},
+		{"cleanup-impl-affine-exit", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n let r = Res(n: 1)\n return 0\n}\n", 93},
 		{"table-using-partial-transfer", "fn relay(take t: Table(U64)) -> Table(U64) { return t }\nfn f(flag: Bool) -> Unit {\n using t = Table.new(U64)\n if flag { relay(t) }\n return\n}\n", 94},
 	}
 	for _, tc := range rejections {

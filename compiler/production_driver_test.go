@@ -783,6 +783,18 @@ func compileGeneratedProgram(t *testing.T, cc, root, generated, host, output str
 
 func compileAndRunProductionArtifact(t *testing.T, cc, root, object, generated string, want int) {
 	t.Helper()
+	const driverText = `#include "alder_host.h"
+#include <stdint.h>
+int main(void) { int context = 0; return (int)alder_program_entry(&context); }
+`
+	compileAndRunProductionArtifactWithDriver(t, cc, root, object, generated, driverText, want)
+}
+
+// compileAndRunProductionArtifactWithDriver links the generated program
+// against an arbitrary driver, for fixtures that observe cleanup through an
+// imported C hook.
+func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, generated, driverText string, want int) {
+	t.Helper()
 	dir := t.TempDir()
 	cfile := filepath.Join(dir, "program.c")
 	driver := filepath.Join(dir, "driver.c")
@@ -790,10 +802,6 @@ func compileAndRunProductionArtifact(t *testing.T, cc, root, object, generated s
 	if err := os.WriteFile(cfile, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	const driverText = `#include "alder_host.h"
-#include <stdint.h>
-int main(void) { int context = 0; return (int)alder_program_entry(&context); }
-`
 	if err := os.WriteFile(driver, []byte(driverText), 0o644); err != nil {
 		t.Fatal(err)
 	}

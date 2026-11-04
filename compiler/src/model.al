@@ -521,8 +521,12 @@ type EnvironmentRec {
 // without an explicit Some binding, 133 a table-view arm region violation
 // (control flow, a fallible operation, a non-copy statement, or a view used
 // as a value), 134 an overlapping table access against a live view, 135 mixed
-// block and expression match arms, and 136 a callback-free `using` whose
-// initializer is not a builtin Table owner.
+// block and expression match arms, 136 a callback-free `using` whose
+// initializer is not an affine Cleanup owner, 137 the bootstrap-private
+// `with cleanup_function` clause outside the private profile, 138 an
+// AsyncCleanup owner in synchronous `using`, 139 a type implementing both
+// cleanup traits, and 140 a Cleanup implementation without a usable
+// nongeneric `cleanup(take self) -> Unit` method.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

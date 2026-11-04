@@ -34,6 +34,10 @@ func privateProfileE2E(base string) bool {
 	switch base {
 	case "domains.al", "maps.al", "buffer.al":
 		return true
+	// cleanup.al uses the `with cleanup_function` clause, which is
+	// bootstrap-private since M7.5.
+	case "cleanup.al":
+		return true
 	}
 	return false
 }

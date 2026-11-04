@@ -336,10 +336,12 @@ slot in place and panics on an out-of-range index; aliases observe the write.
 The fixed map has capacity 16 and deliberately narrow key/value rules. Neither
 may be standardized by accident.
 
-`using name = expression with CleanupFn` reflects the current MIR callback
-bridge. It runs cleanup in reverse order on normal exit, return, failed `try`,
-and checked failure in the detecting function. The 1.0 form is
-`using name = expression`, selected by `Cleanup`.
+`using name = expression with CleanupFn` was the MIR callback bridge. Since
+M7.5 it is bootstrap-private like the other bridges: an ordinary compilation
+rejects it, because the public form is `using name = expression`, which
+selects the builtin Table release or the owner's `Cleanup` implementation. It
+runs cleanup in reverse order on normal exit, return, failed `try`, and
+checked failure in the detecting function.
 
 The Alder-written S0 checker now resolves `CleanupFn` as a nongeneric user
 function with exactly one runtime parameter whose concrete type exactly equals
@@ -500,7 +502,7 @@ ordinary programs:
 | fixed S0 `Map` | standard insertion-ordered `Map` works |
 | `__s0_Buffer` | ordinary source `Vec`/builders work |
 | explicit `Domain`/`DomainMark` | storage inference is verified |
-| callback `using ... with ...` | affine `Cleanup` selection works |
+| callback `using ... with ...` | affine `Cleanup` selection works (the clause is profile-gated since M7.5) |
 | direct `import c name` | header binding blocks work |
 | temporary `main` signatures | project targets and standard host entry work |
 

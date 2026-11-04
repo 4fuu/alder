@@ -99,14 +99,24 @@ var privateProfileReject = map[string]bool{
 	"bind-unit.al":            true,
 	"map-key-signed.al":       true,
 	"map-value-string.al":     true,
+	// The callback `using` clause is bootstrap-private since M7.5, so its
+	// rejects (and the Go oracle that still accepts the form) run privately.
+	"using-callback-type.al": true,
 }
 
 // privateProfileFiles reports whether a self-hosting acceptance corpus still
-// uses the S0 bridges and needs the private bootstrap profile.
+// uses the S0 bridges and needs the private bootstrap profile. The
+// `with cleanup_function` clause is one of those bridges since M7.5 gated it
+// behind the profile.
 func privateProfileFiles(files map[string]string) bool {
 	for _, text := range files {
 		if strings.Contains(text, "__s0_") || strings.Contains(text, "Domain") || strings.Contains(text, "Map(") {
 			return true
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
+				return true
+			}
 		}
 	}
 	return false
@@ -508,7 +518,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "fa398ab07297b97b55e905c9b16c13201368e4f9295f32f4fbb4cb585f7cf9d7"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "55c089c305fd7577c6501ef718d2e74505d38732caefcea9b0b31a7e088a7ab1"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

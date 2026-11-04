@@ -97,6 +97,27 @@ fn main() -> I32 {
 }
 `
 
+const m75CleanupTraitProgram = `import c counter: fn(U64) -> Unit
+type Res {
+    n: U64
+}
+impl Cleanup for Res {
+    fn cleanup(take self) -> Unit {
+        unsafe c { counter(self.n) }
+        return
+    }
+}
+fn make(n: U64) -> Res { return Res(n: n) }
+fn relay(take r: Res) -> Res { return r }
+fn main() -> I32 {
+    using r = make(7)
+    relay(r)
+    using late = make(9)
+    if late.n != 9 { return 1 }
+    return 0
+}
+`
+
 // m75TableRejections pins the public-language rejection surface: overlapping
 // table access, lookup misuse, view region violations, and the callback-free
 // using form on a non-Table owner.
@@ -124,9 +145,19 @@ var m75TableRejections = []struct {
 		"straight-line copy statements",
 	},
 	{
-		"using-non-table",
+		"using-non-cleanup-owner",
 		"fn f() -> Unit { using value = 5 }\nfn main() -> I32 { return 0 }\n",
 		"using requires an affine owner implementing Cleanup",
+	},
+	{
+		"using-callback-gated",
+		"fn close(v: I64) -> Unit { return }\nfn f() -> Unit { using h = 5 with close }\nfn main() -> I32 { return 0 }\n",
+		"with-cleanup clause is private",
+	},
+	{
+		"using-async-cleanup",
+		"type Res { n: U64 }\nimpl AsyncCleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit { using r = Res(n: 1) }\nfn main() -> I32 { return 0 }\n",
+		"AsyncCleanup owner cannot be cleaned by synchronous using",
 	},
 	{
 		"untransferred-owner",
@@ -158,6 +189,7 @@ func TestM75TableProductionQualification(t *testing.T) {
 		{"m75-table-transfer.al", m75TableTransferProgram},
 		{"m75-table-generic.al", m75TableGenericProgram},
 		{"m75-table-compose.al", m75TableComposeProgram},
+		{"m75-cleanup-trait.al", m75CleanupTraitProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -182,7 +214,23 @@ func TestM75TableProductionQualification(t *testing.T) {
 			if strings.Contains(cResult.stdout, "__s0_") {
 				t.Fatalf("%s generated C exposes bootstrap names", program.name)
 			}
-			compileAndRunProductionArtifact(t, cc, root, runtimeObject, cResult.stdout, 0)
+			if program.name == "m75-cleanup-trait.al" {
+				// The cleanup hook is observed through the imported counter.
+				const counterDriver = `#include "alder_host.h"
+#include <stdint.h>
+static uint64_t g_count = 0;
+void counter(uint64_t v) { g_count += v; }
+int main(void) {
+	int context = 0;
+	int result = (int)alder_program_entry(&context);
+	if (g_count != 16) { return 98; }
+	return result;
+}
+`
+				compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, cResult.stdout, counterDriver, 0)
+			} else {
+				compileAndRunProductionArtifact(t, cc, root, runtimeObject, cResult.stdout, 0)
+			}
 			_ = object
 			_ = noGo
 		})

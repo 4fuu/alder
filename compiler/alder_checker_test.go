@@ -1547,6 +1547,14 @@ func privateProfileSources(files map[string]string) bool {
 			strings.Contains(text, "Get(") || strings.Contains(text, "Set(") || strings.Contains(text, "Remove(") {
 			return true
 		}
+		// The `with cleanup_function` clause became bootstrap-private in M7.5:
+		// ordinary programs select cleanup through the Cleanup trait or the
+		// builtin Table owner, so corpus programs using it need the profile.
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
+				return true
+			}
+		}
 	}
 	return false
 }

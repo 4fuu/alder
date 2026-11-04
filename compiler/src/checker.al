@@ -671,6 +671,10 @@ fn interpreted_type_category(d: Domain, state: State, parse: ParseStore, store: 
         }
         if inspect {
             if checked.kind == 3 || checked.kind == 19 { affine = true }
+            // A nominal type that implements Cleanup or AsyncCleanup is an
+            // affine owner: cleanup selection consumes it on every exit. The
+            // receiver index answers this in logarithmic time.
+            if checked.kind == 7 && type_cleanup_impls(store, checked.target) != 0 { affine = true }
             if checked.kind == 4 || checked.kind == 8 || checked.kind == 12 || checked.kind == 18 || checked.kind == 21 || checked.kind == 22 { scoped = true }
             if checked.kind == 6 { unresolved = true }
             if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 || checked.kind == 13 || checked.kind == 15 || checked.kind == 17 {
@@ -7330,6 +7334,86 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
     return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, false)
 }
 
+// symbol_is_cleanup_hook reports whether a function symbol is the cleanup
+// method of a Cleanup or AsyncCleanup implementation. Such a hook consumes
+// its receiver by value as the disposal itself, so its take-self parameter
+// is exempt from the must-transfer exit rule, exactly like a using binding.
+fn symbol_is_cleanup_hook(state: State, store: CheckStore, owner: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, store.traits.receiver_index) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        if rec.trait_builtin == 5 || rec.trait_builtin == 6 {
+            if owner >= rec.first_method && owner < rec.first_method + rec.method_count {
+                let method = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+                return symbol_name_matches_word(state, method, "cleanup")
+            }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// type_cleanup_impls reports which cleanup traits a nominal type symbol
+// implements: bit 1 Cleanup (builtin trait 5), bit 2 AsyncCleanup (builtin 6).
+// Lookup binary-searches the receiver index (sorted by implementing type
+// symbol, then trait) and scans only the adjacent window of that symbol, so
+// affinity queries never walk the whole impl table.
+fn type_cleanup_impls(store: CheckStore, type_symbol: U64) -> U64 {
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    if count == 0 { return 0 }
+    var low: U64 = 0
+    var high: U64 = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < type_symbol { low = mid + 1 } else { high = mid }
+    }
+    var bits: U64 = 0
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > type_symbol { return bits }
+        if symbol == type_symbol {
+            if rec.trait_builtin == 5 { bits = bits + 1 }
+            if rec.trait_builtin == 6 { bits = bits + 2 }
+        }
+        at = at + 1
+    }
+    return bits
+}
+
+// type_cleanup_method_symbol resolves the single `cleanup` method of the
+// Cleanup implementation for a nominal type symbol, or zero when the type has
+// no Cleanup implementation or no such method.
+fn type_cleanup_method_symbol(state: State, store: CheckStore, type_symbol: U64) -> U64 {
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    if count == 0 { return 0 }
+    var low: U64 = 0
+    var high: U64 = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < type_symbol { low = mid + 1 } else { high = mid }
+    }
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > type_symbol { return 0 }
+        if symbol == type_symbol && rec.trait_builtin == 5 {
+            var method_at = rec.first_method
+            while method_at < rec.first_method + rec.method_count {
+                let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
+                if symbol_name_matches_word(state, method, "cleanup") { return method_at }
+                method_at = method_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
 // Cleanup checking intentionally follows frontend/check.go precedence: name,
 // loop, initializer, callback resolution/shape/type/result, then duplicates.
 fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64, in_loop: Bool) -> Result(BodyStep, __s0_Error) {
@@ -7369,6 +7453,10 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
     if (using_kind == 7 || using_kind == 9 || using_kind == 10 || using_kind == 11 || using_kind == 13 || using_kind == 15 || using_kind == 17) && (try checked_type_contains_scoped(d, state, parse, current, initializer.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
     var callback: U64 = 0
     if child_count == 2 {
+        // The `with cleanup_function` clause is the bootstrap-private MIR
+        // callback bridge; ordinary programs select cleanup through the
+        // Cleanup trait or the builtin Table owner.
+        if !check_bootstrap_private() { return body_token_fail(d, state, current, 137, statement) }
         let cleanup_node = __s0_buffer_get(SyntaxRec, parse.nodes, cleanup_link.node - 1)
         let found = symbol_named(state, parse, current, cleanup_node)
         if found == 0 || __s0_buffer_get(SymbolRec, current.symbols, found - 1).kind != 12 { return body_fail(d, current, 83, cleanup_node) }
@@ -7392,10 +7480,33 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
         let result_type = __s0_buffer_get(CheckedTypeRec, current.types, result - 1)
         if result_type.kind != 1 || result_type.target != 12 { return body_fail(d, current, 86, cleanup_node) }
     } else {
-        // The public form: the builtin Table owner is the only compiler-known
-        // cleanup in this milestone. Registration exempts the owner from the
-        // must-transfer exit rule; a transfer disarms the entry.
-        if using_kind != 19 { return body_token_fail(d, state, current, 136, statement) }
+        // The public form: the builtin Table owner registers the synthesized
+        // release callback (callback stays zero), and an affine nominal type
+        // implementing Cleanup registers its trait method. Registration
+        // exempts the owner from the must-transfer exit rule; a transfer
+        // disarms the entry.
+        let using_checked = __s0_buffer_get(CheckedTypeRec, current.types, initializer.checked_type - 1)
+        var builtin_table = false
+        if using_kind == 19 { builtin_table = true }
+        if !builtin_table {
+            if using_kind != 7 { return body_token_fail(d, state, current, 136, statement) }
+            let bits = type_cleanup_impls(current, using_checked.target)
+            if bits == 3 { return body_token_fail(d, state, current, 139, statement) }
+            if bits == 2 { return body_token_fail(d, state, current, 138, statement) }
+            if bits != 1 { return body_token_fail(d, state, current, 136, statement) }
+            let method = type_cleanup_method_symbol(state, current, using_checked.target)
+            if method == 0 { return body_token_fail(d, state, current, 140, statement) }
+            let method_symbol = __s0_buffer_get(SymbolRec, current.symbols, method - 1)
+            if method_symbol.type_arity != 0 { return body_token_fail(d, state, current, 140, statement) }
+            // The cleanup hook takes exactly the owner by value and returns
+            // Unit.
+            if use_count(current, method, 5) != 1 { return body_token_fail(d, state, current, 140, statement) }
+            let result_id = use_by_ordinal(current, method, 6, 0)
+            if result_id == 0 { return body_token_fail(d, state, current, 140, statement) }
+            let result_type = __s0_buffer_get(CheckedTypeRec, current.types, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type - 1)
+            if result_type.kind != 1 || result_type.target != 12 { return body_token_fail(d, state, current, 140, statement) }
+            callback = method
+        }
     }
     if local_lookup(current, owner, statement, state) != 0 || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, current, 27, statement) }
     let locals = try __s0_buffer_append(LocalRec, d, current.locals, LocalRec(owner: owner, kind: 2, syntax: statement_id, source: statement.source, name_start: statement.name_start, name_end: statement.name_end, mutable: 0, checked_type: initializer.checked_type))
@@ -7765,6 +7876,13 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
                 cleanup_at = cleanup_at + 1
             }
         }
+        var owner_is_cleanup_hook = false
+        if local.owner == owner && local.kind == 1 {
+            let hook_self = __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1)
+            if hook_self.kind == 48 {
+                if symbol_is_cleanup_hook(state, after, owner) { owner_is_cleanup_hook = true }
+            }
+        }
         if local.owner == owner && local.kind == 2 {
             let empty = try __s0_buffer_new(TypeBindingRec, d)
             let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
@@ -7775,8 +7893,12 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
             }
         }
         if owned {
-            let flow = owner_flow_block(after, local_at + 1, checked_block.semantic, initial_state)
-            if flow.error_kind != 0 || (!cleanup_registered && !flow.terminated && flow.state == 0) {
+            var flow = owner_flow_block(after, local_at + 1, checked_block.semantic, initial_state)
+            // A cleanup hook's take-self parameter is the disposal itself:
+            // returning without a further transfer is the normal shape, so
+            // the inline return-exit rule is cleared for it.
+            if flow.error_kind == 93 && owner_is_cleanup_hook && flow.syntax != 0 { flow = OwnerFlowRec(state: flow.state, terminated: flow.terminated, error_kind: 0, syntax: 0) }
+            if flow.error_kind != 0 || (!cleanup_registered && !owner_is_cleanup_hook && !flow.terminated && flow.state == 0) {
                 var diagnostic_kind: U64 = 93
                 var diagnostic_node = __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1)
                 if flow.error_kind != 0 {

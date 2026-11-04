@@ -1419,7 +1419,10 @@ func runMalformedLowerCompiler(t *testing.T, exe string) {
 			dir := t.TempDir()
 			source := "fn bad() -> Unit {}\n"
 			if mode == "!alder-core-lower-bad-gactive" {
-				source = "fn close(value: I64) -> Unit {}\nfn bad() -> Unit { using value = 1 with close }\n"
+				// The callback `with` clause is bootstrap-private since M7.5;
+				// this malformed-cleanup path is exercised through the public
+				// Cleanup-selection form instead.
+				source = "type Res { n: U64 }\nimpl Cleanup for Res { fn cleanup(take self) -> Unit { return } }\nfn bad() -> Unit { using value = Res(n: 1) }\n"
 			}
 			if mode == "!alder-core-lower-bad-wduplicate" {
 				source = "fn bad(value: Option(U64)) -> U64 {\n    return match value {\n        None => 0\n        Some(item) => item\n    }\n}\n"
@@ -1444,6 +1447,12 @@ func privateProfileLowerSources(files map[string]string) bool {
 	for _, text := range files {
 		if strings.Contains(text, "__s0_") || strings.Contains(text, "Domain") || strings.Contains(text, "Map(") {
 			return true
+		}
+		// The `with cleanup_function` clause is bootstrap-private since M7.5.
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
+				return true
+			}
 		}
 	}
 	return false
