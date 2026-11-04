@@ -121,6 +121,14 @@ Milestone 7.5 adds the static trait surface of
   parameter/result types, and impl methods that match no requirement are
   rejected. Generic impl methods and calling defaulted methods are not
   supported yet.
+- Structural `Eq` and `Hash` implementations are synthesized by the
+  language for unsigned integers, `Bool`, `String`, `Bytes`, and
+  non-generic records and enums whose every component supports them, so
+  `where K: Eq + Hash` accepts those types. Per
+  [Traits and Closures](traits-and-closures.md), "A type cannot override
+  structural `==` with a surprising user implementation": user `impl Eq`
+  and `impl Hash` blocks are rejected. The synthesized methods are not
+  directly callable yet; they become callable with the ordered collections.
 - Trait-method dispatch is static: a dot-call resolves inherent methods
   first, then the unique trait implementation providing that method name for
   the receiver's concrete type. Because generic bodies are checked per

@@ -4681,6 +4681,9 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             if trait_method.ambiguous { return expr_token_fail(d, state, base, 119, callee) }
             if trait_method.target != 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
             if trait_method.defaulted { return expr_token_fail(d, state, base, 120, callee) }
+            if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
+                if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
+            }
             return expr_token_fail(d, state, base, 61, callee)
         }
         return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
@@ -6239,7 +6242,16 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(restrictions) }
-    let imports = try check_declaration_kind(d, state, parse, after_restrictions, 1)
+    let structural = try synthesize_structural_impls(d, state, parse, after_restrictions)
+    let after_structural = match structural {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match structural {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(structural) }
+    let imports = try check_declaration_kind(d, state, parse, after_structural, 1)
     let after_imports = match imports {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -6298,6 +6310,10 @@ fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore)
         seeded = try append_checked_type(d, seeded, 0, 1, 0, primitive, 0, 0)
         primitive = primitive + 1
     }
+    // String and Bytes singletons exist from the start so structural Eq and
+    // Hash synthesis can target them without a prior source reference.
+    if canonical_type_id(seeded, 2, 0, 0, 0) == 0 { seeded = try append_checked_type(d, seeded, 0, 2, 0, 0, 0, 0) }
+    if canonical_type_id(seeded, 14, 0, 0, 0) == 0 { seeded = try append_checked_type(d, seeded, 0, 14, 0, 0, 0, 0) }
     let symbols = try collect_symbols(d, state, parse, seeded)
     let store = match symbols {
         CheckGood(value) => value
@@ -6766,6 +6782,7 @@ fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, rec
     var found: U64 = 0
     var ambiguous = false
     var defaulted = false
+    var structural = false
     if receiver.kind != 7 || __s0_buffer_len(U64, store.traits.receiver_index) == 0 { return TraitMethodRec(target: 0, ambiguous: false, defaulted: false) }
     var at: U64 = 0
     while at < __s0_buffer_len(U64, store.traits.receiver_index) {
@@ -6776,10 +6793,15 @@ fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, rec
                 if found != 0 { ambiguous = true } else { found = method }
             } else {
                 if trait_method_has_default(state, parse, store, rec, name) { defaulted = true }
+                // Structural Eq/Hash impls satisfy constraints but expose no
+                // callable method symbols until the ordered collections
+                // land; they only shadow their own method names.
+                if rec.synthesized != 0 && ((rec.trait_builtin == 1 && node_word(state, name, "eq")) || (rec.trait_builtin == 2 && node_word(state, name, "hash"))) { structural = true }
             }
         }
         at = at + 1
     }
+    if structural { return TraitMethodRec(target: 0, ambiguous: false, defaulted: false) }
     return TraitMethodRec(target: found, ambiguous: ambiguous, defaulted: defaulted)
 }
 
@@ -7050,6 +7072,7 @@ fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store
 fn validate_trait_impls_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, at: U64) -> Result(CheckResult, __s0_Error) {
     if at >= __s0_buffer_len(TraitImplRec, store.traits.impls) { return Ok(CheckGood(store)) }
     let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, at)
+    if rec.synthesized != 0 { return validate_trait_impls_at(d, state, parse, store, at + 1) }
     let validated = try validate_one_trait_impl(d, state, parse, store, rec)
     if match validated {
         CheckGood(value) => false
@@ -7091,6 +7114,9 @@ fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: Chec
     }
     if tail == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, tail - 1)
+    // Structural equality and hashing are language-provided; a user
+    // implementation cannot override them.
+    if builtin_trait_id(state, trait_node) == 1 || builtin_trait_id(state, trait_node) == 2 { return check_token_fail(d, state, store, 125, trait_node) }
     let self_node_id = trait_impl_self_node(parse, root)
     if self_node_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let self_node = __s0_buffer_get(SyntaxRec, parse.nodes, self_node_id - 1)
@@ -7134,7 +7160,7 @@ fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: Chec
         }
         symbol_at = symbol_at + 1
     }
-    let impls = try __s0_buffer_append(TraitImplRec, d, current.traits.impls, TraitImplRec(trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, self_type: self_checked, owner_node: root_id, first_method: first_method, method_count: method_count))
+    let impls = try __s0_buffer_append(TraitImplRec, d, current.traits.impls, TraitImplRec(trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, self_type: self_checked, owner_node: root_id, first_method: first_method, method_count: method_count, synthesized: 0))
     return Ok(CheckGood(trait_store_with(current, impls, current.traits.impl_index)))
 }
 
@@ -7176,10 +7202,18 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
         CheckGood(value) => value
         CheckBad(value) => value
     }
+    return build_trait_indexes(d, state, parse, current)
+}
+
+// Build both impl indexes once and enforce coherence: exactly one
+// implementation per concrete (trait, implementing type, arguments)
+// combination. Synthesized structural impls participate in the indexes but
+// never collide with user impls because user Eq/Hash impls are rejected.
+fn build_trait_indexes(d: Domain, state: State, parse: ParseStore, current: CheckStore) -> Result(CheckResult, __s0_Error) {
     let impls = current.traits.impls
-    // Merge each record into the sorted index; comparisons only read
+    // Merge each record into fresh sorted indexes; comparisons only read
     // canonical IDs, so the merge never carries storage across backedges.
-    var index = current.traits.impl_index
+    var index = try __s0_buffer_new(U64, d)
     var at: U64 = 0
     while at < __s0_buffer_len(TraitImplRec, impls) {
         let record_id = at + 1
@@ -7218,7 +7252,7 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
             let other_id = __s0_buffer_get(U64, receiver_index, walk)
             if !placed {
                 let other = __s0_buffer_get(TraitImplRec, impls, other_id - 1)
-                if trait_impl_receiver_less(current, record, other) {
+                if trait_impl_receiver_less(indexed, record, other) {
                     merged = try __s0_buffer_append(U64, d, merged, record_id)
                     placed = true
                 }
@@ -7230,19 +7264,19 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
         receiver_index = merged
         at = at + 1
     }
-    current = CheckStore(symbols: indexed.symbols, type_params: indexed.type_params, types: indexed.types, type_args: indexed.type_args, type_annotations: indexed.type_annotations, uses: indexed.uses, indexes: indexed.indexes, locals: indexed.locals, environments: indexed.environments, expressions: indexed.expressions, call_annotations: indexed.call_annotations, expression_children: indexed.expression_children, returns: indexed.returns, control: indexed.control, diagnostics: indexed.diagnostics, traits: TraitStoreRec(constraints: indexed.traits.constraints, impls: indexed.traits.impls, impl_index: indexed.traits.impl_index, args: indexed.traits.args, receiver_index: receiver_index))
+    var with_receiver = CheckStore(symbols: indexed.symbols, type_params: indexed.type_params, types: indexed.types, type_args: indexed.type_args, type_annotations: indexed.type_annotations, uses: indexed.uses, indexes: indexed.indexes, locals: indexed.locals, environments: indexed.environments, expressions: indexed.expressions, call_annotations: indexed.call_annotations, expression_children: indexed.expression_children, returns: indexed.returns, control: indexed.control, diagnostics: indexed.diagnostics, traits: TraitStoreRec(constraints: indexed.traits.constraints, impls: indexed.traits.impls, impl_index: indexed.traits.impl_index, args: indexed.traits.args, receiver_index: receiver_index))
     // Coherence: exactly one implementation per concrete trait application.
     var order: U64 = 1
     while order < __s0_buffer_len(U64, index) {
         let left = __s0_buffer_get(TraitImplRec, impls, __s0_buffer_get(U64, index, order - 1) - 1)
         let right = __s0_buffer_get(TraitImplRec, impls, __s0_buffer_get(U64, index, order) - 1)
-        if trait_impl_key_equal(current, left, right) {
+        if trait_impl_key_equal(with_receiver, left, right) {
             let related = __s0_buffer_get(SyntaxRec, parse.nodes, right.owner_node - 1)
-            return check_token_related_fail(d, state, current, 107, __s0_buffer_get(SyntaxRec, parse.nodes, left.owner_node - 1), related)
+            return check_token_related_fail(d, state, with_receiver, 107, __s0_buffer_get(SyntaxRec, parse.nodes, left.owner_node - 1), related)
         }
         order = order + 1
     }
-    return Ok(CheckGood(current))
+    return Ok(CheckGood(with_receiver))
 }
 
 // Concrete trait-argument lookup for one constraint whose parameterized
@@ -7352,4 +7386,98 @@ fn trait_constraint_application_satisfied(store: CheckStore, constraint: TraitCo
         if trait_key_equal_application(store, rec, constraint, declaration, application) { return true }
     }
     return false
+}
+
+// Sibling-facing lookup helpers (stable interface): find the impl record
+// for a concrete type and builtin trait, and query Cleanup coverage.
+fn trait_impl_for_builtin_type(store: CheckStore, builtin: U64, checked_type: U64) -> U64 {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 7 { return 0 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, store.traits.receiver_index) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        if rec.trait_builtin == builtin && trait_impl_receiver_type_symbol(store, rec) == checked.target { return __s0_buffer_get(U64, store.traits.receiver_index, at) }
+        at = at + 1
+    }
+    return 0
+}
+
+fn type_implements_cleanup(store: CheckStore, checked_type: U64) -> Bool {
+    if trait_impl_for_builtin_type(store, 5, checked_type) != 0 { return true }
+    return trait_impl_for_builtin_type(store, 6, checked_type) != 0
+}
+
+// Structural Eq/Hash support: unsigned integers, Bool, String, Bytes, and
+// non-generic records or enums whose every component supports them.
+fn structural_key_supported(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return checked.target == 1 || checked.target == 6 || checked.target == 7 || checked.target == 8 || checked.target == 9 }
+    if checked.kind == 2 || checked.kind == 14 { return true }
+    if checked.kind != 7 { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
+    if symbol.type_arity != 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if !structural_key_supported(store, use.checked_type, depth + 1) { return false }
+        }
+        at = at + 1
+    }
+    return true
+}
+
+// One structural Eq and Hash impl record for a supported concrete type.
+fn append_structural_impls_for(d: Domain, store: CheckStore, checked_type: U64) -> Result(CheckStore, __s0_Error) {
+    var impls = store.traits.impls
+    impls = try __s0_buffer_append(TraitImplRec, d, impls, TraitImplRec(trait_builtin: 1, trait_symbol: 0, first_arg: 0, arg_count: 0, self_type: checked_type, owner_node: 0, first_method: 0, method_count: 0, synthesized: 1))
+    impls = try __s0_buffer_append(TraitImplRec, d, impls, TraitImplRec(trait_builtin: 2, trait_symbol: 0, first_arg: 0, arg_count: 0, self_type: checked_type, owner_node: 0, first_method: 0, method_count: 0, synthesized: 1))
+    return Ok(trait_store_with(store, impls, store.traits.impl_index))
+}
+
+// Synthesize structural Eq/Hash implementations once, after aggregate
+// fields are resolved and before any constraint gate or body runs. The
+// synthesis itself is a per-symbol loop over a worklist of checked types
+// and never runs per expression site.
+fn synthesize_structural_impls(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var current = store
+    var seeded: U64 = 1
+    while seeded <= 12 {
+        let checked = __s0_buffer_get(CheckedTypeRec, current.types, seeded - 1)
+        if structural_key_supported(current, seeded, 0) {
+            let with_impls = try append_structural_impls_for(d, current, seeded)
+            current = with_impls
+        }
+        seeded = seeded + 1
+    }
+    // String and Bytes are interned singletons; synthesize for them only
+    // when the program already mentions them.
+    var builtin_kind: U64 = 2
+    while builtin_kind <= 14 {
+        if builtin_kind == 2 || builtin_kind == 14 {
+            let existing = canonical_type_id(current, builtin_kind, 0, 0, 0)
+            if existing != 0 {
+                let with_impls = try append_structural_impls_for(d, current, existing)
+                current = with_impls
+            }
+        }
+        builtin_kind = builtin_kind + 1
+    }
+    var symbol_at: U64 = 0
+    while symbol_at < __s0_buffer_len(SymbolRec, current.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, current.symbols, symbol_at)
+        if (symbol.kind == 2 || symbol.kind == 3) && symbol.type_arity == 0 {
+            let appended = try append_checked_type(d, current, symbol_at + 1, 7, symbol.node, symbol_at + 1, 0, 0)
+            let checked_type = checked_type_for_syntax(appended, symbol_at + 1, symbol.node)
+            if checked_type != 0 && structural_key_supported(appended, checked_type, 0) {
+                let with_impls = try append_structural_impls_for(d, appended, checked_type)
+                current = with_impls
+            } else {
+                current = appended
+            }
+        }
+        symbol_at = symbol_at + 1
+    }
+    return build_trait_indexes(d, state, parse, current)
 }

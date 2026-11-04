@@ -352,6 +352,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     }
     if kind == 123 { return out_string("trait implementation method does not match the trait requirement signature") }
     if kind == 124 { return out_string("generic trait implementation methods are not supported yet") }
+    if kind == 125 { return out_string("structural Eq and Hash implementations are language-provided and cannot be declared") }
+    if kind == 126 {
+        if !out_string("structural ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" methods become callable with the ordered collections") { return false }
+        return out_string("")
+    }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

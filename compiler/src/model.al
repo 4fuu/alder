@@ -539,6 +539,7 @@ type TraitImplRec {
     owner_node: U64
     first_method: U64
     method_count: U64
+    synthesized: U64
 }
 
 // impl_index holds trait-impl record IDs sorted by (trait reference, trait

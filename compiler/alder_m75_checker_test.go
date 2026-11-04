@@ -91,6 +91,31 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"structural-keys.al": `type Key {
+    name: U64
+    flag: Bool
+}
+
+enum Mode {
+    Fast
+    Slow(code: U32)
+}
+
+fn keyed(K: type, k: K) -> U64
+where K: Eq + Hash {
+    return 1
+}
+
+fn main() -> I32 {
+    let key = Key(name: 7, flag: true)
+    if keyed(Key, key) != 1 { return 1 }
+    let mode: Mode = Slow(3)
+    if keyed(Mode, mode) != 1 { return 2 }
+    if keyed(U64, 5) != 1 { return 3 }
+    if keyed(String, "x") != 1 { return 4 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -165,6 +190,9 @@ fn main() -> I32 {
 		{"extra-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> U64 { return self.v }\n    fn other(self) -> U64 { return 0 }\n}\nfn main() -> I32 { return 0 }\n", 122},
 		{"signature-mismatch", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> Bool { return true }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"generic-impl-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(A: type, self) -> U64 { return self.v }\n}\nfn main() -> I32 { return 0 }\n", 124},
+		{"user-eq-impl", "type Box { v: U64 }\nimpl Eq for Box {\n}\nfn main() -> I32 { return 0 }\n", 125},
+		{"structural-method-call", "type Box { v: U64 }\nfn main() -> I32 {\n    let a = Box(v: 1)\n    let b = Box(v: 2)\n    if a.eq(b) { return 1 }\n    return 0\n}\n", 126},
+		{"float-key-unsupported", "type Bad {\n    ratio: F64\n}\nfn keyed(K: type, k: K) -> U64\nwhere K: Eq + Hash {\n    return 1\n}\nfn main() -> I32 {\n    if keyed(Bad, Bad(ratio: 1.0)) != 1 { return 1 }\n    return 0\n}\n", 111},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
