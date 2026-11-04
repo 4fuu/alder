@@ -443,9 +443,10 @@ fn cgen_fn_wrapper_result(d: Domain, initial: CgenWriter, store: MirStore, resul
     return cgen_put_type(d, out, store, result_type)
 }
 
-fn cgen_fn_wrapper_params(d: Domain, initial: CgenWriter, store: MirStore, fn_type: U64, named: Bool) -> Result(CgenWriter, __s0_Error) {
+fn cgen_fn_wrapper_params(d: Domain, initial: CgenWriter, store: MirStore, fn_type: U64, named: Bool, env: Bool) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     let param_total = mir_type_part_count(store, fn_type, mir_type_part_function_param())
+    if env { out = try cgen_put(d, out, "(") }
     var wrote = false
     var ordinal: U64 = 0
     while ordinal < param_total {
@@ -460,7 +461,10 @@ fn cgen_fn_wrapper_params(d: Domain, initial: CgenWriter, store: MirStore, fn_ty
         }
         ordinal = ordinal + 1
     }
-    if !wrote { return cgen_put(d, out, "void") }
+    if env {
+        if wrote { out = try cgen_put(d, out, ", ") }
+        out = try cgen_put(d, out, "void *alder_env)")
+    }
     return Ok(out)
 }
 
@@ -476,18 +480,18 @@ fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, 
         out = try cgen_put(d, out, "static ")
         out = try cgen_fn_wrapper_result(d, out, store, t.result_type)
         out = try cgen_fn_wrapper_name(d, out, target, fn_type)
-        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true)
-        out = try cgen_put(d, out, ", void *alder_env);\n")
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true, true)
+        out = try cgen_put(d, out, ";\n")
         // Definition.
         out = try cgen_put(d, out, "static ")
         out = try cgen_fn_wrapper_result(d, out, store, t.result_type)
         out = try cgen_fn_wrapper_name(d, out, target, fn_type)
-        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true)
-        out = try cgen_put(d, out, ", void *alder_env) {\n  (void)alder_env;\n  ")
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true, true)
+        out = try cgen_put(d, out, " {\n  (void)alder_env;\n  ")
         if t.result_type != mir_type_unit() { out = try cgen_put(d, out, "return ") }
         out = try cgen_emit_function_name(d, out, store, target)
         out = try cgen_put(d, out, "(")
-        out = try cgen_fn_wrapper_params(d, out, store, fn_type, false)
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, false, false)
         out = try cgen_put(d, out, ");\n}\n")
         at = at + 2
     }

@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `5014903d8fbaebb2933940bbfa7e40ec90e79d77d88e456d2956805932664d2c`;
+  `36ce3d8b1f112daee6c506a488ab4eca04b4567e5c2b788712d909b1a452bdf6`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `5014903d8fbaebb2933940bbfa7e40ec90e79d77d88e456d2956805932664d2c`.
+  `36ce3d8b1f112daee6c506a488ab4eca04b4567e5c2b788712d909b1a452bdf6`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -984,7 +984,15 @@ Exit-criteria evidence (in progress):
   (primitives and options, results, arrays, aggregates, and enums over
   them) loaded from storage carry no domain provenance, so binding Vec
   elements to locals inside source loops verifies, while storage-carrying
-  loads keep the full derivation and every cyclic-store rejection.
+  loads keep the full derivation and every cyclic-store rejection;
+- function values round-trip end to end: `fn(A, B) -> R` (checked kind 25)
+  types resolve with nested function types, a function name in value
+  position lowers through `fn.value` with strictly-conforming C forwarder
+  wrappers whose code pointer takes an opaque environment parameter, and
+  calls through function-typed bindings lower through `call.value`, pinned
+  through generated strict C11 that applies, selects, and invokes function
+  values (the indirect-call child count equals the callee plus one child
+  per parameter in the lowering model).
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

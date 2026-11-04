@@ -360,11 +360,16 @@ func (g *gen) emitFnValueWrappers(b *strings.Builder) {
 			}
 			params = append(params, g.cType(p)+" alder_p"+strconv.Itoa(i))
 		}
-		if len(params) == 0 {
-			params = append(params, "void")
+		// The environment pointer is always the final parameter; with no
+		// declared parameters it is the only one, so no "void" placeholder is
+		// needed.
+		paramList := strings.Join(params, ", ")
+		if len(params) != 0 {
+			paramList += ", "
 		}
-		b.WriteString("static " + ret + " " + wname + "(" + strings.Join(params, ", ") + ", void *alder_env);\n")
-		b.WriteString("static " + ret + " " + wname + "(" + strings.Join(params, ", ") + ", void *alder_env) {\n")
+		paramList += "void *alder_env"
+		b.WriteString("static " + ret + " " + wname + "(" + paramList + ");\n")
+		b.WriteString("static " + ret + " " + wname + "(" + paramList + ") {\n")
 		b.WriteString("  (void)alder_env;\n")
 		var args []string
 		for i, p := range sig.Params {

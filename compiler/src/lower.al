@@ -1607,7 +1607,11 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     if annotation.builtin == 31 { expected_count = 3 }
     if annotation.builtin == 32 || annotation.builtin == 33 || annotation.builtin == 38 || annotation.builtin == 39 || annotation.builtin == 40 { expected_count = 2 }
     if annotation.builtin == 43 { expected_count = 0 }
-    if expression.child_count != expected_count { return false }
+    // Builtin 44 (indirect call) children are the callee value plus one child
+    // per function parameter; the count is pinned to the function type's
+    // arg_count inside the 44 branch below, so the fixed table above does not
+    // apply.
+    if annotation.builtin != 44 && expression.child_count != expected_count { return false }
     if annotation.builtin == 43 { return annotation.target != 0 && __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1).kind == 25 }
     if annotation.builtin == 44 {
         // The callee child carries the function type; the annotation's own
