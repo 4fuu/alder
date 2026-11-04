@@ -262,9 +262,11 @@ block
 match expression statement
 ```
 
-The second `using` form is the M7.5 public surface: it accepts exactly a
-`Table(T)` owner, registers the builtin release, and keeps the
-`with cleanup_function` clause as the bootstrap-private bridge.
+The second `using` form is the M7.5 public surface: it accepts a `Table(T)`
+owner (registering the builtin release), any affine nominal type implementing
+`Cleanup` (registering its trait method), or a `Vec(T)` of `Cleanup` owners
+(registering a per-element drain). The `with cleanup_function` clause stays
+the bootstrap-private bridge.
 
 `while`/`for` do not yet support `break` or `continue`. Assignment targets are
 restricted to the implemented identifier/field/index shapes. Every non-`Unit`
@@ -287,11 +289,18 @@ Implemented expressions include:
   `Some` arm binds a scoped view usable for field reads (and field writes
   through `get_mut`) inside a straight-line fail-free arm body;
 - the callback-free `using name = Table.new(T)` registration, whose owner is
-  cleanup-covered at every exit and disarmed on transfer.
+  cleanup-covered at every exit and disarmed on transfer;
+- M7.5 resource composition: affine owners transfer into aggregate
+  construction (records, enums, `Option`, `Result`, fixed arrays), affine
+  scrutinees are consumed as a whole, and parts leave an aggregate only by
+  transferring the whole aggregate or registering it with `using`;
+- `Vec(T)` over a `Cleanup` owner: elements enter by transfer through
+  `push`/`from_array`, element reads and views are rejected, a vector grows
+  only through a plain local binding, and a registration drains every element
+  at scope exit.
 
-Bitwise source operators, trait methods, closures, affine aggregate and
-element composition, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0
-standard library are absent.
+Bitwise source operators, closures, ordered `Map`/`Set`, modules, `pub`,
+async, and the 1.0 standard library are absent.
 
 ## Temporary memory and cleanup bridges
 

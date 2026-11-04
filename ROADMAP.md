@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  PENDING-X
+  `11c39f339c016872161b247154e5b0be400a2840407d459f138823bd1bd40867`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  PENDING-X
+  `11c39f339c016872161b247154e5b0be400a2840407d459f138823bd1bd40867`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -920,7 +920,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.5: Static Abstraction, Resources, and Identity
 
-Status: **planned after Milestone 7.3 completes core values, views, and inferred storage**
+Status: **in progress (the static-abstraction and resource/identity halves land as parallel slices; ordered `Map`/`Set`, closures, and function values are still ahead)**
 
 Complete the remaining 1.0 language and memory model from
 [Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md),
@@ -1041,6 +1041,60 @@ Exit-criteria evidence (in progress):
   are rejected (146). The [Traits and Closures](docs/traits-and-closures.md)
   drain shape is pinned end to end through generated strict C11, proving the
   second drain starts where the first ended.
+
+Implementation progress, resource and identity half (the five commits atop
+`77437ec`: source `Table(T)`/`T.Id` surface, affine aggregate composition,
+Cleanup selection through `using`, affine `Vec(T)` drain composition, and
+this evidence record):
+
+- checked kinds 19-22 and builtins 26-29 plus 45 add `Table(T)`, `T.Id`, and the
+  scoped `get`/`get_mut` view payloads: lookups are consumed only as match
+  scrutinees whose `Some` arm binds a straight-line fail-free view, and
+  table-view registrations reject overlapping mutation or exclusive access
+  under a live view. Table storage allocates in the caller-result domain so
+  an escaping owner outlives its function; the builtin registration is a
+  compiler-synthesized no-op release;
+- affine owners compose into records, enums, `Option`, `Result`, and fixed
+  arrays: construction transfers parts, affine scrutinees are consumed as a
+  whole, and parts leave only by transferring the whole aggregate or
+  registering it with `using` (field extraction is deliberately out of
+  scope). A whole-aggregate read at a public `using` transfers its source,
+  so a received owner registers directly;
+- the callback-free `using` selects the builtin table release, the owner's
+  `Cleanup` trait method, or a compiler-synthesized per-element drain for a
+  `Vec(T)` of `Cleanup` owners. Cleanup and AsyncCleanup impl types are
+  affine through the receiver index; AsyncCleanup owners and elements are
+  rejected by synchronous `using` until the async runtime (kinds 138, 139,
+  143), and the callback `with` clause is bootstrap-private (137, gated in
+  every corpus that still exercises the bridge);
+- focused evidence: Alder checker conformance suites pin the accept surface
+  and rejections 130-143, and the production qualification compiles and runs
+  table, trait-cleanup, and vec-drain programs end to end on generated C
+  (imported counters observe every cleanup firing exactly once per element
+  on normal and early-return exits, deterministic MIR/C across processes,
+  no `__s0_` names in generated C for ordinary programs).
+
+Deferred from this half, with reasons:
+
+- `Table.try_insert`: needs a non-panicking MIR insert edge (fallible
+  capacity policy) that the current table operations do not expose;
+- `Vec(Table(T))`: the phase-6 MIR verifier lifetime rule
+  (`lifetime_deref_store`) rejects storing a table handle through a deref
+  place, so heap-stored table elements await a storage decision; diagnostic
+  143 keeps the surface honest in the meantime;
+- `AsyncCleanup` suspension and cancellation behavior: deferred to
+  Milestone 9 as planned; this milestone ships only its type, affinity, and
+  synchronous-`using` exclusion rules.
+
+Compile-time guardrails (cold `bootstrap/regenerate.sh`, 8-core host):
+2a96d07 2:08 / 3.78 GiB; sibling trait commits through `77437ec`
+2:18 / 4.10 GiB; resource-half tip `90dce35` 2:27 / 4.30 GiB. The peak is
+the stage-0 self-compile process itself (gcc on the emitted C peaks at
+0.85 GiB), and its growth is proportional to the compiler's own source
+(+11.5% across both halves), matching the pre-milestone record density
+(2.5-3.4 KB RSS per added source byte against a 2.5 KB baseline). No
+whole-store scan or copy amplification is present: the regenerator stays in
+its 2.5-minute class, far inside the 15-minute CI budget.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
