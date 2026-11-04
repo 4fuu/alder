@@ -77,6 +77,26 @@ fn main() -> I32 {
 }
 `
 
+const m75TableComposeProgram = `type Holder {
+    table: Table(U64)
+    n: U64
+}
+fn relay(take h: Holder) -> Holder { return h }
+fn pass(take t: Table(U64)) -> Table(U64) { return t }
+fn main() -> I32 {
+    using t = Table.new(U64)
+    let holder = Holder(table: t, n: 1)
+    if relay(holder).n != 1 { return 1 }
+    let u = Table.new(U64)
+    let o: Option(Table(U64)) = Some(u)
+    match o {
+        Some(inside) => { pass(inside) }
+        None => {}
+    }
+    return 0
+}
+`
+
 // m75TableRejections pins the public-language rejection surface: overlapping
 // table access, lookup misuse, view region violations, and the callback-free
 // using form on a non-Table owner.
@@ -137,6 +157,7 @@ func TestM75TableProductionQualification(t *testing.T) {
 		{"m75-tables.al", m75TableProgram},
 		{"m75-table-transfer.al", m75TableTransferProgram},
 		{"m75-table-generic.al", m75TableGenericProgram},
+		{"m75-table-compose.al", m75TableComposeProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

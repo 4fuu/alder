@@ -56,6 +56,25 @@ fn main() -> I32 {
  return 0
 }
 `,
+		"table-compose.al": `type Holder {
+ table: Table(U64)
+ n: U64
+}
+fn relay(take h: Holder) -> Holder { return h }
+fn pass(take t: Table(U64)) -> Table(U64) { return t }
+fn main() -> I32 {
+ using t = Table.new(U64)
+ let holder = Holder(table: t, n: 1)
+ relay(holder)
+ let u = Table.new(U64)
+ let o: Option(Table(U64)) = Some(u)
+ match o {
+  Some(inside) => { pass(inside) }
+  None => {}
+ }
+ return 0
+}
+`,
 		"table-transfer.al": `fn move_out() -> Table(U64) {
  using fresh = Table.new(U64)
  return fresh
@@ -90,6 +109,11 @@ fn main() -> I32 {
 		code         int
 	}{
 		{"table-element-scoped", "type Box { view: [U64] }\nfn f() -> Unit { using t = Table.new(Box) }\n", 130},
+		// M7.5 affine aggregate composition: construction transfers parts,
+		// whole aggregates transfer, and affine scrutinees are consumed.
+		{"aggregate-untransferred", "type Box {\n table: Table(U64)\n}\nfn main() -> I32 {\n using t = Table.new(U64)\n let box = Box(table: t)\n return 0\n}\n", 93},
+		{"use-after-construction-transfer", "type Box {\n table: Table(U64)\n}\nfn main() -> I32 {\n using t = Table.new(U64)\n let box = Box(table: t)\n let id = t.insert(5)\n return 0\n}\n", 91},
+		{"use-after-scrutinee-consumption", "fn pass(take t: Table(U64)) -> Table(U64) { return t }\nfn main() -> I32 {\n using t = Table.new(U64)\n let o: Option(Table(U64)) = Some(t)\n match o {\n  Some(inside) => { pass(inside) }\n  None => {}\n }\n let id = t.insert(5)\n return 0\n}\n", 91},
 		{"table-insert-read-param", "fn f(t: Table(U64)) -> Unit { let id = t.insert(1) }\n", 131},
 		{"table-getmut-read-param", "fn f(t: Table(U64), id: U64.Id) -> Unit {\n match t.get_mut(id) {\n  Some(v) => {}\n  None => {}\n }\n}\n", 131},
 		{"table-lookup-binding", "fn f(t: Table(U64), id: U64.Id) -> Unit { let option = t.get(id) }\n", 104},

@@ -59,7 +59,14 @@ ownership. A call to a `take` parameter consumes the caller's binding based on
 the callee's visible signature. Returning an owner transfers it to the caller.
 
 This is deliberately not a general move-oriented object model. Ownership is
-visible only at resource and identity boundaries.
+visible only at resource and identity boundaries. In the M7.5 composition
+model, an affine argument transfers into the aggregate being constructed
+(record field, enum payload, `Option`/`Result` wrapper, or array element), a
+`match` over an affine scrutinee consumes the scrutinee as a whole and binds
+its payload by transfer, and parts leave an aggregate only by transferring
+the aggregate itself: there is no field-extraction or per-part move syntax.
+An aggregate owner satisfies the exit rule by being transferred or registered
+with `using`, exactly like any other owner.
 
 ## Scoped capabilities
 
