@@ -1523,7 +1523,7 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     var expected_count: U64 = 1
     if annotation.builtin == 30 || annotation.builtin == 37 { expected_count = 0 }
     if annotation.builtin == 31 { expected_count = 3 }
-    if annotation.builtin == 32 || annotation.builtin == 38 || annotation.builtin == 39 { expected_count = 2 }
+    if annotation.builtin == 32 || annotation.builtin == 33 || annotation.builtin == 38 || annotation.builtin == 39 || annotation.builtin == 40 { expected_count = 2 }
     if expression.child_count != expected_count { return false }
     if annotation.builtin == 30 { return result.kind == 23 && result.arg_count == 2 }
     if annotation.builtin == 37 { return result.kind == 24 && result.arg_count == 1 }
@@ -1535,14 +1535,19 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         let value = __s0_buffer_get(U64, store.type_args, receiver.first_arg)
         if annotation.builtin == 31 { return lower_builtin_child_type(store, expression, 1) == key && lower_builtin_child_type(store, expression, 2) == value && result.kind == 1 && result.target == 1 }
         if annotation.builtin == 32 { return lower_builtin_child_type(store, expression, 1) == key && result.kind == 9 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == value }
+        if annotation.builtin == 33 { return lower_builtin_child_type(store, expression, 1) == key && result.kind == 1 && result.target == 1 }
         if annotation.builtin == 34 { return result.kind == 1 && result.target == 9 }
+        if annotation.builtin == 35 { return result.kind == 17 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == key }
+        if annotation.builtin == 36 { return result.kind == 17 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == value }
         return false
     }
     if receiver.kind == 24 {
         let element = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
         if annotation.builtin == 38 { return lower_builtin_child_type(store, expression, 1) == element && result.kind == 1 && result.target == 1 }
         if annotation.builtin == 39 { return lower_builtin_child_type(store, expression, 1) == element && result.kind == 1 && result.target == 1 }
+        if annotation.builtin == 40 { return lower_builtin_child_type(store, expression, 1) == element && result.kind == 1 && result.target == 1 }
         if annotation.builtin == 41 { return result.kind == 1 && result.target == 9 }
+        if annotation.builtin == 42 { return result.kind == 17 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element }
     }
     return false
 }
@@ -1873,10 +1878,13 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     current = lower_with_mir(current, storage_type.store)
     // Structural keys compare through place chains: park the searched key in
     // a local once, before any loop, so the scan body never stores into a
-    // local inside the cycle.
+    // local inside the cycle. keys/values/items build fresh vectors and do
+    // not scan.
     var key_place: U64 = 0
+    var scanning: U64 = 1
+    if annotation.builtin == 35 || annotation.builtin == 36 || annotation.builtin == 42 { scanning = 0 }
     let key_head = __s0_buffer_get(CheckedTypeRec, store.types, key_checked - 1)
-    if key_head.kind == 7 {
+    if scanning != 0 && key_head.kind == 7 {
         let key_type = try lower_type(d, source_state, store, current, key_checked)
         let local_ordinal = lower_local_count(key_type.state.mir, function)
         let key_local = try lower_helper_local_place(d, key_type.state, function, local_ordinal, try lower_decimal_name(d, "m75_key_", local_ordinal), key_type.id)
@@ -1971,6 +1979,148 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let falsity = try lower_helper_bool(d, current, function, missing.id, 0, expression_id * 16 + 3)
         current = try lower_jump_value(d, falsity.state, function, missing.id, join.id, falsity.id)
         return Ok(LowerStep(state: current, id: result_value.id))
+    }
+    if annotation.builtin == 33 || annotation.builtin == 40 {
+        let join = try lower_add_block(d, current, function, "bb_m75_remove_join")
+        let result_value = try mir_add_block_param(d, join.state.mir, function, join.id, 0, try lower_decimal_name(d, "__m75_remove_", join.id), mir_type_bool())
+        current = lower_with_mir(join.state, result_value.store)
+        let found = try lower_add_block(d, current, function, "bb_m75_remove_hit")
+        let found_index = try mir_add_block_param(d, found.state.mir, function, found.id, 0, try lower_decimal_name(d, "__m75_hit_", found.id), mir_type_u64())
+        current = lower_with_mir(found.state, found_index.store)
+        let missing = try lower_add_block(d, current, function, "bb_m75_remove_miss")
+        current = missing.state
+        current = try lower_m75_scan(d, source_state, store, current, key_checked, map_entries, entry_type, storage_type.type_id, receiver.id, function, active, first_arg, key_place, found.id, missing.id, panic_block)
+        // Missing: nothing to remove.
+        let falsity = try lower_helper_bool(d, current, function, missing.id, 0, expression_id * 16 + 4)
+        current = try lower_jump_value(d, falsity.state, function, missing.id, join.id, falsity.id)
+        // Found: compact the entries in place, preserving order, then store
+        // the shortened vector back into the receiver binding. Whole entries
+        // move, and the value type is provenance-free, so the loop-carried
+        // load is plain bits under the phase-6 rule.
+        let length = try lower_add_typed_result(d, current, function, found.id, mir_type_u64())
+        let length_instr = try lower_add_instr(d, length.state, function, found.id, mir_op_vec_len(), length.id, 0, 0, receiver.id, 0, 0, "")
+        current = length_instr.state
+        let one = try lower_int_value(d, source_state, store, current, function, found.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let last = try lower_add_typed_result(d, one.state, function, found.id, mir_type_u64())
+        let last_instr = try lower_add_instr(d, last.state, function, found.id, mir_op_int_sub_checked(), last.id, 0, 0, length.id, one.id, panic_block, "")
+        current = last_instr.state
+        let shift = try lower_add_block(d, current, function, "bb_m75_shift")
+        let at = try mir_add_block_param(d, shift.state.mir, function, shift.id, 0, try lower_decimal_name(d, "__m75_shift_", shift.id), mir_type_u64())
+        current = lower_with_mir(shift.state, at.store)
+        current = try lower_jump_value(d, current, function, found.id, shift.id, found_index.id)
+        let more = try lower_add_typed_result(d, current, function, shift.id, mir_type_bool())
+        let compared = try lower_add_instr(d, more.state, function, shift.id, mir_op_int_lt(), more.id, 0, 0, at.id, last.id, 0, "")
+        current = compared.state
+        let body = try lower_add_block(d, current, function, "bb_m75_shift_body")
+        let compacted = try lower_add_block(d, body.state, function, "bb_m75_shift_done")
+        current = try lower_branch(d, compacted.state, function, shift.id, more.id, body.id, compacted.id)
+        let storage = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
+        let storage_instr = try lower_add_instr(d, storage.state, function, body.id, mir_op_vec_storage(), storage.id, 0, 0, receiver.id, 0, 0, "")
+        current = storage_instr.state
+        let next_one = try lower_int_value(d, source_state, store, current, function, body.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let next_at = try lower_add_typed_result(d, next_one.state, function, body.id, mir_type_u64())
+        let next_added = try lower_add_instr(d, next_at.state, function, body.id, mir_op_int_add_checked(), next_at.id, 0, 0, at.id, next_one.id, panic_block, "")
+        current = next_added.state
+        let source_ref = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
+        let source_index = try lower_add_instr(d, source_ref.state, function, body.id, mir_op_slice_index_checked(), source_ref.id, 0, 0, storage.id, next_at.id, panic_block, "")
+        current = source_index.state
+        let source_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: source_ref.id))
+        current = lower_with_mir(current, source_place.store)
+        let moved = try lower_helper_load(d, current, function, body.id, source_place.id, entry_type)
+        current = moved.state
+        let target_ref = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
+        let target_index = try lower_add_instr(d, target_ref.state, function, body.id, mir_op_slice_index_checked(), target_ref.id, 0, 0, storage.id, at.id, panic_block, "")
+        current = target_index.state
+        let target_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
+        let stored = try lower_add_instr(d, lower_with_mir(current, target_place.store), function, body.id, mir_op_store(), 0, target_place.id, 0, moved.id, 0, 0, "")
+        current = stored.state
+        let step = try lower_add_typed_result(d, current, function, body.id, mir_type_u64())
+        let step_added = try lower_add_instr(d, step.state, function, body.id, mir_op_int_add_checked(), step.id, 0, 0, at.id, next_one.id, panic_block, "")
+        current = try lower_jump_value(d, step_added.state, function, body.id, shift.id, step.id)
+        let capacity = try lower_add_typed_result(d, current, function, compacted.id, mir_type_u64())
+        let capacity_instr = try lower_add_instr(d, capacity.state, function, compacted.id, mir_op_vec_capacity(), capacity.id, 0, 0, receiver.id, 0, 0, "")
+        current = capacity_instr.state
+        let storage2 = try lower_add_typed_result(d, current, function, compacted.id, storage_type.type_id)
+        let storage2_instr = try lower_add_instr(d, storage2.state, function, compacted.id, mir_op_vec_storage(), storage2.id, 0, 0, receiver.id, 0, 0, "")
+        current = storage2_instr.state
+        let updated = try lower_add_typed_result(d, current, function, compacted.id, vector.id)
+        let built = try lower_add_instr_three(d, updated.state, function, compacted.id, mir_op_vec_construct_checked(), updated.id, 0, storage2.id, last.id, capacity.id, panic_block)
+        current = built.state
+        let mapped = lower_binding_lookup(current, receiver_expression.parameter_use)
+        if mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        var receiver_place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
+        if mapped.parameter == 0 { receiver_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+            receiver_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+        }
+        let saved = try lower_add_instr(d, lower_with_mir(current, receiver_place.store), function, compacted.id, mir_op_store(), 0, receiver_place.id, 0, updated.id, 0, 0, "")
+        current = saved.state
+        let truth = try lower_helper_bool(d, current, function, compacted.id, 1, expression_id * 16 + 5)
+        current = try lower_jump_value(d, truth.state, function, compacted.id, join.id, truth.id)
+        return Ok(LowerStep(state: current, id: result_value.id))
+    }
+    if annotation.builtin == 35 || annotation.builtin == 36 || annotation.builtin == 42 {
+        // Build a fresh vector of the key/value/element projections in the
+        // expression's inferred storage domain. Projected entries are
+        // provenance-free under the phase-6 rule, so loading them inside
+        // the copy loop is plain bits.
+        var projected_checked = key_checked
+        if annotation.builtin == 36 { projected_checked = value_checked }
+        let projected = try lower_type(d, source_state, store, current, projected_checked)
+        current = projected.state
+        let projected_empty = try __s0_buffer_new(U64, d)
+        let projected_storage = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), projected.id, 0, 0, projected_empty, 0)
+        current = lower_with_mir(current, projected_storage.store)
+        let length = try lower_add_typed_result(d, current, function, active, mir_type_u64())
+        let length_instr = try lower_add_instr(d, length.state, function, active, mir_op_vec_len(), length.id, 0, 0, receiver.id, 0, 0, "")
+        current = length_instr.state
+        let domain = lower_storage_domain_value(current, store, owner, expression_id)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let target_storage = try lower_add_typed_result(d, current, function, active, projected_storage.type_id)
+        let allocated = try lower_add_instr(d, target_storage.state, function, active, mir_op_alloc_checked(), target_storage.id, 0, projected.id, domain, length.id, panic_block, "")
+        current = allocated.state
+        let head = try lower_add_block(d, current, function, "bb_m75_project")
+        let at = try mir_add_block_param(d, head.state.mir, function, head.id, 0, try lower_decimal_name(d, "__m75_project_", head.id), mir_type_u64())
+        current = lower_with_mir(head.state, at.store)
+        let zero = try lower_int_value(d, source_state, store, current, function, active, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        current = try lower_jump_value(d, zero.state, function, active, head.id, zero.id)
+        let more = try lower_add_typed_result(d, current, function, head.id, mir_type_bool())
+        let compared = try lower_add_instr(d, more.state, function, head.id, mir_op_int_lt(), more.id, 0, 0, at.id, length.id, 0, "")
+        current = compared.state
+        let body = try lower_add_block(d, current, function, "bb_m75_project_body")
+        let done = try lower_add_block(d, body.state, function, "bb_m75_project_done")
+        current = try lower_branch(d, done.state, function, head.id, more.id, body.id, done.id)
+        let storage = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
+        let storage_instr = try lower_add_instr(d, storage.state, function, body.id, mir_op_vec_storage(), storage.id, 0, 0, receiver.id, 0, 0, "")
+        current = storage_instr.state
+        let entry_ref = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
+        let entry_index = try lower_add_instr(d, entry_ref.state, function, body.id, mir_op_slice_index_checked(), entry_ref.id, 0, 0, storage.id, at.id, panic_block, "")
+        current = entry_index.state
+        let entry_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: entry_ref.id))
+        current = lower_with_mir(current, entry_place.store)
+        var loaded_place = entry_place.id
+        if map_entries != 0 {
+            var field_name: __s0_String = "key"
+            if annotation.builtin == 36 { field_name = "value" }
+            let field = try lower_helper_field_place(d, current, function, entry_place.id, field_name)
+            loaded_place = field.id
+            current = field.state
+        }
+        let loaded = try lower_helper_load(d, current, function, body.id, loaded_place, projected.id)
+        current = loaded.state
+        let target_ref = try lower_add_typed_result(d, current, function, body.id, projected_storage.type_id)
+        let target_index = try lower_add_instr(d, target_ref.state, function, body.id, mir_op_slice_index_checked(), target_ref.id, 0, 0, target_storage.id, at.id, panic_block, "")
+        current = target_index.state
+        let target_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
+        let stored = try lower_add_instr(d, lower_with_mir(current, target_place.store), function, body.id, mir_op_store(), 0, target_place.id, 0, loaded.id, 0, 0, "")
+        current = stored.state
+        let one = try lower_int_value(d, source_state, store, current, function, body.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let next = try lower_add_typed_result(d, one.state, function, body.id, mir_type_u64())
+        let added = try lower_add_instr(d, next.state, function, body.id, mir_op_int_add_checked(), next.id, 0, 0, at.id, one.id, panic_block, "")
+        current = try lower_jump_value(d, added.state, function, body.id, head.id, next.id)
+        let result_vector = try lower_type(d, source_state, store, current, expression.checked_type)
+        let result = try lower_add_typed_result(d, result_vector.state, function, done.id, result_vector.id)
+        let built = try lower_add_instr_three(d, result.state, function, done.id, mir_op_vec_construct_checked(), result.id, 0, target_storage.id, length.id, length.id, panic_block)
+        return Ok(LowerStep(state: built.state, id: result.id))
     }
     return Ok(LowerStep(state: lower_invalid(current), id: 0))
 }

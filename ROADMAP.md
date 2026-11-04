@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `1893dfb22c1c1636007a8df07a3032c2d8db76061c44af463b807d11e2db0997`;
+  `2f4bf28dd397dda0155b214d16d66b7f36a3888ad35afc4c036da01c53cbb3c2`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `1893dfb22c1c1636007a8df07a3032c2d8db76061c44af463b807d11e2db0997`.
+  `2f4bf28dd397dda0155b214d16d66b7f36a3888ad35afc4c036da01c53cbb3c2`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -961,18 +961,28 @@ Exit-criteria evidence (in progress):
   `impl Hash` blocks are rejected; the synthesized methods remain
   non-callable until default-method dispatch lands;
 - the ordered public `Map(K, V)`/`Set(T)` (checked kinds 23/24, builtin
-  identities 30-42 for the M7.5 subset) are insertion-ordered association
-  lists lowered inline over `vec` storage: `Map.new`/`Set.new`, `insert`
-  with in-place replacement and geometric growth, `get` with `Some`/`None`
-  results, `contains`, and `len`, all pinned end to end through generated
-  strict C11, with structural record and enum keys compared through place
-  chains and the rebuilt vector stored back into the receiver binding for
-  value semantics. Keys are gated to the structural-comparison domain
-  M7.5 lowers (diagnostic 127), values to recursively copyable ordinary
-  values (128), and malformed call shapes are rejected (129). Lookup,
-  insert, and remove scan linearly, a known cost deferred to the
-  standard-library hash containers; `remove`, `keys`, `values`, and `items`
-  remain open.
+  identities 30-42) are insertion-ordered association lists lowered inline
+  over `vec` storage: `Map.new`/`Set.new`, `insert` with in-place
+  replacement and geometric growth, `get` with `Some`/`None` results,
+  `contains`, `len`, order-preserving `remove` via in-place compaction,
+  and `keys`/`values`/`items` projections, all pinned end to end through
+  generated strict C11, including the insertion-order contract after
+  replace, remove, and reinsertion. Structural record and enum keys
+  compare through place chains, and the rebuilt or projected vector is
+  stored back into the receiver binding for value semantics. Keys are
+  gated to the structural-comparison domain M7.5 lowers (diagnostic 127),
+  values to recursively copyable ordinary values (128), `remove`/`values`
+  additionally to storage-free value types while entries move through a
+  lowering loop (129), and malformed call shapes are rejected (129).
+  Lookup, insert, and remove scan linearly, a known cost deferred to the
+  standard-library hash containers;
+- phase 6 exempts loads of provenance-free types from storage-domain
+  derivation, implemented in lockstep in the Go verifier and the Alder
+  mirror with the soundness argument in [MIR](mir.md): plain-bit values
+  (primitives and options, results, arrays, aggregates, and enums over
+  them) loaded from storage carry no domain provenance, so binding Vec
+  elements to locals inside source loops verifies, while storage-carrying
+  loads keep the full derivation and every cyclic-store rejection.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

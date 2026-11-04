@@ -320,6 +320,68 @@ fn main() -> I32 {
     if seen.len() != 2 { return 20 }
     if !seen.contains(2) { return 21 }
     if seen.contains(9) { return 22 }
+    // Insertion order: replacement keeps position, removal compacts in
+    // order, and reinsertion moves the key to the end.
+    var ordered = Map.new(U64, U64)
+    if !ordered.insert(1, 10) { return 23 }
+    if !ordered.insert(2, 20) { return 24 }
+    if !ordered.insert(3, 30) { return 25 }
+    if ordered.insert(2, 25) { return 26 }
+    let after_replace = ordered.keys()
+    if after_replace.len() != 3 { return 27 }
+    let first = after_replace.get(0)
+    let first_key = match first {
+        Some(v) => v
+        None => 0
+    }
+    if first_key != 1 { return 28 }
+    let second = after_replace.get(1)
+    let second_key = match second {
+        Some(v) => v
+        None => 0
+    }
+    if second_key != 2 { return 29 }
+    let replaced_value = ordered.get(2)
+    let replaced = match replaced_value {
+        Some(v) => v
+        None => 0
+    }
+    if replaced != 25 { return 30 }
+    if !ordered.remove(1) { return 31 }
+    if ordered.remove(9) { return 32 }
+    if ordered.len() != 2 { return 33 }
+    let after_remove = ordered.keys()
+    let third = after_remove.get(0)
+    let third_key = match third {
+        Some(v) => v
+        None => 0
+    }
+    if third_key != 2 { return 34 }
+    let values = ordered.values()
+    let value_zero = values.get(0)
+    let value_zero_item = match value_zero {
+        Some(v) => v
+        None => 0
+    }
+    if value_zero_item != 25 { return 35 }
+    if !ordered.insert(1, 11) { return 36 }
+    let after_reinsert = ordered.keys()
+    if after_reinsert.len() != 3 { return 37 }
+    let tail = after_reinsert.get(2)
+    let tail_key = match tail {
+        Some(v) => v
+        None => 0
+    }
+    if tail_key != 1 { return 38 }
+    if !seen.remove(1) { return 39 }
+    let items = seen.items()
+    if items.len() != 1 { return 40 }
+    let only = items.get(0)
+    let only_item = match only {
+        Some(v) => v
+        None => 0
+    }
+    if only_item != 2 { return 41 }
     return 0
 }
 `}

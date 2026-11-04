@@ -184,6 +184,9 @@ enums over that domain whose enum variant payloads are primitives; `String`
 and `Bytes` keys arrive with generated structural text equality. Values must
 be recursively copyable ordinary values; slices, mutable views, and the
 ordered collections themselves are excluded until affine composition lands.
+`remove` and `values` move stored entries through a lowering loop, so they
+additionally require the value type to be free of storage-backed parts
+(vec, string, bytes, and the like) for now.
 
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
 uses eager deep copy; the in-place rule above replaces eager copies once

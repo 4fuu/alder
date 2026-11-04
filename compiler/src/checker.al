@@ -4445,6 +4445,37 @@ fn ordered_value_copyable(store: CheckStore, checked_type: U64, depth: U64) -> B
     return true
 }
 
+// Provenance-free value domain for operations that move stored entries
+// inside a loop: remove shifts entries in place and values copies them out.
+// Mirrors the MIR phase-6 rule that decides whether a loop-carried load
+// keeps storage-domain provenance, so nothing accepted here can be refused
+// by the verifier later.
+fn ordered_value_storage_free(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return true }
+    if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 {
+        var child: U64 = 0
+        while child < checked.arg_count {
+            if !ordered_value_storage_free(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), depth + 1) { return false }
+            child = child + 1
+        }
+        return true
+    }
+    if checked.kind != 7 { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
+    if symbol.type_arity != 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if !ordered_value_storage_free(store, use.checked_type, depth + 1) { return false }
+        }
+        at = at + 1
+    }
+    return true
+}
+
 // Map.new(K, V) and Set.new(T) create empty ordered collections. The static
 // receiver link (Map/Set) is associated, so the call links are the callee
 // followed by the type operands alone, the Vec.new convention.
@@ -4494,7 +4525,7 @@ fn check_ordered_static_builtin(d: Domain, state: State, parse: ParseStore, base
 
 fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_expression: U64, builtin: U64, key: U64, value: U64, ordinal: U64, prior_first: U64, prior_second: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     var want_arity: U64 = 0
-    if builtin == 32 || builtin == 38 || builtin == 39 { want_arity = 1 }
+    if builtin == 32 || builtin == 38 || builtin == 39 || builtin == 33 || builtin == 40 { want_arity = 1 }
     if builtin == 31 { want_arity = 2 }
     if ordinal == want_arity {
         var current = store
@@ -4502,6 +4533,13 @@ fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: C
         if builtin == 34 || builtin == 41 { result = primitive_type_id(state, parse, current, "U64") }
         if builtin == 32 {
             let made = try canonical_application(d, current, owner, 9, value, 0, 1)
+            current = made.store
+            result = made.checked_type
+        }
+        if builtin == 35 || builtin == 36 || builtin == 42 {
+            var element = key
+            if builtin == 36 { element = value }
+            let made = try canonical_application(d, current, owner, 17, element, 0, 1)
             current = made.store
             result = made.checked_type
         }
@@ -4544,18 +4582,25 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
             arity = 2 }
         if node_word(state, callee, "get") { builtin = 32
             arity = 1 }
+        if node_word(state, callee, "remove") { builtin = 33
+            arity = 1 }
         if node_word(state, callee, "len") { builtin = 34 }
+        if node_word(state, callee, "keys") { builtin = 35 }
+        if node_word(state, callee, "values") { builtin = 36 }
     }
     if receiver.kind == 24 {
         if node_word(state, callee, "insert") { builtin = 38
             arity = 1 }
         if node_word(state, callee, "contains") { builtin = 39
             arity = 1 }
+        if node_word(state, callee, "remove") { builtin = 40
+            arity = 1 }
         if node_word(state, callee, "len") { builtin = 41 }
+        if node_word(state, callee, "items") { builtin = 42 }
     }
     if builtin == 0 { return expr_token_fail(d, state, base, 61, callee) }
     if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 129, call) }
-    if builtin == 31 || builtin == 38 {
+    if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 {
         if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
         let local_id = local_lookup(store, owner, receiver_node, state)
         if local_id == 0 || __s0_buffer_get(LocalRec, store.locals, local_id - 1).mutable == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
@@ -4563,12 +4608,15 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     if receiver_node.kind == 24 {
         let local_id = local_lookup(store, owner, receiver_node, state)
         var mode: U64 = 1
-        if builtin == 31 || builtin == 38 { mode = 2 }
+        if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
         if local_id != 0 && lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
     }
     let key = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
     var value: U64 = 0
     if receiver.kind == 23 { value = __s0_buffer_get(U64, store.type_args, receiver.first_arg) }
+    // remove and values move whole entries through a lowering loop; only
+    // provenance-free value types can cross that loop's backedge today.
+    if (builtin == 33 || builtin == 36) && !ordered_value_storage_free(store, value, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, value) }
     return check_ordered_method_args(d, state, parse, base, store, owner, call, call_id, callee, receiver_expression, builtin, key, value, 0, 0, 0, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
 }
 

@@ -277,6 +277,11 @@ fn main() -> I32 {
     var seen = Set.new(U64)
     if !seen.insert(7) { return 4 }
     if !seen.contains(7) { return 5 }
+    if !seen.remove(7) { return 6 }
+    if seen.contains(7) { return 7 }
+    let order = scores.keys()
+    let texts = scores.values()
+    let elements = seen.items()
     return 0
 }
 `,
@@ -311,6 +316,12 @@ fn main() -> I32 {
 		{"map-insert-immutable", "fn main() -> I32 {\n    let m = Map.new(U64, U64)\n    m.insert(1, 2)\n    return 0\n}\n", 101},
 		{"map-unknown-method", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.pop()\n    return 0\n}\n", 61},
 		{"map-get-arg-type", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    let found = m.get(true)\n    return 0\n}\n", 42},
+		{"map-remove-immutable", "fn main() -> I32 {\n    let m = Map.new(U64, U64)\n    m.remove(1)\n    return 0\n}\n", 101},
+		{"map-remove-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.remove()\n    return 0\n}\n", 129},
+		{"map-keys-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.keys(1)\n    return 0\n}\n", 129},
+		{"map-remove-storage-value", "fn main() -> I32 {\n    var m = Map.new(U64, Vec(U64))\n    m.remove(1)\n    return 0\n}\n", 129},
+		{"map-values-storage-value", "fn main() -> I32 {\n    var m = Map.new(U64, String)\n    let texts = m.values()\n    return 0\n}\n", 129},
+		{"set-remove-arg-type", "fn main() -> I32 {\n    var s = Set.new(U64)\n    s.remove(true)\n    return 0\n}\n", 42},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
