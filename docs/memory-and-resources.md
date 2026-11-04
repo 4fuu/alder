@@ -174,6 +174,17 @@ copy-on-write, but the first mutation must preserve independence. Collection
 growth is geometric with checked size arithmetic; no capacity calculation may
 wrap or narrow into C `size_t` unchecked.
 
+Milestone 7.5 implements the ordered `Map(K, V)` and `Set(T)` as
+insertion-ordered association lists over vector storage with structural key
+comparison. Lookup, insert, and remove scan linearly, which is a known cost
+accepted for M7.5; hashing indices arrive with the standard-library hash
+containers. The M7.5 key domain is the structural-comparison domain that the
+inline compare lowers: unsigned integers, `Bool`, and non-generic records and
+enums over that domain whose enum variant payloads are primitives; `String`
+and `Bytes` keys arrive with generated structural text equality. Values must
+be recursively copyable ordinary values; slices, mutable views, and the
+ordered collections themselves are excluded until affine composition lands.
+
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
 uses eager deep copy; the in-place rule above replaces eager copies once
 uniqueness facts exist. This temporary restriction keeps ordinary vector APIs

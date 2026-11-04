@@ -861,6 +861,23 @@ fn validate_concrete_type(d: Domain, state: State, parse: ParseStore, store: Che
                 work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: key, env: norm.env, ancestry: norm.ancestry, next: value_head))
                 head = __s0_buffer_len(ValidationWorkRec, work)
             }
+            if checked.kind == 23 {
+                let norm_key = normalize_interp(store, bindings, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), norm.env, norm.ancestry)
+                if !ordered_key_supported(store, norm_key.checked_type, 0) { return check_type_detail_fail(d, store, 127, root_node, norm_key.checked_type) }
+                let norm_value = normalize_interp(store, bindings, __s0_buffer_get(U64, store.type_args, checked.first_arg), norm.env, norm.ancestry)
+                if !ordered_value_copyable(store, norm_value.checked_type, 0) { return check_type_detail_fail(d, store, 128, root_node, norm_value.checked_type) }
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg), env: norm.env, ancestry: norm.ancestry, next: head))
+                let value_head = __s0_buffer_len(ValidationWorkRec, work)
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: norm.ancestry, next: value_head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
+            if checked.kind == 24 {
+                let norm_element = normalize_interp(store, bindings, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), norm.env, norm.ancestry)
+                if !ordered_key_supported(store, norm_element.checked_type, 0) { return check_type_detail_fail(d, store, 127, root_node, norm_element.checked_type) }
+                if !ordered_value_copyable(store, norm_element.checked_type, 0) { return check_type_detail_fail(d, store, 128, root_node, norm_element.checked_type) }
+                work = try __s0_buffer_append(ValidationWorkRec, d, work, ValidationWorkRec(checked_type: __s0_buffer_get(U64, store.type_args, checked.first_arg - 1), env: norm.env, ancestry: norm.ancestry, next: head))
+                head = __s0_buffer_len(ValidationWorkRec, work)
+            }
             if checked.kind == 7 && declaration_available(boundary, checked.target) {
                 if __s0_buffer_len(TraitConstraintRec, store.traits.constraints) != 0 {
                     var constraint_at: U64 = 0
@@ -1938,8 +1955,15 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         arity = 1 }
     if node_word(state, node, "Result") { kind = 10
         arity = 2 }
-    if node_word(state, node, "Map") { kind = 11
-        arity = 2 }
+    // The public insertion-ordered Map is kind 23; the bootstrap-private
+    // profile keeps Map meaning the fixed S0 map (kind 11) so the compiler's
+    // own sources lower byte-for-byte as before.
+    if node_word(state, node, "Map") {
+        arity = 2
+        if check_bootstrap_private() { kind = 11 } else { kind = 23 }
+    }
+    if node_word(state, node, "Set") { kind = 24
+        arity = 1 }
     if node_word(state, node, "Ptr") { kind = 12
         arity = 1 }
     if node_word(state, node, "__s0_Buffer") { kind = 13
@@ -1987,6 +2011,19 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         let value = __s0_buffer_get(U64, appended.type_args, checked.first_arg)
         if !(try interpreted_map_key_ok(d, state, parse, appended, empty, no_ancestry, key, 0, 0, boundary)) { return check_type_detail_fail(d, appended, 12, syntax_diag_node(state, parse, node_id), key) }
         if try interpreted_contains_reference(d, state, parse, appended, empty, no_ancestry, value, 0, 0, boundary) { return check_type_detail_fail(d, appended, 13, syntax_diag_node(state, parse, node_id), value) }
+    }
+    if (kind == 23 || kind == 24) && try direct_type_concrete(d, appended, empty, checked_id, 0) {
+        if kind == 23 {
+            let key = __s0_buffer_get(U64, appended.type_args, checked.first_arg - 1)
+            let value = __s0_buffer_get(U64, appended.type_args, checked.first_arg)
+            if !ordered_key_supported(appended, key, 0) { return check_type_detail_fail(d, appended, 127, syntax_diag_node(state, parse, node_id), key) }
+            if !ordered_value_copyable(appended, value, 0) { return check_type_detail_fail(d, appended, 128, syntax_diag_node(state, parse, node_id), value) }
+        }
+        if kind == 24 {
+            let element = __s0_buffer_get(U64, appended.type_args, checked.first_arg - 1)
+            if !ordered_key_supported(appended, element, 0) { return check_type_detail_fail(d, appended, 127, syntax_diag_node(state, parse, node_id), element) }
+            if !ordered_value_copyable(appended, element, 0) { return check_type_detail_fail(d, appended, 128, syntax_diag_node(state, parse, node_id), element) }
+        }
     }
     if kind == 7 && try direct_type_concrete(d, appended, empty, checked_id, 0) {
         return validate_concrete_type(d, state, parse, appended, checked_id, 0, syntax_diag_node(state, parse, node_id), boundary)
@@ -3081,7 +3118,11 @@ fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node
     if builtin != 0 { return CheckedTypeRec(kind: builtin, syntax: 0, target: 0, first_arg: 0, arg_count: 0) }
     if node_word(state, node, "Option") { return CheckedTypeRec(kind: 9, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "Result") { return CheckedTypeRec(kind: 10, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
-    if node_word(state, node, "Map") { return CheckedTypeRec(kind: 11, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
+    if node_word(state, node, "Map") {
+        if check_bootstrap_private() { return CheckedTypeRec(kind: 11, syntax: 0, target: 0, first_arg: 0, arg_count: 2) }
+        return CheckedTypeRec(kind: 23, syntax: 0, target: 0, first_arg: 0, arg_count: 2)
+    }
+    if node_word(state, node, "Set") { return CheckedTypeRec(kind: 24, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "Ptr") { return CheckedTypeRec(kind: 12, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "__s0_Buffer") { return CheckedTypeRec(kind: 13, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
     if node_word(state, node, "Vec") { return CheckedTypeRec(kind: 17, syntax: 0, target: 0, first_arg: 0, arg_count: 1) }
@@ -4344,6 +4385,193 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, site_kind, site_syntax)
 }
 
+// Ordered-collection key domain (M7.5): the domain the inline structural
+// compare lowers. Unsigned integers and Bool compare directly; records and
+// enums compare through place chains, so enum variant payloads, which
+// materialize as values inside the scan loop, must be primitives. String
+// and Bytes keys arrive with generated structural text equality, which MIR
+// does not provide yet.
+fn ordered_key_supported(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return checked.target == 1 || (checked.target >= 6 && checked.target <= 9) }
+    if checked.kind != 7 { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
+    if symbol.type_arity != 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if use.role == 2 {
+                let payload = __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1)
+                if payload.kind != 1 { return false }
+                if !(payload.target == 1 || (payload.target >= 6 && payload.target <= 9)) { return false }
+            } else {
+                if !ordered_key_supported(store, use.checked_type, depth + 1) { return false }
+            }
+        }
+        at = at + 1
+    }
+    return true
+}
+
+// Ordered-collection value domain: recursively copyable ordinary values.
+// Slices, mutable views, pointers, bootstrap buffers, and the ordered
+// collections themselves stay out until affine composition lands; declared
+// types must be non-generic so members are already concrete.
+fn ordered_value_copyable(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 || checked.kind == 2 || checked.kind == 14 { return true }
+    if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 || checked.kind == 17 {
+        var child: U64 = 0
+        while child < checked.arg_count {
+            if !ordered_value_copyable(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), depth + 1) { return false }
+            child = child + 1
+        }
+        return true
+    }
+    if checked.kind != 7 { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
+    if symbol.type_arity != 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if !ordered_value_copyable(store, use.checked_type, depth + 1) { return false }
+        }
+        at = at + 1
+    }
+    return true
+}
+
+// Map.new(K, V) and Set.new(T) create empty ordered collections. The static
+// receiver link (Map/Set) is associated, so the call links are the callee
+// followed by the type operands alone, the Vec.new convention.
+fn check_ordered_static_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    var identity: U64 = 30
+    var want_args: U64 = 2
+    let static_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
+    let static_node = __s0_buffer_get(SyntaxRec, parse.nodes, static_link.node - 1)
+    if static_node.kind == 24 && node_word(state, static_node, "Set") { identity = 37
+        want_args = 1 }
+    if call_link_count(parse, call) != want_args + 1 { return expr_token_fail(d, state, base, 129, call) }
+    let key_link = call_link_at(parse, call, 1)
+    let resolved_key = try resolve_expression_type(d, state, parse, store, owner, key_link.node)
+    var current = match resolved_key {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match resolved_key {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let key = checked_type_for_syntax(current, owner, key_link.node)
+    var value: U64 = 0
+    if identity == 30 {
+        let value_link = call_link_at(parse, call, 2)
+        let resolved_value = try resolve_expression_type(d, state, parse, current, owner, value_link.node)
+        current = match resolved_value {
+            CheckGood(value2) => value2
+            CheckBad(value2) => value2
+        }
+        if match resolved_value {
+            CheckGood(value2) => false
+            CheckBad(value2) => true
+        } { return Ok(ExprBad(current)) }
+        value = checked_type_for_syntax(current, owner, value_link.node)
+    }
+    if !ordered_key_supported(current, key, 0) { return expr_token_single_type_fail(d, state, current, 127, __s0_buffer_get(SyntaxRec, parse.nodes, key_link.node - 1), key) }
+    if identity == 30 && !ordered_value_copyable(current, value, 0) { return expr_token_single_type_fail(d, state, current, 128, __s0_buffer_get(SyntaxRec, parse.nodes, call_link_at(parse, call, 2).node - 1), value) }
+    if identity == 37 && !ordered_value_copyable(current, key, 0) { return expr_token_single_type_fail(d, state, current, 128, __s0_buffer_get(SyntaxRec, parse.nodes, key_link.node - 1), key) }
+    var kind: U64 = 23
+    if identity == 37 { kind = 24 }
+    let made = try canonical_application(d, current, owner, kind, key, value, want_args)
+    current = made.store
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, made.checked_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, made.checked_type) }
+    return append_builtin_expression(d, parse, current, owner, call_id, made.checked_type, identity, call, want_args + 1, site_kind, site_syntax)
+}
+
+fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_expression: U64, builtin: U64, key: U64, value: U64, ordinal: U64, prior_first: U64, prior_second: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    var want_arity: U64 = 0
+    if builtin == 32 || builtin == 38 || builtin == 39 { want_arity = 1 }
+    if builtin == 31 { want_arity = 2 }
+    if ordinal == want_arity {
+        var current = store
+        var result = primitive_type_id(state, parse, current, "Bool")
+        if builtin == 34 || builtin == 41 { result = primitive_type_id(state, parse, current, "U64") }
+        if builtin == 32 {
+            let made = try canonical_application(d, current, owner, 9, value, 0, 1)
+            current = made.store
+            result = made.checked_type
+        }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+        return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, prior_first, prior_second, site_kind, site_syntax)
+    }
+    // Method-call links include the callee and the receiver before the
+    // runtime operands.
+    let link = call_link_at(parse, call, ordinal + 2)
+    let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    var wanted = key
+    if builtin == 31 && ordinal == 1 { wanted = value }
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, argument, link.node, wanted, 42, argument, 0, 0)
+    let current = match checked {
+        ExprGood(value2) => value2.store
+        ExprBad(value2) => value2
+    }
+    if match checked {
+        ExprGood(value2) => false
+        ExprBad(value2) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value2) => value2.draft
+        ExprBad(value2) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    var first = prior_first
+    var second = prior_second
+    if ordinal == 0 { first = draft.expression } else { second = draft.expression }
+    return check_ordered_method_args(d, state, parse, base, current, owner, call, call_id, callee, receiver_expression, builtin, key, value, ordinal + 1, first, second, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+}
+
+fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    if receiver.kind != 23 && receiver.kind != 24 { return expr_token_fail(d, state, base, 61, callee) }
+    var builtin: U64 = 0
+    var arity: U64 = 0
+    if receiver.kind == 23 {
+        if node_word(state, callee, "insert") { builtin = 31
+            arity = 2 }
+        if node_word(state, callee, "get") { builtin = 32
+            arity = 1 }
+        if node_word(state, callee, "len") { builtin = 34 }
+    }
+    if receiver.kind == 24 {
+        if node_word(state, callee, "insert") { builtin = 38
+            arity = 1 }
+        if node_word(state, callee, "contains") { builtin = 39
+            arity = 1 }
+        if node_word(state, callee, "len") { builtin = 41 }
+    }
+    if builtin == 0 { return expr_token_fail(d, state, base, 61, callee) }
+    if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 129, call) }
+    if builtin == 31 || builtin == 38 {
+        if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
+        let local_id = local_lookup(store, owner, receiver_node, state)
+        if local_id == 0 || __s0_buffer_get(LocalRec, store.locals, local_id - 1).mutable == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+    }
+    if receiver_node.kind == 24 {
+        let local_id = local_lookup(store, owner, receiver_node, state)
+        var mode: U64 = 1
+        if builtin == 31 || builtin == 38 { mode = 2 }
+        if local_id != 0 && lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
+    }
+    let key = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
+    var value: U64 = 0
+    if receiver.kind == 23 { value = __s0_buffer_get(U64, store.type_args, receiver.first_arg) }
+    return check_ordered_method_args(d, state, parse, base, store, owner, call, call_id, callee, receiver_expression, builtin, key, value, 0, 0, 0, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+}
+
 fn check_map_runtime_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, identity: U64, ordinal: U64, first_runtime: U64, runtime_count: U64, map_type: U64, key: U64, value: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     if ordinal == runtime_count {
         if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
@@ -4641,6 +4869,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         let static_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
         let static_node = __s0_buffer_get(SyntaxRec, parse.nodes, static_link.node - 1)
         if static_node.kind == 24 && node_word(state, static_node, "Vec") { return check_vec_static_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+        if node_word(state, callee, "new") && static_node.kind == 24 && (node_word(state, static_node, "Set") || (node_word(state, static_node, "Map") && !check_bootstrap_private())) { return check_ordered_static_builtin(d, state, parse, base, store, owner, call, call_id, callee, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     }
     if callee.kind == 29 && symbol_named(state, parse, store, callee) == 0 {
         let receiver_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
@@ -4669,6 +4898,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_draft.deferred { return expr_deferred(base) }
         let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
+        if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
         if node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
         }

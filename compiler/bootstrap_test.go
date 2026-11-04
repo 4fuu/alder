@@ -75,12 +75,13 @@ var bootstrapRejectFixtures = []string{
 	"function-value",
 	"type-parameter-after-runtime",
 	// The bootstrap-* fixtures pin the ordinary-mode bootstrap-surface gate
-	// in both compilers.
+	// in both compilers. bootstrap-type-map moved to the Alder-only M7.5
+	// ordered-collection fixtures: the public Map is the ordered kind-23
+	// collection now, so only the Go oracle still rejects it there.
 	"bootstrap-type-domain",
 	"bootstrap-type-domainmark",
 	"bootstrap-type-s0error",
 	"bootstrap-type-s0string",
-	"bootstrap-type-map",
 	"bootstrap-type-s0buffer",
 	"bootstrap-op-alloc",
 	"bootstrap-op-buffer-new",
@@ -506,7 +507,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "fcd30e12bedb5aa8c4b7ec57a507739a2fc6b1a68691649d80588007dc7ff1ca"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "6cbfaf1f839259d229efe8a87aebf03388c8c864ae072fc9abf2e157ca183b9e"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

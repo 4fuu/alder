@@ -185,7 +185,7 @@ as `defer`.
 | `type` parameters and `Name(...)` generics | Yes | Implemented in S0; monomorphized before MIR |
 | `Option`, `Result`, `try`, exhaustive `match` | Yes | Implemented in S0 |
 | Exact-width numerics and checked operations | Yes | S0/MIR/C implemented, with current full-`U64` frontend limits documented in S0 |
-| `String`, `Bytes`, arrays, slices, `Vec`, ordered `Map`/`Set` | Required for 1.0 | M7 implements fixed arrays and distinct owned `String`/`Bytes`; M7.1 implements `Vec`, immutable views, and exclusive mutable views; ordered `Map`/`Set` remain gated |
+| `String`, `Bytes`, arrays, slices, `Vec`, ordered `Map`/`Set` | Required for 1.0 | M7 implements fixed arrays and distinct owned `String`/`Bytes`; M7.1 implements `Vec`, immutable views, and exclusive mutable views; M7.5 implements the ordered `Map`/`Set` with insertion-ordered linear lookup |
 | Inferred invisible storage | Required for 1.0 | Explicit bootstrap domains and MIR operations exist; inference is not implemented |
 | `Table(T)` and `T.Id` | Required for 1.0 | MIR/runtime implemented; source surface not implemented |
 | Resource-selected `using` | Required for 1.0 | S0 callback form is bootstrap-only |

@@ -186,6 +186,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m71-collections", func(t *testing.T) { runAlderM71CheckerBehavior(t, exe) })
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73CheckerBehavior(t, exe) })
 	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
+	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
@@ -1886,7 +1887,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 && checked.kind != 23 && checked.kind != 24 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
@@ -1906,9 +1907,9 @@ func validateCheckerManifest(m checkerManifest) error {
 		switch checked.kind {
 		case 7:
 			wantCount = m.symbols[checked.target-1].arity
-		case 8, 9, 12, 13, 15, 17, 18:
+		case 8, 9, 12, 13, 15, 17, 18, 24:
 			wantCount = 1
-		case 10, 11:
+		case 10, 11, 23:
 			wantCount = 2
 		}
 		if checked.count != wantCount {
@@ -2283,7 +2284,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.builtin >= 30 && annotation.builtin <= 42) || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2633,7 +2634,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 126 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 129 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

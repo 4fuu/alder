@@ -1,6 +1,11 @@
 package compiler
 
 import (
+	"bytes"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -198,6 +203,119 @@ fn main() -> I32 {
 		t.Run(tc.name, func(t *testing.T) {
 			files := map[string]string{tc.name + ".al": tc.source}
 			text := runAlderChecker(t, exe, files, []string{tc.name + ".al"}, true)
+			manifest := parseCheckerManifest(t, text, files)
+			if len(manifest.diagnostics) != 1 {
+				t.Fatalf("expected exactly one rejection diagnostic, got %+v", manifest.diagnostics)
+			}
+			if manifest.diagnostics[0].kind != tc.code {
+				t.Fatalf("expected diagnostic kind %d, got %d", tc.code, manifest.diagnostics[0].kind)
+			}
+		})
+	}
+}
+
+// runAlderCheckerPublic runs the checker conformance entry without the
+// private bootstrap profile: ordered Map/Set fixtures use the public types,
+// so the Map( heuristic in runAlderChecker must not fire for them.
+func runAlderCheckerPublic(t *testing.T, exe string, files map[string]string, order []string, fail bool) string {
+	t.Helper()
+	d := t.TempDir()
+	const sentinel = "!alder-core-checker"
+	if err := os.WriteFile(filepath.Join(d, sentinel), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for n, s := range files {
+		if e := os.WriteFile(filepath.Join(d, n), []byte(s), 0o644); e != nil {
+			t.Fatal(e)
+		}
+	}
+	args := append([]string{sentinel}, order...)
+	cmd := conformanceCommand(exe, args...)
+	cmd.Dir = d
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	e := cmd.Run()
+	if fail {
+		var x *exec.ExitError
+		if !errors.As(e, &x) || x.ExitCode() != 1 {
+			t.Fatalf("run: %v %s", e, stderr.String())
+		}
+	} else if e != nil {
+		t.Fatalf("run: %v %s\n%s", e, stderr.String(), out.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatal(stderr.String())
+	}
+	return out.String()
+}
+
+// M7.5 C4: ordered public Map and Set. These fixtures are Alder-only: the
+// Go oracle frontend does not implement the ordered collections, so they
+// stay out of the shared comparison corpora.
+func runAlderM75OrderedCheckerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	accept := map[string]string{
+		"ordered.al": `type Key {
+    a: U64
+    b: Bool
+}
+
+enum Mode {
+    Fast
+    Slow(code: U32)
+}
+
+fn main() -> I32 {
+    var scores = Map.new(U64, U64)
+    if !scores.insert(1, 10) { return 1 }
+    var by_key = Map.new(Key, Vec(U64))
+    var empty = Vec.new(U64)
+    if !by_key.insert(Key(a: 1, b: true), empty) { return 2 }
+    var modes = Map.new(Mode, U64)
+    if !modes.insert(Slow(3), 4) { return 3 }
+    var seen = Set.new(U64)
+    if !seen.insert(7) { return 4 }
+    if !seen.contains(7) { return 5 }
+    return 0
+}
+`,
+	}
+	for name, source := range accept {
+		t.Run("accept-"+name, func(t *testing.T) {
+			files := map[string]string{name: source}
+			manifest := parseCheckerManifest(t, runAlderCheckerPublic(t, exe, files, []string{name}, false), files)
+			if len(manifest.diagnostics) != 0 {
+				t.Fatalf("ordered acceptance diagnostics: %+v", manifest.diagnostics)
+			}
+		})
+	}
+
+	rejections := []struct {
+		name, source string
+		code         int
+	}{
+		{"map-key-float", "fn main() -> I32 {\n    var m = Map.new(F64, U64)\n    return 0\n}\n", 127},
+		{"map-key-string", "fn main() -> I32 {\n    var m = Map.new(String, U64)\n    return 0\n}\n", 127},
+		{"map-key-signed", "fn main() -> I32 {\n    var m = Map.new(I64, U64)\n    return 0\n}\n", 127},
+		{"map-value-mut-slice", "fn main() -> I32 {\n    var m = Map.new(U64, MutSlice(U64))\n    return 0\n}\n", 128},
+		{"map-value-map", "fn main() -> I32 {\n    var m = Map.new(U64, Map(U64, U64))\n    return 0\n}\n", 128},
+		{"map-member-key", "type Bad {\n    m: Map(F64, U64)\n}\nfn main() -> I32 { return 0 }\n", 127},
+		{"map-member-value", "type Bad {\n    m: Map(U64, [U8])\n}\nfn main() -> I32 { return 0 }\n", 128},
+		{"set-member-element", "type Bad {\n    s: Set(F64)\n}\nfn main() -> I32 { return 0 }\n", 127},
+		{"set-element-string", "fn main() -> I32 {\n    var s = Set.new(String)\n    return 0\n}\n", 127},
+		{"map-static-arity", "fn main() -> I32 {\n    var m = Map.new(U64)\n    return 0\n}\n", 129},
+		{"set-static-arity", "fn main() -> I32 {\n    var s = Set.new(U64, U64)\n    return 0\n}\n", 129},
+		{"map-get-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    let found = m.get()\n    return 0\n}\n", 129},
+		{"map-insert-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.insert(1)\n    return 0\n}\n", 129},
+		{"map-insert-immutable", "fn main() -> I32 {\n    let m = Map.new(U64, U64)\n    m.insert(1, 2)\n    return 0\n}\n", 101},
+		{"map-unknown-method", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.pop()\n    return 0\n}\n", 61},
+		{"map-get-arg-type", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    let found = m.get(true)\n    return 0\n}\n", 42},
+	}
+	for _, tc := range rejections {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name + ".al": tc.source}
+			text := runAlderCheckerPublic(t, exe, files, []string{tc.name + ".al"}, true)
 			manifest := parseCheckerManifest(t, text, files)
 			if len(manifest.diagnostics) != 1 {
 				t.Fatalf("expected exactly one rejection diagnostic, got %+v", manifest.diagnostics)

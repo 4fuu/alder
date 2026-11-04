@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `fcd30e12bedb5aa8c4b7ec57a507739a2fc6b1a68691649d80588007dc7ff1ca`;
+  `6cbfaf1f839259d229efe8a87aebf03388c8c864ae072fc9abf2e157ca183b9e`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `fcd30e12bedb5aa8c4b7ec57a507739a2fc6b1a68691649d80588007dc7ff1ca`.
+  `6cbfaf1f839259d229efe8a87aebf03388c8c864ae072fc9abf2e157ca183b9e`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -958,8 +958,21 @@ Exit-criteria evidence (in progress):
 - structural `Eq`/`Hash` implementations are synthesized for unsigned
   integers, `Bool`, `String`, `Bytes`, and non-generic records/enums over
   that domain, satisfying `Eq + Hash` constraints while user `impl Eq`/
-  `impl Hash` blocks are rejected; closures, function values, default-method
-  dispatch, and the ordered `Map`/`Set` are still open.
+  `impl Hash` blocks are rejected; the synthesized methods remain
+  non-callable until default-method dispatch lands;
+- the ordered public `Map(K, V)`/`Set(T)` (checked kinds 23/24, builtin
+  identities 30-42 for the M7.5 subset) are insertion-ordered association
+  lists lowered inline over `vec` storage: `Map.new`/`Set.new`, `insert`
+  with in-place replacement and geometric growth, `get` with `Some`/`None`
+  results, `contains`, and `len`, all pinned end to end through generated
+  strict C11, with structural record and enum keys compared through place
+  chains and the rebuilt vector stored back into the receiver binding for
+  value semantics. Keys are gated to the structural-comparison domain
+  M7.5 lowers (diagnostic 127), values to recursively copyable ordinary
+  values (128), and malformed call shapes are rejected (129). Lookup,
+  insert, and remove scan linearly, a known cost deferred to the
+  standard-library hash containers; `remove`, `keys`, `values`, and `items`
+  remain open.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
