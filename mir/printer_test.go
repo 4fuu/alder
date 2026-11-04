@@ -206,3 +206,29 @@ bb0:
 		t.Fatalf("str.eq round trip:\n%s", got)
 	}
 }
+
+func TestPrintFnValue(t *testing.T) {
+	text := `mir 5
+
+const @c_one: u64 = 1
+
+fn @get() -> u64 {
+bb0:
+  %one = const.get @c_one
+  return %one
+}
+
+fn @make() -> function(fn() -> u64) {
+bb0:
+  %f = fn.value @get
+  return %f
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatalf("parse fn.value: %v", err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("fn.value round trip:\n%s", got)
+	}
+}

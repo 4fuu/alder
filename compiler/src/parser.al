@@ -116,6 +116,43 @@ fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: __s0_String)
 
 fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let first = parse_token(state, initial)
+    // `fn(A, B) -> R` is the function type. The children are the parameter
+    // types followed by the result type.
+    if first.kind == 1 && first.keyword == 4 {
+        let fn_cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+        let open = try expect_punct(d, state, fn_cursor, "(")
+        if parse_step_bad(open) { return Ok(open) }
+        var cursor = parse_step_cursor(open)
+        var children: U64 = 0
+        if !token_punct(state, cursor, ")") {
+            var more = true
+            while more {
+                let param = try parse_type(d, state, cursor)
+                if parse_step_bad(param) { return Ok(param) }
+                let value = parse_step_value(param)
+                cursor = try add_link(d, value.cursor, value.node, children)
+                children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                if token_punct(state, cursor, ",") {
+                    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                    if token_punct(state, cursor, ")") { more = false }
+                } else { more = false }
+            }
+        }
+        let close = try expect_punct(d, state, cursor, ")")
+        if parse_step_bad(close) { return Ok(close) }
+        cursor = parse_step_cursor(close)
+        let arrow = try expect_punct(d, state, cursor, "->")
+        if parse_step_bad(arrow) { return Ok(arrow) }
+        cursor = parse_step_cursor(arrow)
+        let result = try parse_type(d, state, cursor)
+        if parse_step_bad(result) { return Ok(result) }
+        let rv = parse_step_value(result)
+        cursor = try add_link(d, rv.cursor, rv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, rv.node - 1).end
+        let node = try add_syntax(d, cursor, 57, initial.token + 2, first.source, first.start, end, 0, 0, children)
+        return Ok(Parsed(node))
+    }
     // `Self` is a keyword type reference resolved against the enclosing trait
     // declaration or trait implementation by the checker.
     if first.kind == 1 && first.keyword == 29 {
@@ -354,6 +391,12 @@ fn parse_array_literal(d: Domain, state: State, initial: ParseCursor, depth: U64
 fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
     if depth > parse_depth_limit() { return parse_depth_reject(d, state, initial) }
+    // `fn(A, B) -> R` is the function type and may appear wherever a type
+    // expression is an operand; parse_type builds the same node kind.
+    if token.kind == 1 && token.keyword == 4 {
+        let next = ParseCursor(token: initial.token + 1, store: initial.store)
+        if token_punct(state, next, "(") { return parse_type(d, state, initial) }
+    }
     if token.keyword == 13 { return parse_match(d, state, initial, depth) }
     if token.keyword == 19 { return parse_unsafe_c(d, state, initial, depth) }
     if token_punct(state, initial, "[") { return parse_array_literal(d, state, initial, depth) }

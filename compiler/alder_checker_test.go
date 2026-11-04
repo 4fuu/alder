@@ -206,7 +206,10 @@ func runCheckerConformance(t *testing.T, exe string) {
 			}
 		})
 	}
-	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-in-loop", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "float-arithmetic", "index-not-u64", "shadowing", "unreachable-statement", "function-value"} {
+	// function-value moved out: the Alder checker now accepts a non-generic
+	// function name as a function value (M7.5 C5b); the Go oracle still rejects
+	// it, so the shared fixture keeps testing only the oracle side.
+	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-in-loop", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "float-arithmetic", "index-not-u64", "shadowing", "unreachable-statement"} {
 		t.Run("shared-reject-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "reject", fixture+".al"))
 			if err != nil {
@@ -755,7 +758,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 		kind, occurrence   int
 	}{
 		{name: "call-unknown.al", text: "fn f() -> U64 { return missing() }\n", marker: "missing", kind: 40},
-		{name: "call-bare-function.al", text: "fn helper() -> U64 { return 1 }\nfn f() -> U64 { return helper }\n", marker: "helper", kind: 39, occurrence: 1},
+		{name: "call-bare-generic-function.al", text: "fn pair(A: type, a: A) -> A { return a }\nfn f() -> U64 { return pair }\n", marker: "pair", kind: 39, occurrence: 1},
 		{name: "call-arity.al", text: "fn helper(value: U64) -> U64 { return value }\nfn f() -> U64 { return helper() }\n", marker: "(", kind: 41, occurrence: 2},
 		{name: "call-argument.al", text: "fn helper(value: U64) -> U64 { return value }\nfn f() -> U64 { return helper(true) }\n", marker: "true", kind: 42},
 		{name: "record-positional.al", text: "type P { x: U64 }\nfn f() -> P { return P(1) }\n", marker: "1", kind: 43},
@@ -1887,7 +1890,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				fmt.Fprintf(&key, "/%d", arg.checkedType)
 			}
 		}
-		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 && checked.kind != 23 && checked.kind != 24 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
+		if checked.id != i+1 || checked.kind < 1 || checked.kind > 18 && checked.kind != 23 && checked.kind != 24 && checked.kind != 25 || checked.syntax != 0 || canonicalTypes[key.String()] || (checked.count == 0) != (checked.first == 0) || checked.first < 0 || checked.count < 0 || checked.count > 0 && (checked.first < 1 || checked.first-1 > len(m.args) || checked.count > len(m.args)-(checked.first-1)) {
 			return fmt.Errorf("invalid checked type %+v", checked)
 		}
 		canonicalTypes[key.String()] = true
@@ -1903,6 +1906,11 @@ func validateCheckerManifest(m checkerManifest) error {
 		if checked.kind == 7 && (checked.target < 1 || checked.target > len(m.symbols) || m.symbols[checked.target-1].kind != 2 && m.symbols[checked.target-1].kind != 3) {
 			return fmt.Errorf("checked type %+v has an invalid declaration target", checked)
 		}
+		if checked.kind == 25 {
+			if checked.count < 2 {
+				return fmt.Errorf("checked type %+v has too few function-type arguments", checked)
+			}
+		}
 		wantCount := 0
 		switch checked.kind {
 		case 7:
@@ -1911,6 +1919,8 @@ func validateCheckerManifest(m checkerManifest) error {
 			wantCount = 1
 		case 10, 11, 23:
 			wantCount = 2
+		case 25:
+			wantCount = checked.count
 		}
 		if checked.count != wantCount {
 			return fmt.Errorf("checked type %+v has %d arguments, want %d", checked, checked.count, wantCount)
@@ -2284,7 +2294,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.builtin >= 30 && annotation.builtin <= 42) || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 25 || annotation.builtin >= 30 && annotation.builtin <= 44) || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {

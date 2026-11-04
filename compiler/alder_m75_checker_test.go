@@ -178,6 +178,10 @@ fn main() -> I32 {
 		name, source string
 		code         int
 	}{
+		{"fn-type-key-map", "fn main() -> I32 {\n    var m = Map.new(fn(U64) -> U64, U64)\n    return 0\n}\n", 127},
+		{"indirect-call-arity", "fn double(x: U64) -> U64 { return x + x }\nfn main() -> I32 {\n    let f = double\n    if f(1, 2) != 2 { return 1 }\n    return 0\n}\n", 41},
+		{"indirect-call-arg-type", "fn double(x: U64) -> U64 { return x + x }\nfn main() -> I32 {\n    let f = double\n    if f(true) != 2 { return 1 }\n    return 0\n}\n", 42},
+		{"bare-generic-function", "fn pair(A: type, a: A) -> A { return a }\nfn main() -> I32 {\n    let f = pair\n    return 0\n}\n", 39},
 		{"duplicate-impl", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box { }\nimpl Mark for Box { }\nfn main() -> I32 { return 0 }\n", 107},
 		{"unknown-trait", "type Box { v: U64 }\nfn f(M: type, b: M) -> U64\nwhere M: Missing {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 108},
 		{"trait-arity", "type Box { v: U64 }\ntrait Mark(A: type) { }\nfn f(M: type, b: M) -> U64\nwhere M: Mark {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 109},
@@ -266,6 +270,10 @@ enum Mode {
     Slow(code: U32)
 }
 
+fn apply(f: fn(U64) -> U64, value: U64) -> U64 { return f(value) }
+
+fn double(x: U64) -> U64 { return x + x }
+
 fn main() -> I32 {
     var scores = Map.new(U64, U64)
     if !scores.insert(1, 10) { return 1 }
@@ -298,6 +306,9 @@ fn main() -> I32 {
         None => 1
     }
     if none_seen != 1 { return 12 }
+    let referenced = double
+    if apply(referenced, 3) != 6 { return 16 }
+    if referenced(4) != 8 { return 17 }
     var tags = Set.new(Bytes)
     if !tags.insert("one") { return 13 }
     if !tags.contains("one") { return 14 }

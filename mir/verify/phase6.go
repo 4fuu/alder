@@ -546,6 +546,9 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		for _, a := range in.Args {
 			merge(a)
 		}
+	case mir.OpFnValue:
+		// A function value's provenance is its environment's provenance.
+		merge(in.A)
 	}
 	return changed
 }

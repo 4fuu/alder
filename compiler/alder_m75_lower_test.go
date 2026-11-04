@@ -224,6 +224,82 @@ func runAlderVecLoopLowerBehavior(t *testing.T, exe string) {
 	t.Logf("vec loop program exited cleanly under strict C11")
 }
 
+// M7.5 C5b function values: a non-generic function name in value position,
+// a fn(...) -> ... typed parameter, and an indirect call all lower through
+// fn.value/call.value and run under strict C11. Alder-only.
+func runAlderFnValueLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"fnvalue.al": `fn apply(f: fn(U64) -> U64, value: U64) -> U64 {
+    return f(value)
+}
+
+fn double(x: U64) -> U64 {
+    return x + x
+}
+
+fn inc(x: U64) -> U64 {
+    return x + 1
+}
+
+fn pick(first: Bool, f: fn(U64) -> U64, g: fn(U64) -> U64) -> fn(U64) -> U64 {
+    if first { return f }
+    return g
+}
+
+fn main() -> I32 {
+    let referenced = double
+    if referenced(4) != 8 { return 1 }
+    if apply(referenced, 3) != 6 { return 2 }
+    if apply(inc, 10) != 11 { return 3 }
+    let chosen = pick(true, double, inc)
+    if chosen(5) != 10 { return 4 }
+    let other = pick(false, double, inc)
+    if other(5) != 6 { return 5 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"fnvalue.al"})
+	second := runLowerCompiler(t, exe, files, []string{"fnvalue.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("fn value MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse fn value MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify fn value MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("fn value MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"fnvalue.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "fnvalue.c")
+	program := filepath.Join(dir, "fnvalue.exe")
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of fn values: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run fn value behavior: %v\n%s", err, output)
+	}
+	t.Logf("fn value program exited cleanly under strict C11")
+}
+
 // runResourceCgenCompilerPublic is runResourceCgenCompiler without the
 // private-profile heuristic, for public ordered Map/Set fixtures.
 func runResourceCgenCompilerPublic(t *testing.T, exe string, files map[string]string, order []string) []byte {

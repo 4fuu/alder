@@ -1214,6 +1214,32 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		return in, nil
 
+	case "fn.value":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "fn.value requires MIR format version %d", ClosureFormatVersion)
+		}
+		in.Op = OpFnValue
+		fnTok, err := p.expectAtName("a function name")
+		if err != nil {
+			return in, err
+		}
+		id, ok := p.m.Function(fnTok.text)
+		if !ok {
+			return in, p.errf(fnTok, "unknown function @%s", fnTok.text)
+		}
+		in.Callee = id
+		in.A = NoValue
+		if p.peek().kind == tokPunct && p.peek().text == "(" {
+			p.next()
+			if in.A, err = p.parseValueRef(); err != nil {
+				return in, err
+			}
+			if err = p.expectPunct(")"); err != nil {
+				return in, err
+			}
+		}
+		return in, nil
+
 	case "str.eq":
 		if p.m.FormatVersion < ClosureFormatVersion {
 			return in, p.errf(t, "str.eq requires MIR format version %d", ClosureFormatVersion)

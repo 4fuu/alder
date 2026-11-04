@@ -342,6 +342,11 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(")")
 	case OpStrEq:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
+	case OpFnValue:
+		b.WriteString(" @" + fnName(m, in.Callee))
+		if in.A != NoValue {
+			b.WriteString("(" + valueName(f, in.A) + ")")
+		}
 	}
 	b.WriteString("\n")
 }

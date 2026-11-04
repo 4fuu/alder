@@ -139,6 +139,7 @@ fn mir_op_vec_as_mut_slice() -> U64 { return 63 }
 fn mir_op_array_as_slice() -> U64 { return 64 }
 fn mir_op_call_value() -> U64 { return 65 }
 fn mir_op_str_eq() -> U64 { return 66 }
+fn mir_op_fn_value() -> U64 { return 67 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

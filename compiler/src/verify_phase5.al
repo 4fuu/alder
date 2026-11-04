@@ -320,8 +320,65 @@ return MirVTypeResult(valid: ct != 0, type_id: ct) }
     if x.op == mir_op_call_value() { if ta == 0 || mir_vtype_kind(store, ta) != mir_type_kind_function() { return MirVTypeResult(valid: false, type_id: 0) }
 return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.function, id, ta), type_id: __s0_buffer_get(MirTypeRec, store.types, ta - 1).result_type) }
     if x.op == mir_op_str_eq() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
+    if x.op == mir_op_fn_value() { if x.target == 0 || x.target > __s0_buffer_len(MirFunctionRec, store.functions) { return MirVTypeResult(valid: false, type_id: 0) }
+let callee = __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1)
+let param_total = mir_v5_function_param_count(store, indexes, x.target)
+var env_type: U64 = 0
+if x.a != 0 { env_type = ta
+if env_type == 0 { return MirVTypeResult(valid: false, type_id: 0) } }
+let found = mir_v5_find_function_type(store, indexes, x.target, param_total, callee.result_type, env_type)
+return MirVTypeResult(valid: found != 0, type_id: found) }
     if x.op == mir_op_ffi_call_unsafe() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, true), type_id: __s0_buffer_get(MirImportRec, store.imports, x.target - 1).result_type) }
     return MirVTypeResult(valid: false, type_id: 0)
+}
+
+// Ordinal lookup of one typed part of a function type.
+fn mir_v5_type_part(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> MirTypePartRec {
+    var at: U64 = 0
+    var seen: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+        if part.owner == owner && part.kind == kind {
+            if seen == ordinal { return part }
+            seen = seen + 1
+        }
+        at = at + 1
+    }
+    return MirTypePartRec(kind: 0, owner: 0, ordinal: 0, name_start: 0, name_end: 0, part_type: 0)
+}
+
+// fn.value's result type is the interned function type whose parameters,
+// result, and optional environment part match the target function plus the
+// environment operand. Verification only looks it up; lowering interns it.
+fn mir_v5_find_function_type(store: MirStore, indexes: MirVIndexes, target: U64, param_total: U64, result_type: U64, env_type: U64) -> U64 {
+    var at = mir_primitive_type_count()
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let t = __s0_buffer_get(MirTypeRec, store.types, at)
+        if t.kind == mir_type_kind_function() && t.result_type == result_type {
+            let parts = mir_vindex_type_part_count(indexes, at + 1)
+            let env_count = mir_type_part_count(store, at + 1, mir_type_part_function_env())
+            var want_env: U64 = 1
+            if env_type == 0 { want_env = 0 }
+            if env_count == want_env {
+                var matches = true
+                var ordinal: U64 = 0
+                while ordinal < param_total {
+                    let part = mir_v5_type_part(store, at + 1, mir_type_part_function_param(), ordinal)
+                    let want = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), ordinal)
+                    if part.part_type != want { matches = false }
+                    ordinal = ordinal + 1
+                }
+                if parts != param_total + want_env { matches = false }
+                if matches && env_type != 0 {
+                    let env_part = mir_v5_type_part(store, at + 1, mir_type_part_function_env(), 0)
+                    if env_part.part_type != env_type { matches = false }
+                }
+                if matches { return at + 1 }
+            }
+        }
+        at = at + 1
+    }
+    return 0
 }
 
 // call.value has no static callee: the declared function type drives both
@@ -333,19 +390,7 @@ fn mir_v5_call_value_args_match(store: MirStore, indexes: MirVIndexes, function:
     var ordinal: U64 = 0
     while ordinal < got {
         let argument = mir_v5_operand(store, indexes, mir_operand_instruction(), instruction, 0, ordinal)
-        var expected: U64 = 0
-        var part_at: U64 = 0
-        let parts = mir_vindex_type_part_count(indexes, fn_type)
-        var seen: U64 = 0
-        while part_at < parts {
-            let pid = mir_vindex_type_part(indexes, fn_type, part_at)
-            let part = __s0_buffer_get(MirTypePartRec, store.type_parts, pid - 1)
-            if part.kind == mir_type_part_function_param() {
-                if seen == ordinal { expected = part.part_type }
-                seen = seen + 1
-            }
-            part_at = part_at + 1
-        }
+        let expected = mir_v5_type_part(store, fn_type, mir_type_part_function_param(), ordinal).part_type
         if mir_v5_value_type(store, indexes, function, __s0_buffer_get(MirOperandRec, store.operands, argument - 1).value) != expected { return false }
         ordinal = ordinal + 1
     }

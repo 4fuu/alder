@@ -143,9 +143,9 @@ var scan: U64 = 0
         while scan < at { let q = __s0_buffer_get(MirTypePartRec, store.type_parts, scan)
 if q.owner == p.owner && q.kind == p.kind { expected = expected + 1 }
 scan = scan + 1 }
-        if !mir_vtype_exists(store, p.owner) || !mir_vtype_exists(store, p.part_type) || p.kind < mir_type_part_field() || p.kind > mir_type_part_function_param() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, p.kind, p.part_type)) }
+        if !mir_vtype_exists(store, p.owner) || !mir_vtype_exists(store, p.part_type) || p.kind < mir_type_part_field() || p.kind > mir_type_part_function_env() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, p.kind, p.part_type)) }
         if p.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), 0, 0, 0, 0, 0, p.owner, at + 1, expected, p.ordinal, 0)) }
-        if p.kind != mir_type_part_function_param() {
+        if p.kind != mir_type_part_function_param() && p.kind != mir_type_part_function_env() {
             if !mir_vname_valid(store, p.name_start, p.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, 0, 0)) }
             if p.kind == mir_type_part_variant() && mir_vname_word(store, p.name_start, p.name_end, "default") { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_reserved_member(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, 0, 0)) }
             scan = 0

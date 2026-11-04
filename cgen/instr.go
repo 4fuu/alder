@@ -389,6 +389,30 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		}
 		b.WriteString(g.valueExpr(in.A) + ".env);\n")
 
+	case mir.OpFnValue:
+		ft, ok := g.f.ValueType(in.Result)
+		if !ok || !g.m.ValidType(ft) || g.m.Types[ft].Kind != mir.TypeFunction {
+			b.WriteString("  /* fn.value without a function type */\n")
+			break
+		}
+		n := strconv.Itoa(int(ft))
+		site := [2]int{int(in.Callee), int(ft)}
+		known := false
+		for _, existing := range g.fnValues {
+			if existing == site {
+				known = true
+				break
+			}
+		}
+		if !known {
+			g.fnValues = append(g.fnValues, site)
+		}
+		env := "NULL"
+		if in.A != mir.NoValue {
+			env = g.valueExpr(in.A)
+		}
+		b.WriteString("  " + g.val(in.Result) + " = (AlderFnTy" + n + "){alder_fnwrap_" + strconv.Itoa(int(in.Callee)) + "_" + n + ", (void *)" + env + "};\n")
+
 	case mir.OpStrEq:
 		ta, _ := g.f.ValueType(in.A)
 		helper := "alder_string_eq"

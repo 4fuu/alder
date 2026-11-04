@@ -406,9 +406,104 @@ fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVeri
     return Ok(out)
 }
 
+// One wrapper per distinct (target, function type) fn.value site, in first
+// occurrence order: the value's code pointer type takes the declared
+// parameters plus an opaque environment pointer, which ordinary functions
+// do not, so the forwarder adapts the signature.
+fn cgen_fn_value_sites(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var sites = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_fn_value() {
+            let fn_type = cgen_value_type(store, indexes, item.function, item.result)
+            var known = false
+            var site_at: U64 = 0
+            while site_at + 1 < __s0_buffer_len(U64, sites) {
+                if __s0_buffer_get(U64, sites, site_at) == item.target && __s0_buffer_get(U64, sites, site_at + 1) == fn_type { known = true }
+                site_at = site_at + 2
+            }
+            if !known {
+                sites = try __s0_buffer_append(U64, d, sites, item.target)
+                sites = try __s0_buffer_append(U64, d, sites, fn_type)
+            }
+        }
+        at = at + 1
+    }
+    return Ok(sites)
+}
+
+// One wrapper per distinct (target, function type) fn.value site, in first
+// occurrence order: the value's code pointer type takes the declared
+// parameters plus an opaque environment pointer, which ordinary functions
+// do not, so the forwarder adapts the signature.
+fn cgen_fn_wrapper_result(d: Domain, initial: CgenWriter, store: MirStore, result_type: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    if result_type == mir_type_unit() { return cgen_put(d, out, "void") }
+    return cgen_put_type(d, out, store, result_type)
+}
+
+fn cgen_fn_wrapper_params(d: Domain, initial: CgenWriter, store: MirStore, fn_type: U64, named: Bool) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    let param_total = mir_type_part_count(store, fn_type, mir_type_part_function_param())
+    var wrote = false
+    var ordinal: U64 = 0
+    while ordinal < param_total {
+        let part = cgen_type_part(store, fn_type, mir_type_part_function_param(), ordinal)
+        if part.part_type != mir_type_unit() {
+            if wrote { out = try cgen_put(d, out, ", ") }
+            if named { out = try cgen_put_type(d, out, store, part.part_type)
+            out = try cgen_put(d, out, " alder_p") }
+            if !named { out = try cgen_put(d, out, "alder_p") }
+            out = try cgen_put_u64(d, out, ordinal)
+            wrote = true
+        }
+        ordinal = ordinal + 1
+    }
+    if !wrote { return cgen_put(d, out, "void") }
+    return Ok(out)
+}
+
+fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, sites: __s0_Buffer(U64)) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    while at + 1 < __s0_buffer_len(U64, sites) {
+        let target = __s0_buffer_get(U64, sites, at)
+        let fn_type = __s0_buffer_get(U64, sites, at + 1)
+        let t = __s0_buffer_get(MirTypeRec, store.types, fn_type - 1)
+        
+        // Forward declaration.
+        out = try cgen_put(d, out, "static ")
+        out = try cgen_fn_wrapper_result(d, out, store, t.result_type)
+        out = try cgen_fn_wrapper_name(d, out, target, fn_type)
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true)
+        out = try cgen_put(d, out, ", void *alder_env);\n")
+        // Definition.
+        out = try cgen_put(d, out, "static ")
+        out = try cgen_fn_wrapper_result(d, out, store, t.result_type)
+        out = try cgen_fn_wrapper_name(d, out, target, fn_type)
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, true)
+        out = try cgen_put(d, out, ", void *alder_env) {\n  (void)alder_env;\n  ")
+        if t.result_type != mir_type_unit() { out = try cgen_put(d, out, "return ") }
+        out = try cgen_emit_function_name(d, out, store, target)
+        out = try cgen_put(d, out, "(")
+        out = try cgen_fn_wrapper_params(d, out, store, fn_type, false)
+        out = try cgen_put(d, out, ");\n}\n")
+        at = at + 2
+    }
+    return Ok(out)
+}
+
+fn cgen_fn_wrapper_name(d: Domain, initial: CgenWriter, target: U64, fn_type: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, " alder_fnwrap_")
+    out = try cgen_put_u64(d, out, target - 1)
+    out = try cgen_put(d, out, "_")
+    return cgen_put_u64(d, out, fn_type - 1)
+}
+
 fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_writer_new(d)
-    out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n/* Source: complete-verifier-gated Alder MIR 4. */\n#include \"alder.h\"\n")
+    out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n/* Source: complete-verifier-gated Alder MIR 5. */\n#include \"alder.h\"\n")
     if verified.hosted { out = try cgen_put(d, out, "#include \"alder_host.h\"\n") }
     out = try cgen_put(d, out, "#include <float.h>\n#include <string.h>\n\n")
     out = try cgen_emit_types(d, out, store)
@@ -417,6 +512,8 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_imports(d, out, store)
     out = try cgen_emit_cleanup_sites(d, out, store, indexes)
     out = try cgen_emit_copy_helpers(d, out, store, indexes)
+    let fn_value_sites = try cgen_fn_value_sites(d, store, indexes)
+    out = try cgen_emit_fn_value_wrappers(d, out, store, indexes, fn_value_sites)
     out = try cgen_emit_bodies(d, out, store)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
     return Ok(out)

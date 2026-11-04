@@ -72,7 +72,8 @@ var bootstrapRejectFixtures = []string{
 	"index-not-u64",
 	"shadowing",
 	"unreachable-statement",
-	"function-value",
+	// function-value moved to the Alder-only M7.5 function-value fixtures:
+	// the Alder checker accepts a non-generic function name as a value.
 	"type-parameter-after-runtime",
 	// The bootstrap-* fixtures pin the ordinary-mode bootstrap-surface gate
 	// in both compilers. bootstrap-type-map moved to the Alder-only M7.5
@@ -507,7 +508,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "2e991bee8221b0f9c3a623a7d9363c70644203419ad84456538bb35dcd01f4b8"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "5014903d8fbaebb2933940bbfa7e40ec90e79d77d88e456d2956805932664d2c"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

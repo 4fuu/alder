@@ -363,6 +363,24 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return m.Types[ta].Sig.Result, true
 
+	case OpFnValue:
+		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
+			return NoType, false
+		}
+		callee := m.Functions[in.Callee]
+		sig := FuncSig{Result: callee.Result, Env: NoType}
+		for _, p := range callee.Params {
+			sig.Params = append(sig.Params, p.Type)
+		}
+		if in.A != NoValue {
+			env, ok := f.ValueType(in.A)
+			if !ok || !m.ValidType(env) {
+				return NoType, false
+			}
+			sig.Env = env
+		}
+		return m.FunctionType(sig), true
+
 	case OpFloatEq, OpFloatNe, OpFloatLt, OpFloatLe, OpFloatGt, OpFloatGe:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsFloatType(ta) {

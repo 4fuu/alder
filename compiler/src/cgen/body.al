@@ -224,7 +224,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_str_eq() { return false }
+        if item.op > mir_op_fn_value() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -1142,6 +1142,27 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         if !wrote { out = try cgen_put(d, out, "NULL") } else { out = try cgen_put(d, out, ", ") }
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         return cgen_put(d, out, ".env);\n")
+    }
+    if item.op == mir_op_fn_value() {
+        let fn_type = cgen_value_type(store, indexes, item.function, item.result)
+        if fn_type < 1 || fn_type > __s0_buffer_len(MirTypeRec, store.types) || __s0_buffer_get(MirTypeRec, store.types, fn_type - 1).kind != mir_type_kind_function() {
+            out = try cgen_put(d, out, "  /* fn.value without a function type */\n")
+            return Ok(out)
+        }
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (AlderFnTy")
+        out = try cgen_put_u64(d, out, fn_type - 1)
+        out = try cgen_put(d, out, "){alder_fnwrap_")
+        out = try cgen_put_u64(d, out, item.target - 1)
+        out = try cgen_put(d, out, "_")
+        out = try cgen_put_u64(d, out, fn_type - 1)
+        out = try cgen_put(d, out, ", ")
+        if item.a == 0 { out = try cgen_put(d, out, "NULL") } else {
+            out = try cgen_put(d, out, "(void *)")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        }
+        return cgen_put(d, out, "};\n")
     }
     if item.op == mir_op_str_eq() {
         let operand_type = cgen_value_type(store, indexes, item.function, item.a)

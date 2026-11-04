@@ -1866,8 +1866,44 @@ fn ffi_type_syntax_ok(state: State, parse: ParseStore, node_id: U64) -> Bool {
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     let boundary = declaration_boundary(store, owner)
+    if node.kind == 57 {
+        // Function type: children are the parameter types followed by the
+        // result type. The checked application carries those plus a trailing
+        // environment argument (unit for source-written function types).
+        let resolved = try resolve_arg_links(d, state, parse, store, owner, node.children)
+        var current = match resolved {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }
+        if match resolved {
+            CheckGood(value) => false
+            CheckBad(value) => true
+        } { return Ok(resolved) }
+        if node.children == 0 { return check_fail(d, current, 5, node, 0, 0, 0) }
+        let unit = try canonical_leaf(d, current, 1, 12)
+        current = unit.store
+        // The arguments are the children's checked type ids followed by the
+        // unit environment, not the children's own type arguments.
+        var args = try __s0_buffer_new(U64, d)
+        var child_link = node.children
+        while child_link != 0 {
+            let link = __s0_buffer_get(SyntaxLinkRec, parse.links, child_link - 1)
+            let child_type = checked_type_for_syntax(current, owner, link.node)
+            if child_type == 0 { return check_fail(d, current, 4, __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1), 0, 0, 0) }
+            args = try __s0_buffer_append(U64, d, args, child_type)
+            child_link = link.next
+        }
+        args = try __s0_buffer_append(U64, d, args, unit.checked_type)
+        let existing = canonical_type_for_children(current, 25, 0, args)
+        if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, current, owner, node_id, existing))) }
+        let start = __s0_buffer_len(U64, current.type_args) + 1
+        let recorded = try append_substituted_children(d, current, args, 0)
+        let count = __s0_buffer_len(U64, args)
+        let appended = try append_checked_type(d, recorded, owner, 25, node_id, 0, start, count)
+        return Ok(CheckGood(appended))
+    }
     if node.kind == 5 {
-        let args = try resolve_arg_links(d, state, parse, store, owner, node.children)
+    let args = try resolve_arg_links(d, state, parse, store, owner, node.children)
         let current = match args {
             CheckGood(value) => value
             CheckBad(value) => value
@@ -3132,6 +3168,8 @@ fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node
     return CheckedTypeRec(kind: 0, syntax: 0, target: 0, first_arg: 0, arg_count: 0)
 }
 
+fn expression_type_candidate_57(node: SyntaxRec) -> Bool { return node.kind == 57 }
+
 fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Bool {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     if node.kind == 24 {
@@ -3183,6 +3221,7 @@ fn resolve_expression_type_args(d: Domain, state: State, parse: ParseStore, stor
 
 fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+    if node.kind == 57 { return resolve_type(d, state, parse, store, owner, node_id) }
     if node.kind == 24 {
         let declaration = instance_declaration(store, owner)
         let param = find_type_param(state, store, declaration, node)
@@ -4022,6 +4061,92 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, constructed, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
     return append_call_expression(d, state, parse, current, owner, call_id, 9, constructed, 3, target, 0, call, 2, site_kind, site_syntax)
 }
+
+// Build the checked function-value type fn(params) -> result, env unit for a
+// concrete non-generic function symbol from its role-5 parameter uses and
+// role-6 result use, interning the kind-25 application canonically.
+fn checked_function_value_type(d: Domain, store: CheckStore, owner: U64, target: U64) -> Result(TypeValueRec, __s0_Error) {
+    var current = store
+    let unit_made = try canonical_leaf(d, current, 1, 12)
+    current = unit_made.store
+    let param_total = use_count(current, target, 5)
+    var args = try __s0_buffer_new(U64, d)
+    var ordinal: U64 = 0
+    while ordinal < param_total {
+        let use_id = use_by_ordinal(current, target, 5, ordinal)
+        args = try __s0_buffer_append(U64, d, args, __s0_buffer_get(DeclTypeUseRec, current.uses, use_id - 1).checked_type)
+        ordinal = ordinal + 1
+    }
+    let result_id = use_by_ordinal(current, target, 6, 0)
+    args = try __s0_buffer_append(U64, d, args, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type)
+    args = try __s0_buffer_append(U64, d, args, unit_made.checked_type)
+    let existing = canonical_type_for_children(current, 25, 0, args)
+    if existing != 0 { return Ok(TypeValueRec(store: current, checked_type: existing)) }
+    let start = __s0_buffer_len(U64, current.type_args) + 1
+    let recorded = try append_substituted_children(d, current, args, 0)
+    let next = try append_checked_type(d, recorded, owner, 25, 0, 0, start, __s0_buffer_len(U64, args))
+    return Ok(TypeValueRec(store: next, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
+}
+
+// Indirect call through a function-typed binding. The checked kind-25 type
+// carries [params..., result, env]; arguments check against the leading
+// parameters and the call produces the result type. Arguments walk
+// recursively: their checked stores are storage-carrying call results that
+// must not cross a loop backedge.
+fn check_indirect_call_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, fn_checked: CheckedTypeRec, callee_expression: U64, ordinal: U64, prior_first: U64, prior_second: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let want_total = fn_checked.arg_count - 2
+    if ordinal == want_total {
+        if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, result) }
+        return append_sequence_method(d, store, owner, call_id, result, 44, callee_expression, prior_first, prior_second, site_kind, site_syntax)
+    }
+    let link = call_link_at(parse, call, ordinal + 1)
+    let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    let want = __s0_buffer_get(U64, store.type_args, fn_checked.first_arg - 1 + ordinal)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, argument, link.node, want, 42, argument, 0, 0)
+    let current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    var first = prior_first
+    var second = prior_second
+    if ordinal == 0 { first = draft.expression } else { second = draft.expression }
+    return check_indirect_call_args(d, state, parse, base, current, owner, call, call_id, fn_checked, callee_expression, ordinal + 1, first, second, result, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+}
+
+fn check_indirect_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, fn_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let fn_checked = __s0_buffer_get(CheckedTypeRec, store.types, fn_type - 1)
+    let param_total = fn_checked.arg_count - 2
+    let argument_count = call_link_count(parse, call) - 1
+    if argument_count != param_total { return expr_token_fail(d, state, base, 41, call) }
+    if argument_count > 2 { return expr_token_fail(d, state, base, 144, call) }
+    let result_type = __s0_buffer_get(U64, store.type_args, fn_checked.first_arg - 1 + param_total)
+    let checked_callee = try check_value_expression_inner(d, state, parse, base, store, owner, callee, callee_link_id(parse, call), 0, 60, callee, 0, 0)
+    let current = match checked_callee {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked_callee {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let callee_draft = match checked_callee {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if callee_draft.deferred { return expr_deferred(base) }
+    return check_indirect_call_args(d, state, parse, base, current, owner, call, call_id, fn_checked, callee_draft.expression, 0, 0, 0, result_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
+}
+
+fn callee_link_id(parse: ParseStore, call: SyntaxRec) -> U64 { return call_link_at(parse, call, 0).node }
 
 fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
@@ -4896,6 +5021,17 @@ fn check_s0_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore
 fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    // Indirect call: a plain word callee that names a local binding of
+    // function type. Children are the callee value followed by the runtime
+    // arguments; builtin 44 lowers through call.value.
+    if callee.kind == 24 {
+        let local_id = local_lookup(store, owner, callee, state)
+        if local_id != 0 {
+            let binding = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+            let binding_type = __s0_buffer_get(CheckedTypeRec, store.types, binding.checked_type - 1)
+            if binding_type.kind == 25 { return check_indirect_call(d, state, parse, base, store, owner, call, call_id, callee, binding.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+        }
+    }
     if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {
             let applied_callee_link = call_link_at(parse, callee, 0)
@@ -5371,7 +5507,20 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             if binding.kind == 1 { kind = 1 }
         } else {
             let target = symbol_named(state, parse, store, expression)
-            if target != 0 && __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind == 12 { return expr_fail(d, base, 39, expression) }
+            if target != 0 && __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind == 12 {
+                // A non-generic function name in value position is a
+                // function reference: its value type is fn(params) -> result
+                // with a unit environment.
+                let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+                if symbol.type_arity != 0 { return expr_fail(d, base, 39, expression) }
+                let made = try checked_function_value_type(d, store, owner, target)
+                var with_type = made.store
+                if expected != 0 && !(try expression_type_equal(d, state, parse, with_type, made.checked_type, expected)) { return expr_token_type_fail(d, state, with_type, mismatch_kind, mismatch_node, expected, made.checked_type) }
+                let annotations = try __s0_buffer_append(CallAnnotationRec, d, with_type.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: made.checked_type, variant_use: 0, builtin: 43))
+                let expressions = try __s0_buffer_append(CheckedExprRec, d, with_type.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(with_type, owner), syntax: expression_id, kind: 18, checked_type: made.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
+                with_type = CheckStore(symbols: with_type.symbols, type_params: with_type.type_params, types: with_type.types, type_args: with_type.type_args, type_annotations: with_type.type_annotations, uses: with_type.uses, indexes: with_type.indexes, locals: with_type.locals, environments: with_type.environments, expressions: expressions, call_annotations: annotations, expression_children: with_type.expression_children, returns: with_type.returns, control: with_type.control, diagnostics: with_type.diagnostics, traits: with_type.traits)
+                return expr_draft(with_type, made.checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+            }
             let any_variant = any_variant_named(state, store, expression)
             if any_variant != 0 {
                 let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, any_variant - 1)

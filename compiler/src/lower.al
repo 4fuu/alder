@@ -98,6 +98,54 @@ fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
     return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
 }
 
+// Intern an anonymous function type: contiguous parameter parts, an
+// optional trailing environment part, and the result type. Unlike
+// mir_intern_type, the environment part is part of the interned shape.
+fn mir_intern_function_type(d: Domain, store: MirStore, params: __s0_Buffer(U64), result_type: U64, env_type: U64) -> Result(MirTypeStep, __s0_Error) {
+    var at: U64 = mir_primitive_type_count()
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let prior = __s0_buffer_get(MirTypeRec, store.types, at)
+        if prior.kind == mir_type_kind_function() && prior.result_type == result_type {
+            var param_at: U64 = 0
+            var want_parts = __s0_buffer_len(U64, params) + 1
+            if env_type == 0 { want_parts = __s0_buffer_len(U64, params) }
+            var same = prior.part_count == want_parts
+            while same && param_at < __s0_buffer_len(U64, params) {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, prior.first_part - 1 + param_at)
+                if part.kind != mir_type_part_function_param() || part.part_type != __s0_buffer_get(U64, params, param_at) { same = false }
+                param_at = param_at + 1
+            }
+            if same && env_type != 0 {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, prior.first_part - 1 + param_at)
+                if part.kind != mir_type_part_function_env() || part.part_type != env_type { same = false }
+            }
+            if same { return Ok(MirTypeStep(store: store, type_id: at + 1)) }
+        }
+        at = at + 1
+    }
+    let type_id = __s0_buffer_len(MirTypeRec, store.types) + 1
+    var type_parts = store.type_parts
+    var first: U64 = 0
+    var part_at: U64 = 0
+    while part_at < __s0_buffer_len(U64, params) {
+        if first == 0 { first = __s0_buffer_len(MirTypePartRec, type_parts) + 1 }
+        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_param(), owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, params, part_at)))
+        part_at = part_at + 1
+    }
+    if env_type != 0 {
+        if first == 0 { first = __s0_buffer_len(MirTypePartRec, type_parts) + 1 }
+        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_env(), owner: type_id, ordinal: 0, name_start: 0, name_end: 0, part_type: env_type))
+        part_at = part_at + 1
+    }
+    let rec = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: first, part_count: part_at, result_type: result_type, length: 0)
+    let types = try __s0_buffer_append(MirTypeRec, d, store.types, rec)
+    return Ok(MirTypeStep(store: mir_with_types(mir_with_type_parts(store, type_parts), types), type_id: type_id))
+}
+
+fn lower_with_type_parts(state: LowerState, parts: __s0_Buffer(MirTypePartRec)) -> LowerState {
+    return lower_with_mir(state, mir_with_type_parts(state.mir, parts))
+}
+
 fn lower_invalid(state: LowerState) -> LowerState {
     return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: false)
 }
@@ -546,6 +594,40 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         next = lower_with_mir(next, try mir_add_type_part(d, next.mir, mir_type_part_field(), named.type_id, 0, "slots", slots.type_id))
         let mapped = try __s0_buffer_append(LowerTypeMapRec, d, next.types, LowerTypeMapRec(checked_type: checked_type, mir_type: named.type_id))
         return Ok(LowerStep(state: lower_with_types(next, mapped), id: named.type_id))
+    }
+    if checked.kind == 25 {
+        if checked.arg_count < 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let param_total = checked.arg_count - 2
+        var next = state
+        var parts = try __s0_buffer_new(U64, d)
+        var ordinal: U64 = 0
+        while ordinal < param_total + 1 {
+            let part = try lower_type(d, source_state, store, next, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal))
+            if !part.state.valid { return Ok(part) }
+            next = part.state
+            parts = try __s0_buffer_append(U64, d, parts, part.id)
+            ordinal = ordinal + 1
+        }
+        let result_type = __s0_buffer_get(U64, parts, param_total)
+        var params_only = try __s0_buffer_new(U64, d)
+        var param_at: U64 = 0
+        while param_at < param_total {
+            params_only = try __s0_buffer_append(U64, d, params_only, __s0_buffer_get(U64, parts, param_at))
+            param_at = param_at + 1
+        }
+        let env_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + param_total + 1)
+        let env_rec = __s0_buffer_get(CheckedTypeRec, store.types, env_checked - 1)
+        var env_type: U64 = 0
+        if !(env_rec.kind == 1 && env_rec.target == 12) {
+            let env_part = try lower_type(d, source_state, store, next, env_checked)
+            if !env_part.state.valid { return Ok(env_part) }
+            next = env_part.state
+            env_type = env_part.id
+        }
+        let interned = try mir_intern_function_type(d, next.mir, params_only, result_type, env_type)
+        next = lower_with_mir(next, interned.store)
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, next.types, LowerTypeMapRec(checked_type: checked_type, mir_type: interned.type_id))
+        return Ok(LowerStep(state: lower_with_types(next, mapped), id: interned.type_id))
     }
     if checked.kind == 23 {
         if checked.arg_count != 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -1524,7 +1606,20 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     if annotation.builtin == 30 || annotation.builtin == 37 { expected_count = 0 }
     if annotation.builtin == 31 { expected_count = 3 }
     if annotation.builtin == 32 || annotation.builtin == 33 || annotation.builtin == 38 || annotation.builtin == 39 || annotation.builtin == 40 { expected_count = 2 }
+    if annotation.builtin == 43 { expected_count = 0 }
     if expression.child_count != expected_count { return false }
+    if annotation.builtin == 43 { return annotation.target != 0 && __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1).kind == 25 }
+    if annotation.builtin == 44 {
+        // The callee child carries the function type; the annotation's own
+        // type is the call result.
+        let callee_type = lower_builtin_child_type(store, expression, 0)
+        if callee_type == 0 { return false }
+        let fn_checked = __s0_buffer_get(CheckedTypeRec, store.types, callee_type - 1)
+        if fn_checked.kind != 25 || fn_checked.arg_count < 2 { return false }
+        if expression.child_count != fn_checked.arg_count - 1 { return false }
+        let param_total = fn_checked.arg_count - 2
+        return annotation.checked_type == __s0_buffer_get(U64, store.type_args, fn_checked.first_arg - 1 + param_total)
+    }
     if annotation.builtin == 30 { return result.kind == 23 && result.arg_count == 2 }
     if annotation.builtin == 37 { return result.kind == 24 && result.arg_count == 1 }
     let receiver_type = lower_builtin_child_type(store, expression, 0)
@@ -1821,7 +1916,62 @@ fn lower_m75_append(d: Domain, source_state: State, store: CheckStore, state: Lo
     return lower_jump_value(d, saved.state, function, ready.id, join_block, result_value)
 }
 
+fn callee_checked_type(store: CheckStore, expression: CheckedExprRec) -> U64 {
+    if expression.first_child == 0 || expression.child_count == 0 { return 0 }
+    let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    return __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).checked_type
+}
+
 fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if annotation.builtin == 43 {
+        // Function reference: fn.value with no environment.
+        let target = lower_owner_lookup(state.owners, annotation.target)
+        if target == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let fn_type = try lower_type(d, source_state, store, state, expression.checked_type)
+        let result = try lower_add_typed_result(d, fn_type.state, function, block, fn_type.id)
+        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, 0, 0, 0, target, "")
+        return Ok(LowerStep(state: made.state, id: result.id))
+    }
+    if annotation.builtin == 44 {
+        // Indirect call: call.value through the callee's function value.
+        let callee_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let callee = try lower_expression(d, source_state, spans, store, state, owner, function, block, callee_id, environment, panic_block)
+        var current = callee.state
+        var active = lower_open_block(current.mir, function, block)
+        var first_arg: U64 = 0
+        var second_arg: U64 = 0
+        var ordinal: U64 = 1
+        while ordinal < expression.child_count {
+            let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+            let child = try lower_expression(d, source_state, spans, store, current, owner, function, active, child_id, environment, panic_block)
+            current = child.state
+            active = lower_open_block(current.mir, function, active)
+            if ordinal == 1 { first_arg = child.id }
+            if ordinal == 2 { second_arg = child.id }
+            ordinal = ordinal + 1
+        }
+        let fn_type = try lower_type(d, source_state, store, current, callee_checked_type(store, expression))
+        current = fn_type.state
+        let result_type = try lower_type(d, source_state, store, current, expression.checked_type)
+        current = result_type.state
+        var result: U64 = 0
+        var current2 = current
+        if result_type.id != mir_type_unit() {
+            let value = try lower_add_result(d, current, function, active, expression.checked_type, source_state, store)
+            current2 = value.state
+            result = value.id
+        }
+        let call = try lower_add_instr(d, current2, function, active, mir_op_call_value(), result, 0, 0, callee.id, 0, 0, "")
+        var wired = call.state
+        ordinal = 0
+        while ordinal < expression.child_count - 1 {
+            var arg_value: U64 = first_arg
+            if ordinal == 1 { arg_value = second_arg }
+            wired = try lower_add_instr_operand(d, wired, call.id, ordinal, arg_value, mir_operand_instruction(), "")
+            ordinal = ordinal + 1
+        }
+        return Ok(LowerStep(state: wired, id: result))
+    }
     if annotation.builtin == 30 || annotation.builtin == 37 {
         let vector = try lower_type(d, source_state, store, state, expression.checked_type)
         let result = try lower_add_typed_result(d, vector.state, function, block, vector.id)
@@ -2753,7 +2903,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 42 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 44 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         if annotation.builtin >= 30 { return lower_m75_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 18 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         var current = state
@@ -4415,9 +4565,10 @@ fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.target != 0 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 42 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 44 { return false }
     if annotation.builtin >= 26 && annotation.builtin <= 29 { return false }
     if annotation.builtin >= 30 { return lower_ordered_model_valid(store, annotation, expression) }
+    if annotation.target != 0 { return false }
     var expected_count: U64 = 1
     if annotation.builtin == 18 { expected_count = 0 }
     if annotation.builtin == 2 || annotation.builtin == 11 || annotation.builtin == 15 { expected_count = 3 }
@@ -4654,13 +4805,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 23 && item.kind != 24 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 23 && item.kind != 24 && item.kind != 25 { return false }
         if item.syntax != 0 { return false }
         if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
         if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14 || item.kind == 16) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
-        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16 || item.kind == 17 || item.kind == 18 || item.kind == 23 || item.kind == 24) && item.target != 0 { return false }
+        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16 || item.kind == 17 || item.kind == 18 || item.kind == 23 || item.kind == 24 || item.kind == 25) && item.target != 0 { return false }
         if item.arg_count == 0 && item.first_arg != 0 { return false }
         if item.arg_count != 0 {
             if item.first_arg == 0 || item.first_arg - 1 + item.arg_count > __s0_buffer_len(U64, store.type_args) { return false }
@@ -4674,6 +4825,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 7 && item.arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).type_arity { return false }
         if (item.kind == 8 || item.kind == 9 || item.kind == 12 || item.kind == 13 || item.kind == 15 || item.kind == 17 || item.kind == 18 || item.kind == 24) && item.arg_count != 1 { return false }
         if (item.kind == 10 || item.kind == 11 || item.kind == 23) && item.arg_count != 2 { return false }
+        if item.kind == 25 && item.arg_count < 2 { return false }
         at = at + 1
     }
     at = 0
@@ -4777,7 +4929,8 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             at = at + 1
         } else {
         if item.kind == 5 {
-            if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 42 { return false }
+            if item.builtin == 43 && item.target != 0 { }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 44 { return false } }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }

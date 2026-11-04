@@ -88,6 +88,7 @@ const (
 	OpArrayAsSlice
 	OpCallValue
 	OpStrEq
+	OpFnValue
 )
 
 // String returns the canonical textual name of the operation.
@@ -227,6 +228,8 @@ func (k OpKind) String() string {
 		return "call.value"
 	case OpStrEq:
 		return "str.eq"
+	case OpFnValue:
+		return "fn.value"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

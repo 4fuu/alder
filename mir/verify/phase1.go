@@ -340,7 +340,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpStrEq {
+	if in.Op > mir.OpFnValue {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -359,11 +359,11 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	} else if in.FailTarget != mir.NoBlock {
 		errs = append(errs, Error{Loc: loc, Msg: "operation has an 'else' failure edge but is not checked"})
 	}
-	if (in.Op == mir.OpCallValue || in.Op == mir.OpStrEq) && m.FormatVersion < mir.ClosureFormatVersion {
+	if (in.Op == mir.OpCallValue || in.Op == mir.OpStrEq || in.Op == mir.OpFnValue) && m.FormatVersion < mir.ClosureFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 5"})
 	}
 	// Value operand ranges: each operation has a fixed operand shape.
-	errs = append(errs, checkRequiredInstrOperands(in, loc)...)
+	errs = append(errs, checkRequiredInstrOperands(m, in, loc)...)
 	for _, v := range instrValueOperands(in) {
 		if v != mir.NoValue && int(v) >= len(f.Values) {
 			errs = append(errs, Error{Loc: loc, Msg: "operand out of range"})
@@ -410,7 +410,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	return errs
 }
 
-func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
+func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Error {
 	var errs []Error
 	require := func(v mir.ValueId, what string) {
 		if v == mir.NoValue {
@@ -433,6 +433,10 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	case mir.OpStrEq:
 		require(in.A, "left operand")
 		require(in.B, "right operand")
+	case mir.OpFnValue:
+		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
+			errs = append(errs, Error{Loc: loc, Msg: "fn.value target is not a function"})
+		}
 	case mir.OpAggregateConstruct:
 		for i, field := range in.AggFields {
 			require(field.Value, fmt.Sprintf("aggregate field %d value", i))
@@ -617,6 +621,8 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpStrEq:
 		add(in.A)
 		add(in.B)
+	case mir.OpFnValue:
+		add(in.A)
 	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
 		add(in.Slice)
 	case mir.OpArrayAsSlice:

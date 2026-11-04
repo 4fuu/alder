@@ -207,7 +207,7 @@ func runCgenBodyConformance(t *testing.T, cc, root, exe string) {
 		t.Fatal("body generation is empty or process-nondeterministic")
 	}
 	for _, fragment := range []string{
-		"complete-verifier-gated Alder MIR 4",
+		"complete-verifier-gated Alder MIR 5",
 		"alder_i64_add_checked",
 		"alder_edge_5_",
 		"alder_fn_identity_i32_0(alder_v",

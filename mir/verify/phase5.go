@@ -350,6 +350,10 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "call.value function operand must have a function type"})
 		}
 
+	case mir.OpFnValue:
+		// Result typing is derived in InferResultType; the target function
+		// existence is checked in phase 1.
+
 	case mir.OpStrEq:
 		ta, _ := f.ValueType(in.A)
 		tb, _ := f.ValueType(in.B)
