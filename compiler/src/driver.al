@@ -358,7 +358,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string("")
     }
     if kind == 127 { if !out_string("ordered collection key type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
-        return out_string(" does not support structural Eq and Hash (unsigned integers, Bool, and structs/enums of those only)") }
+        return out_string(" does not support structural Eq and Hash (unsigned integers, Bool, String, Bytes, and structs/enums of those)") }
     if kind == 128 { if !out_string("ordered collection element type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
         return out_string(" must be a copyable value") }
     if kind == 129 {

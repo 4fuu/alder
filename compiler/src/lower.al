@@ -1553,7 +1553,8 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
 }
 
 // Primitive leaf comparison of two values: Bool through paired branches,
-// unsigned integers through int.eq.
+// unsigned integers through int.eq, and String/Bytes through str.eq over
+// the two values.
 fn lower_m75_leaf_equal(d: Domain, state: LowerState, function: U64, block: U64, checked: CheckedTypeRec, left: U64, right: U64, equal_block: U64, different_block: U64) -> Result(LowerState, __s0_Error) {
     if checked.target == 1 {
         let left_true = try lower_add_block(d, state, function, "bb_m75_key_left_true")
@@ -1563,7 +1564,9 @@ fn lower_m75_leaf_equal(d: Domain, state: LowerState, function: U64, block: U64,
         return lower_branch(d, current, function, left_false.id, right, different_block, equal_block)
     }
     let result = try lower_add_typed_result(d, state, function, block, mir_type_bool())
-    let compared = try lower_add_instr(d, result.state, function, block, mir_op_int_eq(), result.id, 0, 0, left, right, 0, "")
+    var op = mir_op_int_eq()
+    if checked.kind == 2 || checked.kind == 14 { op = mir_op_str_eq() }
+    let compared = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, left, right, 0, "")
     return lower_branch(d, compared.state, function, block, result.id, equal_block, different_block)
 }
 
@@ -1575,7 +1578,7 @@ fn lower_m75_leaf_equal(d: Domain, state: LowerState, function: U64, block: U64,
 // the key domain restricts to primitives.
 fn lower_m75_key_equal(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, function: U64, block: U64, left_place: U64, right_place: U64, equal_block: U64, different_block: U64) -> Result(LowerState, __s0_Error) {
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 1 {
+    if checked.kind == 1 || checked.kind == 2 || checked.kind == 14 {
         let left_type = try lower_type(d, source_state, store, state, checked_type)
         let left_loaded = try lower_helper_load(d, left_type.state, function, block, left_place, left_type.id)
         let right_type = try lower_type(d, source_state, store, left_loaded.state, checked_type)

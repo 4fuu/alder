@@ -382,6 +382,24 @@ fn main() -> I32 {
         None => 0
     }
     if only_item != 2 { return 41 }
+    var names = Map.new(String, U64)
+    if !names.insert("alpha", 1) { return 42 }
+    if names.insert("alpha", 2) { return 43 }
+    if !names.insert("beta", 3) { return 44 }
+    if !names.insert("gamma", 4) { return 45 }
+    if names.len() != 3 { return 46 }
+    let alpha = names.get("alpha")
+    let alpha_value = match alpha {
+        Some(v) => v
+        None => 0
+    }
+    if alpha_value != 2 { return 47 }
+    let delta = names.get("delta")
+    let delta_seen = match delta {
+        Some(v) => v
+        None => 9
+    }
+    if delta_seen != 9 { return 48 }
     return 0
 }
 `}

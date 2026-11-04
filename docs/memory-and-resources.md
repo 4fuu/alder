@@ -179,14 +179,15 @@ insertion-ordered association lists over vector storage with structural key
 comparison. Lookup, insert, and remove scan linearly, which is a known cost
 accepted for M7.5; hashing indices arrive with the standard-library hash
 containers. The M7.5 key domain is the structural-comparison domain that the
-inline compare lowers: unsigned integers, `Bool`, and non-generic records and
-enums over that domain whose enum variant payloads are primitives; `String`
-and `Bytes` keys arrive with generated structural text equality. Values must
-be recursively copyable ordinary values; slices, mutable views, and the
-ordered collections themselves are excluded until affine composition lands.
-`remove` and `values` move stored entries through a lowering loop, so they
-additionally require the value type to be free of storage-backed parts
-(vec, string, bytes, and the like) for now.
+inline compare lowers: unsigned integers, `Bool`, `String`, `Bytes`, and
+non-generic records and enums over that domain whose enum variant payloads
+are primitives, `String`, or `Bytes`. Values must be recursively copyable
+ordinary values; slices, mutable views, and the ordered collections
+themselves are excluded until affine composition lands. `remove`, `keys`,
+`values`, and `items` move stored values through a lowering loop, so they
+additionally require the moved type (both halves of the entry for `remove`)
+to be free of storage-backed parts — vec, string, bytes, and the like —
+until runtime-backed move operations exist.
 
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
 uses eager deep copy; the in-place rule above replaces eager copies once

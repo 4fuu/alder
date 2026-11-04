@@ -219,7 +219,7 @@ func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root, object string, no
 	}
 	first := runAlder1(t, exe, noGo, files, alderArgs("--emit=mir")...)
 	second := runAlder1(t, exe, noGo, files, alderArgs("--emit=mir")...)
-	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 4\n") || first != second {
+	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 5\n") || first != second {
 		t.Fatalf("MIR failed or was nondeterministic: first=%+v second=%+v", first, second)
 	}
 	module, err := mir.Parse(first.stdout)
@@ -507,7 +507,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "087eababb2ea65ed610a5c3a4a3e2cb84e885d611c51e35a0ac4bcf3aa2b2c80"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "2e991bee8221b0f9c3a623a7d9363c70644203419ad84456538bb35dcd01f4b8"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

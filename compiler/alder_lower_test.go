@@ -860,8 +860,8 @@ fn out_of_bounds() -> U64 {
 	if err != nil {
 		t.Fatalf("parse M7.1 MIR: %v\n%s", err, first)
 	}
-	if module.FormatVersion != mir.VecFormatVersion {
-		t.Fatalf("M7.1 MIR version = %d, want %d", module.FormatVersion, mir.VecFormatVersion)
+	if module.FormatVersion != mir.CurrentFormatVersion {
+		t.Fatalf("M7.1 MIR version = %d, want %d", module.FormatVersion, mir.CurrentFormatVersion)
 	}
 	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
 		t.Fatalf("verify M7.1 MIR: %s\n%s", verify.Errors(diagnostics), first)

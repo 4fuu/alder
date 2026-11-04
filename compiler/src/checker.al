@@ -4386,15 +4386,15 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
 }
 
 // Ordered-collection key domain (M7.5): the domain the inline structural
-// compare lowers. Unsigned integers and Bool compare directly; records and
-// enums compare through place chains, so enum variant payloads, which
-// materialize as values inside the scan loop, must be primitives. String
-// and Bytes keys arrive with generated structural text equality, which MIR
-// does not provide yet.
+// compare lowers. Unsigned integers and Bool compare directly; String and
+// Bytes compare through str.eq; records and enums compare through place
+// chains, so enum variant payloads, which materialize as values inside the
+// scan loop, must be primitives, String, or Bytes.
 fn ordered_key_supported(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
     if checked_type == 0 || depth > 16 { return false }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind == 1 { return checked.target == 1 || (checked.target >= 6 && checked.target <= 9) }
+    if checked.kind == 2 || checked.kind == 14 { return true }
     if checked.kind != 7 { return false }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
     if symbol.type_arity != 0 { return false }
@@ -4404,8 +4404,10 @@ fn ordered_key_supported(store: CheckStore, checked_type: U64, depth: U64) -> Bo
         if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
             if use.role == 2 {
                 let payload = __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1)
-                if payload.kind != 1 { return false }
-                if !(payload.target == 1 || (payload.target >= 6 && payload.target <= 9)) { return false }
+                if payload.kind == 2 || payload.kind == 14 { } else {
+                    if payload.kind != 1 { return false }
+                    if !(payload.target == 1 || (payload.target >= 6 && payload.target <= 9)) { return false }
+                }
             } else {
                 if !ordered_key_supported(store, use.checked_type, depth + 1) { return false }
             }
@@ -4614,9 +4616,16 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     let key = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
     var value: U64 = 0
     if receiver.kind == 23 { value = __s0_buffer_get(U64, store.type_args, receiver.first_arg) }
-    // remove and values move whole entries through a lowering loop; only
-    // provenance-free value types can cross that loop's backedge today.
-    if (builtin == 33 || builtin == 36) && !ordered_value_storage_free(store, value, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, value) }
+    // remove, keys, values, and items move stored values through a lowering
+    // loop; only provenance-free types can cross that loop's backedge today.
+    // Map remove moves whole entries, so both halves must be free.
+    if builtin == 33 {
+        if !ordered_value_storage_free(store, value, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, value) }
+        if !ordered_value_storage_free(store, key, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, key) }
+    }
+    if builtin == 40 && !ordered_value_storage_free(store, key, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, key) }
+    if (builtin == 35 || builtin == 42) && !ordered_value_storage_free(store, key, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, key) }
+    if builtin == 36 && !ordered_value_storage_free(store, value, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, value) }
     return check_ordered_method_args(d, state, parse, base, store, owner, call, call_id, callee, receiver_expression, builtin, key, value, 0, 0, 0, expected, mismatch_kind, mismatch_node, site_kind, site_syntax)
 }
 

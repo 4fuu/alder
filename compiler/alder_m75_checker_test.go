@@ -282,6 +282,26 @@ fn main() -> I32 {
     let order = scores.keys()
     let texts = scores.values()
     let elements = seen.items()
+    var names = Map.new(String, U64)
+    if !names.insert("alpha", 1) { return 8 }
+    if names.insert("alpha", 2) { return 9 }
+    if !names.insert("beta", 3) { return 10 }
+    let found = names.get("alpha")
+    let got = match found {
+        Some(v) => v
+        None => 0
+    }
+    if got != 2 { return 11 }
+    let absent = names.get("gamma")
+    let none_seen = match absent {
+        Some(v) => v
+        None => 1
+    }
+    if none_seen != 1 { return 12 }
+    var tags = Set.new(Bytes)
+    if !tags.insert("one") { return 13 }
+    if !tags.contains("one") { return 14 }
+    if tags.contains("two") { return 15 }
     return 0
 }
 `,
@@ -301,14 +321,12 @@ fn main() -> I32 {
 		code         int
 	}{
 		{"map-key-float", "fn main() -> I32 {\n    var m = Map.new(F64, U64)\n    return 0\n}\n", 127},
-		{"map-key-string", "fn main() -> I32 {\n    var m = Map.new(String, U64)\n    return 0\n}\n", 127},
 		{"map-key-signed", "fn main() -> I32 {\n    var m = Map.new(I64, U64)\n    return 0\n}\n", 127},
 		{"map-value-mut-slice", "fn main() -> I32 {\n    var m = Map.new(U64, MutSlice(U64))\n    return 0\n}\n", 128},
 		{"map-value-map", "fn main() -> I32 {\n    var m = Map.new(U64, Map(U64, U64))\n    return 0\n}\n", 128},
 		{"map-member-key", "type Bad {\n    m: Map(F64, U64)\n}\nfn main() -> I32 { return 0 }\n", 127},
 		{"map-member-value", "type Bad {\n    m: Map(U64, [U8])\n}\nfn main() -> I32 { return 0 }\n", 128},
 		{"set-member-element", "type Bad {\n    s: Set(F64)\n}\nfn main() -> I32 { return 0 }\n", 127},
-		{"set-element-string", "fn main() -> I32 {\n    var s = Set.new(String)\n    return 0\n}\n", 127},
 		{"map-static-arity", "fn main() -> I32 {\n    var m = Map.new(U64)\n    return 0\n}\n", 144},
 		{"set-static-arity", "fn main() -> I32 {\n    var s = Set.new(U64, U64)\n    return 0\n}\n", 144},
 		{"map-get-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    let found = m.get()\n    return 0\n}\n", 144},
@@ -320,6 +338,9 @@ fn main() -> I32 {
 		{"map-remove-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.remove()\n    return 0\n}\n", 144},
 		{"map-keys-arity", "fn main() -> I32 {\n    var m = Map.new(U64, U64)\n    m.keys(1)\n    return 0\n}\n", 144},
 		{"map-remove-storage-value", "fn main() -> I32 {\n    var m = Map.new(U64, Vec(U64))\n    m.remove(1)\n    return 0\n}\n", 129},
+		{"map-remove-string-key", "fn main() -> I32 {\n    var m = Map.new(String, U64)\n    m.remove(\"x\")\n    return 0\n}\n", 129},
+		{"map-keys-string-key", "fn main() -> I32 {\n    var m = Map.new(String, U64)\n    let ks = m.keys()\n    return 0\n}\n", 129},
+		{"set-items-string-element", "fn main() -> I32 {\n    var s = Set.new(String)\n    let xs = s.items()\n    return 0\n}\n", 129},
 		{"map-values-storage-value", "fn main() -> I32 {\n    var m = Map.new(U64, String)\n    let texts = m.values()\n    return 0\n}\n", 129},
 		{"set-remove-arg-type", "fn main() -> I32 {\n    var s = Set.new(U64)\n    s.remove(true)\n    return 0\n}\n", 42},
 	}

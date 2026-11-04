@@ -414,7 +414,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	for _, order := range orders {
 		args := append([]string{"compile", "--emit=mir"}, order...)
 		got := runProductionCompiler(t, exe, valid, args...)
-		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 4\n") {
+		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 5\n") {
 			t.Fatalf("MIR result for %v: %+v", order, got)
 		}
 		if mirText != "" && got.stdout != mirText {
@@ -644,7 +644,7 @@ fn main() -> I32 {
 `}
 	first := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "locals.al")
 	second := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "locals.al")
-	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 4\n") || first.stdout != second.stdout {
+	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 5\n") || first.stdout != second.stdout {
 		t.Fatalf("source-local MIR result is empty, failed, or nondeterministic: first=%+v second=%+v", first, second)
 	}
 	module, err := mir.Parse(first.stdout)

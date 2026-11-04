@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `087eababb2ea65ed610a5c3a4a3e2cb84e885d611c51e35a0ac4bcf3aa2b2c80`;
+  `2e991bee8221b0f9c3a623a7d9363c70644203419ad84456538bb35dcd01f4b8`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `087eababb2ea65ed610a5c3a4a3e2cb84e885d611c51e35a0ac4bcf3aa2b2c80`.
+  `2e991bee8221b0f9c3a623a7d9363c70644203419ad84456538bb35dcd01f4b8`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -970,12 +970,14 @@ Exit-criteria evidence (in progress):
   replace, remove, and reinsertion. Structural record and enum keys
   compare through place chains, and the rebuilt or projected vector is
   stored back into the receiver binding for value semantics. Keys are
-  gated to the structural-comparison domain M7.5 lowers (diagnostic 127),
-  values to recursively copyable ordinary values (128), `remove`/`values`
-  additionally to storage-free value types while entries move through a
-  lowering loop (129), and malformed call shapes are rejected (129).
-  Lookup, insert, and remove scan linearly, a known cost deferred to the
-  standard-library hash containers;
+  gated to the structural-comparison domain M7.5 lowers — unsigned
+  integers, `Bool`, `String`, and `Bytes` compared through `str.eq`, plus
+  records and enums over that domain (diagnostic 127) — values to
+  recursively copyable ordinary values (128), and `remove`/`keys`/`values`/
+  `items` to storage-free moved types while entries cross a lowering loop
+  (129); malformed call shapes are rejected (144). Lookup, insert, and
+  remove scan linearly, a known cost deferred to the standard-library hash
+  containers;
 - phase 6 exempts loads of provenance-free types from storage-domain
   derivation, implemented in lockstep in the Go verifier and the Alder
   mirror with the soundness argument in [MIR](mir.md): plain-bit values

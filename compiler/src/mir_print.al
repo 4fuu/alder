@@ -1231,5 +1231,5 @@ fn mir_out_functions(store: MirStore) -> Bool {
 
 fn mir_print(store: MirStore) -> Bool {
     if !mir_store_valid(store) { return false }
-    return out_string("mir 4\n") && mir_out_type_declarations(store) && mir_out_declarations(store) && mir_out_functions(store)
+    return out_string("mir 5\n") && mir_out_type_declarations(store) && mir_out_declarations(store) && mir_out_functions(store)
 }
