@@ -12,7 +12,7 @@ import (
 func phase1Integrity(m *mir.Module) []Error {
 	var errs []Error
 	if m.FormatVersion < mir.LegacyFormatVersion || m.FormatVersion > mir.CurrentFormatVersion {
-		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3, 4)", m.FormatVersion)})
+		errs = append(errs, Error{Msg: fmt.Sprintf("unsupported format version %d (supported: 1, 2, 3, 4, 5)", m.FormatVersion)})
 	}
 	if len(m.Types) < int(mir.NumPrimitiveTypes) {
 		errs = append(errs, Error{Msg: fmt.Sprintf("type table has %d entries; expected at least %d canonical primitive slots", len(m.Types), mir.NumPrimitiveTypes)})
@@ -39,6 +39,9 @@ func phase1Integrity(m *mir.Module) []Error {
 		}
 		if t.Kind == mir.TypeVec && m.FormatVersion < mir.VecFormatVersion {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "vec type requires MIR format version 4"})
+		}
+		if t.Kind == mir.TypeFunction && t.Sig.Env != mir.NoType && m.FormatVersion < mir.ClosureFormatVersion {
+			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "function environment requires MIR format version 5"})
 		}
 		if t.Name == "" {
 			if t.Kind == mir.TypeAggregate || t.Kind == mir.TypeEnum {
@@ -337,7 +340,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpArrayAsSlice {
+	if in.Op > mir.OpStrEq {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	if in.Op.ProducesResult() {
@@ -355,6 +358,9 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 		}
 	} else if in.FailTarget != mir.NoBlock {
 		errs = append(errs, Error{Loc: loc, Msg: "operation has an 'else' failure edge but is not checked"})
+	}
+	if (in.Op == mir.OpCallValue || in.Op == mir.OpStrEq) && m.FormatVersion < mir.ClosureFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 5"})
 	}
 	// Value operand ranges: each operation has a fixed operand shape.
 	errs = append(errs, checkRequiredInstrOperands(in, loc)...)
@@ -421,6 +427,12 @@ func checkRequiredInstrOperands(in *mir.Instr, loc string) []Error {
 	switch in.Op {
 	case mir.OpStore:
 		require(in.StoreVal, "store value")
+	case mir.OpCallValue:
+		require(in.A, "function operand")
+		requireAll(in.Args, "call.value argument")
+	case mir.OpStrEq:
+		require(in.A, "left operand")
+		require(in.B, "right operand")
 	case mir.OpAggregateConstruct:
 		for i, field := range in.AggFields {
 			require(field.Value, fmt.Sprintf("aggregate field %d value", i))
@@ -597,6 +609,14 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Slice)
 		add(in.Domain)
 		add(in.Capacity)
+	case mir.OpCallValue:
+		add(in.A)
+		for _, v := range in.Args {
+			add(v)
+		}
+	case mir.OpStrEq:
+		add(in.A)
+		add(in.B)
 	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:
 		add(in.Slice)
 	case mir.OpArrayAsSlice:

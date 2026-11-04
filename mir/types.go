@@ -104,10 +104,13 @@ type Variant struct {
 	Payload TypeId
 }
 
-// FuncSig is a concrete function signature: parameters and result type.
+// FuncSig is a concrete function signature: parameters, result type, and
+// the closure environment type. Env is NoType for plain functions and the
+// environment payload type for closures.
 type FuncSig struct {
 	Params []TypeId
 	Result TypeId
+	Env    TypeId
 }
 
 // Type is one entry of a Module type table.
@@ -163,6 +166,10 @@ func (m *Module) TypeString(t TypeId) string {
 		}
 		b.WriteString(") -> ")
 		b.WriteString(m.TypeString(ty.Sig.Result))
+		if ty.Sig.Env != NoType {
+			b.WriteString(", ")
+			b.WriteString(m.TypeString(ty.Sig.Env))
+		}
 		b.WriteString(")")
 		return b.String()
 	case TypeDomainHandle:
@@ -311,6 +318,9 @@ func (m *Module) intern(kind TypeKind, match func(*Type) bool, fill func(*Type))
 }
 
 func sigEqual(a, b FuncSig) bool {
+	if a.Env != b.Env {
+		return false
+	}
 	if a.Result != b.Result || len(a.Params) != len(b.Params) {
 		return false
 	}

@@ -360,6 +360,43 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		g.callArgs(b, callee, in.Args)
 		b.WriteString(");\n")
 
+	case mir.OpCallValue:
+		ft, ok := g.f.ValueType(in.A)
+		if !ok || !g.m.ValidType(ft) || g.m.Types[ft].Kind != mir.TypeFunction {
+			// Verifier rejects this; keep generation total anyway.
+			b.WriteString("  /* call.value without a function type */\n")
+			break
+		}
+		sig := g.m.Types[ft].Sig
+		b.WriteString("  ")
+		if sig.Result != mir.TypeUnit {
+			b.WriteString(g.val(in.Result) + " = ")
+		}
+		b.WriteString(g.valueExpr(in.A) + ".code(")
+		first := true
+		for i, a := range in.Args {
+			if sig.Params[i] == mir.TypeUnit {
+				continue
+			}
+			if !first {
+				b.WriteString(", ")
+			}
+			first = false
+			b.WriteString(g.valueExpr(a))
+		}
+		if !first {
+			b.WriteString(", ")
+		}
+		b.WriteString(g.valueExpr(in.A) + ".env);\n")
+
+	case mir.OpStrEq:
+		ta, _ := g.f.ValueType(in.A)
+		helper := "alder_string_eq"
+		if g.m.ValidType(ta) && g.m.Types[ta].Kind == mir.TypeBytes {
+			helper = "alder_bytes_eq"
+		}
+		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
+
 	case mir.OpFFICallUnsafe:
 		imp := &g.m.Imports[in.FFIImport]
 		b.WriteString("  ")

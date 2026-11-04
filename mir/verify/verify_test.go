@@ -608,3 +608,67 @@ func TestOwnedStringAndBytesConstants(t *testing.T) {
 		t.Fatalf("incompatible constant not rejected:\n%s", Errors(errs).String())
 	}
 }
+
+func TestClosureFormatOps(t *testing.T) {
+	if errs := Module(mustParse(t, `mir 5
+
+const @c_one: u64 = 1
+
+fn @apply(%f: function(fn(u64) -> u64), %x: u64) -> u64 {
+bb0:
+  %r = call.value %f(%x)
+  return %r
+}
+`)); len(errs) != 0 {
+		t.Fatalf("call.value accepted module rejected: %s", Errors(errs).String())
+	}
+	if errs := Module(mustParse(t, `mir 5
+
+fn @apply(%f: function(fn(u64) -> u64), %x: i64) -> u64 {
+bb0:
+  %r = call.value %f(%x)
+  return %r
+}
+`)); len(errs) == 0 || !containsMsg(errs, "call.value argument 0") {
+		t.Fatalf("call.value argument mismatch not reported:\n%s", Errors(errs).String())
+	}
+	if errs := Module(mustParse(t, `mir 5
+
+fn @eq(%a: string, %b: string) -> bool {
+bb0:
+  %r = str.eq %a, %b
+  return %r
+}
+`)); len(errs) != 0 {
+		t.Fatalf("str.eq accepted module rejected:\n%s", Errors(errs).String())
+	}
+	if errs := Module(mustParse(t, `mir 5
+
+fn @eq(%a: string, %b: u64) -> bool {
+bb0:
+  %r = str.eq %a, %b
+  return %r
+}
+`)); len(errs) == 0 || !containsMsg(errs, "str.eq operands must have the same type") {
+		t.Fatalf("str.eq mismatched operands not reported:\n%s", Errors(errs).String())
+	}
+	if _, err := mir.Parse(`mir 4
+
+fn @apply(%f: function(fn(u64) -> u64), %x: u64) -> u64 {
+bb0:
+  %r = call.value %f(%x)
+  return %r
+}
+`); err == nil || !strings.Contains(err.Error(), "requires MIR format version 5") {
+		t.Fatalf("call.value in format 4 not rejected: %v", err)
+	}
+}
+
+func mustParse(t *testing.T, text string) *mir.Module {
+	t.Helper()
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatalf("parse fixture: %v\n%s", err, text)
+	}
+	return m
+}

@@ -317,8 +317,39 @@ return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() 
     if x.op == mir_op_const_get() { let ct = mir_v5_const_type(store, indexes, x.name_start, x.name_end)
 return MirVTypeResult(valid: ct != 0, type_id: ct) }
     if x.op == mir_op_call() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, false), type_id: __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type) }
+    if x.op == mir_op_call_value() { if ta == 0 || mir_vtype_kind(store, ta) != mir_type_kind_function() { return MirVTypeResult(valid: false, type_id: 0) }
+return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.function, id, ta), type_id: __s0_buffer_get(MirTypeRec, store.types, ta - 1).result_type) }
+    if x.op == mir_op_str_eq() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
     if x.op == mir_op_ffi_call_unsafe() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, true), type_id: __s0_buffer_get(MirImportRec, store.imports, x.target - 1).result_type) }
     return MirVTypeResult(valid: false, type_id: 0)
+}
+
+// call.value has no static callee: the declared function type drives both
+// the argument count and the argument types.
+fn mir_v5_call_value_args_match(store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, fn_type: U64) -> Bool {
+    let part_count = __s0_buffer_get(MirTypeRec, store.types, fn_type - 1).part_count
+    let got = mir_v5_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
+    if got != part_count { return false }
+    var ordinal: U64 = 0
+    while ordinal < got {
+        let argument = mir_v5_operand(store, indexes, mir_operand_instruction(), instruction, 0, ordinal)
+        var expected: U64 = 0
+        var part_at: U64 = 0
+        let parts = mir_vindex_type_part_count(indexes, fn_type)
+        var seen: U64 = 0
+        while part_at < parts {
+            let pid = mir_vindex_type_part(indexes, fn_type, part_at)
+            let part = __s0_buffer_get(MirTypePartRec, store.type_parts, pid - 1)
+            if part.kind == mir_type_part_function_param() {
+                if seen == ordinal { expected = part.part_type }
+                seen = seen + 1
+            }
+            part_at = part_at + 1
+        }
+        if mir_v5_value_type(store, indexes, function, __s0_buffer_get(MirOperandRec, store.operands, argument - 1).value) != expected { return false }
+        ordinal = ordinal + 1
+    }
+    return true
 }
 
 fn mir_v5_check_args(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), x: MirInstrRec, id: U64, target: U64, import_call: Bool) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var result = out

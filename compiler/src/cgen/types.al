@@ -71,10 +71,12 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
     if t.kind == mir_type_kind_result() { state = try cgen_emit_type(d, state, store, t.ok_type)
     state = try cgen_emit_type(d, state, store, t.err_type) }
     if t.kind == mir_type_kind_function() {
+        let param_count = mir_type_part_count(store, id, mir_type_part_function_param())
         var ordinal: U64 = 0
-        while ordinal < t.part_count { state = try cgen_emit_type(d, state, store, cgen_type_part(store, id, mir_type_part_function_param(), ordinal).part_type)
+        while ordinal < param_count { state = try cgen_emit_type(d, state, store, cgen_type_part(store, id, mir_type_part_function_param(), ordinal).part_type)
         ordinal = ordinal + 1 }
         state = try cgen_emit_type(d, state, store, t.result_type)
+        if mir_type_part_count(store, id, mir_type_part_function_env()) != 0 { state = try cgen_emit_type(d, state, store, cgen_type_part(store, id, mir_type_part_function_env(), 0).part_type) }
     }
     var writer = state.writer
     if t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_option() || t.kind == mir_type_kind_result() || t.kind == mir_type_kind_array() { writer = try cgen_emit_struct(d, writer, store, id, t) }
@@ -84,14 +86,21 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
 }
 
 fn cgen_emit_function_type(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t: MirTypeRec) -> Result(CgenWriter, __s0_Error) {
-    var out = try cgen_put(d, initial, "typedef ")
+    // A function value is {code, env}; the code pointer takes the declared
+    // parameters plus the opaque environment pointer.
+    var out = try cgen_put(d, initial, "typedef struct AlderFnTy")
+    out = try cgen_put_u64(d, out, id - 1)
+    out = try cgen_put(d, out, " AlderFnTy")
+    out = try cgen_put_u64(d, out, id - 1)
+    out = try cgen_put(d, out, ";\ntypedef ")
     if t.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, t.result_type) }
     out = try cgen_put(d, out, " (*AlderFnTy")
     out = try cgen_put_u64(d, out, id - 1)
-    out = try cgen_put(d, out, ")(")
+    out = try cgen_put(d, out, "_code)(")
+    let param_count = mir_type_part_count(store, id, mir_type_part_function_param())
     var ordinal: U64 = 0
     var wrote = false
-    while ordinal < t.part_count {
+    while ordinal < param_count {
         let part = cgen_type_part(store, id, mir_type_part_function_param(), ordinal)
         if part.part_type != mir_type_unit() {
             if wrote { out = try cgen_put(d, out, ", ") }
@@ -101,7 +110,12 @@ fn cgen_emit_function_type(d: Domain, initial: CgenWriter, store: MirStore, id: 
         ordinal = ordinal + 1
     }
     if !wrote { out = try cgen_put(d, out, "void") }
-    return cgen_put(d, out, ");\n")
+    out = try cgen_put(d, out, ", void *alder_env);\nstruct AlderFnTy")
+    out = try cgen_put_u64(d, out, id - 1)
+    out = try cgen_put(d, out, " { AlderFnTy")
+    out = try cgen_put_u64(d, out, id - 1)
+    out = try cgen_put(d, out, "_code code; void *env; };\n")
+    return Ok(out)
 }
 
 fn cgen_emit_struct(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t: MirTypeRec) -> Result(CgenWriter, __s0_Error) {
@@ -182,8 +196,20 @@ fn cgen_emit_types(d: Domain, initial: CgenWriter, store: MirStore) -> Result(Cg
         if kind == mir_type_kind_bytes() { has_bytes = true }
         at = at + 1
     }
-    if has_string { out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderString;\n") }
-    if has_bytes { out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n") }
+    if has_string {
+        out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderString;\n")
+        out = try cgen_put(d, out, "static bool ALDER_MAYBE_UNUSED alder_string_eq(AlderString alder_a, AlderString alder_b) {\n")
+        out = try cgen_put(d, out, "  if (alder_a.len != alder_b.len) { return false; }\n")
+        out = try cgen_put(d, out, "  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
+        out = try cgen_put(d, out, "}\n")
+    }
+    if has_bytes {
+        out = try cgen_put(d, out, "typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n")
+        out = try cgen_put(d, out, "static bool ALDER_MAYBE_UNUSED alder_bytes_eq(AlderBytes alder_a, AlderBytes alder_b) {\n")
+        out = try cgen_put(d, out, "  if (alder_a.len != alder_b.len) { return false; }\n")
+        out = try cgen_put(d, out, "  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
+        out = try cgen_put(d, out, "}\n")
+    }
     if has_string || has_bytes { out = try cgen_put(d, out, "\n") }
     at = mir_primitive_type_count()
     var records = false

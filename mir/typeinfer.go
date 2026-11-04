@@ -346,6 +346,23 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return TypeBool, true
 
+	case OpStrEq:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || (m.Types[ta].Kind != TypeString && m.Types[ta].Kind != TypeBytes) {
+			return NoType, false
+		}
+		if tb, ok := f.ValueType(in.B); !ok || tb != ta {
+			return NoType, false
+		}
+		return TypeBool, true
+
+	case OpCallValue:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || m.Types[ta].Kind != TypeFunction {
+			return NoType, false
+		}
+		return m.Types[ta].Sig.Result, true
+
 	case OpFloatEq, OpFloatNe, OpFloatLt, OpFloatLe, OpFloatGt, OpFloatGe:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsFloatType(ta) {

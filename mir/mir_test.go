@@ -49,8 +49,8 @@ func TestStructuralInterning(t *testing.T) {
 	if m.DomainHandle() == m.CleanupScope() {
 		t.Error("distinct singleton kinds collided")
 	}
-	if m.FunctionType(FuncSig{Params: []TypeId{TypeI64}, Result: TypeBool}) !=
-		m.FunctionType(FuncSig{Params: []TypeId{TypeI64}, Result: TypeBool}) {
+	if m.FunctionType(FuncSig{Params: []TypeId{TypeI64}, Result: TypeBool, Env: NoType}) !=
+		m.FunctionType(FuncSig{Params: []TypeId{TypeI64}, Result: TypeBool, Env: NoType}) {
 		t.Error("function types not interned")
 	}
 }
@@ -83,7 +83,7 @@ func TestTypeString(t *testing.T) {
 		{m.DomainMark(), "domain_mark"},
 		{m.CleanupScope(), "cleanup_scope"},
 		{m.CleanupID(), "cleanup_id"},
-		{m.FunctionType(FuncSig{Params: []TypeId{TypeI64, m.Slice(TypeU8)}, Result: TypeBool}), "function(fn(i64, slice(u8)) -> bool)"},
+		{m.FunctionType(FuncSig{Params: []TypeId{TypeI64, m.Slice(TypeU8)}, Result: TypeBool, Env: NoType}), "function(fn(i64, slice(u8)) -> bool)"},
 	}
 	for _, c := range cases {
 		if got := m.TypeString(c.id); got != c.want {

@@ -29,7 +29,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_vec_new() { return 16 }
     if op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() { return 7 }
     if op >= mir_op_vec_len() && op <= mir_op_vec_as_mut_slice() { return 1 }
-    if op == mir_op_array_as_slice() { return 1 }
+    if op == mir_op_array_as_slice() || op == mir_op_call_value() || op == mir_op_str_eq() { return 1 }
     return 0
 }
 // Flat (kind, owner) key for operand ordinal counting. Zero means the
@@ -1022,7 +1022,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_array_as_slice() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_array_as_slice(), i.op, 0)) } else {
+        if i.op > mir_op_str_eq() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_str_eq(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false

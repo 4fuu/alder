@@ -224,7 +224,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_array_as_slice() { return false }
+        if item.op > mir_op_str_eq() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -1109,6 +1109,52 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, ")") }
         out = try cgen_put(d, out, "(")
         out = try cgen_emit_call_args(d, out, store, indexes, instruction, item, item.op == mir_op_ffi_call_unsafe())
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_call_value() {
+        let fn_type = cgen_value_type(store, indexes, item.function, item.a)
+        var result_type: U64 = mir_type_unit()
+        var param_count: U64 = 0
+        if fn_type >= 1 && fn_type <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, fn_type - 1).kind == mir_type_kind_function() {
+            result_type = __s0_buffer_get(MirTypeRec, store.types, fn_type - 1).result_type
+            param_count = mir_type_part_count(store, fn_type, mir_type_part_function_param())
+        }
+        out = try cgen_put(d, out, "  ")
+        if result_type != mir_type_unit() { out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ") }
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".code(")
+        let count = cgen_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
+        var ordinal: U64 = 0
+        var wrote = false
+        while ordinal < count {
+            if ordinal < param_count {
+                let part = cgen_type_part(store, fn_type, mir_type_part_function_param(), ordinal)
+                if part.part_type != mir_type_unit() {
+                    if wrote { out = try cgen_put(d, out, ", ") }
+                    let argument = cgen_operand(store, indexes, mir_operand_instruction(), instruction, 0, ordinal)
+                    out = try cgen_put_value_read(d, out, store, indexes, item.function, argument.value)
+                    wrote = true
+                }
+            }
+            ordinal = ordinal + 1
+        }
+        if !wrote { out = try cgen_put(d, out, "NULL") } else { out = try cgen_put(d, out, ", ") }
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ".env);\n")
+    }
+    if item.op == mir_op_str_eq() {
+        let operand_type = cgen_value_type(store, indexes, item.function, item.a)
+        var helper: __s0_String = "alder_string_eq"
+        if operand_type >= 1 && operand_type <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, operand_type - 1).kind == mir_type_kind_bytes() { helper = "alder_bytes_eq" }
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put(d, out, helper)
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
         return cgen_put(d, out, ");\n")
     }
     return Ok(out)

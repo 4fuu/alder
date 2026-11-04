@@ -347,6 +347,7 @@ func (p *parser) parseFuncSig() (FuncSig, error) {
 		return FuncSig{}, err
 	}
 	var sig FuncSig
+	sig.Env = NoType
 	for {
 		if p.peek().kind == tokPunct && p.peek().text == ")" {
 			p.next()
@@ -373,6 +374,17 @@ func (p *parser) parseFuncSig() (FuncSig, error) {
 	sig.Result, err = p.parseType()
 	if err != nil {
 		return FuncSig{}, err
+	}
+	if p.peek().kind == tokPunct && p.peek().text == "," {
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return FuncSig{}, p.errf(p.peek(), "function environment requires MIR format version %d", ClosureFormatVersion)
+		}
+		p.next()
+		env, err := p.parseType()
+		if err != nil {
+			return FuncSig{}, err
+		}
+		sig.Env = env
 	}
 	return sig, nil
 }
@@ -1181,6 +1193,44 @@ func (p *parser) parseOp() (Instr, error) {
 			return in, err
 		}
 		err = p.expectPunct(")")
+
+	case "call.value":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "call.value requires MIR format version %d", ClosureFormatVersion)
+		}
+		in.Op = OpCallValue
+		in.A, err = p.parseValueRef()
+		if err != nil {
+			return in, err
+		}
+		if err = p.expectPunct("("); err != nil {
+			return in, err
+		}
+		if in.Args, err = p.parseArgs(); err != nil {
+			return in, err
+		}
+		if err = p.expectPunct(")"); err != nil {
+			return in, err
+		}
+		return in, nil
+
+	case "str.eq":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "str.eq requires MIR format version %d", ClosureFormatVersion)
+		}
+		in.Op = OpStrEq
+		in.A, err = p.parseValueRef()
+		if err != nil {
+			return in, err
+		}
+		if err = p.expectPunct(","); err != nil {
+			return in, err
+		}
+		in.B, err = p.parseValueRef()
+		if err != nil {
+			return in, err
+		}
+		return in, nil
 
 	case "ffi.call.unsafe":
 		in.Op = OpFFICallUnsafe

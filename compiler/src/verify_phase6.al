@@ -952,6 +952,12 @@ if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_edge(d, 
 oi = oi + 1 } }
 if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a) }
 if x.op == mir_op_vec_grow_checked() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.b) }
+if x.op == mir_op_call_value() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
+var av: U64 = 0
+let atotal = mir_vindex_op_instr_count(indexes, iid)
+while av < atotal { let ao = mir_vindex_op_instr(indexes, iid, av)
+durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, __s0_buffer_get(MirOperandRec, store.operands, ao - 1).value)
+av = av + 1 } }
 if x.op == mir_op_call() { var e = mir_v6_round_effect_start(index, x.target)
 while e != 0 { let effect = mir_v6_round_effect_at(durable, e)
 if effect.kind == mir_v6_effect_result_from() || effect.kind == mir_v6_effect_result_alloc() { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)

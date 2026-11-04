@@ -257,7 +257,7 @@ func TestGenerateRejectsUnsafeExternalNames(t *testing.T) {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			m := mir.NewModule()
-			m.AddImport(name, mir.FuncSig{Result: mir.TypeUnit})
+			m.AddImport(name, mir.FuncSig{Result: mir.TypeUnit, Env: mir.NoType})
 			if _, err := Generate(m); err == nil || !strings.Contains(err.Error(), "C symbol must be a non-reserved C identifier") {
 				t.Fatalf("unsafe C external name %q accepted: %v", name, err)
 			}

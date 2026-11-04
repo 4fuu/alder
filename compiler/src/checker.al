@@ -4486,7 +4486,7 @@ fn check_ordered_static_builtin(d: Domain, state: State, parse: ParseStore, base
     let static_node = __s0_buffer_get(SyntaxRec, parse.nodes, static_link.node - 1)
     if static_node.kind == 24 && node_word(state, static_node, "Set") { identity = 37
         want_args = 1 }
-    if call_link_count(parse, call) != want_args + 1 { return expr_token_fail(d, state, base, 129, call) }
+    if call_link_count(parse, call) != want_args + 1 { return expr_token_fail(d, state, base, 144, call) }
     let key_link = call_link_at(parse, call, 1)
     let resolved_key = try resolve_expression_type(d, state, parse, store, owner, key_link.node)
     var current = match resolved_key {
@@ -4599,7 +4599,7 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
         if node_word(state, callee, "items") { builtin = 42 }
     }
     if builtin == 0 { return expr_token_fail(d, state, base, 61, callee) }
-    if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 129, call) }
+    if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 144, call) }
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 {
         if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
         let local_id = local_lookup(store, owner, receiver_node, state)

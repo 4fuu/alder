@@ -362,13 +362,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 128 { if !out_string("ordered collection element type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
         return out_string(" must be a copyable value") }
     if kind == 129 {
-        if detail_a != 0 || detail_b != 0 {
-            if !out_string("ordered collection operation cannot move values with storage-backed parts yet: ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
-            return out_string("")
-        }
-        if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
-        return out_string(" is used with the wrong argument shape")
+        if !out_string("ordered collection operation cannot move values with storage-backed parts yet: ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+        return out_string("")
     }
+    if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
+        return out_string(" is used with the wrong argument shape") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

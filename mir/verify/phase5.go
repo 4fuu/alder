@@ -335,6 +335,33 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			}
 		}
 
+	case mir.OpCallValue:
+		ft, ok := f.ValueType(in.A)
+		if ok && m.ValidType(ft) && m.Types[ft].Kind == mir.TypeFunction {
+			sig := m.Types[ft].Sig
+			if len(in.Args) != len(sig.Params) {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("call.value: expected %d arguments, got %d", len(sig.Params), len(in.Args))})
+			} else {
+				for j, a := range in.Args {
+					c.expectExact(a, fmt.Sprintf("call.value argument %d", j), sig.Params[j])
+				}
+			}
+		} else {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "call.value function operand must have a function type"})
+		}
+
+	case mir.OpStrEq:
+		ta, _ := f.ValueType(in.A)
+		tb, _ := f.ValueType(in.B)
+		stringLike := func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}
+		if !stringLike(ta) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.eq operands must be string or bytes"})
+		} else if tb != ta {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.eq operands must have the same type"})
+		}
+
 	case mir.OpFFICallUnsafe:
 		if int(in.FFIImport) < len(m.Imports) {
 			imp := &m.Imports[in.FFIImport]

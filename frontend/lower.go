@@ -80,7 +80,7 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 		for _, p := range sig.Params {
 			params = append(params, l.ty(p))
 		}
-		m.AddImport(imp.Name, mir.FuncSig{Params: params, Result: l.ty(sig.Result)})
+		m.AddImport(imp.Name, mir.FuncSig{Params: params, Result: l.ty(sig.Result), Env: mir.NoType})
 	}
 	// Pass 1: function skeletons in instantiation order.
 	for _, cf := range cm.fns {

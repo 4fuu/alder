@@ -336,6 +336,12 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(" @" + importName(m, in.FFIImport) + "(")
 		printArgs(b, f, in.Args)
 		b.WriteString(")")
+	case OpCallValue:
+		b.WriteString(" " + valueName(f, in.A) + "(")
+		printArgs(b, f, in.Args)
+		b.WriteString(")")
+	case OpStrEq:
+		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 	}
 	b.WriteString("\n")
 }

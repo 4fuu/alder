@@ -12,8 +12,11 @@ const (
 	AllocCheckedFormatVersion = 3
 	// VecFormatVersion introduced vec(T) and its minimal operations.
 	VecFormatVersion = 4
+	// ClosureFormatVersion introduced function-type environments, call.value,
+	// and str.eq.
+	ClosureFormatVersion = 5
 	// CurrentFormatVersion is the format emitted by newly constructed modules.
-	CurrentFormatVersion = VecFormatVersion
+	CurrentFormatVersion = ClosureFormatVersion
 )
 
 // Module is a complete MIR unit: type declarations, imported C declarations,

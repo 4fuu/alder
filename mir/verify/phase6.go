@@ -538,6 +538,14 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 				}
 			}
 		}
+	case mir.OpCallValue:
+		// The callee is unknown at verification time, so the result is
+		// conservatively derived from the function value (its environment may
+		// carry provenance) and from every argument.
+		merge(in.A)
+		for _, a := range in.Args {
+			merge(a)
+		}
 	}
 	return changed
 }

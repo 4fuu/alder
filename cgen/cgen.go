@@ -422,9 +422,17 @@ func (g *gen) emitTypes(b *strings.Builder) {
 	}
 	if hasString {
 		b.WriteString("typedef struct { const uint8_t *data; uint64_t len; } AlderString;\n")
+		b.WriteString("static bool ALDER_MAYBE_UNUSED alder_string_eq(AlderString alder_a, AlderString alder_b) {\n")
+		b.WriteString("  if (alder_a.len != alder_b.len) { return false; }\n")
+		b.WriteString("  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
+		b.WriteString("}\n")
 	}
 	if hasBytes {
 		b.WriteString("typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n")
+		b.WriteString("static bool ALDER_MAYBE_UNUSED alder_bytes_eq(AlderBytes alder_a, AlderBytes alder_b) {\n")
+		b.WriteString("  if (alder_a.len != alder_b.len) { return false; }\n")
+		b.WriteString("  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
+		b.WriteString("}\n")
 	}
 	if hasString || hasBytes {
 		b.WriteByte('\n')
@@ -494,6 +502,9 @@ func typeDependencies(ty *mir.Type) []mir.TypeId {
 	case mir.TypeFunction:
 		out = append(out, ty.Sig.Params...)
 		out = append(out, ty.Sig.Result)
+		if ty.Sig.Env != mir.NoType {
+			out = append(out, ty.Sig.Env)
+		}
 	}
 	return out
 }
@@ -512,7 +523,12 @@ func (g *gen) emitFunctionType(b *strings.Builder, id mir.TypeId, sig mir.FuncSi
 	if len(params) == 0 {
 		params = append(params, "void")
 	}
-	b.WriteString("typedef " + ret + " (*AlderFnTy" + strconv.Itoa(int(id)) + ")(" + strings.Join(params, ", ") + ");\n")
+	// A function value is {code, env}: the code pointer takes the declared
+	// parameters plus the opaque environment pointer, so closures and plain
+	// function references share one ABI. Env-less functions pass NULL.
+	b.WriteString("typedef struct AlderFnTy" + strconv.Itoa(int(id)) + " AlderFnTy" + strconv.Itoa(int(id)) + ";\n")
+	b.WriteString("typedef " + ret + " (*AlderFnTy" + strconv.Itoa(int(id)) + "_code)(" + strings.Join(params, ", ") + ", void *alder_env);\n")
+	b.WriteString("struct AlderFnTy" + strconv.Itoa(int(id)) + " { AlderFnTy" + strconv.Itoa(int(id)) + "_code code; void *env; };\n")
 }
 
 func (g *gen) emitStruct(b *strings.Builder, id mir.TypeId, ty *mir.Type) {

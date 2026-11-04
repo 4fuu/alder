@@ -157,7 +157,7 @@ fn lower_cgen_verified(d: Domain, mir: MirStore, verified: MirVerifyCompleteOutp
 }
 fn lower_emit(d: Domain, mir: MirStore) -> I32 {
     if host_path_is(0, "!alder-core-cgen-resources") {
-        return match mir_verify_complete(d, mir, 4, false) {
+        return match mir_verify_complete(d, mir, 5, false) {
             Err(error) => 3
             Ok(verified) => lower_cgen_verified(d, mir, verified)
         }

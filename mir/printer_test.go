@@ -109,7 +109,7 @@ func TestPrintDeterministic(t *testing.T) {
 
 func TestPrintModuleSections(t *testing.T) {
 	m := NewModule()
-	if got := Print(m); got != "mir 4\n" {
+	if got := Print(m); got != "mir 5\n" {
 		t.Errorf("empty module printed %q", got)
 	}
 	m.AddConst("k", TypeI64, ConstValue{Kind: ConstInt, Int: -5})
@@ -118,7 +118,7 @@ func TestPrintModuleSections(t *testing.T) {
 	m.AddConst("s", m.String(), ConstValue{Kind: ConstString, String: "he\"llo"})
 	m.AddConst("u", TypeUnit, ConstValue{Kind: ConstUnit})
 	got := Print(m)
-	want := "mir 4\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: string = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
+	want := "mir 5\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: string = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
 	if got != want {
 		t.Errorf("const printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -144,8 +144,65 @@ func TestPrintTerminators(t *testing.T) {
 	bb2.SetTerm(Terminator{Kind: TermUnreachable})
 
 	got := Print(m)
-	want := "mir 4\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
+	want := "mir 5\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
 	if got != want {
 		t.Errorf("terminator printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestPrintClosureFormat(t *testing.T) {
+	text := `mir 5
+
+type @Env {
+  n: u64
+}
+
+const @c_one: u64 = 1
+
+fn @apply(%f: function(fn(u64) -> u64, @Env), %x: u64) -> u64 {
+bb0:
+  %r = call.value %f(%x)
+  return %r
+}
+
+fn @plain(%g: function(fn(u64) -> u64)) -> u64 {
+bb0:
+  %one = const.get @c_one
+  %r = call.value %g(%one)
+  return %r
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatalf("parse closure format: %v", err)
+	}
+	again := Print(m)
+	if again != text {
+		t.Fatalf("closure format round trip:\n--- got ---\n%s\n--- want ---\n%s", again, text)
+	}
+	m2, err := Parse(again)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if _, ok := m2.Function("apply"); !ok {
+		t.Fatal("apply missing after round trip")
+	}
+}
+
+func TestPrintStrEq(t *testing.T) {
+	text := `mir 5
+
+fn @same(%a: string, %b: string) -> bool {
+bb0:
+  %r = str.eq %a, %b
+  return %r
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatalf("parse str.eq: %v", err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("str.eq round trip:\n%s", got)
 	}
 }

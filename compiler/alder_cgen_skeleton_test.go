@@ -136,7 +136,9 @@ struct AlderTy14 {
   } alder_u;
   uint32_t alder_tag;
 };
-typedef bool (*AlderFnTy15)(AlderTy12);
+typedef struct AlderFnTy15 AlderFnTy15;
+typedef bool (*AlderFnTy15_code)(AlderTy12, void *alder_env);
+struct AlderFnTy15 { AlderFnTy15_code code; void *env; };
 /* unit constant alder_const_0 has no storage. */
 static ALDER_MAYBE_UNUSED const bool alder_const_1 = true;
 static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854775807LL - 1);
@@ -186,7 +188,9 @@ struct AlderTy14 {
   } alder_u;
   uint32_t alder_tag;
 };
-typedef bool (*AlderFnTy15)(AlderTy12);
+typedef struct AlderFnTy15 AlderFnTy15;
+typedef bool (*AlderFnTy15_code)(AlderTy12, void *alder_env);
+struct AlderFnTy15 { AlderFnTy15_code code; void *env; };
 /* unit constant alder_const_0 has no storage. */
 static ALDER_MAYBE_UNUSED const bool alder_const_1 = true;
 static ALDER_MAYBE_UNUSED const int64_t alder_const_2 = (int64_t)(-9223372036854775807LL - 1);
@@ -255,7 +259,9 @@ func runCgenSkeletonConformance(t *testing.T, cc, root, exe string) {
 		"typedef struct AlderTy12 AlderTy12;",
 		"struct AlderTy13 {",
 		"struct AlderTy12 {",
-		"typedef bool (*AlderFnTy15)(AlderTy12);",
+		"typedef struct AlderFnTy15 AlderFnTy15;",
+		"typedef bool (*AlderFnTy15_code)(AlderTy12, void *alder_env);",
+		"struct AlderFnTy15 { AlderFnTy15_code code; void *env; };",
 		"alder_fn_ns_helper_0(void);",
 		"AlderTy12 (foreign_call)(AlderFnTy15);",
 		"alder_const_2 = (int64_t)(-9223372036854775807LL - 1);",

@@ -62,7 +62,7 @@ func FuncSigOf(f *mir.Function) mir.FuncSig {
 	for i, p := range f.Params {
 		params[i] = p.Type
 	}
-	return mir.FuncSig{Params: params, Result: f.Result}
+	return mir.FuncSig{Params: params, Result: f.Result, Env: mir.NoType}
 }
 
 func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {

@@ -190,6 +190,8 @@ fn mir_validate_types(store: MirStore) -> Bool {
                 }
                 if rec.kind == mir_type_kind_function() {
                     if !mir_type_valid(store, rec.result_type) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 { return false }
+                    let param_count = mir_type_part_count(store, id, mir_type_part_function_param())
+                    if mir_type_part_count(store, id, mir_type_part_function_env()) > 1 { return false }
                     if rec.part_count == 0 {
                         if rec.first_part != 0 { return false }
                     } else {
@@ -197,11 +199,16 @@ fn mir_validate_types(store: MirStore) -> Bool {
                         var part_at: U64 = 0
                         while part_at < rec.part_count {
                             let part = __s0_buffer_get(MirTypePartRec, store.type_parts, rec.first_part - 1 + part_at)
-                            if part.kind != mir_type_part_function_param() || part.owner != id || part.ordinal != part_at { return false }
+                            if part.owner != id { return false }
+                            if part.kind == mir_type_part_function_env() {
+                                if part_at != param_count || part.ordinal != 0 { return false }
+                            } else {
+                                if part.kind != mir_type_part_function_param() || part.ordinal != part_at { return false }
+                            }
                             part_at = part_at + 1
                         }
                     }
-                    if mir_type_part_count(store, id, mir_type_part_function_param()) != rec.part_count { return false }
+                    if param_count > rec.part_count { return false }
                 }
                 if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() || rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() {
                     if rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
@@ -228,7 +235,10 @@ fn mir_validate_types(store: MirStore) -> Bool {
         if part.kind == mir_type_part_function_param() {
             if owner.kind != mir_type_kind_function() || part.name_start != 0 || part.name_end != 0 { return false }
         }
-        if part.kind < mir_type_part_field() || part.kind > mir_type_part_function_param() { return false }
+        if part.kind == mir_type_part_function_env() {
+            if owner.kind != mir_type_kind_function() || part.name_start != 0 || part.name_end != 0 { return false }
+        }
+        if part.kind < mir_type_part_field() || part.kind > mir_type_part_function_env() { return false }
         at = at + 1
     }
     return true
@@ -340,15 +350,19 @@ fn mir_instruction_operands_valid(store: MirStore, id: U64, rec: MirInstrRec) ->
         if !mir_value_valid(store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op) { return false }
     }
     if rec.op == mir_op_const_get() && !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
-    if (rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe()) && !mir_operand_group_valid(store, mir_operand_instruction(), id, 0) { return false }
+    if (rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() || rec.op == mir_op_call_value()) && !mir_operand_group_valid(store, mir_operand_instruction(), id, 0) { return false }
     return true
 }
 
 fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_array_as_slice() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
+    if rec.op > mir_op_str_eq() || !mir_block_valid(store, rec.function, rec.block) || !mir_instruction_operands_valid(store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
+    if rec.op == mir_op_call_value() && mir_value_valid(store, rec.function, rec.a) {
+        let ft = __s0_buffer_get(MirValueRec, store.values, rec.a - 1).value_type
+        if ft >= 1 && ft <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, ft - 1).kind == mir_type_kind_function() && __s0_buffer_get(MirTypeRec, store.types, ft - 1).result_type == mir_type_unit() { may_omit_result = true }
+    }
     if mir_instr_produces(rec.op) && !may_omit_result {
         if !mir_value_valid(store, rec.function, rec.result) { return false }
     }
@@ -596,7 +610,7 @@ fn mir_validate_operands(store: MirStore) -> Bool {
 }
 
 fn mir_store_valid(store: MirStore) -> Bool {
-    if mir_format_version() != 4 || !mir_validate_types(store) || !mir_validate_declarations(store) || !mir_validate_functions(store) || !mir_validate_places(store) { return false }
+    if mir_format_version() != 5 || !mir_validate_types(store) || !mir_validate_declarations(store) || !mir_validate_functions(store) || !mir_validate_places(store) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
@@ -757,13 +771,18 @@ fn mir_out_type(store: MirStore, id: U64, depth: U64) -> Bool {
     if rec.kind == mir_type_kind_vec() { return out_string("vec(") && mir_out_type(store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_function() {
         if !out_string("function(fn(") { return false }
+        let param_count = mir_type_part_count(store, id, mir_type_part_function_param())
         var ordinal: U64 = 0
-        while ordinal < rec.part_count {
+        while ordinal < param_count {
             if ordinal > 0 && !out_string(", ") { return false }
             if !mir_out_type_part_type(store, id, mir_type_part_function_param(), ordinal, depth - 1) { return false }
             ordinal = ordinal + 1
         }
-        return out_string(") -> ") && mir_out_type(store, rec.result_type, depth - 1) && out(41)
+        if !out_string(") -> ") || !mir_out_type(store, rec.result_type, depth - 1) { return false }
+        if mir_type_part_count(store, id, mir_type_part_function_env()) != 0 {
+            if !out_string(", ") || !mir_out_type_part_type(store, id, mir_type_part_function_env(), 0, depth - 1) { return false }
+        }
+        return out(41)
     }
     return false
 }
@@ -892,6 +911,8 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 49 { return out_string("float.from_int") }
     if op == 50 { return out_string("const.get") }
     if op == 51 { return out_string("call") }
+    if op == 65 { return out_string("call.value") }
+    if op == 66 { return out_string("str.eq") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -999,6 +1020,12 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         }
         if rec.op == mir_op_ffi_call_unsafe() && !mir_out_import_name(store, rec.target) { return false }
         if !out(40) || !mir_out_operand_values(store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
+    }
+    if rec.op == mir_op_call_value() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out(40) || !mir_out_operand_values(store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
+    }
+    if rec.op == mir_op_str_eq() {
+        if !out(32) || !mir_out_value(store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(store, rec.function, rec.b) { return false }
     }
     return out(10)
 }

@@ -7,7 +7,7 @@
 // Builders append but do not validate or normalize records, so rejection tests
 // may construct malformed raw stores.
 
-fn mir_format_version() -> U64 { return 4 }
+fn mir_format_version() -> U64 { return 5 }
 
 // TypeKind values match mir/types.go exactly. Primitive Type IDs are external
 // IDs 1..12 in the fixed Go order unit, bool, i8, i16, i32, i64, u8, u16,
@@ -51,6 +51,7 @@ fn mir_primitive_type_count() -> U64 { return 12 }
 fn mir_type_part_field() -> U64 { return 1 }
 fn mir_type_part_variant() -> U64 { return 2 }
 fn mir_type_part_function_param() -> U64 { return 3 }
+fn mir_type_part_function_env() -> U64 { return 4 }
 
 fn mir_const_unit() -> U64 { return 0 }
 fn mir_const_bool() -> U64 { return 1 }
@@ -136,6 +137,8 @@ fn mir_op_vec_storage() -> U64 { return 61 }
 fn mir_op_vec_as_slice() -> U64 { return 62 }
 fn mir_op_vec_as_mut_slice() -> U64 { return 63 }
 fn mir_op_array_as_slice() -> U64 { return 64 }
+fn mir_op_call_value() -> U64 { return 65 }
+fn mir_op_str_eq() -> U64 { return 66 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

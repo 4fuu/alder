@@ -86,6 +86,8 @@ const (
 	OpVecAsSlice
 	OpVecAsMutSlice
 	OpArrayAsSlice
+	OpCallValue
+	OpStrEq
 )
 
 // String returns the canonical textual name of the operation.
@@ -221,6 +223,10 @@ func (k OpKind) String() string {
 		return "vec.as_mut_slice"
 	case OpArrayAsSlice:
 		return "array.as_slice"
+	case OpCallValue:
+		return "call.value"
+	case OpStrEq:
+		return "str.eq"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
