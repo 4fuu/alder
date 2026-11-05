@@ -1132,8 +1132,15 @@ both halves were written):
   and whole-vector assignment inside a `while` body fail phase-5/phase-6
   verification even without the rule — a pre-existing lowering gap to fix
   before the loop case can move;
-- a compiler-scale layered DAG input over traits, generics, and closures that
-  terminates with deterministic diagnostics, MIR, and C.
+- a compiler-scale layered DAG input over traits, generics, and closures
+  that terminates with deterministic diagnostics, MIR, and C — landed: one
+  generic trait with a defaulted method implemented by eight record types,
+  and thirty-two constrained generic layers instantiating each other two
+  ways (layer i calls i+1 and i+2, 256 instances), with closures
+  snapshotting locals and threading through a function-typed helper; MIR,
+  C, and rejection diagnostics are byte-identical across processes and
+  across source/CLI permutations, and the generated C runs under strict
+  C11.
 
 Integrated tip timing (cold `bootstrap/regenerate.sh`): 2:40 / 4.89 GiB,
 against the 2:07 / 3.78 GiB pre-milestone baseline. Each commit's growth
