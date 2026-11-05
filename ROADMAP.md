@@ -920,7 +920,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.5: Static Abstraction, Resources, and Identity
 
-Status: **in progress (the static-abstraction and resource/identity halves land as parallel slices; ordered `Map`/`Set`, closures, and function values are still ahead)**
+Status: **in progress (both implementation halves are integrated; the items under "Remaining before exit" below, including those added by the 2026-11 design amendment, are still ahead)**
 
 Complete the remaining 1.0 language and memory model from
 [Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md),
@@ -946,7 +946,8 @@ Exit-criteria evidence (in progress):
 
 - the static-abstraction half adds `trait`/`where`/`impl Trait(...) for`
   declaration checking with builtin standard-trait names
-  (`Eq`, `Hash`, `Iterator`, `IntoIterator`, `Cleanup`, `AsyncCleanup`),
+  (`Eq`, `Hash`, `Iterator`, `IntoIterator`, `Cleanup`, and an
+  `AsyncCleanup` that the design amendment removes; see below),
   per-unit coherence over a once-built sorted impl index, `Self` resolution,
   and constraint-gated generic instantiation and concrete applications;
 - the dispatch half resolves dot-calls to inherent methods first and then to
@@ -1082,9 +1083,7 @@ Deferred from this half, with reasons:
   (`lifetime_deref_store`) rejects storing a table handle through a deref
   place, so heap-stored table elements await a storage decision; diagnostic
   143 keeps the surface honest in the meantime;
-- `AsyncCleanup` suspension and cancellation behavior: deferred to
-  Milestone 9 as planned; this milestone ships only its type, affinity, and
-  synchronous-`using` exclusion rules.
+- suspending cleanup behavior: deferred to Milestone 9 as planned.
 
 Compile-time guardrails (cold `bootstrap/regenerate.sh`, 8-core host):
 2a96d07 2:08 / 3.78 GiB; sibling trait commits through `77437ec`
@@ -1095,6 +1094,24 @@ the stage-0 self-compile process itself (gcc on the emitted C peaks at
 (2.5-3.4 KB RSS per added source byte against a 2.5 KB baseline). No
 whole-store scan or copy amplification is present: the regenerator stays in
 its 2.5-minute class, far inside the 15-minute CI budget.
+
+Remaining before exit (as of the integration of both halves; the first three
+were added to this milestone by the 2026-11 design amendment, which landed
+after both halves were written):
+
+- remove the builtin `AsyncCleanup` trait and its diagnostics 138/139: the
+  amended design has a single `Cleanup` trait whose hook may suspend when its
+  owner holds a suspending capability;
+- `match` guards (D018);
+- the in-place-when-unique update rule with per-site copy reporting (D023);
+- a compiler-scale layered DAG input over traits, generics, and closures that
+  terminates with deterministic diagnostics, MIR, and C;
+- defaulted methods on generic traits, which still reject with 120.
+
+Integrated tip timing (cold `bootstrap/regenerate.sh`): 2:40 / 4.89 GiB,
+against the 2:07 / 3.78 GiB pre-milestone baseline. Each commit's growth
+stayed proportional to the compiler's own source size; profiling the
+self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
