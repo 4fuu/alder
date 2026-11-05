@@ -109,8 +109,8 @@ fn cgen_emit_function_type(d: Domain, initial: CgenWriter, store: MirStore, id: 
         }
         ordinal = ordinal + 1
     }
-    if !wrote { out = try cgen_put(d, out, "void") }
-    out = try cgen_put(d, out, ", void *alder_env);\nstruct AlderFnTy")
+    if wrote { out = try cgen_put(d, out, ", ") }
+    out = try cgen_put(d, out, "void *alder_env);\nstruct AlderFnTy")
     out = try cgen_put_u64(d, out, id - 1)
     out = try cgen_put(d, out, " { AlderFnTy")
     out = try cgen_put_u64(d, out, id - 1)

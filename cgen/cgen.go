@@ -378,6 +378,13 @@ func (g *gen) emitFnValueWrappers(b *strings.Builder) {
 			}
 			args = append(args, "alder_p"+strconv.Itoa(i))
 		}
+		// A closure thunk takes one trailing environment parameter beyond the
+		// function type's declared parameters: the wrapper adapts the opaque
+		// void * environment to the thunk's reference parameter.
+		callee := g.m.Functions[fnID]
+		if callee != nil && len(callee.Params) == len(params)+1 {
+			args = append(args, "("+g.cType(callee.Params[len(callee.Params)-1].Type)+"){ alder_env, (uint64_t)1 }")
+		}
 		call := g.fnName(fnID) + "(" + strings.Join(args, ", ") + ")"
 		if sig.Result == mir.TypeUnit {
 			b.WriteString("  " + call + ";\n}\n")
@@ -574,14 +581,16 @@ func (g *gen) emitFunctionType(b *strings.Builder, id mir.TypeId, sig mir.FuncSi
 			params = append(params, g.cType(param))
 		}
 	}
-	if len(params) == 0 {
-		params = append(params, "void")
-	}
 	// A function value is {code, env}: the code pointer takes the declared
 	// parameters plus the opaque environment pointer, so closures and plain
 	// function references share one ABI. Env-less functions pass NULL.
+	paramList := strings.Join(params, ", ")
+	if len(params) != 0 {
+		paramList += ", "
+	}
+	paramList += "void *alder_env"
 	b.WriteString("typedef struct AlderFnTy" + strconv.Itoa(int(id)) + " AlderFnTy" + strconv.Itoa(int(id)) + ";\n")
-	b.WriteString("typedef " + ret + " (*AlderFnTy" + strconv.Itoa(int(id)) + "_code)(" + strings.Join(params, ", ") + ", void *alder_env);\n")
+	b.WriteString("typedef " + ret + " (*AlderFnTy" + strconv.Itoa(int(id)) + "_code)(" + paramList + ");\n")
 	b.WriteString("struct AlderFnTy" + strconv.Itoa(int(id)) + " { AlderFnTy" + strconv.Itoa(int(id)) + "_code code; void *env; };\n")
 }
 

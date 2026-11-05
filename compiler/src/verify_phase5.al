@@ -322,11 +322,14 @@ return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.func
     if x.op == mir_op_str_eq() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
     if x.op == mir_op_fn_value() { if x.target == 0 || x.target > __s0_buffer_len(MirFunctionRec, store.functions) { return MirVTypeResult(valid: false, type_id: 0) }
 let callee = __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1)
-let param_total = mir_v5_function_param_count(store, indexes, x.target)
-var env_type: U64 = 0
-if x.a != 0 { env_type = ta
-if env_type == 0 { return MirVTypeResult(valid: false, type_id: 0) } }
-let found = mir_v5_find_function_type(store, indexes, x.target, param_total, callee.result_type, env_type)
+var param_total = mir_v5_function_param_count(store, indexes, x.target)
+// The function value's type erases the environment: {code, env} values
+// carry the environment opaquely, and closures and plain references of the
+// same signature share one value type. A closure thunk's trailing parameter
+// is the environment record supplied by the environment operand, not by
+// callers of the function value.
+if x.a != 0 && param_total > 0 { param_total = param_total - 1 }
+let found = mir_v5_find_function_type(store, indexes, x.target, param_total, callee.result_type, 0)
 return MirVTypeResult(valid: found != 0, type_id: found) }
     if x.op == mir_op_ffi_call_unsafe() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, true), type_id: __s0_buffer_get(MirImportRec, store.imports, x.target - 1).result_type) }
     return MirVTypeResult(valid: false, type_id: 0)

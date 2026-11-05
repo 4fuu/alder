@@ -388,14 +388,157 @@ fn parse_array_literal(d: Domain, state: State, initial: ParseCursor, depth: U64
     return Ok(Parsed(node))
 }
 
+// A closure literal shares its opening `fn (...)` with the function type.
+// Scanning the balanced parameter list decides: a `:` at nesting depth one
+// introduces a named parameter (types never name parameters), and after the
+// closing parenthesis a closure body starts with `=>` or `{`, while the type
+// form continues with `->` alone.
+fn closure_literal_ahead(state: State, initial: ParseCursor) -> Bool {
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    if !token_punct(state, cursor, "(") { return false }
+    var depth: U64 = 1
+    var named = false
+    var scanning = true
+    while scanning {
+        let token = parse_token(state, ParseCursor(token: cursor.token + 1, store: cursor.store))
+        if token.kind == 0 { return false }
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        if token.kind == 5 {
+            if token_text(state, token, "(") { depth = depth + 1 }
+            if token_text(state, token, ")") {
+                depth = depth - 1
+                if depth == 0 { scanning = false }
+            }
+            if depth == 1 && token_text(state, token, ":") { named = true }
+        }
+    }
+    let after = parse_token(state, ParseCursor(token: cursor.token + 1, store: cursor.store))
+    if after.kind != 5 { return false }
+    if token_text(state, after, "=>") { return true }
+    if token_text(state, after, "{") { return true }
+    if token_text(state, after, "->") {
+        if named { return true }
+        // An annotated braced closure continues with `{` after the result
+        // type; the bare type form ends there. Scan the result type's token
+        // extent and look one token past it.
+        var scan = cursor.token + 2
+        var nest: U64 = 0
+        var scanning_type = true
+        while scanning_type {
+            let step = parse_token(state, ParseCursor(token: scan, store: cursor.store))
+            if step.kind == 0 { return false }
+            if nest == 0 && step.kind == 5 {
+                if token_text(state, step, "(") || token_text(state, step, "[") { nest = nest + 1 }
+                else { if token_text(state, step, "{") { return true }
+                    if token_text(state, step, ",") { scan = scan + 1 } else {
+                    if token_text(state, step, "=>") { return true }
+                    return false } }
+            } else {
+                if nest != 0 && step.kind == 5 {
+                    if token_text(state, step, "(") || token_text(state, step, "[") { nest = nest + 1 }
+                    if token_text(state, step, ")") || token_text(state, step, "]") { nest = nest - 1 }
+                }
+            }
+            scan = scan + 1
+        }
+        return false
+    }
+    return false
+}
+
+// `fn (name: Type, ...) => expr` and `fn (name: Type, ...) -> R { ... }` are
+// closure literals (kind 58). Children are the kind-13 parameter nodes, the
+// result type node when annotated, and the body (an expression for the arrow
+// form, a kind-14 block for the braced form).
+fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    let open = try expect_punct(d, state, cursor, "(")
+    if parse_step_bad(open) { return Ok(open) }
+    cursor = parse_step_cursor(open)
+    var children: U64 = 0
+    if !token_punct(state, cursor, ")") {
+        var more = true
+        while more {
+            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            let param = parse_token(state, cursor)
+            let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            let colon = try expect_punct(d, state, colon_cursor, ":")
+            if parse_step_bad(colon) { return Ok(colon) }
+            cursor = parse_step_cursor(colon)
+            let ty = try parse_type(d, state, cursor)
+            if parse_step_bad(ty) { return Ok(ty) }
+            let tv = parse_step_value(ty)
+            let linked = try add_link(d, tv.cursor, tv.node, 0)
+            let pnode = try add_syntax(d, linked, 13, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+            cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, ")") { more = false }
+            } else { more = false }
+        }
+    }
+    let close = try expect_punct(d, state, cursor, ")")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    if token_punct(state, cursor, "=>") {
+        let body = try parse_expression(d, state, ParseCursor(token: cursor.token + 1, store: cursor.store), depth)
+        if parse_step_bad(body) { return Ok(body) }
+        let value = parse_step_value(body)
+        // The arrow body is an implicit return statement inside a block, so
+        // the closure node has the same [params..., (result)?, block] shape
+        // as the braced form and checks through the ordinary function-body
+        // path.
+        let wrapped = try add_link(d, value.cursor, value.node, 0)
+        let statement = try add_syntax(d, wrapped, 18, value.cursor.token + 1, start.source, start.start, __s0_buffer_get(SyntaxRec, wrapped.store.nodes, value.node - 1).end, 0, 0, __s0_buffer_len(SyntaxLinkRec, wrapped.store.links))
+        let block_linked = try add_link(d, statement.cursor, statement.node, 0)
+        let block = try add_syntax(d, block_linked, 14, value.cursor.token + 1, start.source, start.start, __s0_buffer_get(SyntaxRec, block_linked.store.nodes, value.node - 1).end, 0, 0, __s0_buffer_len(SyntaxLinkRec, block_linked.store.links))
+        cursor = try add_link(d, block.cursor, block.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, block.node - 1).end
+        let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
+        return Ok(Parsed(node))
+    }
+    if token_punct(state, cursor, "->") {
+        let result = try parse_type(d, state, ParseCursor(token: cursor.token + 1, store: cursor.store))
+        if parse_step_bad(result) { return Ok(result) }
+        let rv = parse_step_value(result)
+        cursor = try add_link(d, rv.cursor, rv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let block = try parse_block(d, state, cursor)
+        if parse_step_bad(block) { return Ok(block) }
+        let bv = parse_step_value(block)
+        cursor = try add_link(d, bv.cursor, bv.node, children)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
+        let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
+        return Ok(Parsed(node))
+    }
+    let block = try parse_block(d, state, cursor)
+    if parse_step_bad(block) { return Ok(block) }
+    let bv = parse_step_value(block)
+    cursor = try add_link(d, bv.cursor, bv.node, children)
+    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
+    let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
+    return Ok(Parsed(node))
+}
+
 fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
     if depth > parse_depth_limit() { return parse_depth_reject(d, state, initial) }
     // `fn(A, B) -> R` is the function type and may appear wherever a type
-    // expression is an operand; parse_type builds the same node kind.
+    // expression is an operand; parse_type builds the same node kind. A
+    // closure literal also starts with `fn (...)`, so the parenthesized list
+    // is scanned ahead: named parameters or a body introducer mean a
+    // closure (kind 58), otherwise it is the type form.
     if token.kind == 1 && token.keyword == 4 {
         let next = ParseCursor(token: initial.token + 1, store: initial.store)
-        if token_punct(state, next, "(") { return parse_type(d, state, initial) }
+        if token_punct(state, next, "(") {
+            if closure_literal_ahead(state, initial) { return parse_closure(d, state, initial, depth) }
+            return parse_type(d, state, initial)
+        }
     }
     if token.keyword == 13 { return parse_match(d, state, initial, depth) }
     if token.keyword == 19 { return parse_unsafe_c(d, state, initial, depth) }

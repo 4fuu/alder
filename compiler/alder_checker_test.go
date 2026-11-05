@@ -45,7 +45,7 @@ fn checker_parsed(d: Domain, result: ParseResult, store: CheckStore) -> I32 { re
  ParseBad(output) => checker_parse_bad(output.state, output.store)
  ParseLexBad(output) => checker_lex_bad(output.state)
 } }
-fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match empty_trait_store(d) { Err(e) => 3 Ok(traits) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b, traits: traits)) } } } } } } } } } } } } } }
+fn ci_diag(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec), returns: __s0_Buffer(CheckedReturnRec)) -> I32 { return match __s0_buffer_new(CheckedBlockRec, d) { Err(e) => 3 Ok(blocks) => match __s0_buffer_new(CheckedStatementLinkRec, d) { Err(e) => 3 Ok(links) => match __s0_buffer_new(CheckedStatementRec, d) { Err(e) => 3 Ok(statements) => match __s0_buffer_new(CheckedPlaceRec, d) { Err(e) => 3 Ok(places) => match __s0_buffer_new(CheckedMatchRec, d) { Err(e) => 3 Ok(matches) => match __s0_buffer_new(CheckedMatchArmRec, d) { Err(e) => 3 Ok(arms) => match __s0_buffer_new(CheckedTryRec, d) { Err(e) => 3 Ok(tries) => match __s0_buffer_new(CheckedCleanupRec, d) { Err(e) => 3 Ok(cleanups) => match __s0_buffer_new(CheckDiagRec, d) { Err(e) => 3 Ok(b) => match __s0_buffer_new(CheckerUseIndexRec, d) { Err(e) => 3 Ok(use_indexes) => match __s0_buffer_new(U64, d) { Err(e) => 3 Ok(use_order) => match empty_trait_store(d) { Err(e) => 3 Ok(traits) => match empty_closure_store(d) { Err(e) => 3 Ok(closures) => match parse_sources(d, state, parse) { Err(e) => 3 Ok(r) => checker_parsed(d, r, CheckStore(symbols: symbols, type_params: params, types: types, type_args: args, type_annotations: annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: envs, expressions: exprs, call_annotations: calls, expression_children: children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups), diagnostics: b, traits: traits, closures: closures)) } } } } } } } } } } } } } } }
 fn ci_returns(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec), children: __s0_Buffer(CheckedExprChildRec)) -> I32 { return match __s0_buffer_new(CheckedReturnRec, d) { Err(e) => 3 Ok(b) => ci_diag(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,children,b) } }
 fn ci_children(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec), calls: __s0_Buffer(CallAnnotationRec)) -> I32 { return match __s0_buffer_new(CheckedExprChildRec, d) { Err(e) => 3 Ok(b) => ci_returns(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,calls,b) } }
 fn ci_calls(d: Domain, state: State, parse: ParseStore, symbols: __s0_Buffer(SymbolRec), params: __s0_Buffer(TypeParamRec), types: __s0_Buffer(CheckedTypeRec), args: __s0_Buffer(U64), annotations: __s0_Buffer(CheckedTypeAnnotationRec), uses: __s0_Buffer(DeclTypeUseRec), locals: __s0_Buffer(LocalRec), envs: __s0_Buffer(EnvironmentRec), exprs: __s0_Buffer(CheckedExprRec)) -> I32 { return match __s0_buffer_new(CallAnnotationRec, d) { Err(e) => 3 Ok(b) => ci_children(d,state,parse,symbols,params,types,args,annotations,uses,locals,envs,exprs,b) } }
@@ -1968,6 +1968,27 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 	}
 	ordinals := make(map[[2]int]int)
+	// Closure captures: a thunk's role-5 use deliberately sits on the node
+	// of the captured binding in the enclosing function, so a node can back
+	// both the enclosing local and one thunk capture use.
+	localSyntaxOwners := make(map[int]map[int]bool)
+	for _, local := range m.locals {
+		if localSyntaxOwners[local.syntax] == nil {
+			localSyntaxOwners[local.syntax] = make(map[int]bool)
+		}
+		localSyntaxOwners[local.syntax][local.owner] = true
+	}
+	captureAliased := make(map[int]bool)
+	for _, use := range m.uses {
+		if use.role != 5 {
+			continue
+		}
+		for owner := range localSyntaxOwners[use.node] {
+			if owner != use.owner {
+				captureAliased[use.node] = true
+			}
+		}
+	}
 	for i, use := range m.uses {
 		key := [2]int{use.owner, use.role}
 		valueless := use.role == 2 && use.syntax == 0 && use.checkedType == 0
@@ -1978,10 +1999,11 @@ func validateCheckerManifest(m checkerManifest) error {
 		}
 		roleMatchesOwner := use.role == 1 && ownerKind == 2 || use.role == 2 && ownerKind == 3 || (use.role == 3 || use.role == 4) && ownerKind == 1 || (use.role == 5 || use.role == 6) && ownerKind == 12 || (use.role == 7 || use.role == 8) && ownerKind == 13
 		instanceUse := use.role == 7 || use.role == 8
-		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 8 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] && !instanceUse || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || !instanceUse && annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
+		captureAlias := use.role == 5 && captureAliased[use.node]
+		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 8 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] && !instanceUse && !captureAlias || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || !instanceUse && annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
 			return fmt.Errorf("invalid declaration type use %+v", use)
 		}
-		if !instanceUse {
+		if !instanceUse && !captureAlias {
 			nodes[use.node] = true
 		}
 		if !valueless {
@@ -2050,7 +2072,7 @@ func validateCheckerManifest(m checkerManifest) error {
 			ownerKind = m.symbols[local.owner-1].kind
 			ownerArity = m.symbols[local.owner-1].arity
 		}
-		sharedParameterSyntax := local.kind == 1 && local.syntax >= 1 && nodes[local.syntax]
+		sharedParameterSyntax := local.kind == 1 && local.syntax >= 1 && (nodes[local.syntax] || captureAliased[local.syntax])
 		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
 		if local.id != i+1 || !validOwner || local.kind < 1 || local.kind > 2 || local.syntax < 1 || nodes[local.syntax] && !sharedParameterSyntax || bodySyntax[[2]int{local.owner, local.syntax}] || local.checkedType < 1 || local.checkedType > len(m.types) || local.kind == 1 && ownerArity < 0 || local.mutable < 0 || local.mutable > 2 || local.kind == 2 && local.mutable > 1 || !validSourceRange(local.source, local.nameStart, local.nameEnd, true) || bindingEnvironments[i] != 1 {
 			return fmt.Errorf("invalid local binding %+v", local)
@@ -2356,6 +2378,12 @@ func validateCheckerManifest(m checkerManifest) error {
 		if expression.kind == 2 {
 			validPayload = expression.parameterUse == 0 && (expression.boolValue == 0 || expression.boolValue == 1) && expression.checkedType >= 1 && expression.checkedType <= len(m.types) && m.types[expression.checkedType-1].kind == 1
 		}
+		if expression.kind == 24 {
+			// Closure creation: parameterUse names the closure site, the
+			// value carries the erased function type, and there are no
+			// runtime children.
+			validPayload = expression.parameterUse >= 1 && expression.boolValue == 0 && expression.left == 0 && expression.right == 0 && expression.operator == 0 && expression.annotation == 0 && expression.firstChild == 0 && expression.childCount == 0 && expression.checkedType >= 1 && expression.checkedType <= len(m.types) && m.types[expression.checkedType-1].kind == 25
+		}
 		if expression.kind == 3 {
 			validPayload = expression.parameterUse == 0 && expression.boolValue == 0 && expression.checkedType >= 1 && expression.checkedType <= len(m.types) && m.types[expression.checkedType-1].kind == 1
 		}
@@ -2525,7 +2553,16 @@ func validateCheckerManifest(m checkerManifest) error {
 			expressionSites[key] = expression.id
 		}
 		validOwner := ownerKind == 12 && ownerArity == 0 || ownerKind == 13
-		if expression.id != i+1 || !validOwner || expression.syntax < 1 || nodes[expression.syntax] || typeSyntax[expression.syntax] || bodySyntax[[2]int{expression.owner, expression.syntax}] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
+		// A closure-creation expression deliberately sits on the closure
+		// node, which also backs its thunk symbol; the closure site links
+		// the two, so the symbol-claim exclusion does not apply to it.
+		symbolBacked := false
+		for _, symbol := range m.symbols {
+			if symbol.node == expression.syntax && symbol.kind == 12 {
+				symbolBacked = true
+			}
+		}
+		if expression.id != i+1 || !validOwner || expression.syntax < 1 || nodes[expression.syntax] && !(expression.kind == 24 && symbolBacked) || typeSyntax[expression.syntax] || bodySyntax[[2]int{expression.owner, expression.syntax}] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
 			return fmt.Errorf("invalid checked expression %+v", expression)
 		}
 		bodySyntax[[2]int{expression.owner, expression.syntax}] = true
@@ -2644,7 +2681,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 144 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 147 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

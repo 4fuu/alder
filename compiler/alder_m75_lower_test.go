@@ -300,6 +300,80 @@ fn main() -> I32 {
 	t.Logf("fn value program exited cleanly under strict C11")
 }
 
+// M7.5 C5b closures: fn-literal expressions with read-only snapshot captures
+// of ordinary values, arrow and braced bodies, and calls through the closure
+// value all lower through fn.value/call.value with environment records and
+// run under strict C11. Alder-only.
+func runAlderClosureLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"closures.al": `type Point {
+    x: U64
+    y: U64
+}
+
+fn build() -> fn(I64) -> Bool {
+    let minimum = 10
+    return fn(value: I64) => value >= minimum
+}
+
+fn main() -> I32 {
+    let accepted = build()
+    if accepted(2) { return 1 }
+    if !accepted(12) { return 2 }
+    let base = Point(x: 3, y: 4)
+    let scaled = fn(p: Point) -> U64 {
+        return p.x * base.x + p.y * base.y
+    }
+    if scaled(Point(x: 2, y: 2)) != 14 { return 3 }
+    let plain = fn(x: U64) => x + 1
+    if plain(41) != 42 { return 4 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"closures.al"})
+	second := runLowerCompiler(t, exe, files, []string{"closures.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("closure MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse closure MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify closure MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("closure MIR has no main function")
+	}
+	generated := runResourceCgenCompilerPublic(t, exe, files, []string{"closures.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "closures.c")
+	program := filepath.Join(dir, "closures.exe")
+	// main owns the closure environment storage, so the hosted entry takes
+	// the root domain.
+	driver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; int32_t status = alder_fn_main_%d(&root); alder_domain_destroy(&root); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of closures: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run closure behavior: %v\n%s", err, output)
+	}
+	t.Logf("closure program exited cleanly under strict C11")
+}
+
 // runResourceCgenCompilerPublic is runResourceCgenCompiler without the
 // private-profile heuristic, for public ordered Map/Set fixtures.
 func runResourceCgenCompilerPublic(t *testing.T, exe string, files map[string]string, order []string) []byte {

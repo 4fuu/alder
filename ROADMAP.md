@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `36ce3d8b1f112daee6c506a488ab4eca04b4567e5c2b788712d909b1a452bdf6`;
+  `7bc9ec1e7f3bba935c7dda8cd42ac48a029774603c867f0f888118e4755eb55b`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `36ce3d8b1f112daee6c506a488ab4eca04b4567e5c2b788712d909b1a452bdf6`.
+  `7bc9ec1e7f3bba935c7dda8cd42ac48a029774603c867f0f888118e4755eb55b`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -992,7 +992,23 @@ Exit-criteria evidence (in progress):
   calls through function-typed bindings lower through `call.value`, pinned
   through generated strict C11 that applies, selects, and invokes function
   values (the indirect-call child count equals the callee plus one child
-  per parameter in the lowering model).
+  per parameter in the lowering model);
+- closures lower end to end: `fn(name: Type, ...) => expr` and
+  `fn(name: Type, ...) -> R { ... }` literals create function values whose
+  read-only snapshots of enclosing `let`/`var` locals ride a
+  compiler-generated thunk (captures are the thunk's hidden trailing
+  immutable parameters, so writes to captures are rejected as parameter
+  immutability and capture types are gated to storage-free ordinary
+  values, diagnostic 145; malformed shapes are rejected with 147). The
+  environment is one domain-allocated record per closure built through
+  `aggregate.construct` plus `copy_to_domain`, so creation stays inside the
+  verifier loop-store rule's domain-provenance discipline; thunks take no
+  hidden domain parameter and the wrapper adapts the opaque environment
+  pointer to the thunk's reference parameter. Nested literals and
+  creation inside a `while` loop are rejected (147) or refused by the
+  phase-6 loop-store rule until runtime-backed environments land, and
+  closure sites, thunks, and erased `fn(params) -> result` value types are
+  pinned through generated strict C11 programs with captures.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

@@ -270,6 +270,65 @@ fn lower_binding_lookup(state: LowerState, binding: U64) -> LowerBindingMapRec {
     return LowerBindingMapRec(binding: 0, mir_id: 0, parameter: 0, initial: 0)
 }
 
+// Index of the closure site owned by symbol `owner`, or zero. Closure sites
+// are few; the scan runs once per function skeleton and once per closure
+// expression, never per expression.
+fn lower_closure_site_for(store: CheckStore, owner: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(ClosureSiteRec, store.closures.sites) {
+        if __s0_buffer_get(ClosureSiteRec, store.closures.sites, at).owner == owner { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+// The checked local id of the owner's ordinal-th kind-1 (parameter-kind)
+// local. Closure captures are the thunk's trailing parameter-kind locals in
+// the same order as the site's capture list.
+fn lower_closure_param_local(store: CheckStore, locals: LowerLocalIndex, owner: U64, ordinal: U64) -> U64 {
+    var start = __s0_buffer_get(U64, locals.starts, owner - 1)
+    let end = __s0_buffer_get(U64, locals.starts, owner)
+    var seen: U64 = 0
+    while start < end {
+        let binding = __s0_buffer_get(U64, locals.ids, start)
+        let local = __s0_buffer_get(LocalRec, store.locals, binding - 1)
+        if local.kind == 1 {
+            if seen == ordinal { return binding }
+            seen = seen + 1
+        }
+        start = start + 1
+    }
+    return 0
+}
+
+// The closure environment record type: one field per capture, named after
+// the captured binding. Built once per closure site and memoized in the
+// value map under a key far above any expression id.
+fn lower_closure_env_key(owner: U64) -> U64 { return owner + 4000000000 }
+
+fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, site: ClosureSiteRec) -> Result(LowerStep, __s0_Error) {
+    let prior = lower_keyed_domain_value(state, lower_closure_env_key(site.owner))
+    if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
+    let named = try mir_add_named_type(d, state.mir, mir_type_kind_aggregate(), try lower_decimal_name(d, "AlderClosureEnv_", site.owner))
+    var current = lower_with_mir(state, named.store)
+    // One field per capture, named after the captured binding. Captures are
+    // storage-free snapshots in this slice, so the record holds plain values
+    // and needs no domain of its own.
+    var ordinal: U64 = 0
+    while ordinal < site.capture_count {
+        let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
+        let local = __s0_buffer_get(LocalRec, store.locals, capture.local - 1)
+        let typ = try lower_type(d, source_state, store, current, capture.checked_type)
+        if !typ.state.valid { return Ok(typ) }
+        current = typ.state
+        let name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
+        current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, ordinal, name, typ.id))
+        ordinal = ordinal + 1
+    }
+    let memo = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_closure_env_key(site.owner), value: named.type_id))
+    return Ok(LowerStep(state: lower_with_values(current, memo), id: named.type_id))
+}
+
 fn lower_primitive(target: U64) -> U64 {
     if target == 1 { return mir_type_bool() }
     if target == 2 { return mir_type_i8() }
@@ -322,6 +381,13 @@ fn lower_call_borrow_compatible(store: CheckStore, expected: U64, actual: U64) -
 }
 
 fn lower_has_storage(store: CheckStore) -> Bool {
+    // Closure environments are domain-allocated records, so any closure with
+    // captures forces the storage model on for the whole program.
+    var site_at: U64 = 0
+    while site_at < __s0_buffer_len(ClosureSiteRec, store.closures.sites) {
+        if __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at).capture_count != 0 { return true }
+        site_at = site_at + 1
+    }
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let kind = __s0_buffer_get(CheckedTypeRec, store.types, at).kind
@@ -1037,9 +1103,12 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
                 entry = source_word(source_state, rec, symbol.name_start, symbol.name_end, "main")
             }
             if symbol.kind == 13 || symbol.inherent_owner != 0 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
+            if lower_closure_site_for(store, owner) != 0 { name = try lower_decimal_name(d, "closure", owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
-            if current.has_storage && !lower_owner_aliases_domain(source_state, store, owner) {
+            // Closure thunks take no hidden domain parameter; their domain
+            // arrives in the environment record.
+            if current.has_storage && lower_closure_site_for(store, owner) == 0 && !lower_owner_aliases_domain(source_state, store, owner) {
                 let domain = try lower_domain_mir_type(d, current)
                 let hidden = try mir_add_function_param(d, domain.state.mir, function.id, 0, "__domain", domain.id)
                 current = lower_with_mir(domain.state, hidden.store)
@@ -1551,6 +1620,7 @@ fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: L
 
 fn lower_copy_result_storage(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
+    if lower_closure_site_for(store, owner) != 0 { return Ok(LowerStep(state: typ.state, id: value)) }
     if !typ.state.has_storage || !(try lower_mir_type_copy_relocatable(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
     let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
     if domain == 0 || domain != lower_result_domain_value(typ.state, store, owner) { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
@@ -2609,8 +2679,89 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         }
         return Ok(LowerStep(state: current, id: result.id))
     }
+    if expression.kind == 24 {
+        // Closure creation. Capture-free closures are plain function values;
+        // capturing closures allocate the environment record, copy each
+        // captured value into it (snapshot semantics, vec copies included),
+        // and pair it with the thunk through fn.value.
+        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(ClosureSiteRec, store.closures.sites) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, expression.parameter_use - 1)
+        if site.expression != expression_id { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let thunk = lower_owner_lookup(state.owners, site.owner)
+        if thunk == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let fn_type = try lower_type(d, source_state, store, state, expression.checked_type)
+        if !fn_type.state.valid { return Ok(fn_type) }
+        var current = fn_type.state
+        var env_value: U64 = 0
+        if site.capture_count != 0 {
+            let env_type = try lower_closure_env_type(d, source_state, store, current, site)
+            if !env_type.state.valid { return Ok(env_type) }
+            current = env_type.state
+            let empty = try __s0_buffer_new(U64, d)
+            let reference = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), env_type.id, 0, 0, empty, 0)
+            current = lower_with_mir(current, reference.store)
+            let domain = lower_storage_domain_value(current, store, owner, expression_id)
+            if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            // Build the environment record value from the captured values,
+            // copy it into the creation domain, and store it into the
+            // allocated slot. The copy gives the stored value domain
+            // provenance, which keeps closure creation inside loops within
+            // the loop-store rule.
+            var field_values = try __s0_buffer_new(U64, d)
+            var ordinal: U64 = 0
+            while ordinal < site.capture_count {
+                let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
+                let local = __s0_buffer_get(LocalRec, store.locals, capture.local - 1)
+                let typ = try lower_local_type(d, source_state, store, current, owner, capture.local, local)
+                current = typ.state
+                var captured: U64 = 0
+                let binding = lower_binding_lookup(current, capture.local)
+                if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                if binding.parameter == 1 {
+                    captured = binding.mir_id
+                } else {
+                    let capture_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+                    current = lower_with_mir(current, capture_place.store)
+                    let loaded = try lower_helper_load(d, current, function, block, capture_place.id, typ.id)
+                    current = loaded.state
+                    captured = loaded.id
+                }
+                let copied = try lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression_id, capture.checked_type, captured)
+                if !copied.state.valid { return Ok(copied) }
+                current = copied.state
+                field_values = try __s0_buffer_append(U64, d, field_values, copied.id)
+                ordinal = ordinal + 1
+            }
+            let record_result = try lower_add_typed_result(d, current, function, block, env_type.id)
+            let constructed = try lower_add_instr(d, record_result.state, function, block, mir_op_aggregate_construct(), record_result.id, 0, env_type.id, 0, 0, 0, "")
+            current = constructed.state
+            ordinal = 0
+            while ordinal < site.capture_count {
+                let capture_local = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal).local - 1)
+                let field_name = try lower_source_word(d, source_state, capture_local.source, capture_local.name_start, capture_local.name_end)
+                current = try lower_add_instr_operand(d, current, constructed.id, ordinal, __s0_buffer_get(U64, field_values, ordinal), mir_operand_aggregate_field(), field_name)
+                ordinal = ordinal + 1
+            }
+            let copy_result = try lower_add_typed_result(d, current, function, block, env_type.id)
+            let domain_copied = try lower_add_instr(d, copy_result.state, function, block, mir_op_copy_to_domain(), copy_result.id, 0, 0, domain, record_result.id, 0, "")
+            current = domain_copied.state
+            let one = try lower_helper_const(d, current, function, block, mir_type_u64(), 1, expression_id * 100 + 71)
+            current = one.state
+            let env_result = try lower_add_typed_result(d, current, function, block, reference.type_id)
+            current = env_result.state
+            let allocated = try lower_add_instr(d, current, function, block, mir_op_alloc_checked(), env_result.id, 0, env_type.id, domain, one.id, panic_block, "")
+            current = allocated.state
+            env_value = env_result.id
+            let env_deref = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: env_value))
+            current = lower_with_mir(current, env_deref.store)
+            let env_stored = try lower_add_instr(d, current, function, block, mir_op_store(), 0, env_deref.id, 0, copy_result.id, 0, 0, "")
+            current = env_stored.state
+        }
+        let result = try lower_add_typed_result(d, current, function, block, fn_type.id)
+        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, 0, env_value, 0, thunk, "")
+        return Ok(LowerStep(state: made.state, id: result.id))
+    }
     if expression.kind == 19 {
-        if expression.child_count != 2 || expression.first_child == 0 || expression.first_child >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
         let index_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
         let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
@@ -3159,7 +3310,7 @@ fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state:
         }
         environment = active.parent
     }
-    if boundary_environment == 0 && exit_kind != 1 && state.has_storage {
+    if boundary_environment == 0 && exit_kind != 1 && state.has_storage && lower_closure_site_for(store, owner) == 0 {
         let domain = lower_domain_value(current, store, owner)
         if domain == 0 { return Ok(lower_invalid(current)) }
         let destroyed = try lower_add_instr(d, current, function, block, mir_op_domain_destroy(), 0, 0, 0, domain, 0, 0, "")
@@ -3620,9 +3771,18 @@ fn lower_root_indexes(d: Domain, store: CheckStore) -> Result(__s0_Buffer(LowerO
 fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, locals: LowerLocalIndex, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(lower_invalid(state)) }
+    // Closure thunks: captures are checked as trailing parameters but lower
+    // as locals unpacked from the environment parameter, so the thunk's C
+    // ABI stays (declared parameters..., opaque environment pointer).
+    let closure_site = lower_closure_site_for(store, owner)
+    var declared_params: U64 = 0
+    if closure_site != 0 { declared_params = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1).declared_count }
     var current = state
     var param_ordinal: U64 = 0
-    let hidden_domain = state.has_storage
+    // Closure thunks never take the hidden domain parameter: they are called
+    // through a raw code pointer. Their domain arrives in the environment
+    // record and is registered during the prologue below.
+    let hidden_domain = state.has_storage && closure_site == 0
     let aliases_domain = hidden_domain && lower_owner_aliases_domain(source_state, store, owner)
     if hidden_domain && !aliases_domain {
         var parameter = __s0_buffer_get(MirParamRec, current.mir.params, 0)
@@ -3638,6 +3798,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         param_ordinal = 1
     }
     var local_ordinal: U64 = 0
+    var checked_params_seen: U64 = 0
     let start = __s0_buffer_get(U64, locals.starts, owner - 1)
     let end = __s0_buffer_get(U64, locals.starts, owner)
     var at: U64 = 0
@@ -3648,6 +3809,17 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         current = typ.state
         var name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
         if local.kind != 1 && lower_local_name_seen(source_state, store, locals, start, at, local) { name = try lower_decimal_name(d, "__s0_local_", local_ordinal) }
+        var is_capture = false
+        if closure_site != 0 && local.kind == 1 && checked_params_seen >= declared_params { is_capture = true }
+        if is_capture {
+            // A capture: unpacked from the environment record in the prologue
+            // below, not a real parameter.
+            let slot = try mir_add_local(d, current.mir, function, local_ordinal, name, typ.id)
+            current = lower_with_mir(current, slot.store)
+            let capture_bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: slot.id, parameter: 0, initial: 0))
+            current = lower_with_bindings(current, capture_bindings)
+            local_ordinal = local_ordinal + 1
+        } else {
         if local.kind == 1 {
             var parameter_type = typ
             let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
@@ -3676,6 +3848,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 current = lower_with_values(current, domains)
             }
             param_ordinal = param_ordinal + 1
+            checked_params_seen = checked_params_seen + 1
         } else {
             let slot = try mir_add_local(d, current.mir, function, local_ordinal, name, typ.id)
             current = lower_with_mir(current, slot.store)
@@ -3683,12 +3856,58 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             current = lower_with_bindings(current, bindings)
             local_ordinal = local_ordinal + 1
         }
+        }
         at = at + 1
+    }
+    // The closure environment parameter: a reference to the capture record.
+    var env_param: U64 = 0
+    if closure_site != 0 {
+        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
+        if site.capture_count != 0 {
+            let env_type = try lower_closure_env_type(d, source_state, store, current, site)
+            if !env_type.state.valid { return Ok(env_type.state) }
+            let empty = try __s0_buffer_new(U64, d)
+            let reference = try mir_intern_type(d, env_type.state.mir, mir_type_kind_safe_mut(), env_type.id, 0, 0, empty, 0)
+            let parameter = try mir_add_function_param(d, reference.store, function, param_ordinal, "alder_env", reference.type_id)
+            current = lower_with_mir(current, parameter.store)
+            env_param = parameter.id
+        }
     }
     let entry = try mir_add_block(d, current.mir, function, 0, "bb0")
     current = lower_with_mir(current, entry.store)
     let panic = try mir_add_block(d, current.mir, function, 1, "bb_panic")
     current = lower_with_mir(current, panic.store)
+    // Closure prologue: unpack each capture from the environment record into
+    // its local. The captures are the site's trailing role-5 uses; their
+    // mir locals were created above in the same order.
+    if closure_site != 0 {
+        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
+        if site.capture_count != 0 {
+            let deref = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: env_param))
+            current = lower_with_mir(current, deref.store)
+            var ordinal: U64 = 0
+            while ordinal < site.capture_count {
+                let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
+                let capture_local = lower_closure_param_local(store, locals, owner, site.declared_count + ordinal)
+                if capture_local == 0 { return Ok(lower_invalid(current)) }
+                let local = __s0_buffer_get(LocalRec, store.locals, capture_local - 1)
+                let typ = try lower_local_type(d, source_state, store, current, owner, capture_local, local)
+                current = typ.state
+                let field_name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
+                let field = try lower_helper_field_place(d, current, function, deref.id, field_name)
+                current = field.state
+                let loaded = try lower_helper_load(d, current, function, entry.id, field.id, typ.id)
+                current = loaded.state
+                let binding = lower_binding_lookup(current, capture_local)
+                if binding.binding == 0 { return Ok(lower_invalid(current)) }
+                let local_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+                current = lower_with_mir(current, local_place.store)
+                let stored = try lower_add_instr(d, current, function, entry.id, mir_op_store(), 0, local_place.id, 0, loaded.id, 0, 0, "")
+                current = stored.state
+                ordinal = ordinal + 1
+            }
+        }
+    }
     if hidden_domain {
         let parent = lower_result_domain_value(current, store, owner)
         if parent == 0 { return Ok(lower_invalid(current)) }
@@ -4971,7 +5190,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind > 23 { return false }
+        if item.kind == 0 || item.kind > 24 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -4984,6 +5203,18 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             child_at = child_at + 1
         }
         if item.site_kind > 8 || (item.site_kind == 0 && item.site_syntax != 0) || (item.site_kind != 0 && item.site_syntax == 0) || item.site_syntax > __s0_buffer_len(CheckedSpanRec, spans) { return false }
+        if item.kind == 24 {
+            // Closure creation: parameter_use names the closure site, whose
+            // expression points back here; the value has the erased function
+            // type and no runtime children.
+            if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(ClosureSiteRec, store.closures.sites) { return false }
+            let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, item.parameter_use - 1)
+            if site.expression != at + 1 || site.owner == 0 || site.owner > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+            let thunk_symbol = __s0_buffer_get(SymbolRec, store.symbols, site.owner - 1)
+            if thunk_symbol.kind != 12 || thunk_symbol.type_arity != 0 || thunk_symbol.declaration != site.owner { return false }
+            if __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1).kind != 25 { return false }
+            if item.child_count != 0 || item.annotation != 0 || item.first_child != 0 { return false }
+        }
         if item.kind == 1 || item.kind == 5 || item.kind == 22 {
             if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).owner != item.owner { return false }
         }
@@ -5149,7 +5380,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 element_at = element_at + 1
             }
         }
-        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.kind != 22 && item.parameter_use != 0 { return false }
+        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.kind != 22 && item.kind != 24 && item.parameter_use != 0 { return false }
         at = at + 1
     }
     at = 0

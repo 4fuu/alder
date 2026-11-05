@@ -409,7 +409,16 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		}
 		env := "NULL"
 		if in.A != mir.NoValue {
+			// The environment member is an opaque pointer; a reference-typed
+			// environment value (the closure's record reference) passes its
+			// data pointer.
 			env = g.valueExpr(in.A)
+			if t, ok := g.f.ValueType(in.A); ok && g.m.ValidType(t) {
+				switch g.m.Types[t].Kind {
+				case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+					env += ".data"
+				}
+			}
 		}
 		b.WriteString("  " + g.val(in.Result) + " = (AlderFnTy" + n + "){alder_fnwrap_" + strconv.Itoa(int(in.Callee)) + "_" + n + ", (void *)" + env + "};\n")
 

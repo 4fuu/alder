@@ -1139,7 +1139,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
             }
             ordinal = ordinal + 1
         }
-        if !wrote { out = try cgen_put(d, out, "NULL") } else { out = try cgen_put(d, out, ", ") }
+        if wrote { out = try cgen_put(d, out, ", ") }
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         return cgen_put(d, out, ".env);\n")
     }
@@ -1159,8 +1159,18 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_u64(d, out, fn_type - 1)
         out = try cgen_put(d, out, ", ")
         if item.a == 0 { out = try cgen_put(d, out, "NULL") } else {
+            // The environment member is an opaque pointer; a reference-typed
+            // environment value (the closure's record reference) passes its
+            // data pointer.
+            let env_operand_type = cgen_value_type(store, indexes, item.function, item.a)
+            var ref_env = false
+            if env_operand_type >= 1 && env_operand_type <= __s0_buffer_len(MirTypeRec, store.types) {
+                let env_kind = __s0_buffer_get(MirTypeRec, store.types, env_operand_type - 1).kind
+                if env_kind == mir_type_kind_slice() || env_kind == mir_type_kind_safe_ref() || env_kind == mir_type_kind_safe_mut() { ref_env = true }
+            }
             out = try cgen_put(d, out, "(void *)")
             out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            if ref_env { out = try cgen_put(d, out, ".data") }
         }
         return cgen_put(d, out, "};\n")
     }

@@ -45,6 +45,28 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"closures.al": `type Point {
+    x: U64
+    y: U64
+}
+
+fn main() -> I32 {
+    let minimum = 10
+    let accepted = fn(value: I64) => value >= minimum
+    if accepted(12) { return 0 }
+    if !accepted(2) { return 1 }
+    let base = Point(x: 3, y: 4)
+    let scaled = fn(p: Point) -> U64 {
+        return p.x * base.x + p.y * base.y
+    }
+    if scaled(Point(x: 2, y: 2)) != 14 { return 2 }
+    let plain = fn(x: U64) => x + 1
+    if plain(41) != 42 { return 3 }
+    let typed: fn() -> I64 = fn() => 9
+    if typed() != 9 { return 4 }
+    return 0
+}
+`,
 		"markers.al": `type Box {
     v: U64
 }
@@ -202,6 +224,9 @@ fn main() -> I32 {
 		{"user-eq-impl", "type Box { v: U64 }\nimpl Eq for Box {\n}\nfn main() -> I32 { return 0 }\n", 125},
 		{"structural-method-call", "type Box { v: U64 }\nfn main() -> I32 {\n    let a = Box(v: 1)\n    let b = Box(v: 2)\n    if a.eq(b) { return 1 }\n    return 0\n}\n", 126},
 		{"float-key-unsupported", "type Bad {\n    ratio: F64\n}\nfn keyed(K: type, k: K) -> U64\nwhere K: Eq + Hash {\n    return 1\n}\nfn main() -> I32 {\n    if keyed(Bad, Bad(ratio: 1.0)) != 1 { return 1 }\n    return 0\n}\n", 111},
+		{"closure-vec-capture", "fn main() -> I32 {\n    let values = Vec.new(U64)\n    let first = fn() => values.len()\n    return 0\n}\n", 145},
+		{"closure-string-capture", "fn main() -> I32 {\n    let name = \"ald\"\n    let sized = fn() => len(name)\n    return 0\n}\n", 145},
+		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

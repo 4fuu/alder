@@ -368,16 +368,20 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		callee := m.Functions[in.Callee]
+		// The function value's type erases the environment: {code, env}
+		// values carry the environment opaquely, so closures and plain
+		// references of the same signature share one value type. The
+		// environment operand's own type still feeds provenance in phase 6.
 		sig := FuncSig{Result: callee.Result, Env: NoType}
-		for _, p := range callee.Params {
-			sig.Params = append(sig.Params, p.Type)
+		params := callee.Params
+		// A closure thunk's trailing parameter is the environment record;
+		// it is supplied by the environment operand, not by callers of the
+		// function value.
+		if in.A != NoValue && len(params) > 0 {
+			params = params[:len(params)-1]
 		}
-		if in.A != NoValue {
-			env, ok := f.ValueType(in.A)
-			if !ok || !m.ValidType(env) {
-				return NoType, false
-			}
-			sig.Env = env
+		for _, p := range params {
+			sig.Params = append(sig.Params, p.Type)
 		}
 		return m.FunctionType(sig), true
 

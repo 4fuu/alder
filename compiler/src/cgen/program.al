@@ -492,6 +492,18 @@ fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, 
         out = try cgen_emit_function_name(d, out, store, target)
         out = try cgen_put(d, out, "(")
         out = try cgen_fn_wrapper_params(d, out, store, fn_type, false, false)
+        // A closure thunk takes one trailing environment parameter beyond
+        // the function type's declared parameters: the wrapper adapts the
+        // opaque void * environment to the thunk's reference parameter.
+        let thunk_params = mir_v5_function_param_count(store, indexes, target)
+        let declared_params = mir_type_part_count(store, fn_type, mir_type_part_function_param())
+        if thunk_params == declared_params + 1 {
+            let last = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), thunk_params - 1)
+            if declared_params != 0 { out = try cgen_put(d, out, ", ") }
+            out = try cgen_put(d, out, "(")
+            out = try cgen_put_type(d, out, store, last)
+            out = try cgen_put(d, out, "){ alder_env, (uint64_t)1 }")
+        }
         out = try cgen_put(d, out, ");\n}\n")
         at = at + 2
     }

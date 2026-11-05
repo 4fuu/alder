@@ -136,8 +136,34 @@ Milestone 7.5 adds the static trait surface of
   implementation with no vtable; resolved impl methods lower as ordinary
   monomorphized functions named `<method><owner-symbol-id>`.
 
-Closures, function values, default-method dispatch, and trait-backed
-collections are not implemented yet and remain later Milestone 7.5 work.
+Closures and function values are partially implemented as Milestone 7.5
+work in progress:
+
+- `fn(A, B) -> R` is a checked function type usable in annotations,
+  parameters, results, and bindings. A named non-generic function in value
+  position is a function reference, and a call whose callee is a
+  function-typed binding is an indirect call; both lower through
+  `fn.value`/`call.value` and run under the generated strict C11.
+- A closure literal `fn(name: Type, ...) => expr` or
+  `fn(name: Type, ...) -> R { ... }` creates a function value. Parameter
+  types are required; the arrow form infers its result type from the body
+  expression. Reads of enclosing `let`/`var` locals are independent value
+  snapshots taken at creation: captures resolve as hidden trailing
+  immutable parameters of a compiler-generated thunk function, so writes to
+  a capture are rejected as writes to an immutable binding, and only
+  storage-free ordinary values (primitives and records/enums/options of
+  primitives) may be captured while environments are lowered as plain
+  domain-allocated records. The thunk ABI is `(declared parameters, opaque
+  environment pointer)`; capture-free closures are plain function values.
+- Known limits of this slice, all diagnostic 147 rejections or documented
+  verifier refusals: nested closure literals are rejected until transitive
+  capture threading lands; closure creation inside a `while` loop is
+  refused by the verifier loop-store rule until environments gain
+  runtime-backed allocation; parameter type inference from the expected
+  function type is not implemented.
+
+Default-method dispatch and trait-backed collections are not implemented yet
+and remain later Milestone 7.5 work.
 
 The hosted entry forms are temporarily `fn main() -> I32` and
 `fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim
