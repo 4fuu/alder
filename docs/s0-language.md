@@ -95,8 +95,14 @@ Milestone 7.5 adds the static trait surface of
 - `trait Name(Params) where ... { ... }` declares a trait. Method
   requirements are `fn` signatures; a requirement with a body carries a
   default implementation. `Self` names the implementing type inside a trait
-  or one of its implementations, and trait methods cannot declare their own
-  type parameters yet.
+  or one of its implementations. Trait and impl methods may declare their
+  own leading `type` parameters; an implementation method must declare
+  exactly as many as its requirement, and they match positionally. Method
+  type parameters are recorded in the trait's scope, so their names must be
+  unique across the whole trait and they resolve throughout it; explicit
+  specialization follows the receiver (`box.combine(U64, 3)`). Defaulted
+  requirements synthesize only for arity-zero traits: a generic trait's
+  parameters are not visible in the synthesized method's scope yet.
 - `impl Trait(Arguments) for Type { ... }` implements a trait for a
   non-generic declared record or enum type with concrete trait arguments.
   Methods are ordinary functions; their bodies are checked and lowered even
@@ -134,7 +140,8 @@ Milestone 7.5 adds the static trait surface of
   the receiver's concrete type. Because generic bodies are checked per
   concrete instance, a constrained call site dispatches to that instance's
   implementation with no vtable; resolved impl methods lower as ordinary
-  monomorphized functions named `<method><owner-symbol-id>`.
+  monomorphized functions named `<method><owner-symbol-id>`, including
+  methods with their own type parameters instantiated per call site.
 - A non-self `mut` parameter is legal for affine owners, scoped
   capabilities, and a copyable type parameter constrained by a trait with at
   least one `mut self` requirement (the builtin `Iterator` or a user trait).

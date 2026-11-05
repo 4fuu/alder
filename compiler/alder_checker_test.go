@@ -1845,12 +1845,23 @@ func validateCheckerManifest(m checkerManifest) error {
 			traitSelfNodes[symbol.id] = true
 		}
 	}
+	// A requirement's own type-parameter node is recorded twice: once in the
+	// trait's scope (requirement matching) and once in the method's scope
+	// (the method or its synthesized default), so parameter nodes are unique
+	// per owner rather than globally. The Self parameter reuses the trait's
+	// own node.
+	paramNodes := make(map[int]bool)
+	traitSelfParams := make(map[int]bool)
 	for i, param := range m.params {
 		ownerSelf := traitSelfNodes[param.owner] && param.node == m.symbols[param.owner-1].node
-		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || nodes[param.node] && !ownerSelf || !validSourceRange(param.source, param.start, param.end, true) {
+		if ownerSelf {
+			traitSelfParams[param.owner] = true
+		}
+		claim := param.owner<<32 | param.node
+		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || paramNodes[claim] && !ownerSelf || !validSourceRange(param.source, param.start, param.end, true) {
 			return fmt.Errorf("invalid type parameter %+v", param)
 		}
-		nodes[param.node] = true
+		paramNodes[claim] = true
 	}
 	for i, arg := range m.args {
 		if arg.id != i+1 || arg.checkedType < 1 || arg.checkedType > len(m.types) {
@@ -1959,8 +1970,18 @@ func validateCheckerManifest(m checkerManifest) error {
 			paramCounts[param.owner-1]++
 		}
 		for i, symbol := range m.symbols {
-			if symbol.kind == 50 && (paramCounts[i] == symbol.arity || paramCounts[i] == symbol.arity+1) {
-				// Traits add one implicit trailing `Self` parameter.
+			if symbol.kind == 50 {
+				// Traits add one implicit trailing `Self` parameter beyond
+				// their declared arity, and every requirement with its own type
+				// parameters records them in the trait's scope as well, so the
+				// count only has a lower bound here.
+				traitParams := paramCounts[i]
+				if traitSelfParams[symbol.id] {
+					traitParams--
+				}
+				if traitParams < symbol.arity {
+					return fmt.Errorf("symbol %+v has %d type parameter records", symbol, paramCounts[i])
+				}
 				continue
 			}
 			if symbol.kind != 13 && paramCounts[i] != symbol.arity || symbol.kind == 13 && paramCounts[i] != 0 {

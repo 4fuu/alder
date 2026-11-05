@@ -5075,8 +5075,11 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
         if symbol.kind == 50 {
             // Traits add one implicit trailing `Self` parameter beyond their
-            // declared arity.
-            if type_param_counts[at + 1] != symbol.type_arity && type_param_counts[at + 1] != symbol.type_arity + 1 { return false }
+            // declared arity, and each requirement with its own type
+            // parameters records them in the trait's scope as well.
+            var trait_params = type_param_counts[at + 1]
+            if trait_self_param(store, at + 1) != 0 { trait_params = trait_params - 1 }
+            if trait_params < symbol.type_arity { return false }
         } else {
             if symbol.kind != 13 && type_param_counts[at + 1] != symbol.type_arity { return false }
             if symbol.kind == 13 && type_param_counts[at + 1] != 0 { return false }

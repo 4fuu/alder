@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `76073c87a8b009df8f537869dbb04fb276904234a1184a53c0905d8299745b39`;
+  `605a3da1c6b33cdeb6b8bc6e1d2840ac3141c9855f2289aeb1e3691590874c0c`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `76073c87a8b009df8f537869dbb04fb276904234a1184a53c0905d8299745b39`.
+  `605a3da1c6b33cdeb6b8bc6e1d2840ac3141c9855f2289aeb1e3691590874c0c`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1018,6 +1018,19 @@ Exit-criteria evidence (in progress):
   dispatch through the existing static path (`trait method ... not
   callable yet`, diagnostic 120, is retired), and both overridden and
   defaulted dispatch are pinned through generated strict C11.
+- trait and impl methods carry their own compile-time type parameters:
+  a requirement's leading `type` parameters are recorded in the trait's
+  scope (name-unique across the trait), an implementation must declare the
+  same count and they match positionally through the impl substitution
+  (`trait method ... cannot declare their own type parameters yet`,
+  diagnostic 118, and `generic trait implementation methods are not
+  supported yet`, 124, are retired; arity and position mismatches are
+  signature mismatches, 123). Method calls take explicit type arguments
+  after the receiver, and generic trait, impl, and inherent methods are
+  pinned end to end through generated strict C11, including dispatch
+  through a constrained generic function and a defaulted generic method on
+  an arity-zero trait. Defaulted methods on generic traits still wait: the
+  synthesized method cannot see the trait's parameters.
 - iterator cursors borrow exclusively: a non-self `mut` parameter stays an
   exclusive call borrow (rule 89 unchanged for ordinary parameters) and is
   legal for copyable values only when its type is a type parameter

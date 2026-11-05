@@ -1475,8 +1475,9 @@ fn synthesize_default_methods(d: Domain, state: State, parse: ParseStore, store:
 
 // Root recursion over the impl roots: the store threads through every step
 // and must not cross a loop backedge. The parser links the trait application
-// as the impl root's chain tail; generic traits wait for instance checking
-// and synthesize nothing.
+// as the impl root's chain tail. Only arity-zero traits synthesize defaults:
+// a synthesized method resolves in its own scope, where a generic trait's
+// parameters are not visible.
 fn synthesize_default_methods_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
     if root_at >= __s0_buffer_len(U64, parse.roots) { return Ok(CheckGood(store)) }
     var current = store
@@ -3471,11 +3472,35 @@ fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore,
     return true
 }
 
+// The first argument link of a method call is the receiver, so its
+// explicit type arguments start one link later than a free call's. The
+// parser links the receiver only for non-associated dot callees: a callee
+// that resolves as one qualified name, or whose base word starts
+// uppercase (a type's associated function), keeps its base inside the
+// callee node instead.
+fn call_receiver_links(state: State, parse: ParseStore, store: CheckStore, call: SyntaxRec) -> U64 {
+    let callee_link = call_link_at(parse, call, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 29 { return 0 }
+    if symbol_named(state, parse, store, callee) != 0 { return 0 }
+    if callee.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
+        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        if base.kind == 24 && base.name_end > base.name_start {
+            let source = __s0_buffer_get(SourceRec, state.sources, base.source)
+            let first = text_byte(state, source, base.name_start)
+            if first >= 65 && first <= 90 { return 0 }
+        }
+    }
+    return 1
+}
+
 fn leading_type_arg_count(state: State, parse: ParseStore, store: CheckStore, owner: U64, call: SyntaxRec) -> U64 {
     var count: U64 = 0
-    let total = call_link_count(parse, call) - 1
+    let receivers = call_receiver_links(state, parse, store, call)
+    let total = call_link_count(parse, call) - 1 - receivers
     while count < total {
-        let link = call_link_at(parse, call, count + 1)
+        let link = call_link_at(parse, call, receivers + count + 1)
         if !expression_type_candidate(state, parse, store, owner, link.node) { return count }
         count = count + 1
     }
@@ -3842,9 +3867,13 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     return expr_draft(store, 0, 0)
 }
 
-fn check_existing_call_modes(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, supplied: U64, ordinal: U64, count: U64) -> Result(ExprOutcome, __s0_Error) {
+fn check_existing_call_modes(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, supplied: U64, receiver_at: U64, ordinal: U64, count: U64) -> Result(ExprOutcome, __s0_Error) {
     if ordinal == count { return expr_draft(store, 0, 0) }
-    let link = call_link_at(parse, call, supplied + ordinal + 1)
+    var link_ordinal = supplied + ordinal + 1
+    if receiver_at != 0 {
+        if ordinal == 0 { link_ordinal = receiver_at } else { link_ordinal = supplied + ordinal }
+    }
+    let link = call_link_at(parse, call, link_ordinal)
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
     let expression = expression_for_syntax(store, owner, link.node)
     if expression == 0 { return expr_deferred(base) }
@@ -3860,7 +3889,7 @@ fn check_existing_call_modes(d: Domain, state: State, parse: ParseStore, base: C
         ExprGood(item) => false
         ExprBad(item) => true
     } { return Ok(ExprBad(current)) }
-    return check_existing_call_modes(d, state, parse, base, current, owner, call, target, supplied, ordinal + 1, count)
+    return check_existing_call_modes(d, state, parse, base, current, owner, call, target, supplied, receiver_at, ordinal + 1, count)
 }
 
 fn check_positional_call_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, role: U64, ordinal: U64, count: U64, mismatch: U64) -> Result(ExprOutcome, __s0_Error) {
@@ -4004,9 +4033,13 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
     return Ok(CallInferenceGood(CallInferenceRec(store: final_store, bindings: inferred)))
 }
 
-fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, receiver_at: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
     if ordinal == count { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
-    let arg_link = call_link_at(parse, call, runtime_start + ordinal + 1)
+    var arg_ordinal = runtime_start + ordinal + 1
+    if receiver_at != 0 {
+        if ordinal == 0 { arg_ordinal = receiver_at } else { arg_ordinal = runtime_start + ordinal }
+    }
+    let arg_link = call_link_at(parse, call, arg_ordinal)
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
     if arg.kind == 28 {
         let failed = try check_token_fail(d, state, base, 42, arg)
@@ -4034,7 +4067,7 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
                 CallInferenceBad(value) => bindings
                 CallInferenceDefer => bindings
             }
-            return infer_call_arguments(d, state, parse, base, variant_store, owner, call, target, runtime_start, ordinal + 1, count, inferred)
+            return infer_call_arguments(d, state, parse, base, variant_store, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, inferred)
         }
         if match variant {
             CallInferenceGood(value) => false
@@ -4081,14 +4114,14 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
             }))
         }
     }
-    return infer_call_arguments(d, state, parse, base, after, owner, call, target, runtime_start, ordinal + 1, count, inferred)
+    return infer_call_arguments(d, state, parse, base, after, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, inferred)
 }
 
-fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, declaration: U64, application: SyntaxRec, ordinal: U64, param_at: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
+fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, declaration: U64, application: SyntaxRec, ordinal: U64, param_at: U64, first_link: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
     if ordinal == __s0_buffer_get(SymbolRec, store.symbols, declaration - 1).type_arity { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
     var at = param_at
     while __s0_buffer_get(TypeParamRec, store.type_params, at).owner != declaration { at = at + 1 }
-    let link = call_link_at(parse, application, ordinal + 1)
+    let link = call_link_at(parse, application, first_link + ordinal + 1)
     let resolved = try resolve_expression_type(d, state, parse, store, owner, link.node)
     let current = match resolved {
         CheckGood(value) => value
@@ -4107,17 +4140,18 @@ fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store:
         }))
     }
     let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: at + 1, checked_type: concrete))
-    return explicit_function_bindings(d, state, parse, current, owner, declaration, application, ordinal + 1, at + 1, next)
+    return explicit_function_bindings(d, state, parse, current, owner, declaration, application, ordinal + 1, at + 1, first_link, next)
 }
 
 fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, supplied: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
     if supplied != symbol.type_arity { return expr_token_fail(d, state, base, 56, call) }
-    let argument_count = call_link_count(parse, call) - 1 - supplied
+    let receivers = call_receiver_links(state, parse, store, call)
+    let argument_count = call_link_count(parse, call) - 1 - supplied - receivers
     let parameter_count = use_count(store, target, 5)
-    if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
+    if argument_count + receivers != parameter_count { return expr_token_fail(d, state, base, 41, call) }
     let empty = try __s0_buffer_new(InferenceBindingRec, d)
-    let explicit = try explicit_function_bindings(d, state, parse, store, owner, target, call, 0, 0, empty)
+    let explicit = try explicit_function_bindings(d, state, parse, store, owner, target, call, 0, 0, receivers, empty)
     let with_types = match explicit {
         CallInferenceGood(value) => value.store
         CallInferenceBad(value) => value
@@ -4133,7 +4167,7 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
         CallInferenceBad(value) => empty
         CallInferenceDefer => empty
     }
-    let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied, 0, argument_count, bindings)
+    let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied + receivers, receivers, 0, argument_count + receivers, bindings)
     let current = match arguments {
         CallInferenceGood(value) => value.store
         CallInferenceBad(value) => value
@@ -4162,7 +4196,7 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
         InstanceGood(value) => value.instance
         InstanceBad(value) => 0
     }
-    let modes = try check_existing_call_modes(d, state, parse, base, with_instance, owner, call, instance_id, supplied, 0, argument_count)
+    let modes = try check_existing_call_modes(d, state, parse, base, with_instance, owner, call, instance_id, supplied + receivers, receivers, 0, argument_count + receivers)
     let checked_instance = match modes {
         ExprGood(value) => value.store
         ExprBad(value) => value
@@ -4870,7 +4904,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
                 UnifyConflict => true
             } { return expr_token_fail(d, state, base, 58, call) }
         }
-        let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, argument_count, bindings)
+        let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, bindings)
         let current = match inferred {
             CallInferenceGood(value) => value.store
             CallInferenceBad(value) => value
@@ -4904,7 +4938,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             InstanceGood(value) => value.instance
             InstanceBad(value) => 0
         }
-        let modes = try check_existing_call_modes(d, state, parse, base, with_instance, owner, call, instance_id, 0, 0, argument_count)
+        let modes = try check_existing_call_modes(d, state, parse, base, with_instance, owner, call, instance_id, 0, 0, 0, argument_count)
         let checked_instance = match modes {
             ExprGood(value) => value.store
             ExprBad(value) => value
@@ -7760,24 +7794,26 @@ fn check_constraint_traits(d: Domain, state: State, parse: ParseStore, store: Ch
 }
 
 // Trait method requirements: resolve parameter and result types in the
-// trait's scope, where `Self` is the implicit trailing parameter. Methods
-// cannot declare their own type parameters yet.
+// trait's scope, where `Self` is the implicit trailing parameter. A
+// requirement may declare its own leading type parameters; they are
+// recorded in the trait's scope after the trait's parameters (collect
+// tail-first like a function's parameters, keeping the store out of loop
+// backedges), so their names must be unique across the whole trait.
 fn check_trait_method(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec) -> Result(CheckResult, __s0_Error) {
-    // Reject own type parameters before any type resolves against them.
-    var link_at = node.children
-    while link_at != 0 {
-        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 7 { return check_token_fail(d, state, store, 118, __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)) }
-        link_at = item.next
+    let collected = try collect_param_links(d, state, parse, store, owner, node.children)
+    let current = match collected {
+        CheckGood(value) => value
+        CheckBad(value) => value
     }
-    return check_trait_method_links(d, state, parse, store, owner, node.children)
+    if check_result_bad(collected) { return Ok(collected) }
+    return check_trait_method_links(d, state, parse, current, owner, node.children)
 }
 
 fn check_trait_method_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_at: U64) -> Result(CheckResult, __s0_Error) {
     if link_at == 0 { return Ok(CheckGood(store)) }
     let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
-    if child.kind == 7 { return check_token_fail(d, state, store, 118, child) }
+    if child.kind == 7 { return check_trait_method_links(d, state, parse, store, owner, item.next) }
     if child.kind == 13 || child.kind == 47 || child.kind == 48 {
         if child.children != 0 {
             let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
@@ -7978,15 +8014,21 @@ fn trait_store_with(store: CheckStore, impls: __s0_Buffer(TraitImplRec), index: 
     return CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: TraitStoreRec(constraints: store.traits.constraints, impls: impls, impl_index: index, args: store.traits.args, receiver_index: store.traits.receiver_index), closures: store.closures)
 }
 
-// Structural type comparison substituting trait-space references through
-// one impl: trait parameters become the impl's concrete arguments and the
-// implicit Self parameter becomes the implementing type. Pure comparison;
-// no store mutation.
-fn trait_impl_type_matches(store: CheckStore, trait_symbol_id: U64, requirement: U64, impl_type: U64, first_arg: U64, arg_count: U64, self_type: U64, depth: U64) -> Bool {
+// Compare one requirement-side type with one impl-method-side type.
+// Trait parameters substitute positionally from the impl's trait arguments
+// and `Self` substitutes to the implementing type. A requirement method's
+// own type parameters (the contiguous method_first..method_first+
+// method_count records, owned by the trait) match only the impl method's
+// type parameter at the same position (impl_symbol's records).
+fn trait_impl_type_matches(store: CheckStore, trait_symbol_id: U64, requirement: U64, impl_type: U64, first_arg: U64, arg_count: U64, self_type: U64, method_first: U64, method_count: U64, impl_symbol: U64, depth: U64) -> Bool {
     if requirement == 0 || impl_type == 0 || depth > 16 { return false }
     let req = __s0_buffer_get(CheckedTypeRec, store.types, requirement - 1)
     let got = __s0_buffer_get(CheckedTypeRec, store.types, impl_type - 1)
     if req.kind == 6 {
+        if method_count != 0 && req.target >= method_first && req.target < method_first + method_count {
+            if got.kind != 6 || impl_symbol == 0 { return false }
+            return type_param_ordinal(store, impl_symbol, got.target) == req.target - method_first
+        }
         // type_param_ordinal counts from zero and the requirement's
         // parameters always belong to the trait.
         var substituted: U64 = 0
@@ -8002,7 +8044,7 @@ fn trait_impl_type_matches(store: CheckStore, trait_symbol_id: U64, requirement:
     if req.kind != got.kind || req.target != got.target || req.arg_count != got.arg_count { return false }
     var at: U64 = 0
     while at < req.arg_count {
-        if !trait_impl_type_matches(store, trait_symbol_id, __s0_buffer_get(U64, store.type_args, req.first_arg - 1 + at), __s0_buffer_get(U64, store.type_args, got.first_arg - 1 + at), first_arg, arg_count, self_type, depth + 1) { return false }
+        if !trait_impl_type_matches(store, trait_symbol_id, __s0_buffer_get(U64, store.type_args, req.first_arg - 1 + at), __s0_buffer_get(U64, store.type_args, got.first_arg - 1 + at), first_arg, arg_count, self_type, method_first, method_count, impl_symbol, depth + 1) { return false }
         at = at + 1
     }
     return true
@@ -8035,12 +8077,6 @@ fn trait_requirement_node(state: State, parse: ParseStore, requirement_node: U64
 fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: CheckStore, rec: TraitImplRec) -> Result(CheckResult, __s0_Error) {
     var store = initial
     let impl_node = __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1)
-    var method_at = rec.first_method
-    while method_at < rec.first_method + rec.method_count {
-        let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
-        if method.type_arity != 0 { return check_token_fail(d, state, store, 124, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
-        method_at = method_at + 1
-    }
     // Builtin traits have exactly one fixed requirement each.
     if rec.trait_builtin != 0 {
         var word: __s0_String = "cleanup"
@@ -8071,7 +8107,7 @@ fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: 
             receiver_kind = 48
         }
         var found: U64 = 0
-        method_at = rec.first_method
+        var method_at = rec.first_method
         while method_at < rec.first_method + rec.method_count {
             let method = __s0_buffer_get(SymbolRec, store.symbols, method_at - 1)
             if symbol_name_matches_word(state, method, word) { found = method_at }
@@ -8079,14 +8115,17 @@ fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: 
         }
         if found == 0 { return check_token_fail(d, state, store, 121, impl_node) }
         let method = __s0_buffer_get(SymbolRec, store.symbols, found - 1)
+        // A builtin requirement is never generic, so a generic impl method
+        // cannot match its signature.
+        if method.type_arity != 0 { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
         if method_receiver_kind(state, parse, store, found) != receiver_kind { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
         if use_count(store, found, 5) != runtime_params + 1 { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
         if runtime_params != 0 {
             let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_by_ordinal(store, found, 5, 1) - 1)
-            if !trait_impl_type_matches(store, 0, first_param_type, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+            if !trait_impl_type_matches(store, 0, first_param_type, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0, 0, 0, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
         }
         let result_use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_by_ordinal(store, found, 6, 0) - 1)
-        if !trait_impl_type_matches(store, 0, result_type, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
+        if !trait_impl_type_matches(store, 0, result_type, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0, 0, 0, 0) { return check_token_fail(d, state, store, 123, __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)) }
         return Ok(CheckGood(store))
     }
     // User traits: every kind-51 requirement must be provided or defaulted,
@@ -8122,6 +8161,38 @@ fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: 
 
 // Walk the trait's requirements recursively: resolved requirement types
 // carry storage, so they must not cross loop backedges.
+// A requirement's own type parameters are recorded in the trait's scope as
+// one contiguous run after the trait's parameters; they are identified by
+// their parameter nodes, which are direct kind-7 children of the
+// requirement node.
+fn requirement_method_param_first(parse: ParseStore, store: CheckStore, trait_symbol: U64, requirement: SyntaxRec) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let p = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if p.owner == trait_symbol {
+            var link_at = requirement.children
+            while link_at != 0 {
+                let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+                if item.node == p.node { return at + 1 }
+                link_at = item.next
+            }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn requirement_method_param_count(parse: ParseStore, requirement: SyntaxRec) -> U64 {
+    var total: U64 = 0
+    var link_at = requirement.children
+    while link_at != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 7 { total = total + 1 }
+        link_at = item.next
+    }
+    return total
+}
+
 fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, link_at: U64) -> Result(CheckResult, __s0_Error) {
     if link_at == 0 { return Ok(CheckGood(store)) }
     let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
@@ -8162,9 +8233,14 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
     let method_node = __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)
     if method_receiver_kind(state, parse, store, found) != want_receiver { return check_token_fail(d, state, store, 123, method_node) }
     if use_count(store, found, 5) != want_params + 1 { return check_token_fail(d, state, store, 123, method_node) }
+    // The impl method declares exactly as many type parameters as the
+    // requirement; they match positionally through the impl substitution.
+    let want_type_arity = requirement_method_param_count(parse, requirement)
+    if method.type_arity != want_type_arity { return check_token_fail(d, state, store, 123, method_node) }
+    let method_first = requirement_method_param_first(parse, store, rec.trait_symbol, requirement)
     // Runtime parameter and result types resolve recursively in the trait's
     // scope and compare through the impl substitution.
-    let compared = try validate_requirement_params(d, state, parse, store, rec, found, requirement, requirement.children, 1)
+    let compared = try validate_requirement_params(d, state, parse, store, rec, found, requirement, requirement.children, 1, method_first, want_type_arity)
     if match compared {
         CheckGood(value) => false
         CheckBad(value) => true
@@ -8194,7 +8270,7 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
                 want = checked_type_for_syntax(current, rec.trait_symbol, result_item.node)
             }
             let result_use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 6, 0) - 1)
-            if !trait_impl_type_matches(current, rec.trait_symbol, want, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) { return check_token_fail(d, state, current, 123, method_node) }
+            if !trait_impl_type_matches(current, rec.trait_symbol, want, result_use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, method_first, want_type_arity, found, 0) { return check_token_fail(d, state, current, 123, method_node) }
             return validate_user_requirements(d, state, parse, current, rec, item.next)
         }
         result_at = result_item.next
@@ -8202,12 +8278,12 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
     return validate_user_requirements(d, state, parse, with_params, rec, item.next)
 }
 
-fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, found: U64, requirement: SyntaxRec, req_at: U64, param_ordinal: U64) -> Result(CheckResult, __s0_Error) {
+fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, found: U64, requirement: SyntaxRec, req_at: U64, param_ordinal: U64, method_first: U64, method_count: U64) -> Result(CheckResult, __s0_Error) {
     if req_at == 0 { return Ok(CheckGood(store)) }
     let req_item = __s0_buffer_get(SyntaxLinkRec, parse.links, req_at - 1)
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, req_item.node - 1)
     if !((child.kind == 13 || child.kind == 47 || child.kind == 48) && !node_word(state, child, "self")) {
-        return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal)
+        return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal, method_first, method_count)
     }
     if child.children != 0 {
         let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
@@ -8228,12 +8304,12 @@ fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store
             want = checked_type_for_syntax(current, rec.trait_symbol, head.node)
         }
         let use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 5, param_ordinal) - 1)
-        if !trait_impl_type_matches(current, rec.trait_symbol, want, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, 0) {
+        if !trait_impl_type_matches(current, rec.trait_symbol, want, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, method_first, method_count, found, 0) {
             return check_token_fail(d, state, current, 123, __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SymbolRec, current.symbols, found - 1).node - 1))
         }
-        return validate_requirement_params(d, state, parse, current, rec, found, requirement, req_item.next, param_ordinal + 1)
+        return validate_requirement_params(d, state, parse, current, rec, found, requirement, req_item.next, param_ordinal + 1, method_first, method_count)
     }
-    return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal + 1)
+    return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal + 1, method_first, method_count)
 }
 
 // Validate every trait implementation once method signatures are resolved.

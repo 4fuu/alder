@@ -757,3 +757,68 @@ fn main() -> I32 {
 	}
 	t.Logf("mut-cursor drain program exited cleanly under strict C11")
 }
+
+// Generic trait methods end to end: a requirement with its own type
+// parameters, the matching impl method, and direct dot-calls with inferred
+// and explicit type arguments. Alder-only: the Go oracle frontend does not
+// implement the trait surface.
+func runAlderM75GenericMethodLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"generic-methods.al": `type Box {
+    v: U64
+}
+
+trait Combine(Item: type) {
+    fn combine(A: type, self, other: A) -> A
+}
+
+impl Combine(U64) for Box {
+    fn combine(A: type, self, other: A) -> A {
+        return other
+    }
+}
+
+fn main() -> I32 {
+    let box = Box(v: 5)
+    if box.combine(U64, 3) != 3 { return 1 }
+    if box.combine(4) != 4 { return 2 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"generic-methods.al"})
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse generic-method MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify generic-method MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("generic-method MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"generic-methods.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "generic-methods.c")
+	program := filepath.Join(dir, "generic-methods.exe")
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of generic trait methods: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run generic trait method behavior: %v\n%s", err, output)
+	}
+	t.Logf("generic trait method program exited cleanly under strict C11")
+}

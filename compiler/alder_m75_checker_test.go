@@ -177,6 +177,53 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"generic-methods.al": `type Box {
+    v: U64
+}
+
+trait Combine(Item: type) {
+    fn combine(A: type, self, other: A) -> A
+}
+
+impl Combine(U64) for Box {
+    fn combine(A: type, self, other: A) -> A {
+        return other
+    }
+}
+
+fn use_combine(C: type, I: type, c: C, extra: U64) -> U64
+where C: Combine(I) {
+    return c.combine(extra)
+}
+
+fn main() -> I32 {
+    let box = Box(v: 5)
+    if box.combine(U64, 3) != 3 { return 1 }
+    if use_combine(Box, U64, box, 9) != 9 { return 2 }
+    if box.combine(4) != 4 { return 3 }
+    return 0
+}
+`,
+		"defaulted-generic-method.al": `type Box {
+    v: U64
+}
+
+trait Echo {
+    fn echo(A: type, self, other: A) -> A {
+        return other
+    }
+}
+
+impl Echo for Box {
+}
+
+fn main() -> I32 {
+    let box = Box(v: 5)
+    if box.echo(3) != 3 { return 1 }
+    if box.echo(U64, 4) != 4 { return 2 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -248,15 +295,18 @@ fn main() -> I32 {
 		{"impl-where", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box\nwhere Box: Mark {\n}\nfn main() -> I32 { return 0 }\n", 113},
 		{"trait-as-type", "trait Mark { }\nfn f(m: Mark) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 114},
 		{"self-outside-trait", "fn f(v: Self) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 117},
-		{"trait-method-params", "trait Mark {\n    fn m(A: type, v: A) -> U64\n}\nfn main() -> I32 { return 0 }\n", 118},
 		{"ambiguous-method", "type Box { v: U64 }\ntrait A { fn fetch(self) -> U64 }\ntrait B { fn fetch(self) -> U64 }\nimpl A for Box { fn fetch(self) -> U64 { return self.v } }\nimpl B for Box { fn fetch(self) -> U64 { return self.v } }\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 119},
 		{"missing-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n}\nfn main() -> I32 { return 0 }\n", 121},
 		{"extra-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> U64 { return self.v }\n    fn other(self) -> U64 { return 0 }\n}\nfn main() -> I32 { return 0 }\n", 122},
 		{"signature-mismatch", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> Bool { return true }\n}\nfn main() -> I32 { return 0 }\n", 123},
-		{"generic-impl-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(A: type, self) -> U64 { return self.v }\n}\nfn main() -> I32 { return 0 }\n", 124},
 		{"user-eq-impl", "type Box { v: U64 }\nimpl Eq for Box {\n}\nfn main() -> I32 { return 0 }\n", 125},
 		{"structural-method-call", "type Box { v: U64 }\nfn main() -> I32 {\n    let a = Box(v: 1)\n    let b = Box(v: 2)\n    if a.eq(b) { return 1 }\n    return 0\n}\n", 126},
 		{"float-key-unsupported", "type Bad {\n    ratio: F64\n}\nfn keyed(K: type, k: K) -> U64\nwhere K: Eq + Hash {\n    return 1\n}\nfn main() -> I32 {\n    if keyed(Bad, Bad(ratio: 1.0)) != 1 { return 1 }\n    return 0\n}\n", 111},
+		{"generic-method-arity-mismatch", "type Box { v: U64 }\ntrait Combine(Item: type) {\n    fn combine(A: type, self, other: A) -> A\n}\nimpl Combine(U64) for Box {\n    fn combine(self, other: U64) -> U64 { return other }\n}\nfn main() -> I32 { return 0 }\n", 123},
+		{"generic-method-concrete-mismatch", "type Box { v: U64 }\ntrait Combine(Item: type) {\n    fn combine(A: type, self, other: A) -> A\n}\nimpl Combine(U64) for Box {\n    fn combine(A: type, self, other: U64) -> U64 { return other }\n}\nfn main() -> I32 { return 0 }\n", 123},
+		{"generic-method-builtin-trait", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(A: type, mut self) -> Option(U64) { return None }\n}\nfn main() -> I32 { return 0 }\n", 123},
+		{"generic-method-name-reuse", "trait Two {\n    fn left(A: type, self, a: A) -> A\n    fn right(A: type, self, a: A) -> A\n}\nfn main() -> I32 { return 0 }\n", 3},
+		{"generic-impl-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(A: type, self) -> U64 { return self.v }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"closure-vec-capture", "fn main() -> I32 {\n    let values = Vec.new(U64)\n    let first = fn() => values.len()\n    return 0\n}\n", 145},
 		{"closure-string-capture", "fn main() -> I32 {\n    let name = \"ald\"\n    let sized = fn() => len(name)\n    return 0\n}\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},

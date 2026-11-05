@@ -40,7 +40,9 @@ requirement, as `I` does above. At the call site the argument must be a
 mutable place — a `var` binding, an owner, or another `mut` parameter
 forwarding the cursor — so `iterator.next()` in the example advances the
 caller's cursor. Passing a `let`-bound copyable cursor is rejected: it would
-advance a discarded copy.
+advance a discarded copy. (The `while let` loop shape shown above is the 1.0
+source form; the current S0 profile expresses the same drain recursively
+until `while let` lands with the frontend that replaces S0.)
 
 Iteration keeps this model without associated types:
 

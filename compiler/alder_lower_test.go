@@ -27,6 +27,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m75-closures", func(t *testing.T) { runAlderClosureLowerBehavior(t, exe) })
 	t.Run("m75-default-methods", func(t *testing.T) { runAlderDefaultMethodLowerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorLowerBehavior(t, exe) })
+	t.Run("m75-generic-methods", func(t *testing.T) { runAlderM75GenericMethodLowerBehavior(t, exe) })
 	t.Run("m75-vec-loop-scalars", func(t *testing.T) { runAlderVecLoopLowerBehavior(t, exe) })
 	files := map[string]string{
 		"types.al": `import c foreign: fn(U64) -> U64
