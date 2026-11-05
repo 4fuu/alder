@@ -164,8 +164,9 @@ fn main() -> I32 {
 		// The gated `with` clause is not rejected here: the corpus detector
 		// runs any callback-form program under the private profile, where it
 		// is legal again. The production qualification pins rejection 137.
-		{"cleanup-async-only", "type Res {\n n: U64\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n using r = Res(n: 1)\n return 0\n}\n", 138},
-		{"cleanup-both-traits", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n using r = Res(n: 1)\n return 0\n}\n", 139},
+		// The builtin AsyncCleanup trait is removed (D012): the name is
+		// reserved, so implementing it is rejected as an unknown trait.
+		{"async-cleanup-removed", "type Res {\n n: U64\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 { return 0 }\n", 108},
 		{"cleanup-copyable-owner", "fn main() -> I32 {\n using value = 5\n return 0\n}\n", 136},
 		{"cleanup-impl-affine-exit", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn main() -> I32 {\n let r = Res(n: 1)\n return 0\n}\n", 93},
 		{"table-using-partial-transfer", "fn relay(take t: Table(U64)) -> Table(U64) { return t }\nfn f(flag: Bool) -> Unit {\n using t = Table.new(U64)\n if flag { relay(t) }\n return\n}\n", 94},

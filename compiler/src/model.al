@@ -527,9 +527,9 @@ type EnvironmentRec {
 // as a value), 134 an overlapping table access against a live view, 135 mixed
 // block and expression match arms, 136 a callback-free `using` whose
 // initializer is not an affine Cleanup owner, 137 the bootstrap-private
-// `with cleanup_function` clause outside the private profile, 138 an
-// AsyncCleanup owner in synchronous `using`, 139 a type implementing both
-// cleanup traits, 140 a Cleanup implementation without a usable
+// `with cleanup_function` clause outside the private profile (138 and 139
+// are retired with the removed AsyncCleanup trait), 140 a Cleanup
+// implementation without a usable
 // nongeneric `cleanup(take self) -> Unit` method, 141 an element read or
 // view on an affine-element vector, 142 a push into a vector whose binding
 // already carries a using registration, and 143 a Table element inside a
@@ -558,7 +558,7 @@ type DiagnosticTypeRec {
 }
 
 // Static trait model for Milestone 7.5. Builtin standard traits use stable
-// IDs (1 Eq, 2 Hash, 3 Iterator, 4 IntoIterator, 5 Cleanup, 6 AsyncCleanup);
+// IDs (1 Eq, 2 Hash, 3 Iterator, 4 IntoIterator, 5 Cleanup);
 // user-declared traits are symbols whose syntax kind is 50 and are referenced
 // by symbol ID. A trait reference stores trait_builtin or trait_symbol; the
 // other stays zero. Syntax kinds: 50 trait declaration, 51 trait method

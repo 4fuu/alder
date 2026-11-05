@@ -111,7 +111,7 @@ Milestone 7.5 adds the static trait surface of
   record, enum, and trait signatures. Constraint arguments resolve in the
   declaration's scope.
 - The builtin standard traits `Eq`, `Hash`, `Iterator(Item)`,
-  `IntoIterator(IteratorType, Item)`, `Cleanup`, and `AsyncCleanup` exist
+  `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
   without source declarations; `Order`, `Display`, and `Error` are reserved
   names without implementations until their APIs are designed with the
   standard library.

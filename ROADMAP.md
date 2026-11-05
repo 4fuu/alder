@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `11c39f339c016872161b247154e5b0be400a2840407d459f138823bd1bd40867`
+  `3b6ff9ff6f82def2363fa98aa525dd843435d719f3d57f09228e35ac141639de`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `11c39f339c016872161b247154e5b0be400a2840407d459f138823bd1bd40867`
+  `3b6ff9ff6f82def2363fa98aa525dd843435d719f3d57f09228e35ac141639de`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -946,8 +946,8 @@ Exit-criteria evidence (in progress):
 
 - the static-abstraction half adds `trait`/`where`/`impl Trait(...) for`
   declaration checking with builtin standard-trait names
-  (`Eq`, `Hash`, `Iterator`, `IntoIterator`, `Cleanup`, and an
-  `AsyncCleanup` that the design amendment removes; see below),
+  (`Eq`, `Hash`, `Iterator`, `IntoIterator`, and `Cleanup`; the
+  design amendment's `AsyncCleanup` is removed below),
   per-unit coherence over a once-built sorted impl index, `Self` resolution,
   and constraint-gated generic instantiation and concrete applications;
 - the dispatch half resolves dot-calls to inherent methods first and then to
@@ -1063,11 +1063,12 @@ this evidence record):
   so a received owner registers directly;
 - the callback-free `using` selects the builtin table release, the owner's
   `Cleanup` trait method, or a compiler-synthesized per-element drain for a
-  `Vec(T)` of `Cleanup` owners. Cleanup and AsyncCleanup impl types are
-  affine through the receiver index; AsyncCleanup owners and elements are
-  rejected by synchronous `using` until the async runtime (kinds 138, 139,
-  143), and the callback `with` clause is bootstrap-private (137, gated in
-  every corpus that still exercises the bridge);
+  `Vec(T)` of `Cleanup` owners. Cleanup impl types are affine through the
+  receiver index, and the callback `with` clause is bootstrap-private (137,
+  gated in every corpus that still exercises the bridge); the builtin
+  `AsyncCleanup` trait is removed with its diagnostics 138/139 per D012 — a
+  `Cleanup` hook may suspend once its owner holds a suspending capability in
+  Milestone 9;
 - focused evidence: Alder checker conformance suites pin the accept surface
   and rejections 130-143, and the production qualification compiles and runs
   table, trait-cleanup, and vec-drain programs end to end on generated C
@@ -1095,13 +1096,10 @@ the stage-0 self-compile process itself (gcc on the emitted C peaks at
 whole-store scan or copy amplification is present: the regenerator stays in
 its 2.5-minute class, far inside the 15-minute CI budget.
 
-Remaining before exit (as of the integration of both halves; the first three
+Remaining before exit (as of the integration of both halves; the first two
 were added to this milestone by the 2026-11 design amendment, which landed
 after both halves were written):
 
-- remove the builtin `AsyncCleanup` trait and its diagnostics 138/139: the
-  amended design has a single `Cleanup` trait whose hook may suspend when its
-  owner holds a suspending capability;
 - `match` guards (D018);
 - the in-place-when-unique update rule with per-site copy reporting (D023);
 - a compiler-scale layered DAG input over traits, generics, and closures that

@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Trait declarations, coherence, and constraint resolution are implemented (M7.5). `Cleanup` selection through `using` and its affine typing are implemented; `AsyncCleanup` types are affine and await the async runtime. Closures and function values are not implemented.**
+Availability: **Trait declarations, coherence, constraint resolution, closures, and function values are implemented (M7.5). `Cleanup` selection through `using` and its affine typing are implemented; there is no separate `AsyncCleanup` trait, and a `Cleanup` hook's ability to suspend arrives with the concurrency runtime's suspending capabilities in Milestone 9.**
 
 Traits provide static library abstraction without changing Alder into a
 runtime object system. Closures provide familiar higher-order APIs without

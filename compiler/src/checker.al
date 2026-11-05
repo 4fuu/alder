@@ -671,7 +671,7 @@ fn interpreted_type_category(d: Domain, state: State, parse: ParseStore, store: 
         }
         if inspect {
             if checked.kind == 3 || checked.kind == 19 { affine = true }
-            // A nominal type that implements Cleanup or AsyncCleanup is an
+            // A nominal type that implements Cleanup is an
             // affine owner: cleanup selection consumes it on every exit. The
             // receiver index answers this in logarithmic time.
             if checked.kind == 7 && type_cleanup_impls(store, checked.target) != 0 { affine = true }
@@ -1142,7 +1142,6 @@ fn builtin_trait_id(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, "Iterator") { return 3 }
     if node_word(state, node, "IntoIterator") { return 4 }
     if node_word(state, node, "Cleanup") { return 5 }
-    if node_word(state, node, "AsyncCleanup") { return 6 }
     return 0
 }
 
@@ -7379,8 +7378,8 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
 
 // vec_element_cleanup_story reports whether a Vec element type may join an
 // affine vector: 0 no (the copyable-only rule stays), or the element's
-// concrete Cleanup method symbol id. AsyncCleanup elements stay out until
-// the async runtime, and Table elements stay out until the MIR storage rules
+// concrete Cleanup method symbol id. Table elements stay out until the MIR
+// storage rules
 // admit heap-stored table handles (the phase-6 verifier rejects the deref
 // store today); a Table owner registers with using directly instead.
 fn vec_element_cleanup_story(state: State, store: CheckStore, element: U64) -> U64 {
@@ -7413,14 +7412,14 @@ fn cleanup_binding_registered(store: CheckStore, owner: U64, binding: U64) -> Bo
 }
 
 // symbol_is_cleanup_hook reports whether a function symbol is the cleanup
-// method of a Cleanup or AsyncCleanup implementation. Such a hook consumes
+// method of a Cleanup implementation. Such a hook consumes
 // its receiver by value as the disposal itself, so its take-self parameter
 // is exempt from the must-transfer exit rule, exactly like a using binding.
 fn symbol_is_cleanup_hook(state: State, store: CheckStore, owner: U64) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(U64, store.traits.receiver_index) {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
-        if rec.trait_builtin == 5 || rec.trait_builtin == 6 {
+        if rec.trait_builtin == 5 {
             if owner >= rec.first_method && owner < rec.first_method + rec.method_count {
                 let method = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
                 return symbol_name_matches_word(state, method, "cleanup")
@@ -7431,9 +7430,8 @@ fn symbol_is_cleanup_hook(state: State, store: CheckStore, owner: U64) -> Bool {
     return false
 }
 
-// type_cleanup_impls reports which cleanup traits a nominal type symbol
-// implements: bit 1 Cleanup (builtin trait 5), bit 2 AsyncCleanup (builtin 6).
-// Lookup binary-searches the receiver index (sorted by implementing type
+// type_cleanup_impls reports whether a nominal type symbol implements the
+// Cleanup trait (builtin trait 5). Lookup binary-searches the receiver index (sorted by implementing type
 // symbol, then trait) and scans only the adjacent window of that symbol, so
 // affinity queries never walk the whole impl table.
 fn type_cleanup_impls(store: CheckStore, type_symbol: U64) -> U64 {
@@ -7452,10 +7450,7 @@ fn type_cleanup_impls(store: CheckStore, type_symbol: U64) -> U64 {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
         let symbol = trait_impl_receiver_type_symbol(store, rec)
         if symbol > type_symbol { return bits }
-        if symbol == type_symbol {
-            if rec.trait_builtin == 5 { bits = bits + 1 }
-            if rec.trait_builtin == 6 { bits = bits + 2 }
-        }
+        if symbol == type_symbol && rec.trait_builtin == 5 { bits = bits + 1 }
         at = at + 1
     }
     return bits
@@ -7584,10 +7579,7 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
         }
         if !builtin_table && vec_drain == 0 {
             if using_kind != 7 { return body_token_fail(d, state, current, 136, statement) }
-            let bits = type_cleanup_impls(current, using_checked.target)
-            if bits == 3 { return body_token_fail(d, state, current, 139, statement) }
-            if bits == 2 { return body_token_fail(d, state, current, 138, statement) }
-            if bits != 1 { return body_token_fail(d, state, current, 136, statement) }
+            if type_cleanup_impls(current, using_checked.target) != 1 { return body_token_fail(d, state, current, 136, statement) }
             let method = type_cleanup_method_symbol(state, current, using_checked.target)
             if method == 0 { return body_token_fail(d, state, current, 140, statement) }
             let method_symbol = __s0_buffer_get(SymbolRec, current.symbols, method - 1)
@@ -8789,7 +8781,7 @@ fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: 
             word = "into_iterator"
             result_type = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1)
         }
-        if rec.trait_builtin == 5 || rec.trait_builtin == 6 {
+        if rec.trait_builtin == 5 {
             receiver_kind = 48
         }
         var found: U64 = 0

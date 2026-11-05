@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `Vec(T)` over a `Cleanup` owner is affine: elements enter by transfer through `push` or `from_array`, element reads and views are rejected, and a registration drains every element at scope exit. `AsyncCleanup` types are affine and rejected by synchronous `using` until the async runtime arrives; the callback `with` clause is bootstrap-private. Tables as `Vec` elements are deferred by the phase-6 MIR lifetime rule
+Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `Vec(T)` over a `Cleanup` owner is affine: elements enter by transfer through `push` or `from_array`, element reads and views are rejected, and a registration drains every element at scope exit. There is no separate `AsyncCleanup` trait: a `Cleanup` hook may suspend when its owner holds a suspending capability once the concurrency runtime arrives in Milestone 9; the callback `with` clause is bootstrap-private. Tables as `Vec` elements are deferred by the phase-6 MIR lifetime rule
 (`lifetime_deref_store` rejects storing a table handle through a deref
 place), so heap-stored table elements await a storage decision.**
 

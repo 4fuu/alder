@@ -127,7 +127,7 @@ fn main() -> I32 {
 		{"vec-untransferred", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit { let v = Vec.new(Res) }\n", 93},
 		{"vec-use-after-push", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit {\n let r = Res(n: 1)\n let v = Vec.new(Res)\n v.push(r)\n let gone = r.n\n return\n}\n", 91},
 		{"vec-push-borrow-param", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn f(v: Vec(Res)) -> Unit {\n v.push(Res(n: 1))\n return\n}\n", 101},
-		{"vec-async-element", "type Res {\n n: U64\n}\nimpl AsyncCleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit { let v = Vec.new(Res) }\n", 100},
+		{"vec-scoped-element", "type Box { view: [U64] }\nfn f() -> Unit { let v = Vec.new(Box) }\n", 100},
 	}
 	for _, tc := range rejections {
 		tc := tc

@@ -155,9 +155,9 @@ var m75TableRejections = []struct {
 		"with-cleanup clause is private",
 	},
 	{
-		"using-async-cleanup",
+		"async-cleanup-removed",
 		"type Res { n: U64 }\nimpl AsyncCleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit { using r = Res(n: 1) }\nfn main() -> I32 { return 0 }\n",
-		"AsyncCleanup owner cannot be cleaned by synchronous using",
+		"unknown trait",
 	},
 	{
 		"untransferred-owner",
