@@ -109,6 +109,81 @@ fn duplicate_value_name_fixture(d: Domain, initial: MirStore) -> Result(MirStore
     return Ok(mir_with_values(term.store, values))
 }
 
+// Function-value operation fixtures for the format-5 ops, following the
+// cross-function value-names template for the valid-store wiring. Mode 0
+// accepts fn.value feeding call.value plus str.eq over two string
+// constants; mode 1 points fn.value at a missing function; mode 2 calls a
+// non-function value; mode 3 compares non-string operands; mode 4 compares
+// string against bytes.
+fn fn_value_ops_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    var store = initial
+    let empty = try __s0_buffer_new(U64, d)
+    let string_type = try mir_intern_type(d, store, mir_type_kind_string(), 0, 0, 0, empty, 0)
+    store = string_type.store
+    let bytes_type = try mir_intern_type(d, store, mir_type_kind_bytes(), 0, 0, 0, empty, 0)
+    store = bytes_type.store
+    let text = try mir_add_const(d, store, "lit", string_type.type_id, mir_const_string(), 0, 0, 0, "a")
+    store = text.store
+    let bytes = try mir_add_const(d, store, "litb", bytes_type.type_id, mir_const_string(), 0, 0, 0, "a")
+    store = bytes.store
+    let target = try mir_add_function(d, store, "callee", mir_type_u64())
+    store = target.store
+    let param = try mir_add_function_param(d, store, target.id, 0, "value", mir_type_u64())
+    store = param.store
+    let entry = try mir_add_block(d, store, target.id, 0, "entry")
+    store = entry.store
+    let term = try mir_add_terminator(d, store, MirTermRec(function: target.id, block: entry.id, kind: mir_term_return(), value: param.id, target: 0, then_block: 0, else_block: 0))
+    store = term.store
+    let caller = try mir_add_function(d, store, "caller", mir_type_unit())
+    store = caller.store
+    let argument = try mir_add_function_param(d, store, caller.id, 0, "argument", mir_type_u64())
+    store = argument.store
+    let block = try mir_add_block(d, store, caller.id, 0, "entry")
+    store = block.store
+    var params = try __s0_buffer_new(U64, d)
+    params = try __s0_buffer_append(U64, d, params, mir_type_u64())
+    let fn_type = try mir_intern_function_type(d, store, params, mir_type_u64(), 0)
+    store = fn_type.store
+    let made = try mir_add_value(d, store, caller.id, "made", fn_type.type_id, mir_value_def_instruction(), block.id, 1)
+    store = made.store
+    var made_target = target.id
+    if mode == 1 { made_target = 99 }
+    let made_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 0, op: mir_op_fn_value(), result: made.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: made_target, name_start: 0, name_end: 0))
+    store = made_instr.store
+    let called = try mir_add_value(d, store, caller.id, "called", mir_type_u64(), mir_value_def_instruction(), block.id, 2)
+    store = called.store
+    var call_operand = made.id
+    if mode == 2 { call_operand = argument.id }
+    let call_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 1, op: mir_op_call_value(), result: called.id, place: 0, type_op: 0, a: call_operand, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    store = call_instr.store
+    let call_arg = try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_instruction(), owner: call_instr.id, ordinal: 0, edge: 0, value: argument.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+    store = call_arg.store
+    if mode == 0 || mode == 3 || mode == 4 {
+        let left = try mir_add_value(d, store, caller.id, "left", string_type.type_id, mir_value_def_instruction(), block.id, 3)
+        store = left.store
+        let text_const = __s0_buffer_get(MirConstRec, store.constants, text.id - 1)
+        let left_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 2, op: mir_op_const_get(), result: left.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: text_const.name_start, name_end: text_const.name_end))
+        store = left_instr.store
+        var right_type = string_type.type_id
+        if mode == 4 { right_type = bytes_type.type_id }
+        let right = try mir_add_value(d, store, caller.id, "right", right_type, mir_value_def_instruction(), block.id, 4)
+        store = right.store
+        var right_const_id = text.id
+        if mode == 4 { right_const_id = bytes.id }
+        let right_const = __s0_buffer_get(MirConstRec, store.constants, right_const_id - 1)
+        let right_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 3, op: mir_op_const_get(), result: right.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: right_const.name_start, name_end: right_const.name_end))
+        store = right_instr.store
+        let compared = try mir_add_value(d, store, caller.id, "compared", mir_type_bool(), mir_value_def_instruction(), block.id, 5)
+        store = compared.store
+        var compare_left = left.id
+        if mode == 3 { compare_left = argument.id }
+        let compare_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 4, op: mir_op_str_eq(), result: compared.id, place: 0, type_op: 0, a: compare_left, b: right.id, c: 0, target: 0, name_start: 0, name_end: 0))
+        store = compare_instr.store
+    }
+    let final = try mir_add_terminator(d, store, MirTermRec(function: caller.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(final.store)
+}
+
 fn cross_function_value_names_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
     let first = try mir_add_function(d, initial, "first", mir_type_unit())
     let first_value = try mir_add_function_param(d, first.store, first.id, 0, "shared", mir_type_u64())
@@ -1188,6 +1263,11 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if rejected_values.complete { if mir_print(duplicate_values) { return Ok(false) } }
 	if try cgen_generate(d, duplicate_values, 3, false) { return Ok(false) }
 	if !expect_complete(93, try mir_verify_complete(d, try cross_function_value_names_fixture(d, try mir_store_new(d)), 3, false), true, false, 0, 0, 0) { return Ok(false) }
+	if !emit_complete(100, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 0), 5, false)) { return Ok(false) }
+	if !emit_complete(101, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 1), 5, false)) { return Ok(false) }
+	if !emit_complete(102, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 2), 5, false)) { return Ok(false) }
+	if !emit_complete(103, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 3), 5, false)) { return Ok(false) }
+	if !emit_complete(104, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 4), 5, false)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1214,7 +1294,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.Replace(want, "E 24 1 7\nE 25 1 6\n", "V 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\nE 25 1 6\n", 1)
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 5\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()
