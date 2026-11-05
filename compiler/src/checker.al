@@ -1486,9 +1486,9 @@ fn synthesize_default_methods(d: Domain, state: State, parse: ParseStore, store:
 
 // Root recursion over the impl roots: the store threads through every step
 // and must not cross a loop backedge. The parser links the trait application
-// as the impl root's chain tail. Only arity-zero traits synthesize defaults:
-// a synthesized method resolves in its own scope, where a generic trait's
-// parameters are not visible.
+// as the impl root's chain tail. Every defaulted requirement synthesizes:
+// the trait's parameters reach the materialized method substituted with the
+// impl's concrete trait arguments.
 fn synthesize_default_methods_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
     if root_at >= __s0_buffer_len(U64, parse.roots) { return Ok(CheckGood(store)) }
     var current = store
@@ -1507,7 +1507,7 @@ fn synthesize_default_methods_from(d: Domain, state: State, parse: ParseStore, s
             let trait_symbol = symbol_named(state, parse, current, application)
             if trait_symbol != 0 {
                 let trait_decl = __s0_buffer_get(SymbolRec, current.symbols, trait_symbol - 1)
-                if trait_decl.kind == 50 && trait_decl.type_arity == 0 {
+                if trait_decl.kind == 50 {
                     let stepped = try synthesize_default_method_links(d, state, parse, current, root_id, trait_symbol, trait_root_children(parse, trait_decl))
                     if match stepped {
                         CheckGood(value) => false
@@ -2221,6 +2221,32 @@ fn ffi_type_syntax_ok(state: State, parse: ParseStore, node_id: U64) -> Bool {
     return child.kind == 4 && builtin_type_kind(state, child) == 1
 }
 
+// A materialized default method is a kind-12 symbol whose node is the trait
+// requirement. It resolves in its own scope, so the trait's parameters are
+// not its type parameters: they are the concrete trait arguments of the one
+// implementation the method was materialized for. Returns the substituted
+// checked type, or 0 when the name is not a parameter of that trait.
+fn synthesized_default_trait_arg(state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec) -> U64 {
+    let declaration = instance_declaration(store, owner)
+    if declaration == 0 { return 0 }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
+    if symbol.kind != 12 || symbol.inherent_owner == 0 { return 0 }
+    if __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1).kind != 51 { return 0 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitImplRec, store.traits.impls) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, at)
+        if rec.owner_node == symbol.inherent_owner {
+            let param = find_type_param(state, store, rec.trait_symbol, node)
+            if param == 0 { return 0 }
+            let ordinal = type_param_ordinal(store, rec.trait_symbol, param)
+            if ordinal >= rec.arg_count { return 0 }
+            return __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + ordinal)
+        }
+        at = at + 1
+    }
+    return 0
+}
+
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     let boundary = declaration_boundary(store, owner)
@@ -2321,6 +2347,8 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             if concrete != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, concrete))) }
             return Ok(CheckGood(try append_checked_type(d, store, owner, 6, node_id, param, 0, 0)))
         }
+        let substituted = synthesized_default_trait_arg(state, parse, store, owner, node)
+        if substituted != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, substituted))) }
         let symbol = find_declared_type(state, parse, store, node)
         if symbol == 0 {
             if trait_symbol_named(state, parse, store, node) != 0 { return check_fail(d, store, 114, node, 0, 0, 0) }
@@ -6364,7 +6392,6 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             let trait_method = trait_receiver_method(state, parse, current, receiver_type, callee)
             if trait_method.ambiguous { return expr_token_fail(d, state, base, 119, callee) }
             if trait_method.target != 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
-            if trait_method.defaulted { return expr_token_fail(d, state, base, 120, callee) }
             if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
                 if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
             }
@@ -8723,7 +8750,6 @@ fn trait_impl_receiver_less(store: CheckStore, left: TraitImplRec, right: TraitI
 type TraitMethodRec {
     target: U64
     ambiguous: Bool
-    defaulted: Bool
 }
 
 fn trait_impl_method_symbol(state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, name: SyntaxRec) -> U64 {
@@ -8736,36 +8762,11 @@ fn trait_impl_method_symbol(state: State, parse: ParseStore, store: CheckStore, 
     return 0
 }
 
-fn trait_method_has_default(state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, name: SyntaxRec) -> Bool {
-    if rec.trait_symbol == 0 { return false }
-    let trait_symbol = __s0_buffer_get(SymbolRec, store.symbols, rec.trait_symbol - 1)
-    let root = __s0_buffer_get(SyntaxRec, parse.nodes, trait_symbol.node - 1)
-    var link_at = root.children
-    while link_at != 0 {
-        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
-        if child.kind == 51 && same_name(state, name.source, name.name_start, name.name_end, child.source, child.name_start, child.name_end) {
-            // A requirement with a block carries the default body.
-            var body_at = child.children
-            var has_block = false
-            while body_at != 0 {
-                let body_item = __s0_buffer_get(SyntaxLinkRec, parse.links, body_at - 1)
-                if __s0_buffer_get(SyntaxRec, parse.nodes, body_item.node - 1).kind == 14 { has_block = true }
-                body_at = body_item.next
-            }
-            return has_block
-        }
-        link_at = item.next
-    }
-    return false
-}
-
 fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, receiver: CheckedTypeRec, name: SyntaxRec) -> TraitMethodRec {
     var found: U64 = 0
     var ambiguous = false
-    var defaulted = false
     var structural = false
-    if receiver.kind != 7 || __s0_buffer_len(U64, store.traits.receiver_index) == 0 { return TraitMethodRec(target: 0, ambiguous: false, defaulted: false) }
+    if receiver.kind != 7 || __s0_buffer_len(U64, store.traits.receiver_index) == 0 { return TraitMethodRec(target: 0, ambiguous: false) }
     var at: U64 = 0
     while at < __s0_buffer_len(U64, store.traits.receiver_index) {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
@@ -8774,7 +8775,6 @@ fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, rec
             if method != 0 {
                 if found != 0 { ambiguous = true } else { found = method }
             } else {
-                if trait_method_has_default(state, parse, store, rec, name) { defaulted = true }
                 // Structural Eq/Hash impls satisfy constraints but expose no
                 // callable method symbols until the ordered collections
                 // land; they only shadow their own method names.
@@ -8783,8 +8783,8 @@ fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, rec
         }
         at = at + 1
     }
-    if structural { return TraitMethodRec(target: 0, ambiguous: false, defaulted: false) }
-    return TraitMethodRec(target: found, ambiguous: ambiguous, defaulted: defaulted)
+    if structural { return TraitMethodRec(target: 0, ambiguous: false) }
+    return TraitMethodRec(target: found, ambiguous: ambiguous)
 }
 
 fn trait_store_with(store: CheckStore, impls: __s0_Buffer(TraitImplRec), index: __s0_Buffer(U64)) -> CheckStore {

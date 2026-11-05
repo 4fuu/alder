@@ -822,3 +822,105 @@ fn main() -> I32 {
 	}
 	t.Logf("generic trait method program exited cleanly under strict C11")
 }
+
+// Generic-trait default methods end to end: one defaulted requirement whose
+// result is the trait's parameter, materialized for two implementations with
+// different trait arguments. The default body calls the overridden method,
+// the materialized result type is the impl's concrete argument, and both the
+// direct dot-call and dispatch through a constrained generic function run
+// under strict C11. Alder-only: the Go oracle frontend does not implement
+// the trait surface.
+func runAlderGenericTraitDefaultLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"generic-trait-defaults.al": `type NumBox {
+    n: U64
+}
+
+type TextBox {
+    t: String
+}
+
+trait Produce(Out: type) {
+    fn produce(self) -> Out
+    fn identity_default(self) -> Out {
+        return self.produce()
+    }
+}
+
+impl Produce(U64) for NumBox {
+    fn produce(self) -> U64 { return self.n }
+}
+
+impl Produce(String) for TextBox {
+    fn produce(self) -> String { return self.t }
+}
+
+fn through(P: type, O: type, p: P) -> O
+where P: Produce(O) {
+    return p.identity_default()
+}
+
+fn main() -> I32 {
+    let num = NumBox(n: 7)
+    if num.identity_default() != 7 { return 1 }
+    if through(NumBox, U64, num) != 7 { return 2 }
+    var seen = Map.new(String, U64)
+    let text = TextBox(t: "hey")
+    if !seen.insert(text.identity_default(), 5) { return 3 }
+    let found = seen.get("hey")
+    let got = match found {
+        Some(v) => v
+        None => 0
+    }
+    if got != 5 { return 4 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"generic-trait-defaults.al"})
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse generic-trait-default MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify generic-trait-default MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("generic-trait-default MIR has no main function")
+	}
+	// Both materializations lower as distinct functions.
+	materialized := 0
+	for id := range module.Functions {
+		name := module.Functions[id].Name
+		if len(name) > len("identity_default") && name[:len("identity_default")] == "identity_default" {
+			materialized++
+		}
+	}
+	if materialized != 2 {
+		t.Fatalf("generic-trait-default MIR has %d identity_default materializations, want 2", materialized)
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"generic-trait-defaults.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "generic-trait-defaults.c")
+	program := filepath.Join(dir, "generic-trait-defaults.exe")
+	driver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; int32_t status = alder_fn_main_%d(&root); alder_domain_destroy(&root); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of generic-trait defaults: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run generic-trait default behavior: %v\n%s", err, output)
+	}
+	t.Logf("generic-trait default program exited cleanly under strict C11")
+}

@@ -101,8 +101,9 @@ Milestone 7.5 adds the static trait surface of
   type parameters are recorded in the trait's scope, so their names must be
   unique across the whole trait and they resolve throughout it; explicit
   specialization follows the receiver (`box.combine(U64, 3)`). Defaulted
-  requirements synthesize only for arity-zero traits: a generic trait's
-  parameters are not visible in the synthesized method's scope yet.
+  requirements synthesize for every trait: a materialized method resolves
+  the trait's parameters as the concrete trait arguments of its own
+  implementation.
 - `impl Trait(Arguments) for Type { ... }` implements a trait for a
   non-generic declared record or enum type with concrete trait arguments.
   Methods are ordinary functions; their bodies are checked and lowered even

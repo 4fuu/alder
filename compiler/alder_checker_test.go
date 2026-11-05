@@ -1843,13 +1843,21 @@ func validateCheckerManifest(m checkerManifest) error {
 	// Traits carry one implicit trailing `Self` parameter whose node is the
 	// trait declaration itself rather than a dedicated parameter node.
 	traitSelfNodes := make(map[int]bool)
+	// A requirement node backs one synthesized kind-12 method per
+	// implementation that uses its default body, so a node first claimed by
+	// a kind-12 symbol may be re-claimed by further kind-12 symbols; every
+	// other node backs exactly one symbol.
+	nodeKind12 := make(map[int]bool)
 	for i, symbol := range m.symbols {
 		instance := symbol.declaration != 0
 		validInstance := symbol.kind == 12 && symbol.arity == 0 && symbol.declaration == symbol.id && symbol.instanceArgCount == 0 || symbol.kind == 13 && symbol.arity == 0 && symbol.declaration >= 1 && symbol.declaration < symbol.id && m.symbols[symbol.declaration-1].kind == 12 && m.symbols[symbol.declaration-1].arity == symbol.instanceArgCount
-		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13 && symbol.kind != 50) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
+		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13 && symbol.kind != 50) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] && !(symbol.kind == 12 && nodeKind12[symbol.node]) || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
 			return fmt.Errorf("invalid symbol %+v", symbol)
 		}
 		if symbol.kind != 13 {
+			if symbol.kind == 12 {
+				nodeKind12[symbol.node] = true
+			}
 			nodes[symbol.node] = true
 		}
 		if symbol.kind == 50 {
@@ -2022,6 +2030,7 @@ func validateCheckerManifest(m checkerManifest) error {
 			}
 		}
 	}
+	useNodeSynth := make(map[int]bool)
 	for i, use := range m.uses {
 		key := [2]int{use.owner, use.role}
 		valueless := use.role == 2 && use.syntax == 0 && use.checkedType == 0
@@ -2033,10 +2042,17 @@ func validateCheckerManifest(m checkerManifest) error {
 		roleMatchesOwner := use.role == 1 && ownerKind == 2 || use.role == 2 && ownerKind == 3 || (use.role == 3 || use.role == 4) && ownerKind == 1 || (use.role == 5 || use.role == 6) && ownerKind == 12 || (use.role == 7 || use.role == 8) && ownerKind == 13
 		instanceUse := use.role == 7 || use.role == 8
 		captureAlias := use.role == 5 && captureAliased[use.node]
-		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 8 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] && !instanceUse && !captureAlias || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || !instanceUse && annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
+		// Synthesized default methods share the requirement's syntax nodes,
+		// so a use node first claimed by a kind-12 owner may be re-claimed by
+		// further kind-12 owners.
+		synthShared := useNodeSynth[use.node] && ownerKind == 12
+		if use.id != i+1 || use.owner < 1 || use.owner > len(m.symbols) || use.role < 1 || use.role > 8 || !roleMatchesOwner || use.ordinal != ordinals[key] || use.node < 1 || nodes[use.node] && !instanceUse && !captureAlias && !synthShared || !validSourceRange(use.source, use.nameStart, use.nameEnd, named) || named != (use.nameStart != 0 || use.nameEnd != 0) || !valueless && (use.syntax < 1 || use.checkedType < 1 || use.checkedType > len(m.types) || !instanceUse && annotations[[2]int{use.owner, use.syntax}] != use.checkedType) || valueless && (use.nameStart == 0 || use.nameEnd == 0) {
 			return fmt.Errorf("invalid declaration type use %+v", use)
 		}
 		if !instanceUse && !captureAlias {
+			if ownerKind == 12 {
+				useNodeSynth[use.node] = true
+			}
 			nodes[use.node] = true
 		}
 		if !valueless {

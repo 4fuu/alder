@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `2de9b7a73093932002772aab1e4483cbf762918153b2daf38f3c27763abf69d1`
+  `8ad3740da5aaec02a3549fbc70d3d14a290e9dd608c76ef9757452941f0e5589`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `2de9b7a73093932002772aab1e4483cbf762918153b2daf38f3c27763abf69d1`
+  `8ad3740da5aaec02a3549fbc70d3d14a290e9dd608c76ef9757452941f0e5589`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1030,8 +1030,15 @@ Exit-criteria evidence (in progress):
   after the receiver, and generic trait, impl, and inherent methods are
   pinned end to end through generated strict C11, including dispatch
   through a constrained generic function and a defaulted generic method on
-  an arity-zero trait. Defaulted methods on generic traits still wait: the
-  synthesized method cannot see the trait's parameters.
+  an arity-zero trait.
+- defaulted methods synthesize for generic traits as well: a materialized
+  method resolves the trait's parameters substituted with the concrete
+  trait arguments of its own implementation, so one defaulted requirement
+  runs at different result types per implementation (diagnostic 120 is
+  retired with its flag and helper). Both materializations of a
+  generic-trait default, direct dot-calls, and dispatch through a
+  constrained generic function are pinned end to end through generated
+  strict C11.
 - iterator cursors borrow exclusively: a non-self `mut` parameter stays an
   exclusive call borrow (rule 89 unchanged for ordinary parameters) and is
   legal for copyable values only when its type is a type parameter
@@ -1126,8 +1133,7 @@ both halves were written):
   verification even without the rule — a pre-existing lowering gap to fix
   before the loop case can move;
 - a compiler-scale layered DAG input over traits, generics, and closures that
-  terminates with deterministic diagnostics, MIR, and C;
-- defaulted methods on generic traits, which still reject with 120.
+  terminates with deterministic diagnostics, MIR, and C.
 
 Integrated tip timing (cold `bootstrap/regenerate.sh`): 2:40 / 4.89 GiB,
 against the 2:07 / 3.78 GiB pre-milestone baseline. Each commit's growth

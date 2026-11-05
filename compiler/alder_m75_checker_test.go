@@ -204,6 +204,50 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"generic-trait-defaults.al": `type NumBox {
+    n: U64
+}
+
+type TextBox {
+    t: String
+}
+
+trait Produce(Out: type) {
+    fn produce(self) -> Out
+    fn identity_default(self) -> Out {
+        return self.produce()
+    }
+}
+
+impl Produce(U64) for NumBox {
+    fn produce(self) -> U64 { return self.n }
+}
+
+impl Produce(String) for TextBox {
+    fn produce(self) -> String { return self.t }
+}
+
+fn through(P: type, O: type, p: P) -> O
+where P: Produce(O) {
+    return p.identity_default()
+}
+
+fn main() -> I32 {
+    let num = NumBox(n: 7)
+    if num.identity_default() != 7 { return 1 }
+    if through(NumBox, U64, num) != 7 { return 2 }
+    var seen = Map.new(String, U64)
+    let text = TextBox(t: "hey")
+    if !seen.insert(text.identity_default(), 5) { return 3 }
+    let found = seen.get("hey")
+    let got = match found {
+        Some(v) => v
+        None => 0
+    }
+    if got != 5 { return 4 }
+    return 0
+}
+`,
 		"defaulted-generic-method.al": `type Box {
     v: U64
 }
