@@ -167,7 +167,7 @@ fn lower_emit(d: Domain, mir: MirStore) -> I32 {
 fn lower_expect_bad(result: LowerResult) -> I32 { return match result {
     LowerBad => 0
     LowerModelBad => 0
-    LowerGood(mir) => 5
+    LowerGood(good) => 5
 } }
 fn lower_bad_done(result: Result(LowerResult, __s0_Error)) -> I32 { return match result {
     Err(error) => 3
@@ -249,7 +249,7 @@ fn lower_mode_spans(d: Domain, state: State, spans: __s0_Buffer(CheckedSpanRec),
         Ok(result) => match result {
             LowerBad => 5
             LowerModelBad => 5
-            LowerGood(mir) => lower_emit(d, mir)
+            LowerGood(good) => lower_emit(d, good.mir)
         }
     }
 }

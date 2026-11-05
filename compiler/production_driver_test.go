@@ -850,6 +850,7 @@ uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)sou
 uint64_t alderhost_command(void) { return %d; }
 bool alderhost_project_mode(void) { return false; }
 bool alderhost_bootstrap_private(void) { return false; }
+bool alderhost_report_copies(void) { return false; }
 uint64_t alderhost_project_action(void) { return 0; }
 uint64_t alderhost_manifest_len(void) { return 0; }
 uint8_t alderhost_manifest_byte(uint64_t offset) { (void)offset; return 0; }

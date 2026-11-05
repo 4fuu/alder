@@ -70,7 +70,51 @@ type LowerState {
     // lower_has_storage(store), computed once: the checked store is fixed
     // while lowering, and the walk is too costly to repeat per site.
     has_storage: Bool
+    // D023 move plan of the function being lowered: per-expression move
+    // verdicts and per-binding copy reasons, computed once per owner.
+    moves: LowerMovePlan
+    // Copy-site report records (D023), collected as copies are emitted.
+    reports: __s0_Buffer(CopySiteRec)
     valid: Bool
+}
+
+// The D023 move plan of one concrete function instance: movable is indexed
+// by checked expression ID and marks the binding reads that may transfer
+// their source storage instead of copying it; reasons is indexed by checked
+// local ID and carries the report reason of that binding's last non-movable
+// read (zero when nothing blocks it).
+type LowerMovePlan {
+    movable: __s0_Buffer(U64)
+    reasons: __s0_Buffer(U64)
+}
+
+// One binding access in lowering order: a read of expression, or a
+// definition of binding (expression zero).
+type LowerMoveEventRec {
+    binding: U64
+    expression: U64
+    is_definition: U64
+}
+
+// One loop's event range [first_event, end_event) plus the enclosing loop;
+// ranges nest because the event list follows the statement tree.
+type LowerMoveLoopRec {
+    first_event: U64
+    end_event: U64
+    parent: U64
+}
+
+fn lower_with_plan(state: LowerState, moves: LowerMovePlan) -> LowerState {
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: moves, reports: state.reports, valid: state.valid)
+}
+
+fn lower_with_reports(state: LowerState, reports: __s0_Buffer(CopySiteRec)) -> LowerState {
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: reports, valid: state.valid)
+}
+
+fn lower_add_copy_report(d: Domain, state: LowerState, owner: U64, source: U64, start: U64, end: U64, binding: U64, reason: U64) -> Result(LowerState, __s0_Error) {
+    let reports = try __s0_buffer_append(CopySiteRec, d, state.reports, CopySiteRec(owner: owner, source: source, start: start, end: end, binding: binding, reason: reason))
+    return Ok(lower_with_reports(state, reports))
 }
 
 type LowerStep {
@@ -89,14 +133,19 @@ type LowerFlowStep {
     terminated: Bool
 }
 
+type LowerGoodRec {
+    mir: MirStore
+    reports: __s0_Buffer(CopySiteRec)
+}
+
 enum LowerResult {
-    LowerGood(value: MirStore)
+    LowerGood(value: LowerGoodRec)
     LowerBad
     LowerModelBad
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 // Intern an anonymous function type: contiguous parameter parts, an
@@ -148,39 +197,39 @@ fn lower_with_type_parts(state: LowerState, parts: __s0_Buffer(MirTypePartRec)) 
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: false)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: false)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_releases(state: LowerState, releases: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_with_part_index(state: LowerState, index: LowerPartIndex) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid)
 }
 
 fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
@@ -1831,6 +1880,289 @@ fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: L
     return Ok(LowerStep(state: copied.state, id: result.id))
 }
 
+// ---------------------------------------------------------------------------
+// D023: in-place update of uniquely owned values.
+//
+// lower_move_analyze computes, for one concrete function instance, which
+// binding-read expressions may transfer their source storage instead of
+// copying it. A read of a binding may move when every later access to that
+// binding in program order is a definition, and every access inside any
+// loop enclosing the read is likewise a definition (a read re-executed
+// after a backedge keeps the source alive). Parameters never move: their
+// storage belongs to the caller, and the dead-argument case is decided at
+// the caller's copy site. Bindings captured by closures and bindings that
+// ever form a view are excluded conservatively. Verdicts write into the
+// shared movable buffer (indexed by expression ID) and reasons into the
+// shared per-binding buffer, both allocated once per compilation.
+
+type LowerMoveWalkRec {
+    events: __s0_Buffer(LowerMoveEventRec)
+    excluded: __s0_Buffer(U64)
+}
+
+fn lower_move_walk_expression(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, expression_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(walk) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    var events = walk.events
+    var excluded = walk.excluded
+    if (expression.kind == 1 || expression.kind == 5 || expression.kind == 22) && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(LocalRec, store.locals) {
+        events = try __s0_buffer_append(LowerMoveEventRec, d, events, LowerMoveEventRec(binding: expression.parameter_use, expression: expression_id, is_definition: 0))
+    }
+    if expression.kind == 18 && expression.annotation != 0 {
+        // A slice or mutable-slice view of a binding keeps an implicit later
+        // reference to its storage, so that binding never moves.
+        let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+        if annotation.builtin == 23 || annotation.builtin == 24 {
+            if expression.child_count != 0 && expression.first_child != 0 && expression.first_child <= __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+                let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+                if receiver_id != 0 && receiver_id <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+                    let receiver = __s0_buffer_get(CheckedExprRec, store.expressions, receiver_id - 1)
+                    if (receiver.kind == 1 || receiver.kind == 5) && receiver.parameter_use != 0 && receiver.parameter_use <= __s0_buffer_len(U64, excluded) {
+                        if __s0_buffer_get(U64, excluded, receiver.parameter_use - 1) == 0 { __s0_buffer_set(U64, excluded, receiver.parameter_use - 1, 3) }
+                    }
+                }
+            }
+        }
+    }
+    var child: U64 = 0
+    var inner = LowerMoveWalkRec(events: events, excluded: excluded)
+    while child < expression.child_count {
+        if expression.first_child != 0 && expression.first_child - 1 + child < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
+            inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression)
+        }
+        child = child + 1
+    }
+    if expression.kind == 12 && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(CheckedMatchRec, store.control.matches) {
+        let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
+        var arm: U64 = 0
+        while arm < checked.arm_count {
+            let arm_rec = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + arm)
+            if arm_rec.body != 0 { inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, arm_rec.body) }
+            if arm_rec.block != 0 { inner = try lower_move_walk_block(d, store, inner, loops, loop_at, arm_rec.block) }
+            arm = arm + 1
+        }
+    }
+    if expression.kind == 13 && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(CheckedTryRec, store.control.tries) {
+        inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1).expression)
+    }
+    return Ok(inner)
+}
+
+fn lower_move_walk_block(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, block_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+    if block_id == 0 || block_id > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return Ok(walk) }
+    let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
+    // The statement chain is reverse source ordered: collect it, then walk
+    // the statements front to back so events follow lowering order.
+    var chain = try __s0_buffer_new(U64, d)
+    var at = block.statements
+    var walking = true
+    while at != 0 && walking {
+        if at > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) {
+            walking = false
+        } else {
+            let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, at - 1)
+            if link.statement != 0 && link.statement <= __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                chain = try __s0_buffer_append(U64, d, chain, link.statement)
+            }
+            at = link.next
+        }
+    }
+    var inner = walk
+    var index = __s0_buffer_len(U64, chain)
+    while index > 0 {
+        inner = try lower_move_walk_one(d, store, inner, loops, loop_at, __s0_buffer_get(U64, chain, index - 1))
+        index = index - 1
+    }
+    return Ok(inner)
+}
+
+fn lower_move_walk_one(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, statement_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+    if statement_id == 0 || statement_id > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(walk) }
+    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_id - 1)
+    var inner = try lower_move_walk_expression(d, store, walk, loops, loop_at, statement.expression)
+    var events = inner.events
+    if statement.kind == 1 || statement.kind == 2 || statement.kind == 10 {
+        if statement.binding != 0 && statement.binding <= __s0_buffer_len(LocalRec, store.locals) {
+            events = try __s0_buffer_append(LowerMoveEventRec, d, events, LowerMoveEventRec(binding: statement.binding, expression: 0, is_definition: 1))
+        }
+    }
+    if statement.kind == 3 && statement.place != 0 && statement.place <= __s0_buffer_len(CheckedPlaceRec, store.control.places) {
+        let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, statement.place - 1)
+        if place.index != 0 { inner = try lower_move_walk_expression(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded), loops, loop_at, place.index)
+            events = inner.events }
+        if place.root != 0 && place.root <= __s0_buffer_len(LocalRec, store.locals) {
+            events = try __s0_buffer_append(LowerMoveEventRec, d, events, LowerMoveEventRec(binding: place.root, expression: 0, is_definition: 1))
+        }
+    }
+    if statement.kind == 6 { return lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded), loops, loop_at, statement.body) }
+    if statement.kind == 7 {
+        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded)
+        walked = try lower_move_walk_block(d, store, walked, loops, loop_at, statement.body)
+        walked = try lower_move_walk_block(d, store, walked, loops, loop_at, statement.alternative)
+        return Ok(walked)
+    }
+    if statement.kind == 8 || statement.kind == 9 {
+        let opened = try __s0_buffer_append(LowerMoveLoopRec, d, loops, LowerMoveLoopRec(first_event: __s0_buffer_len(LowerMoveEventRec, events), end_event: 0, parent: loop_at))
+        var loops_now = opened
+        let loop_now = __s0_buffer_len(LowerMoveLoopRec, loops_now)
+        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded)
+        walked = try lower_move_walk_block(d, store, walked, loops_now, loop_now, statement.body)
+        let rec = __s0_buffer_get(LowerMoveLoopRec, loops_now, loop_now - 1)
+        __s0_buffer_set(LowerMoveLoopRec, loops_now, loop_now - 1, LowerMoveLoopRec(first_event: rec.first_event, end_event: __s0_buffer_len(LowerMoveEventRec, walked.events), parent: rec.parent))
+        if statement.kind == 9 && statement.binding != 0 && statement.binding <= __s0_buffer_len(LocalRec, store.locals) {
+            // The loop binding is defined fresh each iteration after the
+            // sequence read; the sequence read precedes the loop range, so
+            // a dead sequence still moves into the element copies.
+            walked = LowerMoveWalkRec(events: try __s0_buffer_append(LowerMoveEventRec, d, walked.events, LowerMoveEventRec(binding: statement.binding, expression: 0, is_definition: 1)), excluded: walked.excluded)
+        }
+        return Ok(walked)
+    }
+    return Ok(LowerMoveWalkRec(events: events, excluded: inner.excluded))
+}
+
+// lower_move_analyze fills the shared move plan for one concrete function
+// instance: parameters and captured bindings are excluded up front, the
+// statement tree is walked once in lowering order, and each read event is
+// decided against the binding's later accesses and enclosing loops.
+fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64, plan: LowerMovePlan) -> Result(LowerMovePlan, __s0_Error) {
+    let locals_count = __s0_buffer_len(LocalRec, store.locals)
+    // Exclusions are per binding and permanent: parameters (7) share the
+    // caller's storage, captured bindings (2) are snapshot by closures, and
+    // view receivers (3) keep an implicit later reference.
+    var excluded = try __s0_buffer_new(U64, d)
+    var excluded_at: U64 = 0
+    while excluded_at < locals_count {
+        excluded = try __s0_buffer_append(U64, d, excluded, 0)
+        excluded_at = excluded_at + 1
+    }
+    var at: U64 = 0
+    while at < locals_count {
+        let local = __s0_buffer_get(LocalRec, store.locals, at)
+        if local.owner == owner && local.kind == 1 { __s0_buffer_set(U64, excluded, at, 7) }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(ClosureCaptureRec, store.closures.captures) {
+        let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, at)
+        if capture.local != 0 && capture.local <= locals_count && __s0_buffer_get(U64, excluded, capture.local - 1) == 0 {
+            __s0_buffer_set(U64, excluded, capture.local - 1, 2)
+        }
+        at = at + 1
+    }
+    let events = try __s0_buffer_new(LowerMoveEventRec, d)
+    let loops = try __s0_buffer_new(LowerMoveLoopRec, d)
+    let walked = try lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: excluded), loops, 0, root_block)
+    var movable = plan.movable
+    // last_reason carries the report reason of each binding's most recent
+    // read: zero once a read moves, 1 or 4 while later uses block it.
+    var last_reason = try __s0_buffer_new(U64, d)
+    var reason_at: U64 = 0
+    while reason_at < locals_count {
+        last_reason = try __s0_buffer_append(U64, d, last_reason, 0)
+        reason_at = reason_at + 1
+    }
+    var index: U64 = 0
+    while index < __s0_buffer_len(LowerMoveEventRec, walked.events) {
+        let event = __s0_buffer_get(LowerMoveEventRec, walked.events, index)
+        if event.is_definition == 0 && event.binding != 0 && event.binding <= locals_count {
+            var reason = __s0_buffer_get(U64, walked.excluded, event.binding - 1)
+            if reason == 0 {
+                var blocked: U64 = 0
+                var later: U64 = index + 1
+                while later < __s0_buffer_len(LowerMoveEventRec, walked.events) {
+                    let next_event = __s0_buffer_get(LowerMoveEventRec, walked.events, later)
+                    if next_event.binding == event.binding && next_event.is_definition == 0 { blocked = 1 }
+                    later = later + 1
+                }
+                if blocked != 0 { reason = 1 }
+                // A read inside a loop body never moves in this milestone:
+                // the phase-6 loop-store rule tracks storage provenance
+                // around backedges, so a moved header crossing a backedge is
+                // rejected. Such sites copy and report the loop reason.
+                var loop_at: U64 = 0
+                while loop_at < __s0_buffer_len(LowerMoveLoopRec, loops) && reason == 0 {
+                    let span_loop = __s0_buffer_get(LowerMoveLoopRec, loops, loop_at)
+                    if span_loop.first_event <= index && index < span_loop.end_event { reason = 4 }
+                    loop_at = loop_at + 1
+                }
+                if reason != 0 || event.expression == 0 || event.expression > __s0_buffer_len(U64, movable) {
+                    if reason == 0 { reason = 1 }
+                    __s0_buffer_set(U64, last_reason, event.binding - 1, reason)
+                } else {
+                    __s0_buffer_set(U64, movable, event.expression - 1, 1)
+                    __s0_buffer_set(U64, last_reason, event.binding - 1, 0)
+                }
+            } else {
+                __s0_buffer_set(U64, last_reason, event.binding - 1, reason)
+            }
+        }
+        index = index + 1
+    }
+    // Publish the report reasons: exclusions win, then the last read's
+    // verdict, then a plain later-use default.
+    at = 0
+    while at < locals_count {
+        var reason = __s0_buffer_get(U64, walked.excluded, at)
+        if reason == 0 { reason = __s0_buffer_get(U64, last_reason, at) }
+        __s0_buffer_set(U64, plan.reasons, at, reason)
+        at = at + 1
+    }
+    return Ok(LowerMovePlan(movable: movable, reasons: plan.reasons))
+}
+
+// lower_move_or_copy applies the D023 rule at one value-semantics copy
+// site. When the copied value comes from a binding read that the move plan
+// marks movable, and the site's placement domain equals the source's (the
+// target never outlives the source storage), the value transfers instead
+// of copying; every other site copies and appends a report record.
+// receiver_source_expression returns the receiver child expression of a
+// builtin call, which copy sites use as their potential move source.
+fn receiver_source_expression(expression: CheckedExprRec, store: CheckStore) -> U64 {
+    if expression.child_count == 0 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return 0 }
+    return __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+}
+
+fn lower_move_or_copy(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64, source_expression: U64, reason_override: U64) -> Result(LowerStep, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, checked_type)
+    let vec = try lower_mir_type_contains_vec(d, typ.state, typ.id)
+    if !vec.value { return Ok(LowerStep(state: vec.state, id: value)) }
+    var current = vec.state
+    var binding: U64 = 0
+    if source_expression != 0 && source_expression <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let read = __s0_buffer_get(CheckedExprRec, store.expressions, source_expression - 1)
+        if (read.kind == 1 || read.kind == 5 || read.kind == 22) && read.parameter_use != 0 && read.parameter_use <= __s0_buffer_len(LocalRec, store.locals) { binding = read.parameter_use }
+    }
+    var movable = false
+    if binding != 0 && source_expression <= __s0_buffer_len(U64, current.moves.movable) && __s0_buffer_get(U64, current.moves.movable, source_expression - 1) == 1 { movable = true }
+    if movable {
+        let source_domain = lower_storage_domain_value(current, store, owner, source_expression)
+        let target_domain = lower_storage_domain_value(current, store, owner, expression_id)
+        if source_domain != 0 && target_domain != 0 && source_domain == target_domain {
+            return Ok(LowerStep(state: current, id: value))
+        }
+    }
+    var reason: U64 = reason_override
+    if reason == 0 {
+        if binding == 0 {
+            reason = 5
+        } else {
+            if movable { reason = 6 } else {
+                reason = 1
+                if binding <= __s0_buffer_len(U64, current.moves.reasons) { reason = __s0_buffer_get(U64, current.moves.reasons, binding - 1) }
+                if reason == 0 { reason = 1 }
+            }
+        }
+    }
+    if expression_id != 0 && expression_id <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let site = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+        if site.syntax != 0 && site.syntax <= __s0_buffer_len(CheckedSpanRec, spans) {
+            let span = __s0_buffer_get(CheckedSpanRec, spans, site.syntax - 1)
+            current = try lower_add_copy_report(d, current, owner, span.source, span.start, span.end, binding, reason)
+        }
+    }
+    return lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression_id, checked_type, value)
+}
+
 fn lower_copy_result_storage(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
     if lower_closure_site_for(store, owner) != 0 { return Ok(LowerStep(state: typ.state, id: value)) }
@@ -1852,7 +2184,7 @@ fn lower_retain_exit_value(d: Domain, source_state: State, store: CheckStore, st
     return Ok(LowerStep(state: copied.state, id: result.id))
 }
 
-fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, copy: Bool) -> Result(LowerStep, __s0_Error) {
+fn lower_binding_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, copy: Bool) -> Result(LowerStep, __s0_Error) {
     let binding = lower_binding_lookup(state, expression.parameter_use)
     if binding.binding == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     var current = state
@@ -1879,14 +2211,14 @@ fn lower_binding_expression(d: Domain, source_state: State, store: CheckStore, s
         current = instr.state
         value = result.id
     }
-    if copy { return lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression_id, expression.checked_type, value) }
+    if copy { return lower_move_or_copy(d, source_state, spans, store, current, owner, function, block, expression_id, expression.checked_type, value, expression_id, 0) }
     return Ok(LowerStep(state: current, id: value))
 }
 
 fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 { return lower_binding_expression(d, source_state, store, state, owner, function, block, expression_id, expression, false) }
+    if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 { return lower_binding_expression(d, source_state, spans, store, state, owner, function, block, expression_id, expression, false) }
     return lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
 }
 
@@ -2404,7 +2736,7 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         current = value_place.state
         let value_loaded = try lower_helper_load(d, current, function, found.id, value_place.id, value_type.id)
         current = value_loaded.state
-        let copied = try lower_copy_if_vec(d, source_state, store, current, owner, function, found.id, expression_id, value_checked, value_loaded.id)
+        let copied = try lower_move_or_copy(d, source_state, spans, store, current, owner, function, found.id, expression_id, value_checked, value_loaded.id, receiver_source_expression(expression, store), 0)
         current = copied.state
         let some = try lower_add_typed_result(d, current, function, found.id, option.id)
         let made_some = try lower_add_instr(d, some.state, function, found.id, mir_op_enum_construct(), some.id, 0, option.id, copied.id, 0, 0, "some")
@@ -2660,7 +2992,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
             let source_place = try mir_add_place(d, source_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: source_ref.id))
             let loaded = try lower_add_typed_result(d, lower_with_mir(source_index.state, source_place.store), function, block, element.id)
             let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, source_place.id, 0, 0, 0, 0, "")
-            let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, block, expression_id, element_checked, loaded.id)
+            let copied = try lower_move_or_copy(d, source_state, spans, store, load.state, owner, function, block, expression_id, element_checked, loaded.id, __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + count_at).expression, 0)
             let target_ref = try lower_add_typed_result(d, copied.state, function, block, storage_type.type_id)
             let target_index = try lower_add_instr(d, target_ref.state, function, block, mir_op_slice_index_checked(), target_ref.id, 0, 0, storage.id, index, panic_block, "")
             let target_place = try mir_add_place(d, target_index.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
@@ -2801,7 +3133,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: reference.id))
         let loaded = try lower_add_typed_result(d, lower_with_mir(indexed.state, place.store), function, some_block.id, element.id)
         let load = try lower_add_instr(d, loaded.state, function, some_block.id, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
-        let copied = try lower_copy_if_vec(d, source_state, store, load.state, owner, function, some_block.id, expression_id, element_checked, loaded.id)
+        let copied = try lower_move_or_copy(d, source_state, spans, store, load.state, owner, function, some_block.id, expression_id, element_checked, loaded.id, receiver_source_expression(expression, store), 0)
         let some = try lower_add_typed_result(d, copied.state, function, some_block.id, option.id)
         let made_some = try lower_add_instr(d, some.state, function, some_block.id, mir_op_enum_construct(), some.id, 0, option.id, copied.id, 0, 0, "some")
         current = try lower_jump_value(d, made_some.state, function, some_block.id, join.id, some.id)
@@ -2881,7 +3213,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.owner != owner || !lower_type_concrete(store, expression.checked_type) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
-        return lower_binding_expression(d, source_state, store, state, owner, function, block, expression_id, expression, expression.kind != 22)
+        return lower_binding_expression(d, source_state, spans, store, state, owner, function, block, expression_id, expression, expression.kind != 22)
     }
     if expression.kind >= 2 && expression.kind <= 4 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
@@ -2991,7 +3323,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     current = loaded.state
                     captured = loaded.id
                 }
-                let copied = try lower_copy_if_vec(d, source_state, store, current, owner, function, block, expression_id, capture.checked_type, captured)
+                let copied = try lower_move_or_copy(d, source_state, spans, store, current, owner, function, block, expression_id, capture.checked_type, captured, 0, 2)
                 if !copied.state.valid { return Ok(copied) }
                 current = copied.state
                 field_values = try __s0_buffer_append(U64, d, field_values, copied.id)
@@ -3058,7 +3390,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let result = try lower_add_result(d, lower_with_mir(indexed.state, place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
-        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id)
+        return lower_move_or_copy(d, source_state, spans, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id, base_id, 0)
     }
     if expression.kind == 21 {
         if expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) || expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -3079,7 +3411,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: deref.id, field_start: named.start, field_end: named.end, deref_value: 0))
             let result = try lower_add_result(d, lower_with_mir(base_type.state, field_place.store), function, active, expression.checked_type, source_state, store)
             let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, field_place.id, 0, 0, 0, 0, "")
-            return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id)
+            return lower_move_or_copy(d, source_state, spans, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id, base_id, 0)
         }
         let ordinal = lower_local_count(base_type.state.mir, function)
         let temporary = try mir_add_local(d, base_type.state.mir, function, ordinal, try lower_decimal_name(d, "field_tmp", expression_id), base_type.id)
@@ -3089,7 +3421,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: local_place.id, field_start: named.start, field_end: named.end, deref_value: 0))
         let result = try lower_add_result(d, lower_with_mir(stored.state, field_place.store), function, active, expression.checked_type, source_state, store)
         let loaded = try lower_add_instr(d, result.state, function, active, mir_op_load(), result.id, field_place.id, 0, 0, 0, 0, "")
-        return lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id)
+        return lower_move_or_copy(d, source_state, spans, store, loaded.state, owner, function, active, expression_id, expression.checked_type, result.id, base_id, 0)
     }
     if expression.kind == 6 || expression.kind == 7 {
         if expression.child_count == 0 || expression.first_child == 0 || expression.first_child - 1 + expression.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
@@ -3959,7 +4291,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
-        let copied = try lower_copy_if_vec(d, source_state, store, loaded.state, owner, function, body.id, statement.expression, elem_checked, element_value.id)
+        let copied = try lower_move_or_copy(d, source_state, spans, store, loaded.state, owner, function, body.id, statement.expression, elem_checked, element_value.id, statement.expression, 0)
         current = try lower_store_binding(d, copied.state, function, body.id, statement.binding, copied.id)
         let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
@@ -4186,13 +4518,19 @@ fn lower_root_indexes(d: Domain, store: CheckStore) -> Result(__s0_Buffer(LowerO
 fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, locals: LowerLocalIndex, state: LowerState, owner: U64) -> Result(LowerState, __s0_Error) {
     let function = lower_owner_lookup(state.owners, owner)
     if function == 0 { return Ok(lower_invalid(state)) }
+    let root_block = lower_owner_lookup(state.roots, owner)
+    if root_block == 0 { return Ok(lower_invalid(state)) }
+    // D023: decide this function's movable reads once, before any body
+    // lowering; copy sites then consult the flat verdict buffer.
+    let analyzed = try lower_move_analyze(d, store, owner, root_block, state.moves)
+    let planned = lower_with_plan(state, analyzed)
     // Closure thunks: captures are checked as trailing parameters but lower
     // as locals unpacked from the environment parameter, so the thunk's C
     // ABI stays (declared parameters..., opaque environment pointer).
     let closure_site = lower_closure_site_for(store, owner)
     var declared_params: U64 = 0
     if closure_site != 0 { declared_params = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1).declared_count }
-    var current = state
+    var current = planned
     var param_ordinal: U64 = 0
     // Closure thunks never take the hidden domain parameter: they are called
     // through a raw code pointer. Their domain arrives in the environment
@@ -6267,9 +6605,25 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     let roots = try lower_root_indexes(d, store)
     let binding_statements = try lower_binding_statement_indexes(d, store)
     let locals = try lower_local_indexes(d, store)
+    let copy_reports = try __s0_buffer_new(CopySiteRec, d)
     let part_head = try __s0_buffer_new(U64, d)
     let part_next = try __s0_buffer_new(U64, d)
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), valid: true)
+    // The D023 move plan is indexed by expression ID and local ID; one
+    // zeroed allocation per compilation, filled per function by
+    // lower_move_analyze.
+    var plan_movable = try __s0_buffer_new(U64, d)
+    var plan_reasons = try __s0_buffer_new(U64, d)
+    var zero_at: U64 = 0
+    while zero_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        plan_movable = try __s0_buffer_append(U64, d, plan_movable, 0)
+        zero_at = zero_at + 1
+    }
+    zero_at = 0
+    while zero_at < __s0_buffer_len(LocalRec, store.locals) {
+        plan_reasons = try __s0_buffer_append(U64, d, plan_reasons, 0)
+        zero_at = zero_at + 1
+    }
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons), reports: copy_reports, valid: true)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)
@@ -6298,5 +6652,5 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     if !state.valid {
         return Ok(LowerBad)
     }
-    return Ok(LowerGood(state.mir))
+    return Ok(LowerGood(LowerGoodRec(mir: state.mir, reports: state.reports)))
 }

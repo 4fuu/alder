@@ -379,6 +379,24 @@ type CheckedMatchArmRec {
     guard: U64
 }
 
+// A D023 copy-site report record: one per value-semantics copy the lowerer
+// keeps because the source's storage is not provably uniquely owned and
+// placeable at that point. source/start/end locate the site through the
+// checked span of the copied expression; binding names the checked local
+// whose aliasing forced the copy (zero when the copied value is not a
+// binding read); reason is 1 still used later, 2 captured by a closure,
+// 3 has a live view, 4 re-read by a loop, 5 not from a binding,
+// 6 target placement outlives the source storage, or 7 parameter storage
+// shared with the caller.
+type CopySiteRec {
+    owner: U64
+    source: U64
+    start: U64
+    end: U64
+    binding: U64
+    reason: U64
+}
+
 type CheckedTryRec {
     owner: U64
     syntax: U64

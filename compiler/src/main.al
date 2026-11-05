@@ -18,8 +18,9 @@ fn run_cgen(d: Domain, mir: MirStore, verified: MirVerifyCompleteOutput) -> I32 
     }
 }
 
-fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I32 {
+fn finish_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, result: MirVerifyCompleteOutput, reports: __s0_Buffer(CopySiteRec)) -> I32 {
     if !result.complete { return driver_failure(4, "internal", "internal compiler failure: verification refused") }
+    if host_report_copies() && !driver_report_copies(state, store.locals, reports) { return driver_internal_error() }
     if driver_command() == 1 { return driver_success_check() }
     if driver_command() == 2 {
         if !driver_artifact_start("mir") { return driver_failure(3, "io", "cannot write compiler output") }
@@ -34,20 +35,62 @@ fn finish_verify(d: Domain, mir: MirStore, result: MirVerifyCompleteOutput) -> I
     return run_cgen(d, mir, result)
 }
 
-fn run_verify(d: Domain, mir: MirStore) -> I32 {
+import c alderhost_report_copies: fn() -> Bool
+
+fn host_report_copies() -> Bool { return unsafe c { alderhost_report_copies() } }
+
+// driver_copy_reason_text renders one D023 report reason.
+fn driver_copy_reason_text(reason: U64) -> __s0_String {
+    if reason == 1 { return "still used later" }
+    if reason == 2 { return "captured by a closure" }
+    if reason == 3 { return "has a live view" }
+    if reason == 4 { return "re-read by a loop" }
+    if reason == 5 { return "not from a binding" }
+    if reason == 6 { return "target placement outlives the source storage" }
+    return "parameter storage shared with the caller"
+}
+
+// driver_report_copies prints the D023 copy-site report after a successful
+// verification, when the host asked for it. Human format only: JSON stays
+// machine-parseable.
+fn driver_report_copies(state: State, store: __s0_Buffer(LocalRec), reports: __s0_Buffer(CopySiteRec)) -> Bool {
+    if driver_json() { return true }
+    if !driver_select(1) { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(CopySiteRec, reports) {
+        let rec = __s0_buffer_get(CopySiteRec, reports, at)
+        if !driver_out_human_range(state, rec.source, rec.start) || !out_string(": copy of `") { return false }
+        if rec.binding != 0 && rec.binding <= __s0_buffer_len(LocalRec, store) {
+            let local = __s0_buffer_get(LocalRec, store, rec.binding - 1)
+            let source = __s0_buffer_get(SourceRec, state.sources, local.source)
+            var name_at = local.name_start
+            while name_at < local.name_end {
+                if !out(text_byte(state, source, name_at)) { return false }
+                name_at = name_at + 1
+            }
+        } else {
+            if !out_string("value") { return false }
+        }
+        if !out_string("`: ") || !out_string(driver_copy_reason_text(rec.reason)) || !out(10) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn run_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, reports: __s0_Buffer(CopySiteRec)) -> I32 {
     var hosted = false
     if driver_command() == 3 && (!project_mode() || project_binary()) { hosted = true }
     return match mir_verify_complete(d, mir, mir_format_version(), hosted) {
         Err(error) => storage_error()
-        Ok(result) => finish_verify(d, mir, result)
+        Ok(result) => finish_verify(d, state, store, mir, result, reports)
     }
 }
 
-fn finish_lower(d: Domain, result: LowerResult) -> I32 {
+fn finish_lower(d: Domain, state: State, store: CheckStore, result: LowerResult) -> I32 {
     return match result {
         LowerBad => driver_failure(4, "internal", "internal compiler failure: lowering refused")
         LowerModelBad => driver_failure(4, "internal", "internal compiler failure: lowering model refused")
-        LowerGood(mir) => run_verify(d, mir)
+        LowerGood(good) => run_verify(d, state, store, good.mir, good.reports)
     }
 }
 
@@ -56,7 +99,7 @@ fn run_lower(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> I
         Err(error) => storage_error()
         Ok(spans) => match lower_checked(d, state, spans, store) {
             Err(error) => storage_error()
-            Ok(result) => finish_lower(d, result)
+            Ok(result) => finish_lower(d, state, store, result)
         }
     }
 }

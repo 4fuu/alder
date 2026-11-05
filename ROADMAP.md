@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `c1e8f67c9337d19b2116c98ff8b13412b76e016798af8d8e1b0b03e4a3c4fb05`
+  `2de9b7a73093932002772aab1e4483cbf762918153b2daf38f3c27763abf69d1`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `c1e8f67c9337d19b2116c98ff8b13412b76e016798af8d8e1b0b03e4a3c4fb05`
+  `2de9b7a73093932002772aab1e4483cbf762918153b2daf38f3c27763abf69d1`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1069,6 +1069,15 @@ this evidence record):
   `AsyncCleanup` trait is removed with its diagnostics 138/139 per D012 — a
   `Cleanup` hook may suspend once its owner holds a suspending capability in
   Milestone 9;
+- the D023 in-place-when-unique rule: a copy site whose source binding is
+  provably dead and unaliased transfers the storage instead of copying
+  (pinned observable: an aliased source still copies and reports, a dead
+  source moves with no copy call in the generated C, parameter storage
+  never moves inside the callee while a dead caller argument does, and an
+  escaping target still copies through exit retention). Copy sites inside
+  loop bodies and closure captures copy and report (reasons "re-read by a
+  loop" and "captured by a closure"); `--report-copies` prints every
+  remaining site with its reason after a successful check or compile;
 - `match` guards (D018): an arm may carry an `if` guard between its pattern
   and its arrow. The guard runs after the pattern matches with the arm's
   bindings in scope, a false guard continues with the next arm, a guarded
@@ -1111,7 +1120,11 @@ Remaining before exit (as of the integration of both halves; the items below
 were added to or reshaped by the 2026-11 design amendment, which landed after
 both halves were written):
 
-- the in-place-when-unique update rule with per-site copy reporting (D023);
+- (D023 landed; see the evidence below) the remaining D023 gap: copy sites
+  inside loop bodies still copy, because `for x in v` over an owned `Vec(T)`
+  and whole-vector assignment inside a `while` body fail phase-5/phase-6
+  verification even without the rule — a pre-existing lowering gap to fix
+  before the loop case can move;
 - a compiler-scale layered DAG input over traits, generics, and closures that
   terminates with deterministic diagnostics, MIR, and C;
 - defaulted methods on generic traits, which still reject with 120.

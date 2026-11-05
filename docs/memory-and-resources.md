@@ -43,6 +43,16 @@ representative programs, because a silently lost in-place update can turn a
 linear loop quadratic. See
 [D023](design-decisions.md#d023--uniquely-owned-values-update-in-place).
 
+Milestone 7.5 implements the rule for the collection copy sites: a value
+whose source binding is provably dead and unaliased at the copy transfers
+its storage instead of copying, parameters never move inside their callee
+(the caller's dead argument is elided at the call instead), bindings
+captured by closures or observed through views always copy, and copy sites
+inside loop bodies copy until the phase-6 loop-store rule understands moved
+storage across backedges. The compiler's `--report-copies` flag prints one
+line per remaining copy site with its reason after a successful check or
+compile.
+
 ## Affine owners
 
 Types that represent exactly-once external state are affine. The initial set

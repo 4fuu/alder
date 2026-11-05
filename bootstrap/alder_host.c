@@ -69,6 +69,7 @@ struct AlderHostContext {
     uint64_t command;
     bool project_mode;
     bool bootstrap_private;
+    bool report_copies;
     uint64_t project_action;
     uint8_t *manifest;
     uint64_t manifest_len;
@@ -190,6 +191,10 @@ bool alderhost_project_mode(void) {
 
 bool alderhost_bootstrap_private(void) {
     return alderhost_active_context != NULL && alderhost_active_context->bootstrap_private;
+}
+
+bool alderhost_report_copies(void) {
+    return alderhost_active_context != NULL && alderhost_active_context->report_copies;
 }
 
 uint64_t alderhost_project_action(void) {
@@ -862,6 +867,10 @@ static int alderhost_parse_request(int argc, char **argv,
                     return alderhost_fail(context->command, context->json, 2, "usage", "bootstrap-private specified more than once");
                 }
                 context->bootstrap_private = true;
+                continue;
+            }
+            if (strcmp(arg, "--report-copies") == 0) {
+                context->report_copies = true;
                 continue;
             }
             if (alderhost_option(arg, "format", &value)) {
