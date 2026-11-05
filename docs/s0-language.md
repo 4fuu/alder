@@ -119,8 +119,8 @@ Milestone 7.5 adds the static trait surface of
 - Every implementation is validated: required methods must be present with
   exactly the trait's receiver mode, runtime arity, and substituted
   parameter/result types, and impl methods that match no requirement are
-  rejected. Generic impl methods and calling defaulted methods are not
-  supported yet.
+  rejected. Generic impl methods are not supported yet; defaulted methods
+  are materialized as ordinary impl methods and dispatch statically.
 - Structural `Eq` and `Hash` implementations are synthesized by the
   language for unsigned integers, `Bool`, `String`, `Bytes`, and
   non-generic records and enums whose every component supports them, so

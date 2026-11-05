@@ -1196,6 +1196,12 @@ fn resolve_self_type(d: Domain, state: State, parse: ParseStore, store: CheckSto
                     if rec.owner_node == symbol.inherent_owner && rec.self_type != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, rec.self_type))) }
                     at = at + 1
                 }
+                // The trait implementation records are not built yet while
+                // declarations are still resolving (a synthesized default
+                // method's Self resolves before that pass); derive the
+                // implementing type from the impl root's own type node.
+                let self_node = trait_impl_self_node(parse, owner_node)
+                if self_node != 0 { return resolve_type(d, state, parse, store, owner, self_node) }
             }
         }
     }
@@ -1345,12 +1351,170 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         root_at = root_at + 1
         }
     }
+    let defaults = try synthesize_default_methods(d, state, parse, store)
+    if match defaults {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(defaults) }
+    store = match defaults {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    let regrouped = try regroup_impl_method_symbols(d, state, parse, store)
+    if match regrouped {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(regrouped) }
+    store = match regrouped {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
     let inherent = try validate_inherent_owners(d, state, parse, store)
     if match inherent {
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(inherent) }
     return validate_import_targets(d, state, parse, store)
+}
+
+// Default-method dispatch: every trait requirement that carries a default
+// body is materialized as an ordinary impl method for each implementation
+// that does not override it, so the requirement's body is checked, lowered,
+// and dispatched exactly like a written method. Synthesis is parse-driven
+// and runs inside symbol collection, before any declaration or body
+// checking, so the ordinary passes treat the materialized method as if it
+// were written in the impl.
+fn synthesize_default_method_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, impl_root: U64, trait_root: U64, link_at: U64) -> Result(CheckResult, __s0_Error) {
+    if link_at == 0 { return Ok(CheckGood(store)) }
+    let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+    let requirement = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+    var current = store
+    if requirement.kind == 51 {
+        var has_block = false
+        var body_at = requirement.children
+        while body_at != 0 {
+            let body_item = __s0_buffer_get(SyntaxLinkRec, parse.links, body_at - 1)
+            if __s0_buffer_get(SyntaxRec, parse.nodes, body_item.node - 1).kind == 14 { has_block = true }
+            body_at = body_item.next
+        }
+        if has_block {
+            var overridden = false
+            var symbol_at: U64 = 0
+            while symbol_at < __s0_buffer_len(SymbolRec, current.symbols) {
+                let symbol = __s0_buffer_get(SymbolRec, current.symbols, symbol_at)
+                if symbol.inherent_owner == impl_root && same_name(state, requirement.source, requirement.name_start, requirement.name_end, symbol.source, symbol.name_start, symbol.name_end) { overridden = true }
+                symbol_at = symbol_at + 1
+            }
+            if !overridden {
+                let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
+                var declaration: U64 = 0
+                if symbol_arity(parse, requirement) == 0 { declaration = symbol_id }
+                let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: item.node, source: requirement.source, name_start: requirement.name_start, name_end: requirement.name_end, type_arity: symbol_arity(parse, requirement), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: impl_root, module_source: 0, public: false))
+                current = CheckStore(symbols: symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures)
+            }
+        }
+    }
+    return synthesize_default_method_links(d, state, parse, current, impl_root, trait_root, item.next)
+}
+
+// After synthesis the materialized default methods sit at the tail of the
+// symbol table, but an implementation's method range must be contiguous for
+// dispatch. Rebuild the symbol table once, moving each impl's synthesized
+// methods directly behind that impl's written methods; symbol identifiers
+// are not referenced by anything yet, and only the self-referencing
+// declaration field needs renumbering. A synthesized record is a kind-12
+// symbol whose parse node is the trait requirement (kind 51).
+fn regroup_impl_method_symbols(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    if __s0_buffer_len(SymbolRec, store.symbols) == 0 { return Ok(CheckGood(store)) }
+    var reordered = try __s0_buffer_new(SymbolRec, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let item = __s0_buffer_get(SymbolRec, store.symbols, at)
+        // Synthesized records whose impl has written methods were already
+        // inserted behind them; skip those in the straight copy. An impl
+        // with no written methods keeps its synthesized records here.
+        var moved_synth = false
+        if item.inherent_owner != 0 && __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 51 {
+            var earlier_at: U64 = 0
+            while earlier_at < at {
+                let earlier = __s0_buffer_get(SymbolRec, store.symbols, earlier_at)
+                if earlier.inherent_owner == item.inherent_owner && __s0_buffer_get(SyntaxRec, parse.nodes, earlier.node - 1).kind != 51 { moved_synth = true }
+                earlier_at = earlier_at + 1
+            }
+        }
+        if moved_synth {
+            at = at + 1
+        } else {
+        if item.inherent_owner != 0 && (at + 1 >= __s0_buffer_len(SymbolRec, store.symbols) || __s0_buffer_get(SymbolRec, store.symbols, at + 1).inherent_owner != item.inherent_owner) {
+            var moved_at = __s0_buffer_len(SymbolRec, store.symbols) - 1
+            while moved_at > at {
+                let moved = __s0_buffer_get(SymbolRec, store.symbols, moved_at)
+                if moved.inherent_owner == item.inherent_owner && __s0_buffer_get(SyntaxRec, parse.nodes, moved.node - 1).kind == 51 {
+                    var moved_record = moved
+                    if moved_record.declaration != 0 { moved_record = SymbolRec(kind: moved_record.kind, node: moved_record.node, source: moved_record.source, name_start: moved_record.name_start, name_end: moved_record.name_end, type_arity: moved_record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: moved_record.first_instance_arg, instance_arg_count: moved_record.instance_arg_count, discovery_parent: moved_record.discovery_parent, inherent_owner: moved_record.inherent_owner, module_source: moved_record.module_source, public: moved_record.public) }
+                    reordered = try __s0_buffer_append(SymbolRec, d, reordered, moved_record)
+                }
+                moved_at = moved_at - 1
+            }
+        }
+        var record = item
+        if record.declaration == at + 1 { record = SymbolRec(kind: record.kind, node: record.node, source: record.source, name_start: record.name_start, name_end: record.name_end, type_arity: record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: record.first_instance_arg, instance_arg_count: record.instance_arg_count, discovery_parent: record.discovery_parent, inherent_owner: record.inherent_owner, module_source: record.module_source, public: record.public) }
+        reordered = try __s0_buffer_append(SymbolRec, d, reordered, record)
+        at = at + 1
+        }
+    }
+    return Ok(CheckGood(CheckStore(symbols: reordered, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures)))
+}
+
+// Materialize the default bodies of one trait implementation. The parser
+// links the trait application as the impl root's chain tail; generic traits
+// wait for instance checking and synthesize nothing.
+fn synthesize_default_methods(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    return synthesize_default_methods_from(d, state, parse, store, 0)
+}
+
+// Root recursion over the impl roots: the store threads through every step
+// and must not cross a loop backedge. The parser links the trait application
+// as the impl root's chain tail; generic traits wait for instance checking
+// and synthesize nothing.
+fn synthesize_default_methods_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
+    if root_at >= __s0_buffer_len(U64, parse.roots) { return Ok(CheckGood(store)) }
+    var current = store
+    let root_id = __s0_buffer_get(U64, parse.roots, root_at)
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+    if root.kind == 53 {
+        var link_at = root.children
+        var tail: U64 = 0
+        while link_at != 0 {
+            let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+            if item.next == 0 { tail = item.node }
+            link_at = item.next
+        }
+        if tail != 0 {
+            let application = __s0_buffer_get(SyntaxRec, parse.nodes, tail - 1)
+            let trait_symbol = symbol_named(state, parse, current, application)
+            if trait_symbol != 0 {
+                let trait_decl = __s0_buffer_get(SymbolRec, current.symbols, trait_symbol - 1)
+                if trait_decl.kind == 50 && trait_decl.type_arity == 0 {
+                    let stepped = try synthesize_default_method_links(d, state, parse, current, root_id, trait_symbol, trait_root_children(parse, trait_decl))
+                    if match stepped {
+                        CheckGood(value) => false
+                        CheckBad(value) => true
+                    } { return Ok(stepped) }
+                    current = match stepped {
+                        CheckGood(value) => value
+                        CheckBad(value) => value
+                    }
+                }
+            }
+        }
+    }
+    return synthesize_default_methods_from(d, state, parse, current, root_at + 1)
+}
+
+fn trait_root_children(parse: ParseStore, trait_decl: SymbolRec) -> U64 {
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, trait_decl.node - 1)
+    return root.children
 }
 
 fn append_type_param(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
@@ -2405,7 +2569,10 @@ fn check_one_declaration(d: Domain, state: State, parse: ParseStore, store: Chec
     var checked: CheckResult = CheckGood(with_params)
     if root.kind == 2 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 1, 0) }
     if root.kind == 3 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 2, 11) }
-    if root.kind == 12 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 5, 0) }
+    // A synthesized default method is a kind-12 symbol whose node is the
+    // trait requirement (kind 51): its receiver, parameters, result, and
+    // default body block resolve exactly like a written function's.
+    if root.kind == 12 || root.kind == 51 { checked = try check_type_links(d, state, parse, with_params, owner, root.children, 5, 0) }
     if root.kind == 1 {
         let signature = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
         let sig = __s0_buffer_get(SyntaxRec, parse.nodes, signature.node - 1)
@@ -2414,7 +2581,7 @@ fn check_one_declaration(d: Domain, state: State, parse: ParseStore, store: Chec
     if root.kind == 50 { checked = try check_trait_declaration(d, state, parse, with_params, owner, root) }
     let complete = check_result_store(checked)
     if check_result_bad(checked) { return Ok(checked) }
-    if root.kind == 2 || root.kind == 3 || root.kind == 12 { checked = try check_owner_constraints(d, state, parse, complete, owner, root) }
+    if root.kind == 2 || root.kind == 3 || root.kind == 12 || root.kind == 51 { checked = try check_owner_constraints(d, state, parse, complete, owner, root) }
     let finished = check_result_store(checked)
     if check_result_bad(checked) { return Ok(checked) }
     if root.kind == 3 {

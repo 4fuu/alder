@@ -67,6 +67,40 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"defaults.al": `type Box {
+    v: U64
+}
+
+trait Getter {
+    fn fetch(self) -> U64 {
+        return 7
+    }
+    fn stamped(self) -> U64
+}
+
+impl Getter for Box {
+    fn stamped(self) -> U64 {
+        return self.v + 100
+    }
+}
+
+trait Marked {
+    fn marked(self) -> U64 {
+        return 11
+    }
+}
+
+impl Marked for Box {
+}
+
+fn main() -> I32 {
+    let box = Box(v: 1)
+    if box.fetch() != 7 { return 1 }
+    if box.stamped() != 101 { return 2 }
+    if box.marked() != 11 { return 3 }
+    return 0
+}
+`,
 		"markers.al": `type Box {
     v: U64
 }
@@ -216,7 +250,6 @@ fn main() -> I32 {
 		{"self-outside-trait", "fn f(v: Self) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 117},
 		{"trait-method-params", "trait Mark {\n    fn m(A: type, v: A) -> U64\n}\nfn main() -> I32 { return 0 }\n", 118},
 		{"ambiguous-method", "type Box { v: U64 }\ntrait A { fn fetch(self) -> U64 }\ntrait B { fn fetch(self) -> U64 }\nimpl A for Box { fn fetch(self) -> U64 { return self.v } }\nimpl B for Box { fn fetch(self) -> U64 { return self.v } }\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 119},
-		{"default-not-callable", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64 {\n        return 0\n    }\n}\nimpl Getter for Box {\n}\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 120},
 		{"missing-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n}\nfn main() -> I32 { return 0 }\n", 121},
 		{"extra-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> U64 { return self.v }\n    fn other(self) -> U64 { return 0 }\n}\nfn main() -> I32 { return 0 }\n", 122},
 		{"signature-mismatch", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> Bool { return true }\n}\nfn main() -> I32 { return 0 }\n", 123},

@@ -300,6 +300,87 @@ fn main() -> I32 {
 	t.Logf("fn value program exited cleanly under strict C11")
 }
 
+// M7.5 default-method dispatch: a dot-call on a receiver whose impl omits a
+// defaulted requirement dispatches to the materialized default body, pinned
+// through generated strict C11 alongside overridden methods. Alder-only.
+func runAlderDefaultMethodLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"defaults.al": `type Box {
+    v: U64
+}
+
+trait Getter {
+    fn fetch(self) -> U64 {
+        return 7
+    }
+    fn stamped(self) -> U64
+}
+
+impl Getter for Box {
+    fn stamped(self) -> U64 {
+        return self.v + 100
+    }
+}
+
+trait Marked {
+    fn marked(self) -> U64 {
+        return 11
+    }
+}
+
+impl Marked for Box {
+}
+
+fn main() -> I32 {
+    let box = Box(v: 1)
+    if box.fetch() != 7 { return 1 }
+    if box.stamped() != 101 { return 2 }
+    if box.marked() != 11 { return 3 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"defaults.al"})
+	second := runLowerCompiler(t, exe, files, []string{"defaults.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("default-method MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse default-method MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify default-method MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("default-method MIR has no main function")
+	}
+	generated := runResourceCgenCompilerPublic(t, exe, files, []string{"defaults.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "defaults.c")
+	program := filepath.Join(dir, "defaults.exe")
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of default methods: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run default-method behavior: %v\n%s", err, output)
+	}
+	t.Logf("default-method program exited cleanly under strict C11")
+}
+
 // M7.5 C5b closures: fn-literal expressions with read-only snapshot captures
 // of ordinary values, arrow and braced bodies, and calls through the closure
 // value all lower through fn.value/call.value with environment records and

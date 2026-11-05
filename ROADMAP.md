@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `7bc9ec1e7f3bba935c7dda8cd42ac48a029774603c867f0f888118e4755eb55b`;
+  `5b9615f8e9aacb0c376354b13b431edf92a875f1568892e3ba77a72e744ee286`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `7bc9ec1e7f3bba935c7dda8cd42ac48a029774603c867f0f888118e4755eb55b`.
+  `5b9615f8e9aacb0c376354b13b431edf92a875f1568892e3ba77a72e744ee286`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1009,6 +1009,15 @@ Exit-criteria evidence (in progress):
   phase-6 loop-store rule until runtime-backed environments land, and
   closure sites, thunks, and erased `fn(params) -> result` value types are
   pinned through generated strict C11 programs with captures.
+- default-method dispatch works end to end: a trait requirement with a
+  default body is materialized as an ordinary impl method (a kind-12
+  symbol whose node is the requirement) for every implementation that
+  does not override it, inside symbol collection and before any
+  declaration or body checking, with the impl's method symbols regrouped
+  so each implementation's method range stays contiguous; dot-calls then
+  dispatch through the existing static path (`trait method ... not
+  callable yet`, diagnostic 120, is retired), and both overridden and
+  defaulted dispatch are pinned through generated strict C11.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
