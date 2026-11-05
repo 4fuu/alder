@@ -187,6 +187,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73CheckerBehavior(t, exe) })
 	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
 	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
+	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorCheckerBehavior(t, exe) })
 	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))

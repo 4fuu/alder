@@ -679,3 +679,81 @@ fn main() -> I32 {
 	}
 	t.Logf("ordered collections program exited cleanly under strict C11")
 }
+
+// Rule-89 mut cursors end to end: the docs' drain example shape (S0 has no
+// `while let`, so the loop is the recursive form used across M7.5) with a
+// copyable cursor. The mut parameter borrows the caller's var binding, so
+// the second drain must start where the first ended instead of re-reading a
+// copy. Alder-only: the Go oracle frontend does not implement the trait
+// surface.
+func runAlderM75MutCursorLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"mut-cursor.al": `type Cursor {
+    at: U64
+}
+
+impl Iterator(U64) for Cursor {
+    fn next(mut self) -> Option(U64) {
+        if self.at < 3 {
+            let value = self.at
+            self.at = self.at + 1
+            return Some(value)
+        }
+        return None
+    }
+}
+
+fn drain(I: type, T: type, mut iterator: I, total: U64) -> U64
+where I: Iterator(T) {
+    return match iterator.next() {
+        Some(value) => drain(I, T, iterator, total + value)
+        None => total
+    }
+}
+
+fn main() -> I32 {
+    var cursor = Cursor(at: 0)
+    let first = drain(Cursor, U64, cursor, 0)
+    if first != 3 { return 1 }
+    let second = drain(Cursor, U64, cursor, 0)
+    if second != 0 { return 2 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"mut-cursor.al"})
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse mut-cursor MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify mut-cursor MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("mut-cursor MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"mut-cursor.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "mut-cursor.c")
+	program := filepath.Join(dir, "mut-cursor.exe")
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of mut-cursor drain: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run mut-cursor drain behavior: %v\n%s", err, output)
+	}
+	t.Logf("mut-cursor drain program exited cleanly under strict C11")
+}

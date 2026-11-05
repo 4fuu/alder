@@ -297,10 +297,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return driver_out_diagnostic_type(detail_c, detail_d) }
     if kind == 87 { return out_string("source form is outside the supported S0 contract") }
     if kind == 88 { return out_string("public declaration signature exposes a private type") }
-    if kind == 89 { return out_string("mut parameter requires an affine owner or scoped capability") }
+    if kind == 89 { return out_string("mut parameter requires an affine owner, scoped capability, or a type parameter constrained by a mut-self trait") }
     if kind == 90 { return out_string("take parameter requires an affine owner") }
     if kind == 91 { return out_string("owner was already transferred") }
     if kind == 92 { return out_string("argument does not provide the parameter's required exclusive or owning access") }
+    if kind == 146 { return out_string("mut cursor argument must be a mutable place: pass a var binding so the callee advances the caller's cursor") }
     if kind == 93 { return out_string("affine owner reaches function exit without an ownership transfer") }
     if kind == 94 { return out_string("affine owner must be transferred on every reachable path or on none") }
     if kind == 95 { return out_string("affine owner cannot be mutable or overwritten; transfer or clean it up first") }

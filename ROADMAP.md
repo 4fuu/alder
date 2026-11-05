@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `5b9615f8e9aacb0c376354b13b431edf92a875f1568892e3ba77a72e744ee286`;
+  `76073c87a8b009df8f537869dbb04fb276904234a1184a53c0905d8299745b39`;
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `5b9615f8e9aacb0c376354b13b431edf92a875f1568892e3ba77a72e744ee286`.
+  `76073c87a8b009df8f537869dbb04fb276904234a1184a53c0905d8299745b39`.
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1018,6 +1018,16 @@ Exit-criteria evidence (in progress):
   dispatch through the existing static path (`trait method ... not
   callable yet`, diagnostic 120, is retired), and both overridden and
   defaulted dispatch are pinned through generated strict C11.
+- iterator cursors borrow exclusively: a non-self `mut` parameter stays an
+  exclusive call borrow (rule 89 unchanged for ordinary parameters) and is
+  legal for copyable values only when its type is a type parameter
+  constrained by a trait with at least one `mut self` requirement — the
+  builtin `Iterator` or a user trait. The call-site argument must be a
+  mutable place, so `next()` advances the caller's `var` cursor through the
+  lowered `safe_mut` reference; `let`-bound copyable and temporary arguments
+  are rejected (146). The [Traits and Closures](docs/traits-and-closures.md)
+  drain shape is pinned end to end through generated strict C11, proving the
+  second drain starts where the first ended.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 

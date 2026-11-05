@@ -32,6 +32,16 @@ application model as other generics. `Self` names the implementing type.
 Required methods are public by contract. A trait may provide a default method
 body that uses only its declared requirements.
 
+`mut` remains an exclusive call borrow; it never mutates a copy. A non-self
+`mut` parameter is legal for affine owners and scoped capabilities, and for
+copyable values in exactly one shape: the parameter's type is a type parameter
+whose `where`-constraint names a trait with at least one `mut self`
+requirement, as `I` does above. At the call site the argument must be a
+mutable place — a `var` binding, an owner, or another `mut` parameter
+forwarding the cursor — so `iterator.next()` in the example advances the
+caller's cursor. Passing a `let`-bound copyable cursor is rejected: it would
+advance a discarded copy.
+
 Iteration keeps this model without associated types:
 
 ```alder

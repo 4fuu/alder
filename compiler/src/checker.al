@@ -1557,6 +1557,72 @@ fn find_type_param(state: State, store: CheckStore, owner: U64, node: SyntaxRec)
     return 0
 }
 
+// A `mut` non-self parameter of copyable category is legal only in the
+// iterator-cursor shape: its type is exactly a type parameter of the owner,
+// and a where-constraint on that parameter names a trait with at least one
+// `mut self` requirement. The where syntax is read directly because
+// parameter types check before the owner's constraints are recorded; the
+// constraint-recording pass still validates the clause itself afterwards.
+fn mut_cursor_param_ok(state: State, parse: ParseStore, store: CheckStore, owner: U64, type_node: SyntaxRec) -> Bool {
+    if type_node.kind != 4 { return false }
+    if find_type_param(state, store, owner, type_node) == 0 { return false }
+    let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, owner_symbol.node - 1)
+    var clause_at = root.children
+    while clause_at != 0 {
+        let clause_link = __s0_buffer_get(SyntaxLinkRec, parse.links, clause_at - 1)
+        let clause = __s0_buffer_get(SyntaxRec, parse.nodes, clause_link.node - 1)
+        if clause.kind == 52 {
+            var constraint_at = clause.children
+            while constraint_at != 0 {
+                let constraint_link = __s0_buffer_get(SyntaxLinkRec, parse.links, constraint_at - 1)
+                let constraint = __s0_buffer_get(SyntaxRec, parse.nodes, constraint_link.node - 1)
+                if constraint.kind == 55 && same_name(state, constraint.source, constraint.name_start, constraint.name_end, type_node.source, type_node.name_start, type_node.name_end) {
+                    if mut_cursor_trait_named(state, parse, store, constraint.children) { return true }
+                }
+                constraint_at = constraint_link.next
+            }
+        }
+        clause_at = clause_link.next
+    }
+    return false
+}
+
+// One constraint's trait applications: the builtin Iterator is the mut-self
+// builtin; a user trait qualifies when any requirement declares `mut self`.
+fn mut_cursor_trait_named(state: State, parse: ParseStore, store: CheckStore, trait_at: U64) -> Bool {
+    var at = trait_at
+    while at != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, at - 1)
+        let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if trait_node.kind == 4 || trait_node.kind == 6 {
+            if builtin_trait_id(state, trait_node) == 3 { return true }
+            let symbol_id = trait_symbol_named(state, parse, store, trait_node)
+            if symbol_id != 0 {
+                let trait_symbol = __s0_buffer_get(SymbolRec, store.symbols, symbol_id - 1)
+                let trait_root = __s0_buffer_get(SyntaxRec, parse.nodes, trait_symbol.node - 1)
+                var requirement_at = trait_root.children
+                while requirement_at != 0 {
+                    let requirement_link = __s0_buffer_get(SyntaxLinkRec, parse.links, requirement_at - 1)
+                    let requirement = __s0_buffer_get(SyntaxRec, parse.nodes, requirement_link.node - 1)
+                    if requirement.kind == 51 {
+                        var child_at = requirement.children
+                        while child_at != 0 {
+                            let child_link = __s0_buffer_get(SyntaxLinkRec, parse.links, child_at - 1)
+                            let child = __s0_buffer_get(SyntaxRec, parse.nodes, child_link.node - 1)
+                            if child.kind == 47 && node_word(state, child, "self") { return true }
+                            child_at = child_link.next
+                        }
+                    }
+                    requirement_at = requirement_link.next
+                }
+            }
+        }
+        at = item.next
+    }
+    return false
+}
+
 fn find_declared_type(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
     let resolved = symbol_named(state, parse, store, node)
     if resolved != 0 {
@@ -2342,8 +2408,16 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
             let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
             let category = try interpreted_type_category(d, state, parse, next, empty, no_ancestry, checked_type_for_syntax(next, owner, syntax), 0, 0)
             if category.category != 0 {
-                if child.kind == 47 && category.category == 1 && !node_word(state, child, "self") { return check_token_fail(d, state, next, 89, diag_node) }
                 if child.kind == 48 && category.category != 2 { return check_token_fail(d, state, next, 90, diag_node) }
+            }
+            // `mut` stays an exclusive call borrow: an affine value, a scoped
+            // capability, or a copyable cursor reached through a type
+            // parameter constrained by a mut-self trait. Copyable and
+            // unconstrained types are rejected; type-parameter types have
+            // category 0 and are gated here so the cursor case stays the only
+            // exception.
+            if child.kind == 47 && !node_word(state, child, "self") && category.category != 2 && category.category != 3 {
+                if !mut_cursor_param_ok(state, parse, next, owner, __s0_buffer_get(SyntaxRec, parse.nodes, syntax - 1)) { return check_token_fail(d, state, next, 89, diag_node) }
             }
         }
     }
@@ -3737,18 +3811,31 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, parameter.checked_type, 0, 0)
-    if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { return expr_token_fail(d, state, base, 89, arg) }
     if parameter_node.kind == 48 && category.category != 2 { return expr_token_fail(d, state, base, 90, arg) }
+    // A mut cursor parameter borrows the caller's binding exclusively, so
+    // the argument must be a mutable place: a var binding, an owner, or
+    // another mut parameter forwarding the cursor. A let-bound copyable
+    // argument would silently advance a copy and gets its own diagnostic.
+    var place_fail: U64 = 92
+    if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { place_fail = 146 }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, base, 92, arg) }
+    if expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, base, place_fail, arg) }
     let binding = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
     var access = false
-    if binding.kind == 2 { access = true } else {
+    if binding.kind == 2 {
+        // Ordinary let bindings own affine values outright, so they satisfy
+        // mut and take parameters. A copyable cursor argument is different:
+        // only a var binding (or a forwarding mut parameter) lets the callee
+        // advance the caller's cursor instead of a discarded copy.
+        if place_fail != 146 { access = true } else {
+            if binding.mutable == 1 { access = true }
+        }
+    } else {
         let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
         if parameter_node.kind == 47 && (declaration.kind == 47 || declaration.kind == 48) { access = true }
         if parameter_node.kind == 48 && declaration.kind == 48 { access = true }
     }
-    if !access { return expr_token_fail(d, state, base, 92, arg) }
+    if !access { return expr_token_fail(d, state, base, place_fail, arg) }
     if parameter_node.kind == 48 {
         __s0_buffer_set(CheckedExprRec, store.expressions, expression_id - 1, CheckedExprRec(owner: expression.owner, owner_previous: expression.owner_previous, syntax: expression.syntax, kind: 22, checked_type: expression.checked_type, parameter_use: expression.parameter_use, bool_value: expression.bool_value, left: expression.left, right: expression.right, annotation: expression.annotation, first_child: expression.first_child, child_count: expression.child_count, operator: expression.operator, site_kind: expression.site_kind, site_syntax: expression.site_syntax))
     }

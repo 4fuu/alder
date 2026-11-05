@@ -427,3 +427,101 @@ fn main() -> I32 {
 		})
 	}
 }
+
+// Rule 89 stays narrow: `mut` on a non-self parameter is an exclusive call
+// borrow, legal for affine values, scoped capabilities, and — the one
+// copyable exception — a type parameter constrained by a trait with at least
+// one `mut self` requirement (the builtin Iterator or a user trait). At a
+// call site the argument must be a mutable place: a var binding or another
+// mut parameter forwarding the cursor. A let-bound copyable argument would
+// advance a discarded copy and is rejected with 146.
+func runAlderM75MutCursorCheckerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	accept := map[string]string{
+		"mut-cursor.al": `type Cursor {
+    at: U64
+}
+
+type Count {
+    n: U64
+}
+
+impl Iterator(U64) for Cursor {
+    fn next(mut self) -> Option(U64) {
+        if self.at < 3 {
+            let value = self.at
+            self.at = self.at + 1
+            return Some(value)
+        }
+        return None
+    }
+}
+
+trait Stepper(Item: type) {
+    fn step(mut self) -> Item
+}
+
+impl Stepper(U64) for Count {
+    fn step(mut self) -> U64 {
+        let out = self.n
+        self.n = self.n + 1
+        return out
+    }
+}
+
+fn drain(I: type, T: type, mut iterator: I, total: U64) -> U64
+where I: Iterator(T) {
+    return match iterator.next() {
+        Some(value) => drain(I, T, iterator, total + value)
+        None => total
+    }
+}
+
+fn take_step(S: type, X: type, mut s: S) -> U64
+where S: Stepper(X) {
+    return s.step()
+}
+
+fn main() -> I32 {
+    var cursor = Cursor(at: 0)
+    if drain(Cursor, U64, cursor, 0) != 3 { return 1 }
+    var count = Count(n: 7)
+    if take_step(Count, U64, count) != 7 { return 2 }
+    return 0
+}
+`,
+	}
+	for name, source := range accept {
+		t.Run("accept-"+name, func(t *testing.T) {
+			files := map[string]string{name: source}
+			manifest := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{name}, false), files)
+			if len(manifest.diagnostics) != 0 {
+				t.Fatalf("mut-cursor acceptance diagnostics: %+v", manifest.diagnostics)
+			}
+		})
+	}
+
+	rejections := []struct {
+		name, source string
+		code         int
+	}{
+		{"mut-unconstrained-type-param", "fn bad(T: type, mut t: T) -> Unit {\n    return unit\n}\nfn main() -> I32 { return 0 }\n", 89},
+		{"mut-plain-trait-constraint", "type Box { v: U64 }\ntrait Plain(A: type) {\n    fn peek(self) -> A\n}\nimpl Plain(U64) for Box {\n    fn peek(self) -> U64 { return self.v }\n}\nfn f(P: type, mut p: P) -> U64\nwhere P: Plain(U64) {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 89},
+		{"mut-concrete-copyable", "fn f(mut value: U64) -> Unit {\n    return unit\n}\nfn main() -> I32 { return 0 }\n", 89},
+		{"mut-cursor-let-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type, T: type, mut iterator: I) -> U64\nwhere I: Iterator(T) {\n    return 0\n}\nfn main() -> I32 {\n    let cursor = Cursor(at: 0)\n    if drain(Cursor, U64, cursor) != 0 { return 1 }\n    return 0\n}\n", 146},
+		{"mut-cursor-temporary-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type, T: type, mut iterator: I) -> U64\nwhere I: Iterator(T) {\n    return 0\n}\nfn main() -> I32 {\n    if drain(Cursor, U64, Cursor(at: 0)) != 0 { return 1 }\n    return 0\n}\n", 146},
+	}
+	for _, tc := range rejections {
+		t.Run("reject-"+tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name + ".al": tc.source}
+			text := runAlderChecker(t, exe, files, []string{tc.name + ".al"}, true)
+			manifest := parseCheckerManifest(t, text, files)
+			if len(manifest.diagnostics) != 1 {
+				t.Fatalf("expected exactly one rejection diagnostic, got %+v", manifest.diagnostics)
+			}
+			if manifest.diagnostics[0].kind != tc.code {
+				t.Fatalf("expected diagnostic kind %d, got %d", tc.code, manifest.diagnostics[0].kind)
+			}
+		})
+	}
+}
