@@ -382,6 +382,8 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 141 { return out_string("a Vec of affine elements supports push and len only; element access would duplicate an owner") }
     if kind == 142 { return out_string("a registered vector owner is immutable; grow a plain binding first, then register it with using") }
     if kind == 143 { return out_string("a Table cannot be a Vec element yet: heap-storing a table handle awaits storage rules; register the table with using directly") }
+    if kind == 148 { return out_string("a match guard only borrows the arm's bindings; it cannot consume an owner") }
+    if kind == 149 { return out_string("a table-view match arm cannot carry a guard; the view region is one straight-line fail-free block") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

@@ -3478,33 +3478,92 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let result_type = try lower_type(d, source_state, store, join.state, checked.checked_type)
         let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_match_join", join.id), result_type.id)
         var current = lower_with_mir(result_type.state, join_param.store)
+        // A guarded arm enters through its own test block; an unguarded arm
+        // enters its body block directly. Arms of one variant form a
+        // contiguous run that shares one switch case: the case jumps to the
+        // run's first arm entry, and a false guard branches to the next
+        // entry of the same run, or to the wildcard arm's entry when the run
+        // ends.
         var arm_blocks = try __s0_buffer_new(U64, d)
+        var arm_entries = try __s0_buffer_new(U64, d)
+        var wildcard_entry: U64 = 0
         var ordinal: U64 = 0
         while ordinal < checked.arm_count {
+            let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
             let arm_block = try lower_add_block(d, current, function, "bb_match_arm")
             current = arm_block.state
             arm_blocks = try __s0_buffer_append(U64, d, arm_blocks, arm_block.id)
+            if arm.guard != 0 {
+                let test_block = try lower_add_block(d, current, function, "bb_match_guard")
+                current = test_block.state
+                arm_entries = try __s0_buffer_append(U64, d, arm_entries, test_block.id)
+            } else {
+                arm_entries = try __s0_buffer_append(U64, d, arm_entries, arm_block.id)
+            }
+            if arm.variant_kind == 7 && wildcard_entry == 0 { wildcard_entry = __s0_buffer_get(U64, arm_entries, ordinal) }
             ordinal = ordinal + 1
         }
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: scrutinee.id, target: 0, then_block: 0, else_block: 0))
         current = lower_with_mir(current, term.store)
         ordinal = 0
+        var case_ordinal: U64 = 0
+        var run_binding_value: U64 = 0
         while ordinal < checked.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
             if arm.owner != owner || arm.checked_match != expression.parameter_use { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-            let name = try lower_variant_name(d, source_state, store, arm.variant_kind, arm.variant_use)
-            var binding_value: U64 = 0
-            if arm.binding != 0 {
-                let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
-                let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
-                let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__s0_match_payload", checked.first_arm + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
-                current = lower_with_mir(payload_type.state, value.store)
-                binding_value = value.id
-                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
-                current = lower_with_bindings(current, bindings)
+            var first_of_run = true
+            if ordinal != 0 {
+                let previous = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal - 1)
+                first_of_run = !(previous.variant_kind == arm.variant_kind && previous.variant_use == arm.variant_use)
             }
-            let case = try lower_add_switch_case(d, current, term.id, ordinal, name, binding_value, __s0_buffer_get(U64, arm_blocks, ordinal))
-            current = case.state
+            if first_of_run {
+                let name = try lower_variant_name(d, source_state, store, arm.variant_kind, arm.variant_use)
+                var binding_value: U64 = 0
+                if arm.binding != 0 {
+                    let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
+                    let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
+                    let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__s0_match_payload", checked.first_arm + case_ordinal), payload_type.id, mir_value_def_switch_case(), source_block, case_ordinal + 1)
+                    current = lower_with_mir(payload_type.state, value.store)
+                    binding_value = value.id
+                    let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
+                    current = lower_with_bindings(current, bindings)
+                }
+                let case = try lower_add_switch_case(d, current, term.id, case_ordinal, name, binding_value, __s0_buffer_get(U64, arm_entries, ordinal))
+                current = case.state
+                run_binding_value = binding_value
+                case_ordinal = case_ordinal + 1
+            } else {
+                // A later arm of the same run binds the run's case payload.
+                if arm.binding != 0 {
+                    if run_binding_value == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                    let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: run_binding_value, parameter: 1, initial: 0))
+                    current = lower_with_bindings(current, bindings)
+                }
+            }
+            ordinal = ordinal + 1
+        }
+
+        // Guard tests: a true guard enters the arm body; a false guard
+        // continues with the next entry of the same run, or with the
+        // wildcard arm's entry when the run ends.
+        ordinal = 0
+        while ordinal < checked.arm_count {
+            let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
+            if arm.guard != 0 {
+                let entry = __s0_buffer_get(U64, arm_entries, ordinal)
+                let guard_value = try lower_expression(d, source_state, spans, store, current, owner, function, entry, arm.guard, arm.environment, panic_block)
+                current = guard_value.state
+                if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
+                let active = lower_open_block(current.mir, function, entry)
+                var fall_entry: U64 = 0
+                if ordinal + 1 < checked.arm_count {
+                    let next_arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal + 1)
+                    if next_arm.variant_kind == arm.variant_kind && next_arm.variant_use == arm.variant_use { fall_entry = __s0_buffer_get(U64, arm_entries, ordinal + 1) }
+                }
+                if fall_entry == 0 { fall_entry = wildcard_entry }
+                if fall_entry == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                current = try lower_branch(d, current, function, active, guard_value.id, __s0_buffer_get(U64, arm_blocks, ordinal), fall_entry)
+            }
             ordinal = ordinal + 1
         }
         ordinal = 0
@@ -5368,8 +5427,9 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     }
     count_at = 0
     while count_at < arm_count {
-        let body = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, count_at).body
-        if body >= 1 && body <= expression_count { expression_owners[body] = expression_owners[body] + 1 }
+        let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, count_at)
+        if arm.body >= 1 && arm.body <= expression_count { expression_owners[arm.body] = expression_owners[arm.body] + 1 }
+        if arm.guard >= 1 && arm.guard <= expression_count { expression_owners[arm.guard] = expression_owners[arm.guard] + 1 }
         count_at = count_at + 1
     }
     count_at = 0
@@ -6019,11 +6079,23 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         while ordinal < item.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal)
             if arm.owner != item.owner || arm.checked_match != at + 1 { return false }
+            // Arms of one variant form one contiguous run: every earlier
+            // same-variant arm must be guarded, and it must be the
+            // immediately preceding arm, so a false guard falls through a
+            // straight edge chain.
             var prior_ordinal: U64 = 0
+            var seen_same_variant = false
             while prior_ordinal < ordinal {
                 let prior = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + prior_ordinal)
-                if arm.variant_kind == prior.variant_kind && arm.variant_use == prior.variant_use { return false }
+                if arm.variant_kind == prior.variant_kind && arm.variant_use == prior.variant_use {
+                    if prior.guard == 0 { return false }
+                    seen_same_variant = true
+                }
                 prior_ordinal = prior_ordinal + 1
+            }
+            if seen_same_variant && ordinal != 0 {
+                let back = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, item.first_arm - 1 + ordinal - 1)
+                if back.variant_kind != arm.variant_kind || back.variant_use != arm.variant_use { return false }
             }
             ordinal = ordinal + 1
         }
@@ -6035,6 +6107,12 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || (item.body == 0 && item.block == 0) || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) || (item.block != 0 && item.block > __s0_buffer_len(CheckedBlockRec, store.control.blocks)) { return false }
         let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.checked_match - 1)
+        if item.guard != 0 {
+            if item.guard > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+            let guard = __s0_buffer_get(CheckedExprRec, store.expressions, item.guard - 1)
+            let guard_type = __s0_buffer_get(CheckedTypeRec, store.types, guard.checked_type - 1)
+            if guard.owner != item.owner || guard_type.kind != 1 || guard_type.target != 1 { return false }
+        }
         if item.body != 0 {
             let body = __s0_buffer_get(CheckedExprRec, store.expressions, item.body - 1)
             if checked_match.owner != item.owner || body.owner != item.owner || !lower_checked_abi_equal(store, body.checked_type, checked_match.checked_type) { return false }

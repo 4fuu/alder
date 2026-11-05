@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `3b6ff9ff6f82def2363fa98aa525dd843435d719f3d57f09228e35ac141639de`
+  `c1e8f67c9337d19b2116c98ff8b13412b76e016798af8d8e1b0b03e4a3c4fb05`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `3b6ff9ff6f82def2363fa98aa525dd843435d719f3d57f09228e35ac141639de`
+  `c1e8f67c9337d19b2116c98ff8b13412b76e016798af8d8e1b0b03e4a3c4fb05`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1069,12 +1069,23 @@ this evidence record):
   `AsyncCleanup` trait is removed with its diagnostics 138/139 per D012 — a
   `Cleanup` hook may suspend once its owner holds a suspending capability in
   Milestone 9;
+- `match` guards (D018): an arm may carry an `if` guard between its pattern
+  and its arrow. The guard runs after the pattern matches with the arm's
+  bindings in scope, a false guard continues with the next arm, a guarded
+  arm never counts toward exhaustiveness, a guard only borrows its bindings
+  (no transfer may appear inside it, 148), and a table-view arm cannot
+  carry a guard because its access region is one straight-line fail-free
+  block (149). Same-variant arms form one contiguous run (72) so lowering
+  chains each false guard through one straight edge into the next entry,
+  ending at the run's unguarded arm or the wildcard arm; W records carry
+  the guard expression (manifest v17);
 - focused evidence: Alder checker conformance suites pin the accept surface
-  and rejections 130-143, and the production qualification compiles and runs
-  table, trait-cleanup, and vec-drain programs end to end on generated C
-  (imported counters observe every cleanup firing exactly once per element
-  on normal and early-return exits, deterministic MIR/C across processes,
-  no `__s0_` names in generated C for ordinary programs).
+  and rejections 130-143 and 148-149, and the production qualification
+  compiles and runs table, trait-cleanup, vec-drain, and guard programs end
+  to end on generated C (imported counters observe every cleanup firing
+  exactly once per element on normal and early-return exits, guard programs
+  assert the fall-through chain at runtime, deterministic MIR/C across
+  processes, no `__s0_` names in generated C for ordinary programs).
 
 Deferred from this half, with reasons:
 
@@ -1096,11 +1107,10 @@ the stage-0 self-compile process itself (gcc on the emitted C peaks at
 whole-store scan or copy amplification is present: the regenerator stays in
 its 2.5-minute class, far inside the 15-minute CI budget.
 
-Remaining before exit (as of the integration of both halves; the first two
-were added to this milestone by the 2026-11 design amendment, which landed
-after both halves were written):
+Remaining before exit (as of the integration of both halves; the items below
+were added to or reshaped by the 2026-11 design amendment, which landed after
+both halves were written):
 
-- `match` guards (D018);
 - the in-place-when-unique update rule with per-site copy reporting (D023);
 - a compiler-scale layered DAG input over traits, generics, and closures that
   terminates with deterministic diagnostics, MIR, and C;

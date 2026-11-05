@@ -280,7 +280,10 @@ Implemented expressions include:
   and short-circuit Boolean operators;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
-  arms (`=> { ... }`) whose bodies may hold ordinary statements;
+  arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`
+  guards: the guard runs after the pattern matches, a false guard continues
+  with the next arm, a guarded arm never counts toward exhaustiveness, and a
+  guard only borrows its bindings (kinds 148 and 149);
 - prefix `try` with the exact same error type;
 - a single direct imported call in `unsafe c { ... }`;
 - M7.5 table identity: `Table(T)` over concrete copyable elements,

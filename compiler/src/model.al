@@ -376,6 +376,7 @@ type CheckedMatchArmRec {
     environment: U64
     body: U64
     block: U64
+    guard: U64
 }
 
 type CheckedTryRec {
@@ -532,8 +533,9 @@ type EnvironmentRec {
 // implementation without a usable
 // nongeneric `cleanup(take self) -> Unit` method, 141 an element read or
 // view on an affine-element vector, 142 a push into a vector whose binding
-// already carries a using registration, and 143 a Table element inside a
-// vector, whose heap-stored handle awaits MIR storage rules.
+// already carries a using registration, 143 a Table element inside a
+// vector whose heap-stored handle awaits MIR storage rules, 148 a match
+// guard that consumes a binding, and 149 a match guard on a table-view arm.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

@@ -184,6 +184,7 @@ type MatchArmDraftRec {
     environment: U64
     body: U64
     block: U64
+    guard: U64
 }
 
 enum MatchArmOutcome {
@@ -3197,6 +3198,67 @@ fn match_variant_seen(arms: __s0_Buffer(MatchArmDraftRec), first: U64, count: U6
     return false
 }
 
+// match_unguarded_arm_count counts the arms that cover their variant
+// unconditionally; a guarded arm never counts toward exhaustiveness.
+fn match_unguarded_arm_count(arms: __s0_Buffer(MatchArmDraftRec), first: U64, count: U64) -> U64 {
+    var total: U64 = 0
+    var at: U64 = 0
+    while at < count {
+        if __s0_buffer_get(MatchArmDraftRec, arms, first - 1 + at).guard == 0 { total = total + 1 }
+        at = at + 1
+    }
+    return total
+}
+
+// match_variant_covers reports whether a declared enum variant has an
+// unguarded arm.
+fn match_variant_covers(arms: __s0_Buffer(MatchArmDraftRec), first: U64, count: U64, variant_use: U64) -> Bool {
+    var at: U64 = 0
+    while at < count {
+        let arm = __s0_buffer_get(MatchArmDraftRec, arms, first - 1 + at)
+        if arm.variant_use == variant_use && arm.guard == 0 { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// match_variant_consumed reports whether an earlier arm for the same variant
+// already handles it unconditionally: an unguarded earlier arm makes a later
+// same-variant arm unreachable, and same-variant arms must also stay
+// contiguous so a guard's fall-through chain stays a straight edge.
+fn match_variant_consumed(arms: __s0_Buffer(MatchArmDraftRec), first: U64, count: U64, variant_use: U64, variant_kind: U64) -> Bool {
+    var at: U64 = 0
+    var seen: U64 = 0
+    while at < count {
+        let arm = __s0_buffer_get(MatchArmDraftRec, arms, first - 1 + at)
+        if arm.variant_use == variant_use && arm.variant_kind == variant_kind {
+            if arm.guard == 0 { return true }
+            seen = 1
+        }
+        at = at + 1
+    }
+    if seen != 0 && count != 0 {
+        let back = __s0_buffer_get(MatchArmDraftRec, arms, first - 1 + count - 1)
+        if back.variant_use != variant_use || back.variant_kind != variant_kind { return true }
+    }
+    return false
+}
+
+// guard_consumes_binding walks a checked guard expression: a guard only
+// borrows the arm's bindings, so any transferred (kind 22) owner read inside
+// it is rejected.
+fn guard_consumes_binding(store: CheckStore, expression_id: U64) -> Bool {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind == 22 { return true }
+    var child: U64 = 0
+    while child < expression.child_count {
+        if guard_consumes_binding(store, __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression) { return true }
+        child = child + 1
+    }
+    return false
+}
+
 fn match_arms_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(MatchArmOutcome, __s0_Error) {
     let failed = try check_token_fail(d, state, store, kind, node)
     return Ok(MatchArmsBad(match failed {
@@ -3317,14 +3379,23 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
             if concrete.kind == 5 && node_word(state, arm, "Limit") { variant_kind = 6 }
             if variant_kind == 0 { return match_arms_fail(d, state, prior.store, 71, match_node) }
         }
-        if match_variant_seen(prior.arms, prior.first_arm, prior.arm_count, variant_use, variant_kind) { return match_arms_fail(d, state, prior.store, 72, match_node) }
+        if match_variant_consumed(prior.arms, prior.first_arm, prior.arm_count, variant_use, variant_kind) { return match_arms_fail(d, state, prior.store, 72, match_node) }
     }
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, arm.children - 1)
     var current = prior.store
     let entry = current_environment(current, owner)
     var binding: U64 = 0
     var binding_link: U64 = 0
-    if body_link.next != 0 { binding_link = body_link.next }
+    var guard_link: U64 = 0
+    if body_link.next != 0 {
+        let after_body = __s0_buffer_get(SyntaxLinkRec, parse.links, body_link.next - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, after_body.node - 1).kind == 39 {
+            binding_link = body_link.next
+        } else {
+            guard_link = body_link.next
+            if after_body.next != 0 { binding_link = after_body.next }
+        }
+    }
     if payload_type != 0 && binding_link == 0 { return match_arms_fail(d, state, current, 73, match_node) }
     if payload_type == 0 && binding_link != 0 { return match_arms_fail(d, state, current, 74, match_node) }
     if binding_link != 0 {
@@ -3346,6 +3417,34 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
     }
     var arm_expected = expected
     if prior.arm_type != 0 { arm_expected = prior.arm_type }
+    var arm_guard: U64 = 0
+    if guard_link != 0 {
+        let guard_node = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, guard_link - 1).node - 1)
+        // A guard runs between the pattern match and the body: it only
+        // borrows the arm's bindings (no transfer may appear inside it) and
+        // may not guard a table-view arm, whose access region must stay one
+        // straight-line fail-free block.
+        if view_root != 0 { return match_arms_fail(d, state, current, 149, guard_node) }
+        let bool_type = canonical_type_id(current, 1, 1, 0, 0)
+        if bool_type == 0 { return Ok(MatchArmsDefer) }
+        let guard_link_id = __s0_buffer_get(SyntaxLinkRec, parse.links, guard_link - 1).node
+        let checked_guard = try check_value_expression_inner(d, state, parse, base, current, owner, guard_node, guard_link_id, bool_type, 77, guard_node, 0, 0)
+        current = match checked_guard {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked_guard {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(MatchArmsBad(current)) }
+        let guard_draft = match checked_guard {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if guard_draft.deferred { return Ok(MatchArmsDefer) }
+        if guard_consumes_binding(current, guard_draft.expression) { return match_arms_fail(d, state, current, 148, guard_node) }
+        arm_guard = guard_draft.expression
+    }
     let body_node = __s0_buffer_get(SyntaxRec, parse.nodes, body_link.node - 1)
     var arm_body: U64 = 0
     var arm_block: U64 = 0
@@ -3397,13 +3496,13 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
     if !block_arm && prior.block_arms { return match_arms_fail(d, state, current, 135, body_node) }
     if prior.arm_type != 0 && !(try expression_type_equal(d, state, parse, current, prior.arm_type, arm_value_type)) { return match_arms_fail(d, state, current, 77, body_node) }
     let arm_environment = current_environment(current, owner)
-    let next_drafts = try __s0_buffer_append(MatchArmDraftRec, d, prior.arms, MatchArmDraftRec(owner: owner, syntax: link.node, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: arm_body, block: arm_block))
+    let next_drafts = try __s0_buffer_append(MatchArmDraftRec, d, prior.arms, MatchArmDraftRec(owner: owner, syntax: link.node, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: arm_body, block: arm_block, guard: arm_guard))
     if binding != 0 { current = try restore_environment(d, current, owner, entry) }
     var arm_type = prior.arm_type
     if arm_type == 0 { arm_type = arm_value_type }
     var first = prior.first_arm
     if first == 0 { first = __s0_buffer_len(MatchArmDraftRec, next_drafts) }
-    return Ok(MatchArmsGood(MatchArmValueRec(store: current, arm_type: arm_type, first_arm: first, arm_count: prior.arm_count + 1, wildcard: prior.wildcard || variant_kind == 7, block_arms: prior.block_arms || block_arm, expression_arms: prior.expression_arms || !block_arm, arms: next_drafts)))
+    return Ok(MatchArmsGood(MatchArmValueRec(store: current, arm_type: arm_type, first_arm: first, arm_count: prior.arm_count + 1, wildcard: prior.wildcard || (variant_kind == 7 && arm_guard == 0), block_arms: prior.block_arms || block_arm, expression_arms: prior.expression_arms || !block_arm, arms: next_drafts)))
 }
 
 fn append_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, checked_type: U64, reference: U64, bool_value: U64, left: U64, right: U64, operator: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
@@ -6820,14 +6919,14 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                     use_at = use_at + 1
                 }
             }
-            var covered = arms.arm_count == variant_count
+            var covered = match_unguarded_arm_count(arms.arms, arms.first_arm, arms.arm_count) == variant_count
             if scrutinee_type.kind == 7 {
                 covered = true
                 var missing: U64 = 0
                 var variant_at: U64 = 0
                 while variant_at < __s0_buffer_len(DeclTypeUseRec, arms.store.uses) {
                     let declared = __s0_buffer_get(DeclTypeUseRec, arms.store.uses, variant_at)
-                    if declared.owner == scrutinee_type.target && declared.role == 2 && !match_variant_seen(arms.arms, arms.first_arm, arms.arm_count, variant_at + 1, 0) { covered = false
+                    if declared.owner == scrutinee_type.target && declared.role == 2 && !match_variant_covers(arms.arms, arms.first_arm, arms.arm_count, variant_at + 1) { covered = false
                         if missing == 0 { missing = variant_at + 1 } }
                     variant_at = variant_at + 1
                 }
@@ -6851,7 +6950,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         var arm_at: U64 = 0
         while arm_at < arms.arm_count {
             let arm = __s0_buffer_get(MatchArmDraftRec, arms.arms, arms.first_arm - 1 + arm_at)
-            persisted_arms = try __s0_buffer_append(CheckedMatchArmRec, d, persisted_arms, CheckedMatchArmRec(owner: arm.owner, syntax: arm.syntax, checked_match: match_id, variant_use: arm.variant_use, variant_kind: arm.variant_kind, binding: arm.binding, environment: arm.environment, body: arm.body, block: arm.block))
+            persisted_arms = try __s0_buffer_append(CheckedMatchArmRec, d, persisted_arms, CheckedMatchArmRec(owner: arm.owner, syntax: arm.syntax, checked_match: match_id, variant_use: arm.variant_use, variant_kind: arm.variant_kind, binding: arm.binding, environment: arm.environment, body: arm.body, block: arm.block, guard: arm.guard))
             arm_at = arm_at + 1
         }
         let matches = try __s0_buffer_append(CheckedMatchRec, d, arms.store.control.matches, CheckedMatchRec(owner: owner, syntax: expression_id, scrutinee: scrutinee.expression, scrutinee_type: scrutinee.checked_type, checked_type: arms.arm_type, first_arm: first_arm, arm_count: arms.arm_count))
@@ -8279,7 +8378,7 @@ fn emit_checked_control(store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
         let rec = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
-        if !out_string("W ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_match) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.variant_kind) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.body) || !out(32) || !out_u64(rec.block) || !out(10) { return false }
+        if !out_string("W ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_match) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.variant_kind) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.body) || !out(32) || !out_u64(rec.block) || !out(32) || !out_u64(rec.guard) || !out(10) { return false }
         at = at + 1
     }
     at = 0
@@ -8403,7 +8502,7 @@ fn emit_check_diagnostic(rec: CheckDiagRec) -> Bool {
 fn emit_check_manifest(state: State, parse: ParseStore, store: CheckStore) -> Bool {
     // Checker paths are hex encoded so every host path remains one unambiguous
     // whitespace-delimited field. All later records refer to numeric source IDs.
-    if !out_string("ALDER-CHECKER-MANIFEST 16\n") || !emit_check_sources(state) || !emit_check_spans(parse) { return false }
+    if !out_string("ALDER-CHECKER-MANIFEST 17\n") || !emit_check_sources(state) || !emit_check_spans(parse) { return false }
     if !emit_checked_symbols(store) { return false }
     if !emit_checked_types(store) { return false }
     if !emit_checked_bindings(store) { return false }

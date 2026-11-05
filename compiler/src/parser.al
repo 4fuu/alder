@@ -306,6 +306,18 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         }
     }
+    // A match arm may carry an `if` guard between its pattern and the arrow:
+    // the guard is evaluated after the pattern matches and before the body,
+    // and a false guard continues matching with the next arm (D018).
+    var guard_node: U64 = 0
+    let guard_token = parse_token(state, cursor)
+    if guard_token.kind == 1 && guard_token.keyword == 7 {
+        let guard_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        let guard_step = try parse_expression(d, state, guard_cursor, depth)
+        if parse_step_bad(guard_step) { return Ok(guard_step) }
+        guard_node = parse_step_value(guard_step).node
+        cursor = parse_step_value(guard_step).cursor
+    }
     let arrow = try expect_punct(d, state, cursor, "=>")
     if parse_step_bad(arrow) { return Ok(arrow) }
     // An arm body is one expression, or a `{ ... }` statement block for the
@@ -318,7 +330,15 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     }
     if parse_step_bad(body) { return Ok(body) }
     let value = parse_step_value(body)
-    cursor = try add_link(d, value.cursor, value.node, children)
+    if guard_node != 0 {
+        // Arm children stay reverse source ordered: the body leads, then the
+        // guard, then the variant binding.
+        let guard_link = try add_link(d, value.cursor, guard_node, children)
+        let guard_link_id = __s0_buffer_len(SyntaxLinkRec, guard_link.store.links)
+        cursor = try add_link(d, guard_link, value.node, guard_link_id)
+    } else {
+        cursor = try add_link(d, value.cursor, value.node, children)
+    }
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
     let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
     return Ok(Parsed(arm))
