@@ -235,8 +235,10 @@ Compilation consumes this plan without consulting ambient state. Absolute host
 paths may appear in process invocation but never in semantic identities,
 diagnostics, MIR, generated C, lockfiles, or cache keys.
 
-The same plan API is used by CLI, tests, documentation, LSP, and package cache.
-There is no separate IDE resolver.
+The plan is serialized once per input state as a canonical, versioned artifact
+keyed by its inputs. CLI commands, tests, documentation, queries, the LSP, and
+the package cache all read that artifact instead of re-resolving the project,
+so every tool sees the same module graph. There is no separate IDE resolver.
 
 ## xmake/xrepo native provider
 
@@ -292,9 +294,14 @@ alder new <name>
 alder check [--target <name>]
 alder build [--target <name>] [--release] [--emit mir|c]
 alder run [--target <name>] [-- <args>...]
-alder test [filter]
+alder test [filter] [--fuzz]
 alder fmt [--check]
-alder doc [--open]
+alder fix [--dry-run]
+alder doc [<module-or-symbol>] [--full] [-s <words>] [--type <signature>]
+alder ide def|refs|outline|hover|rename ...
+alder explain <code>
+alder spec [<section>] [-s <words>]
+alder help [agent]
 alder add <git-url> --rev <commit>
 alder update [package] --rev <commit>
 alder fetch
@@ -308,12 +315,90 @@ diagnostics, usage errors, I/O errors, package errors, native-provider errors,
 and internal failures remain distinct. Noninteractive commands never prompt;
 destructive or trust-changing operations require explicit flags.
 
+The CLI is the primary interface to the toolchain. Every capability an editor
+offers, including navigation, rename, hover, and API lookup, is a
+noninteractive command over the serialized build plan, and `alder lsp` wraps
+the same queries. A coding agent or script never needs an editor, a running
+server, or text search to answer a semantic question.
+
+### CLI output contract
+
+Default output is compact plain text designed to be acted on in one round trip:
+
+- **Success is one line.** `alder check` prints `ok` plus counts; `alder test`
+  prints one summary line and expands only failures.
+- **A diagnostic is complete on first read.** It has a stable code, the
+  location, the direct cause in one sentence that names the involved values,
+  types, or bindings, each related location, and a concrete fix when the
+  compiler knows one. A model must not need a second command to learn what is
+  wrong or where; `alder explain <code>` only adds background, a minimal
+  wrong/right example pair, and the governing `alder spec` section.
+
+  ```text
+  src/app.al:12:9 error SEM0142 view `line` of `buffer` is used after `buffer.clear()` at 11:5
+    11:5 `buffer.clear()` invalidates every view of `buffer`
+    fix: copy the text first: `let text = String.from(line)`
+  ```
+
+- **Machine-applicable fixes.** When a fix is a mechanical edit, the JSON
+  diagnostic carries it as text edits and `alder fix` applies every such edit.
+- **A failed test is reproducible from its output.** The report shows the
+  assertion's expression, both operand values, captured output, and the exact
+  command that reruns only that case.
+- **Long output is truncated at both ends.** When output exceeds the size limit
+  (default 200 lines, `--max-lines` to change, `0` for none), the command
+  prints the first and last part, one line stating how many lines were
+  omitted, and the path of a file under `build/logs/` that holds the complete
+  output. Nothing is lost and the full text is read only when needed.
+- **No decoration off a terminal.** Color, progress bars, and spinners appear
+  only on an interactive terminal; output never depends on terminal width.
+- **Stable and deterministic.** Ordering follows canonical source order, and
+  paths are workspace-relative.
+
+`--json` selects the versioned machine form of the same records.
+
+### Queries
+
+`alder doc` answers API questions in layers, so a query returns only what was
+asked:
+
+- `alder doc std.fs` lists the module's public items, one line each: the
+  signature and the doc comment's summary line;
+- `alder doc std.fs.File.open` prints one item: signature, summary, documented
+  errors, and its first example;
+- `--full` prints the complete doc comment;
+- `-s <words>` searches names and summaries across the sysroot and
+  dependencies; `--type "Bytes -> Result(Json, _)"` searches by signature,
+  with `_` matching any type.
+
+Every listing ends with the item count; a listing that hits the output limit
+follows the truncation rule above. `alder ide def|refs|outline|hover|rename`
+performs semantic navigation by symbol path or `file:line:column`. `hover`
+shows the inferred type, the doc summary, and whether a call is potentially
+suspending. `alder spec` prints a section of the language specification, which
+ships offline with the toolchain.
+
+`alder help agent` prints a reference of at most 40 lines covering these
+commands and the output contract. `alder new` writes an `AGENTS.md` that points
+to it.
+
+### Documentation requirements
+
+Every public declaration, including public fields, enum variants, and trait
+methods, needs a `///` doc comment, and so does each module. `alder check`
+reports a missing one as an error. The first line must be a single sentence
+summarizing the item; `alder doc` listings show only that line. A public
+function returning `Result` documents its error cases under `# Errors`.
+Examples in doc comments are compiled and run by `alder test`.
+
 ## Entry points and tests
 
-A binary target selects one module exporting `main`. Supported 1.0 forms are
-synchronous or `async`, with zero parameters or one `[String]` or
-`[std.env.OsString]` argument, and a result of `Unit`, `I32`,
-`Result(Unit, E)`, or `Result(I32, E)`, where `E` implements `Display`.
+A binary target selects one module exporting `main`. `main` may first take one
+I/O capability: `std.io.Blocking` runs it without an executor, and
+`std.io.Evented` starts the hosted executor and runs `main` as its root task.
+It may then take zero parameters or one `[String]` or `[std.env.OsString]`
+argument, and it returns `Unit`, `I32`, `Result(Unit, E)`, or `Result(I32, E)`,
+where `E` implements `Display`.
 
 The argument slice includes the host's element 0 when supplied; user arguments
 therefore begin at index 1. `OsString` preserves the host bytes/Unicode units.
@@ -336,22 +421,23 @@ test "parses input" {
     assert(parse("ok").is_ok())
 }
 
-async test "serves request" -> Result(Unit, TestError) {
-    try await exercise_server()
+test "serves request" (io: SimIo) -> Result(Unit, TestError) {
+    try exercise_server(io)
     return Ok(())
 }
 ```
 
-A test is synchronous `test` or `async test` and returns `Unit` (omitted) or
-`Result(Unit, E)` where `E: Display`. Fallthrough/`()`/`Ok(())` passes; `Err`
+A test may take one I/O capability (`Blocking`, `SimIo`, or `Evented`) and
+returns `Unit` (omitted) or `Result(Unit, E)` where `E: Display`. Fallthrough/`()`/`Ok(())` passes; `Err`
 fails with its displayed value; assertion or invariant termination fails with
 the captured process diagnostic. Expected-termination helpers execute the
 subject in a child process because invariant panic is not catchable.
 
 Enumeration is canonical by package, module path, source position, and name.
-Tests are isolated processes by default. Async tests use a deterministic
-single-worker executor by default; `--async-workers=auto` exercises the
-production multithread executor without changing pass/fail semantics.
+Tests are isolated processes by default. A test taking `SimIo` runs on the
+deterministic single-worker executor with virtual time; a test taking `Evented`
+exercises the production multithread executor without changing pass/fail
+semantics.
 
 ## Reproducibility limits
 

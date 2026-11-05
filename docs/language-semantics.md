@@ -33,7 +33,7 @@ Values do not expose source-invalidating moves.
 Exactly-once resources, `Table(T)`, foreign owned handles, task groups, task
 handles, and a record or enum containing any such owner are affine. They have
 one owning binding and cannot be copied. Implementing the compiler-recognized
-`Cleanup` or `AsyncCleanup` trait also makes a type affine.
+`Cleanup` trait also makes a type affine.
 
 Passing an owner to an ordinary parameter borrows it only for that call.
 `mut` grants exclusive call access. `take` transfers ownership. Returning an
@@ -200,6 +200,9 @@ variants. Payload bindings are immutable. Matching an affine enum consumes its
 owned scrutinee if an owner payload is extracted; a temporary can be consumed
 directly, while an owned local is unavailable afterward. Borrow-only pattern
 tests such as `if let` cannot let an affine payload escape their access scope.
+A `match` arm may carry an `if` guard evaluated after its pattern matches; a
+false guard continues with the next arm, a guarded arm does not count toward
+exhaustiveness, and a guard cannot consume a binding.
 The type, not a general `move` expression, exposes this rare consumption.
 The `let payload = option else ...` extraction form consumes an affine option
 and transfers its payload, while it copies a copyable payload.
@@ -221,7 +224,10 @@ materializes the complete `Err(E)` value in caller-result storage before local
 cleanup and function-domain destruction.
 
 Error adaptation uses an explicit `map_error` call or another ordinary
-conversion; it is never implicit. `try` does not catch bounds, overflow,
+conversion; it is never implicit. The standard convention is that each module
+defines its own precise error enum, wraps a lower-level error as a variant
+payload instead of re-exporting it, and exposes that payload through the
+`Error` trait's `cause` method, so diagnostics can print the whole chain. `try` does not catch bounds, overflow,
 infallible allocation, or C contract violations. If `T` is affine, `try`
 consumes the `Result(T, E)` and transfers the `Ok` owner into its result binding.
 
@@ -284,12 +290,16 @@ input file order do not change meaning, diagnostics, MIR, or generated C.
 
 See [Modules and Builds](modules-and-builds.md).
 
-## Async and task semantics
+## I/O capabilities and task semantics
 
-An async function is lowered to compiler-owned state that can suspend only at
-`await` and defined async runtime operations. Calling it creates a pending
-operation that must be immediately awaited or transferred to a task group; a
-bare call cannot silently start background work.
+There is no `async fn`. Code that waits on the host receives an I/O capability
+through a compile-time type parameter bounded by `Io`, `BlockingIo`, or
+`AsyncIo`. Whether a call may suspend is decided from signatures and bounds
+during checking; each monomorphized instance then lowers either to direct code
+(every capability is `BlockingIo`) or to a verified state machine. A bare call
+always runs to completion before the caller continues; only a standard task
+operation given a direct `Pending(T)` call starts concurrent work. Function
+values never suspend.
 
 Every spawned task belongs to a lexical `TaskGroup`. Ordinary inputs are
 independent values, affine inputs transfer only through visible `take`

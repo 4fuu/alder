@@ -44,6 +44,13 @@ change it before 1.0, but must update its owning document, decision register,
 examples, roadmap, and later executable tests together. Documentation status
 does not imply implementation availability.
 
+The 2026-11 design review against 2024-2026 language developments amended the
+baseline in documentation only: D012 replaces `async fn` coloring with I/O
+capabilities and per-instance suspension, D018 adds `match` guards, D022 makes
+the toolchain CLI-first with complete first-read diagnostics and required doc
+comments, and D023 makes in-place update of uniquely owned values a cost
+contract. Implemented milestones are unaffected.
+
 ### Milestone 1: MIR Toolkit
 
 Status: **complete**
@@ -920,11 +927,12 @@ Complete the remaining 1.0 language and memory model from
 [Memory and Resources](docs/memory-and-resources.md), and
 [Traits and Closures](docs/traits-and-closures.md): static coherent traits and
 constraints, safe closures and function values, ordered `Map`/`Set`, affine
-resource composition, compiler-recognized `Cleanup`/`AsyncCleanup`, and the
-source `Table(T)`/`T.Id` surface. `AsyncCleanup` receives its complete suspended
-execution and cancellation behavior with the async runtime in Milestone 9;
-this milestone establishes its type, affinity, and scope rules without
-introducing async execution early.
+resource composition, compiler-recognized `Cleanup`, `match` guards, the
+in-place-when-unique update rule with per-site copy reporting, and the source
+`Table(T)`/`T.Id` surface. Suspending cleanup hooks receive their complete
+execution and cancellation behavior with the concurrency runtime in Milestone
+9; this milestone establishes cleanup type, affinity, and scope rules without
+introducing suspension early.
 
 Exit requires focused acceptance/rejection tests for trait coherence and
 static dispatch, closure capture and escape, deterministic ordered
@@ -956,13 +964,18 @@ bridge appears publicly.
 
 Status: **required before Alder 1.0**
 
-Implement `async fn`, `await`, state-machine MIR/lowering, affine `TaskGroup`
-and `Task(T)`, structured cancellation with async cleanup, multithread and local
-executors, channels, synchronization, atomics, timers, async files/sockets, and
-the bounded blocking-C bridge defined in
+Implement the `Io`/`BlockingIo`/`AsyncIo` capability traits, signature-based
+suspension checking, per-instance direct or state-machine MIR/lowering, affine
+`TaskGroup` and `Task(T)`, `Pending(T)` task operations, structured
+cancellation with suspending cleanup, multithread and local executors,
+`SimIo`, channels, synchronization, atomics, timers, evented files/sockets,
+and the bounded blocking-C bridge defined in
 [Async and Structured Concurrency](docs/async.md).
 
-Exit requires data-race rejection, nested join/cancel/cleanup tests, channel
+Exit requires one source instantiated under both `Blocking` and `Evented` with
+identical results, rejection of guards and affine values across potentially
+suspending calls and of suspending closures, data-race rejection, nested
+join/cancel/cleanup tests, `SimIo` virtual-time and deadlock tests, channel
 backpressure/FIFO tests, task-transfer and thread-affinity checks, high task
 counts with bounded stack/storage, blocking C completion after cancellation,
 and sanitizer/race coverage on supported hosts. No child may outlive its group
@@ -972,10 +985,10 @@ and no detached task surface may be introduced.
 
 Status: **required before Alder 1.0**
 
-Complete the [Standard Library](docs/standard-library.md) with async/sync
-networking, DNS, TCP/UDP, URL, HTTP/1.1 and HTTP/2, TLS with secure defaults,
+Complete the [Standard Library](docs/standard-library.md), written once
+against `I: Io`, with networking, DNS, TCP/UDP, URL, HTTP/1.1 and HTTP/2, TLS with secure defaults,
 JSON, encodings, CLI parsing, logging, signals, async processes, and all required
-cross-platform error contracts. Ship versioned Unicode, timezone, certificate,
+cross-platform error contracts and precise per-module error enums. Ship versioned Unicode, timezone, certificate,
 and native provenance data with the toolchain.
 
 Exit requires offline use after installation and complete Linux/macOS/Windows
@@ -988,10 +1001,20 @@ HTTP/TLS/JSON are toolchain libraries, not an implicit network download.
 Status: **required distribution tooling before Alder 1.0**
 
 Implement `alder fmt` over lossless syntax, the isolated deterministic test
-runner (including async tests), `alder doc`, and baseline `alder lsp` over the
-same snapshot, resolver, compiler service, diagnostics, and build plan.
+runner (parameterized cases, seeded fuzz corpora, `--fuzz`, value-capturing
+assertions), `alder doc` layered queries and search, `alder ide`,
+`alder explain`, `alder spec`, `alder fix`, `alder help agent`, required doc
+comments, and baseline `alder lsp` over the same serialized build plan,
+compiler service, and diagnostics, following the CLI output contract in
+[Modules and Builds](docs/modules-and-builds.md#cli-output-contract).
+Splitting coarse diagnostic codes into one code per rule is not gated on this
+milestone; it proceeds whenever a diagnostic is added or touched, per
+`CONTRIBUTING.md`.
 
-Exit requires formatter idempotence/trivia and malformed-input behavior,
+Exit requires formatter idempotence/trivia, upgrade stability, and
+malformed-input behavior, CLI output-contract tests (one-line success,
+complete first-read diagnostics, head-and-tail truncation with a full-output
+file, text/JSON parity), an explanation entry for every diagnostic code,
 machine-readable stable test results, compiled documentation examples,
 CLI/LSP diagnostic and formatting parity, UTF-8/UTF-16 conversion, overlay
 isolation, cancellation/stale-result suppression, and no implicit fetch.
@@ -1073,7 +1096,8 @@ The following items are not part of the current implementation scope:
 - stable native ABI promises beyond intentional C interfaces;
 - bit-reproducible native binaries without a pinned native toolchain;
 - dynamic trait objects and specialization;
-- detached fire-and-forget tasks.
+- detached fire-and-forget tasks;
+- generators, `gen` blocks, and callback sugar such as Gleam's `use`.
 
 ## LLVM Reconsideration Gate
 

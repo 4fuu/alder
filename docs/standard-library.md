@@ -5,7 +5,7 @@ Design status: **Frozen minimum module and behavior set**
 Availability: **Not implemented as a 1.0 sysroot**
 
 Alder 1.0 ships batteries sufficient for command-line tools, services, file
-processing, C wrappers, networking, and async applications. The library is
+processing, C wrappers, networking, and concurrent services. The library is
 version-matched to the toolchain and available offline after installation.
 
 This document freezes the minimum scope and major contracts, not every final
@@ -28,8 +28,8 @@ The installed sysroot has two stability layers:
    minimal Alder runtime. It contains language-level algebraic types, traits,
    values/collections, slices, fixed arrays, checked numeric helpers, and
    minimal formatting contracts.
-2. `std` is explicitly imported, hosted, and contains allocation, OS, async,
-   network, test, and C support.
+2. `std` is explicitly imported, hosted, and contains allocation, OS, I/O
+   capabilities, task groups, network, test, and C support.
 
 HTTP, TLS, URL, and JSON are part of the 1.0 `std` distribution rather than a
 network-fetched starter bundle. Their implementations may use audited,
@@ -46,7 +46,7 @@ Option, Some, None
 Result, Ok, Err
 String, Bytes, Array, Vec, Map, Set
 Eq, Hash, Order, Iterator, IntoIterator
-Display, Error, Cleanup, AsyncCleanup
+Display, Error, Cleanup
 Range
 ```
 
@@ -118,11 +118,17 @@ Required modules:
 
 - `std.path`: owned `Path`, component iteration, lexical join/normalize,
   extension/name operations, and explicit platform conversion;
-- `std.io`: `Reader`, `Writer`, and `Seek` traits; buffered readers/writers;
-  standard input/output/error; exact/copy/line helpers; `IoError`;
+- `std.io`: the `Io`, `BlockingIo`, and `AsyncIo` capability traits; the
+  `Blocking` and `Evented` capabilities; `Reader`, `Writer`, and `Seek` traits;
+  buffered readers/writers; standard input/output/error; exact/copy/line
+  helpers; `IoError`;
 - `std.fs`: affine `File`, directory iteration, metadata, permissions,
-  canonicalization, copy/rename/remove, temporary files/directories, and
-  synchronous plus async operations.
+  canonicalization, copy/rename/remove, and temporary files/directories.
+
+Every operation that waits on the host takes an I/O capability and is written
+once against `I: Io`, so the same API serves blocking tools and evented
+servers; there is no parallel synchronous and asynchronous surface. See
+[Async and Structured Concurrency](async.md#the-io-capability).
 
 Path values preserve platform-relevant bytes/units and do not assume every OS
 path is UTF-8. Display may escape non-text components. Directory iteration is
@@ -141,7 +147,7 @@ Required modules:
   checked `String` conversion, current executable and directory, and
   platform/target information;
 - `std.process`: value-semantic `Command`, affine `Child`, pipes, exit status,
-  synchronous output, async wait, cancellation-aware termination, and explicit
+  output capture, wait, cancellation-aware termination, and explicit
   environment inheritance;
 - `std.signal`: portable termination/interrupt subscriptions plus
   target-specific extensions behind capability checks.
@@ -155,7 +161,7 @@ quoting or expansion.
 Required modules:
 
 - `std.time`: monotonic `Instant`, wall-clock `SystemTime`, checked `Duration`,
-  timezone-independent UTC conversion, timers, sleep, and async sleep;
+  timezone-independent UTC conversion, timers, and sleep;
 - `std.random`: OS cryptographic randomness, deterministic seeded generators
   for simulation/tests, and unbiased ranges;
 - `std.math`: portable scalar math with documented IEEE behavior and explicit
@@ -165,14 +171,14 @@ Calendar and timezone databases are versioned distribution data. Ambient C
 rounding-mode changes are outside safe wrappers and cannot silently redefine
 Alder numeric semantics.
 
-## Async and synchronization
+## Tasks and synchronization
 
 Required modules:
 
-- `std.task`: `TaskGroup.new`, result-bearing `spawn`, unit-returning `start`,
-  scoped `Task(T)`, parent-exit cancellation, cooperative cancellation tokens,
-  internally joined timeout/race, yield, executor configuration, and bounded
-  blocking work;
+- `std.task`: `TaskGroup.new(io)`, result-bearing `spawn`, unit-returning
+  `start`, scoped `Task(T)`, parent-exit cancellation, cooperative cancellation
+  tokens, `check_cancel`, internally joined timeout/race, yield, executor
+  configuration, and bounded blocking work;
 - `std.channel`: bounded/unbounded channels with FIFO and backpressure;
 - `std.sync`: group-scoped `Shared(T)`, mutex/RW-lock guards, one-time
   initialization, and barriers;
@@ -188,7 +194,7 @@ or an unsafe user-asserted transfer trait.
 Required modules:
 
 - `std.net`: IP/socket addresses, DNS, affine TCP listeners/streams, UDP,
-  socket options, and sync/async operations;
+  socket options, and capability-based operations;
 - `std.url`: parsing, normalization, percent encoding, and relative resolution;
 - `std.net.http`: streaming HTTP/1.1 and HTTP/2 client/server APIs, limits,
   redirects, proxies, cancellation, and explicit body ownership;
@@ -238,11 +244,28 @@ safe values, affine resources, and `Result`. No public API exposes S0
 Required modules and tools:
 
 - `std.test`: assertions, expected-error helpers, temporary resources,
-  deterministic random seeds, async tests, and subprocess tests;
-- top-level `test`/`async test` declarations with `Unit` or
-  `Result(Unit, E)` outcomes discovered by `alder test`;
+  deterministic random seeds, `SimIo`, parameterized cases, fuzz inputs, and
+  subprocess tests;
+- top-level `test` declarations with `Unit` or `Result(Unit, E)` outcomes
+  discovered by `alder test`;
 - `alder doc` API documentation from public declarations and doc comments;
-- examples compiled as tests when marked as Alder code.
+- examples in doc comments compiled and run as tests.
+
+A failed `assert_eq`, `assert_ne`, or comparison assertion prints the source
+expression and both operand values; a failed `assert` prints its expression
+and the values of the bindings it reads. A failure message never only says
+"assertion failed".
+
+A parameterized test runs once per listed case, and each case is reported and
+can be rerun by its own name. A fuzz test asks for generated input through
+`std.test`; ordinary runs use a fixed seeded corpus plus every saved failing
+input, so they stay deterministic, and only `alder test --fuzz` runs an
+open-ended campaign. A new failing input is saved under the package's test
+data directory and reported with the command that replays it.
+
+`SimIo` is a deterministic `AsyncIo` for tests: one worker, a virtual clock
+that advances only when every task is blocked on time, and a test failure that
+lists each blocked task when the program deadlocks.
 
 The test runner isolates tests by process by default, captures output, reports
 stable machine-readable results, and never depends on directory enumeration
@@ -257,6 +280,12 @@ all failures into strings or ambient integer error codes.
 
 Errors are ordinary values and may carry safe source ranges, paths, and causal
 context. There is no hidden exception chain.
+
+Each module declares the precise error enum its operations can return; it does
+not re-export a dependency's error or fall back to a catch-all. A wrapped
+lower-level error is a variant payload reachable through `Error.cause`, and
+`program error:` output prints the chain one cause per line. `core.result`
+provides `map_error` for adaptation; no implicit conversion exists.
 
 ## Portability and unsupported capabilities
 

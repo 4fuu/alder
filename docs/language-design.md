@@ -19,7 +19,7 @@ name a second language.
 
 > Alder is a small, batteries-included native language with ordinary value
 > semantics, inferred storage, explicit errors, deterministic resources,
-> structured async and identity, and locally auditable C interoperability.
+> structured concurrency and identity, and locally auditable C interoperability.
 
 ## Goals
 
@@ -32,7 +32,9 @@ Alder aims to provide:
   parameters;
 - deterministic cleanup for resources;
 - algebraic data types, exhaustive matching, and monomorphized generics;
-- statically coherent traits, safe closures, and structured async concurrency;
+- statically coherent traits, safe closures, and structured concurrency
+  without colored functions;
+- a CLI-first toolchain whose compact output serves people and coding agents;
 - direct C ABI access behind an explicit `unsafe c` boundary;
 - deterministic modules, packages, builds, and diagnostics suitable for
   self-hosting and production tools;
@@ -54,7 +56,7 @@ Alder 1.0 does not include:
 - catchable exceptions or panic recovery;
 - class inheritance, implicit dynamic dispatch, or runtime generic arguments;
 - arbitrary operator definitions, macros, or general compile-time execution;
-- detached fire-and-forget tasks;
+- detached fire-and-forget tasks, and `async fn` function coloring;
 - safe unchecked access to arbitrary C declarations;
 - a package registry, publishing service, general semantic-version solver, or
   stable native Alder ABI;
@@ -112,8 +114,8 @@ pointers.
   not catchable in Alder 1.0.
 
 `using` guarantees reverse-order cleanup on normal scope exit, `return`, and
-`try` propagation, plus structured task cancellation. Async cleanup is allowed
-for task-group teardown. No source-language stack-unwinding guarantee applies
+`try` propagation, plus structured task cancellation. Cleanup may suspend for
+task-group teardown. No source-language stack-unwinding guarantee applies
 after unrecoverable termination.
 
 ### C is explicit and local
@@ -135,7 +137,7 @@ a second semantic model:
 
 - `T?` for `Option(T)`;
 - `try` for exact-error-type `Result` propagation;
-- `if let` for a one-pattern match;
+- `if let` for a one-pattern match, and `if` guards on `match` arms;
 - statically resolved method calls with `value.method(...)`;
 - `while let` and `for value in values` over static iterator traits;
 - string interpolation through `Display`;
@@ -157,8 +159,8 @@ as `defer`.
   affine owners, `Table(T)`, views, and cleanup.
 - [Traits and Closures](traits-and-closures.md) defines static abstraction and
   safe capture.
-- [Async and Structured Concurrency](async.md) defines the required 1.0 async
-  model, task isolation, cancellation, and executors.
+- [Async and Structured Concurrency](async.md) defines I/O capabilities,
+  per-instance suspension, task isolation, cancellation, and executors.
 - [C Interoperability](c-interop.md) defines raw pointers, binding contracts,
   safe wrappers, and unsupported C features.
 - [Modules and Builds](modules-and-builds.md) defines source modules,
@@ -189,7 +191,9 @@ as `defer`.
 | Resource-selected `using` | Required for 1.0 | S0 callback form is bootstrap-only |
 | Inherent methods | Required for 1.0 | M7 implements inherent methods, associated functions, and receiver modes |
 | Static traits and safe closures | Required for 1.0 | Not implemented in S0 |
-| `async fn`, `await`, task groups, channels, cancellation | Required for 1.0 | Not implemented; current runtime is single-threaded |
+| I/O capabilities, per-instance suspension, task groups, channels, cancellation | Required for 1.0 | Not implemented; current runtime is single-threaded |
+| `match` guards | Required for 1.0 | Not implemented in S0 |
+| CLI queries, `explain`, and required doc comments | Required for 1.0 | Not implemented; `alder check`/`compile` and three coarse diagnostic codes exist |
 | C binding blocks, exports, callbacks, and safe wrappers | Required for 1.0 | S0 direct-symbol import is bootstrap-only |
 | Source modules, `pub`, manifests, and deterministic build plans | Required for 1.0 | Not implemented; S0 uses one explicit global source set |
 | Exact-revision Git packages and lockfile | Required for 1.0 | Not implemented |

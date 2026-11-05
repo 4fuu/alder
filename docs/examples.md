@@ -12,27 +12,36 @@ corresponding implementation milestone turns them into executable tests.
 ```alder
 module hello.main
 
-import std.io { println }
+import std.io { Blocking, println }
 
-pub fn main(arguments: [String]) {
+pub fn main(io: Blocking, arguments: [String]) {
     let name = arguments.get(1).unwrap_or("world")
-    println("Hello, {name}!")
+    println(io, "Hello, {name}!")
 }
 ```
 
 Values are immutable by default, indexing uses the safe `get`, and string
-interpolation uses `Display`.
+interpolation uses `Display`. Standard output is I/O, so `main` asks the host
+for a blocking capability; no executor starts.
 
 ## Values, errors, and tests
 
 ```alder
 module inventory.price
 
+/// Why a price list has no valid total.
 pub enum PriceError {
+    /// A price was below zero.
     Negative
+    /// The sum does not fit in `I64`.
     Overflow
 }
 
+/// Adds a list of non-negative prices.
+///
+/// # Errors
+///
+/// `Negative` for any price below zero; `Overflow` when the sum exceeds `I64`.
 pub fn total(prices: [I64]) -> Result(I64, PriceError) {
     var value: I64 = 0
 
@@ -52,7 +61,8 @@ test "adds positive prices" {
 ```
 
 Ordinary checked `+` terminates on a programmer invariant failure;
-`try_add` exposes expected overflow as `Result`.
+`try_add` exposes expected overflow as `Result`. Every public declaration
+carries a doc comment whose first line is its summary.
 
 ## Inferred temporary storage
 
@@ -61,11 +71,17 @@ module documents.summary
 
 import std.json { Json, JsonError }
 
+/// Title and length of a JSON document.
 pub type Summary {
     title: String
     word_count: U64
 }
 
+/// Reads the `title` and `content` fields of a JSON document.
+///
+/// # Errors
+///
+/// A `JsonError` when the bytes are not JSON or a field is missing.
 pub fn summarize(data: Bytes) -> Result(Summary, JsonError) {
     let document = try Json.parse(data)
     let title = try document.string("title")
@@ -106,15 +122,18 @@ ordinary read values by independent value snapshot.
 ```alder
 module game.world
 
+/// A named node with an optional parent.
 pub type Entity {
     name: String
     parent: Entity.Id?
 }
 
+/// Owns every entity.
 pub type World {
     entities: Table(Entity)
 }
 
+/// Inserts a child of `parent`, or returns `None` when `parent` is gone.
 pub fn add_child(mut world: World, parent: Entity.Id, name: String)
     -> Option(Entity.Id) {
     if world.entities.get(parent).is_none() {
@@ -134,31 +153,46 @@ module files.copy
 
 import std.fs { File }
 import std.path { Path }
-import std.io { IoError }
+import std.io { Io, IoError }
 
-pub fn copy(from: Path, to: Path) -> Result(Unit, IoError) {
-    using input = try File.open(from)
-    using output = try File.create(to)
+/// Copies the file at `from` to a new file at `to`.
+///
+/// # Errors
+///
+/// An `IoError` from opening, reading, writing, or closing either file.
+pub fn copy(I: type, io: I, from: Path, to: Path) -> Result(Unit, IoError)
+where I: Io {
+    using input = try File.open(io, from)
+    using output = try File.create(io, to)
     try input.copy_to(output)
     return output.finish()
 }
 ```
 
 `output.finish` reports final write/close errors and disarms fallback cleanup.
-On earlier error, resources clean in reverse order.
+On earlier error, resources clean in reverse order. The same function copies
+with blocking calls under `std.io.Blocking` and suspends under
+`std.io.Evented`.
 
-## Structured async
+## Structured concurrency
 
 ```alder
 module client.profile
 
+import std.io { AsyncIo }
 import std.net.http { get, HttpError }
 import std.task { TaskGroup }
 
-pub async fn load_profile(id: User.Id) -> Result(Profile, HttpError) {
-    using tasks = TaskGroup.new()
-    let user = tasks.spawn(get("/users/{id}"))
-    let posts = tasks.spawn(get("/users/{id}/posts"))
+/// Fetches a user and their posts concurrently.
+///
+/// # Errors
+///
+/// The first `HttpError` from either request or from decoding its body.
+pub fn load_profile(I: type, io: I, id: User.Id) -> Result(Profile, HttpError)
+where I: AsyncIo {
+    using tasks = TaskGroup.new(io)
+    let user = tasks.spawn(get(io, "/users/{id}"))
+    let posts = tasks.spawn(get(io, "/users/{id}/posts"))
 
     let user_response = try await user
     let posts_response = try await posts
@@ -173,25 +207,27 @@ pub async fn load_profile(id: User.Id) -> Result(Profile, HttpError) {
 The group cannot finish before both children finish or are canceled and
 cleaned. The two response values are independent; no mutable local is shared.
 
-## Async server lifetime
+## Server lifetime
 
 ```alder
 module server.main
 
+import std.io { AsyncIo, Evented }
 import std.net { TcpListener, TcpStream }
 import std.task { TaskGroup }
 
-async fn serve(take socket: TcpStream) {
+fn serve(I: type, io: I, take socket: TcpStream(I))
+where I: AsyncIo {
     // ...
 }
 
-pub async fn main() -> Result(Unit, ServerError) {
-    using listener = try await TcpListener.bind("127.0.0.1:8080")
-    using connections = TaskGroup.new()
+pub fn main(io: Evented) -> Result(Unit, ServerError) {
+    using listener = try TcpListener.bind(io, "127.0.0.1:8080")
+    using connections = TaskGroup.new(io)
 
     while true {
-        let socket = try await listener.accept()
-        connections.start(serve(socket))
+        let socket = try listener.accept()
+        connections.start(serve(io, socket))
     }
 }
 ```
@@ -214,6 +250,7 @@ import c "counter.h" as raw {
     raw fn destroy = "counter_destroy"(counter: c.Ptr(Counter))
 }
 
+/// A counter owned by the C library.
 pub type Counter {
     raw: c.Ptr(raw.Counter)
 }
@@ -224,6 +261,11 @@ impl Cleanup for Counter {
     }
 }
 
+/// Creates a counter.
+///
+/// # Errors
+///
+/// `CreateFailed` when the C library returns a null counter.
 pub fn create() -> Result(Counter, CounterError) {
     let pointer = unsafe c { raw.create() }
     if c.is_null(pointer) {
@@ -232,6 +274,11 @@ pub fn create() -> Result(Counter, CounterError) {
     return Ok(unsafe c { Counter(raw: pointer) })
 }
 
+/// Reads the counter's current value.
+///
+/// # Errors
+///
+/// `OutOfRange` when the C value does not fit in `I64`.
 pub fn value(counter: Counter) -> Result(I64, CounterError) {
     let raw_value = unsafe c { raw.value(counter.raw) }
     return I64.try_from(raw_value).map_error(fn(_) => OutOfRange)

@@ -23,6 +23,24 @@ cross-domain copies must be visible to compiler diagnostics or profiling.
 There is no routine source-invalidating `move` operation. This semantic choice
 does not require eager deep copies.
 
+### In-place update of uniquely owned values
+
+A mutating collection or builder operation updates its target in place when
+the compiler proves the target's storage uniquely owned at that point: no other
+live binding, closure capture, task argument, or view refers to it. Otherwise
+the operation first copies. Uniqueness is a static fact derived from bindings,
+view liveness, and storage placement; there is no reference count and no
+runtime uniqueness test. Assignment followed by mutation of only one side, a
+value passed to a function and then dead in the caller, and a loop that
+rebuilds a local collection are the cases the analysis must prove.
+
+The rule never changes observable values. It is a cost contract: tooling
+reports every copy site that remains, with its reason (for example "`items` is
+still used at line 40"), and the performance suite pins in-place behavior for
+representative programs, because a silently lost in-place update can turn a
+linear loop quadratic. See
+[D023](design-decisions.md#d023--uniquely-owned-values-update-in-place).
+
 ## Affine owners
 
 Types that represent exactly-once external state are affine. The initial set
@@ -53,6 +71,11 @@ whose validity is tied to an owner or storage domain.
 - `Table(T).get` produces a scoped immutable table view.
 - `Table(T).get_mut` produces a scoped exclusive table view.
 - lock acquisition produces an affine guard whose cleanup releases the lock.
+
+A view is formed only from a place: a binding, a field or element path of a
+binding, or a parameter. It is never formed from a call result or another
+temporary, which therefore cannot dangle. A caller that needs a view of a
+temporary binds it first.
 
 A capability cannot be used after reset, owner mutation that invalidates it,
 table removal, unlock, task-group exit, or foreign release. Mutable capability
@@ -92,6 +115,11 @@ it retains it in the nearest safe outer domain. The fallback may consume more
 memory but cannot produce use after free. The compiler must diagnose or profile
 material retention and cross-domain copies; it does not silently switch the
 program to per-object reference counting.
+
+Placement and view checking track individual fields and element paths, and
+judge a view by its actual later uses rather than its lexical scope, so a
+borrow of one field does not retain or lock its siblings. Precision here
+directly reduces retention and needs no source syntax.
 
 The placement analysis is a finite monotone constraint problem over stable
 candidate-domain and allocation IDs. A placement starts at its innermost
@@ -147,7 +175,8 @@ growth is geometric with checked size arithmetic; no capacity calculation may
 wrap or narrow into C `size_t` unchecked.
 
 Milestone 7.1 implements `Vec(T)` only when `T` is recursively copyable and
-uses eager deep copy. This temporary restriction keeps ordinary vector APIs
+uses eager deep copy; the in-place rule above replaces eager copies once
+uniqueness facts exist. This temporary restriction keeps ordinary vector APIs
 free of transfer and cleanup behavior before Milestone 7.5 implements affine
 element composition. M7.3 slice 2 replaces M7.1's single hidden borrowed root
 placement with a hidden caller-result domain plus a nested function domain.
@@ -198,8 +227,8 @@ capacity policy explicitly.
 ## Deterministic cleanup
 
 `using name = expression` accepts an affine type implementing the language's
-special synchronous `Cleanup` trait or, inside an async function, its
-`AsyncCleanup` trait. Registrations run at most once in reverse lexical order.
+special `Cleanup` trait. Registrations run at most once in reverse lexical
+order.
 
 Cleanup is guaranteed on:
 
@@ -221,12 +250,13 @@ resource on both `Ok` and `Err`. A retryable operation instead uses `mut self`
 and leaves fallback cleanup registered. Automatic cleanup remains suitable for
 abandonment and cannot hide a recoverable result.
 
-`AsyncCleanup` is also infallible but may suspend while joining child tasks or
-completing a documented asynchronous release. Once scope cancellation starts,
-cleanup runs in a cancellation-shielded teardown state: it still observes the
-original cancellation token but is not itself repeatedly canceled before it
-can join/release. Task groups implement `AsyncCleanup`; they cannot be created
-in a synchronous function.
+A cleanup hook whose owner holds a suspending I/O capability, such as a task
+group or an evented socket, may suspend while joining child tasks or completing
+an asynchronous release, so its scope exit is potentially suspending. Once
+scope cancellation starts, cleanup runs in a cancellation-shielded teardown
+state: it still observes the original cancellation token but is not itself
+repeatedly canceled before it can join/release. Task groups require an
+`AsyncIo` capability.
 
 Resources may be grouped in ordinary affine records. Such a record either
 implements `Cleanup` or must transfer/clean each owner before its scope ends.

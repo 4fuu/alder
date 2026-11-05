@@ -104,7 +104,10 @@ Alder does not expose Rust-style per-object ownership, moves, borrow chains, or 
 - **segmented regions** to reduce avoidable retention;
 - **generational `T.Id` values and `Table(T)`** for long-lived objects with identity;
 - **scoped cleanup** for files, sockets, locks, and transactions;
-- **`async fn`, `await`, and structured task groups** to bound task lifetimes;
+- **I/O capabilities with per-instance suspension**: one function serves
+  blocking and evented callers, and structured task groups bound task lifetimes;
+- **a CLI-first toolchain** whose compact diagnostics and API queries suit both
+  people and coding agents;
 - **explicit `unsafe c` boundaries** for operations the language cannot prove safe.
 
 When the compiler cannot prove that storage can be reclaimed early, the default failure mode is retention until the nearest enclosing domain ends. Complex code should degrade to measurable memory cost, not memory unsafety or pervasive type-system complexity.
@@ -144,7 +147,8 @@ compiler architecture.
 ## Alder 1.0 Target
 
 The 1.0 release is not only a self-hosted compiler. It requires static traits,
-safe closures, inferred storage, `Table(T)` identity, `async fn`/`await`,
+safe closures, inferred storage, `Table(T)` identity, I/O capabilities with
+per-instance suspension,
 structured cancellation, C header bindings and exports, deterministic modules
 and builds, exact-revision Git packages, managed xmake/xrepo native
 dependencies, an offline batteries-included standard library (including

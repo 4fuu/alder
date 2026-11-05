@@ -95,8 +95,9 @@ The 1.0 prelude includes or re-exports:
   collection APIs;
 - `Display` for user-facing formatting;
 - `Error` for application error reporting;
-- `Cleanup` and `AsyncCleanup` for infallible automatic hooks selected by
-  `using`;
+- `Cleanup` for the infallible automatic hook selected by `using`;
+- `Io`, `BlockingIo`, and `AsyncIo` for I/O capabilities (defined by `std.io`
+  and recognized by the compiler for suspension checking and lowering);
 - conversion traits used only by explicit named conversion APIs.
 
 `Cleanup` is compiler-recognized because affine drop checking must know that a
@@ -112,17 +113,28 @@ It cannot return a recoverable error. A resource exposes a separate consuming
 `finish` or `close` method when the caller must observe an error; that method
 releases the owner on both success and failure.
 
-An async-only owner such as `TaskGroup` instead implements:
+There is no separate asynchronous cleanup trait. A hook whose receiver holds a
+suspending I/O capability, such as `TaskGroup(I)` joining its children, may
+suspend; its scope exit is then potentially suspending and cancellation-shielded
+as defined in [Memory and Resources](memory-and-resources.md) and
+[Async and Structured Concurrency](async.md).
+
+A trait's doc comment may contain a `# Missing implementation` section. When
+no implementation applies, the diagnostic prints that section's first paragraph
+after the direct cause, with `{Self}` and trait-parameter names substituted:
 
 ```alder
-trait AsyncCleanup {
-    async fn cleanup(take self)
-}
+/// Types that can be compared for equality.
+///
+/// # Missing implementation
+///
+/// `{Self}` has no `==`. Records and enums get structural equality when every
+/// field is `Eq`.
+trait Eq { ... }
 ```
 
-This remains the same `using` construct and reverse-order cleanup model. It may
-suspend only in an async scope and is cancellation-shielded as defined in
-[Memory and Resources](memory-and-resources.md).
+The section is documentation only and has no effect on semantics; Alder 1.0
+adds no attribute syntax.
 
 Task transfer safety is a compiler-derived structural property, not a trait
 that safe user code can assert manually. This prevents an incorrect impl from
@@ -187,7 +199,11 @@ than a magic closure environment.
 
 ## Function values and ABI
 
-Function and closure types use `fn(A, B) -> R`. Noncapturing functions can
+Function and closure types use `fn(A, B) -> R`. Function values never suspend:
+a closure body, or a named function used as a value, cannot contain a
+potentially suspending call. APIs that take suspending work accept a named
+function through a compile-time parameter or a standard `Pending(T)` call; see
+[Async and Structured Concurrency](async.md). Noncapturing functions can
 coerce to a function value. Capturing closures have compiler-generated
 environments and are ordinary Alder values subject to their captured
 categories.

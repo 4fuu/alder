@@ -248,12 +248,13 @@ An export catches no invariant panic; process termination is the only portable
 panic behavior across C. The generated header and symbol name are deterministic.
 Thread entry and runtime initialization are supplied by the host bridge.
 
-## Async and thread safety
+## Concurrency and thread safety
 
 A raw binding carries no inferred thread-safety or nonblocking promise. A safe
 wrapper decides whether it:
 
 - is short and callable on an executor worker;
+- takes an I/O capability, so it is potentially suspending;
 - must use the bounded blocking pool;
 - is restricted to the local executor/thread;
 - may be transferred between tasks;
@@ -288,6 +289,10 @@ The 1.0 C gate includes:
 - C-to-Alder export reentry and malformed inputs;
 - strict warnings, sanitizers, static analysis, and deterministic generated
   binding code.
+
+Wrappers over C libraries may additionally be tested with a memory-safe C
+implementation such as Fil-C as an optional lane; it is a debugging aid, not a
+supported toolchain.
 
 S0's `import c name: fn(...)` and single direct call are a narrow bootstrap
 bridge and do not establish this complete contract.

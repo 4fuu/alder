@@ -54,6 +54,28 @@ Rules:
 - Compiler graph structures should prefer stable integer IDs and contiguous storage over pervasive host-language pointers.
 - Semantic lowering and behavior changes should be separate from formatting or mechanical cleanup when practical.
 
+## Diagnostic Standards
+
+These rules apply to every new or changed diagnostic in the Go bootstrap and
+the Alder-written compiler, and implement the CLI output contract in
+`docs/modules-and-builds.md`.
+
+- One rule, one stable code. Codes are a namespace prefix (`LEX`, `SYN`,
+  `SEM`, `LOW`, ...) plus four digits and are never reused for a different
+  rule. The existing catch-all codes `LEX0001`, `SYN0001`, and `SEM0001` are
+  split by rule as diagnostics are added or touched; new code must not emit
+  them for a rule that has its own code.
+- The message states the direct cause in one sentence and names the involved
+  binding, type, value, or construct. Related locations go in related ranges,
+  not in prose.
+- When the compiler knows a fix, the diagnostic carries it as a note and, when
+  mechanical, as a text edit. A reader must not need `alder explain` to know
+  what is wrong, where, or how to fix it.
+- Every code has an explanation entry: a few lines of background, a minimal
+  wrong/right example pair, and the governing specification section.
+- Types are printed with the names visible at the diagnostic's location.
+- Rejection tests pin the code and message.
+
 ## Go Bootstrap Standards
 
 - Use the Go standard library unless a dependency removes substantial, demonstrated complexity.

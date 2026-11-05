@@ -14,8 +14,10 @@ Required result: implement the semantics in
 [Memory and Resources](memory-and-resources.md).
 
 Choose and test the smallest constraint/fixed-point algorithm that places
-storage, proves scoped views, and reports retention/copy costs at compiler
-scale. The safe outer-domain fallback is not open.
+storage, proves scoped views, proves the uniqueness facts behind in-place
+updates (D023), and reports retention/copy costs at compiler scale. It must be
+field-precise and judge views by their later uses. The safe outer-domain
+fallback and the in-place-when-unique rule are not open.
 
 ### Exact MIR representation for async suspension
 
@@ -24,7 +26,9 @@ Required result: implement [Async and Structured Concurrency](async.md).
 Decide whether suspension, cancellation cleanup, and executor wakeups belong in
 a new explicit MIR version or are lowered to existing CFG plus narrowly
 verified runtime operations. The representation must remain backend-neutral
-and iteratively verifiable.
+and iteratively verifiable. Per-instance suspension (D012) is settled: only
+instances with a suspending capability use the representation, and the same
+source must also lower to direct MIR.
 
 ### Windows tier-1 C toolchain
 
@@ -72,7 +76,8 @@ module families without a versioned snapshot.
 Required result: meet the 1.0 release evidence without changing safe semantics.
 
 Set quantitative compiler memory/time, generated-C compile time, runtime,
-async scheduling, collection-copy, and binary-size budgets from representative
+task scheduling, collection-copy, dual-instance (blocking and evented) code
+size, and binary-size budgets from representative
 program baselines. Include layered DAGs and malformed/adversarial inputs, not
 only linear happy paths.
 

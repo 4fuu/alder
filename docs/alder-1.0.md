@@ -21,8 +21,10 @@ Alder 1.0 is a native, statically typed language that is:
 - predictably fast without a tracing garbage collector or universal hidden
   reference counting;
 - small enough to learn from one coherent language guide;
-- modern enough for algebraic data, generics, closures, structured async,
+- modern enough for algebraic data, generics, closures, structured concurrency,
   deterministic cleanup, modules, packages, testing, and editor tooling;
+- practical for coding agents: every toolchain capability is a compact,
+  noninteractive CLI command whose diagnostics state cause and fix directly;
 - directly interoperable with C through a narrow, explicit trusted boundary;
 - usable offline after installation, with a version-matched standard library
   and build tool;
@@ -47,7 +49,7 @@ executing beyond that boundary.
 | Storage | Compiler-inferred hierarchical storage with safe outer-domain retention fallback | [Memory and Resources](memory-and-resources.md) |
 | Identity | `Table(T)`, generational `T.Id`, and nonescaping table views | [Memory and Resources](memory-and-resources.md) |
 | Resources | Affine owners, `using`, exactly-once normal cleanup, explicit transfer | [Memory and Resources](memory-and-resources.md) |
-| Async | `async fn`, `await`, task groups, cancellation cleanup, async I/O, isolated task state | [Async and Structured Concurrency](async.md) |
+| Concurrency | I/O capabilities with per-instance suspension, task groups, `await` on task handles, cancellation cleanup, isolated task state | [Async and Structured Concurrency](async.md) |
 | C | Verified ABI descriptions, raw C types, safe-wrapper rules, C exports and callbacks | [C Interoperability](c-interop.md) |
 | Modules | Private-by-default modules, explicit public exports, deterministic acyclic package graph | [Modules and Builds](modules-and-builds.md) |
 
@@ -64,8 +66,9 @@ One Alder installation includes, without a network fetch:
   sysroot;
 - the complete `core` and `std` libraries in
   [Standard Library](standard-library.md);
-- the formatter, test runner, documentation generator, package commands, and
-  baseline language server;
+- the formatter, test runner, documentation generator, semantic query
+  commands, offline language specification, package commands, and baseline
+  language server;
 - the managed pinned xmake/xrepo native provider and recipe snapshot, as a
   replaceable component not used by the compiler bootstrap or standard library;
 - project templates and C binding templates;
@@ -108,7 +111,7 @@ The 1.0 release must qualify these hosted target families:
 - macOS on x86-64 and Apple silicon with the supported Apple Clang toolchain;
 - Windows on x86-64 with a documented supported C11 toolchain.
 
-Every tier-1 combination must run the language, standard-library, async,
+Every tier-1 combination must run the language, standard-library, concurrency,
 generated-C, sanitizer where available, package, and bootstrap acceptance
 suites. A target is not supported merely because generated C happens to
 compile. Additional targets, including WASI, may be added without weakening
@@ -148,7 +151,12 @@ Alder 1.0 requires all of the following, not only implementation presence:
 9. representative benchmarks showing no known accidental exponential compiler
    behavior and no unbounded hidden ARC/GC cost;
 10. a clean offline install-and-build acceptance from the published source and
-    binary distributions.
+    binary distributions;
+11. an `alder fmt` stability guarantee: a newer edition-1 toolchain never
+    reformats a file that an older edition-1 formatter left conforming;
+12. CLI output-contract tests: one-line success, complete first-read
+    diagnostics, head-and-tail truncation with a full-output file, and parity
+    between text and JSON records.
 
 ## Compatibility after 1.0
 

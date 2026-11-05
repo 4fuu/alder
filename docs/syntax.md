@@ -20,6 +20,10 @@ accepts every construct.
 - Types and enum variants conventionally begin with an uppercase letter;
   values, functions, fields, and modules conventionally use lowercase.
 - `//` starts a line comment. `/* ... */` is a non-nesting block comment.
+- `///` starts a doc comment for the declaration that follows it, or for the
+  module when it precedes the `module` header. Doc comments are Markdown; the
+  first line is a one-sentence summary. Public declarations require one; see
+  [Modules and Builds](modules-and-builds.md#documentation-requirements).
 - Semicolons are not part of ordinary Alder syntax.
 
 Physical newlines separate top-level declarations, record fields, enum
@@ -92,11 +96,11 @@ Top-level declaration forms are:
 module, import
 type, enum
 const
-fn, async fn
+fn
 trait
 impl
 export c fn
-test, async test
+test
 ```
 
 There are no mutable globals or executable top-level initializers. Trait,
@@ -393,8 +397,23 @@ integer literal   integer literal where implemented
 ```
 
 Bindings are immutable and scoped to the arm. A wildcard completes
-exhaustiveness. Guards, or-patterns, record/slice destructuring, and range
-patterns are deferred.
+exhaustiveness.
+
+An arm may add an `if` guard after its pattern:
+
+```alder
+let label = match response {
+    Ok(body) if body.is_empty() => "empty"
+    Ok(_) => "ok"
+    Err(_) => "failed"
+}
+```
+
+The guard is a `Bool` expression evaluated after the pattern matches, with the
+arm's bindings in scope. When it is false, matching continues with the next
+arm. A guarded arm never counts toward exhaustiveness. A guard only borrows the
+bindings; it cannot consume an affine payload. Or-patterns, record/slice
+destructuring, and range patterns are deferred.
 
 `if let` is exact one-pattern-match sugar:
 
@@ -423,7 +442,7 @@ an affine payload, which cannot escape its arm.
 `while let` repeats a one-pattern match:
 
 ```alder
-while let Some(message) = try await inbox.receive() {
+while let Some(message) = try inbox.receive() {
     handle(message)
 }
 ```
@@ -436,17 +455,17 @@ common resource case.
 ## Errors and cleanup syntax
 
 ```alder
-let text = try File.read_text(path)
-using file = try File.open(path)
+let text = try File.read_text(io, path)
+using file = try File.open(io, path)
 ```
 
 `try` applies only to `Result(T, E)` and propagates the same error type from the
 current function. Alder does not use postfix `?` for error propagation because
 `T?` already denotes optional types and `try` is explicit.
 
-`using` binds one affine resource and registers its type-defined `Cleanup`, or
-`AsyncCleanup` in an async scope. Both hooks are infallible and consume the
-owner. Cleanup behavior is frozen in
+`using` binds one affine resource and registers its type-defined `Cleanup`
+hook. The hook is infallible and consumes the owner; it may suspend when the
+owner holds a suspending I/O capability. Cleanup behavior is frozen in
 [Memory and Resources](memory-and-resources.md).
 
 There is no general `defer` in the core.
@@ -478,7 +497,7 @@ impl User {
 - There are no extension-method searches, runtime lookup, overload sets, or
   method values in the core.
 
-Associated functions omit `self` and are called as `File.open(path)`. Opaque
+Associated functions omit `self` and are called as `File.open(io, path)`. Opaque
 library values and affine owners use named associated constructors such as
 `TaskGroup.new()` and `Table.new(Player)`; a type is not implicitly callable
 merely because it has no public fields. Record construction remains
@@ -488,7 +507,7 @@ Trait implementations use `impl Trait(Arguments) for Type`; their static
 coherence and supported surface are defined in
 [Traits and Closures](traits-and-closures.md).
 
-## Closures and async
+## Closures and concurrency
 
 Expression and block closures use anonymous `fn` syntax:
 
@@ -504,22 +523,25 @@ Parameter/result types may be inferred from an expected function type. Ordinary
 read captures are value snapshots. Implicit mutable or affine capture is
 rejected; see [Traits and Closures](traits-and-closures.md).
 
-Async uses familiar declaration and suspension syntax:
+There is no `async fn`. Code that waits on the host takes an I/O capability
+through an ordinary compile-time type parameter:
 
 ```alder
-async fn fetch(url: Url) -> Result(Bytes, HttpError) {
-    using tasks = TaskGroup.new()
-    let response = tasks.spawn(http.get(url))
+fn fetch(I: type, io: I, url: Url) -> Result(Bytes, HttpError)
+where I: AsyncIo {
+    using tasks = TaskGroup.new(io)
+    let response = tasks.spawn(http.get(io, url))
     let bytes = try await response
     return Ok(bytes)
 }
 ```
 
-An async call starts only when immediately awaited or passed to a task-group
-spawn operation. `await` is allowed only inside `async fn`; prefix operators
-compose right-to-left, so `try await operation` awaits first and then propagates
-its `Result`. Task handles and groups are affine. There is no detached-task
-syntax. See [Async and Structured Concurrency](async.md).
+The argument of `spawn`, `start`, and the other standard task operations must
+be a direct call; it runs as the child task. `await` applies only to a
+`Task(T)` handle. Prefix operators compose right-to-left, so `try await task`
+awaits first and then propagates its `Result`. Task handles and groups are
+affine. There is no detached-task syntax. See
+[Async and Structured Concurrency](async.md).
 
 ## `unsafe c`
 

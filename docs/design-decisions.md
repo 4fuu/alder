@@ -95,10 +95,12 @@ promise stack unwinding or recovery.
 
 Status: **Frozen 1.0**
 
-`using` selects an infallible `Cleanup` hook, or `AsyncCleanup` in an async
-scope, for an affine owner. Normal flow, return, `try`, loop exit, and
-structured cancellation clean in reverse order. There is no second general
-`defer` construct.
+`using` selects the infallible `Cleanup` hook of an affine owner. Normal flow,
+return, `try`, loop exit, and structured cancellation clean in reverse order.
+A hook whose receiver holds a suspending I/O capability may suspend; there is
+no separate `AsyncCleanup` trait. There is no second general `defer`
+construct; the C2y defer TS (ISO/IEC TS 25755) is weaker than `using` and does
+not affect generated C11.
 
 ### D010 — Static coherent traits
 
@@ -115,13 +117,28 @@ Status: **Frozen 1.0**
 Closures copy ordinary read captures. Mutable locals and affine owners are not
 implicitly captured. Shared mutable task state uses explicit scoped owners.
 
-### D012 — Structured async before 1.0
+### D012 — Structured concurrency with per-instance suspension
 
-Status: **Frozen 1.0**
+Status: **Frozen 1.0** (amended 2026-11: replaces `async fn` coloring)
 
-`async fn`, `await`, `TaskGroup`, scoped task handles, cancellation cleanup,
-async I/O, and multithread/local executors are required for 1.0. Detached
-fire-and-forget tasks are absent.
+Code that waits on the host receives an explicit I/O capability through a
+compile-time type parameter bounded by `Io`, `BlockingIo`, or `AsyncIo`.
+Checking uses the bounds, so suspension rules are local and decided before
+monomorphization. Lowering uses the concrete instance: `BlockingIo` instances
+are direct code and other instances are verified state machines. There is no
+`async fn`; `await` only consumes a `Task(T)`. Function values never suspend.
+`TaskGroup`, scoped task handles, cancellation cleanup, async I/O, and
+multithread/local executors are required for 1.0, and one standard library
+serves blocking and evented programs. Detached fire-and-forget tasks are
+absent.
+
+Rationale: Zig's `std.Io` (0.16, 2026) showed the capability-parameter surface
+works, but it resolves the color at runtime and has no stackless backend.
+Effekt's type-directed selective CPS showed per-function selection of direct
+and suspending code. Alder monomorphizes before MIR, has no trait objects, and
+needs no separate compilation, so it can make the selection statically. The
+remaining costs are threading `io` through signatures and duplicated instances;
+code size is measured as a release budget.
 
 ### D013 — Explicit C trusted boundary
 
@@ -168,10 +185,11 @@ offline with Alder 1.0.
 
 Status: **Frozen 1.0**
 
-Retained sugar includes `T?`, prefix `try`, `if let`/`while let`, method-dot
-calls, interpolation, `for`, and `using`. Alder rejects competing generic
-syntax, postfix error `?`, truthiness, implicit conversion, arbitrary operator
-grammar, implicit tail returns, and detached-task syntax.
+Retained sugar includes `T?`, prefix `try`, `if let`/`while let`, `match`-arm
+`if` guards, method-dot calls, interpolation, `for`, and `using`. Alder rejects
+competing generic syntax, postfix error `?`, truthiness, implicit conversion,
+arbitrary operator grammar, implicit tail returns, generators, callback sugar
+such as Gleam's `use`, and detached-task syntax.
 
 ### D019 — Cancellation never erases an await result
 
@@ -207,6 +225,33 @@ platform text engines, input methods, and accessibility bridges sit behind
 that boundary. Linux comes first. Keeping it outside `std` keeps 1.0
 qualification and compatibility promises independent of three desktop
 platforms' UI stacks. See the [Roadmap](../ROADMAP.md#post-10-native-ui-package).
+
+### D022 — The toolchain is CLI-first and agent-friendly
+
+Status: **Frozen 1.0**
+
+Every toolchain capability, including semantic navigation and API lookup, is
+available as a noninteractive `alder` command; the LSP wraps the same queries.
+Default output is compact text that a model can act on in one round trip: a
+diagnostic states its direct cause, related locations, and a concrete fix when
+one is known. `alder explain` adds background only. Output beyond a size limit
+shows its head and tail and writes the complete text to a reported file.
+Every public declaration needs a doc comment whose first line is a one-sentence
+summary, so API queries can list one line per item. See
+[Modules and Builds](modules-and-builds.md#cli-output-contract).
+
+### D023 — Uniquely owned values update in place
+
+Status: **Frozen 1.0**
+
+A mutating collection or builder operation on a value the compiler proves
+uniquely owned (no other live binding, capture, or view of its storage) updates
+in place; otherwise it copies first. Uniqueness is proven statically from
+bindings, views, and storage placement, with no reference count. Value
+semantics are unchanged. Each copy site and its reason are reported by tooling,
+because a silently lost in-place update is a large, invisible regression (Roc
+hit a roughly thousandfold slowdown this way in 2026). Precedents: Koka
+Perceus/FBIP and Lean 4 reset/reuse.
 
 ## Bootstrap decisions
 

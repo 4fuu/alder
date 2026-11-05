@@ -278,6 +278,13 @@ Rules:
 - do not emit `restrict` until MIR proves the required non-aliasing contract;
 - keep raw foreign pointers distinct from safe references in generated helper APIs.
 
+These rules are written to stay valid under the provenance model of ISO/IEC
+TS 6010 and on capability hardware such as CHERI, where a pointer cannot be
+recreated from an integer or moved outside its object. Future C exports of
+slices may add Clang `__counted_by` annotations as an option; generated code
+does not depend on `-fbounds-safety`, which is not yet available in upstream
+Clang.
+
 ## Bounds Checks
 
 Slice indexing lowers to an explicit check before address calculation:
