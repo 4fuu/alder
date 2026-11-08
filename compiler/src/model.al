@@ -284,6 +284,9 @@ type CheckedExprChildRec {
 // 23 immutable slice/range, 24 mutable slice, and 25 mutable subview.
 // Table builtin identities are 26 Table.new, 27 insert, 28 get, 29 get_mut,
 // and 45 remove (30-44 are the ordered Map/Set and function-value builtins).
+// place is the receiver place a mutating collection operation writes its
+// grown header back through; it is zero when the operation does not write
+// back (len, get, lookups, and table handle operations).
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -291,6 +294,7 @@ type CallAnnotationRec {
     checked_type: U64
     variant_use: U64
     builtin: U64
+    place: U64
 }
 
 type CheckedReturnRec {
@@ -331,14 +335,18 @@ type CheckedStatementRec {
     alternative: U64
 }
 
-// Place kinds are 1 local, 2 struct field, 3 slice index, and 4 indexed struct
-// field. root is a stable LocalRec ID, field is a declaration-ordinal
-// DeclTypeUseRec ID, index is a checked U64 expression, and checked_type is the
-// concrete value accepted by the store.
+// A place is a chain of projections over one root local. Place kinds are
+// 1 local, 2 struct field, and 3 slice index. base is zero for a projection of
+// the root local and otherwise the place it projects from, so `a.b.c` and
+// `a.b[0]` are chains rather than one flat shape. Every level records the root
+// LocalRec ID, which is the binding the mutability and overlap rules speak
+// about, its own checked_type, and either the declaration-ordinal
+// DeclTypeUseRec ID of its field or its checked U64 index expression.
 type CheckedPlaceRec {
     owner: U64
     syntax: U64
     kind: U64
+    base: U64
     root: U64
     field: U64
     index: U64

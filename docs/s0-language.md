@@ -479,10 +479,17 @@ direct C-import root in `unsafe c`; record fields are checked and stored in
 declaration order. Inherent methods support ordinary, mutable, and taking
 receivers; associated functions and same-named methods on distinct owner types
 resolve to distinct concrete symbols. Explicit type arguments are all-or-none
-and use the same postfix call tree as runtime arguments. Checked places cover mutable locals and
-struct fields plus slice indices and indexed struct fields; roots and fields
+and use the same postfix call tree as runtime arguments. Checked places are chains over one root local:
+a name, a field of any place, and a slice index of any place, so `a`, `a.b`,
+`a[i]`, `a.b.c`, `a.b[i]`, and `a[i].b` are all assignable. Roots and fields
 retain stable semantic IDs, and concrete generic field types are substituted
-before checking the right-hand side. Lexical environments do not leak block,
+before checking the right-hand side. A mutating collection or table operation
+resolves its receiver the same way, so `b.items.push(x)`, `b.items[i] = x`, a
+`Map`/`Set` `insert`/`remove`, and a `Table` operation work through a field of
+a local or of a `mut self` receiver, through a nested field path, and through
+an element of a field; the grown collection header is written back through
+that place. A view taken through a field excludes mutation of the binding that
+owns it. Lexical environments do not leak block,
 branch, loop, or `for` element bindings. Non-`Unit` functions must return on
 every path, statements after a guaranteed return are rejected before their
 contents, and conservative loops fall through. `using` cleanup facts cover

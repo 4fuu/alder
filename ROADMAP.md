@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `395fc31c1cf6dc3322daa7960ebf901dcbde4a36a011ce35ea0d6097405c7060`
+  `64b5ab8b94a97bf94f65b4b89cf9e53b9641ecf2c12d4f6f933b44ba3848839d`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `395fc31c1cf6dc3322daa7960ebf901dcbde4a36a011ce35ea0d6097405c7060`
+  `64b5ab8b94a97bf94f65b4b89cf9e53b9641ecf2c12d4f6f933b44ba3848839d`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1183,17 +1183,16 @@ both halves were written):
   and a capture-free closure takes the caller's domain as its leading hidden
   parameter, so a body that allocates or copies storage works whether or not
   it captures anything.
-- `mut self` receivers on a field place are not implemented:
-  `b.items.push(x)` rejects with 101 and `b.items[i] = x` with "invalid
-  assignment target", although the frozen `core.collection` snapshot
-  declares `push(mut self, value)` and `values[index] = replacement` and
-  the place model treats a field path of a binding as a place. Whole-field
-  assignment (`b.items = Vec.new(U64)`) already works. Supporting it means
-  resolving `mut self` receivers as places in the checker and writing a
-  grown header back through a field place in the lowering, for every
-  `mut self` method (`Vec.push`/`slice_mut`, `Map`/`Set` `insert`,
-  `Table` `insert`/`remove`), so it is a place-model feature rather than a
-  loop fix and is deferred here.
+- `mut self` receivers on a field place landed: a place is now a chain, so
+  `b.items.push(x)`, `b.items[i] = x`, a Map or Set `insert`/`remove`, and
+  every Table operation work through a field of a local, a field of a `mut
+  self` receiver, a nested path (`a.b.c.push`), and an element of a field
+  (`a.rows[0].push`). The checker records the receiver place on the call and
+  the lowering writes the grown header back through it, so a `mut self`
+  method and a field of a local both store into the storage the caller owns.
+  A view taken through a field now also excludes mutation of the binding that
+  owns it, so `let view = b.items.slice(0, 1)` followed by `b.items.push(x)`
+  is the same access conflict as it is for a whole binding.
 - `break` and `continue` landed: both lower to jumps to the innermost
   enclosing loop's exit and step blocks, `continue` in a `for` reaches a
   dedicated step block so the index still advances, a match arm's statement

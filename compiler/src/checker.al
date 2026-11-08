@@ -2991,8 +2991,7 @@ fn active_view_over(store: CheckStore, owner: U64, receiver: U64, environment: U
                         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
                         if annotation.builtin >= 23 && annotation.builtin <= 25 && expression.child_count != 0 {
                             let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-                            let source = __s0_buffer_get(CheckedExprRec, store.expressions, child - 1)
-                            if (source.kind == 1 || source.kind == 5) && source.parameter_use == receiver { return annotation.builtin }
+                            if expression_root_binding(store, child) == receiver { return annotation.builtin }
                         }
                     }
                     expression_id = expression.owner_previous
@@ -3332,6 +3331,20 @@ fn view_expression_ok(store: CheckStore, expression_id: U64) -> Bool {
     return true
 }
 
+// view_place_ok walks a place chain and requires every index component to be
+// view_expression_ok, so a view arm cannot index through anything but plain
+// copy statements.
+fn view_place_ok(store: CheckStore, place_id: U64) -> Bool {
+    var current = place_id
+    while current != 0 {
+        if current > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
+        let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, current - 1)
+        if place.index != 0 && !view_expression_ok(store, place.index) { return false }
+        current = place.base
+    }
+    return true
+}
+
 // view_block_ok validates a checked block of a table-view arm after checking:
 // every statement is a let or assignment whose initializer, index, and value
 // expressions satisfy view_expression_ok.
@@ -3345,11 +3358,7 @@ fn view_block_ok(store: CheckStore, block_id: U64) -> Bool {
         let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
         if statement.kind != 1 && statement.kind != 3 && statement.kind != 6 { return false }
         if !view_expression_ok(store, statement.expression) { return false }
-        if statement.place != 0 {
-            if statement.place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
-            let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, statement.place - 1)
-            if place.index != 0 && !view_expression_ok(store, place.index) { return false }
-        }
+        if statement.place != 0 && !view_place_ok(store, statement.place) { return false }
         if statement.body != 0 && !view_block_ok(store, statement.body) { return false }
         link_id = link.next
     }
@@ -4086,7 +4095,7 @@ fn expression_for_syntax(store: CheckStore, owner: U64, syntax: U64) -> U64 {
 }
 
 fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, expression_kind: U64, checked_type: U64, annotation_kind: U64, target: U64, variant_use: U64, child_call: SyntaxRec, child_mode: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: 0, place: 0))
     let annotation = __s0_buffer_len(CallAnnotationRec, annotations)
     var children = store.expression_children
     var first_child: U64 = 0
@@ -4148,7 +4157,7 @@ fn canonical_leaf(d: Domain, store: CheckStore, kind: U64, target: U64) -> Resul
 // append_builtin_expression records only runtime operands as ordered children;
 // explicit type operands remain canonical type annotations on their syntax.
 fn append_builtin_expression(d: Domain, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, call: SyntaxRec, first_runtime: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0))
     var children = store.expression_children
     var first_child: U64 = 0
     var child_count: U64 = 0
@@ -4172,7 +4181,7 @@ fn append_builtin_expression(d: Domain, parse: ParseStore, store: CheckStore, ow
 // (OutOfMemory or Limit) as a kind-6 annotation with a kind-10 expression and
 // no children. builtin is 5 for OutOfMemory and 6 for Limit.
 fn append_s0_error_expression(d: Domain, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 6, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 6, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 10, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
     let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
@@ -4809,7 +4818,7 @@ fn check_indirect_call_args(d: Domain, state: State, parse: ParseStore, base: Ch
     let want_total = fn_checked.arg_count - 2
     if ordinal == want_total {
         if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, result) }
-        return append_sequence_method(d, store, owner, call_id, result, 44, callee_expression, prior_first, prior_second, site_kind, site_syntax)
+        return append_sequence_method(d, store, owner, call_id, result, 44, callee_expression, prior_first, prior_second, 0, site_kind, site_syntax)
     }
     let link = call_link_at(parse, call, ordinal + 1)
     let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
@@ -5636,8 +5645,7 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
     if node_word(state, callee, "remove") { identity = 45 }
     if identity == 0 { return expr_token_fail(d, state, base, 61, callee) }
     if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 41, call) }
-    if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 131, receiver_node) }
-    let local_id = local_lookup(store, owner, receiver_node, state)
+    let local_id = field_chain_root_local(store, owner, state, parse, receiver_node)
     if local_id == 0 { return expr_token_fail(d, state, base, 131, receiver_node) }
     let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
     var owning_receiver = local.kind == 2 || local.mutable == 1
@@ -5697,11 +5705,11 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
         result = bool_type
     }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
-    return append_sequence_method(d, current, owner, call_id, result, identity, receiver_expression, draft.expression, 0, site_kind, site_syntax)
+    return append_sequence_method(d, current, owner, call_id, result, identity, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
 }
 
-fn append_sequence_method(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, receiver: U64, first_arg: U64, second_arg: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin))
+fn append_sequence_method(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, receiver: U64, first_arg: U64, second_arg: U64, place: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: place))
     var children = store.expression_children
     let first = __s0_buffer_len(CheckedExprChildRec, children) + 1
     children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: receiver))
@@ -5749,33 +5757,63 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         if element_category.category == 2 && vec_element_allows_affine(state, store, element) { affine_elements = true }
     }
     if affine_elements && (builtin == 22 || builtin == 23 || builtin == 24 || builtin == 25) { return expr_token_fail(d, state, base, 141, callee) }
+    var gate_store = store
+    var receiver_place: U64 = 0
     if builtin == 21 || builtin == 24 {
-        if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
-        let local_id = local_lookup(store, owner, receiver_node, state)
-        if local_id == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
-        let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
-        var may_mutate = local.mutable == 1
-        // An affine-element vector has no mutable binding form (rule 95), so
-        // push targets its owning local binding. A registration captures the
-        // vector header at `using` time and a parameter binding has no slot
-        // to write a grown header back to, so both stay immutable: grow a
-        // plain binding first, then register or transfer the whole vector.
-        if affine_elements && builtin == 21 {
-            may_mutate = local.kind == 2
-            if may_mutate && cleanup_binding_registered(store, owner, local_id) { return expr_token_fail(d, state, base, 142, receiver_node) }
+        if receiver_node.kind == 24 {
+            let local_id = local_lookup(store, owner, receiver_node, state)
+            if local_id == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+            let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+            var may_mutate = local.mutable == 1
+            var owning = false
+            // An affine-element vector has no mutable binding form (rule 95),
+            // so push targets its owning local binding. A registration
+            // captures the vector header at `using` time and a parameter
+            // binding has no slot to write a grown header back to, so both
+            // stay immutable: grow a plain binding first, then register or
+            // transfer the whole vector.
+            if affine_elements && builtin == 21 {
+                may_mutate = local.kind == 2
+                owning = may_mutate
+                if may_mutate && cleanup_binding_registered(store, owner, local_id) { return expr_token_fail(d, state, base, 142, receiver_node) }
+            }
+            if !may_mutate { return expr_token_fail(d, state, base, 101, receiver_node) }
+            // The receiver place is what the grown header is written back
+            // through. An affine-element vector is already checked as an
+            // owning binding, so it records the plain local place.
+            var placed: PlaceOutcome = PlaceDefer
+            if owning { placed = try append_place(d, store, owner, checked_expression_syntax(store, receiver_expression), 1, 0, local_id, 0, 0, local.checked_type) } else {
+                placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
+            }
+            if place_failed(placed) { return place_expr_failure(placed, store, base) }
+            let placed_value = place_value(placed, store)
+            gate_store = placed_value.store
+            receiver_place = placed_value.place
+        } else {
+            // A field or element receiver is the place the grown header is
+            // written back through. A vector of affine elements keeps its
+            // whole-binding rule: the registration captures one header.
+            if affine_elements { return expr_token_fail(d, state, base, 101, receiver_node) }
+            let placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
+            if place_failed(placed) { return place_expr_failure(placed, store, base) }
+            let placed_value = place_value(placed, store)
+            gate_store = placed_value.store
+            receiver_place = placed_value.place
         }
-        if !may_mutate { return expr_token_fail(d, state, base, 101, receiver_node) }
     }
+    var mode: U64 = 1
+    if builtin == 21 { mode = 2 }
+    if builtin == 23 { mode = 3 }
+    if builtin == 24 || builtin == 25 { mode = 4 }
+    var access_root: U64 = 0
     if receiver_node.kind == 24 {
-        let local_id = local_lookup(store, owner, receiver_node, state)
-        var mode: U64 = 1
-        if builtin == 21 { mode = 2 }
-        if builtin == 23 { mode = 3 }
-        if builtin == 24 || builtin == 25 { mode = 4 }
-        if local_id != 0 && lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
+        access_root = local_lookup(store, owner, receiver_node, state)
+    } else {
+        access_root = expression_root_binding(store, receiver_expression)
     }
-    let u64_type = primitive_type_id(state, parse, store, "U64")
-    var current = store
+    if access_root != 0 && lexical_access_conflict(store, owner, access_root, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
+    let u64_type = primitive_type_id(state, parse, gate_store, "U64")
+    var current = gate_store
     var first_expression: U64 = 0
     var second_expression: U64 = 0
     if arity != 0 {
@@ -5835,7 +5873,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         current = made.store
         result = made.checked_type }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
-    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, site_kind, site_syntax)
+    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, receiver_place, site_kind, site_syntax)
 }
 
 // Ordered-collection key domain (M7.5): the domain the inline structural
@@ -5978,7 +6016,7 @@ fn check_ordered_static_builtin(d: Domain, state: State, parse: ParseStore, base
     return append_builtin_expression(d, parse, current, owner, call_id, made.checked_type, identity, call, want_args + 1, site_kind, site_syntax)
 }
 
-fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_expression: U64, builtin: U64, key: U64, value: U64, ordinal: U64, prior_first: U64, prior_second: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_expression: U64, receiver_place: U64, builtin: U64, key: U64, value: U64, ordinal: U64, prior_first: U64, prior_second: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     var want_arity: U64 = 0
     if builtin == 32 || builtin == 38 || builtin == 39 || builtin == 33 || builtin == 40 { want_arity = 1 }
     if builtin == 31 { want_arity = 2 }
@@ -5999,7 +6037,7 @@ fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: C
             result = made.checked_type
         }
         if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
-        return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, prior_first, prior_second, site_kind, site_syntax)
+        return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, prior_first, prior_second, receiver_place, site_kind, site_syntax)
     }
     // Method-call links include the callee and the receiver before the
     // runtime operands.
@@ -6024,7 +6062,7 @@ fn check_ordered_method_args(d: Domain, state: State, parse: ParseStore, base: C
     var first = prior_first
     var second = prior_second
     if ordinal == 0 { first = draft.expression } else { second = draft.expression }
-    return check_ordered_method_args(d, state, parse, base, current, owner, call, call_id, callee, receiver_expression, builtin, key, value, ordinal + 1, first, second, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    return check_ordered_method_args(d, state, parse, base, current, owner, call, call_id, callee, receiver_expression, receiver_place, builtin, key, value, ordinal + 1, first, second, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
 }
 
 fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -6055,17 +6093,30 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     }
     if builtin == 0 { return expr_token_fail(d, state, base, 61, callee) }
     if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 144, call) }
+    var gate_store = store
+    var receiver_place: U64 = 0
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 {
-        if receiver_node.kind != 24 { return expr_token_fail(d, state, base, 101, receiver_node) }
-        let local_id = local_lookup(store, owner, receiver_node, state)
-        if local_id == 0 || __s0_buffer_get(LocalRec, store.locals, local_id - 1).mutable == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+        if receiver_node.kind == 24 {
+            let local_id = local_lookup(store, owner, receiver_node, state)
+            if local_id == 0 || __s0_buffer_get(LocalRec, store.locals, local_id - 1).mutable == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+        }
+        // The rebuilt collection is written back through the receiver place:
+        // the binding itself, a field of it, or an element of it.
+        let placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
+        if place_failed(placed) { return place_expr_failure(placed, store, base) }
+        let placed_value = place_value(placed, store)
+        gate_store = placed_value.store
+        receiver_place = placed_value.place
     }
+    var mode: U64 = 1
+    if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
+    var access_root: U64 = 0
     if receiver_node.kind == 24 {
-        let local_id = local_lookup(store, owner, receiver_node, state)
-        var mode: U64 = 1
-        if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
-        if local_id != 0 && lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
+        access_root = local_lookup(store, owner, receiver_node, state)
+    } else {
+        if receiver_place != 0 { access_root = __s0_buffer_get(CheckedPlaceRec, gate_store.control.places, receiver_place - 1).root }
     }
+    if access_root != 0 && lexical_access_conflict(store, owner, access_root, mode) { return expr_token_fail(d, state, base, 92, receiver_node) }
     let key = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
     var value: U64 = 0
     if receiver.kind == 23 { value = __s0_buffer_get(U64, store.type_args, receiver.first_arg) }
@@ -6079,7 +6130,7 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     if builtin == 40 && !ordered_value_storage_free(store, key, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, key) }
     if (builtin == 35 || builtin == 42) && !ordered_value_storage_free(store, key, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, key) }
     if builtin == 36 && !ordered_value_storage_free(store, value, 0) { return expr_token_single_type_fail(d, state, store, 129, callee, value) }
-    return check_ordered_method_args(d, state, parse, base, store, owner, call, call_id, callee, receiver_expression, builtin, key, value, 0, 0, 0, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    return check_ordered_method_args(d, state, parse, base, gate_store, owner, call, call_id, callee, receiver_expression, receiver_place, builtin, key, value, 0, 0, 0, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
 }
 
 fn check_map_runtime_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, identity: U64, ordinal: U64, first_runtime: U64, runtime_count: U64, map_type: U64, key: U64, value: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -6853,7 +6904,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                 let made = try checked_function_value_type(d, store, owner, target)
                 var with_type = made.store
                 if expected != 0 && !(try expression_type_equal(d, state, parse, with_type, made.checked_type, expected)) { return expr_token_type_fail(d, state, with_type, mismatch_kind, mismatch_node, expected, made.checked_type) }
-                let annotations = try __s0_buffer_append(CallAnnotationRec, d, with_type.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: made.checked_type, variant_use: 0, builtin: 43))
+                let annotations = try __s0_buffer_append(CallAnnotationRec, d, with_type.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: made.checked_type, variant_use: 0, builtin: 43, place: 0))
                 let expressions = try __s0_buffer_append(CheckedExprRec, d, with_type.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(with_type, owner), syntax: expression_id, kind: 18, checked_type: made.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
                 with_type = CheckStore(symbols: with_type.symbols, type_params: with_type.type_params, types: with_type.types, type_args: with_type.type_args, type_annotations: with_type.type_annotations, uses: with_type.uses, indexes: with_type.indexes, locals: with_type.locals, environments: with_type.environments, expressions: expressions, call_annotations: annotations, expression_children: with_type.expression_children, returns: with_type.returns, control: with_type.control, diagnostics: with_type.diagnostics, traits: with_type.traits, closures: with_type.closures)
                 return expr_draft(with_type, made.checked_type, __s0_buffer_len(CheckedExprRec, expressions))
@@ -6945,8 +6996,17 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                 let annotation = __s0_buffer_get(CallAnnotationRec, current.call_annotations, scrutinee_expression.annotation - 1)
                 if annotation.builtin != 28 && annotation.builtin != 29 { return expr_token_fail(d, state, base, 132, expression) }
                 let receiver = __s0_buffer_get(CheckedExprRec, current.expressions, __s0_buffer_get(CheckedExprChildRec, current.expression_children, scrutinee_expression.first_child - 1).expression - 1)
-                if (receiver.kind != 1 && receiver.kind != 5) || receiver.parameter_use == 0 { return expr_token_fail(d, state, base, 132, expression) }
-                view_root = receiver.parameter_use
+                // The view root is the binding the live view excludes from
+                // mutation. A field receiver names a table inside a record,
+                // so its root is that record's binding: the access rules then
+                // stay conservative over the whole owner rather than only the
+                // projected field.
+                var root_binding: U64 = 0
+                if receiver.syntax != 0 && receiver.syntax <= __s0_buffer_len(SyntaxRec, parse.nodes) {
+                    root_binding = field_chain_root_local(current, owner, state, parse, __s0_buffer_get(SyntaxRec, parse.nodes, receiver.syntax - 1))
+                }
+                if root_binding == 0 { return expr_token_fail(d, state, base, 132, expression) }
+                view_root = root_binding
                 if annotation.builtin == 29 { view_mut = 1 }
                 if payload.kind == 22 && view_mut == 0 { return expr_token_fail(d, state, base, 132, expression) }
             }
@@ -7215,118 +7275,213 @@ fn place_token_bad(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     return Ok(PlaceBad(bad))
 }
 
-fn append_place(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, root: U64, field: U64, index: U64, checked_type: U64) -> Result(PlaceOutcome, __s0_Error) {
-    let places = try __s0_buffer_append(CheckedPlaceRec, d, store.control.places, CheckedPlaceRec(owner: owner, syntax: syntax, kind: kind, root: root, field: field, index: index, checked_type: checked_type))
+fn append_place(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, base: U64, root: U64, field: U64, index: U64, checked_type: U64) -> Result(PlaceOutcome, __s0_Error) {
+    let places = try __s0_buffer_append(CheckedPlaceRec, d, store.control.places, CheckedPlaceRec(owner: owner, syntax: syntax, kind: kind, base: base, root: root, field: field, index: index, checked_type: checked_type))
     let control = CheckedControlStore(blocks: store.control.blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups, table_views: store.control.table_views)
     return Ok(PlaceGood(PlaceValueRec(store: with_control(store, control), place: __s0_buffer_len(CheckedPlaceRec, places), checked_type: checked_type)))
 }
 
-// Place components are checked before the assignment value. Indexing is the
-// one reference-style mutation permitted through an immutable slice binding;
-// direct and direct-field stores require a mutable root.
-fn check_assignment_place(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, target: SyntaxRec, target_id: U64, statement: SyntaxRec, statement_id: U64, in_loop: Bool) -> Result(PlaceOutcome, __s0_Error) {
-    var root = target
-    var root_id = target_id
-    var field_node = target
-    var field: U64 = 0
-    var index_node = target
-    var index_id: U64 = 0
-    var kind: U64 = 1
-    if target.kind == 29 {
-        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, target.children - 1)
-        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
-        field_node = target
-        if base.kind == 30 {
-            kind = 4
-            index_node = base
-            let index_link = __s0_buffer_get(SyntaxLinkRec, parse.links, base.children - 1)
-            index_id = index_link.node
-            let root_link = __s0_buffer_get(SyntaxLinkRec, parse.links, index_link.next - 1)
-            root_id = root_link.node
-            root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+fn place_store(outcome: PlaceOutcome, store: CheckStore) -> CheckStore {
+    let current = match outcome {
+        PlaceGood(value) => value.store
+        PlaceBad(value) => value
+        PlaceDefer => store
+    }
+    return current
+}
+
+fn place_value(outcome: PlaceOutcome, store: CheckStore) -> PlaceValueRec {
+    let current = match outcome {
+        PlaceGood(value) => value
+        PlaceBad(value) => PlaceValueRec(store: store, place: 0, checked_type: 0)
+        PlaceDefer => PlaceValueRec(store: store, place: 0, checked_type: 0)
+    }
+    return current
+}
+
+fn place_failed(outcome: PlaceOutcome) -> Bool {
+    let failed = match outcome {
+        PlaceGood(value) => false
+        PlaceBad(value) => true
+        PlaceDefer => true
+    }
+    return failed
+}
+
+// A failed receiver place ends the call expression: a bad place already
+// reported a diagnostic, and a deferred one defers the whole expression.
+fn place_expr_failure(outcome: PlaceOutcome, store: CheckStore, base: CheckStore) -> Result(ExprOutcome, __s0_Error) {
+    let deferred = match outcome {
+        PlaceGood(value) => false
+        PlaceBad(value) => false
+        PlaceDefer => true
+    }
+    if deferred { return expr_deferred(base) }
+    return Ok(ExprBad(place_store(outcome, store)))
+}
+
+fn checked_expression_syntax(store: CheckStore, expression: U64) -> U64 {
+    if expression == 0 || expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return 0 }
+    return __s0_buffer_get(CheckedExprRec, store.expressions, expression - 1).syntax
+}
+
+// The root binding of a checked expression: the base name under any chain of
+// field and index projections. A view's liveness keys on it, so a view taken
+// through a field still excludes mutation of the binding that owns the
+// storage.
+fn expression_root_binding(store: CheckStore, expression: U64) -> U64 {
+    if expression == 0 || expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return 0 }
+    var current = __s0_buffer_get(CheckedExprRec, store.expressions, expression - 1)
+    var depth: U64 = 0
+    while current.child_count != 0 && current.first_child != 0 && depth < 32 {
+        if current.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return 0 }
+        let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, current.first_child - 1).expression
+        if child == 0 || child > __s0_buffer_len(CheckedExprRec, store.expressions) { return 0 }
+        current = __s0_buffer_get(CheckedExprRec, store.expressions, child - 1)
+        depth = depth + 1
+    }
+    return current.parameter_use
+}
+
+// The root binding of a receiver that is a name or a chain of field
+// projections. Zero when the chain has an index level or the name does not
+// resolve, which is what a table operation reports as its receiver
+// diagnostic: a table handle mutates in place, so it needs no write-back
+// place, but an element receiver would need one.
+fn field_chain_root_local(store: CheckStore, owner: U64, state: State, parse: ParseStore, node: SyntaxRec) -> U64 {
+    var current = node
+    while current.kind == 29 {
+        let head = __s0_buffer_get(SyntaxLinkRec, parse.links, current.children - 1)
+        current = __s0_buffer_get(SyntaxRec, parse.nodes, head.node - 1)
+    }
+    if current.kind != 24 { return 0 }
+    return local_lookup(store, owner, current, state)
+}
+
+// The root name of a place chain, which is the binding the mutability
+// diagnostics speak about.
+fn place_root_node(parse: ParseStore, node: SyntaxRec) -> SyntaxRec {
+    var current = node
+    while current.kind == 29 || current.kind == 30 {
+        let head = __s0_buffer_get(SyntaxLinkRec, parse.links, current.children - 1)
+        var base_link = head
+        if current.kind == 30 { base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1) }
+        current = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+    }
+    return current
+}
+
+// One level of a place chain. The base of a projection resolves before the
+// field name or index it projects with, so a bad base reports first. A root
+// must be a mutable binding; the one exception is an exclusive table view,
+// whose element fields are mutable through the view, and `projection` carries
+// the kind of the projection that consumes this level so a view root can be
+// refused everywhere else.
+fn check_place_level(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec, node_id: U64, projection: U64, statement: SyntaxRec, statement_id: U64, in_loop: Bool) -> Result(PlaceOutcome, __s0_Error) {
+    if node.kind == 24 {
+        let local_id = local_lookup(store, owner, node, state)
+        if local_id == 0 { return place_bad(d, store, 18, node) }
+        let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
+        // Overwriting the binding itself is refused for an affine owner; a
+        // field or element of it may still be mutated.
+        if projection == 0 {
+            let empty = try __s0_buffer_new(TypeBindingRec, d)
+            let ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+            let category = try interpreted_type_category(d, state, parse, store, empty, ancestry, local.checked_type, 0, 0)
+            if category.category == 2 { return place_token_bad(d, state, store, 95, statement) }
+        }
+        let root_checked = __s0_buffer_get(CheckedTypeRec, store.types, local.checked_type - 1)
+        if root_checked.kind == 21 || root_checked.kind == 22 {
+            // An exclusive view grants field mutation through its element; an
+            // immutable view, and any other use of a view binding as a place,
+            // stays read-only.
+            if projection != 2 || root_checked.kind != 22 { return place_bad(d, store, 28, node) }
         } else {
-            kind = 2
-            root_id = base_link.node
-            root = base
+            // An index projection reports its own mutability diagnostic: a
+            // slice names the binding, while an array or vector is a plain
+            // store through an immutable root.
+            if projection != 3 && local.mutable == 0 { return place_bad(d, store, 28, node) }
         }
+        return append_place(d, store, owner, node_id, 1, 0, local_id, 0, 0, local.checked_type)
     }
-    if target.kind == 30 {
-        kind = 3
-        index_node = target
-        let index_link = __s0_buffer_get(SyntaxLinkRec, parse.links, target.children - 1)
-        index_id = index_link.node
-        let root_link = __s0_buffer_get(SyntaxLinkRec, parse.links, index_link.next - 1)
-        root_id = root_link.node
-        root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
-    }
-    if root.kind != 24 { return Ok(PlaceDefer) }
-    let local_id = local_lookup(store, owner, root, state)
-    if local_id == 0 { return place_bad(d, store, 18, root) }
-    let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
-    if kind == 1 {
-        let root_empty = try __s0_buffer_new(TypeBindingRec, d)
-        let root_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-        let root_category = try interpreted_type_category(d, state, parse, store, root_empty, root_ancestry, local.checked_type, 0, 0)
-        if root_category.category == 2 { return place_token_bad(d, state, store, 95, statement) }
-    }
-    var current = store
-    var value_type = local.checked_type
-    // An exclusive table view grants field mutation through its element; an
-    // immutable view, and any other use of a view binding as a place, stays
-    // read-only.
-    let root_checked = __s0_buffer_get(CheckedTypeRec, current.types, local.checked_type - 1)
-    if root_checked.kind == 21 || root_checked.kind == 22 {
-        if kind != 2 || root_checked.kind != 22 { return place_bad(d, store, 28, root) }
-        value_type = __s0_buffer_get(U64, current.type_args, root_checked.first_arg - 1)
-    } else {
-        if local.mutable == 0 && kind <= 2 { return place_bad(d, store, 28, root) }
-    }
-    var index_expression: U64 = 0
-    if kind == 3 || kind == 4 {
-        let sequence = __s0_buffer_get(CheckedTypeRec, current.types, value_type - 1)
-        if sequence.kind != 8 && sequence.kind != 15 && sequence.kind != 17 && sequence.kind != 18 { return place_token_bad(d, state, store, 62, index_node) }
-        value_type = __s0_buffer_get(U64, current.type_args, sequence.first_arg - 1)
-        let empty = try __s0_buffer_new(TypeBindingRec, d)
-        let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-        if try interpreted_contains_reference(d, state, parse, current, empty, no_ancestry, value_type, 0, 0, 0) { return place_token_bad(d, state, store, 64, index_node) }
-        let index_syntax = __s0_buffer_get(SyntaxRec, parse.nodes, index_id - 1)
-        let index_type = primitive_type_id(state, parse, current, "U64")
-        let checked_index = try check_value_expression(d, state, parse, current, owner, index_syntax, index_id, index_type, 63, index_node, 7, statement_id, in_loop)
-        current = match checked_index {
-            ExprGood(value) => value.store
-            ExprBad(value) => value
+    if node.kind != 29 && node.kind != 30 { return Ok(PlaceDefer) }
+    let head = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+    var base_link = head
+    if node.kind == 30 { base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, head.next - 1) }
+    let base_node = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+    // The base is consumed by this level's place kind, not by its syntax kind.
+    var base_projection: U64 = 2
+    if node.kind == 30 { base_projection = 3 }
+    let base_outcome = try check_place_level(d, state, parse, store, owner, base_node, base_link.node, base_projection, statement, statement_id, in_loop)
+    if place_failed(base_outcome) { return Ok(base_outcome) }
+    let base_value = place_value(base_outcome, store)
+    let base_store = base_value.store
+    let base_place = __s0_buffer_get(CheckedPlaceRec, base_store.control.places, base_value.place - 1)
+    let base_checked = __s0_buffer_get(CheckedTypeRec, base_store.types, base_value.checked_type - 1)
+    if node.kind == 29 {
+        var aggregate_type = base_value.checked_type
+        // A field of a table view is a field of the view's element.
+        if base_checked.kind == 21 || base_checked.kind == 22 {
+            if base_checked.kind != 22 { return place_bad(d, base_store, 28, node) }
+            aggregate_type = __s0_buffer_get(U64, base_store.type_args, base_checked.first_arg - 1)
         }
-        if match checked_index {
-            ExprGood(value) => false
-            ExprBad(value) => true
-        } { return Ok(PlaceBad(current)) }
-        let draft = match checked_index {
-            ExprGood(value) => value.draft
-            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
-        }
-        if draft.deferred { return Ok(PlaceDefer) }
-        index_expression = draft.expression
-        if lexical_access_conflict(store, owner, local_id, 2) { return place_token_bad(d, state, store, 92, statement) }
-        // Only explicitly mutable slice parameters retain the bootstrap
-        // compatibility path; ordinary source slice values are immutable.
-        if sequence.kind == 8 && local.mutable == 0 { return place_token_bad(d, state, store, 103, statement) }
-        if sequence.kind == 18 && local.mutable == 0 { return place_token_bad(d, state, store, 103, statement) }
-        if (sequence.kind == 15 || sequence.kind == 17) && local.mutable == 0 { return place_bad(d, store, 28, root) }
+        let aggregate = __s0_buffer_get(CheckedTypeRec, base_store.types, aggregate_type - 1)
+        if aggregate.kind != 7 || __s0_buffer_get(SymbolRec, base_store.symbols, aggregate.target - 1).kind != 2 { return place_bad(d, base_store, 60, node) }
+        let field = field_use_named(state, base_store, aggregate.target, node)
+        if field == 0 { return place_bad(d, base_store, 61, node) }
+        let concrete = try concrete_field_type(d, base_store, aggregate_type, field)
+        return append_place(d, concrete.store, owner, node_id, 2, base_value.place, base_place.root, field, 0, concrete.checked_type)
     }
-    if kind == 2 || kind == 4 {
-        let aggregate = __s0_buffer_get(CheckedTypeRec, current.types, value_type - 1)
-        if aggregate.kind != 7 || __s0_buffer_get(SymbolRec, current.symbols, aggregate.target - 1).kind != 2 { return place_bad(d, store, 60, field_node) }
-        field = field_use_named(state, current, aggregate.target, field_node)
-        if field == 0 { return place_bad(d, store, 61, field_node) }
-        let concrete = try concrete_field_type(d, current, value_type, field)
-        current = concrete.store
-        value_type = concrete.checked_type
-    }
+    // Indexing is the one reference-style mutation permitted through an
+    // immutable slice binding; every other immutable root refuses the store.
+    if base_checked.kind != 8 && base_checked.kind != 15 && base_checked.kind != 17 && base_checked.kind != 18 { return place_token_bad(d, state, base_store, 62, node) }
+    let element_type = __s0_buffer_get(U64, base_store.type_args, base_checked.first_arg - 1)
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-    let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, value_type, 0, 0)
-    if category.category == 2 { return place_token_bad(d, state, current, 95, statement) }
-    return append_place(d, current, owner, target_id, kind, local_id, field, index_expression, value_type)
+    if try interpreted_contains_reference(d, state, parse, base_store, empty, no_ancestry, element_type, 0, 0, 0) { return place_token_bad(d, state, base_store, 64, node) }
+    let index_syntax = __s0_buffer_get(SyntaxRec, parse.nodes, head.node - 1)
+    let index_type = primitive_type_id(state, parse, base_store, "U64")
+    let checked_index = try check_value_expression(d, state, parse, base_store, owner, index_syntax, head.node, index_type, 63, node, 7, statement_id, in_loop)
+    let current = match checked_index {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked_index {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(PlaceBad(current)) }
+    let index_draft = match checked_index {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if index_draft.deferred { return Ok(PlaceDefer) }
+    if lexical_access_conflict(base_store, owner, base_place.root, 2) { return place_token_bad(d, state, base_store, 92, statement) }
+    let root_local = __s0_buffer_get(LocalRec, base_store.locals, base_place.root - 1)
+    if root_local.mutable == 0 {
+        if base_checked.kind == 8 || base_checked.kind == 18 { return place_token_bad(d, state, base_store, 103, statement) }
+        return place_bad(d, base_store, 28, place_root_node(parse, node))
+    }
+    return append_place(d, current, owner, node_id, 3, base_value.place, base_place.root, 0, index_draft.expression, element_type)
+}
+
+// Place components are checked before the assignment value, and the whole
+// place must not name an affine owner.
+fn check_assignment_place(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, target: SyntaxRec, target_id: U64, statement: SyntaxRec, statement_id: U64, in_loop: Bool) -> Result(PlaceOutcome, __s0_Error) {
+    let outcome = try check_place_level(d, state, parse, store, owner, target, target_id, 0, statement, statement_id, in_loop)
+    if place_failed(outcome) { return Ok(outcome) }
+    let value = place_value(outcome, store)
+    let empty = try __s0_buffer_new(TypeBindingRec, d)
+    let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+    let category = try interpreted_type_category(d, state, parse, value.store, empty, no_ancestry, value.checked_type, 0, 0)
+    if category.category == 2 { return place_token_bad(d, state, value.store, 95, statement) }
+    return Ok(PlaceGood(value))
+}
+
+// A method receiver that is not a plain name is a place the operation mutates,
+// so it resolves under the same rules as an assignment target. The call keeps
+// the place to write a grown collection header back through it.
+fn check_receiver_place(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec, node_id: U64, in_loop: Bool) -> Result(PlaceOutcome, __s0_Error) {
+    return check_place_level(d, state, parse, store, owner, node, node_id, 0, node, node_id, in_loop)
 }
 
 // Binding order follows the Go checker: reserved name, annotation resolution,
@@ -8476,7 +8631,7 @@ fn emit_checked_control(store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CheckedPlaceRec, store.control.places) {
         let rec = __s0_buffer_get(CheckedPlaceRec, store.control.places, at)
-        if !out_string("V ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.root) || !out(32) || !out_u64(rec.field) || !out(32) || !out_u64(rec.index) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
+        if !out_string("V ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.base) || !out(32) || !out_u64(rec.root) || !out(32) || !out_u64(rec.field) || !out(32) || !out_u64(rec.index) || !out(32) || !out_u64(rec.checked_type) || !out(10) { return false }
         at = at + 1
     }
     at = 0
@@ -8548,7 +8703,7 @@ fn emit_checked_bindings(store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let rec = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if !out_string("Q ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.target) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.builtin) || !out(10) { return false }
+        if !out_string("Q ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.kind) || !out(32) || !out_u64(rec.target) || !out(32) || !out_u64(rec.checked_type) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.builtin) || !out(32) || !out_u64(rec.place) || !out(10) { return false }
         at = at + 1
     }
     return true

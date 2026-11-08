@@ -117,7 +117,7 @@ type checkerExpression struct {
 }
 
 type checkerCallAnnotation struct {
-	id, owner, kind, target, checkedType, variantUse, builtin int
+	id, owner, kind, target, checkedType, variantUse, builtin, place int
 }
 
 type checkerExpressionChild struct{ id, expression int }
@@ -127,7 +127,7 @@ type checkerReturn struct {
 }
 
 type checkerPlace struct {
-	id, owner, syntax, kind, root, field, index, checkedType int
+	id, owner, syntax, kind, base, root, field, index, checkedType int
 }
 
 type checkerStatement struct {
@@ -547,7 +547,10 @@ func runCheckerConformance(t *testing.T, exe string) {
 	}
 	controlGood["control.al"] += "}\n"
 	controlManifest := parseCheckerManifest(t, runAlderChecker(t, exe, controlGood, []string{"control.al"}, false), controlGood)
-	if len(controlManifest.blocks) < 24 || len(controlManifest.statements) < 99 || len(controlManifest.places) != 4 {
+	// Four assignments name four places, and a place is a chain: `direct` is
+	// one local record, `box.value` and `values[0]` are each a local plus one
+	// projection, and `boxes[0].value` is a local, an index, and a field.
+	if len(controlManifest.blocks) < 24 || len(controlManifest.statements) < 99 || len(controlManifest.places) != 8 {
 		t.Fatalf("control records are incomplete: blocks=%d statements=%d places=%d", len(controlManifest.blocks), len(controlManifest.statements), len(controlManifest.places))
 	}
 	choose := checkerSymbolByName(t, bodyManifest, bodyGood, "choose")
@@ -1711,10 +1714,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.environments = append(m.environments, checkerEnvironment{id: numbers[0], owner: numbers[1], parent: numbers[2], binding: numbers[3]})
 		case "Q":
-			if err != nil || len(numbers) != 7 {
+			if err != nil || len(numbers) != 8 {
 				return m, fmt.Errorf("line %d has invalid Q record", lineNumber+2)
 			}
-			m.callAnnotations = append(m.callAnnotations, checkerCallAnnotation{id: numbers[0], owner: numbers[1], kind: numbers[2], target: numbers[3], checkedType: numbers[4], variantUse: numbers[5], builtin: numbers[6]})
+			m.callAnnotations = append(m.callAnnotations, checkerCallAnnotation{id: numbers[0], owner: numbers[1], kind: numbers[2], target: numbers[3], checkedType: numbers[4], variantUse: numbers[5], builtin: numbers[6], place: numbers[7]})
 		case "E":
 			if err != nil || len(numbers) != 15 {
 				return m, fmt.Errorf("line %d has invalid E record", lineNumber+2)
@@ -1751,10 +1754,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.cleanups = append(m.cleanups, checkerCleanup{id: numbers[0], owner: numbers[1], syntax: numbers[2], environment: numbers[3], binding: numbers[4], initializer: numbers[5], callback: numbers[6], drain: numbers[7], normalExit: numbers[8], returnExit: numbers[9], tryExit: numbers[10]})
 		case "V":
-			if err != nil || len(numbers) != 8 {
+			if err != nil || len(numbers) != 9 {
 				return m, fmt.Errorf("line %d has invalid V record", lineNumber+2)
 			}
-			m.places = append(m.places, checkerPlace{id: numbers[0], owner: numbers[1], syntax: numbers[2], kind: numbers[3], root: numbers[4], field: numbers[5], index: numbers[6], checkedType: numbers[7]})
+			m.places = append(m.places, checkerPlace{id: numbers[0], owner: numbers[1], syntax: numbers[2], kind: numbers[3], base: numbers[4], root: numbers[5], field: numbers[6], index: numbers[7], checkedType: numbers[8]})
 		case "J":
 			if err != nil || len(numbers) != 10 {
 				return m, fmt.Errorf("line %d has invalid J record", lineNumber+2)
@@ -2148,20 +2151,29 @@ func validateCheckerManifest(m checkerManifest) error {
 	placeOwners := make([]int, len(m.places))
 	controlExpressionOwners := make([]int, len(m.expressions))
 	for i, place := range m.places {
-		if place.id != i+1 || !checkerConcreteOwner(m, place.owner) || place.syntax < 1 || place.kind < 1 || place.kind > 4 || place.root < 1 || place.root > len(m.locals) || m.locals[place.root-1].owner != place.owner || place.checkedType < 1 || place.checkedType > len(m.types) {
+		if place.id != i+1 || !checkerConcreteOwner(m, place.owner) || place.syntax < 1 || place.kind < 1 || place.kind > 3 || place.base < 0 || place.base > i || place.root < 1 || place.root > len(m.locals) || m.locals[place.root-1].owner != place.owner || place.checkedType < 1 || place.checkedType > len(m.types) {
 			return fmt.Errorf("invalid checked place identity %+v", place)
 		}
-		rootType := m.locals[place.root-1].checkedType
-		valueType := rootType
-		// A table-view root mutates the element type's fields.
-		if m.types[rootType-1].kind == 21 || m.types[rootType-1].kind == 22 {
-			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
+		// A chain is built base first, and a projection shares its base's
+		// owner and root.
+		sourceType := m.locals[place.root-1].checkedType
+		if place.base != 0 {
+			parent := m.places[place.base-1]
+			if parent.owner != place.owner || parent.root != place.root {
+				return fmt.Errorf("checked place base does not share owner and root %+v", place)
+			}
+			sourceType = parent.checkedType
 		}
-		if place.kind >= 3 {
-			if rootType < 1 || rootType > len(m.types) || (m.types[rootType-1].kind != 8 && m.types[rootType-1].kind != 15 && m.types[rootType-1].kind != 17 && m.types[rootType-1].kind != 18) || m.types[rootType-1].count != 1 {
+		valueType := sourceType
+		// A field of a table view is a field of the view's element type.
+		if place.kind == 2 && (m.types[sourceType-1].kind == 21 || m.types[sourceType-1].kind == 22) {
+			valueType = checkerDirectArgs(m, m.types[sourceType-1])[0].checkedType
+		}
+		if place.kind == 3 {
+			if sourceType < 1 || sourceType > len(m.types) || (m.types[sourceType-1].kind != 8 && m.types[sourceType-1].kind != 15 && m.types[sourceType-1].kind != 17 && m.types[sourceType-1].kind != 18) || m.types[sourceType-1].count != 1 {
 				return fmt.Errorf("checked place has nonslice indexed root %+v", place)
 			}
-			valueType = checkerDirectArgs(m, m.types[rootType-1])[0].checkedType
+			valueType = checkerDirectArgs(m, m.types[sourceType-1])[0].checkedType
 			if place.index < 1 || place.index > len(m.expressions) {
 				return fmt.Errorf("checked place has invalid index %+v", place)
 			}
@@ -2173,7 +2185,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		} else if place.index != 0 {
 			return fmt.Errorf("nonindexed checked place has index %+v", place)
 		}
-		if place.kind == 2 || place.kind == 4 {
+		if place.kind == 2 {
 			valueType = checkerConcreteFieldType(m, valueType, place.field)
 			if valueType == 0 {
 				return fmt.Errorf("checked place field does not belong to concrete aggregate %+v", place)
@@ -2360,6 +2372,19 @@ func validateCheckerManifest(m checkerManifest) error {
 	for i, owners := range statementOwners {
 		if owners != 1 {
 			return fmt.Errorf("checked statement %d has %d link owners", i+1, owners)
+		}
+	}
+	// A projection owns the place it projects from, and a call annotation owns
+	// the receiver place it writes back through, so every record is referenced
+	// exactly once.
+	for _, place := range m.places {
+		if place.base >= 1 && place.base <= len(m.places) {
+			placeOwners[place.base-1]++
+		}
+	}
+	for _, annotation := range m.callAnnotations {
+		if annotation.place >= 1 && annotation.place <= len(m.places) {
+			placeOwners[annotation.place-1]++
 		}
 	}
 	for i, owners := range placeOwners {
@@ -3175,7 +3200,7 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["instance declaration mismatch"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 2 0 0 0", 1)
 	malformed["instance argument range"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 1 1 0", 1)
 	malformed["instance discovery cycle"] = strings.Replace(validUnaryBody, "I 1 1 1 0 0 0", "I 1 1 1 0 0 1", 1)
-	validCallBody := "ALDER-CHECKER-MANIFEST 17\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
+	validCallBody := "ALDER-CHECKER-MANIFEST 17\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\nQ 1 1 1 1 1 0 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nR 1 1 5 1 1\nJ 1 1 5 4 0 1 0 0 0 0\nK 1 1 0\nB 1 1 6 0 1 1\nEND\n"
 	if _, err := decodeCheckerManifest(validCallBody, inputs); err != nil {
 		t.Fatalf("valid call body manifest: %v", err)
 	}
@@ -3187,28 +3212,28 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 	malformed["call annotation unexpected variant"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0", "Q 1 1 1 1 1 1", 1)
 	malformed["call annotation invalid builtin identity"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0", "Q 1 1 5 0 1 0 18", 1)
 	malformed["expression missing call annotation"] = strings.Replace(validCallBody, "E 1 1 4 8 1 0 0 0 0 1", "E 1 1 4 8 1 0 0 0 0 0", 1)
-	malformed["call annotation after expression"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5", "E 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nQ 1 1 1 1 1 0 0", 1)
+	malformed["call annotation after expression"] = strings.Replace(validCallBody, "Q 1 1 1 1 1 0 0 0\nE 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5", "E 1 1 4 8 1 0 0 0 0 1 0 0 0 3 5\nQ 1 1 1 1 1 0 0 0", 1)
 	controlPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 12 0 0\nT 1 1 2 1\nU 1 1 6 0 3 0 0 0 2 1\nI 1 1 1 0 0 0\n"
 	controlPrefix = strings.Replace(controlPrefix, "MANIFEST 11", "MANIFEST 17", 1)
 	validControlBody := controlPrefix + "B 1 1 4 0 0 0\nEND\n"
 	if _, err := decodeCheckerManifest(validControlBody, inputs); err != nil {
 		t.Fatalf("valid control body manifest: %v", err)
 	}
-	malformed["place unknown root"] = controlPrefix + "V 1 1 4 1 1 0 0 1\nB 1 1 5 0 0 0\nEND\n"
+	malformed["place unknown root"] = controlPrefix + "V 1 1 4 1 0 1 0 0 1\nB 1 1 5 0 0 0\nEND\n"
 	malformed["statement unknown place"] = controlPrefix + "J 1 1 4 3 0 0 1 0 0 0\nK 1 1 0\nB 1 1 5 0 1 0\nEND\n"
 	malformed["statement link unknown statement"] = controlPrefix + "K 1 1 0\nB 1 1 4 0 1 0\nEND\n"
 	malformed["block unknown environment"] = strings.Replace(validControlBody, "B 1 1 4 0 0 0", "B 1 1 4 1 0 0", 1)
-	assignmentPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nT 1 1 2 1\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\nE 1 1 6 1 1 1 0 0 0 0 0 0 0 2 7\nV 1 1 5 1 1 0 0 1\nJ 1 1 7 3 1 1 1 0 0 0\nK 1 1 0\nB 1 1 8 1 1 0\nEND\n"
+	assignmentPrefix := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nT 1 1 2 1\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 1\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 1\nN 1 1 0 1\nE 1 1 6 1 1 1 0 0 0 0 0 0 0 2 7\nV 1 1 5 1 0 1 0 0 1\nJ 1 1 7 3 1 1 1 0 0 0\nK 1 1 0\nB 1 1 8 1 1 0\nEND\n"
 	assignmentPrefix = strings.Replace(assignmentPrefix, "MANIFEST 11", "MANIFEST 17", 1)
 	if _, err := decodeCheckerManifest(assignmentPrefix, inputs); err != nil {
 		t.Fatalf("valid assignment control manifest: %v", err)
 	}
-	genericFieldBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 2 1 0 0 1 1 0 0 0 0\nY 2 12 4 0 0 1 0 2 0 0 0\nP 1 1 2 0 0 1\nC 1 1 0 9 0 0\nC 2 6 0 1 0 0\nC 3 7 0 1 1 1\nC 4 1 0 12 0 0\nA 1 1\nT 1 1 5 2\nT 2 2 6 3\nT 3 2 7 4\nU 1 1 1 0 3 0 0 1 5 2\nU 2 2 5 0 5 0 0 1 6 3\nU 3 2 6 0 6 0 0 0 7 4\nI 1 2 2 0 0 0\nL 1 2 1 5 0 0 1 0 3\nN 1 2 0 1\nE 1 2 8 3 1 0 0 0 0 0 0 0 0 2 9\nV 1 2 7 2 1 1 0 1\nJ 1 2 9 3 1 1 1 0 0 0\nK 1 1 0\nB 1 2 10 1 1 0\nEND\n"
+	genericFieldBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 2 1 0 0 1 1 0 0 0 0\nY 2 12 4 0 0 1 0 2 0 0 0\nP 1 1 2 0 0 1\nC 1 1 0 9 0 0\nC 2 6 0 1 0 0\nC 3 7 0 1 1 1\nC 4 1 0 12 0 0\nA 1 1\nT 1 1 5 2\nT 2 2 6 3\nT 3 2 7 4\nU 1 1 1 0 3 0 0 1 5 2\nU 2 2 5 0 5 0 0 1 6 3\nU 3 2 6 0 6 0 0 0 7 4\nI 1 2 2 0 0 0\nL 1 2 1 5 0 0 1 0 3\nN 1 2 0 1\nE 1 2 8 3 1 0 0 0 0 0 0 0 0 2 9\nV 1 2 7 2 0 1 1 0 1\nJ 1 2 9 3 1 1 1 0 0 0\nK 1 1 0\nB 1 2 10 1 1 0\nEND\n"
 	genericFieldBody = strings.Replace(genericFieldBody, "MANIFEST 11", "MANIFEST 17", 1)
 	if _, err := decodeCheckerManifest(genericFieldBody, inputs); err != nil {
 		t.Fatalf("valid generic field control manifest: %v", err)
 	}
-	indexedBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nC 3 8 0 0 1 1\nA 1 1\nT 1 1 2 3\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 3\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 3\nN 1 1 0 1\nE 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2 1 0 0 0\nK 1 1 0\nB 1 1 9 1 1 0\nEND\n"
+	indexedBody := "ALDER-CHECKER-MANIFEST 11\nS 0 612e616c 1\nY 1 12 1 0 0 1 0 1 0 0 0\nC 1 1 0 9 0 0\nC 2 1 0 12 0 0\nC 3 8 0 0 1 1\nA 1 1\nT 1 1 2 3\nT 2 1 3 2\nU 1 1 5 0 4 0 0 1 2 3\nU 2 1 6 0 5 0 0 0 3 2\nI 1 1 1 0 0 0\nL 1 1 1 4 0 0 1 0 3\nN 1 1 0 1\nE 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 0 1 0 1 1\nJ 1 1 8 3 1 2 1 0 0 0\nK 1 1 0\nB 1 1 9 1 1 0\nEND\n"
 	indexedBody = strings.Replace(indexedBody, "MANIFEST 11", "MANIFEST 17", 1)
 	if _, err := decodeCheckerManifest(indexedBody, inputs); err != nil {
 		t.Fatalf("valid indexed control manifest: %v", err)
@@ -3227,17 +3252,17 @@ func TestCheckerManifestDecoderRejectsMalformed(t *testing.T) {
 		"unordered statement chain":      {strings.Replace(assignmentPrefix, "K 1 1 0\nB 1 1 8 1 1 0", "K 1 1 0\nK 2 1 1\nB 1 1 8 1 2 0", 1), "not in source order"},
 		"nonconcrete block owner":        {strings.Replace(assignmentPrefix, "B 1 1 8 1 1 0", "B 1 2 8 1 1 0", 1), "invalid checked block"},
 		"forbidden statement payload":    {strings.Replace(assignmentPrefix, "J 1 1 7 3 1 1 1 0 0 0", "J 1 1 7 3 1 1 1 1 0 0", 1), "invalid checked statement payload"},
-		"place kind payload":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 1 0 1", 1), "fieldless checked place has field"},
-		"place checked type":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 0 0 2", 1), "place type disagrees"},
-		"place source component order":   {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 7 1 1 0 0 1", 1), "statement payload"},
+		"place kind payload":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 0 1 0 0 1", "V 1 1 5 1 0 1 1 0 1", 1), "fieldless checked place has field"},
+		"place checked type":             {strings.Replace(assignmentPrefix, "V 1 1 5 1 0 1 0 0 1", "V 1 1 5 1 0 1 0 0 2", 1), "place type disagrees"},
+		"place source component order":   {strings.Replace(assignmentPrefix, "V 1 1 5 1 0 1 0 0 1", "V 1 1 7 1 0 1 0 0 1", 1), "statement payload"},
 		"expression statement site":      {strings.Replace(assignmentPrefix, "0 2 7\nV", "0 2 8\nV", 1), "statement payload"},
-		"orphan place":                   {strings.Replace(assignmentPrefix, "V 1 1 5 1 1 0 0 1", "V 1 1 5 1 1 0 0 1\nV 2 1 4 1 1 0 0 1", 1), "checked place 2 has 0 statement owners"},
+		"orphan place":                   {strings.Replace(assignmentPrefix, "V 1 1 5 1 0 1 0 0 1", "V 1 1 5 1 0 1 0 0 1\nV 2 1 4 1 0 1 0 0 1", 1), "checked place 2 has 0 statement owners"},
 		"invalid block return guarantee": {strings.Replace(assignmentPrefix, "B 1 1 8 1 1 0", "B 1 1 8 1 1 1", 1), "invalid return guarantee"},
-		"field use wrong aggregate":      {strings.Replace(genericFieldBody, "V 1 2 7 2 1 1 0 1", "V 1 2 7 2 1 2 0 1", 1), "field does not belong"},
-		"generic field substitution":     {strings.Replace(genericFieldBody, "V 1 2 7 2 1 1 0 1", "V 1 2 7 2 1 1 0 4", 1), "place type disagrees"},
+		"field use wrong aggregate":      {strings.Replace(genericFieldBody, "V 1 2 7 2 0 1 1 0 1", "V 1 2 7 2 0 1 2 0 1", 1), "field does not belong"},
+		"generic field substitution":     {strings.Replace(genericFieldBody, "V 1 2 7 2 0 1 1 0 1", "V 1 2 7 2 0 1 1 0 4", 1), "place type disagrees"},
 		"index is not U64":               {strings.Replace(indexedBody, "E 1 1 6 3 1", "E 1 1 6 3 2", 1), "index is not owned U64"},
 		"index expression owner":         {strings.Replace(indexedBody, "E 1 1 6 3 1", "E 1 2 6 3 1", 1), "index is not owned U64"},
-		"place component order":          {strings.Replace(indexedBody, "E 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 1 0 1 1\nJ 1 1 8 3 1 2", "E 1 1 6 3 1 0 0 0 0 0 0 0 0 2 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 7 8\nV 1 1 5 3 1 0 2 1\nJ 1 1 8 3 1 1", 1), "components do not precede"},
+		"place component order":          {strings.Replace(indexedBody, "E 1 1 6 3 1 0 0 0 0 0 0 0 0 7 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 2 8\nV 1 1 5 3 0 1 0 1 1\nJ 1 1 8 3 1 2", "E 1 1 6 3 1 0 0 0 0 0 0 0 0 2 8\nE 2 1 7 3 1 0 0 0 0 0 0 0 0 7 8\nV 1 1 5 3 0 1 0 2 1\nJ 1 1 8 3 1 1", 1), "components do not precede"},
 		"child block cycle":              {childBlockCycle, "child block is not acyclic"},
 		"child block parent ownership":   {strings.Replace(nestedBlockBody, "B 1 1 5 0 0 0", "B 1 2 5 0 0 0", 1), "statement payload"},
 	}

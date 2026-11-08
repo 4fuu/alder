@@ -784,6 +784,10 @@ fn parse_expression(d: Domain, state: State, cursor: ParseCursor, depth: U64) ->
     return parse_binary(d, state, cursor, depth, 1)
 }
 
+// An assignment target is a name or any chain of field and index projections
+// rooted at one name: `a`, `a.b`, `a[0]`, `a.b.c`, `a.b[0]`, and `a[0].b[1]`
+// all store into a place the checker resolves. Anything else, such as a call
+// or an operator result, is not a place.
 fn assignment_target(store: ParseStore, node_id: U64) -> Bool {
     let node = __s0_buffer_get(SyntaxRec, store.nodes, node_id - 1)
     if node.kind == 24 { return true }
@@ -791,12 +795,7 @@ fn assignment_target(store: ParseStore, node_id: U64) -> Bool {
     let head = __s0_buffer_get(SyntaxLinkRec, store.links, node.children - 1)
     var base_link = head
     if node.kind == 30 { base_link = __s0_buffer_get(SyntaxLinkRec, store.links, head.next - 1) }
-    let base = __s0_buffer_get(SyntaxRec, store.nodes, base_link.node - 1)
-    if base.kind == 24 { return true }
-    if node.kind != 29 || base.kind != 30 { return false }
-    let index_head = __s0_buffer_get(SyntaxLinkRec, store.links, base.children - 1)
-    let index_base = __s0_buffer_get(SyntaxLinkRec, store.links, index_head.next - 1)
-    return __s0_buffer_get(SyntaxRec, store.nodes, index_base.node - 1).kind == 24
+    return assignment_target(store, base_link.node)
 }
 
 fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {

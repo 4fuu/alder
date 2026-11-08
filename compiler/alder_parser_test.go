@@ -403,9 +403,9 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"return-eof.al", "fn bad() -> U64 { return", 12, "", 0, 0},
 		{"return-line-eof.al", "fn bad() -> U64 {\n return\n", 4, "", 0, 0},
 		{"assign-call.al", "fn bad() -> U64 {\n f() = value\n}\n", 14, "f() =", 0, 1},
-		{"assign-field-chain.al", "fn bad() -> U64 {\n x.field.other = value\n}\n", 14, "x.field.other", 0, 1},
-		{"assign-field-index.al", "fn bad() -> U64 {\n x.field[index] = value\n}\n", 14, "x.field[index]", 0, 1},
-		{"assign-index-chain.al", "fn bad() -> U64 {\n x[index][other] = value\n}\n", 14, "x[index][other]", 0, 1},
+		// Field and index chains are assignment targets: `x.field.other`,
+		// `x.field[index]`, and `x[index][other]` all parse as places, so they
+		// reach the checker instead of failing here.
 		{"assign-group.al", "fn bad() -> U64 {\n (x + y) = value\n}\n", 14, "(x + y)", 0, 1},
 		{"nesting-group-depth.al", "fn bad() -> U64 { return " + strings.Repeat("(", 65) + "X" + strings.Repeat(")", 65) + " }", 19, "X", 0, 1},
 		{"nesting-chain-depth.al", "fn bad() -> U64 { return 1" + strings.Repeat(" + 1", 64) + " + X }", 19, "+ X", 0, 1},
