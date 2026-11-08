@@ -150,6 +150,30 @@ fn main() -> I32 {
 }
 `
 
+const d023PerSiteReasonProgram = `fn add_one(v: Vec(U64)) -> Vec(U64) {
+    var b = v
+    b.push(1)
+    return b
+}
+fn main() -> I32 {
+    var a = Vec.new(U64)
+    a.push(5)
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 2 {
+        let b = add_one(a)
+        total = total + b.len()
+        i = i + 1
+    }
+    let c = add_one(a)
+    let d = add_one(a)
+    if total != 4 { return 1 }
+    if c.len() != 2 { return 2 }
+    if d.len() != 2 { return 3 }
+    return 0
+}
+`
+
 func TestM75D023ProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -175,6 +199,7 @@ func TestM75D023ProductionQualification(t *testing.T) {
 		{"d023-escaped-target.al", d023EscapedTargetProgram},
 		{"d023-loop-rebuild.al", d023LoopRebuildProgram},
 		{"d023-loop-reread.al", d023LoopRereadProgram},
+		{"d023-per-site-reason.al", d023PerSiteReasonProgram},
 	}
 	for _, program := range programs {
 		program := program
@@ -273,5 +298,21 @@ func TestM75D023ProductionQualification(t *testing.T) {
 	}
 	if rereadText := rereadReport.stdout + rereadReport.stderr; !strings.Contains(rereadText, "copy of `a`: re-read by a loop") {
 		t.Fatalf("loop-reread report missing the loop reason: %q", rereadText)
+	}
+	// One binding can have a read that copies and a later read that moves.
+	// Each remaining copy site is reported with its own reason: the loop body
+	// never re-establishes `a`, so that site copies for the loop reason, the
+	// next read copies because the read after it still uses `a`, and the last
+	// read moves and is not reported at all.
+	perSiteReport := runProductionCompiler(t, exe, map[string]string{"d023-per-site-reason.al": d023PerSiteReasonProgram}, "check", "--report-copies", "d023-per-site-reason.al")
+	if perSiteReport.status != 0 {
+		t.Fatalf("per-site report run: %+v", perSiteReport)
+	}
+	perSiteText := perSiteReport.stdout + perSiteReport.stderr
+	if !strings.Contains(perSiteText, "copy of `a`: re-read by a loop") || !strings.Contains(perSiteText, "copy of `a`: still used later") {
+		t.Fatalf("per-site report should name both sites with their own reasons: %q", perSiteText)
+	}
+	if got := strings.Count(perSiteText, "copy of `a`"); got != 2 {
+		t.Fatalf("per-site report should name exactly the two copying reads, got %d: %q", got, perSiteText)
 	}
 }

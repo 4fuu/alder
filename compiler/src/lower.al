@@ -71,18 +71,19 @@ type LowerState {
     // while lowering, and the walk is too costly to repeat per site.
     has_storage: Bool
     // D023 move plan of the function being lowered: per-expression move
-    // verdicts and per-binding copy reasons, computed once per owner.
+    // verdicts and per-site copy reasons, computed once per owner.
     moves: LowerMovePlan
     // Copy-site report records (D023), collected as copies are emitted.
     reports: __s0_Buffer(CopySiteRec)
     valid: Bool
 }
 
-// The D023 move plan of one concrete function instance: movable is indexed
-// by checked expression ID and marks the binding reads that may transfer
-// their source storage instead of copying it; reasons is indexed by checked
-// local ID and carries the report reason of that binding's last non-movable
-// read (zero when nothing blocks it).
+// The D023 move plan of one concrete function instance, indexed by checked
+// expression ID on both axes: movable marks the binding reads that may
+// transfer their source storage instead of copying it, and reasons carries
+// the report reason of that read's own copy site (zero when nothing blocks
+// it). Per site, not per binding: one binding can have a read that copies for
+// one reason and a later read that moves.
 type LowerMovePlan {
     movable: __s0_Buffer(U64)
     reasons: __s0_Buffer(U64)
@@ -1906,15 +1907,15 @@ fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: L
 //
 // lower_move_analyze computes, for one concrete function instance, which
 // binding-read expressions may transfer their source storage instead of
-// copying it. A read of a binding may move when every later access to that
-// binding in program order is a definition, and every access inside any
-// loop enclosing the read is likewise a definition (a read re-executed
-// after a backedge keeps the source alive). Parameters never move: their
-// storage belongs to the caller, and the dead-argument case is decided at
-// the caller's copy site. Bindings captured by closures and bindings that
-// ever form a view are excluded conservatively. Verdicts write into the
-// shared movable buffer (indexed by expression ID) and reasons into the
-// shared per-binding buffer, both allocated once per compilation.
+// copying it. A read outside every loop moves when no later access to that
+// binding in program order is a read. A read inside a loop body moves when
+// the body re-establishes the binding before the read repeats, which
+// lower_move_loop_reason decides. Parameters never move: their storage
+// belongs to the caller, and the dead-argument case is decided at the
+// caller's copy site. Bindings captured by closures and bindings that ever
+// form a view are excluded conservatively. Verdicts write into the shared
+// movable buffer and reasons into the shared reason buffer, both indexed by
+// expression ID and allocated once per compilation.
 
 type LowerMoveWalkRec {
     events: __s0_Buffer(LowerMoveEventRec)
@@ -2125,14 +2126,7 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
     let loops = try __s0_buffer_new(LowerMoveLoopRec, d)
     let walked = try lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: excluded, loops: loops, conditionals: 0), 0, root_block)
     var movable = plan.movable
-    // last_reason carries the report reason of each binding's most recent
-    // read: zero once a read moves, 1 or 4 while later uses block it.
-    var last_reason = try __s0_buffer_new(U64, d)
-    var reason_at: U64 = 0
-    while reason_at < locals_count {
-        last_reason = try __s0_buffer_append(U64, d, last_reason, 0)
-        reason_at = reason_at + 1
-    }
+    var reasons = plan.reasons
     var index: U64 = 0
     while index < __s0_buffer_len(LowerMoveEventRec, walked.events) {
         let event = __s0_buffer_get(LowerMoveEventRec, walked.events, index)
@@ -2158,27 +2152,17 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
                 }
                 if reason != 0 || event.expression == 0 || event.expression > __s0_buffer_len(U64, movable) {
                     if reason == 0 { reason = 1 }
-                    __s0_buffer_set(U64, last_reason, event.binding - 1, reason)
+                    if event.expression != 0 && event.expression <= __s0_buffer_len(U64, reasons) { __s0_buffer_set(U64, reasons, event.expression - 1, reason) }
                 } else {
                     __s0_buffer_set(U64, movable, event.expression - 1, 1)
-                    __s0_buffer_set(U64, last_reason, event.binding - 1, 0)
                 }
             } else {
-                __s0_buffer_set(U64, last_reason, event.binding - 1, reason)
+                if event.expression != 0 && event.expression <= __s0_buffer_len(U64, reasons) { __s0_buffer_set(U64, reasons, event.expression - 1, reason) }
             }
         }
         index = index + 1
     }
-    // Publish the report reasons: exclusions win, then the last read's
-    // verdict, then a plain later-use default.
-    at = 0
-    while at < locals_count {
-        var reason = __s0_buffer_get(U64, walked.excluded, at)
-        if reason == 0 { reason = __s0_buffer_get(U64, last_reason, at) }
-        __s0_buffer_set(U64, plan.reasons, at, reason)
-        at = at + 1
-    }
-    return Ok(LowerMovePlan(movable: movable, reasons: plan.reasons))
+    return Ok(LowerMovePlan(movable: movable, reasons: reasons))
 }
 
 // lower_move_or_copy applies the D023 rule at one value-semantics copy
@@ -2219,7 +2203,7 @@ fn lower_move_or_copy(d: Domain, source_state: State, spans: __s0_Buffer(Checked
         } else {
             if movable { reason = 6 } else {
                 reason = 1
-                if binding <= __s0_buffer_len(U64, current.moves.reasons) { reason = __s0_buffer_get(U64, current.moves.reasons, binding - 1) }
+                if source_expression != 0 && source_expression <= __s0_buffer_len(U64, current.moves.reasons) { reason = __s0_buffer_get(U64, current.moves.reasons, source_expression - 1) }
                 if reason == 0 { reason = 1 }
             }
         }
@@ -6727,18 +6711,16 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     let copy_reports = try __s0_buffer_new(CopySiteRec, d)
     let part_head = try __s0_buffer_new(U64, d)
     let part_next = try __s0_buffer_new(U64, d)
-    // The D023 move plan is indexed by expression ID and local ID; one
-    // zeroed allocation per compilation, filled per function by
+    // The D023 move plan is indexed by expression ID on both axes - the
+    // verdict and the reason belong to the copy site, not to the binding, so
+    // one binding can report a copying read and a moving read side by side.
+    // One zeroed allocation per compilation, filled per function by
     // lower_move_analyze.
     var plan_movable = try __s0_buffer_new(U64, d)
     var plan_reasons = try __s0_buffer_new(U64, d)
     var zero_at: U64 = 0
     while zero_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         plan_movable = try __s0_buffer_append(U64, d, plan_movable, 0)
-        zero_at = zero_at + 1
-    }
-    zero_at = 0
-    while zero_at < __s0_buffer_len(LocalRec, store.locals) {
         plan_reasons = try __s0_buffer_append(U64, d, plan_reasons, 0)
         zero_at = zero_at + 1
     }
