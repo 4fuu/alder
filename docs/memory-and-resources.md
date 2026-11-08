@@ -46,12 +46,21 @@ linear loop quadratic. See
 Milestone 7.5 implements the rule for the collection copy sites: a value
 whose source binding is provably dead and unaliased at the copy transfers
 its storage instead of copying, parameters never move inside their callee
-(the caller's dead argument is elided at the call instead), bindings
-captured by closures or observed through views always copy, and copy sites
-inside loop bodies copy until the phase-6 loop-store rule understands moved
-storage across backedges. The compiler's `--report-copies` flag prints one
-line per remaining copy site with its reason after a successful check or
-compile.
+(the caller's dead argument is elided at the call instead), and bindings
+captured by closures or observed through views always copy.
+
+A read inside a loop body also moves when the body re-establishes the
+binding before the read runs again: the next access to that binding in the
+body is a definition and the body is straight-line code, so the definition
+always executes before the loop repeats the read. That is the loop-rebuild
+shape `items = rebuild(items)`. A body that only reads the binding, reads it
+again after the rebuild, or contains a conditional, a `match` or `try`
+expression, or a nested loop still copies, because any of those can skip the
+definition and leave the next iteration reading storage the callee owns.
+Reads after the loop do not affect the verdict: the rebuild re-establishes
+the binding, so they read the new value. The compiler's `--report-copies`
+flag prints one line per remaining copy site with its reason after a
+successful check or compile.
 
 ## Affine owners
 

@@ -94,6 +94,62 @@ fn main() -> I32 {
 }
 `
 
+const d023LoopRebuildProgram = `fn rebuild(src: Vec(U64)) -> Vec(U64) {
+    var out = Vec.new(U64)
+    var i: U64 = 0
+    while i < src.len() {
+        match src.get(i) {
+            Some(x) => { out.push(x) }
+            None => { }
+        }
+        i = i + 1
+    }
+    out.push(src.len())
+    return out
+}
+fn main() -> I32 {
+    var a = Vec.new(U64)
+    a.push(5)
+    var i: U64 = 0
+    while i < 3 {
+        a = rebuild(a)
+        i = i + 1
+    }
+    if a.len() != 4 { return 1 }
+    var total: U64 = 0
+    var j: U64 = 0
+    while j < a.len() {
+        match a.get(j) {
+            Some(x) => { total = total + x }
+            None => { }
+        }
+        j = j + 1
+    }
+    if total != 11 { return 2 }
+    return 0
+}
+`
+
+const d023LoopRereadProgram = `fn add_one(v: Vec(U64)) -> Vec(U64) {
+    var b = v
+    b.push(1)
+    return b
+}
+fn main() -> I32 {
+    var a = Vec.new(U64)
+    a.push(5)
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        let b = add_one(a)
+        total = total + b.len()
+        i = i + 1
+    }
+    if total != 6 { return 1 }
+    return 0
+}
+`
+
 func TestM75D023ProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -117,6 +173,8 @@ func TestM75D023ProductionQualification(t *testing.T) {
 		{"d023-parameter.al", d023ParameterProgram},
 		{"d023-dead-argument.al", d023DeadArgumentProgram},
 		{"d023-escaped-target.al", d023EscapedTargetProgram},
+		{"d023-loop-rebuild.al", d023LoopRebuildProgram},
+		{"d023-loop-reread.al", d023LoopRereadProgram},
 	}
 	for _, program := range programs {
 		program := program
@@ -174,5 +232,46 @@ func TestM75D023ProductionQualification(t *testing.T) {
 	}
 	if !strings.Contains(deadArgText, "parameter storage shared with the caller") {
 		t.Fatalf("dead-argument report missing the callee parameter copy: %q", deadArgText)
+	}
+	// A loop that rebuilds the binding moves: the loop-rebuild shape
+	// `a = rebuild(a)` re-establishes `a` from the call result before the read
+	// repeats, so the argument transfers instead of copying. The program
+	// checks the rebuilt contents, so a move that corrupted the source would
+	// return a wrong status rather than merely cost a copy.
+	rebuildC := runProductionCompiler(t, exe, map[string]string{"d023-loop-rebuild.al": d023LoopRebuildProgram}, "compile", "--emit=c", "d023-loop-rebuild.al")
+	if rebuildC.status != 0 {
+		t.Fatalf("loop-rebuild C run: %+v stderr=%s", rebuildC, rebuildC.stderr)
+	}
+	// The one remaining copy call is the callee's return-value copy, which no
+	// move can remove; the loop site itself contributes none.
+	if got := strings.Count(rebuildC.stdout, "= alder_copy_ty"); got != 1 {
+		t.Fatalf("loop-rebuild program should copy only the callee return, got %d copy calls", got)
+	}
+	rebuildReport := runProductionCompiler(t, exe, map[string]string{"d023-loop-rebuild.al": d023LoopRebuildProgram}, "check", "--report-copies", "d023-loop-rebuild.al")
+	if rebuildReport.status != 0 {
+		t.Fatalf("loop-rebuild report run: %+v", rebuildReport)
+	}
+	if got := rebuildReport.stdout + rebuildReport.stderr; got != "" {
+		t.Fatalf("loop-rebuild report should be empty, got %q", got)
+	}
+
+	// The boundary: a body that only reads the binding never re-establishes
+	// it, so the next iteration would read storage the callee owns. That site
+	// keeps its copy and reports the loop reason.
+	rereadC := runProductionCompiler(t, exe, map[string]string{"d023-loop-reread.al": d023LoopRereadProgram}, "compile", "--emit=c", "d023-loop-reread.al")
+	if rereadC.status != 0 {
+		t.Fatalf("loop-reread C run: %+v stderr=%s", rereadC, rereadC.stderr)
+	}
+	// Two copies are the callee's own (its parameter and its return value);
+	// the third is the loop site, which cannot move here.
+	if got := strings.Count(rereadC.stdout, "= alder_copy_ty"); got != 3 {
+		t.Fatalf("loop-reread program should keep its loop-site copy, got %d copy calls", got)
+	}
+	rereadReport := runProductionCompiler(t, exe, map[string]string{"d023-loop-reread.al": d023LoopRereadProgram}, "check", "--report-copies", "d023-loop-reread.al")
+	if rereadReport.status != 0 {
+		t.Fatalf("loop-reread report run: %+v", rereadReport)
+	}
+	if rereadText := rereadReport.stdout + rereadReport.stderr; !strings.Contains(rereadText, "copy of `a`: re-read by a loop") {
+		t.Fatalf("loop-reread report missing the loop reason: %q", rereadText)
 	}
 }

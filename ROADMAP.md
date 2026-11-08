@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `8a40ff818572cd6d44798856785ef3585dd011bbab2aff6be95857e89f2f228a`
+  `edcf0a0278d6cd69289d42045387e3685a50248bac52c1858cf55dbec71c582e`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `8a40ff818572cd6d44798856785ef3585dd011bbab2aff6be95857e89f2f228a`
+  `edcf0a0278d6cd69289d42045387e3685a50248bac52c1858cf55dbec71c582e`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1127,12 +1127,17 @@ Remaining before exit (as of the integration of both halves; the items below
 were added to or reshaped by the 2026-11 design amendment, which landed after
 both halves were written):
 
-- (D023 landed; see the evidence below) the remaining D023 gap: copy sites
-  inside loop bodies still copy. The lowering and verification gap that used
-  to block it is fixed: `for x in v` over an owned `Vec(T)` and whole-vector
-  assignment inside a `while` body now verify, because the for lowering
-  carries the owning value as the loop parameter and phase 6 rejects an
-  owning loop-carried value only when its storage dies inside the loop;
+- (D023 landed; see the evidence below) the D023 loop-rebuild move landed with
+  it: a read inside a loop body transfers its storage when the next access to
+  that binding in the body is a definition and the body is straight-line
+  code, so `items = rebuild(items)` no longer copies, while a body that only
+  reads the binding, reads it again after the rebuild, or contains a
+  conditional, `match`/`try` expression, or nested loop still copies. The
+  lowering and verification gap that used to block the shape is fixed too:
+  `for x in v` over an owned `Vec(T)` and whole-vector assignment inside a
+  `while` body now verify, because the for lowering carries the owning value
+  as the loop parameter and phase 6 rejects an owning loop-carried value only
+  when its storage dies inside the loop;
 - a compiler-scale layered DAG input over traits, generics, and closures
   that terminates with deterministic diagnostics, MIR, and C — landed: one
   generic trait with a defaulted method implemented by eight record types,

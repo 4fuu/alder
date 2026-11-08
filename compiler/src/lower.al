@@ -102,6 +102,10 @@ type LowerMoveLoopRec {
     first_event: U64
     end_event: U64
     parent: U64
+    // Set when the body contains a construct that may skip a later statement
+    // (an if, a match or try expression, or a nested loop). The loop-rebuild
+    // move needs a straight-line body, so the flag gates it.
+    conditional: U64
 }
 
 fn lower_with_plan(state: LowerState, moves: LowerMovePlan) -> LowerState {
@@ -1915,9 +1919,14 @@ fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: L
 type LowerMoveWalkRec {
     events: __s0_Buffer(LowerMoveEventRec)
     excluded: __s0_Buffer(U64)
+    loops: __s0_Buffer(LowerMoveLoopRec)
+    // Number of skipping constructs entered so far. Each loop records the
+    // delta across its own body, so the counter answers "is this body
+    // straight-line code" without a second walk.
+    conditionals: U64
 }
 
-fn lower_move_walk_expression(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, expression_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+fn lower_move_walk_expression(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loop_at: U64, expression_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(walk) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     var events = walk.events
@@ -1942,30 +1951,32 @@ fn lower_move_walk_expression(d: Domain, store: CheckStore, walk: LowerMoveWalkR
         }
     }
     var child: U64 = 0
-    var inner = LowerMoveWalkRec(events: events, excluded: excluded)
+    var inner = LowerMoveWalkRec(events: events, excluded: excluded, loops: walk.loops, conditionals: walk.conditionals)
     while child < expression.child_count {
         if expression.first_child != 0 && expression.first_child - 1 + child < __s0_buffer_len(CheckedExprChildRec, store.expression_children) {
-            inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression)
+            inner = try lower_move_walk_expression(d, store, inner, loop_at, __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression)
         }
         child = child + 1
     }
     if expression.kind == 12 && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(CheckedMatchRec, store.control.matches) {
         let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
+        inner = LowerMoveWalkRec(events: inner.events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals + 1)
         var arm: U64 = 0
         while arm < checked.arm_count {
             let arm_rec = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + arm)
-            if arm_rec.body != 0 { inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, arm_rec.body) }
-            if arm_rec.block != 0 { inner = try lower_move_walk_block(d, store, inner, loops, loop_at, arm_rec.block) }
+            if arm_rec.body != 0 { inner = try lower_move_walk_expression(d, store, inner, loop_at, arm_rec.body) }
+            if arm_rec.block != 0 { inner = try lower_move_walk_block(d, store, inner, loop_at, arm_rec.block) }
             arm = arm + 1
         }
     }
     if expression.kind == 13 && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(CheckedTryRec, store.control.tries) {
-        inner = try lower_move_walk_expression(d, store, inner, loops, loop_at, __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1).expression)
+        inner = LowerMoveWalkRec(events: inner.events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals + 1)
+        inner = try lower_move_walk_expression(d, store, inner, loop_at, __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1).expression)
     }
     return Ok(inner)
 }
 
-fn lower_move_walk_block(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, block_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+fn lower_move_walk_block(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loop_at: U64, block_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
     if block_id == 0 || block_id > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return Ok(walk) }
     let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
     // The statement chain is reverse source ordered: collect it, then walk
@@ -1987,16 +1998,16 @@ fn lower_move_walk_block(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, l
     var inner = walk
     var index = __s0_buffer_len(U64, chain)
     while index > 0 {
-        inner = try lower_move_walk_one(d, store, inner, loops, loop_at, __s0_buffer_get(U64, chain, index - 1))
+        inner = try lower_move_walk_one(d, store, inner, loop_at, __s0_buffer_get(U64, chain, index - 1))
         index = index - 1
     }
     return Ok(inner)
 }
 
-fn lower_move_walk_one(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loops: __s0_Buffer(LowerMoveLoopRec), loop_at: U64, statement_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
+fn lower_move_walk_one(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loop_at: U64, statement_id: U64) -> Result(LowerMoveWalkRec, __s0_Error) {
     if statement_id == 0 || statement_id > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(walk) }
     let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, statement_id - 1)
-    var inner = try lower_move_walk_expression(d, store, walk, loops, loop_at, statement.expression)
+    var inner = try lower_move_walk_expression(d, store, walk, loop_at, statement.expression)
     var events = inner.events
     if statement.kind == 1 || statement.kind == 2 || statement.kind == 10 {
         if statement.binding != 0 && statement.binding <= __s0_buffer_len(LocalRec, store.locals) {
@@ -2005,36 +2016,80 @@ fn lower_move_walk_one(d: Domain, store: CheckStore, walk: LowerMoveWalkRec, loo
     }
     if statement.kind == 3 && statement.place != 0 && statement.place <= __s0_buffer_len(CheckedPlaceRec, store.control.places) {
         let place = __s0_buffer_get(CheckedPlaceRec, store.control.places, statement.place - 1)
-        if place.index != 0 { inner = try lower_move_walk_expression(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded), loops, loop_at, place.index)
+        if place.index != 0 { inner = try lower_move_walk_expression(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals), loop_at, place.index)
             events = inner.events }
         if place.root != 0 && place.root <= __s0_buffer_len(LocalRec, store.locals) {
             events = try __s0_buffer_append(LowerMoveEventRec, d, events, LowerMoveEventRec(binding: place.root, expression: 0, is_definition: 1))
         }
     }
-    if statement.kind == 6 { return lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded), loops, loop_at, statement.body) }
+    if statement.kind == 6 { return lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals), loop_at, statement.body) }
     if statement.kind == 7 {
-        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded)
-        walked = try lower_move_walk_block(d, store, walked, loops, loop_at, statement.body)
-        walked = try lower_move_walk_block(d, store, walked, loops, loop_at, statement.alternative)
+        // Either arm may run, so a definition inside one cannot be relied on.
+        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals + 1)
+        walked = try lower_move_walk_block(d, store, walked, loop_at, statement.body)
+        walked = try lower_move_walk_block(d, store, walked, loop_at, statement.alternative)
         return Ok(walked)
     }
     if statement.kind == 8 || statement.kind == 9 {
-        let opened = try __s0_buffer_append(LowerMoveLoopRec, d, loops, LowerMoveLoopRec(first_event: __s0_buffer_len(LowerMoveEventRec, events), end_event: 0, parent: loop_at))
+        let opened = try __s0_buffer_append(LowerMoveLoopRec, d, inner.loops, LowerMoveLoopRec(first_event: __s0_buffer_len(LowerMoveEventRec, events), end_event: 0, parent: loop_at, conditional: 0))
         var loops_now = opened
         let loop_now = __s0_buffer_len(LowerMoveLoopRec, loops_now)
-        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded)
-        walked = try lower_move_walk_block(d, store, walked, loops_now, loop_now, statement.body)
+        // A nested loop runs zero or more times, so the enclosing loop counts
+        // it as a skipping construct; the counter starts one above the base so
+        // the loop's own body is measured without it.
+        let base_conditionals = inner.conditionals
+        var walked = LowerMoveWalkRec(events: events, excluded: inner.excluded, loops: loops_now, conditionals: base_conditionals + 1)
+        walked = try lower_move_walk_block(d, store, walked, loop_now, statement.body)
         let rec = __s0_buffer_get(LowerMoveLoopRec, loops_now, loop_now - 1)
-        __s0_buffer_set(LowerMoveLoopRec, loops_now, loop_now - 1, LowerMoveLoopRec(first_event: rec.first_event, end_event: __s0_buffer_len(LowerMoveEventRec, walked.events), parent: rec.parent))
+        var conditional: U64 = 0
+        if walked.conditionals != base_conditionals + 1 { conditional = 1 }
+        __s0_buffer_set(LowerMoveLoopRec, loops_now, loop_now - 1, LowerMoveLoopRec(first_event: rec.first_event, end_event: __s0_buffer_len(LowerMoveEventRec, walked.events), parent: rec.parent, conditional: conditional))
         if statement.kind == 9 && statement.binding != 0 && statement.binding <= __s0_buffer_len(LocalRec, store.locals) {
             // The loop binding is defined fresh each iteration after the
             // sequence read; the sequence read precedes the loop range, so
             // a dead sequence still moves into the element copies.
-            walked = LowerMoveWalkRec(events: try __s0_buffer_append(LowerMoveEventRec, d, walked.events, LowerMoveEventRec(binding: statement.binding, expression: 0, is_definition: 1)), excluded: walked.excluded)
+            walked = LowerMoveWalkRec(events: try __s0_buffer_append(LowerMoveEventRec, d, walked.events, LowerMoveEventRec(binding: statement.binding, expression: 0, is_definition: 1)), excluded: walked.excluded, loops: walked.loops, conditionals: walked.conditionals)
         }
         return Ok(walked)
     }
-    return Ok(LowerMoveWalkRec(events: events, excluded: inner.excluded))
+    return Ok(LowerMoveWalkRec(events: events, excluded: inner.excluded, loops: inner.loops, conditionals: inner.conditionals))
+}
+
+// lower_move_innermost_loop returns one plus the index of the innermost loop
+// span containing the event, or zero when the event is outside every loop.
+// Loops are recorded on entry, so the last containing span is the innermost.
+fn lower_move_innermost_loop(loops: __s0_Buffer(LowerMoveLoopRec), index: U64) -> U64 {
+    var found: U64 = 0
+    var loop_at: U64 = 0
+    while loop_at < __s0_buffer_len(LowerMoveLoopRec, loops) {
+        let span_loop = __s0_buffer_get(LowerMoveLoopRec, loops, loop_at)
+        if span_loop.first_event <= index && index < span_loop.end_event { found = loop_at + 1 }
+        loop_at = loop_at + 1
+    }
+    return found
+}
+
+// lower_move_loop_reason decides one read inside a loop body. The body repeats,
+// so a moved read must be re-established by a definition before it runs again:
+// the next access to the binding inside the body has to be a definition, and
+// the body has to be straight-line code, because a conditional, a match or try
+// expression, or a nested loop could skip that definition and leave the next
+// iteration reading storage the callee owns. `a = rebuild(a)` is that shape; a
+// body that only reads the binding, or that reads it again after the rebuild,
+// keeps copying.
+fn lower_move_loop_reason(events: __s0_Buffer(LowerMoveEventRec), loops: __s0_Buffer(LowerMoveLoopRec), loop_span: U64, index: U64, binding: U64) -> U64 {
+    let span_loop = __s0_buffer_get(LowerMoveLoopRec, loops, loop_span - 1)
+    if span_loop.conditional != 0 { return 4 }
+    var later = index + 1
+    while later < span_loop.end_event {
+        let next_event = __s0_buffer_get(LowerMoveEventRec, events, later)
+        if next_event.binding == binding {
+            if next_event.is_definition != 0 { return 0 }
+            return 1
+        }
+        later = later + 1
+    }
+    return 4
 }
 
 // lower_move_analyze fills the shared move plan for one concrete function
@@ -2068,7 +2123,7 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
     }
     let events = try __s0_buffer_new(LowerMoveEventRec, d)
     let loops = try __s0_buffer_new(LowerMoveLoopRec, d)
-    let walked = try lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: excluded), loops, 0, root_block)
+    let walked = try lower_move_walk_block(d, store, LowerMoveWalkRec(events: events, excluded: excluded, loops: loops, conditionals: 0), 0, root_block)
     var movable = plan.movable
     // last_reason carries the report reason of each binding's most recent
     // read: zero once a read moves, 1 or 4 while later uses block it.
@@ -2084,23 +2139,22 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
         if event.is_definition == 0 && event.binding != 0 && event.binding <= locals_count {
             var reason = __s0_buffer_get(U64, walked.excluded, event.binding - 1)
             if reason == 0 {
-                var blocked: U64 = 0
-                var later: U64 = index + 1
-                while later < __s0_buffer_len(LowerMoveEventRec, walked.events) {
-                    let next_event = __s0_buffer_get(LowerMoveEventRec, walked.events, later)
-                    if next_event.binding == event.binding && next_event.is_definition == 0 { blocked = 1 }
-                    later = later + 1
-                }
-                if blocked != 0 { reason = 1 }
-                // A read inside a loop body never moves in this milestone:
-                // the phase-6 loop-store rule tracks storage provenance
-                // around backedges, so a moved header crossing a backedge is
-                // rejected. Such sites copy and report the loop reason.
-                var loop_at: U64 = 0
-                while loop_at < __s0_buffer_len(LowerMoveLoopRec, loops) && reason == 0 {
-                    let span_loop = __s0_buffer_get(LowerMoveLoopRec, loops, loop_at)
-                    if span_loop.first_event <= index && index < span_loop.end_event { reason = 4 }
-                    loop_at = loop_at + 1
+                // A read inside a loop body is decided against that body
+                // alone: the definition that re-establishes the binding also
+                // makes every access after the loop a read of the new value.
+                // Reads outside every loop keep the plain later-use rule.
+                let loop_span = lower_move_innermost_loop(walked.loops, index)
+                if loop_span != 0 {
+                    reason = lower_move_loop_reason(walked.events, walked.loops, loop_span, index, event.binding)
+                } else {
+                    var blocked: U64 = 0
+                    var later: U64 = index + 1
+                    while later < __s0_buffer_len(LowerMoveEventRec, walked.events) {
+                        let next_event = __s0_buffer_get(LowerMoveEventRec, walked.events, later)
+                        if next_event.binding == event.binding && next_event.is_definition == 0 { blocked = 1 }
+                        later = later + 1
+                    }
+                    if blocked != 0 { reason = 1 }
                 }
                 if reason != 0 || event.expression == 0 || event.expression > __s0_buffer_len(U64, movable) {
                     if reason == 0 { reason = 1 }
