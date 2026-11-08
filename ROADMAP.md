@@ -1190,10 +1190,17 @@ both halves were written):
   [MIR](docs/mir.md)). Two limits remain, deliberately rejected rather than
   miscompiled: creating such a closure inside a loop body rejects with
   diagnostic 153, because phase 6's loop-store rule still classifies the
-  environment record as a capability, and a view bound inside a loop body
-  without any closure (`let s = v.slice(0, 1)` in a `while` body) is accepted
-  by the checker and then refused by phase 6 with the same loop-store rule,
-  so views and loop bodies do not compose yet. Every closure body has a
+  environment record as a capability. Views and loop bodies otherwise
+  compose: a view created in an iteration is read inside that iteration, so
+  phase 6 accepts a view store whose storage domain survives the loop and
+  requires every read of a view local inside the cycle to be dominated by a
+  store in the same cycle (or to name storage the loop cannot relocate), a
+  view of a vector the loop reassigns works, a view created before a loop and
+  read inside it still works when the loop cannot move its storage, and a
+  table-view arm inside a `while` body works once cleanup registration runs
+  on the loop's panic path (the using-inside-loops commit). A view cannot be
+  assigned inside a loop body: diagnostic 154 rejects `s = v.slice(...)`
+  there, because the target slot survives the backedge. Every closure body has a
   domain: a capturing closure's environment record carries the domain that
   owns it, and a capture-free closure takes the caller's domain as its leading
   hidden parameter, so a body that allocates or copies storage works whether

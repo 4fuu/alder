@@ -1086,11 +1086,17 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 	dom := dominators(f)
 	var errs []Error
 	kills := collectLoopKills(f, effects)
+	reachCache := make(map[mir.BlockId][]bool, len(f.Blocks))
 	reachesFor := func(from, to mir.BlockId) bool {
 		if int(from) >= len(f.Blocks) || int(to) >= len(f.Blocks) {
 			return false
 		}
-		return reachableFrom(f, from)[int(to)]
+		reached, ok := reachCache[from]
+		if !ok {
+			reached = reachableFrom(f, from)
+			reachCache[from] = reached
+		}
+		return reached[int(to)]
 	}
 	for bi, b := range f.Blocks {
 		var reaches []bool
@@ -1142,14 +1148,11 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 			if in.Op != mir.OpStore || int(in.StoreVal) >= len(info) || !hasLocalDomainProvenance(info[in.StoreVal]) {
 				continue
 			}
-			if !loopCarryOwnerType(m, f.Values[in.StoreVal].Type, envRecords) {
-				// Capability-typed values keep the original conservative
-				// exemption: parameter-domain ownership with no destroying
-				// effect anywhere in the function.
-				if stableCapabilityLoopStore(m, f, info, effect, in) {
-					continue
-				}
-			} else if stableParameterDomainLoopStore(m, f, info, effect, in, reachesFor, kills, mir.BlockId(bi)) {
+			// A capability-typed value must be stored into a local place; an
+			// owner may also be stored through a projection. The stability
+			// test below is the same for both.
+			requireLocalPlace := !loopCarryOwnerType(m, f.Values[in.StoreVal].Type, envRecords)
+			if stableLoopStore(m, f, info, effect, in, reachesFor, kills, mir.BlockId(bi), requireLocalPlace) {
 				continue
 			}
 			errs = append(errs, Error{
@@ -1158,75 +1161,75 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 			})
 		}
 	}
+	// A view read inside a loop must be redefined in the same iteration, or
+	// the loop must not be able to move the storage it views. A view header is
+	// not an owning value: a later iteration that reads a header stored by an
+	// earlier one dangles as soon as the loop grows, removes from, or replaces
+	// the owner, and the domain surviving the loop does not prevent that.
+	for bi, b := range f.Blocks {
+		if !inCycle(f, mir.BlockId(bi)) {
+			continue
+		}
+		for ii := range b.Instrs {
+			in := &b.Instrs[ii]
+			if in.Op != mir.OpLoad || int(in.Result) >= len(f.Values) || !viewStorageType(m, f.Values[in.Result].Type) {
+				continue
+			}
+			if _, ok := localPlaceKey(&in.Place); !ok {
+				continue
+			}
+			parameterRooted := false
+			for root := range info[in.Result].roots {
+				if root.param >= 0 {
+					parameterRooted = true
+				}
+			}
+			if parameterRooted {
+				continue
+			}
+			if loopRedefinesPlace(f, dom, reachesFor, mir.BlockId(bi), ii, &in.Place) {
+				continue
+			}
+			base := viewBaseOf(m, f, in.Result, 0)
+			if base.kind == viewBaseStable {
+				continue
+			}
+			if base.kind == viewBaseLocal && !loopRelocatesBase(m, f, reachesFor, mir.BlockId(bi), base.local) {
+				continue
+			}
+			errs = append(errs, Error{
+				Loc: locInstr(f, b, ii, in),
+				Msg: fmt.Sprintf("read of %s reads a view across a loop backedge; the view must be created in the iteration that reads it or its storage must not move in the loop", valueName(f, in.Result)),
+			})
+		}
+	}
 	return errs
 }
 
-// stableParameterDomainLoopStore permits a mutable local descriptor to be
-// updated in a loop when every dynamic allocation it can name belongs to an
-// external domain that this function never resets or destroys through verified
-// MIR effects, or to a local domain that provably outlives the loop: a domain
-// created before the loop whose destroy or reset sites all lie outside the
-// loop's blocks. Repeated static allocation sites are safe in that case
-// because every produced allocation remains live for the entire call, and a
-// pre-loop local domain dies only at the function's exits. Local domains
-// created or invalidated inside the loop remain forbidden: their per-site C
-// slots and dynamic identities must not be conflated across iterations. As
-// elsewhere in the verifier, unsafe foreign code is responsible for honoring
-// the declared safe boundary.
-// stableCapabilityLoopStore is the original conservative exemption, kept for
-// capability-typed values: a local place, no destroying or resetting effect
-// anywhere in the function, no instruction-local dep, and every root owned by
-// a domain parameter.
-func stableCapabilityLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr) bool {
-	if _, ok := localPlaceKey(&in.Place); !ok {
-		return false
-	}
-	for _, yes := range effect.destroys {
-		if yes {
+// stableLoopStore permits a store inside a loop cycle whose value's domain
+// provenance is local to the function when every domain it can name survives
+// the loop: either the store writes a local place and every root is owned by a
+// domain parameter, or the owning domain is created before the loop and no
+// destroy or reset inside the loop's blocks invalidates it. Repeated static
+// allocation sites are safe in that case because every produced allocation
+// remains live for the entire call, and a pre-loop local domain dies only at
+// the function's exits. Local domains created or invalidated inside the loop
+// remain forbidden: their per-site C slots and dynamic identities must not be
+// conflated across iterations. As elsewhere in the verifier, unsafe foreign
+// code is responsible for honoring the declared safe boundary.
+//
+// A capability-typed value (a view) additionally has to be stored into a local
+// place. Its root is the domain that owns the viewed storage; that domain
+// surviving the loop is what keeps the header valid across iterations, and the
+// source-level view rules keep the storage itself alive while a view exists, so
+// the verifier's own job here is only to prevent domain identity conflation
+// across the backedge.
+func stableLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr, reaches func(from, to mir.BlockId) bool, kills []loopKill, block mir.BlockId, requireLocalPlace bool) bool {
+	if requireLocalPlace {
+		if _, ok := localPlaceKey(&in.Place); !ok {
 			return false
 		}
 	}
-	for _, yes := range effect.resets {
-		if yes {
-			return false
-		}
-	}
-	valueInfo := info[in.StoreVal]
-	for d := range valueInfo.deps {
-		if d.blk != mir.NoBlock {
-			return false
-		}
-	}
-	localRoot := false
-	for root := range valueInfo.roots {
-		if root.param >= 0 {
-			continue
-		}
-		localRoot = true
-		if int(root.handle) >= len(info) {
-			return false
-		}
-		handleInfo := info[root.handle]
-		for d := range handleInfo.deps {
-			if d.blk != mir.NoBlock {
-				return false
-			}
-		}
-		ownedByParameterDomain := false
-		for p := range handleInfo.params {
-			if p < 0 || p >= len(f.Params) || !isDomainType(m, f.Params[p].Type) {
-				return false
-			}
-			ownedByParameterDomain = true
-		}
-		if !ownedByParameterDomain {
-			return false
-		}
-	}
-	return localRoot
-}
-
-func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr, reaches func(from, to mir.BlockId) bool, kills []loopKill, block mir.BlockId) bool {
 	for _, yes := range effect.destroys {
 		if yes {
 			return false
@@ -1283,6 +1286,180 @@ func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domai
 	// outlive the loop, whether they arrive as roots or as surviving
 	// domain-identity deps (the loop-carried collection header case).
 	return true
+}
+
+// viewStorageType reports whether a type is a scoped view whose header points
+// into storage this frame does not own.
+func viewStorageType(m *mir.Module, t mir.TypeId) bool {
+	if int(t) >= len(m.Types) {
+		return false
+	}
+	switch m.Types[t].Kind {
+	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+		return true
+	}
+	return false
+}
+
+// viewBase kinds: where the storage a view header points into lives.
+const (
+	viewBaseUnknown = iota // the walk cannot name the storage
+	viewBaseLocal          // a local slot of this frame holds it
+	viewBaseStable         // storage no frame operation can relocate
+)
+
+// viewBase names the storage a view header points into.
+type viewBase struct {
+	kind  int
+	local mir.LocalId
+}
+
+// viewBaseOf walks a view value back to the storage it views. A value that
+// owns storage is its own base; a view is followed through as_slice, slice
+// range and index, and a load from a view slot follows every value stored into
+// that slot. A parameter, a constant, an allocation, and a call result are
+// storage this frame cannot relocate, so they count as stable. The walk reports
+// unknown when the storage arrives from an unclassifiable definition, the slot
+// has more than one possible base, or the chain is not one this rule follows.
+func viewBaseOf(m *mir.Module, f *mir.Function, v mir.ValueId, depth int) viewBase {
+	if depth > 16 || int(v) >= len(f.Values) {
+		return viewBase{kind: viewBaseUnknown}
+	}
+	def := f.Values[v].Def
+	switch def.Kind {
+	case mir.ValueDefFuncParam, mir.ValueDefBlockParam:
+		return viewBase{kind: viewBaseStable}
+	case mir.ValueDefSwitchCase:
+		if int(def.Block) >= len(f.Blocks) {
+			return viewBase{kind: viewBaseUnknown}
+		}
+		return viewBaseOf(m, f, f.Blocks[def.Block].Term.Value, depth+1)
+	case mir.ValueDefInstr:
+	default:
+		return viewBase{kind: viewBaseUnknown}
+	}
+	if int(def.Block) >= len(f.Blocks) || def.Instr >= len(f.Blocks[def.Block].Instrs) {
+		return viewBase{kind: viewBaseUnknown}
+	}
+	in := &f.Blocks[def.Block].Instrs[def.Instr]
+	switch in.Op {
+	case mir.OpLoad:
+		if in.Place.Kind != mir.PlaceLocal {
+			return viewBase{kind: viewBaseUnknown}
+		}
+		if !viewStorageType(m, f.Values[v].Type) {
+			return viewBase{kind: viewBaseLocal, local: in.Place.Local}
+		}
+		key, ok := localPlaceKey(&in.Place)
+		if !ok {
+			return viewBase{kind: viewBaseUnknown}
+		}
+		root, rootOK := placeRootLocal(&in.Place)
+		if !rootOK {
+			return viewBase{kind: viewBaseUnknown}
+		}
+		var found viewBase
+		any := false
+		for bi := range f.Blocks {
+			for ii := range f.Blocks[bi].Instrs {
+				store := &f.Blocks[bi].Instrs[ii]
+				if store.Op != mir.OpStore {
+					continue
+				}
+				if storeRoot, ok := placeRootLocal(&store.Place); !ok || storeRoot != root {
+					continue
+				}
+				if storeKey, ok := localPlaceKey(&store.Place); !ok || storeKey != key {
+					continue
+				}
+				base := viewBaseOf(m, f, store.StoreVal, depth+1)
+				if base.kind == viewBaseUnknown || (any && base != found) {
+					return viewBase{kind: viewBaseUnknown}
+				}
+				found = base
+				any = true
+			}
+		}
+		if any {
+			return found
+		}
+		return viewBase{kind: viewBaseUnknown}
+	case mir.OpVecAsSlice, mir.OpVecAsMutSlice, mir.OpSliceRangeChecked, mir.OpSliceIndexChecked:
+		return viewBaseOf(m, f, in.Slice, depth+1)
+	case mir.OpArrayAsSlice:
+		return viewBaseOf(m, f, in.Array, depth+1)
+	case mir.OpAlloc, mir.OpAllocChecked, mir.OpVecNew, mir.OpVecConstructChecked, mir.OpVecGrowChecked,
+		mir.OpCopyToDomain, mir.OpTableCreate, mir.OpConstGet, mir.OpCall, mir.OpCallValue:
+		return viewBase{kind: viewBaseStable}
+	}
+	return viewBase{kind: viewBaseUnknown}
+}
+
+// loopRelocatesBase reports whether a cycle that contains `block` can relocate
+// or replace the storage local `base` names: a vector grow whose operand
+// derives from it, a store into it, or a call that receives it (a callee may
+// grow storage through an exclusive argument). Element writes do not move the
+// storage and are not included.
+func loopRelocatesBase(m *mir.Module, f *mir.Function, reaches func(from, to mir.BlockId) bool, block mir.BlockId, base mir.LocalId) bool {
+	for bi := range f.Blocks {
+		if !loopSameCycle(reaches, block, mir.BlockId(bi)) {
+			continue
+		}
+		for ii := range f.Blocks[bi].Instrs {
+			in := &f.Blocks[bi].Instrs[ii]
+			switch in.Op {
+			case mir.OpVecGrowChecked:
+				if b := viewBaseOf(m, f, in.Slice, 0); b.kind == viewBaseLocal && b.local == base {
+					return true
+				}
+			case mir.OpStore:
+				if b, ok := placeRootLocal(&in.Place); ok && b == base {
+					return true
+				}
+			case mir.OpCall, mir.OpCallValue:
+				for _, arg := range in.Args {
+					if b := viewBaseOf(m, f, arg, 0); b.kind == viewBaseLocal && b.local == base {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// loopRedefinesPlace reports whether a store to the same place dominates the
+// load, which makes the read see a view created in the same iteration. A store
+// in the load's own block has to precede it.
+func loopRedefinesPlace(f *mir.Function, dom [][]bool, reaches func(from, to mir.BlockId) bool, block mir.BlockId, index int, place *mir.Place) bool {
+	key, ok := localPlaceKey(place)
+	if !ok {
+		return false
+	}
+	for bi := range f.Blocks {
+		if !loopSameCycle(reaches, block, mir.BlockId(bi)) {
+			continue
+		}
+		for ii := range f.Blocks[bi].Instrs {
+			in := &f.Blocks[bi].Instrs[ii]
+			if in.Op != mir.OpStore {
+				continue
+			}
+			if storeKey, ok := localPlaceKey(&in.Place); !ok || storeKey != key {
+				continue
+			}
+			if mir.BlockId(bi) == block {
+				if ii < index {
+					return true
+				}
+				continue
+			}
+			if loopInBody(dom, mir.BlockId(bi), block) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func hasLocalDomainProvenance(i domainInfo) bool {

@@ -1,0 +1,210 @@
+mir 5
+
+const @lit.seq12582913: u64 = 0
+
+const @lit.seq12582914: u64 = 4
+
+const @lit.seq12582915: u64 = 2
+
+const @lit.seq12582916: u64 = 1
+
+const @lit7: u64 = 1
+
+const @lit.seq12582918: u64 = 0
+
+const @lit.seq12582919: u64 = 4
+
+const @lit.seq12582920: u64 = 2
+
+const @lit.seq12582921: u64 = 1
+
+const @lit13: u64 = 0
+
+const @lit14: u64 = 0
+
+const @lit16: u64 = 3
+
+const @lit19: u64 = 0
+
+const @lit20: u64 = 2
+
+const @lit27: u64 = 1
+
+const @lit30: u64 = 2
+
+const @lit32: u64 = 6
+
+const @lit34: i32 = 0
+
+const @lit35: i32 = 1
+
+fn @one(%__domain: domain_handle, %n: u64) -> vec(u64) {
+  local %v: vec(u64)
+
+bb0:
+  %v5 = domain.create %__domain
+  %v6 = vec.new vec(u64)
+  store local %v, %v6
+  %v7 = load local %v
+  %v8 = vec.len %v7
+  %v9 = vec.capacity %v7
+  %v10 = int.eq %v8, %v9
+  branch %v10, bb_vec_grow2, bb_vec_keep3
+
+bb_panic:
+  domain.destroy %v5
+  panic
+
+bb_vec_grow2:
+  %v12 = const.get @lit.seq12582913
+  %v13 = int.eq %v9, %v12
+  branch %v13, bb_vec_initial_capacity5, bb_vec_double_capacity6
+
+bb_vec_keep3:
+  jump bb_vec_ready4(%v7)
+
+bb_vec_ready4(%__m71_vec_5: vec(u64)):
+  %v19 = vec.storage %__m71_vec_5
+  %v20 = slice.index.checked %v19, %v8 else bb_panic
+  store deref %v20, %n
+  %v21 = const.get @lit.seq12582916
+  %v22 = int.add.checked %v8, %v21 else bb_panic
+  %v23 = vec.capacity %__m71_vec_5
+  %v24 = vec.construct.checked %v19, %v22, %v23 else bb_panic
+  store local %v, %v24
+  %v25 = load local %v
+  %v26 = const.get @lit7
+  %v27 = int.add.checked %n, %v26 else bb_panic
+  %v28 = vec.len %v25
+  %v29 = vec.capacity %v25
+  %v30 = int.eq %v28, %v29
+  branch %v30, bb_vec_grow8, bb_vec_keep9
+
+bb_vec_initial_capacity5:
+  %v15 = const.get @lit.seq12582914
+  jump bb_vec_capacity7(%v15)
+
+bb_vec_double_capacity6:
+  %v16 = const.get @lit.seq12582915
+  %v17 = int.mul.checked %v9, %v16 else bb_panic
+  jump bb_vec_capacity7(%v17)
+
+bb_vec_capacity7(%__m71_capacity_8: u64):
+  %v18 = vec.grow.checked %v7, %v5, %__m71_capacity_8 else bb_panic
+  jump bb_vec_ready4(%v18)
+
+bb_vec_grow8:
+  %v32 = const.get @lit.seq12582918
+  %v33 = int.eq %v29, %v32
+  branch %v33, bb_vec_initial_capacity11, bb_vec_double_capacity12
+
+bb_vec_keep9:
+  jump bb_vec_ready10(%v25)
+
+bb_vec_ready10(%__m71_vec_11: vec(u64)):
+  %v39 = vec.storage %__m71_vec_11
+  %v40 = slice.index.checked %v39, %v28 else bb_panic
+  store deref %v40, %v27
+  %v41 = const.get @lit.seq12582921
+  %v42 = int.add.checked %v28, %v41 else bb_panic
+  %v43 = vec.capacity %__m71_vec_11
+  %v44 = vec.construct.checked %v39, %v42, %v43 else bb_panic
+  store local %v, %v44
+  %v45 = load local %v
+  %v46 = copy_to_domain %__domain, %v45
+  domain.destroy %v5
+  return %v46
+
+bb_vec_initial_capacity11:
+  %v35 = const.get @lit.seq12582919
+  jump bb_vec_capacity13(%v35)
+
+bb_vec_double_capacity12:
+  %v36 = const.get @lit.seq12582920
+  %v37 = int.mul.checked %v29, %v36 else bb_panic
+  jump bb_vec_capacity13(%v37)
+
+bb_vec_capacity13(%__m71_capacity_14: u64):
+  %v38 = vec.grow.checked %v25, %v5, %__m71_capacity_14 else bb_panic
+  jump bb_vec_ready10(%v38)
+}
+
+fn @f(%__domain: domain_handle, %n: u64) -> u64 {
+  local %v: vec(u64)
+  local %total: u64
+  local %i: u64
+  local %s: slice(u64)
+
+bb0:
+  %v48 = domain.create %__domain
+  %v49 = call @one(%v48, %n)
+  store local %v, %v49
+  %v50 = const.get @lit13
+  store local %total, %v50
+  %v51 = const.get @lit14
+  store local %i, %v51
+  jump bb_head2
+
+bb_panic:
+  domain.destroy %v48
+  panic
+
+bb_head2:
+  %v52 = load local %i
+  %v53 = const.get @lit16
+  %v54 = int.lt %v52, %v53
+  branch %v54, bb_body3, bb_join4
+
+bb_body3:
+  %v55 = load local %v
+  %v56 = const.get @lit19
+  %v57 = const.get @lit20
+  %v58 = vec.as_slice %v55
+  %v59 = slice.range.checked %v58, %v56, %v57 else bb_panic
+  store local %s, %v59
+  %v60 = load local %total
+  %v61 = load local %s
+  %v62 = slice.len %v61
+  %v63 = int.add.checked %v60, %v62 else bb_panic
+  store local %total, %v63
+  %v64 = load local %i
+  %v65 = const.get @lit27
+  %v66 = int.add.checked %v64, %v65 else bb_panic
+  store local %i, %v66
+  jump bb_head2
+
+bb_join4:
+  %v67 = load local %total
+  %v68 = copy_to_domain %__domain, %v67
+  domain.destroy %v48
+  return %v68
+}
+
+fn @main(%__domain: domain_handle) -> i32 {
+bb0:
+  %v69 = domain.create %__domain
+  %v70 = const.get @lit30
+  %v71 = call @f(%v69, %v70)
+  %v72 = const.get @lit32
+  %v73 = int.eq %v71, %v72
+  branch %v73, bb_then2, bb_else3
+
+bb_panic:
+  domain.destroy %v69
+  panic
+
+bb_then2:
+  %v74 = const.get @lit34
+  %v75 = copy_to_domain %__domain, %v74
+  domain.destroy %v69
+  return %v75
+
+bb_else3:
+  jump bb_join4
+
+bb_join4:
+  %v76 = const.get @lit35
+  %v77 = copy_to_domain %__domain, %v76
+  domain.destroy %v69
+  return %v77
+}

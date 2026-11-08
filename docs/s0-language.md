@@ -188,6 +188,14 @@ work in progress:
   carries the domain that owns it, and a closure with no captures takes the
   caller's domain as its leading hidden parameter, like a named function
   value. A body may therefore copy or allocate storage and return it.
+- A view created in a loop iteration is created and read inside that
+  iteration, so nothing crosses the backedge: `let s = v.slice(0, 2)` in a
+  `while` or `for` body, a view of a vector the loop reassigns, and a
+  table-view arm (`match t.get(id)` or `match t.get_mut(id)`) inside a loop
+  body all work. A view cannot be *assigned* inside a loop body, because the
+  target slot survives the backedge and the next iteration could read a
+  header the loop has since relocated; bind the view where it is created.
+  Diagnostic 154 rejects the assignment.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
   with diagnostic 147; a closure that captures a scoped capability and

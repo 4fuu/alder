@@ -1,0 +1,59 @@
+mir 5
+
+const @zero_u64: u64 = 0
+const @one_u64: u64 = 1
+const @three_u64: u64 = 3
+const @cap_u64: u64 = 4
+
+fn @f(%root: domain_handle) -> u64 {
+  local %v: vec(u64)
+  local %s: slice(u64)
+  local %total: u64
+  local %i: u64
+
+bb0:
+  %d = domain.create %root
+  %empty = vec.new vec(u64)
+  store local %v, %empty
+  %base = load local %v
+  %lo = const.get @zero_u64
+  %hi = const.get @one_u64
+  %all = vec.as_slice %base
+  %view = slice.range.checked %all, %lo, %hi else bb_panic
+  store local %s, %view
+  %zero = const.get @zero_u64
+  store local %total, %zero
+  store local %i, %zero
+  jump bb_head
+
+bb_panic:
+  domain.destroy %d
+  panic
+
+bb_head:
+  %count = load local %i
+  %limit = const.get @three_u64
+  %more = int.lt %count, %limit
+  branch %more, bb_body, bb_done
+
+bb_body:
+  %sum = load local %total
+  %read = load local %s
+  %len = slice.len %read
+  %next_sum = int.add.checked %sum, %len else bb_panic
+  store local %total, %next_sum
+  %owner = load local %v
+  %cap = const.get @cap_u64
+  %grown = vec.grow.checked %owner, %d, %cap else bb_panic
+  store local %v, %grown
+  %step = load local %i
+  %one = const.get @one_u64
+  %next_step = int.add.checked %step, %one else bb_panic
+  store local %i, %next_step
+  jump bb_head
+
+bb_done:
+  %out = load local %total
+  domain.destroy %d
+  return %out
+}

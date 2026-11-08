@@ -118,6 +118,84 @@ func m73LayeredProgram(depth int) string {
 	return builder.String()
 }
 
+// A view created per iteration is created and read inside the same iteration,
+// so nothing crosses the loop backedge: the loop rule accepts it because every
+// read is dominated by a store in the same cycle, and a view whose owner is
+// reassigned in the loop stays valid because it is re-created first. The table
+// shapes read a row through a view arm and write one through get_mut each
+// iteration.
+const m73LoopViewProgram = `type Player {
+    age: U64
+}
+fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    return v
+}
+fn while_views(seed: U64) -> U64 {
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        let v = one(seed + i)
+        let s = v.slice(0, 2)
+        total = total + s.len() + s[0]
+        i = i + 1
+    }
+    return total
+}
+fn for_views(seed: U64) -> U64 {
+    let items = one(seed)
+    let other = one(seed + 10)
+    var total: U64 = 0
+    for x in items {
+        let s = other.slice(0, 2)
+        total = total + x + s.len()
+    }
+    return total
+}
+fn reassigned_owner(seed: U64) -> U64 {
+    var v = one(seed)
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        let s = v.slice(0, 2)
+        total = total + s.len() + s[1]
+        v = one(seed + i)
+        i = i + 1
+    }
+    return total
+}
+fn table_loop(seed: U64) -> U64 {
+    using players = Table.new(Player)
+    let first = players.insert(Player(age: seed))
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        total = total + match players.get(first) {
+            Some(p) => p.age
+            None => 0
+        }
+        match players.get_mut(first) {
+            Some(p) => { p.age = i }
+            None => {}
+        }
+        i = i + 1
+    }
+    return total + match players.get(first) {
+        Some(p) => p.age
+        None => 0
+    }
+}
+fn main() -> I32 {
+    if while_views(10) != 39 { return 1 }
+    if for_views(10) != 25 { return 2 }
+    if reassigned_owner(10) != 40 { return 3 }
+    if table_loop(5) != 8 { return 4 }
+    return 0
+}
+`
+
 func runM73ProductionProgram(t *testing.T, exe, object, root, name, text string) {
 	t.Helper()
 	files := map[string]string{name: text}
@@ -159,6 +237,10 @@ func TestM73StorageProductionQualification(t *testing.T) {
 	t.Run("generic-monomorphization", func(t *testing.T) {
 		t.Parallel()
 		runM73ProductionProgram(t, exe, runtimeObject, root, "generic.al", m73GenericProgram)
+	})
+	t.Run("loop-views", func(t *testing.T) {
+		t.Parallel()
+		runM73ProductionProgram(t, exe, runtimeObject, root, "loopviews.al", m73LoopViewProgram)
 	})
 	t.Run("layered-retention", func(t *testing.T) {
 		t.Parallel()
@@ -225,6 +307,7 @@ func TestM73StorageProductionQualification(t *testing.T) {
 		// Diagnostic 101 must keep its own meaning in ordinary programs; it
 		// once shared a message with the private bootstrap-operation gate.
 		{"immutable-vec-receiver-push.al", "checker diagnostic 101", "fn add(values: Vec(U64)) -> I32 {\n    values.push(1)\n    return 0\n}\nfn main() -> I32 { return 0 }\n"},
+		{"view-assigned-in-loop.al", "a view cannot be assigned inside a loop body", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    var s = v.slice(0, 1)\n    var total: U64 = 0\n    var i: U64 = 0\n    while i < 3 {\n        s = v.slice(0, 1)\n        total = total + s.len()\n        i = i + 1\n    }\n    return total\n}\nfn main() -> I32 { return 0 }\n"},
 		{"overlapping-mutable-views.al", "exclusive or owning access", "fn main() -> I32 {\n    var values: Array(U64, 3) = [1, 2, 3]\n    var left: MutSlice(U64) = values.slice_mut(0, 2)\n    var right: MutSlice(U64) = values.slice_mut(1, 3)\n    return 0\n}\n"},
 	}
 	for _, tc := range rejections {

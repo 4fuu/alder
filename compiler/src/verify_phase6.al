@@ -1718,31 +1718,16 @@ while at < end { let x = mir_v6_fact_at(analysis, at)
 if (x.kind == mir_v6_fact_dep() && x.a != 0) || (x.kind == mir_v6_fact_root() && x.b != 0) { return true }
 at = at + 1 }
 return false }
-fn mir_v6_capability_loop_store(store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, function: U64, value: U64, place: U64) -> Bool {
-if mir_v6_place_deref(store, place) { return false }
-var e0 = mir_v6_effect_start(analysis, function)
-let e0end = mir_v6_effect_end(analysis, function)
-while e0 < e0end { let effect = mir_v6_effect_at(analysis, e0)
-if effect.kind == mir_v6_effect_destroy() || effect.kind == mir_v6_effect_reset() { return false }
-e0 = e0 + 1 }
-var f0 = mir_v6_fact_start(analysis, function, value)
-let f0end = mir_v6_fact_end(analysis, function, value)
-while f0 < f0end { let fact = mir_v6_fact_at(analysis, f0)
-if fact.kind == mir_v6_fact_dep() && fact.a != 0 { return false }
-if fact.kind == mir_v6_fact_root() && fact.b != 0 {
-var parameter_domain = false
-var h0 = mir_v6_fact_start(analysis, function, fact.a)
-let h0end = mir_v6_fact_end(analysis, function, fact.a)
-while h0 < h0end { let owner = mir_v6_fact_at(analysis, h0)
-if owner.kind == mir_v6_fact_dep() && owner.a != 0 { return false }
-if owner.kind == mir_v6_fact_param() { let vi = mir_vindex_value(indexes, function, fact.a)
-if vi != 0 && mir_vtype_kind(store, __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type) == mir_type_kind_domain_handle() { parameter_domain = true } }
-h0 = h0 + 1 }
-if !parameter_domain { return false } }
-f0 = f0 + 1 }
-return true }
-
-fn mir_v6_stable_loop_store(store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), function: U64, value: U64, place: U64, block: U64) -> Bool {
+// mir_v6_stable_loop_store permits a store inside a loop cycle whose value's
+// domain provenance is local to the function when every domain it can name
+// survives the loop: either the store writes a local place and every root is
+// owned by a domain parameter, or the owning domain is created before the loop
+// and no destroy or reset inside the loop's blocks invalidates it. A
+// capability-typed value (a view) additionally has to be stored into a local
+// place; its root is the domain that owns the viewed storage, and the view
+// read rule below keeps a header from surviving into a later iteration.
+fn mir_v6_stable_loop_store(store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), function: U64, value: U64, place: U64, block: U64, require_local_place: Bool) -> Bool {
+if require_local_place && mir_v6_place_deref(store, place) { return false }
 var e = mir_v6_effect_start(analysis, function)
 let eend = mir_v6_effect_end(analysis, function)
 while e < eend { let effect = mir_v6_effect_at(analysis, e)
@@ -1766,6 +1751,167 @@ if (owner.kind == mir_v6_fact_dep() || owner.kind == mir_v6_fact_parent()) && mi
 h = h + 1 } }
 f = f + 1 }
 return true }
+
+// mir_v6_view_storage_type reports whether a type is a scoped view whose header
+// points into storage the frame does not own.
+fn mir_v6_view_storage_type(store: MirStore, type_id: U64) -> Bool {
+    if type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return false }
+    let kind = __s0_buffer_get(MirTypeRec, store.types, type_id - 1).kind
+    return kind == mir_type_kind_slice() || kind == mir_type_kind_safe_ref() || kind == mir_type_kind_safe_mut()
+}
+
+// mir_v6_places_same reports whether two non-deref places name the same slot
+// with the same projection path.
+fn mir_v6_places_same(store: MirStore, indexes: MirVIndexes, a: U64, b: U64) -> Bool {
+    if a == 0 || b == 0 { return false }
+    if mir_vindex_place_deref(indexes, a) || mir_vindex_place_deref(indexes, b) { return false }
+    if __s0_buffer_get(U64, indexes.place_root, a - 1) != __s0_buffer_get(U64, indexes.place_root, b - 1) { return false }
+    let depth = mir_vindex_place_depth(indexes, a)
+    if depth != mir_vindex_place_depth(indexes, b) { return false }
+    var n: U64 = 0
+    while n < depth {
+        let ap = __s0_buffer_get(MirPlaceRec, store.places, mir_vp4_place_component(store, a, n) - 1)
+        let bp = __s0_buffer_get(MirPlaceRec, store.places, mir_vp4_place_component(store, b, n) - 1)
+        if !mir_vname_equal(store, ap.field_start, ap.field_end, bp.field_start, bp.field_end) { return false }
+        n = n + 1
+    }
+    return true
+}
+
+// mir_v6_view_base walks a view value back to the storage it views. The
+// result is 0 when the walk cannot name the storage, 1 when the storage is one
+// this frame cannot relocate (a parameter, a constant, an allocation, or a call
+// result), and local + 2 when a local slot of this frame holds it. A view is
+// followed through as_slice, slice range and index, a switch payload through
+// its scrutinee, and a load from a view slot through every value stored into
+// that slot.
+fn mir_v6_view_base(store: MirStore, indexes: MirVIndexes, function: U64, value: U64, depth: U64) -> U64 {
+    if depth > 16 { return 0 }
+    let vi = mir_vindex_value(indexes, function, value)
+    if vi == 0 { return 0 }
+    let rec = __s0_buffer_get(MirValueRec, store.values, vi - 1)
+    if rec.def_kind == mir_value_def_function_param() || rec.def_kind == mir_value_def_block_param() { return 1 }
+    if rec.def_kind == mir_value_def_switch_case() {
+        let term_id = mir_vindex_term(indexes, function, rec.block)
+        if term_id == 0 { return 0 }
+        let term = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+        return mir_v6_view_base(store, indexes, function, term.value, depth + 1)
+    }
+    if rec.def_kind != mir_value_def_instruction() { return 0 }
+    let iid = mir_v6_instruction_for_value(store, indexes, rec)
+    if iid == 0 { return 0 }
+    let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+    if x.op == mir_op_load() {
+        let place = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
+        if place.kind != mir_place_local() { return 0 }
+        if !mir_v6_view_storage_type(store, rec.value_type) { return place.local + 2 }
+        var found: U64 = 0
+        var any = false
+        let slot_root = __s0_buffer_get(U64, indexes.place_root, x.place - 1)
+        let bcount = mir_vindex_block_count(indexes, function)
+        var b: U64 = 1
+        while b <= bcount {
+            let icount = mir_vindex_instr_count(indexes, function, b)
+            var ii: U64 = 0
+            while ii < icount {
+                let sid = mir_vindex_instr(indexes, function, b, ii)
+                let st = __s0_buffer_get(MirInstrRec, store.instructions, sid - 1)
+                if st.op == mir_op_store() && __s0_buffer_get(U64, indexes.place_root, st.place - 1) == slot_root && mir_v6_places_same(store, indexes, st.place, x.place) {
+                    let base = mir_v6_view_base(store, indexes, function, st.a, depth + 1)
+                    if base == 0 || (any && base != found) { return 0 }
+                    found = base
+                    any = true
+                }
+                ii = ii + 1
+            }
+            b = b + 1
+        }
+        if any { return found }
+        return 0
+    }
+    if x.op == mir_op_vec_as_slice() || x.op == mir_op_vec_as_mut_slice() || x.op == mir_op_slice_range_checked() || x.op == mir_op_slice_index_checked() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }
+    if x.op == mir_op_array_as_slice() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }
+    if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_vec_new() || x.op == mir_op_vec_construct_checked() || x.op == mir_op_vec_grow_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_const_get() || x.op == mir_op_call() || x.op == mir_op_call_value() { return 1 }
+    return 0
+}
+
+// mir_v6_loop_relocates_base reports whether a cycle that contains `block` can
+// relocate or replace the storage local `base` names: a vector grow whose
+// operand derives from it, a store into it, or a call that receives it (a
+// callee may grow storage through an exclusive argument). Element writes do not
+// move the storage and are not included.
+fn mir_v6_loop_relocates_base(store: MirStore, indexes: MirVIndexes, reach: MirV6Reachability, function: U64, block: U64, base: U64) -> Bool {
+    let bcount = mir_vindex_block_count(indexes, function)
+    var b: U64 = 1
+    while b <= bcount {
+        if mir_v6_loop_same_cycle(reach, block, b) {
+            let icount = mir_vindex_instr_count(indexes, function, b)
+            var ii: U64 = 0
+            while ii < icount {
+                let iid = mir_vindex_instr(indexes, function, b, ii)
+                let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+                if x.op == mir_op_vec_grow_checked() {
+                    if mir_v6_view_base(store, indexes, function, x.a, 0) == base + 2 { return true }
+                }
+                if x.op == mir_op_store() {
+                    if __s0_buffer_get(U64, indexes.place_root, x.place - 1) == base { return true }
+                }
+                if x.op == mir_op_call() {
+                    var oi: U64 = 0
+                    var arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, oi)
+                    while arg != 0 {
+                        if mir_v6_view_base(store, indexes, function, arg, 0) == base + 2 { return true }
+                        oi = oi + 1
+                        arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, oi)
+                    }
+                }
+                ii = ii + 1
+            }
+        }
+        b = b + 1
+    }
+    return false
+}
+
+// mir_v6_loop_redefines_place reports whether a store to the same place
+// dominates the load, which makes the read see a view created in the same
+// iteration. A store in the load's own block has to precede it.
+fn mir_v6_loop_redefines_place(store: MirStore, indexes: MirVIndexes, reach: MirV6Reachability, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, block: U64, ordinal: U64, place: U64) -> Bool {
+    let bcount = mir_vindex_block_count(indexes, function)
+    var b: U64 = 1
+    while b <= bcount {
+        if mir_v6_loop_same_cycle(reach, block, b) {
+            let icount = mir_vindex_instr_count(indexes, function, b)
+            var ii: U64 = 0
+            while ii < icount {
+                let sid = mir_vindex_instr(indexes, function, b, ii)
+                let st = __s0_buffer_get(MirInstrRec, store.instructions, sid - 1)
+                if st.op == mir_op_store() && mir_v6_places_same(store, indexes, st.place, place) {
+                    if b == block {
+                        if ii < ordinal { return true }
+                    } else {
+                        if mir_v6_loop_in_body(cfg, dom, b, block) { return true }
+                    }
+                }
+                ii = ii + 1
+            }
+        }
+        b = b + 1
+    }
+    return false
+}
+
+// mir_v6_value_parameter_rooted reports whether a value's provenance includes
+// a root that arrives from outside the frame.
+fn mir_v6_value_parameter_rooted(analysis: MirV6Analysis, function: U64, value: U64) -> Bool {
+    var f = mir_v6_fact_start(analysis, function, value)
+    let fend = mir_v6_fact_end(analysis, function, value)
+    while f < fend { let fact = mir_v6_fact_at(analysis, f)
+        if fact.kind == mir_v6_fact_root() && fact.a != 0 && fact.b == 0 { return true }
+        f = f + 1 }
+    return false
+}
+
 fn mir_v6_escapes_local(analysis: MirV6Analysis, function: U64, value: U64) -> Bool { var r = mir_v6_fact_start(analysis, function, value)
 let rend = mir_v6_fact_end(analysis, function, value)
 while r < rend { let root = mir_v6_fact_at(analysis, r)
@@ -1895,18 +2041,52 @@ while b2 <= bcount {
             var stable = false
             let value_type = mir_vindex_value(indexes, function, x.a)
             if value_type != 0 {
-                if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, __s0_buffer_get(MirValueRec, store.values, value_type - 1).value_type) {
-                    stable = mir_v6_stable_loop_store(store, indexes, analysis, reach, kills, function, x.a, x.place, x.block) } else {
-                    // Capability-typed values keep the original conservative
-                    // exemption: parameter-domain ownership with no
-                    // destroying effect anywhere in the function.
-                    stable = mir_v6_capability_loop_store(store, indexes, analysis, function, x.a, x.place) }
+                // A capability-typed value must be stored into a local place;
+                // an owner may also be stored through a projection. The
+                // stability test is the same for both.
+                var require_local_place = true
+                if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, __s0_buffer_get(MirValueRec, store.values, value_type - 1).value_type) { require_local_place = false }
+                stable = mir_v6_stable_loop_store(store, indexes, analysis, reach, kills, function, x.a, x.place, x.block, require_local_place)
             }
 
             if !stable { out = try mir_v6_bad(d, out, mir_vdiag_loop_store_resource(), function, x.block, iid, 0, x.place, x.a) } }
         ii = ii + 1
     }
     b2 = b2 + 1
+}
+// A view read inside a loop must be redefined in the same iteration, or the
+// loop must not be able to move the storage it views. A view header is not an
+// owning value: a later iteration that reads a header stored by an earlier one
+// dangles as soon as the loop grows, removes from, or replaces the owner, and
+// the domain surviving the loop does not prevent that.
+var b3: U64 = 1
+while b3 <= bcount {
+    if mir_v6_reach_has(reach, b3, b3) {
+        let icount3 = mir_vindex_instr_count(indexes, function, b3)
+        var i3: U64 = 0
+        while i3 < icount3 {
+            let iid3 = mir_vindex_instr(indexes, function, b3, i3)
+            let x3 = __s0_buffer_get(MirInstrRec, store.instructions, iid3 - 1)
+            if x3.op == mir_op_load() && !mir_v6_place_deref(store, x3.place) {
+                let vi3 = mir_vindex_value(indexes, function, x3.result)
+                if vi3 != 0 {
+                    let vt3 = __s0_buffer_get(MirValueRec, store.values, vi3 - 1).value_type
+                    if mir_v6_view_storage_type(store, vt3) {
+                        var accepted = mir_v6_value_parameter_rooted(analysis, function, x3.result)
+                        if !accepted { accepted = mir_v6_loop_redefines_place(store, indexes, reach, cfg, dom, function, b3, i3, x3.place) }
+                        if !accepted {
+                            let base = mir_v6_view_base(store, indexes, function, x3.result, 0)
+                            if base == 1 { accepted = true }
+                            if base > 1 && !mir_v6_loop_relocates_base(store, indexes, reach, function, b3, base - 2) { accepted = true }
+                        }
+                        if !accepted { out = try mir_v6_bad(d, out, mir_vdiag_loop_view_read(), function, b3, iid3, 0, x3.place, x3.result) }
+                    }
+                }
+            }
+            i3 = i3 + 1
+        }
+    }
+    b3 = b3 + 1
 }
 return Ok(out) }
 fn mir_vphase6_with(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, analysis: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = initial

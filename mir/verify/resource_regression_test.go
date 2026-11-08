@@ -550,14 +550,21 @@ failed:
 	})
 
 	t.Run("slice load in loop across backedge still rejected", func(t *testing.T) {
+		// The view is re-materialized inside the loop, but the read at the loop
+		// head sees the header stored by the previous iteration, and the loop
+		// grows the storage that header points into.
 		requireRejectedWith(t, `mir 4
 fn @f(%root: domain_handle, %n: u64, %again: bool) {
   local %view: slice(u8)
 entry:
   %d = domain.create %root
   %p = alloc %d, slice(u8), %n
+  %s0 = load deref %p
+  store local %view, %s0
   jump loop
 loop:
+  %early = load local %view
+  %len = slice.len %early
   %s = load deref %p
   store local %view, %s
   branch %again, loop, done
@@ -565,7 +572,7 @@ done:
   domain.destroy %d
   return
 }
-`, "carries a function-local domain handle or reference across a loop backedge")
+`, "reads a view across a loop backedge")
 	})
 
 	t.Run("parallel edges retain every argument", func(t *testing.T) {

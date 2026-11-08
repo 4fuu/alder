@@ -7629,6 +7629,11 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
     }
     if draft.deferred { return body_token_fail(d, state, ostore, 87, rhs) }
     if __s0_buffer_get(CheckedTypeRec, ostore.types, place.checked_type - 1).kind == 18 { return body_token_fail(d, state, ostore, 104, statement) }
+    // A view of frame-local storage assigned inside a loop body would put a
+    // header into a slot that survives the backedge, where the next iteration
+    // could read it after the loop relocated or replaced the storage. Bind a
+    // view in the iteration that creates it instead.
+    if in_loop && expression_is_view_expression(ostore, draft.expression) { return body_token_fail(d, state, ostore, 154, statement) }
     return append_checked_statement(d, ostore, owner, statement_id, 3, environment, draft.expression, place.place, 0, 0, 0, false)
 }
 
@@ -8539,6 +8544,18 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
     let after_bodies = check_result_store(bodies)
     if check_result_bad(bodies) { return Ok(bodies) }
     return check_deferred_bodies(d, state, parse, after_bodies, __s0_buffer_len(SymbolRec, after_bodies.symbols))
+}
+
+// expression_is_view_expression reports whether an expression is a builtin
+// view over a sequence (`.slice`, `.slice_mut`, or `.subview`), whose header
+// points into storage this frame owns.
+fn expression_is_view_expression(store: CheckStore, expression_id: U64) -> Bool {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind != 18 || expression.annotation == 0 { return false }
+    if expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+    return annotation.builtin == 23 || annotation.builtin == 24 || annotation.builtin == 25
 }
 
 // expression_is_indirect_call reports whether an expression is an indirect

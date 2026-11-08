@@ -86,6 +86,7 @@ fn mir_vdiag_duplicate_entry() -> U64 { return 71 }
 fn mir_vdiag_entry_result() -> U64 { return 72 }
 fn mir_vdiag_entry_signature() -> U64 { return 73 }
 fn mir_vdiag_copy_source_type() -> U64 { return 74 }
+fn mir_vdiag_loop_view_read() -> U64 { return 75 }
 // All IDs use the frozen external 1-based contract. Zero means no context.
 // detail fields are append-only small numeric expected/actual/reference facts.
 type MirVerifyDiagRec {

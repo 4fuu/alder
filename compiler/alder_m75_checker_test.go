@@ -436,6 +436,56 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"loop-views.al": `fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    return v
+}
+
+fn while_views(seed: U64) -> U64 {
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        let v = one(seed + i)
+        let s = v.slice(0, 2)
+        total = total + s.len() + s[0]
+        i = i + 1
+    }
+    return total
+}
+
+fn for_views(seed: U64) -> U64 {
+    let items = one(seed)
+    let other = one(seed + 10)
+    var total: U64 = 0
+    for x in items {
+        let s = other.slice(0, 2)
+        total = total + x + s.len()
+    }
+    return total
+}
+
+fn reassigned_owner(seed: U64) -> U64 {
+    var v = one(seed)
+    var total: U64 = 0
+    var i: U64 = 0
+    while i < 3 {
+        let s = v.slice(0, 2)
+        total = total + s.len() + s[1]
+        v = one(seed + i)
+        i = i + 1
+    }
+    return total
+}
+
+fn main() -> I32 {
+    if while_views(10) != 39 { return 1 }
+    if for_views(10) != 25 { return 2 }
+    if reassigned_owner(10) != 40 { return 3 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -525,6 +575,7 @@ fn main() -> I32 {
 		{"closure-slice-forward-retain", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn keep(f: fn() -> U64) -> U64 {\n    var ks = Vec.new(fn() -> U64)\n    ks.push(f)\n    return ks.len()\n}\nfn forward(f: fn() -> U64) -> U64 {\n    return keep(f)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    return forward(g)\n}\nfn main() -> I32 { return 0 }\n", 152},
 		{"closure-slice-indirect-argument", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn indirect(ff: fn(fn() -> U64) -> U64, f: fn() -> U64) -> U64 {\n    return ff(f)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    let call = fn(h: fn() -> U64) -> U64 { return h() }\n    return indirect(call, g)\n}\nfn main() -> I32 { return 0 }\n", 152},
 		{"closure-slice-recursive-retain", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn keep_all(f: fn() -> U64, n: U64) -> U64 {\n    var ks = Vec.new(fn() -> U64)\n    ks.push(f)\n    if n == 0 { return ks.len() }\n    return keep_all(f, n - 1)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    return keep_all(g, 2)\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"view-assigned-in-loop", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    var s = v.slice(0, 1)\n    var total: U64 = 0\n    var i: U64 = 0\n    while i < 3 {\n        s = v.slice(0, 1)\n        total = total + s.len()\n        i = i + 1\n    }\n    return total\n}\nfn main() -> I32 { return 0 }\n", 154},
 		{"closure-slice-in-loop", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    var i: U64 = 0\n    while i < 2 {\n        let g = fn() -> U64 { return s.len() }\n        let n = g()\n        i = i + 1\n    }\n    return 0\n}\n", 153},
 		{"closure-affine-capture", "type Res {\n    n: U64\n}\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn capture(r: Res) -> fn() -> U64 {\n    let g = fn() -> U64 { return r.n }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
