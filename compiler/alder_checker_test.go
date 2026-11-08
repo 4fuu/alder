@@ -191,7 +191,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m75-tables", func(t *testing.T) { runAlderM75TableCheckerBehavior(t, exe) })
 	t.Run("m75-guards", func(t *testing.T) { runAlderM75GuardCheckerBehavior(t, exe) })
 	t.Run("m75-vecs", func(t *testing.T) { runAlderM75VecCheckerBehavior(t, exe) })
-	for _, fixture := range []string{"basic", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
+	for _, fixture := range []string{"basic", "else-if", "generics", "match", "try", "cleanup", "ffi", "buffer"} {
 		t.Run("shared-accept-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "accept", fixture+".al"))
 			if err != nil {

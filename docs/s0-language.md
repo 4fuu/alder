@@ -280,7 +280,7 @@ Implemented statements:
 
 ```text
 let, var, assignment
-if / else
+if / else if / else
 while
 for name in slice
 return
@@ -289,6 +289,9 @@ using name = value
 block
 match expression statement
 ```
+
+An `else if` chain is an `else` whose block holds one nested `if` statement, so
+a chain obeys the ordinary block and statement rules at every level.
 
 The second `using` form is the M7.5 public surface: it accepts a `Table(T)`
 owner (registering the builtin release), any affine nominal type implementing

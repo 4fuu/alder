@@ -488,6 +488,15 @@ func (p *parser) parseIf() (Stmt, error) {
 	s := &IfStmt{P: tokenPos(t), Cond: cond, Then: then}
 	if p.cur().kind == tokIdent && p.cur().kw == kwElse {
 		p.advance()
+		if p.cur().kind == tokIdent && p.cur().kw == kwIf {
+			// `else if` is an else whose block holds one nested if statement.
+			nested, err := p.parseIf()
+			if err != nil {
+				return nil, err
+			}
+			s.Else = &Block{P: nested.stmtPos(), Stmts: []Stmt{nested}}
+			return s, nil
+		}
 		elseB, err := p.parseBlock()
 		if err != nil {
 			return nil, err

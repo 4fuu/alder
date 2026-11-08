@@ -14,6 +14,7 @@ import (
 // acceptFixtures compile to verified MIR whose printed form is pinned.
 var acceptFixtures = []string{
 	"basic",
+	"else-if",
 	"generics",
 	"match",
 	"try",

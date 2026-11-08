@@ -817,7 +817,23 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         var end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
         if kind == 32 && parse_token(state, cursor).keyword == 8 {
-            let alternative = try parse_block(d, state, ParseCursor(token: cursor.token + 1, store: cursor.store))
+            let else_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            var alternative: ParseStep = Rejected(else_cursor)
+            if parse_token(state, else_cursor).keyword == 7 {
+                // `else if` is an else whose block holds one nested if
+                // statement; the chain nests through this same rule.
+                let nested = try parse_statement(d, state, else_cursor)
+                if parse_step_bad(nested) { return Ok(nested) }
+                let nv = parse_step_value(nested)
+                let nested_end = __s0_buffer_get(SyntaxRec, nv.cursor.store.nodes, nv.node - 1).end
+                let if_token = parse_token(state, else_cursor)
+                var block_cursor = try add_link(d, ParseCursor(token: nv.cursor.token, store: nv.cursor.store), nv.node, 0)
+                let block_children = __s0_buffer_len(SyntaxLinkRec, block_cursor.store.links)
+                let block_node = try add_syntax(d, block_cursor, 14, else_cursor.token + 1, if_token.source, if_token.start, nested_end, 0, 0, block_children)
+                alternative = Parsed(block_node)
+            } else {
+                alternative = try parse_block(d, state, else_cursor)
+            }
             if parse_step_bad(alternative) { return Ok(alternative) }
             let av = parse_step_value(alternative)
             cursor = try add_link(d, av.cursor, av.node, children)

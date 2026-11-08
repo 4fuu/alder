@@ -1,0 +1,320 @@
+mir 5
+
+const @lit.int.c0: u64 = 0
+
+const @lit.int.c1: u64 = 10
+
+const @lit.int.c2: u64 = 1
+
+const @lit.int.c3: u64 = 11
+
+const @lit.int.c4: u64 = 2
+
+const @lit.int.c5: u64 = 12
+
+const @lit.int.c6: u64 = 13
+
+const @lit.int.c7: u64 = 20
+
+const @lit.int.c8: u64 = 30
+
+const @lit.int.c9: u64 = 3
+
+const @lit.int.c10: u64 = 4
+
+const @lit.int.c11: i32 = 1
+
+const @lit.int.c12: i32 = 2
+
+const @lit.int.c13: u64 = 9
+
+const @lit.int.c14: i32 = 3
+
+const @lit.int.c15: u64 = 5
+
+const @lit.int.c16: i32 = 4
+
+const @lit.int.c17: u64 = 15
+
+const @lit.int.c18: i32 = 5
+
+const @lit.int.c19: u64 = 25
+
+const @lit.int.c20: i32 = 6
+
+const @lit.int.c21: u64 = 35
+
+const @lit.int.c22: i32 = 7
+
+const @lit.int.c23: i32 = 8
+
+const @lit.int.c24: i32 = 0
+
+fn @classify(%x: u64) -> u64 {
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = int.eq %x, %v
+  branch %v0, bb_then, bb_else
+
+bb_then:
+  %v1 = const.get @lit.int.c1
+  return %v1
+
+bb_else:
+  %v2 = const.get @lit.int.c2
+  %v3 = int.eq %x, %v2
+  branch %v3, bb_then0, bb_else0
+
+bb_join:
+  unreachable
+
+bb_then0:
+  %v4 = const.get @lit.int.c3
+  return %v4
+
+bb_else0:
+  %v5 = const.get @lit.int.c4
+  %v6 = int.eq %x, %v5
+  branch %v6, bb_then1, bb_else1
+
+bb_join0:
+  unreachable
+
+bb_then1:
+  %v7 = const.get @lit.int.c5
+  return %v7
+
+bb_else1:
+  %v8 = const.get @lit.int.c6
+  return %v8
+
+bb_join1:
+  unreachable
+}
+
+fn @bucket(%x: u64) -> u64 {
+bb0:
+  %v = const.get @lit.int.c1
+  %v0 = int.lt %x, %v
+  branch %v0, bb_then, bb_else
+
+bb_then:
+  %v1 = const.get @lit.int.c2
+  return %v1
+
+bb_else:
+  %v2 = const.get @lit.int.c7
+  %v3 = int.lt %x, %v2
+  branch %v3, bb_then0, bb_else0
+
+bb_join:
+  unreachable
+
+bb_then0:
+  %v4 = const.get @lit.int.c4
+  return %v4
+
+bb_else0:
+  %v5 = const.get @lit.int.c8
+  %v6 = int.lt %x, %v5
+  branch %v6, bb_then1, bb_else1
+
+bb_join0:
+  unreachable
+
+bb_then1:
+  %v7 = const.get @lit.int.c9
+  return %v7
+
+bb_else1:
+  %v8 = const.get @lit.int.c10
+  return %v8
+
+bb_join1:
+  unreachable
+}
+
+fn @sum(%n: u64) -> u64 {
+  local %total: u64
+  local %i: u64
+
+bb0:
+  %v = const.get @lit.int.c0
+  store local %total, %v
+  %v0 = const.get @lit.int.c0
+  store local %i, %v0
+  jump bb_head
+
+bb_head:
+  %v1 = load local %i
+  %v2 = int.lt %v1, %n
+  branch %v2, bb_body, bb_join
+
+bb_body:
+  %v3 = load local %i
+  %v4 = const.get @lit.int.c0
+  %v5 = int.eq %v3, %v4
+  branch %v5, bb_then, bb_else
+
+bb_join:
+  %v21 = load local %total
+  return %v21
+
+bb_then:
+  %v6 = load local %total
+  %v7 = const.get @lit.int.c2
+  %v8 = int.add.checked %v6, %v7 else bb_fail
+  store local %total, %v8
+  jump bb_join0
+
+bb_else:
+  %v9 = load local %i
+  %v10 = const.get @lit.int.c2
+  %v11 = int.eq %v9, %v10
+  branch %v11, bb_then0, bb_else0
+
+bb_join0:
+  %v18 = load local %i
+  %v19 = const.get @lit.int.c2
+  %v20 = int.add.checked %v18, %v19 else bb_fail
+  store local %i, %v20
+  jump bb_head
+
+bb_fail:
+  panic
+
+bb_then0:
+  %v12 = load local %total
+  %v13 = const.get @lit.int.c4
+  %v14 = int.add.checked %v12, %v13 else bb_fail
+  store local %total, %v14
+  jump bb_join1
+
+bb_else0:
+  %v15 = load local %total
+  %v16 = const.get @lit.int.c9
+  %v17 = int.add.checked %v15, %v16 else bb_fail
+  store local %total, %v17
+  jump bb_join1
+
+bb_join1:
+  jump bb_join0
+}
+
+fn @main() -> i32 {
+bb0:
+  %v = const.get @lit.int.c0
+  %v0 = call @classify(%v)
+  %v1 = const.get @lit.int.c1
+  %v2 = int.ne %v0, %v1
+  branch %v2, bb_then, bb_else
+
+bb_then:
+  %v3 = const.get @lit.int.c11
+  return %v3
+
+bb_else:
+  jump bb_join
+
+bb_join:
+  %v4 = const.get @lit.int.c4
+  %v5 = call @classify(%v4)
+  %v6 = const.get @lit.int.c5
+  %v7 = int.ne %v5, %v6
+  branch %v7, bb_then0, bb_else0
+
+bb_then0:
+  %v8 = const.get @lit.int.c12
+  return %v8
+
+bb_else0:
+  jump bb_join0
+
+bb_join0:
+  %v9 = const.get @lit.int.c13
+  %v10 = call @classify(%v9)
+  %v11 = const.get @lit.int.c6
+  %v12 = int.ne %v10, %v11
+  branch %v12, bb_then1, bb_else1
+
+bb_then1:
+  %v13 = const.get @lit.int.c14
+  return %v13
+
+bb_else1:
+  jump bb_join1
+
+bb_join1:
+  %v14 = const.get @lit.int.c15
+  %v15 = call @bucket(%v14)
+  %v16 = const.get @lit.int.c2
+  %v17 = int.ne %v15, %v16
+  branch %v17, bb_then2, bb_else2
+
+bb_then2:
+  %v18 = const.get @lit.int.c16
+  return %v18
+
+bb_else2:
+  jump bb_join2
+
+bb_join2:
+  %v19 = const.get @lit.int.c17
+  %v20 = call @bucket(%v19)
+  %v21 = const.get @lit.int.c4
+  %v22 = int.ne %v20, %v21
+  branch %v22, bb_then3, bb_else3
+
+bb_then3:
+  %v23 = const.get @lit.int.c18
+  return %v23
+
+bb_else3:
+  jump bb_join3
+
+bb_join3:
+  %v24 = const.get @lit.int.c19
+  %v25 = call @bucket(%v24)
+  %v26 = const.get @lit.int.c9
+  %v27 = int.ne %v25, %v26
+  branch %v27, bb_then4, bb_else4
+
+bb_then4:
+  %v28 = const.get @lit.int.c20
+  return %v28
+
+bb_else4:
+  jump bb_join4
+
+bb_join4:
+  %v29 = const.get @lit.int.c21
+  %v30 = call @bucket(%v29)
+  %v31 = const.get @lit.int.c10
+  %v32 = int.ne %v30, %v31
+  branch %v32, bb_then5, bb_else5
+
+bb_then5:
+  %v33 = const.get @lit.int.c22
+  return %v33
+
+bb_else5:
+  jump bb_join5
+
+bb_join5:
+  %v34 = const.get @lit.int.c10
+  %v35 = call @sum(%v34)
+  %v36 = const.get @lit.int.c13
+  %v37 = int.ne %v35, %v36
+  branch %v37, bb_then6, bb_else6
+
+bb_then6:
+  %v38 = const.get @lit.int.c23
+  return %v38
+
+bb_else6:
+  jump bb_join6
+
+bb_join6:
+  %v39 = const.get @lit.int.c24
+  return %v39
+}
