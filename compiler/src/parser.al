@@ -919,6 +919,14 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         let node = try add_syntax(d, cursor, 18, initial.token + 1, start.source, start.start, end, 0, 0, children)
         return Ok(Parsed(node))
     }
+    if start.keyword == 30 || start.keyword == 31 {
+        // break and continue carry no value and take no argument; a following
+        // expression is a line-separation error like any other.
+        var kind: U64 = 59
+        if start.keyword == 31 { kind = 60 }
+        let node = try add_syntax(d, ParseCursor(token: initial.token + 1, store: initial.store), kind, initial.token + 1, start.source, start.start, start.end, 0, 0, 0)
+        return Ok(Parsed(node))
+    }
     if token_punct(state, initial, "{") { return parse_block(d, state, initial) }
     let expr = try parse_expression(d, state, initial, 0)
     if parse_step_bad(expr) { return Ok(expr) }

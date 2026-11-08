@@ -269,9 +269,13 @@ owner (registering the builtin release), any affine nominal type implementing
 (registering a per-element drain). The `with cleanup_function` clause stays
 the bootstrap-private bridge.
 
-`while`/`for` do not yet support `break` or `continue`. Assignment targets are
-restricted to the implemented identifier/field/index shapes. Every non-`Unit`
-function path returns explicitly.
+`break` and `continue` jump to the exit and the next iteration of the
+innermost enclosing loop; `continue` in a `for` still runs the index step, and
+both are rejected outside a loop, in a closure body, and in a table-view match
+arm. A `using` registration inside a loop body is rejected, so neither jump can
+cross a cleanup scope. Assignment targets are restricted to the implemented
+identifier/field/index shapes. Every non-`Unit` function path returns
+explicitly.
 
 Implemented expressions include:
 

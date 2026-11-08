@@ -1475,7 +1475,7 @@ bb_panic:
 
 bb_for_head2(%__for_index_3: u64, %__for_sequence_3: slice(u64)):
   %v422 = int.lt %__for_index_3, %v418
-  branch %v422, bb_for_body3, bb_for_join4
+  branch %v422, bb_for_body3, bb_for_join5
 
 bb_for_body3:
   %for_ref = slice.index.checked %__for_sequence_3, %__for_index_3 else bb_panic
@@ -1485,11 +1485,14 @@ bb_for_body3:
   %v426 = load local %value
   %v427 = int.add.checked %v425, %v426 else bb_panic
   store local %total, %v427
+  jump bb_for_step4
+
+bb_for_step4:
   %v428 = const.get @lit.seq205521011
   %v429 = int.add.checked %__for_index_3, %v428 else bb_panic
   jump bb_for_head2(%v429, %__for_sequence_3)
 
-bb_for_join4:
+bb_for_join5:
   %v430 = load local %total
   return %v430
 }

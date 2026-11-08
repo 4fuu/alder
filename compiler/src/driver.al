@@ -380,6 +380,8 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 143 { return out_string("a Table cannot be a Vec element yet: heap-storing a table handle awaits storage rules; register the table with using directly") }
     if kind == 148 { return out_string("a match guard only borrows the arm's bindings; it cannot consume an owner") }
     if kind == 149 { return out_string("a table-view match arm cannot carry a guard; the view region is one straight-line fail-free block") }
+    if kind == 150 { return out_string("break is only allowed inside a loop") }
+    if kind == 151 { return out_string("continue is only allowed inside a loop") }
     if !out_string("semantic error (checker diagnostic ") || !out_u64(kind) { return false }
     return out(41)
 }

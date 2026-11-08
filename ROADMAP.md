@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `3334e1715d14b87f93125f4458111fa00616be84272ab514df6a376e19c39c88`
+  `395fc31c1cf6dc3322daa7960ebf901dcbde4a36a011ce35ea0d6097405c7060`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `3334e1715d14b87f93125f4458111fa00616be84272ab514df6a376e19c39c88`
+  `395fc31c1cf6dc3322daa7960ebf901dcbde4a36a011ce35ea0d6097405c7060`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1161,6 +1161,27 @@ both halves were written):
   escaping closure is retained into its destination domain by the
   `copy_to_domain` retain hook, so chains of returns and closures carried in
   vectors or records stay valid.
+- `mut self` receivers on a field place are not implemented:
+  `b.items.push(x)` rejects with 101 and `b.items[i] = x` with "invalid
+  assignment target", although the frozen `core.collection` snapshot
+  declares `push(mut self, value)` and `values[index] = replacement` and
+  the place model treats a field path of a binding as a place. Whole-field
+  assignment (`b.items = Vec.new(U64)`) already works. Supporting it means
+  resolving `mut self` receivers as places in the checker and writing a
+  grown header back through a field place in the lowering, for every
+  `mut self` method (`Vec.push`/`slice_mut`, `Map`/`Set` `insert`,
+  `Table` `insert`/`remove`), so it is a place-model feature rather than a
+  loop fix and is deferred here.
+- `break` and `continue` landed: both lower to jumps to the innermost
+  enclosing loop's exit and step blocks, `continue` in a `for` reaches a
+  dedicated step block so the index still advances, a match arm's statement
+  block inherits the enclosing loop context, and the D023 loop-rebuild gate
+  treats both as skipping constructs. A cleanup cannot be crossed because
+  `using` inside a loop body is still rejected, and a table-view arm rejects
+  both jumps as control flow. One pre-existing gap is recorded here rather
+  than fixed: a table-view `match` inside a `while` body is accepted by the
+  checker and then refused by phase 6 ("verification refused"), with or
+  without `break`, so the view region and a loop body do not yet compose.
 
 Cold `bootstrap/regenerate.sh` timing is recorded per commit and compared only
 on the same host: absolute wall time and peak RSS depend on the host and
