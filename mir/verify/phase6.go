@@ -978,7 +978,7 @@ func loopInBody(dom [][]bool, header, block mir.BlockId) bool {
 // (a reset also invalidates descendants, which parent facts record). Entry
 // domains created before the loop and destroyed only after it survive, which
 // is what makes loop-carried collection headers legal.
-func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, dom [][]bool, anchor, from mir.BlockId, v mir.ValueId) bool {
+func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, dom [][]bool, anchor, from mir.BlockId, v mir.ValueId, shared bool) bool {
 	if int(v) >= len(info) {
 		return false
 	}
@@ -997,9 +997,12 @@ func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir
 		}
 	}
 	for r := range vi.roots {
-		// An allocation produced inside THIS loop is per-iteration: carrying
-		// it around the backedge conflates iterations, so it stays forbidden.
-		if r.param < 0 && r.allocBlk != mir.NoBlock && loopInBody(dom, anchor, r.allocBlk) {
+		// An allocation produced inside THIS loop is per-iteration for an
+		// owning value: carrying it around the backedge conflates iterations,
+		// so it stays forbidden. A shared function environment is immutable
+		// and copyable, so the allocation site alone does not condemn it; a
+		// domain death inside the loop still does.
+		if !shared && r.param < 0 && r.allocBlk != mir.NoBlock && loopInBody(dom, anchor, r.allocBlk) {
 			return true
 		}
 		if r.param < 0 && int(r.handle) < len(info) {
@@ -1016,6 +1019,59 @@ func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir
 		}
 	}
 	return false
+}
+
+// envSnapshotType reports whether a type is a copyable snapshot that may
+// contain function values and nothing that owns or aliases mutable storage.
+// Such a value shares immutable environment records, so carrying it across a
+// backedge transfers no ownership and cannot conflate iterations; the
+// environment still dies with its owning domain, which the death checks keep
+// enforcing.
+func envSnapshotType(m *mir.Module, t mir.TypeId) bool {
+	hasEnv, blocked := envSnapshotScan(m, t, 0)
+	return hasEnv && !blocked
+}
+
+func envSnapshotScan(m *mir.Module, t mir.TypeId, depth int) (hasEnv, blocked bool) {
+	if t == 0 || int(t) >= len(m.Types) || depth > 8 {
+		return false, true
+	}
+	ty := &m.Types[t]
+	switch ty.Kind {
+	case mir.TypeFunction:
+		return true, false
+	case mir.TypePrimitive:
+		return false, false
+	case mir.TypeAggregate, mir.TypeEnum, mir.TypeOption, mir.TypeResult, mir.TypeArray:
+	default:
+		return false, true
+	}
+	children := make([]mir.TypeId, 0, 2+len(ty.Fields)+len(ty.Variants))
+	if ty.Elem != 0 {
+		children = append(children, ty.Elem)
+	}
+	if ty.OK != 0 {
+		children = append(children, ty.OK)
+	}
+	if ty.Err != 0 {
+		children = append(children, ty.Err)
+	}
+	for _, field := range ty.Fields {
+		if field.Type != 0 {
+			children = append(children, field.Type)
+		}
+	}
+	for _, variant := range ty.Variants {
+		if variant.Payload != 0 {
+			children = append(children, variant.Payload)
+		}
+	}
+	for _, child := range children {
+		childEnv, childBlocked := envSnapshotScan(m, child, depth+1)
+		hasEnv = hasEnv || childEnv
+		blocked = blocked || childBlocked
+	}
+	return hasEnv, blocked
 }
 
 func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, effects []functionEffect) []Error {
@@ -1056,11 +1112,16 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 					for r := range i.roots {
 						local = local || r.param < 0
 					}
-					capability := true
+					dies := true
 					if int(args[v.Def.Param]) < len(f.Values) {
-						capability = !loopCarryOwnerType(m, f.Values[args[v.Def.Param]].Type)
+						carriedType := f.Values[args[v.Def.Param]].Type
+						if envSnapshotType(m, carriedType) {
+							dies = loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param], true)
+						} else if loopCarryOwnerType(m, carriedType) {
+							dies = loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param], false)
+						}
 					}
-					if local && (capability || loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param])) {
+					if local && dies {
 						errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %s carries a function-local domain handle or reference across a backedge", valueName(f, mir.ValueId(vi)))})
 					}
 				}

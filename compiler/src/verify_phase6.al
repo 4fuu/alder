@@ -1592,6 +1592,62 @@ fn mir_v6_loop_in_body(cfg: MirVP4PointCfg, dom: MirVP4Dom, header: U64, block: 
     return mir_vp4_dominates(cfg, dom, mir_vp4_boundary_node(cfg, block, 0), mir_vp4_boundary_node(cfg, header, 0))
 }
 
+// mir_v6_env_snapshot reports whether a type is a copyable snapshot that may
+// contain function values and nothing that owns or aliases mutable storage.
+// Such a value shares immutable environment records, so carrying it across a
+// backedge transfers no ownership and cannot conflate iterations; a function
+// value's environment still dies with its owning domain, which the death
+// checks below keep enforcing.
+type MirV6EnvSnapshotRec {
+    has_env: Bool
+    blocked: Bool
+}
+fn mir_v6_env_snapshot_scan(store: MirStore, indexes: MirVIndexes, type_id: U64, depth: U64) -> MirV6EnvSnapshotRec {
+    if type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) || depth > 8 { return MirV6EnvSnapshotRec(has_env: false, blocked: true) }
+    let checked = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if checked.kind == mir_type_kind_function() { return MirV6EnvSnapshotRec(has_env: true, blocked: false) }
+    if checked.kind == mir_type_kind_primitive() { return MirV6EnvSnapshotRec(has_env: false, blocked: false) }
+    if checked.kind == mir_type_kind_aggregate() || checked.kind == mir_type_kind_enum() || checked.kind == mir_type_kind_option() || checked.kind == mir_type_kind_result() || checked.kind == mir_type_kind_array() {
+        var has_env = false
+        var blocked = false
+        if checked.elem != 0 {
+            let child = mir_v6_env_snapshot_scan(store, indexes, checked.elem, depth + 1)
+            if child.has_env { has_env = true }
+            if child.blocked { blocked = true }
+        }
+        if checked.ok_type != 0 {
+            let child = mir_v6_env_snapshot_scan(store, indexes, checked.ok_type, depth + 1)
+            if child.has_env { has_env = true }
+            if child.blocked { blocked = true }
+        }
+        if checked.err_type != 0 {
+            let child = mir_v6_env_snapshot_scan(store, indexes, checked.err_type, depth + 1)
+            if child.has_env { has_env = true }
+            if child.blocked { blocked = true }
+        }
+        var part: U64 = 0
+        let part_count = mir_vindex_type_part_count(indexes, type_id)
+        while part < part_count {
+            let part_id = mir_vindex_type_part(indexes, type_id, part)
+            if part_id != 0 && part_id <= __s0_buffer_len(MirTypePartRec, store.type_parts) {
+                let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part_id - 1)
+                if rec.part_type != 0 {
+                    let child = mir_v6_env_snapshot_scan(store, indexes, rec.part_type, depth + 1)
+                    if child.has_env { has_env = true }
+                    if child.blocked { blocked = true }
+                }
+            }
+            part = part + 1
+        }
+        return MirV6EnvSnapshotRec(has_env: has_env, blocked: blocked)
+    }
+    return MirV6EnvSnapshotRec(has_env: false, blocked: true)
+}
+fn mir_v6_env_snapshot(store: MirStore, indexes: MirVIndexes, type_id: U64) -> Bool {
+    let scan = mir_v6_env_snapshot_scan(store, indexes, type_id, 0)
+    return scan.has_env && !scan.blocked
+}
+
 // mir_v6_loop_value_dies is the precise half of the loop rules: a carried
 // value dies inside its loop when it depends on a domain created in the
 // loop, or when a destroy or reset inside the loop invalidates one of its
@@ -1599,7 +1655,7 @@ fn mir_v6_loop_in_body(cfg: MirVP4PointCfg, dom: MirVP4Dom, header: U64, block: 
 // facts record). Entry domains created before the loop and destroyed only
 // after it survive, which is what makes loop-carried collection headers
 // legal.
-fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, anchor: U64, from_block: U64, value: U64) -> Bool {
+fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, anchor: U64, from_block: U64, value: U64, shared: Bool) -> Bool {
     var f = mir_v6_fact_start(analysis, function, value)
     let fend = mir_v6_fact_end(analysis, function, value)
     while f < fend {
@@ -1609,11 +1665,13 @@ fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kil
             if mir_v6_loop_fact_killed(analysis, reach, kills, function, from_block, fact) { return true }
         }
         if fact.kind == mir_v6_fact_root() && fact.b != 0 {
-            // An allocation produced inside THIS loop is per-iteration:
-            // carrying it around the backedge conflates iterations, so it
-            // stays forbidden. An allocation whose owning domain dies
-            // inside the loop dangles.
-            if mir_v6_loop_in_body(cfg, dom, anchor, fact.b) { return true }
+            // An allocation produced inside THIS loop is per-iteration for
+            // an owning value: carrying it around the backedge conflates
+            // iterations, so it stays forbidden. A shared function
+            // environment is immutable and copyable, so the allocation site
+            // alone does not condemn it; a domain death inside the loop still
+            // does.
+            if !shared && mir_v6_loop_in_body(cfg, dom, anchor, fact.b) { return true }
             var h = mir_v6_fact_start(analysis, function, fact.a)
             let hend = mir_v6_fact_end(analysis, function, fact.a)
             while h < hend {
@@ -1633,7 +1691,13 @@ fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kil
 fn mir_v6_loop_param_dies(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), owner_seen: __s0_Buffer(U64), owner_stamp: U64, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, anchor: U64, source: U64, value: U64) -> Result(Bool, __s0_Error) {
     let vi = mir_vindex_value(indexes, function, value)
     if vi == 0 { return Ok(true) }
-    if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type) { return Ok(mir_v6_loop_value_dies(analysis, reach, kills, cfg, dom, function, anchor, source, value)) }
+    let value_type = __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type
+    // A copyable snapshot that may contain function values shares immutable
+    // environment records, so the per-iteration allocation clause does not
+    // apply; the death checks still reject an environment whose domain dies
+    // inside the loop.
+    if mir_v6_env_snapshot(store, indexes, value_type) { return Ok(mir_v6_loop_value_dies(analysis, reach, kills, cfg, dom, function, anchor, source, value, true)) }
+    if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, value_type) { return Ok(mir_v6_loop_value_dies(analysis, reach, kills, cfg, dom, function, anchor, source, value, false)) }
     return Ok(true)
 }
 

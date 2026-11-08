@@ -71,6 +71,35 @@ fn main() -> I32 {
 }
 `
 
+// Closures created per iteration carry distinct snapshots. Reading them back
+// through a second loop carries function values across a backedge, which the
+// phase-6 loop rule accepts because their environments are immutable shared
+// records whose domain outlives the loop.
+const m75LoopClosureProgram = `fn identity(x: U64) -> U64 { return x }
+fn main() -> I32 {
+    var fns = Vec.new(fn(U64) -> U64)
+    var i: U64 = 0
+    while i < 3 {
+        let bump = fn(x: U64) => x + i
+        fns.push(bump)
+        i = i + 1
+    }
+    var total: U64 = 0
+    var k: U64 = 0
+    while k < fns.len() {
+        let found = fns.get(k)
+        let f = match found {
+            Some(g) => g
+            None => identity
+        }
+        total = total + f(10)
+        k = k + 1
+    }
+    if total != 33 { return 1 }
+    return 0
+}
+`
+
 func TestM75ClosureProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -91,6 +120,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 	}{
 		{"m75-generic-closures", m75GenericClosureProgram},
 		{"m75-closure-escape", m75ClosureEscapeProgram},
+		{"m75-loop-closures", m75LoopClosureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -174,6 +204,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 	}{
 		{"m75-generic-closures", m75GenericClosureProgram},
 		{"m75-closure-escape", m75ClosureEscapeProgram},
+		{"m75-loop-closures", m75LoopClosureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
