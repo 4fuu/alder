@@ -1,0 +1,31 @@
+mir 5
+
+const @zero_u64: u64 = 0
+const @one_u64: u64 = 1
+const @true_v: bool = true
+
+fn @f(%root: domain_handle, %again: bool) {
+  local %current: vec(u64)
+bb0:
+  %d = domain.create %root
+  %v = vec.new vec(u64)
+  store local %current, %v
+  %g = const.get @true_v
+  jump loop
+
+loop:
+  %h = load local %current
+  %cap = vec.capacity %h
+  %grown = vec.grow.checked %h, %d, %cap else bb_panic
+  store local %current, %grown
+  %c = const.get @true_v
+  branch %c, loop, done
+
+done:
+  domain.destroy %d
+  return
+
+bb_panic:
+  domain.destroy %d
+  panic
+}

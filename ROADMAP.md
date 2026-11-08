@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `93a66b768a69b66a3ca6e4df0cd247e400d744955c08115b99502d0ee81e7515`
+  `8a40ff818572cd6d44798856785ef3585dd011bbab2aff6be95857e89f2f228a`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `93a66b768a69b66a3ca6e4df0cd247e400d744955c08115b99502d0ee81e7515`
+  `8a40ff818572cd6d44798856785ef3585dd011bbab2aff6be95857e89f2f228a`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1128,10 +1128,11 @@ were added to or reshaped by the 2026-11 design amendment, which landed after
 both halves were written):
 
 - (D023 landed; see the evidence below) the remaining D023 gap: copy sites
-  inside loop bodies still copy, because `for x in v` over an owned `Vec(T)`
-  and whole-vector assignment inside a `while` body fail phase-5/phase-6
-  verification even without the rule — a pre-existing lowering gap to fix
-  before the loop case can move;
+  inside loop bodies still copy. The lowering and verification gap that used
+  to block it is fixed: `for x in v` over an owned `Vec(T)` and whole-vector
+  assignment inside a `while` body now verify, because the for lowering
+  carries the owning value as the loop parameter and phase 6 rejects an
+  owning loop-carried value only when its storage dies inside the loop;
 - a compiler-scale layered DAG input over traits, generics, and closures
   that terminates with deterministic diagnostics, MIR, and C — landed: one
   generic trait with a defaulted method implemented by eight record types,

@@ -1,0 +1,6 @@
+fn @f: block loop: op store #3: store of %grown carries a function-local domain handle or reference across a loop backedge
+fn @f: block loop: op vec.capacity #1: use of %h after reset or destruction of its domain
+fn @f: block loop: op vec.grow.checked #2: use of %h after reset or destruction of its domain
+fn @f: block loop: op store #3: use of %grown after reset or destruction of its domain
+fn @f: block loop: op domain.destroy #4: use of %d after reset or destruction of its domain
+fn @f: block loop: op domain.destroy #4: domain may already be destroyed on an incoming path

@@ -40,7 +40,7 @@ func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupA
 			continue
 		}
 		info := domainInfos[fi]
-		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi])...)
+		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi], effects)...)
 		var cleanup *cleanupAnalysis
 		if fi < len(cleanups) {
 			cleanup = cleanups[fi]
@@ -771,8 +771,187 @@ func allEdgeArgsTo(b *mir.Block, target mir.BlockId) [][]mir.ValueId {
 	return out
 }
 
-func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect) []Error {
+// loopKill records one domain death site inside a function: a direct
+// destroy or reset, or a call argument a callee effect may destroy or reset.
+type loopKill struct {
+	blk   mir.BlockId
+	value mir.ValueId
+}
+
+// collectLoopKills gathers the per-function kill sites once, so each
+// loop-carried store or parameter checks them without rescanning the module.
+func collectLoopKills(f *mir.Function, effects []functionEffect) []loopKill {
+	var kills []loopKill
+	for bi, b := range f.Blocks {
+		for ii := range b.Instrs {
+			in := &b.Instrs[ii]
+			if in.Op == mir.OpDomainDestroy || in.Op == mir.OpDomainReset {
+				kills = append(kills, loopKill{blk: mir.BlockId(bi), value: in.Domain})
+			}
+			if in.Op == mir.OpCall && int(in.Callee) < len(effects) {
+				e := effects[in.Callee]
+				for p, yes := range e.destroys {
+					if yes && p < len(in.Args) {
+						kills = append(kills, loopKill{blk: mir.BlockId(bi), value: in.Args[p]})
+					}
+				}
+				for p, yes := range e.resets {
+					if yes && p < len(in.Args) {
+						kills = append(kills, loopKill{blk: mir.BlockId(bi), value: in.Args[p]})
+					}
+				}
+			}
+		}
+	}
+	return kills
+}
+
+// loopKeyKilled reports whether a domain identity key dies at a collected
+// kill site in a loop block that the carrying site can reach. Two
+// parameter-domain keys with no defining block alias conservatively, matching
+// the dep-aliasing rule used elsewhere.
+func loopKeyKilled(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, from mir.BlockId, key defKey) bool {
+	for _, k := range kills {
+		if !inCycleFor(f, k.blk) || !reaches(from, k.blk) {
+			continue
+		}
+		for d := range info[k.value].deps {
+			if d == key || d.blk == mir.NoBlock && key.blk == mir.NoBlock {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// loopCarryOwnerType reports whether a type is an owning value whose
+// loop-carried storage the survival rule may reason about: it contains an
+// owning collection (vec, array, or aggregate/enum/option of owners) and no
+// capability or handle kind (slices, references, domain handles and marks,
+// table owners and views, raw pointers). Capability-typed values keep the
+// conservative loop rules: views alias memory owned elsewhere and are
+// lexically scoped by design, and handles are the resource discipline
+// itself.
+func loopCarryOwnerType(m *mir.Module, t mir.TypeId) bool {
+	if int(t) >= len(m.Types) {
+		return true
+	}
+	// The map is per query and only ever memoizes an owning verdict: a
+	// capability verdict unwinds the whole walk immediately, so the type that
+	// produced it is never asked about again inside this call.
+	seen := map[mir.TypeId]bool{}
+	var walk func(t mir.TypeId) bool
+	walk = func(t mir.TypeId) bool {
+		if int(t) >= len(m.Types) || seen[t] || t == 0 {
+			return true
+		}
+		seen[t] = true
+		switch m.Types[t].Kind {
+		case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeDomainHandle,
+			mir.TypeDomainMark, mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView,
+			mir.TypeRawPtr, mir.TypeCleanupScope, mir.TypeCleanupID:
+			return false
+		default:
+			if e := m.Types[t].Elem; e != 0 {
+				if !walk(e) {
+					return false
+				}
+			}
+			if o := m.Types[t].OK; o != 0 {
+				if !walk(o) {
+					return false
+				}
+			}
+			if e := m.Types[t].Err; e != 0 {
+				if !walk(e) {
+					return false
+				}
+			}
+			for _, field := range m.Types[t].Fields {
+				if field.Type != 0 {
+					if !walk(field.Type) {
+						return false
+					}
+				}
+			}
+			for _, variant := range m.Types[t].Variants {
+				if variant.Payload != 0 {
+					if !walk(variant.Payload) {
+						return false
+					}
+				}
+			}
+			return true
+		}
+	}
+	return walk(t)
+}
+
+// inCycleFor reports whether a block lies on a cycle: plain reachability
+// always includes the start block, so self-reachability needs a dedicated
+// check.
+func inCycleFor(f *mir.Function, b mir.BlockId) bool {
+	if int(b) >= len(f.Blocks) {
+		return false
+	}
+	return inCycle(f, b)
+}
+
+// loopValueDies is the precise half of the loop rules: a carried value dies
+// inside its loop when it depends on a domain created in the loop, or when a
+// destroy or reset inside the loop invalidates one of its domain identities
+// (a reset also invalidates descendants, which parent facts record). Entry
+// domains created before the loop and destroyed only after it survive, which
+// is what makes loop-carried collection headers legal.
+func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, from mir.BlockId, v mir.ValueId) bool {
+	if int(v) >= len(info) {
+		return false
+	}
+	vi := info[v]
+	for d := range vi.deps {
+		if d.blk != mir.NoBlock && inCycle(f, d.blk) {
+			return true
+		}
+		if loopKeyKilled(f, info, reaches, kills, from, d) {
+			return true
+		}
+	}
+	for p := range vi.parents {
+		if loopKeyKilled(f, info, reaches, kills, from, p) {
+			return true
+		}
+	}
+	for r := range vi.roots {
+		// An allocation produced inside a cycle is per-iteration: carrying it
+		// around a backedge conflates iterations, so it stays forbidden.
+		if r.param < 0 && r.allocBlk != mir.NoBlock && inCycleFor(f, r.allocBlk) {
+			return true
+		}
+		if r.param < 0 && int(r.handle) < len(info) {
+			for d := range info[r.handle].deps {
+				if loopKeyKilled(f, info, reaches, kills, from, d) {
+					return true
+				}
+			}
+			for p := range info[r.handle].parents {
+				if loopKeyKilled(f, info, reaches, kills, from, p) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, effects []functionEffect) []Error {
 	var errs []Error
+	kills := collectLoopKills(f, effects)
+	reachesFor := func(from, to mir.BlockId) bool {
+		if int(from) >= len(f.Blocks) || int(to) >= len(f.Blocks) {
+			return false
+		}
+		return reachableFrom(f, from)[int(to)]
+	}
 	for bi, b := range f.Blocks {
 		var reaches []bool
 		for vi, v := range f.Values {
@@ -798,7 +977,11 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 					for r := range i.roots {
 						local = local || r.param < 0
 					}
-					if local {
+					capability := true
+					if int(args[v.Def.Param]) < len(f.Values) {
+						capability = !loopCarryOwnerType(m, f.Values[args[v.Def.Param]].Type)
+					}
+					if local && (capability || loopValueDies(f, info, reachesFor, kills, mir.BlockId(bi), args[v.Def.Param])) {
 						errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %s carries a function-local domain handle or reference across a backedge", valueName(f, mir.ValueId(vi)))})
 					}
 				}
@@ -814,7 +997,14 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 			if in.Op != mir.OpStore || int(in.StoreVal) >= len(info) || !hasLocalDomainProvenance(info[in.StoreVal]) {
 				continue
 			}
-			if stableParameterDomainLoopStore(m, f, info, effect, in) {
+			if !loopCarryOwnerType(m, f.Values[in.StoreVal].Type) {
+				// Capability-typed values keep the original conservative
+				// exemption: parameter-domain ownership with no destroying
+				// effect anywhere in the function.
+				if stableCapabilityLoopStore(m, f, info, effect, in) {
+					continue
+				}
+			} else if stableParameterDomainLoopStore(m, f, info, effect, in, reachesFor, kills, mir.BlockId(bi)) {
 				continue
 			}
 			errs = append(errs, Error{
@@ -829,12 +1019,20 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 // stableParameterDomainLoopStore permits a mutable local descriptor to be
 // updated in a loop when every dynamic allocation it can name belongs to an
 // external domain that this function never resets or destroys through verified
-// MIR effects. Repeated static allocation sites are safe in that case because
-// every produced allocation remains live for the entire call. Local domains
-// remain forbidden: their per-site C slots and dynamic identities must not be
-// conflated across iterations. As elsewhere in the verifier, unsafe foreign
-// code is responsible for honoring the declared safe boundary.
-func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr) bool {
+// MIR effects, or to a local domain that provably outlives the loop: a domain
+// created before the loop whose destroy or reset sites all lie outside the
+// loop's blocks. Repeated static allocation sites are safe in that case
+// because every produced allocation remains live for the entire call, and a
+// pre-loop local domain dies only at the function's exits. Local domains
+// created or invalidated inside the loop remain forbidden: their per-site C
+// slots and dynamic identities must not be conflated across iterations. As
+// elsewhere in the verifier, unsafe foreign code is responsible for honoring
+// the declared safe boundary.
+// stableCapabilityLoopStore is the original conservative exemption, kept for
+// capability-typed values: a local place, no destroying or resetting effect
+// anywhere in the function, no instruction-local dep, and every root owned by
+// a domain parameter.
+func stableCapabilityLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr) bool {
 	if _, ok := localPlaceKey(&in.Place); !ok {
 		return false
 	}
@@ -881,6 +1079,65 @@ func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domai
 		}
 	}
 	return localRoot
+}
+
+func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, in *mir.Instr, reaches func(from, to mir.BlockId) bool, kills []loopKill, block mir.BlockId) bool {
+	for _, yes := range effect.destroys {
+		if yes {
+			return false
+		}
+	}
+	for _, yes := range effect.resets {
+		if yes {
+			return false
+		}
+	}
+	valueInfo := info[in.StoreVal]
+	for d := range valueInfo.deps {
+		if d.blk != mir.NoBlock && (inCycle(f, d.blk) || loopKeyKilled(f, info, reaches, kills, block, d)) {
+			return false
+		}
+	}
+	for root := range valueInfo.roots {
+		if root.param >= 0 {
+			continue
+		}
+		if int(root.handle) >= len(info) {
+			return false
+		}
+		handleInfo := info[root.handle]
+		// A local root is stable when its owning domain survives the whole
+		// loop: either the parameter-domain path below still applies, or the
+		// domain is created before the loop and no destroy or reset inside
+		// the loop's blocks invalidates it.
+		ownedByParameterDomain := false
+		for p := range handleInfo.params {
+			if p < 0 || p >= len(f.Params) || !isDomainType(m, f.Params[p].Type) {
+				continue
+			}
+			ownedByParameterDomain = true
+		}
+		if ownedByParameterDomain {
+			continue
+		}
+		for d := range handleInfo.deps {
+			if d.blk != mir.NoBlock && inCycleFor(f, d.blk) {
+				return false
+			}
+			if loopKeyKilled(f, info, reaches, kills, block, d) {
+				return false
+			}
+		}
+		for p := range handleInfo.parents {
+			if loopKeyKilled(f, info, reaches, kills, block, p) {
+				return false
+			}
+		}
+	}
+	// A value with no failing check is stable: its storage domains all
+	// outlive the loop, whether they arrive as roots or as surviving
+	// domain-identity deps (the loop-carried collection header case).
+	return true
 }
 
 func hasLocalDomainProvenance(i domainInfo) bool {

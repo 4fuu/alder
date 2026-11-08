@@ -1762,6 +1762,18 @@ fn lower_int_value(d: Domain, source_state: State, store: CheckStore, state: Low
     return Ok(LowerStep(state: instr.state, id: result.id))
 }
 
+// lower_int_value_seq creates an integer constant in the sequence-lowering
+// name space: its suffix comes from the per-module constant counter, which
+// statement-keyed literal names never use, so the two spaces cannot collide.
+fn lower_int_value_seq(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, value: I64) -> Result(LowerStep, __s0_Error) {
+    let suffix = __s0_buffer_len(MirConstRec, state.mir.constants) + __s0_buffer_len(MirFunctionRec, state.mir.functions) * 4194304 + 1
+    let name = try lower_decimal_name(d, "lit.seq", suffix)
+    let constant = try mir_add_const(d, state.mir, name, mir_type_u64(), mir_const_int(), 0, value, 0, "")
+    let result = try lower_add_result(d, lower_with_mir(state, constant.store), function, block, 9, source_state, store)
+    let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
 fn lower_token_for_span(state: State, span: CheckedSpanRec) -> U64 {
     var first: U64 = 0
     var end = __s0_buffer_len(TokenRec, state.tokens)
@@ -2423,7 +2435,7 @@ fn lower_m75_scan(d: Domain, source_state: State, store: CheckStore, state: Lowe
     let head = try lower_add_block(d, state, function, "bb_m75_scan")
     let index = try mir_add_block_param(d, head.state.mir, function, head.id, 0, try lower_decimal_name(d, "__m75_scan_", head.id), mir_type_u64())
     var current = lower_with_mir(head.state, index.store)
-    let zero = try lower_int_value(d, source_state, store, current, function, entry_block, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let zero = try lower_int_value_seq(d, source_state, store, current, function, entry_block, 0)
     current = try lower_jump_value(d, zero.state, function, entry_block, head.id, zero.id)
     let length = try lower_add_typed_result(d, current, function, head.id, mir_type_u64())
     let length_instr = try lower_add_instr(d, length.state, function, head.id, mir_op_vec_len(), length.id, 0, 0, receiver_value, 0, 0, "")
@@ -2474,7 +2486,7 @@ fn lower_m75_scan(d: Domain, source_state: State, store: CheckStore, state: Lowe
         current = try lower_m75_leaf_equal(d, current, function, body.id, key_rec, key_value, scan_key, equal_block.id, different_block.id)
     }
     current = try lower_jump_value(d, current, function, equal_block.id, found_block, index.id)
-    let one = try lower_int_value(d, source_state, store, current, function, different_block.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let one = try lower_int_value_seq(d, source_state, store, current, function, different_block.id, 1)
     let next = try lower_add_typed_result(d, one.state, function, different_block.id, mir_type_u64())
     let added = try lower_add_instr(d, next.state, function, different_block.id, mir_op_int_add_checked(), next.id, 0, 0, index.id, one.id, panic_block, "")
     return lower_jump_value(d, added.state, function, different_block.id, head.id, next.id)
@@ -2500,7 +2512,7 @@ fn lower_m75_append(d: Domain, source_state: State, store: CheckStore, state: Lo
     let ready = try lower_add_block(d, keep.state, function, "bb_m75_ready")
     let ready_value = try mir_add_block_param(d, ready.state.mir, function, ready.id, 0, try lower_decimal_name(d, "__m75_vec_", ready.id), vector_type)
     current = try lower_branch(d, lower_with_mir(ready.state, ready_value.store), function, active, full.id, grow.id, keep.id)
-    let zero = try lower_int_value(d, source_state, store, current, function, grow.id, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let zero = try lower_int_value_seq(d, source_state, store, current, function, grow.id, 0)
     let is_zero = try lower_add_typed_result(d, zero.state, function, grow.id, mir_type_bool())
     let zero_cmp = try lower_add_instr(d, is_zero.state, function, grow.id, mir_op_int_eq(), is_zero.id, 0, 0, capacity.id, zero.id, 0, "")
     current = zero_cmp.state
@@ -2509,9 +2521,9 @@ fn lower_m75_append(d: Domain, source_state: State, store: CheckStore, state: Lo
     let capacity_join = try lower_add_block(d, doubled_block.state, function, "bb_m75_capacity")
     let capacity_value = try mir_add_block_param(d, capacity_join.state.mir, function, capacity_join.id, 0, try lower_decimal_name(d, "__m75_capacity_", capacity_join.id), mir_type_u64())
     current = try lower_branch(d, lower_with_mir(capacity_join.state, capacity_value.store), function, grow.id, is_zero.id, initial.id, doubled_block.id)
-    let four = try lower_int_value(d, source_state, store, current, function, initial.id, 4, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let four = try lower_int_value_seq(d, source_state, store, current, function, initial.id, 4)
     current = try lower_jump_value(d, four.state, function, initial.id, capacity_join.id, four.id)
-    let two = try lower_int_value(d, source_state, store, current, function, doubled_block.id, 2, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let two = try lower_int_value_seq(d, source_state, store, current, function, doubled_block.id, 2)
     let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
     let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
     current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
@@ -2530,7 +2542,7 @@ fn lower_m75_append(d: Domain, source_state: State, store: CheckStore, state: Lo
     let target_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target.id))
     let stored = try lower_add_instr(d, lower_with_mir(current, target_place.store), function, ready.id, mir_op_store(), 0, target_place.id, 0, pushed_value, 0, 0, "")
     current = stored.state
-    let one = try lower_int_value(d, source_state, store, current, function, ready.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+    let one = try lower_int_value_seq(d, source_state, store, current, function, ready.id, 1)
     let next_length = try lower_add_typed_result(d, one.state, function, ready.id, mir_type_u64())
     let added = try lower_add_instr(d, next_length.state, function, ready.id, mir_op_int_add_checked(), next_length.id, 0, 0, length.id, one.id, panic_block, "")
     current = added.state
@@ -2804,7 +2816,7 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let length = try lower_add_typed_result(d, current, function, found.id, mir_type_u64())
         let length_instr = try lower_add_instr(d, length.state, function, found.id, mir_op_vec_len(), length.id, 0, 0, receiver.id, 0, 0, "")
         current = length_instr.state
-        let one = try lower_int_value(d, source_state, store, current, function, found.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let one = try lower_int_value_seq(d, source_state, store, current, function, found.id, 1)
         let last = try lower_add_typed_result(d, one.state, function, found.id, mir_type_u64())
         let last_instr = try lower_add_instr(d, last.state, function, found.id, mir_op_int_sub_checked(), last.id, 0, 0, length.id, one.id, panic_block, "")
         current = last_instr.state
@@ -2821,7 +2833,7 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let storage = try lower_add_typed_result(d, current, function, body.id, storage_type.type_id)
         let storage_instr = try lower_add_instr(d, storage.state, function, body.id, mir_op_vec_storage(), storage.id, 0, 0, receiver.id, 0, 0, "")
         current = storage_instr.state
-        let next_one = try lower_int_value(d, source_state, store, current, function, body.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let next_one = try lower_int_value_seq(d, source_state, store, current, function, body.id, 1)
         let next_at = try lower_add_typed_result(d, next_one.state, function, body.id, mir_type_u64())
         let next_added = try lower_add_instr(d, next_at.state, function, body.id, mir_op_int_add_checked(), next_at.id, 0, 0, at.id, next_one.id, panic_block, "")
         current = next_added.state
@@ -2885,7 +2897,7 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let head = try lower_add_block(d, current, function, "bb_m75_project")
         let at = try mir_add_block_param(d, head.state.mir, function, head.id, 0, try lower_decimal_name(d, "__m75_project_", head.id), mir_type_u64())
         current = lower_with_mir(head.state, at.store)
-        let zero = try lower_int_value(d, source_state, store, current, function, active, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let zero = try lower_int_value_seq(d, source_state, store, current, function, active, 0)
         current = try lower_jump_value(d, zero.state, function, active, head.id, zero.id)
         let more = try lower_add_typed_result(d, current, function, head.id, mir_type_bool())
         let compared = try lower_add_instr(d, more.state, function, head.id, mir_op_int_lt(), more.id, 0, 0, at.id, length.id, 0, "")
@@ -2917,7 +2929,7 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let target_place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target_ref.id))
         let stored = try lower_add_instr(d, lower_with_mir(current, target_place.store), function, body.id, mir_op_store(), 0, target_place.id, 0, loaded.id, 0, 0, "")
         current = stored.state
-        let one = try lower_int_value(d, source_state, store, current, function, body.id, 1, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let one = try lower_int_value_seq(d, source_state, store, current, function, body.id, 1)
         let next = try lower_add_typed_result(d, one.state, function, body.id, mir_type_u64())
         let added = try lower_add_instr(d, next.state, function, body.id, mir_op_int_add_checked(), next.id, 0, 0, at.id, one.id, panic_block, "")
         current = try lower_jump_value(d, added.state, function, body.id, head.id, next.id)
@@ -2989,8 +3001,8 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let empty = try __s0_buffer_new(U64, d)
         let storage_type = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty, 0)
         var current = lower_with_mir(element.state, storage_type.store)
-        let zero = try lower_int_value(d, source_state, store, current, function, block, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
-        let one = try lower_int_value(d, source_state, store, zero.state, function, block, 1, __s0_buffer_len(MirConstRec, zero.state.mir.constants) + 1)
+        let zero = try lower_int_value_seq(d, source_state, store, current, function, block, 0)
+        let one = try lower_int_value_seq(d, source_state, store, zero.state, function, block, 1)
         current = one.state
         var length = zero.id
         var count_at: U64 = 0
@@ -3076,7 +3088,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let ready_value = try mir_add_block_param(d, vector.state.mir, function, ready.id, 0, try lower_decimal_name(d, "__m71_vec_", ready.id), vector.id)
         current = try lower_branch(d, lower_with_mir(vector.state, ready_value.store), function, active, full.id, grow.id, keep.id)
 
-        let zero = try lower_int_value(d, source_state, store, current, function, grow.id, 0, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let zero = try lower_int_value_seq(d, source_state, store, current, function, grow.id, 0)
         let is_zero = try lower_add_typed_result(d, zero.state, function, grow.id, mir_type_bool())
         let zero_cmp = try lower_add_instr(d, is_zero.state, function, grow.id, mir_op_int_eq(), is_zero.id, 0, 0, capacity.id, zero.id, 0, "")
         let initial = try lower_add_block(d, zero_cmp.state, function, "bb_vec_initial_capacity")
@@ -3084,9 +3096,9 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let capacity_join = try lower_add_block(d, doubled_block.state, function, "bb_vec_capacity")
         let capacity_value = try mir_add_block_param(d, capacity_join.state.mir, function, capacity_join.id, 0, try lower_decimal_name(d, "__m71_capacity_", capacity_join.id), mir_type_u64())
         current = try lower_branch(d, lower_with_mir(capacity_join.state, capacity_value.store), function, grow.id, is_zero.id, initial.id, doubled_block.id)
-        let four = try lower_int_value(d, source_state, store, current, function, initial.id, 4, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let four = try lower_int_value_seq(d, source_state, store, current, function, initial.id, 4)
         current = try lower_jump_value(d, four.state, function, initial.id, capacity_join.id, four.id)
-        let two = try lower_int_value(d, source_state, store, current, function, doubled_block.id, 2, __s0_buffer_len(MirConstRec, current.mir.constants) + 1)
+        let two = try lower_int_value_seq(d, source_state, store, current, function, doubled_block.id, 2)
         let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
         let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
         current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
@@ -3107,7 +3119,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let indexed = try lower_add_instr(d, target.state, function, ready.id, mir_op_slice_index_checked(), target.id, 0, 0, storage.id, length.id, panic_block, "")
         let target_place = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: target.id))
         let stored = try lower_add_instr(d, lower_with_mir(indexed.state, target_place.store), function, ready.id, mir_op_store(), 0, target_place.id, 0, first_arg, 0, 0, "")
-        let one = try lower_int_value(d, source_state, store, stored.state, function, ready.id, 1, __s0_buffer_len(MirConstRec, stored.state.mir.constants) + 1)
+        let one = try lower_int_value_seq(d, source_state, store, stored.state, function, ready.id, 1)
         let next_length = try lower_add_typed_result(d, one.state, function, ready.id, mir_type_u64())
         let added = try lower_add_instr(d, next_length.state, function, ready.id, mir_op_int_add_checked(), next_length.id, 0, 0, length.id, one.id, panic_block, "")
         let next_capacity = try lower_add_typed_result(d, added.state, function, ready.id, mir_type_u64())
@@ -4273,11 +4285,20 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         return Ok(LowerFlowStep(state: current, block: join.id, terminated: false))
     }
     if statement.kind == 9 {
-        var sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
         let sequence_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
         let sequence_type = __s0_buffer_get(CheckedTypeRec, store.types, sequence_expression.checked_type - 1)
         if sequence_type.kind != 8 && sequence_type.kind != 15 && sequence_type.kind != 16 && sequence_type.kind != 17 && sequence_type.kind != 18 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
         if sequence_type.kind != 16 && sequence_type.arg_count != 1 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
+        // The loop parameter carries the sequence value itself. An array or
+        // vector converts to its slice view once before the loop for the
+        // length bound, and the body re-derives the view from the carried
+        // owner each iteration, so the loop-carried parameter is an owning
+        // value rather than a view.
+        let sequence_param_base = try lower_type(d, source_state, store, sequence.state, sequence_expression.checked_type)
+        let sequence_param_type_id = sequence_param_base.id
+        var length_operand = sequence.id
+        var length_state = sequence.state
         if sequence_type.kind == 15 || sequence_type.kind == 17 {
             let elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1)
             let elem = try lower_type(d, source_state, store, sequence.state, elem_checked)
@@ -4287,19 +4308,19 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
             var op = mir_op_array_as_slice()
             if sequence_type.kind == 17 { op = mir_op_vec_as_slice() }
             let converted = try lower_add_instr(d, view.state, function, active, op, view.id, 0, 0, sequence.id, 0, 0, "")
-            sequence = LowerStep(state: converted.state, id: view.id)
+            length_operand = view.id
+            length_state = converted.state
         }
         // slice.len always returns canonical U64 (checked type 9 in the sealed primitive prefix).
-        let length_value = try lower_add_result(d, sequence.state, function, active, 9, source_state, store)
-        let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, sequence.id, 0, 0, "")
+        let length_value = try lower_add_result(d, length_state, function, active, 9, source_state, store)
+        let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, length_operand, 0, 0, "")
         let zero_value = try lower_int_value(d, source_state, store, length_instr.state, function, active, 0, link.statement)
         let head = try lower_add_block(d, zero_value.state, function, "bb_for_head")
         let body = try lower_add_block(d, head.state, function, "bb_for_body")
         let join = try lower_add_block(d, body.state, function, "bb_for_join")
         let index_param = try mir_add_block_param(d, join.state.mir, function, head.id, 0, "index", mir_type_u64())
-        let lowered_sequence_type = try lower_type(d, source_state, store, lower_with_mir(join.state, index_param.store), sequence_expression.checked_type)
-        let sequence_param = try mir_add_block_param(d, lowered_sequence_type.state.mir, function, head.id, 1, "sequence", lowered_sequence_type.id)
-        current = try lower_jump_two(d, lower_with_mir(lowered_sequence_type.state, sequence_param.store), function, active, head.id, zero_value.id, sequence.id)
+        let sequence_param = try mir_add_block_param(d, index_param.store, function, head.id, 1, "sequence", sequence_param_type_id)
+        current = try lower_jump_two(d, lower_with_mir(current, sequence_param.store), function, active, head.id, zero_value.id, sequence.id)
         let compared = try lower_add_result(d, current, function, head.id, 1, source_state, store)
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
         current = try lower_branch(d, compare.state, function, head.id, compared.id, body.id, join.id)
@@ -4307,9 +4328,21 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         if sequence_type.kind == 8 || sequence_type.kind == 15 || sequence_type.kind == 17 || sequence_type.kind == 18 { elem_checked = __s0_buffer_get(U64, store.type_args, sequence_type.first_arg - 1) }
         let elem = try lower_type(d, source_state, store, current, elem_checked)
         let empty = try __s0_buffer_new(U64, d)
-        let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
+        let view_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_slice(), elem.id, 0, 0, empty, 0)
+        var index_sequence = sequence_param.id
+        if sequence_type.kind == 15 || sequence_type.kind == 17 {
+            // Re-derive the immutable view from the carried owner each
+            // iteration; the loop parameter stays an owning value.
+            let view_value = try lower_add_typed_result(d, lower_with_mir(elem.state, view_type.store), function, body.id, view_type.type_id)
+            var view_op = mir_op_array_as_slice()
+            if sequence_type.kind == 17 { view_op = mir_op_vec_as_slice() }
+            let view_made = try lower_add_instr(d, view_value.state, function, body.id, view_op, view_value.id, 0, 0, sequence_param.id, 0, 0, "")
+            index_sequence = view_value.id
+            current = view_made.state
+        }
+        let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
         let ref_value = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, "for_ref"), ref_type.type_id, mir_value_def_instruction(), body.id, lower_instruction_ordinal(ref_type.store, function, body.id) + 1)
-        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, sequence_param.id, index_param.id, panic_block, "")
+        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, index_sequence, index_param.id, panic_block, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
