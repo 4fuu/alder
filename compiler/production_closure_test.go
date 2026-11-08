@@ -238,6 +238,113 @@ fn main() -> I32 {
 }
 `
 
+// Nested closure literals. The inner literal captures the outer closure's
+// parameter and a value only the inner literal reads, so the outer
+// environment carries the transitive capture; the outer environment records
+// the domain it lives in, so the thunk allocates the inner environment beside
+// it. The arrow form infers the outer result type from a nested literal, and
+// the deep shape nests three levels.
+const m75NestedClosureProgram = `fn make(base: U64) -> fn(U64) -> fn(U64) -> U64 {
+    let outer = fn(delta: U64) -> fn(U64) -> U64 {
+        let inner = fn(x: U64) -> U64 { return x + base + delta }
+        return inner
+    }
+    return outer
+}
+fn transitive(seed: U64) -> fn() -> fn() -> U64 {
+    let outer = fn() -> fn() -> U64 {
+        let inner = fn() -> U64 { return seed + 1 }
+        return inner
+    }
+    return outer
+}
+type Box {
+    v: U64
+}
+fn record_capture(b: Box) -> fn() -> fn() -> U64 {
+    let outer = fn() -> fn() -> U64 {
+        let inner = fn() -> U64 { return b.v + 1 }
+        return inner
+    }
+    return outer
+}
+fn arrow(seed: U64) -> fn() -> fn(U64) -> U64 {
+    let outer = fn() => fn(x: U64) => x + seed
+    return outer
+}
+fn deep(a: U64) -> fn(U64) -> fn(U64) -> fn(U64) -> U64 {
+    let level1 = fn(b: U64) -> fn(U64) -> fn(U64) -> U64 {
+        let level2 = fn(c: U64) -> fn(U64) -> U64 {
+            let level3 = fn(x: U64) -> U64 { return x + a + b + c }
+            return level3
+        }
+        return level2
+    }
+    return level1
+}
+fn main() -> I32 {
+    let outer = make(10)
+    var pad_a = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad_a.push(1)
+        i = i + 1
+    }
+    let inner = outer(5)
+    var pad_b = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_b.push(2)
+        i = i + 1
+    }
+    if inner(2) != 17 { return 1 }
+    let t = transitive(4)
+    var pad_c = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_c.push(3)
+        i = i + 1
+    }
+    let u = t()
+    var pad_d = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_d.push(4)
+        i = i + 1
+    }
+    if u() != 5 { return 2 }
+    let r = record_capture(Box(v: 41))
+    var pad_g = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_g.push(7)
+        i = i + 1
+    }
+    let ri = r()
+    if ri() != 42 { return 5 }
+    let af = arrow(6)
+    var pad_e = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_e.push(5)
+        i = i + 1
+    }
+    let ag = af()
+    if ag(3) != 9 { return 3 }
+    let d1 = deep(1)
+    let d2 = d1(2)
+    let d3 = d2(3)
+    var pad_f = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_f.push(6)
+        i = i + 1
+    }
+    if d3(4) != 10 { return 4 }
+    return 0
+}
+`
+
 func TestM75ClosureProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -261,6 +368,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-loop-closures", m75LoopClosureProgram},
 		{"m75-retain-chains", m75RetainChainProgram},
 		{"m75-retain-containers", m75RetainContainerProgram},
+		{"m75-nested-closures", m75NestedClosureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -347,6 +455,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-loop-closures", m75LoopClosureProgram},
 		{"m75-retain-chains", m75RetainChainProgram},
 		{"m75-retain-containers", m75RetainContainerProgram},
+		{"m75-nested-closures", m75NestedClosureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

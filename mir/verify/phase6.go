@@ -35,6 +35,7 @@ type resourceState struct {
 
 func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupAnalysis, domainInfos [][]domainInfo) []Error {
 	var errs []Error
+	envRecords := closureEnvRecords(m)
 	for fi, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
@@ -58,7 +59,7 @@ func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupA
 				loc := locInstr(f, b, ii, in)
 				if in.Op == mir.OpStore {
 					if _, deref := placeDerefRoot(&in.Place); deref {
-						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored) {
+						if stored, ok := f.ValueType(in.StoreVal); ok && typeRequiresLocalStore(m, stored, envRecords) {
 							errs = append(errs, Error{Loc: loc, Msg: "lifetime-bearing values may not be stored through dereference places in the current MIR profile"})
 						}
 					}
@@ -563,16 +564,56 @@ func typeContainsRef(m *mir.Module, t mir.TypeId) bool {
 	return containsKind(m, t, mir.TypeSafeRef) || containsKind(m, t, mir.TypeSafeMut) ||
 		containsKind(m, t, mir.TypeSlice) || containsKind(m, t, mir.TypeVec) || containsKind(m, t, mir.TypeTable)
 }
-func typeRequiresLocalStore(m *mir.Module, t mir.TypeId) bool {
+func typeRequiresLocalStore(m *mir.Module, t mir.TypeId, envRecords map[mir.TypeId]bool) bool {
 	for _, kind := range []mir.TypeKind{
 		mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeSlice, mir.TypeTable,
 		mir.TypeDomainHandle, mir.TypeDomainMark,
 	} {
+		// A closure environment record records the domain that owns it. The
+		// retain hook rewrites that field when the record moves domains and
+		// the record never outlives its domain, so the field is safe behind
+		// the dereference store that installs the record.
+		if kind == mir.TypeDomainHandle && envRecords[t] {
+			continue
+		}
 		if containsKind(m, t, kind) {
 			return true
 		}
 	}
 	return false
+}
+
+// closureEnvRecords returns the aggregate types used as fn.value environments.
+func closureEnvRecords(m *mir.Module) map[mir.TypeId]bool {
+	envs := map[mir.TypeId]bool{}
+	for _, f := range m.Functions {
+		if f == nil {
+			continue
+		}
+		for _, b := range f.Blocks {
+			if b == nil {
+				continue
+			}
+			for i := range b.Instrs {
+				in := &b.Instrs[i]
+				if in.Op != mir.OpFnValue || in.A == mir.NoValue {
+					continue
+				}
+				t, ok := f.ValueType(in.A)
+				if !ok || !m.ValidType(t) {
+					continue
+				}
+				ty := &m.Types[t]
+				switch ty.Kind {
+				case mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeSlice:
+					if m.ValidType(ty.Elem) && m.Types[ty.Elem].Kind == mir.TypeAggregate {
+						envs[ty.Elem] = true
+					}
+				}
+			}
+		}
+	}
+	return envs
 }
 func addDep(i *domainInfo, d defKey) bool {
 	if i.deps == nil {

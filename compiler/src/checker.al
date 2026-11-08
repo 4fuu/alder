@@ -55,6 +55,10 @@ type ClosureSiteRec {
     declared_count: U64
     capture_count: U64
     first_capture: U64
+    // 1 when the literal's body contains another closure literal. Such a
+    // site carries the domain its environment lives in, so the thunk body
+    // can allocate a nested environment in the same domain.
+    nests: U64
 }
 
 type ClosureCaptureRec {
@@ -4877,10 +4881,39 @@ type ClosureScanRec {
     ok: Bool
 }
 
+// closure_declared_params collects a closure literal's declared parameter
+// nodes, in order, from the literal's leading kind-13 children.
+fn closure_declared_params(d: Domain, parse: ParseStore, node: SyntaxRec) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var out = try __s0_buffer_new(U64, d)
+    var link = node.children
+    var counting = true
+    while link != 0 && counting {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 13 {
+            out = try __s0_buffer_append(U64, d, out, item.node)
+        } else { counting = false }
+        link = item.next
+    }
+    return Ok(out)
+}
+
+// closure_nests reports whether the subtree under a closure literal's body
+// contains another closure literal.
+fn closure_nests(parse: ParseStore, link_id: U64) -> Bool {
+    if link_id == 0 { return false }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    if node.kind == 58 { return true }
+    if closure_nests(parse, node.children) { return true }
+    return closure_nests(parse, link.next)
+}
+
 // Collect the closure's captures: word nodes under the body that resolve to
 // locals of the enclosing owner and are not this closure's own parameters.
 // Type positions never produce kind-24 nodes, so every hit is a value
-// reference.
+// reference. A nested literal's subtree is scanned too, so the outer
+// environment carries everything the inner body reads.
 fn closure_scan_captures(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64, params: __s0_Buffer(U64), found_in: __s0_Buffer(U64), nodes_in: __s0_Buffer(U64)) -> Result(ClosureScanRec, __s0_Error) {
     var found = found_in
     var nodes = nodes_in
@@ -4889,7 +4922,11 @@ fn closure_scan_captures(d: Domain, state: State, parse: ParseStore, store: Chec
         var skip = false
         var param_at: U64 = 0
         while param_at < __s0_buffer_len(U64, params) {
-            if __s0_buffer_get(U64, params, param_at) == node_id { skip = true }
+            // A declared parameter of this literal or of a nested literal it
+            // contains shadows the same name in the enclosing scope, so a
+            // use of that name is never a capture.
+            let declared = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, params, param_at) - 1)
+            if same_name(state, node.source, node.name_start, node.name_end, declared.source, declared.name_start, declared.name_end) { skip = true }
             param_at = param_at + 1
         }
         if !skip {
@@ -4909,17 +4946,23 @@ fn closure_scan_captures(d: Domain, state: State, parse: ParseStore, store: Chec
         }
         return Ok(ClosureScanRec(found: found, nodes: nodes, ok: true))
     }
+    var scoped = params
     if node.kind == 58 {
-        // Nested closure literals are outside this slice: their transitive
-        // capture threading through the outer thunk's frame is not lowered
-        // yet, and the nested site check during arrow inference needs its
-        // own store threading. Skip the subtree.
-        return Ok(ClosureScanRec(found: found, nodes: nodes, ok: true))
+        // A nested literal's own parameters shadow the enclosing names inside
+        // its body, and everything else it reads is a capture of this literal
+        // too: the nested thunk can only reach values the outer environment
+        // carries.
+        let nested = try closure_declared_params(d, parse, node)
+        var add_at: U64 = 0
+        while add_at < __s0_buffer_len(U64, nested) {
+            scoped = try __s0_buffer_append(U64, d, scoped, __s0_buffer_get(U64, nested, add_at))
+            add_at = add_at + 1
+        }
     }
     var link = node.children
     while link != 0 {
         let child = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
-        let stepped = try closure_scan_captures(d, state, parse, store, owner, child.node, params, found, nodes)
+        let stepped = try closure_scan_captures(d, state, parse, store, owner, child.node, scoped, found, nodes)
         if !stepped.ok { return Ok(stepped) }
         found = stepped.found
         nodes = stepped.nodes
@@ -5008,8 +5051,6 @@ fn closure_real_type(d: Domain, real: CheckStore, temp: CheckStore, type_id: U64
 }
 
 fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, node: SyntaxRec, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
-    // Nested closure literals wait for transitive capture threading.
-    if lower_closure_site_for(store, owner) != 0 { return expr_token_fail(d, state, base, 147, node) }
     let total = call_link_count(parse, node)
     if total < 1 { return expr_token_fail(d, state, base, 147, node) }
     var declared: U64 = 0
@@ -5149,7 +5190,9 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     let first_capture = __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1
     let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: site_index, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
     let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
-    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture))
+    var nests: U64 = 0
+    if closure_nests(parse, node.children) { nests = 1 }
+    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture, nests: nests))
     let with_closures = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: captures))
     return expr_draft(with_closures, fn_type, expression_record)
 }

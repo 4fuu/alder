@@ -555,11 +555,33 @@ if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_vec()) { return Ok(true) }
 return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) }
+// mir_v6_env_record reports whether the type is an aggregate used as a
+// fn.value environment. Such a record records the domain that owns it, and
+// the retain hook rewrites that field when the record moves domains, so its
+// domain handle is safe behind the dereference store that installs it.
+fn mir_v6_env_record(store: MirStore, indexes: MirVIndexes, type_id: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_fn_value() && item.a != 0 {
+            let env_type = mir_v5_value_type(store, indexes, item.function, item.a)
+            if env_type >= 1 && env_type <= __s0_buffer_len(MirTypeRec, store.types) {
+                let env = __s0_buffer_get(MirTypeRec, store.types, env_type - 1)
+                if env.kind == mir_type_kind_safe_ref() || env.kind == mir_type_kind_safe_mut() || env.kind == mir_type_kind_slice() {
+                    if env.elem == type_id { return true }
+                }
+            }
+        }
+        at = at + 1
+    }
+    return false
+}
+
 fn mir_v6_type_local_store(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) { return Ok(true) }
-if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) { return Ok(true) }
+if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) && !mir_v6_env_record(store, indexes, type_id) { return Ok(true) }
 return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) }
 
 fn mir_v6_instruction_for_value(store: MirStore, indexes: MirVIndexes, value: MirValueRec) -> U64 { if value.def_kind != mir_value_def_instruction() { return 0 }

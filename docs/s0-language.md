@@ -169,12 +169,15 @@ work in progress:
   primitives) may be captured while environments are lowered as plain
   domain-allocated records. The thunk ABI is `(declared parameters, opaque
   environment pointer)`; capture-free closures are plain function values.
-- Known limits of this slice, all diagnostic 147 rejections or documented
-  verifier refusals: nested closure literals are rejected until transitive
-  capture threading lands; closure creation inside a `while` loop is
-  refused by the verifier loop-store rule until environments gain
-  runtime-backed allocation; parameter type inference from the expected
-  function type is not implemented.
+- A literal nested inside another literal captures transitively: the outer
+  environment carries every value the inner body reads, including values the
+  outer literal never reads itself. An outer literal whose body nests another
+  literal records the domain that owns its environment in the record, and its
+  thunk allocates the inner environment in that domain. Closure creation
+  inside a `while` loop is carried by the immutable environment snapshot.
+- Known limits of this slice: parameter type inference from the expected
+  function type is not implemented; malformed closure shapes are rejected
+  with diagnostic 147.
 
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.

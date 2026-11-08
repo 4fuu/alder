@@ -43,6 +43,12 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	// parameter itself.
 	declarations = append(declarations, "fn rebased_layer(P: type, p: P, seed: U64) -> U64\nwhere P: Deliver(U64) {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(p.deliver())\n}")
 	declarations = append(declarations, "fn keep_value(T: type, value: T) -> T {\n    let same = fn() -> T { return value }\n    return same()\n}")
+	// Nested closure literals: the inner literal reads the generic layer's
+	// seed, which the outer literal never reads itself, so the outer
+	// environment must carry the transitive capture. The outer environment
+	// records the domain it lives in and the thunk allocates the inner
+	// environment beside it.
+	declarations = append(declarations, "fn nested_layer(T: type, seed: U64) -> U64 {\n    let outer = fn() -> fn(U64) -> U64 {\n        let inner = fn(x: U64) -> U64 { return x + seed }\n        return inner\n    }\n    let made = outer()\n    return made(seed)\n}")
 	for cell := 0; cell < m75LayeredCells; cell++ {
 		declarations = append(declarations, fmt.Sprintf("type Cell%03d {\n    v: U64\n}", cell))
 		declarations = append(declarations, fmt.Sprintf("impl Deliver(U64) for Cell%03d {\n    fn deliver(self) -> U64 { return self.v }\n}", cell))
@@ -76,6 +82,8 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	main.WriteString("    if rebased_layer(Cell002, Cell002(v: 20), 7) != 27 { return 6 }\n")
 	main.WriteString("    if keep_value(U64, 9) != 9 { return 7 }\n")
 	main.WriteString("    if keep_value(Cell004, Cell004(v: 44)).v != 44 { return 8 }\n")
+	main.WriteString("    if nested_layer(U64, 6) != 12 { return 10 }\n")
+	main.WriteString("    if nested_layer(Cell006, 7) != 14 { return 11 }\n")
 	main.WriteString("    if Cell005(v: 50).twice() != 50 { return 9 }\n    return 0\n}")
 	declarations = append(declarations, main.String())
 	return declarations, want

@@ -457,9 +457,13 @@ fn closure_literal_ahead(state: State, initial: ParseCursor) -> Bool {
             if nest == 0 && step.kind == 5 {
                 if token_text(state, step, "(") || token_text(state, step, "[") { nest = nest + 1 }
                 else { if token_text(state, step, "{") { return true }
+                    // A result type may itself be `fn(...) -> ...`, so an
+                    // arrow at the top level continues the type rather than
+                    // ending the scan.
+                    if token_text(state, step, "->") { scan = scan + 1 } else {
                     if token_text(state, step, ",") { scan = scan + 1 } else {
                     if token_text(state, step, "=>") { return true }
-                    return false } }
+                    return false } } }
             } else {
                 if nest != 0 && step.kind == 5 {
                     if token_text(state, step, "(") || token_text(state, step, "[") { nest = nest + 1 }

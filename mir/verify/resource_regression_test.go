@@ -1179,6 +1179,39 @@ panic:
 `, "return of invalid value %value")
 	})
 
+	t.Run("environment record with a domain field", func(t *testing.T) {
+		// A literal whose body contains another literal records the domain
+		// that owns its environment, so its thunk allocates a nested
+		// environment in that domain. The domain handle sits behind the
+		// dereference store that installs the record; the retain hook
+		// rewrites it when the record moves to another domain.
+		requireAccepted(t, `mir 5
+const @one: u64 = 1
+type @Env {
+  alder_env_domain: domain_handle
+  seed: u64
+}
+fn @thunk(%x: u64, %env: safe_mut(@Env)) -> u64 {
+entry:
+  return %x
+}
+fn @make(%domain: domain_handle, %seed: u64) -> function(fn(u64) -> u64) {
+entry:
+  %child = domain.create %domain
+  %record = aggregate.construct @Env { alder_env_domain: %child, seed: %seed }
+  %one = const.get @one
+  %slot = alloc.checked %child, @Env, %one else panic
+  store deref %slot, %record
+  %value = fn.value @thunk(%slot)
+  %result = copy_to_domain %domain, %value
+  domain.destroy %child
+  return %result
+panic:
+  panic
+}
+`)
+	})
+
 	t.Run("retained environment destroyed", func(t *testing.T) {
 		requireAccepted(t, `mir 5
 const @one: u64 = 1

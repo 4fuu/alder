@@ -1010,11 +1010,17 @@ Exit-criteria evidence (in progress):
   parameters, captures, and result take that instance's concrete types;
   the linear body walk skips thunks and a post-body pass checks each one
   after every ordinary body has run, which is also when an instance's
-  site check has recorded the thunk signature. Nested literals and
-  creation inside a `while` loop are rejected (147) or refused by the
-  phase-6 loop-store rule until runtime-backed environments land, and
-  closure sites, thunks, and erased `fn(params) -> result` value types are
-  pinned through generated strict C11 programs with captures.
+  site check has recorded the thunk signature. A closure created inside a
+  `while` loop is carried by its immutable environment snapshot, and a
+  literal nested inside another literal captures transitively: the outer
+  environment carries every value the inner body reads, and the outer
+  record records the domain that owns it so the thunk allocates the inner
+  environment beside it. An escaping closure is retained into its
+  destination domain by the function value's retain hook, so chains of
+  returns and closures carried in vectors or records stay valid. Closure
+  sites, thunks, and erased `fn(params) -> result` value types are pinned
+  through generated strict C11 programs with captures, and the layered DAG
+  threads a nested literal through a generic body.
 - default-method dispatch works end to end: a trait requirement with a
   default body is materialized as an ordinary impl method (a kind-12
   symbol whose node is the requirement) for every implementation that
@@ -1154,13 +1160,13 @@ both halves were written):
   C, and rejection diagnostics are byte-identical across processes and
   across source/CLI permutations, and the generated C runs under strict
   C11.
-- remaining closure limits: nested closure literals (147) still reject.
-  Every other closure shape works: a literal inside a generic function body
-  materializes one thunk per instance, a closure created inside a `while` loop
-  carries its immutable environment snapshot across the backedge, and an
-  escaping closure is retained into its destination domain by the
-  `copy_to_domain` retain hook, so chains of returns and closures carried in
-  vectors or records stay valid.
+- closure surface complete for the 1.0 value model: a literal inside a
+  generic function body materializes one thunk per instance, nested literals
+  thread their captures transitively through the outer environment, a closure
+  created inside a `while` loop carries its immutable environment snapshot
+  across the backedge, and an escaping closure is retained into its
+  destination domain by the `copy_to_domain` retain hook, so chains of
+  returns and closures carried in vectors or records stay valid.
 - `mut self` receivers on a field place are not implemented:
   `b.items.push(x)` rejects with 101 and `b.items[i] = x` with "invalid
   assignment target", although the frozen `core.collection` snapshot

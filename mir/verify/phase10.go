@@ -13,6 +13,7 @@ import (
 // grow here as the C backend matures.
 func phase10Backend(m *mir.Module) []Error {
 	var errs []Error
+	envRecords := closureEnvRecords(m)
 	for i := range m.Imports {
 		if !validCExternalName(m.Imports[i].Name) {
 			errs = append(errs, Error{
@@ -33,6 +34,12 @@ func phase10Backend(m *mir.Module) []Error {
 				case mir.OpAlloc, mir.OpAllocChecked:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr} {
+						// A closure environment record records the domain
+						// that owns it; the retain hook rewrites that field
+						// when the record moves domains.
+						if k == mir.TypeDomainHandle && envRecords[in.TypeOp] {
+							continue
+						}
 						if containsKind(m, in.TypeOp, k) {
 							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("alloc element type may not contain %s", kindName(m, k))})
 							break

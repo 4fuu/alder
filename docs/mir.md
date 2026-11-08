@@ -416,6 +416,19 @@ Phase 6 merges the environment operand's domain provenance into the fn value
 and into every `call.value` result, so the value and its results carry the
 captured domain's provenance through the existing lattice.
 
+A closure environment record is one aggregate per site. A literal whose body
+contains another literal records the domain that owns the record as its first
+field, and the thunk loads that field in its prologue and uses it as its active
+and result domain, so a nested environment is allocated beside the outer
+record instead of in a frame domain the thunk does not have. Two conservative
+rules are narrowed for such a record and for nothing else: a domain handle in a
+dereference store is accepted when the stored value is an aggregate used as a
+`fn.value` environment, and `alloc` of that aggregate is accepted. This is
+sound because the record is allocated in the domain its field names, every
+cross-domain move goes through the retain hook, which rewrites the field to the
+destination domain, and the record never outlives its domain; the field is only
+ever used as an allocation parent.
+
 A function value that leaves its creating frame is retained.
 `copy_to_domain` of a function type produces a complete, independent value in
 the destination domain through the backend's per-environment retain hook, so

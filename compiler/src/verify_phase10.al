@@ -43,7 +43,9 @@ fn mir_v10_external_name(store: MirStore, start: U64, end: U64) -> Bool {
     return !mir_v10_header_name(store, start, end)
 }
 fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
-    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) { return Ok(mir_type_kind_domain_handle()) }
+    // A closure environment record records the domain that owns it; the
+    // retain hook rewrites that field when the record moves domains.
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) && !mir_v6_env_record(store, indexes, type_id) { return Ok(mir_type_kind_domain_handle()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) { return Ok(mir_type_kind_domain_mark()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_scope()) { return Ok(mir_type_kind_cleanup_scope()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_cleanup_id()) { return Ok(mir_type_kind_cleanup_id()) }

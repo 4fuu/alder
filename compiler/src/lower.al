@@ -398,8 +398,18 @@ fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, sta
     let named = try mir_add_named_type(d, state.mir, mir_type_kind_aggregate(), try lower_decimal_name(d, "AlderClosureEnv_", site.owner))
     var current = lower_with_mir(state, named.store)
     // One field per capture, named after the captured binding. Captures are
-    // storage-free snapshots in this slice, so the record holds plain values
-    // and needs no domain of its own.
+    // storage-free snapshots, so the record holds plain values. A literal
+    // whose body contains another literal records the domain the record
+    // lives in first, so the thunk body can allocate a nested environment in
+    // the same domain; the retain hook rewrites that field when the record
+    // moves to another domain.
+    var field_ordinal: U64 = 0
+    if site.nests == 1 {
+        let domain_type = try lower_domain_mir_type(d, current)
+        current = domain_type.state
+        current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, 0, "alder_env_domain", domain_type.id))
+        field_ordinal = 1
+    }
     var ordinal: U64 = 0
     while ordinal < site.capture_count {
         let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
@@ -408,7 +418,7 @@ fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, sta
         if !typ.state.valid { return Ok(typ) }
         current = typ.state
         let name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
-        current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, ordinal, name, typ.id))
+        current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, field_ordinal + ordinal, name, typ.id))
         ordinal = ordinal + 1
     }
     let memo = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_closure_env_key(site.owner), value: named.type_id))
@@ -471,7 +481,8 @@ fn lower_has_storage(store: CheckStore) -> Bool {
     // captures forces the storage model on for the whole program.
     var site_at: U64 = 0
     while site_at < __s0_buffer_len(ClosureSiteRec, store.closures.sites) {
-        if __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at).capture_count != 0 { return true }
+        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at)
+        if site.capture_count != 0 || site.nests == 1 { return true }
         site_at = site_at + 1
     }
     var at: U64 = 0
@@ -3377,7 +3388,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if !fn_type.state.valid { return Ok(fn_type) }
         var current = fn_type.state
         var env_value: U64 = 0
-        if site.capture_count != 0 {
+        if site.capture_count != 0 || site.nests == 1 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type) }
             current = env_type.state
@@ -3421,16 +3432,29 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let record_result = try lower_add_typed_result(d, current, function, block, env_type.id)
             let constructed = try lower_add_instr(d, record_result.state, function, block, mir_op_aggregate_construct(), record_result.id, 0, env_type.id, 0, 0, 0, "")
             current = constructed.state
+            var field_ordinal: U64 = 0
+            if site.nests == 1 {
+                // The record carries the domain it lives in. A nested
+                // environment is then allocated in that domain by the thunk,
+                // and the record needs no cross-domain copy: its domain field
+                // already gives the stored value its provenance.
+                current = try lower_add_instr_operand(d, current, constructed.id, 0, domain, mir_operand_aggregate_field(), "alder_env_domain")
+                field_ordinal = 1
+            }
             ordinal = 0
             while ordinal < site.capture_count {
                 let capture_local = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal).local - 1)
                 let field_name = try lower_source_word(d, source_state, capture_local.source, capture_local.name_start, capture_local.name_end)
-                current = try lower_add_instr_operand(d, current, constructed.id, ordinal, __s0_buffer_get(U64, field_values, ordinal), mir_operand_aggregate_field(), field_name)
+                current = try lower_add_instr_operand(d, current, constructed.id, field_ordinal + ordinal, __s0_buffer_get(U64, field_values, ordinal), mir_operand_aggregate_field(), field_name)
                 ordinal = ordinal + 1
             }
-            let copy_result = try lower_add_typed_result(d, current, function, block, env_type.id)
-            let domain_copied = try lower_add_instr(d, copy_result.state, function, block, mir_op_copy_to_domain(), copy_result.id, 0, 0, domain, record_result.id, 0, "")
-            current = domain_copied.state
+            var stored_value = record_result.id
+            if site.nests == 0 {
+                let copy_result = try lower_add_typed_result(d, current, function, block, env_type.id)
+                let domain_copied = try lower_add_instr(d, copy_result.state, function, block, mir_op_copy_to_domain(), copy_result.id, 0, 0, domain, record_result.id, 0, "")
+                current = domain_copied.state
+                stored_value = copy_result.id
+            }
             let one = try lower_helper_const(d, current, function, block, mir_type_u64(), 1, expression_id * 100 + 71)
             current = one.state
             let env_result = try lower_add_typed_result(d, current, function, block, reference.type_id)
@@ -3440,7 +3464,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             env_value = env_result.id
             let env_deref = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: env_value))
             current = lower_with_mir(current, env_deref.store)
-            let env_stored = try lower_add_instr(d, current, function, block, mir_op_store(), 0, env_deref.id, 0, copy_result.id, 0, 0, "")
+            let env_stored = try lower_add_instr(d, current, function, block, mir_op_store(), 0, env_deref.id, 0, stored_value, 0, 0, "")
             current = env_stored.state
         }
         let result = try lower_add_typed_result(d, current, function, block, fn_type.id)
@@ -4757,7 +4781,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     var env_param: U64 = 0
     if closure_site != 0 {
         let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
-        if site.capture_count != 0 {
+        if site.capture_count != 0 || site.nests == 1 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type.state) }
             let empty = try __s0_buffer_new(U64, d)
@@ -4804,6 +4828,24 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 current = stored.state
                 ordinal = ordinal + 1
             }
+        }
+        if site.nests == 1 {
+            // A literal whose body contains another literal records the
+            // domain its environment lives in. Register that domain as this
+            // thunk's active and result domain so a nested environment is
+            // allocated beside the outer record instead of inside a frame
+            // domain the thunk does not have.
+            let deref = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: env_param))
+            current = lower_with_mir(current, deref.store)
+            let field = try lower_helper_field_place(d, current, function, deref.id, "alder_env_domain")
+            current = field.state
+            let domain_type = try lower_domain_mir_type(d, current)
+            current = domain_type.state
+            let loaded = try lower_helper_load(d, current, function, entry.id, field.id, domain_type.id)
+            current = loaded.state
+            let active = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_active_domain_key(store, owner), value: loaded.id))
+            let result_domain = try __s0_buffer_append(LowerValueMapRec, d, active, LowerValueMapRec(expression: lower_domain_key(store, owner), value: loaded.id))
+            current = lower_with_values(current, result_domain)
         }
     }
     if hidden_domain {
