@@ -121,6 +121,19 @@ func TestAPIRejections(t *testing.T) {
 		t.Errorf("alloc.checked missing else edge not reported:\n%s", Errors(errs).String())
 	}
 
+	// The fn.value domain marker is legal only on fn.value; on any other
+	// instruction the shape check rejects it.
+	marked := mir.NewModule()
+	mf := marked.AddFunction("f", []mir.Param{{Name: "d", Type: mir.TypeI64}}, mir.TypeUnit)
+	mb := mf.AddBlock("bb0", nil)
+	one := mf.AddValue("one", mir.TypeI64, mir.ValueDef{Kind: mir.ValueDefFuncParam, Param: 0})
+	mb.AddInstr(mir.Instr{Op: mir.OpIntAddChecked, Result: mir.NoValue, A: one, FailTarget: mir.NoBlock, TypeOp: mir.FnValueDomainMarker})
+	mb.SetTerm(mir.Terminator{Kind: mir.TermReturn, Result: mir.NoValue})
+	errs = Module(marked)
+	if !containsMsg(errs, "fn.value domain marker on a non-fn.value instruction") {
+		t.Errorf("marker on a non-fn.value instruction not rejected:\n%s", Errors(errs).String())
+	}
+
 	// A producing instruction that binds no result.
 	m2 := mir.NewModule()
 	f2 := m2.AddFunction("g", nil, mir.TypeUnit)

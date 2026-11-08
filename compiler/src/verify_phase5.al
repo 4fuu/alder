@@ -323,13 +323,25 @@ return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.func
     if x.op == mir_op_fn_value() { if x.target == 0 || x.target > __s0_buffer_len(MirFunctionRec, store.functions) { return MirVTypeResult(valid: false, type_id: 0) }
 let callee = __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1)
 var param_total = mir_v5_function_param_count(store, indexes, x.target)
+var param_base: U64 = 0
 // The function value's type erases the environment: {code, env} values
 // carry the environment opaquely, and closures and plain references of the
 // same signature share one value type. A closure thunk's trailing parameter
 // is the environment record supplied by the environment operand, not by
-// callers of the function value.
-if x.a != 0 && param_total > 0 { param_total = param_total - 1 }
-let found = mir_v5_find_function_type(store, indexes, x.target, param_total, callee.result_type, 0)
+// callers of the function value. The marker instead names a storage-model
+// target: its leading parameter is the hidden domain, supplied through the
+// environment operand, so the erased type covers the parameters after it.
+if x.a != 0 && param_total > 0 && x.type_op != mir_fn_value_domain_marker() { param_total = param_total - 1 }
+if x.type_op == mir_fn_value_domain_marker() {
+    if x.a == 0 || param_total == 0 { return MirVTypeResult(valid: false, type_id: 0) }
+    let first_param = mir_v5_param_type(store, indexes, x.target, 0, mir_param_function(), 0)
+    if first_param == 0 || __s0_buffer_get(MirTypeRec, store.types, first_param - 1).kind != mir_type_kind_domain_handle() { return MirVTypeResult(valid: false, type_id: 0) }
+    let env_type = mir_v5_value_type(store, indexes, x.function, x.a)
+    if env_type == 0 || __s0_buffer_get(MirTypeRec, store.types, env_type - 1).kind != mir_type_kind_domain_handle() { return MirVTypeResult(valid: false, type_id: 0) }
+    param_base = 1
+    param_total = param_total - 1
+}
+let found = mir_v5_find_function_type_based(store, indexes, x.target, param_base, param_total, callee.result_type, 0)
 return MirVTypeResult(valid: found != 0, type_id: found) }
     if x.op == mir_op_ffi_call_unsafe() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, true), type_id: __s0_buffer_get(MirImportRec, store.imports, x.target - 1).result_type) }
     return MirVTypeResult(valid: false, type_id: 0)
@@ -354,6 +366,10 @@ fn mir_v5_type_part(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> Mir
 // result, and optional environment part match the target function plus the
 // environment operand. Verification only looks it up; lowering interns it.
 fn mir_v5_find_function_type(store: MirStore, indexes: MirVIndexes, target: U64, param_total: U64, result_type: U64, env_type: U64) -> U64 {
+    return mir_v5_find_function_type_based(store, indexes, target, 0, param_total, result_type, env_type)
+}
+
+fn mir_v5_find_function_type_based(store: MirStore, indexes: MirVIndexes, target: U64, param_base: U64, param_total: U64, result_type: U64, env_type: U64) -> U64 {
     var at = mir_primitive_type_count()
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let t = __s0_buffer_get(MirTypeRec, store.types, at)
@@ -367,7 +383,7 @@ fn mir_v5_find_function_type(store: MirStore, indexes: MirVIndexes, target: U64,
                 var ordinal: U64 = 0
                 while ordinal < param_total {
                     let part = mir_v5_type_part(store, at + 1, mir_type_part_function_param(), ordinal)
-                    let want = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), ordinal)
+                    let want = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), param_base + ordinal)
                     if part.part_type != want { matches = false }
                     ordinal = ordinal + 1
                 }

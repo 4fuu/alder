@@ -373,7 +373,8 @@ fn mir_validate_instruction_refs(store: MirStore, id: U64, rec: MirInstrRec) -> 
     if may_omit_result && rec.result != 0 { return false }
     if !mir_instr_produces(rec.op) && rec.result != 0 { return false }
     if rec.place != 0 && !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) { return false }
-    if rec.type_op != 0 && !mir_type_valid(store, rec.type_op) { return false }
+    if rec.type_op != 0 && rec.type_op != mir_fn_value_domain_marker() && !mir_type_valid(store, rec.type_op) { return false }
+    if rec.type_op == mir_fn_value_domain_marker() && rec.op != mir_op_fn_value() { return false }
     if rec.a != 0 && !mir_value_valid(store, rec.function, rec.a) { return false }
     if rec.b != 0 && !mir_value_valid(store, rec.function, rec.b) { return false }
     if rec.c != 0 && !mir_value_valid(store, rec.function, rec.c) { return false }
@@ -1036,6 +1037,9 @@ fn mir_out_instruction(store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
         if !out_string(" @") || !mir_out_function_name(store, rec.target) { return false }
         if rec.a != 0 {
             if !out(40) || !mir_out_value(store, rec.function, rec.a) || !out(41) { return false }
+        }
+        if rec.type_op == mir_fn_value_domain_marker() {
+            if !out_string(" domain") { return false }
         }
     }
     return out(10)

@@ -184,6 +184,68 @@ fn fn_value_ops_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirSt
     return Ok(final.store)
 }
 
+// fn.value with the domain marker: mode 0 accepts a marked reference to a
+// storage-model callee (leading domain parameter) that is called through
+// call.value; mode 1 marks a callee whose leading parameter is not a
+// domain; mode 2 marks a reference without the environment operand; mode 3
+// puts the marker on a str.eq instead of a fn.value.
+fn fn_value_domain_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
+    var store = initial
+    let empty = try __s0_buffer_new(U64, d)
+    let domain_type = try mir_intern_type(d, store, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    store = domain_type.store
+    let target = try mir_add_function(d, store, "callee", mir_type_u64())
+    store = target.store
+    var first_type = domain_type.type_id
+    if mode == 1 { first_type = mir_type_u64() }
+    let dom_param = try mir_add_function_param(d, store, target.id, 0, "dom", first_type)
+    store = dom_param.store
+    let value_param = try mir_add_function_param(d, store, target.id, 1, "value", mir_type_u64())
+    store = value_param.store
+    let entry = try mir_add_block(d, store, target.id, 0, "entry")
+    store = entry.store
+    let term = try mir_add_terminator(d, store, MirTermRec(function: target.id, block: entry.id, kind: mir_term_return(), value: value_param.id, target: 0, then_block: 0, else_block: 0))
+    store = term.store
+    let caller = try mir_add_function(d, store, "caller", mir_type_unit())
+    store = caller.store
+    let caller_dom = try mir_add_function_param(d, store, caller.id, 0, "dom", domain_type.type_id)
+    store = caller_dom.store
+    let block = try mir_add_block(d, store, caller.id, 0, "entry")
+    store = block.store
+    var params = try __s0_buffer_new(U64, d)
+    params = try __s0_buffer_append(U64, d, params, mir_type_u64())
+    let fn_type = try mir_intern_function_type(d, store, params, mir_type_u64(), 0)
+    store = fn_type.store
+    let made = try mir_add_value(d, store, caller.id, "made", fn_type.type_id, mir_value_def_instruction(), block.id, 1)
+    store = made.store
+    var env_value = caller_dom.id
+    if mode == 2 { env_value = 0 }
+    let made_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 0, op: mir_op_fn_value(), result: made.id, place: 0, type_op: mir_fn_value_domain_marker(), a: env_value, b: 0, c: 0, target: target.id, name_start: 0, name_end: 0))
+    store = made_instr.store
+    if mode == 3 {
+        let left = try mir_add_value(d, store, caller.id, "left", mir_type_bool(), mir_value_def_instruction(), block.id, 2)
+        store = left.store
+        let str_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 1, op: mir_op_str_eq(), result: left.id, place: 0, type_op: mir_fn_value_domain_marker(), a: caller_dom.id, b: caller_dom.id, c: 0, target: 0, name_start: 0, name_end: 0))
+        store = str_instr.store
+    } else {
+        let called = try mir_add_value(d, store, caller.id, "called", mir_type_u64(), mir_value_def_instruction(), block.id, 2)
+        store = called.store
+        let call_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 1, op: mir_op_call_value(), result: called.id, place: 0, type_op: 0, a: made.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+        store = call_instr.store
+        let const_made = try mir_add_const(d, store, "unit_arg", mir_type_u64(), mir_const_int(), 0, 1, 0, "")
+        store = const_made.store
+        let const_rec = __s0_buffer_get(MirConstRec, store.constants, const_made.id - 1)
+        let arg = try mir_add_value(d, store, caller.id, "arg", mir_type_u64(), mir_value_def_instruction(), block.id, 3)
+        store = arg.store
+        let arg_instr = try mir_add_instruction(d, store, MirInstrRec(function: caller.id, block: block.id, ordinal: 2, op: mir_op_const_get(), result: arg.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: const_rec.name_start, name_end: const_rec.name_end))
+        store = arg_instr.store
+        let operand = try mir_add_operand(d, store, MirOperandRec(kind: mir_operand_instruction(), owner: call_instr.id, ordinal: 0, edge: 0, value: arg.id, target: 0, operand_type: 0, name_start: 0, name_end: 0))
+        store = operand.store
+    }
+    let final = try mir_add_terminator(d, store, MirTermRec(function: caller.id, block: block.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(final.store)
+}
+
 fn cross_function_value_names_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error) {
     let first = try mir_add_function(d, initial, "first", mir_type_unit())
     let first_value = try mir_add_function_param(d, first.store, first.id, 0, "shared", mir_type_u64())
@@ -1268,6 +1330,10 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if !emit_complete(102, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 2), 5, false)) { return Ok(false) }
 	if !emit_complete(103, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 3), 5, false)) { return Ok(false) }
 	if !emit_complete(104, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 4), 5, false)) { return Ok(false) }
+    if !emit_complete(105, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 0), 5, false)) { return Ok(false) }
+    if !emit_complete(106, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 1), 5, false)) { return Ok(false) }
+    if !emit_complete(107, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 2), 5, false)) { return Ok(false) }
+    if !emit_complete(108, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 3), 5, false)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1294,7 +1360,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.Replace(want, "E 24 1 7\nE 25 1 6\n", "V 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\nE 25 1 6\n", 1)
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 5\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

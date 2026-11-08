@@ -1036,6 +1036,12 @@ scan = scan + 1 }
             if checked && !has_fail { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_failure_edge(), i.function, i.block, id, 0, 0, 0, id, 0, fail_count, 0)) }
             let mask = mir_vop_required_mask(i.op)
             if ((mask % 2 == 1) && i.a == 0) || (((mask / 2) % 2 == 1) && i.b == 0) || (((mask / 4) % 2 == 1) && i.c == 0) || (((mask / 8) % 2 == 1) && i.place == 0) || (((mask / 16) % 2 == 1) && i.type_op == 0) || (((mask / 32) % 2 == 1) && i.target == 0) || (((mask / 64) % 2 == 1) && i.name_start == i.name_end) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), i.function, i.block, id, 0, 0, 0, id, mask, 0, 0)) }
+            // The fn.value domain marker: type_op 1 is legal only on
+            // fn.value and requires the environment operand that carries
+            // the domain. No other op reads a type of the boolean slot, so
+            // the value identifies the marker unambiguously.
+            if i.type_op == mir_fn_value_domain_marker() && i.op != mir_op_fn_value() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), i.function, i.block, id, 0, 0, 0, id, i.type_op, 0, 0)) }
+            if i.type_op == mir_fn_value_domain_marker() && i.op == mir_op_fn_value() && i.a == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), i.function, i.block, id, 0, 0, 0, id, i.type_op, 0, 0)) }
             var a_ok = i.a == 0
             var b_ok = i.b == 0
             var c_ok = i.c == 0

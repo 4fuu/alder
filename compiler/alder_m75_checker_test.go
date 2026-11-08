@@ -204,6 +204,55 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"fn-value-mix.al": `fn scale(x: U64) -> U64 { return x + 1 }
+fn twice_apply(f: fn(U64) -> U64, v: U64) -> U64 {
+    return f(f(v))
+}
+fn main() -> I32 {
+    if twice_apply(scale, 1) != 3 { return 1 }
+    let offset: U64 = 5
+    let shifted = fn(x: U64) => x + offset
+    if shifted(1) != 6 { return 2 }
+    if twice_apply(shifted, 1) != 11 { return 3 }
+    return 0
+}
+`,
+		"fn-value-into-generic.al": `fn outer(T: type, f: fn(U64) -> U64, seed: U64) -> U64 {
+    return f(seed + 1)
+}
+fn scale(x: U64) -> U64 { return x + 1 }
+fn main() -> I32 {
+    if outer(U64, scale, 3) != 5 { return 1 }
+    return 0
+}
+`,
+		"fn-value-escape.al": `fn scale(x: U64) -> U64 { return x + 1 }
+type Holder { cb: fn(U64) -> U64 }
+fn make_holder(seed: U64) -> Holder {
+    return Holder(cb: scale)
+}
+fn call_it(h: Holder) -> U64 {
+    let f = h.cb
+    return f(4)
+}
+fn main() -> I32 {
+    let made = make_holder(2)
+    if call_it(made) != 5 { return 1 }
+    var keep = Vec.new(Holder)
+    {
+        let h = Holder(cb: scale)
+        keep.push(h)
+    }
+    if keep.len() != 1 { return 2 }
+    let first = keep.get(0)
+    let got = match first {
+        Some(h) => call_it(h)
+        None => 0
+    }
+    if got != 5 { return 3 }
+    return 0
+}
+`,
 		"generic-trait-defaults.al": `type NumBox {
     n: U64
 }

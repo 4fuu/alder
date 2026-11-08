@@ -377,8 +377,24 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		// A closure thunk's trailing parameter is the environment record;
 		// it is supplied by the environment operand, not by callers of the
 		// function value.
-		if in.A != NoValue && len(params) > 0 {
+		if in.A != NoValue && in.TypeOp != FnValueDomainMarker && len(params) > 0 {
 			params = params[:len(params)-1]
+		}
+		// The domain marker instead names a storage-model target: its
+		// leading parameter is the hidden domain supplied through the
+		// environment operand, so the erased type covers the parameters
+		// after it.
+		if in.TypeOp == FnValueDomainMarker {
+			if in.A == NoValue || len(params) == 0 {
+				return NoType, false
+			}
+			if m.Types[params[0].Type].Kind != TypeDomainHandle {
+				return NoType, false
+			}
+			if ta, ok := f.ValueType(in.A); !ok || !m.ValidType(ta) || m.Types[ta].Kind != TypeDomainHandle {
+				return NoType, false
+			}
+			params = params[1:]
 		}
 		for _, p := range params {
 			sig.Params = append(sig.Params, p.Type)

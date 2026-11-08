@@ -46,6 +46,12 @@ fn mir_type_u32() -> U64 { return 9 }
 fn mir_type_u64() -> U64 { return 10 }
 fn mir_type_f32() -> U64 { return 11 }
 fn mir_type_f64() -> U64 { return 12 }
+// The fn.value domain marker value: type_op on fn.value carries this flag
+// when the environment operand supplies the callee's hidden leading domain
+// parameter. The value is deliberately far outside any real type id range
+// so it can never collide with an op that reads type_op as a type.
+fn mir_fn_value_domain_marker() -> U64 { return 2147483647 }
+
 fn mir_primitive_type_count() -> U64 { return 12 }
 
 fn mir_type_part_field() -> U64 { return 1 }

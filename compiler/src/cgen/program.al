@@ -419,13 +419,14 @@ fn cgen_fn_value_sites(d: Domain, store: MirStore, indexes: MirVIndexes) -> Resu
             let fn_type = cgen_value_type(store, indexes, item.function, item.result)
             var known = false
             var site_at: U64 = 0
-            while site_at + 1 < __s0_buffer_len(U64, sites) {
-                if __s0_buffer_get(U64, sites, site_at) == item.target && __s0_buffer_get(U64, sites, site_at + 1) == fn_type { known = true }
-                site_at = site_at + 2
+            while site_at + 2 < __s0_buffer_len(U64, sites) {
+                if __s0_buffer_get(U64, sites, site_at) == item.target && __s0_buffer_get(U64, sites, site_at + 1) == fn_type && __s0_buffer_get(U64, sites, site_at + 2) == item.type_op { known = true }
+                site_at = site_at + 3
             }
             if !known {
                 sites = try __s0_buffer_append(U64, d, sites, item.target)
                 sites = try __s0_buffer_append(U64, d, sites, fn_type)
+                sites = try __s0_buffer_append(U64, d, sites, item.type_op)
             }
         }
         at = at + 1
@@ -471,9 +472,10 @@ fn cgen_fn_wrapper_params(d: Domain, initial: CgenWriter, store: MirStore, fn_ty
 fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, sites: __s0_Buffer(U64)) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
-    while at + 1 < __s0_buffer_len(U64, sites) {
+    while at + 2 < __s0_buffer_len(U64, sites) {
         let target = __s0_buffer_get(U64, sites, at)
         let fn_type = __s0_buffer_get(U64, sites, at + 1)
+        let domain_marked = __s0_buffer_get(U64, sites, at + 2)
         let t = __s0_buffer_get(MirTypeRec, store.types, fn_type - 1)
         
         // Forward declaration.
@@ -491,21 +493,36 @@ fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, 
         if t.result_type != mir_type_unit() { out = try cgen_put(d, out, "return ") }
         out = try cgen_emit_function_name(d, out, store, target)
         out = try cgen_put(d, out, "(")
-        out = try cgen_fn_wrapper_params(d, out, store, fn_type, false, false)
-        // A closure thunk takes one trailing environment parameter beyond
-        // the function type's declared parameters: the wrapper adapts the
-        // opaque void * environment to the thunk's reference parameter.
+        // A storage-model target: the environment member carries the
+        // AlderDomain * captured at the fn.value site, and it becomes the
+        // target's leading domain argument.
         let thunk_params = mir_v5_function_param_count(store, indexes, target)
         let declared_params = mir_type_part_count(store, fn_type, mir_type_part_function_param())
-        if thunk_params == declared_params + 1 {
+        var wrote_argument = false
+        if domain_marked != 0 {
+            out = try cgen_put(d, out, "(AlderDomain *)alder_env")
+            wrote_argument = true
+        }
+        if declared_params != 0 {
+            if wrote_argument { out = try cgen_put(d, out, ", ") }
+            out = try cgen_fn_wrapper_params(d, out, store, fn_type, false, false)
+            wrote_argument = true
+        }
+        // A closure thunk takes one trailing environment parameter beyond
+        // the function type's declared parameters: the wrapper adapts the
+        // opaque void * environment to the thunk's reference parameter. A
+        // domain-marked target also has one parameter beyond the declared
+        // set, but that parameter is the leading domain, already supplied
+        // above.
+        if domain_marked == 0 && thunk_params == declared_params + 1 {
             let last = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), thunk_params - 1)
-            if declared_params != 0 { out = try cgen_put(d, out, ", ") }
+            if wrote_argument { out = try cgen_put(d, out, ", ") }
             out = try cgen_put(d, out, "(")
             out = try cgen_put_type(d, out, store, last)
             out = try cgen_put(d, out, "){ alder_env, (uint64_t)1 }")
         }
         out = try cgen_put(d, out, ");\n}\n")
-        at = at + 2
+        at = at + 3
     }
     return Ok(out)
 }

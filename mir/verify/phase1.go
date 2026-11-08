@@ -343,6 +343,12 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	if in.Op > mir.OpFnValue {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
+	// The fn.value domain marker is legal only on fn.value; no other op
+	// reads a type in the boolean type slot, so the value identifies the
+	// marker unambiguously.
+	if in.TypeOp == mir.FnValueDomainMarker && in.Op != mir.OpFnValue {
+		errs = append(errs, Error{Loc: loc, Msg: "fn.value domain marker on a non-fn.value instruction"})
+	}
 	if in.Op.ProducesResult() {
 		if in.Result == mir.NoValue {
 			if !droppableResult(m, in) {
@@ -436,6 +442,13 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpFnValue:
 		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
 			errs = append(errs, Error{Loc: loc, Msg: "fn.value target is not a function"})
+		}
+		// The domain marker is legal only on fn.value, and it requires the
+		// environment operand that carries the domain. No other op reads a
+		// type in the boolean type slot, so the value identifies the marker
+		// unambiguously.
+		if in.TypeOp == mir.FnValueDomainMarker && in.A == mir.NoValue {
+			errs = append(errs, Error{Loc: loc, Msg: "fn.value domain marker requires an environment operand"})
 		}
 	case mir.OpAggregateConstruct:
 		for i, field := range in.AggFields {

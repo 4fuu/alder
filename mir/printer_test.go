@@ -232,3 +232,36 @@ bb0:
 		t.Fatalf("fn.value round trip:\n%s", got)
 	}
 }
+
+func TestPrintFnValueDomainMarker(t *testing.T) {
+	text := `mir 5
+
+const @c_one: u64 = 1
+
+fn @scale(%dom: domain_handle, %x: u64) -> u64 {
+bb0:
+  return %x
+}
+
+fn @main(%d: domain_handle) -> u64 {
+bb0:
+  %f = fn.value @scale(%d) domain
+  %z = const.get @c_one
+  return %z
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatalf("parse fn.value domain marker: %v", err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("fn.value domain marker round trip:\n%s", got)
+	}
+	id, ok := m.Function("main")
+	if !ok {
+		t.Fatalf("main function missing")
+	}
+	if m.Functions[id].Blocks[0].Instrs[0].TypeOp != FnValueDomainMarker {
+		t.Fatalf("fn.value domain marker did not parse as the sentinel")
+	}
+}

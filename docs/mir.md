@@ -381,6 +381,41 @@ Imported declarations currently record the import name (also the C symbol) and a
 
 MIR verification cannot prove arbitrary foreign behavior. It verifies only that unsafe entry is explicit and that safe wrapper claims are internally consistent.
 
+## Function Values
+
+`fn.value` makes a `{code, env}` pair: the target function plus an optional
+environment operand, called through `call.value` with the declared runtime
+arguments (MIR 5). The erased function type covers the declared parameters
+and the result only; the environment rides opaquely in the value.
+
+Two shapes extend the erased signature:
+
+- a closure thunk's trailing parameter is the environment record, supplied
+  by the environment operand, and the erased type omits it;
+- in the storage model every plain function carries a hidden leading
+  `domain_handle` parameter. When `fn.value` targets such a function, its
+  environment operand carries the referencing function's own domain and the
+  instruction's `type_op` holds the domain marker (the sentinel constant far
+  above every real type id). The erased type then covers the parameters
+  after the hidden domain, and phase-5 typing requires both that the
+  callee's leading parameter is a `domain_handle` and that the environment
+  operand is domain-typed.
+
+The domain marker is legal only on `fn.value` and requires the environment
+operand; the verifier rejects it on any other operation (no other operation
+reads a type near the sentinel, so the value identifies the marker
+unambiguously) and rejects a marked `fn.value` whose callee lacks the hidden
+domain parameter. The C backend's forwarder wrapper casts the trailing
+environment argument to `AlderDomain *` and passes it as the target's first
+argument, exactly as a direct call threads the caller's domain.
+
+Lifetime: the environment domain is the referencing function's own domain
+parameter, and every storage domain in a compiled program descends from the
+host entry's domain, which outlives every frame that can observe the value.
+Phase 6 merges the environment operand's domain provenance into the fn value
+and into every `call.value` result, so the value and its results carry the
+captured domain's provenance through the existing lattice.
+
 ## Textual MIR
 
 The current textual format is `mir 4`; the parser and verifier retain legacy

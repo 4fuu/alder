@@ -924,3 +924,92 @@ fn main() -> I32 {
 	}
 	t.Logf("generic-trait default program exited cleanly under strict C11")
 }
+
+// Domain-carrying function values end to end: in the storage model every
+// plain function carries a hidden leading domain parameter, so a function
+// reference wraps the current domain into the value's environment and the
+// C forwarder passes it as the target's first argument. Named functions and
+// closures mix in one function, a function value threads into a constrained
+// generic call, and a value created in a helper or a nested block is called
+// after that scope returned — sound because every domain in a public-source
+// program descends from the main entry's domain, which outlives every
+// frame. Alder-only: the Go oracle frontend does not implement the storage
+// model's fn-value surface.
+func runAlderFnValueDomainLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"fn-value-domain.al": `fn scale(x: U64) -> U64 { return x + 1 }
+fn twice_apply(f: fn(U64) -> U64, v: U64) -> U64 {
+    return f(f(v))
+}
+fn outer(T: type, f: fn(U64) -> U64, seed: U64) -> U64 {
+    return f(seed + 1)
+}
+type Holder { cb: fn(U64) -> U64 }
+fn make_holder(seed: U64) -> Holder {
+    return Holder(cb: scale)
+}
+fn call_it(h: Holder) -> U64 {
+    let f = h.cb
+    return f(4)
+}
+fn main() -> I32 {
+    if twice_apply(scale, 1) != 3 { return 1 }
+    let offset: U64 = 5
+    let shifted = fn(x: U64) => x + offset
+    if twice_apply(shifted, 1) != 11 { return 2 }
+    if outer(U64, scale, 3) != 5 { return 3 }
+    if call_it(make_holder(2)) != 5 { return 4 }
+    var keep = Vec.new(Holder)
+    {
+        let h = Holder(cb: scale)
+        keep.push(h)
+    }
+    if keep.len() != 1 { return 5 }
+    let first = keep.get(0)
+    let got = match first {
+        Some(h) => call_it(h)
+        None => 0
+    }
+    if got != 5 { return 6 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"fn-value-domain.al"})
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse fn-value-domain MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify fn-value-domain MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("fn-value-domain MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"fn-value-domain.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "fn-value-domain.c")
+	program := filepath.Join(dir, "fn-value-domain.exe")
+	// The program owns heap storage: the driver creates the root domain and
+	// passes it to the hosted main, whose parameter aliases it.
+	driver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; int32_t status = alder_fn_main_%d(&root); alder_domain_destroy(&root); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of fn-value domain program: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run fn-value domain behavior: %v\n%s", err, output)
+	}
+	t.Logf("fn-value domain program exited cleanly under strict C11")
+}

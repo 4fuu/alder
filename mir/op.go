@@ -6,6 +6,10 @@ import "strconv"
 type OpKind uint8
 
 const (
+
+	// FnValueDomainMarker is the type_op flag a fn.value carries when its
+	// environment operand supplies the callee's hidden leading domain
+	// parameter. The value sits far outside any real type id range so it can
 	// Places and aggregates.
 	OpLoad OpKind = iota
 	OpStore
@@ -89,6 +93,11 @@ const (
 	OpCallValue
 	OpStrEq
 	OpFnValue
+	// FnValueDomainMarker is the type_op flag a fn.value carries when its
+	// environment operand supplies the callee's hidden leading domain
+	// parameter. The value sits far outside any real type id range so it can
+	// never collide with an op that reads type_op as a type.
+	FnValueDomainMarker TypeId = 2147483647
 )
 
 // String returns the canonical textual name of the operation.

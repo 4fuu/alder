@@ -1,0 +1,15 @@
+mir 5
+
+const @c_one: u64 = 1
+
+fn @plain(%x: u64) -> u64 {
+bb0:
+  return %x
+}
+
+fn @main(%d: domain_handle) -> i32 {
+bb0:
+  %f = fn.value @plain(%d) domain
+  %z = const.get @c_one
+  return %z
+}

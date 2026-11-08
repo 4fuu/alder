@@ -396,7 +396,11 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			break
 		}
 		n := strconv.Itoa(int(ft))
-		site := [2]int{int(in.Callee), int(ft)}
+		marker := 0
+		if in.TypeOp == mir.FnValueDomainMarker {
+			marker = 1
+		}
+		site := [3]int{int(in.Callee), int(ft), marker}
 		known := false
 		for _, existing := range g.fnValues {
 			if existing == site {

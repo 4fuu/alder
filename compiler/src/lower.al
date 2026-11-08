@@ -372,6 +372,11 @@ fn lower_closure_param_local(store: CheckStore, locals: LowerLocalIndex, owner: 
 // value map under a key far above any expression id.
 fn lower_closure_env_key(owner: U64) -> U64 { return owner + 4000000000 }
 
+// The referencing function's own domain PARAMETER — the caller-provided
+// ancestor domain, not the function's ephemeral child — is what a marked
+// fn.value captures, so the value never outlives the domain it holds.
+fn lower_env_domain_key(owner: U64) -> U64 { return owner + 4100000000 }
+
 fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, site: ClosureSiteRec) -> Result(LowerStep, __s0_Error) {
     let prior = lower_keyed_domain_value(state, lower_closure_env_key(site.owner))
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
@@ -2553,12 +2558,29 @@ fn callee_checked_type(store: CheckStore, expression: CheckedExprRec) -> U64 {
 
 fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if annotation.builtin == 43 {
-        // Function reference: fn.value with no environment.
+        // Function reference. In the storage model the target carries a
+        // hidden leading domain parameter, exactly like a direct call: the
+        // value's environment carries the current function's domain, and
+        // the marker records that the callee's leading parameter is that
+        // hidden domain so the erased function type covers only the
+        // declared parameters.
         let target = lower_owner_lookup(state.owners, annotation.target)
         if target == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        var env_value: U64 = 0
+        var marker: U64 = 0
+        if state.has_storage && lower_closure_site_for(store, annotation.target) == 0 && !lower_owner_aliases_domain(source_state, store, annotation.target) {
+            // Capture this function's own domain parameter — the ancestor
+            // domain the caller provided — so the value cannot outlive its
+            // environment. A main that aliases the domain has no hidden
+            // parameter; its first parameter is the domain itself.
+            env_value = lower_keyed_domain_value(state, lower_env_domain_key(owner))
+            if env_value == 0 { env_value = lower_domain_value(state, store, owner) }
+            if env_value == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+            marker = mir_fn_value_domain_marker()
+        }
         let fn_type = try lower_type(d, source_state, store, state, expression.checked_type)
         let result = try lower_add_typed_result(d, fn_type.state, function, block, fn_type.id)
-        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, 0, 0, 0, target, "")
+        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, marker, env_value, 0, target, "")
         return Ok(LowerStep(state: made.state, id: result.id))
     }
     if annotation.builtin == 44 {
@@ -4547,7 +4569,8 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         }
         if parameter.function != function || parameter.kind != mir_param_function() || parameter.ordinal != 0 { return Ok(lower_invalid(current)) }
         let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.value))
-        current = lower_with_values(current, domains)
+        let env_domains = try __s0_buffer_append(LowerValueMapRec, d, domains, LowerValueMapRec(expression: lower_env_domain_key(owner), value: parameter.value))
+        current = lower_with_values(current, env_domains)
         param_ordinal = 1
     }
     var local_ordinal: U64 = 0

@@ -1238,6 +1238,10 @@ func (p *parser) parseOp() (Instr, error) {
 				return in, err
 			}
 		}
+		if p.peek().text == "domain" {
+			p.next()
+			in.TypeOp = FnValueDomainMarker
+		}
 		return in, nil
 
 	case "str.eq":

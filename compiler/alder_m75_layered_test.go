@@ -20,11 +20,10 @@ import (
 // terminate with identical diagnostics, MIR, and C across processes and
 // across source permutations, and the generated C must run under strict C11.
 //
-// The generator deliberately stays inside the fn-value envelope the
-// integrated tip supports: closures are not created inside generic bodies,
-// and function values are not passed as arguments into constrained generic
-// calls. Both corners are broken on the integrated tip (the first panics the
-// checker; the second fails MIR verification) and are reported separately.
+// The generator stays inside the fn-value envelope the compiler supports:
+// closures are not created inside generic bodies (that corner still rejects;
+// see the closure work), while named function values and closures mix freely
+// and thread through constrained generic calls and function-typed helpers.
 const (
 	m75LayeredCells  = 8
 	m75LayeredDepth  = 32
@@ -36,6 +35,7 @@ const (
 func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	declarations = append(declarations, "trait Deliver(Out: type) {\n    fn deliver(self) -> Out\n    fn twice(self) -> Out {\n        return self.deliver()\n    }\n}")
 	declarations = append(declarations, "fn twice_apply(f: fn(U64) -> U64, v: U64) -> U64 {\n    return f(f(v))\n}")
+	declarations = append(declarations, "fn scale(x: U64) -> U64 { return x + 1 }")
 	for cell := 0; cell < m75LayeredCells; cell++ {
 		declarations = append(declarations, fmt.Sprintf("type Cell%03d {\n    v: U64\n}", cell))
 		declarations = append(declarations, fmt.Sprintf("impl Deliver(U64) for Cell%03d {\n    fn deliver(self) -> U64 { return self.v }\n}", cell))
@@ -57,14 +57,14 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	// The expected leaf results come from the mirrored path below; the
 	// second call wraps the DAG result in a main-level closure and the
 	// third threads that closure through the function-typed helper.
-	want = append(want, m75LayeredLeaf(0), m75LayeredLeaf(7*10)+5, m75LayeredLeaf(3*10))
+	want = append(want, m75LayeredLeaf(0), m75LayeredLeaf(7*10)+5, m75LayeredLeaf(3*10)+2)
 	var main strings.Builder
 	main.WriteString("fn main() -> I32 {\n")
 	main.WriteString(fmt.Sprintf("    if layer_000(Cell000, Cell000(v: 0), 0) != %d { return 1 }\n", want[0]))
 	main.WriteString("    let offset: U64 = 5\n    let shifted = fn(x: U64) => x + offset\n")
 	main.WriteString(fmt.Sprintf("    if shifted(layer_000(Cell007, Cell007(v: 70), 0)) != %d { return 2 }\n", want[1]))
 	main.WriteString("    if twice_apply(shifted, 1) != 11 { return 3 }\n")
-	main.WriteString(fmt.Sprintf("    if layer_000(Cell003, Cell003(v: 30), 0) != %d { return 4 }\n", want[2]))
+	main.WriteString(fmt.Sprintf("    if twice_apply(scale, layer_000(Cell003, Cell003(v: 30), 0)) != %d { return 4 }\n", want[2]))
 	main.WriteString("    if Cell005(v: 50).twice() != 50 { return 5 }\n    return 0\n}")
 	declarations = append(declarations, main.String())
 	return declarations, want

@@ -1,0 +1,15 @@
+mir 5
+
+const @c_one: u64 = 1
+
+fn @scale(%dom: domain_handle, %x: u64) -> u64 {
+bb0:
+  return %x
+}
+
+fn @main() -> i32 {
+bb0:
+  %f = fn.value @scale domain
+  %z = const.get @c_one
+  return %z
+}

@@ -1,0 +1,1 @@
+fn @main: block bb0: op fn.value #0: fn.value domain marker requires an environment operand

@@ -1,0 +1,2 @@
+fn @main: block bb0: op fn.value #0: cannot infer result type from instruction operands
+fn @main: block bb0: terminator return: return operand: expected i32, got u64

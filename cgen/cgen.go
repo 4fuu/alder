@@ -125,7 +125,7 @@ type gen struct {
 	pushSites map[[3]int]int // cleanup.push site -> ctx/adapter index
 	nextCtx   int            // module-wide ctx/adapter counter
 	strConsts map[string]int // string constant name -> static array index
-	fnValues  [][2]int       // (function id, function type id) fn.value wrappers, first occurrence order
+	fnValues  [][3]int       // (function id, function type id, domain marker) fn.value wrappers, first occurrence order
 
 	// Per-function lowering state.
 	f           *mir.Function
@@ -372,6 +372,12 @@ func (g *gen) emitFnValueWrappers(b *strings.Builder) {
 		b.WriteString("static " + ret + " " + wname + "(" + paramList + ") {\n")
 		b.WriteString("  (void)alder_env;\n")
 		var args []string
+		// A storage-model target: the environment member carries the
+		// AlderDomain * captured at the fn.value site, and it becomes the
+		// target's leading domain argument.
+		if site[2] != 0 {
+			args = append(args, "(AlderDomain *)alder_env")
+		}
 		for i, p := range sig.Params {
 			if p == mir.TypeUnit {
 				continue
@@ -380,9 +386,12 @@ func (g *gen) emitFnValueWrappers(b *strings.Builder) {
 		}
 		// A closure thunk takes one trailing environment parameter beyond the
 		// function type's declared parameters: the wrapper adapts the opaque
-		// void * environment to the thunk's reference parameter.
+		// void * environment to the thunk's reference parameter. A
+		// domain-marked target also has one parameter beyond the declared
+		// set, but that parameter is the leading domain, already supplied
+		// above.
 		callee := g.m.Functions[fnID]
-		if callee != nil && len(callee.Params) == len(params)+1 {
+		if site[2] == 0 && callee != nil && len(callee.Params) == len(params)+1 {
 			args = append(args, "("+g.cType(callee.Params[len(callee.Params)-1].Type)+"){ alder_env, (uint64_t)1 }")
 		}
 		call := g.fnName(fnID) + "(" + strings.Join(args, ", ") + ")"

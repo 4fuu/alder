@@ -347,6 +347,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		if in.A != NoValue {
 			b.WriteString("(" + valueName(f, in.A) + ")")
 		}
+		if in.TypeOp == FnValueDomainMarker {
+			b.WriteString(" domain")
+		}
 	}
 	b.WriteString("\n")
 }
