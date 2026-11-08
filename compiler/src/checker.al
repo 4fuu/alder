@@ -55,6 +55,10 @@ type ClosureSiteRec {
     declared_count: U64
     capture_count: U64
     first_capture: U64
+    // 1 when a capture is a scoped capability (a slice or mut slice). Such a
+    // closure may not escape the scope that owns the capability, which the
+    // post-body escape pass enforces.
+    scoped: U64
 }
 
 type ClosureCaptureRec {
@@ -4882,7 +4886,11 @@ fn closure_capture_copyable(store: CheckStore, checked_type: U64, depth: U64) ->
     if checked_type == 0 || depth > 16 { return false }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind == 3 || checked.kind == 19 { return false }
-    if checked.kind == 4 || checked.kind == 8 || checked.kind == 12 || checked.kind == 18 || checked.kind == 21 || checked.kind == 22 { return false }
+    // A slice or mut slice is a scoped capability: it may be captured only by
+    // a closure that does not escape, which the escape pass enforces. Table
+    // views, domain marks, and raw pointers stay rejected outright.
+    if checked.kind == 8 || checked.kind == 18 { return true }
+    if checked.kind == 4 || checked.kind == 12 || checked.kind == 21 || checked.kind == 22 { return false }
     if checked.kind == 6 { return false }
     if checked.kind == 1 || checked.kind == 2 || checked.kind == 5 || checked.kind == 14 || checked.kind == 16 || checked.kind == 20 || checked.kind == 25 { return true }
     if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 || checked.kind == 13 || checked.kind == 15 || checked.kind == 17 || checked.kind == 23 || checked.kind == 24 {
@@ -5108,16 +5116,26 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     if !scan.ok { return expr_token_fail(d, state, base, 147, node) }
     let found = scan.found
     let found_nodes = scan.nodes
-    // Every capture must be snapshot-copyable.
+    // Every capture must be an ordinary snapshot value or a scoped capability
+    // that does not escape.
     var capture_at: U64 = 0
+    var scoped: U64 = 0
     while capture_at < __s0_buffer_len(U64, found) {
         let binding = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(U64, found, capture_at) - 1)
         if !closure_capture_copyable(current, binding.checked_type, 0) {
             let failed_node = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, found_nodes, capture_at) - 1)
             return expr_token_fail(d, state, current, 145, failed_node)
         }
+        let captured = __s0_buffer_get(CheckedTypeRec, current.types, binding.checked_type - 1)
+        if captured.kind == 8 || captured.kind == 18 { scoped = 1 }
         capture_at = capture_at + 1
     }
+    // A closure that captures a scoped capability must stay in the scope that
+    // owns it. Phase 6's loop-store rule classifies its environment record as
+    // a capability and refuses the store inside a loop cycle, so creation
+    // inside a loop body is not supported yet: reject it here with a
+    // diagnostic instead of accepting a program the verifier then refuses.
+    if scoped == 1 && in_loop { return expr_token_fail(d, state, current, 153, node) }
     // One thunk per site check. A literal inside a generic body is checked
     // once per instance, and each instance's captures are its own locals with
     // its own concrete types, so every check materializes a fresh thunk and
@@ -5209,7 +5227,7 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     let first_capture = __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1
     let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: site_index, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
     let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
-    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture))
+    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture, scoped: scoped))
     let with_closures = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: captures))
     return expr_draft(with_closures, fn_type, expression_record)
 }
@@ -8491,6 +8509,159 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
     return check_deferred_bodies(d, state, parse, after_bodies, __s0_buffer_len(SymbolRec, after_bodies.symbols))
 }
 
+// expression_is_indirect_call reports whether an expression is an indirect
+// call through a function value (the call.value annotation).
+fn expression_is_indirect_call(store: CheckStore, expression: CheckedExprRec) -> Bool {
+    if expression.kind != 18 || expression.annotation == 0 { return false }
+    if expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+    return __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1).builtin == 44
+}
+
+// closure_call_callee_ok reports whether expression `child` is the callee (the
+// first child) of an indirect call `parent`.
+fn closure_call_callee_ok(store: CheckStore, parent: U64, child: U64) -> Bool {
+    if parent == 0 || parent > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let call = __s0_buffer_get(CheckedExprRec, store.expressions, parent - 1)
+    if !expression_is_indirect_call(store, call) { return false }
+    if call.child_count < 1 || call.first_child == 0 { return false }
+    if call.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
+    return __s0_buffer_get(CheckedExprChildRec, store.expression_children, call.first_child - 1).expression == child
+}
+
+// check_scoped_capture_escapes enforces the escape rule for closures that
+// capture a scoped capability: every read of such a closure value in its
+// enclosing function must be the callee of an indirect call, so the closure
+// cannot outlive the scope that owns the captured view. A closure that
+// captures another restricted closure inherits the restriction, so the rule
+// also covers an inner closure handed to an escaping outer one. The check runs
+// once over the finished store, after every body (including thunk bodies) has
+// been checked, because a closure value's uses are only known then.
+fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    let current = store
+    // Parent map over the expression forest (expression id -> parent id, zero
+    // for a statement root), plus the statement binding of each root
+    // expression and the defining expression of each bound local.
+    var parents = try __s0_buffer_new(U64, d)
+    var expression_binding = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+        parents = try __s0_buffer_append(U64, d, parents, 0)
+        expression_binding = try __s0_buffer_append(U64, d, expression_binding, 0)
+        at = at + 1
+    }
+    var local_definition = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < __s0_buffer_len(LocalRec, current.locals) {
+        local_definition = try __s0_buffer_append(U64, d, local_definition, 0)
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedStatementRec, current.control.statements) {
+        let statement = __s0_buffer_get(CheckedStatementRec, current.control.statements, at)
+        if statement.expression != 0 && statement.expression <= __s0_buffer_len(U64, expression_binding) && statement.binding != 0 {
+            __s0_buffer_set(U64, expression_binding, statement.expression - 1, statement.binding)
+            if statement.binding <= __s0_buffer_len(U64, local_definition) { __s0_buffer_set(U64, local_definition, statement.binding - 1, statement.expression) }
+        }
+        at = at + 1
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, current.expressions, at)
+        var child_at: U64 = 0
+        while child_at < expression.child_count {
+            if expression.first_child != 0 && expression.first_child - 1 + child_at <= __s0_buffer_len(CheckedExprChildRec, current.expression_children) {
+                let child = __s0_buffer_get(CheckedExprChildRec, current.expression_children, expression.first_child - 1 + child_at).expression
+                if child >= 1 && child <= __s0_buffer_len(U64, parents) { __s0_buffer_set(U64, parents, child - 1, at + 1) }
+            }
+            child_at = child_at + 1
+        }
+        at = at + 1
+    }
+    // Propagate the restriction through captures to a fixpoint: a closure
+    // whose capture was defined by a restricted closure expression is itself
+    // restricted, however deep the chain of captures runs.
+    var scoped = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < __s0_buffer_len(ClosureSiteRec, current.closures.sites) {
+        scoped = try __s0_buffer_append(U64, d, scoped, __s0_buffer_get(ClosureSiteRec, current.closures.sites, at).scoped)
+        at = at + 1
+    }
+    var changed = true
+    var rounds: U64 = 0
+    while changed && rounds <= __s0_buffer_len(U64, scoped) {
+        changed = false
+        rounds = rounds + 1
+        var site_at: U64 = 0
+        while site_at < __s0_buffer_len(U64, scoped) {
+            if __s0_buffer_get(U64, scoped, site_at) == 0 {
+                let site = __s0_buffer_get(ClosureSiteRec, current.closures.sites, site_at)
+                var capture_at: U64 = 0
+                while capture_at < site.capture_count {
+                    let capture = __s0_buffer_get(ClosureCaptureRec, current.closures.captures, site.first_capture - 1 + capture_at)
+                    if capture.local != 0 && capture.local <= __s0_buffer_len(U64, local_definition) {
+                        let definition = __s0_buffer_get(U64, local_definition, capture.local - 1)
+                        if definition != 0 && definition <= __s0_buffer_len(CheckedExprRec, current.expressions) {
+                            let source = __s0_buffer_get(CheckedExprRec, current.expressions, definition - 1)
+                            if source.kind == 24 && source.parameter_use >= 1 && source.parameter_use <= __s0_buffer_len(U64, scoped) {
+                                if __s0_buffer_get(U64, scoped, source.parameter_use - 1) == 1 {
+                                    __s0_buffer_set(U64, scoped, site_at, 1)
+                                    changed = true
+                                }
+                            }
+                        }
+                    }
+                    capture_at = capture_at + 1
+                }
+            }
+            site_at = site_at + 1
+        }
+    }
+    at = 0
+    while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, current.expressions, at)
+        var restricted = false
+        if expression.kind == 24 && expression.parameter_use >= 1 && expression.parameter_use <= __s0_buffer_len(U64, scoped) {
+            if __s0_buffer_get(U64, scoped, expression.parameter_use - 1) == 1 { restricted = true }
+        }
+        if restricted {
+            let parent = __s0_buffer_get(U64, parents, at)
+            var escape_node = expression.syntax
+            var escaped_here = false
+            if parent != 0 {
+                // A non-root use must be the callee of an indirect call;
+                // anything else (argument, field, aggregate, match, ...)
+                // carries the closure out of its scope.
+                if !closure_call_callee_ok(current, parent, at + 1) { escaped_here = true }
+            } else {
+                let binding = __s0_buffer_get(U64, expression_binding, at)
+                if binding == 0 {
+                    // A returned or otherwise unconsumed root value escapes.
+                    escaped_here = true
+                } else {
+                    var read_at: U64 = 0
+                    while read_at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+                        let read = __s0_buffer_get(CheckedExprRec, current.expressions, read_at)
+                        if read.owner == expression.owner && read.parameter_use == binding && (read.kind == 1 || read.kind == 5 || read.kind == 22) {
+                            let read_parent = __s0_buffer_get(U64, parents, read_at)
+                            if !closure_call_callee_ok(current, read_parent, read_at + 1) { escaped_here = true
+                                escape_node = read.syntax }
+                        }
+                        read_at = read_at + 1
+                    }
+                }
+            }
+            if escaped_here {
+                if escape_node >= 1 && escape_node <= __s0_buffer_len(SyntaxRec, parse.nodes) {
+                    return check_token_fail(d, state, current, 152, __s0_buffer_get(SyntaxRec, parse.nodes, escape_node - 1))
+                }
+                return Ok(CheckBad(current))
+            }
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(current))
+}
+
 // Closure thunks are materialized by the site check inside the enclosing
 // body. For a generic body that happens when an instance is checked, so the
 // linear body walk skips thunks and this pass checks each one after every
@@ -8512,7 +8683,7 @@ fn check_deferred_bodies(d: Domain, state: State, parse: ParseStore, store: Chec
         }
         at = at + 1
     }
-    return Ok(CheckGood(current))
+    return check_scoped_capture_escapes(d, state, parse, current)
 }
 
 fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {

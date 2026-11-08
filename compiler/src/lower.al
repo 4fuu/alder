@@ -1961,6 +1961,12 @@ fn lower_mir_type_has_reference(d: Domain, store: MirStore, root: U64) -> Bool {
 // vector copy handles vector-based types, and the bootstrap map and buffer
 // records carry references instead.
 fn lower_capture_storage_copy(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    // A captured scoped capability is a view, not owned storage: the closure
+    // aliases the scope that owns it, which the escape rule keeps alive.
+    if checked_type >= 1 && checked_type <= __s0_buffer_len(CheckedTypeRec, store.types) {
+        let capture = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+        if capture.kind == 8 || capture.kind == 18 { return Ok(LowerStep(state: state, id: value)) }
+    }
     let typ = try lower_type(d, source_state, store, state, checked_type)
     if !typ.state.valid { return Ok(typ) }
     let vec = try lower_mir_type_contains_vec(d, typ.state, typ.id)

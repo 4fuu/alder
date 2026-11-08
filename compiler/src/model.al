@@ -561,7 +561,10 @@ type EnvironmentRec {
 // view on an affine-element vector, 142 a push into a vector whose binding
 // already carries a using registration, 143 a Table element inside a
 // vector whose heap-stored handle awaits MIR storage rules, 148 a match
-// guard that consumes a binding, and 149 a match guard on a table-view arm.
+// guard that consumes a binding, 149 a match guard on a table-view arm, 150
+// and 151 `break`/`continue` outside a loop, 152 a closure that captures a
+// scoped capability and escapes the scope that owns it, and 153 a closure
+// that captures a scoped capability created inside a loop body.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

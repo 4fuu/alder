@@ -426,14 +426,20 @@ a named function value carries it. A capture that carries storage is
 deep-copied into that domain at creation and into the destination domain when
 the record is retained; a function-valued capture is retained recursively. For
 the loop-survival rule such a record is an owning value: its domain field names
-the domain that owns the record, not a borrowed capability. Two conservative
+the domain that owns the record, not a borrowed capability. Three conservative
 rules are narrowed for such a record and for nothing else: a domain handle in a
 dereference store is accepted when the stored value is an aggregate used as a
-`fn.value` environment, and `alloc` of that aggregate is accepted. This is
-sound because the record is allocated in the domain its field names, every
+`fn.value` environment, `alloc` of that aggregate is accepted, and the
+local-store rule that confines a type containing a `slice`, `safe_ref`, or
+`safe_mut` to a local place no longer applies to the record. This is sound
+because the record is allocated in the domain its field names, every
 cross-domain move goes through the retain hook, which rewrites the field to the
 destination domain, and the record never outlives its domain; the field is only
-ever used as an allocation parent.
+ever used as an allocation parent. The third narrowing is sound because a
+captured view is a header, not owned storage: the checker accepts such a
+capture only when the closure cannot escape the scope that owns the viewed
+storage, so the storage outlives every call the closure value can reach, and
+the record's view field is never dereferenced after that scope ends.
 
 A function value that leaves its creating frame is retained.
 `copy_to_domain` of a function type produces a complete, independent value in
@@ -442,8 +448,9 @@ the copy severs the source's provenance exactly as it does for a slice, a
 vector, or an aggregate. This is sound only because the hook makes the copy
 complete: it allocates a fresh environment record in the destination domain,
 rewrites a captured domain handle to that domain, and retains every
-function-valued capture recursively. Closure captures are storage-free, so a
-shallow record copy of the remaining fields is complete. A function value
+function-valued capture recursively. Closure captures are storage-free apart
+from a captured view, which is a header copied as a header, so a shallow record
+copy of the remaining fields is complete. A function value
 returned without such a copy still shares its environment, so phase 6 rejects
 the exit when the environment's owning domain was destroyed.
 

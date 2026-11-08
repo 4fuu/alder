@@ -345,6 +345,59 @@ fn main() -> I32 {
 }
 `
 
+// A closure may capture a scoped capability when it provably does not escape:
+// every read of the value in the owning scope is the callee of a call through
+// it. The environment record then holds the view header, so the closure reads
+// the original storage; an intervening allocation between creation and the
+// call would expose a dangling copy. The shapes cover a direct local call, a
+// nested literal whose inner capture is called through an outer local call,
+// and a second view of the same vector.
+const m75ScopedCaptureProgram = `fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    v.push(seed + 2)
+    return v
+}
+fn view_total(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 3)
+    let sum = fn() -> U64 { return s.len() + s[0] + s[1] + s[2] }
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 16 {
+        pad.push(i)
+        i = i + 1
+    }
+    return sum()
+}
+fn nested_view_total(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(1, 3)
+    let inner = fn() -> U64 { return s.len() + s[0] }
+    let outer = fn() -> U64 { return inner() + 10 }
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 16 {
+        pad.push(i)
+        i = i + 1
+    }
+    return outer()
+}
+fn tail_len(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(2, 3)
+    let only = fn() -> U64 { return s.len() * 100 + s[0] }
+    return only()
+}
+fn main() -> I32 {
+    if view_total(10) != 36 { return 1 }
+    if nested_view_total(10) != 23 { return 2 }
+    if tail_len(10) != 112 { return 3 }
+    return 0
+}
+`
+
 // Captures of ordinary storage-backed values are independent snapshots. The
 // closure sees the length, map entry, and record element it captured even
 // after the source is mutated, each call follows an intervening allocation,
@@ -586,6 +639,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-nested-closures", m75NestedClosureProgram},
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
+		{"m75-scoped-captures", m75ScopedCaptureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -675,6 +729,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-nested-closures", m75NestedClosureProgram},
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
+		{"m75-scoped-captures", m75ScopedCaptureProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

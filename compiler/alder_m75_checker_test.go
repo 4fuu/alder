@@ -352,6 +352,26 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"closure-slice-local.al": `fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    return v
+}
+
+fn total(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let inner = fn() -> U64 { return s.len() + s[1] }
+    let outer = fn() -> U64 { return inner() + 1 }
+    return outer()
+}
+
+fn main() -> I32 {
+    if total(40) != 44 { return 1 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -435,7 +455,10 @@ fn main() -> I32 {
 		{"generic-method-builtin-trait", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(A: type, mut self) -> Option(U64) { return None }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"generic-method-name-reuse", "trait Two {\n    fn left(A: type, self, a: A) -> A\n    fn right(A: type, self, a: A) -> A\n}\nfn main() -> I32 { return 0 }\n", 3},
 		{"generic-impl-method", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(A: type, self) -> U64 { return self.v }\n}\nfn main() -> I32 { return 0 }\n", 123},
-		{"closure-slice-capture", "fn capture(s: [U64]) -> fn() -> U64 {\n    let g = fn() -> U64 { return s.len() }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 145},
+		{"closure-slice-return", "fn capture(s: [U64]) -> fn() -> U64 {\n    let g = fn() -> U64 { return s.len() }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"closure-slice-vec-store", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    var keep = Vec.new(fn() -> U64)\n    keep.push(g)\n    return 0\n}\n", 152},
+		{"closure-slice-outer-capture", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn capture(seed: U64) -> fn() -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let inner = fn() -> U64 { return s.len() }\n    let outer = fn() -> U64 { return inner() }\n    return outer\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"closure-slice-in-loop", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    var i: U64 = 0\n    while i < 2 {\n        let g = fn() -> U64 { return s.len() }\n        let n = g()\n        i = i + 1\n    }\n    return 0\n}\n", 153},
 		{"closure-affine-capture", "type Res {\n    n: U64\n}\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn capture(r: Res) -> fn() -> U64 {\n    let g = fn() -> U64 { return r.n }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
 	}

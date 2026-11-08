@@ -587,9 +587,10 @@ fn mir_v6_env_record(store: MirStore, indexes: MirVIndexes, type_id: U64) -> Boo
     return false
 }
 
-fn mir_v6_type_local_store(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
-if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
-if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
+fn mir_v6_type_local_store(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { let env_record = mir_v6_env_record(store, indexes, type_id)
+if !env_record && try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
+if !env_record && try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
+if !env_record && try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_handle()) && !mir_v6_env_record(store, indexes, type_id) { return Ok(true) }
 return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_domain_mark()) }

@@ -1174,15 +1174,24 @@ both halves were written):
   returns and closures carried in vectors or records stay valid. Captures of
   ordinary storage-backed values and function values snapshot and retain
   correctly.
-- remaining closure capture limit, deliberately rejected rather than
-  miscompiled: capturing a scoped capability (a slice or a view) still
-  rejects with diagnostic 145, because proving that the closure does not
-  escape is not implemented and a captured view would alias storage whose
-  scope ends before the closure's lifetime. Every closure body has a domain:
-  a capturing closure's environment record carries the domain that owns it,
-  and a capture-free closure takes the caller's domain as its leading hidden
-  parameter, so a body that allocates or copies storage works whether or not
-  it captures anything.
+- scoped-capability captures land for closures that provably do not escape:
+  a closure may capture an immutable slice or a mutable view when every read
+  of the value in the owning scope is a call through it, the restriction
+  carries through captured closures, and any other use rejects with
+  diagnostic 152. The environment holds the view header instead of a copy, so
+  the closure reads the original storage, and phase 6's local-store rule is
+  narrowed for an environment record that carries a view field (see
+  [MIR](docs/mir.md)). Two limits remain, deliberately rejected rather than
+  miscompiled: creating such a closure inside a loop body rejects with
+  diagnostic 153, because phase 6's loop-store rule still classifies the
+  environment record as a capability, and a view bound inside a loop body
+  without any closure (`let s = v.slice(0, 1)` in a `while` body) is accepted
+  by the checker and then refused by phase 6 with the same loop-store rule,
+  so views and loop bodies do not compose yet. Every closure body has a
+  domain: a capturing closure's environment record carries the domain that
+  owns it, and a capture-free closure takes the caller's domain as its leading
+  hidden parameter, so a body that allocates or copies storage works whether
+  or not it captures anything.
 - `mut self` receivers on a field place landed: a place is now a chain, so
   `b.items.push(x)`, `b.items[i] = x`, a Map or Set `insert`/`remove`, and
   every Table operation work through a field of a local, a field of a `mut

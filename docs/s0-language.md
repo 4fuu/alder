@@ -170,9 +170,12 @@ work in progress:
   function values. A storage-backed capture is copied into the environment's
   domain at creation and deep-copied into a destination domain when the
   closure escapes, and function-valued captures are retained recursively.
-  Affine owners and scoped capabilities (slices and views) are still
-  rejected. The thunk ABI is `(declared parameters, opaque
-  environment pointer)`; capture-free closures are plain function values.
+  Affine owners are still rejected. A scoped capability (a slice or view) may
+  be captured only by a closure that provably does not escape the scope that
+  owns it: every read of the value in that scope must be a call through it,
+  and the restriction carries through captured closures. The thunk ABI is
+  `(declared parameters, opaque environment pointer)`; capture-free closures
+  are plain function values.
 - A literal nested inside another literal captures transitively: the outer
   environment carries every value the inner body reads, including values the
   outer literal never reads itself. An outer literal whose body nests another
@@ -185,8 +188,10 @@ work in progress:
   value. A body may therefore copy or allocate storage and return it.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
-  with diagnostic 147; capturing a scoped capability (a slice or view) is
-  rejected with diagnostic 145 until escape-proving capture lands.
+  with diagnostic 147; a closure that captures a scoped capability and
+  escapes is rejected with diagnostic 152, and creating one inside a loop
+  body is rejected with diagnostic 153 until the phase-6 loop-store rule
+  accepts a view-carrying environment record.
 
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.

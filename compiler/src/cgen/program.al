@@ -402,11 +402,12 @@ fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore, index
                 var part: U64 = 0
                 while part < mir_type_part_count(store, env_type, mir_type_part_field()) {
                     let child = cgen_type_part(store, env_type, mir_type_part_field(), part).part_type
-                    var domain_field = false
+                    var skip_field = false
                     if child >= 1 && child <= __s0_buffer_len(MirTypeRec, store.types) {
-                        if __s0_buffer_get(MirTypeRec, store.types, child - 1).kind == mir_type_kind_domain_handle() { domain_field = true }
+                        let child_kind = __s0_buffer_get(MirTypeRec, store.types, child - 1).kind
+                        if child_kind == mir_type_kind_domain_handle() || child_kind == mir_type_kind_slice() || child_kind == mir_type_kind_safe_ref() || child_kind == mir_type_kind_safe_mut() { skip_field = true }
                     }
-                    if !domain_field { state = try cgen_emit_copy_type(d, state, store, child) }
+                    if !skip_field { state = try cgen_emit_copy_type(d, state, store, child) }
                     part = part + 1
                 }
             }
@@ -476,7 +477,9 @@ fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, " = alder_d;\n")
             }
-            if child_item.kind != mir_type_kind_function() && child_item.kind != mir_type_kind_domain_handle() && !cgen_copy_trivial(store, child) {
+            // A captured view is a header, not owned storage: the closure
+            // aliases the scope that owns it, so the hook copies the header.
+            if child_item.kind != mir_type_kind_function() && child_item.kind != mir_type_kind_domain_handle() && child_item.kind != mir_type_kind_slice() && child_item.kind != mir_type_kind_safe_ref() && child_item.kind != mir_type_kind_safe_mut() && !cgen_copy_trivial(store, child) {
                 // A storage-bearing capture is deep-copied into the
                 // destination domain, and any function inside it is retained
                 // by the recursive copy.

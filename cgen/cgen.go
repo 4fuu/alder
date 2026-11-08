@@ -189,7 +189,11 @@ func (g *gen) analyze() error {
 					// copy_to_domain instruction names the type.
 					if t := g.fnEnvAggregate(f, in.A); t != 0 {
 						for _, fld := range g.m.Types[t].Fields {
-							if !g.m.ValidType(fld.Type) || g.m.Types[fld.Type].Kind == mir.TypeDomainHandle || g.copyTrivial(fld.Type) {
+							if !g.m.ValidType(fld.Type) || g.copyTrivial(fld.Type) {
+								continue
+							}
+							switch g.m.Types[fld.Type].Kind {
+							case mir.TypeDomainHandle, mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
 								continue
 							}
 							if err := g.requireCopyable(fld.Type); err != nil {
@@ -795,6 +799,9 @@ func (g *gen) emitEnvRetain(b *strings.Builder, t mir.TypeId) {
 				field + ".env = " + field + ".retain(alder_d, " + field + ".env); }\n")
 		case mir.TypeDomainHandle:
 			b.WriteString("  " + field + " = alder_d;\n")
+		case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut:
+			// A captured view is a header, not owned storage: the closure
+			// aliases the scope that owns it, so the hook copies the header.
 		default:
 			// A storage-bearing capture is deep-copied into the destination
 			// domain, and any function inside it is retained by the

@@ -569,11 +569,13 @@ func typeRequiresLocalStore(m *mir.Module, t mir.TypeId, envRecords map[mir.Type
 		mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeSlice, mir.TypeTable,
 		mir.TypeDomainHandle, mir.TypeDomainMark,
 	} {
-		// A closure environment record records the domain that owns it. The
-		// retain hook rewrites that field when the record moves domains and
-		// the record never outlives its domain, so the field is safe behind
-		// the dereference store that installs the record.
-		if kind == mir.TypeDomainHandle && envRecords[t] {
+		// A closure environment record may carry the domain that owns it and
+		// a captured scoped capability. The retain hook rewrites the domain
+		// field when the record moves domains, the record never outlives its
+		// domain, and a captured view is kept alive by the checker's escape
+		// rule, so those fields are safe behind the dereference store that
+		// installs the record.
+		if envRecords[t] && (kind == mir.TypeDomainHandle || kind == mir.TypeSafeRef || kind == mir.TypeSafeMut || kind == mir.TypeSlice) {
 			continue
 		}
 		if containsKind(m, t, kind) {

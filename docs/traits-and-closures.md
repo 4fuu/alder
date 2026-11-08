@@ -200,6 +200,22 @@ compiler may elide physical copies while preserving that behavior, and it
 reports a copy site with its reason when it does not. A closure containing
 only copyable captures is itself a copyable value.
 
+A closure may also capture a scoped capability — an immutable slice or a
+mutable view — but only when it provably does not escape the scope that owns
+it. Every read of such a closure value in the enclosing function must be the
+callee of a call through that value, so the value cannot be returned, stored in
+a vector or record, or passed to a parameter that may retain it, and the
+compiler rejects any other use with diagnostic 152. The restriction is
+transitive: a closure that captures such a closure inherits it, so handing an
+inner view-capturing closure to an escaping outer one is rejected too. The
+environment holds the view header rather than a copy, so the closure reads the
+original storage, and the escape rule keeps the owner alive for the closure's
+whole life. Creating such a closure inside a loop body is not supported yet:
+phase 6's loop-store rule classifies the environment record as a capability, so
+the checker rejects the shape with diagnostic 153 instead of accepting a
+program the verifier would refuse, and the limitation is listed in the
+roadmap.
+
 Alder 1.0 deliberately rejects:
 
 - implicit capture of a mutable local for shared mutation;
