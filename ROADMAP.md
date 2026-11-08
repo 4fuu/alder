@@ -1147,6 +1147,12 @@ both halves were written):
   C, and rejection diagnostics are byte-identical across processes and
   across source/CLI permutations, and the generated C runs under strict
   C11.
+- closure literals inside generic function bodies: a literal there needs one
+  thunk signature per instantiation, but the checker materializes the thunk
+  only when an instance of the enclosing body is checked, after the linear
+  body walk has passed the reserved symbol. Diagnostic 160 rejects the shape
+  cleanly instead of reading a missing result use; per-instance thunk
+  materialization is the follow-up that retires it.
 
 Integrated tip timing (cold `bootstrap/regenerate.sh`): 2:40 / 4.89 GiB,
 against the 2:07 / 3.78 GiB pre-milestone baseline. Each commit's growth

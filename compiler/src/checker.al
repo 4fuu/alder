@@ -8039,6 +8039,13 @@ fn owner_flow_links(store: CheckStore, binding: U64, link_id: U64, state: U64) -
 fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return Ok(CheckGood(store)) }
+    // A reserved closure thunk whose signature no enclosing body check has
+    // materialized cannot be checked: its parameter and result uses do not
+    // exist yet. Reject instead of reading a missing result use.
+    let thunk_node = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+    if symbol.kind == 12 && thunk_node.kind == 58 && function_use(store, owner, 6, thunk_node, state) == 0 {
+        return check_token_fail(d, state, store, 160, thunk_node)
+    }
     let declaration = __s0_buffer_get(SymbolRec, store.symbols, instance_declaration(store, owner) - 1)
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, declaration.node - 1)
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
@@ -8283,6 +8290,33 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
     return check_function_bodies(d, state, parse, after_reserved)
 }
 
+// Whether a closure literal sits inside a generic declaration body. The
+// innermost kind-12 declaration whose source span contains the literal owns
+// it; its type arity decides whether the enclosing body is checked once per
+// instantiation. Thunk symbols (kind 12 over a kind-58 node) are skipped
+// because they share the literal's own span.
+fn closure_literal_in_generic_body(parse: ParseStore, store: CheckStore, node: SyntaxRec) -> Bool {
+    var found = false
+    var generic = false
+    var best_start: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.kind == 12 {
+            let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+            if declaration.kind != 58 && declaration.source == node.source && declaration.start <= node.start && node.end <= declaration.end {
+                if !found || declaration.start >= best_start {
+                    found = true
+                    best_start = declaration.start
+                    generic = symbol.type_arity != 0
+                }
+            }
+        }
+        at = at + 1
+    }
+    return found && generic
+}
+
 // Reserve the synthetic thunk symbol and site record for every closure
 // literal before any function body is checked, in source order. Appending
 // symbols while a body is mid-check destabilizes the deferred body loop and
@@ -8296,6 +8330,11 @@ fn reserve_closure_symbols(d: Domain, state: State, parse: ParseStore, store: Ch
     while node_at <= __s0_buffer_len(SyntaxRec, parse.nodes) {
         let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_at - 1)
         if node.kind == 58 {
+            // A literal inside a generic declaration body has no single
+            // signature: its thunk is only materialized when an instance of
+            // that body is checked. Reject the shape before the body walk can
+            // reach a thunk whose uses do not exist yet.
+            if closure_literal_in_generic_body(parse, current, node) { return check_token_fail(d, state, current, 160, node) }
             let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
             let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: node_at, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: 0, declaration: symbol_id, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: 0, module_source: 0, public: false))
             var sites = current.closures.sites

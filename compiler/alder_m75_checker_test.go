@@ -403,6 +403,7 @@ fn main() -> I32 {
 		{"closure-vec-capture", "fn main() -> I32 {\n    let values = Vec.new(U64)\n    let first = fn() => values.len()\n    return 0\n}\n", 145},
 		{"closure-string-capture", "fn main() -> I32 {\n    let name = \"ald\"\n    let sized = fn() => len(name)\n    return 0\n}\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
+		{"closure-in-generic-body", "fn layer(T: type, seed: U64) -> U64 {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(seed)\n}\nfn main() -> I32 {\n    if layer(U64, 3) != 6 { return 1 }\n    return 0\n}\n", 160},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {
