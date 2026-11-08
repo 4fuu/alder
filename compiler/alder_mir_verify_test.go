@@ -475,6 +475,60 @@ fn bad_aggregate_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_
     return Ok(done.store)
 }
 
+fn closure_env_escape_fixture(d: Domain, initial: MirStore, escaped: Bool) -> Result(MirStore, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    let handle = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
+    let env_type = try mir_add_named_type(d, handle.store, mir_type_kind_aggregate(), "Env")
+    let field = try mir_add_type_part(d, env_type.store, mir_type_part_field(), env_type.type_id, 0, "seed", mir_type_u64())
+    let env_ref = try mir_intern_type(d, field, mir_type_kind_safe_mut(), env_type.type_id, 0, 0, empty, 0)
+    let thunk = try mir_add_function(d, env_ref.store, "thunk", mir_type_u64())
+    let tx = try mir_add_function_param(d, thunk.store, thunk.id, 0, "x", mir_type_u64())
+    let te = try mir_add_function_param(d, tx.store, thunk.id, 1, "env", env_ref.type_id)
+    let tentry = try mir_add_block(d, te.store, thunk.id, 0, "entry")
+    let tret = try mir_add_terminator(d, tentry.store, MirTermRec(function: thunk.id, block: tentry.id, kind: mir_term_return(), value: tx.id, target: 0, then_block: 0, else_block: 0))
+    var params = try __s0_buffer_new(U64, d)
+    params = try __s0_buffer_append(U64, d, params, mir_type_u64())
+    let fn_type = try mir_intern_function_type(d, tret.store, params, mir_type_u64(), 0)
+    let make = try mir_add_function(d, fn_type.store, "make", fn_type.type_id)
+    let mdom = try mir_add_function_param(d, make.store, make.id, 0, "domain", handle.type_id)
+    let mseed = try mir_add_function_param(d, mdom.store, make.id, 1, "seed", mir_type_u64())
+    let entry = try mir_add_block(d, mseed.store, make.id, 0, "entry")
+    let child = try mir_add_value(d, entry.store, make.id, "child", handle.type_id, mir_value_def_instruction(), entry.id, 1)
+    let create = try mir_add_instruction(d, child.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 0, op: mir_op_domain_create(), result: child.id, place: 0, type_op: 0, a: mdom.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let record = try mir_add_value(d, create.store, make.id, "record", env_type.type_id, mir_value_def_instruction(), entry.id, 2)
+    let construct = try mir_add_instruction(d, record.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 1, op: mir_op_aggregate_construct(), result: record.id, place: 0, type_op: env_type.type_id, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let seed_name = try mir_append_name(d, construct.store, "seed")
+    let operand = try mir_add_operand(d, seed_name.store, MirOperandRec(kind: mir_operand_aggregate_field(), owner: construct.id, ordinal: 0, edge: 0, value: mseed.id, target: 0, operand_type: 0, name_start: seed_name.start, name_end: seed_name.end))
+    // The environment record is copied into the creating child domain when
+    // the closure escapes, or into the caller domain when it is retained.
+    var copy_domain = child.id
+    if !escaped { copy_domain = mdom.id }
+    let copied = try mir_add_value(d, operand.store, make.id, "copied", env_type.type_id, mir_value_def_instruction(), entry.id, 3)
+    let copy_instr = try mir_add_instruction(d, copied.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 2, op: mir_op_copy_to_domain(), result: copied.id, place: 0, type_op: 0, a: copy_domain, b: record.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let one = try mir_add_const(d, copy_instr.store, "one", mir_type_u64(), mir_const_int(), 0, 1, 0, "")
+    let one_rec = __s0_buffer_get(MirConstRec, one.store.constants, one.id - 1)
+    let size = try mir_add_value(d, one.store, make.id, "size", mir_type_u64(), mir_value_def_instruction(), entry.id, 4)
+    let size_instr = try mir_add_instruction(d, size.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 3, op: mir_op_const_get(), result: size.id, place: 0, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: one_rec.name_start, name_end: one_rec.name_end))
+    let slot = try mir_add_value(d, size_instr.store, make.id, "slot", env_ref.type_id, mir_value_def_instruction(), entry.id, 5)
+    var alloc_domain = child.id
+    if !escaped { alloc_domain = mdom.id }
+    let alloc_instr = try mir_add_instruction(d, slot.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 4, op: mir_op_alloc(), result: slot.id, place: 0, type_op: env_type.type_id, a: alloc_domain, b: size.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let slot_place = try mir_add_place(d, alloc_instr.store, MirPlaceRec(function: make.id, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: slot.id))
+    let stored = try mir_add_instruction(d, slot_place.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 5, op: mir_op_store(), result: 0, place: slot_place.id, type_op: 0, a: copied.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let local = try mir_add_local(d, stored.store, make.id, 0, "f", fn_type.type_id)
+    let value = try mir_add_value(d, local.store, make.id, "value", fn_type.type_id, mir_value_def_instruction(), entry.id, 7)
+    let make_value = try mir_add_instruction(d, value.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 6, op: mir_op_fn_value(), result: value.id, place: 0, type_op: 0, a: slot.id, b: 0, c: 0, target: thunk.id, name_start: 0, name_end: 0))
+    let local_place = try mir_add_place(d, make_value.store, MirPlaceRec(function: make.id, kind: mir_place_local(), local: local.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    let stored_local = try mir_add_instruction(d, local_place.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 7, op: mir_op_store(), result: 0, place: local_place.id, type_op: 0, a: value.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let loaded = try mir_add_value(d, stored_local.store, make.id, "loaded", fn_type.type_id, mir_value_def_instruction(), entry.id, 9)
+    let load_instr = try mir_add_instruction(d, loaded.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 8, op: mir_op_load(), result: loaded.id, place: local_place.id, type_op: 0, a: 0, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let result = try mir_add_value(d, load_instr.store, make.id, "result", fn_type.type_id, mir_value_def_instruction(), entry.id, 10)
+    let copy_out = try mir_add_instruction(d, result.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 9, op: mir_op_copy_to_domain(), result: result.id, place: 0, type_op: 0, a: mdom.id, b: loaded.id, c: 0, target: 0, name_start: 0, name_end: 0))
+    let destroy = try mir_add_instruction(d, copy_out.store, MirInstrRec(function: make.id, block: entry.id, ordinal: 10, op: mir_op_domain_destroy(), result: 0, place: 0, type_op: 0, a: child.id, b: 0, c: 0, target: 0, name_start: 0, name_end: 0))
+    let done = try mir_add_terminator(d, destroy.store, MirTermRec(function: make.id, block: entry.id, kind: mir_term_return(), value: result.id, target: 0, then_block: 0, else_block: 0))
+    return Ok(done.store)
+}
+
 fn domain_lifetime_fixture(d: Domain, initial: MirStore, invalidate: Bool) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let handle_step = try mir_intern_type(d, initial, mir_type_kind_domain_handle(), 0, 0, 0, empty, 0)
@@ -1334,6 +1388,8 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_complete(106, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 1), 5, false)) { return Ok(false) }
     if !emit_complete(107, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 2), 5, false)) { return Ok(false) }
     if !emit_complete(108, try mir_verify_complete(d, try fn_value_domain_fixture(d, try mir_store_new(d), 3), 5, false)) { return Ok(false) }
+    if !emit_verification(109, try mir_verify_module(d, try closure_env_escape_fixture(d, try mir_store_new(d), true), 5)) { return Ok(false) }
+    if !emit_complete(110, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), false), 5, false)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1360,7 +1416,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.Replace(want, "E 24 1 7\nE 25 1 6\n", "V 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\nE 25 1 6\n", 1)
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 5\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 10\nD 6 53 2 1 0 2 0 0 0 0 0 10\nC 110 0 1 0 0\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

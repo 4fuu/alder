@@ -1144,3 +1144,72 @@ entry:
 `, "use of %mb after reset or destruction")
 	})
 }
+
+// A capturing closure's environment is a domain allocation and the function
+// value is only {code, environment}, so copy_to_domain shares the environment
+// instead of materializing it. Destroying the creating domain before the
+// return therefore leaves a dangling environment pointer, and phase 6 must
+// keep the environment's provenance through the copy and reject the exit.
+func TestClosureEnvironmentEscapeRejected(t *testing.T) {
+	t.Run("destroyed environment domain", func(t *testing.T) {
+		requireRejectedWith(t, `mir 5
+const @one: u64 = 1
+type @Env {
+  seed: u64
+}
+fn @thunk(%x: u64, %env: safe_mut(@Env)) -> u64 {
+entry:
+  return %x
+}
+fn @make(%domain: domain_handle, %seed: u64) -> function(fn(u64) -> u64) {
+  local %f: function(fn(u64) -> u64)
+entry:
+  %child = domain.create %domain
+  %record = aggregate.construct @Env { seed: %seed }
+  %copied = copy_to_domain %child, %record
+  %one = const.get @one
+  %slot = alloc.checked %child, @Env, %one else panic
+  store deref %slot, %copied
+  %value = fn.value @thunk(%slot)
+  store local %f, %value
+  %loaded = load local %f
+  %result = copy_to_domain %domain, %loaded
+  domain.destroy %child
+  return %result
+panic:
+  panic
+}
+`, "return of invalid value %result")
+	})
+
+	t.Run("surviving environment domain", func(t *testing.T) {
+		requireAccepted(t, `mir 5
+const @one: u64 = 1
+type @Env {
+  seed: u64
+}
+fn @thunk(%x: u64, %env: safe_mut(@Env)) -> u64 {
+entry:
+  return %x
+}
+fn @make(%domain: domain_handle, %seed: u64) -> function(fn(u64) -> u64) {
+  local %f: function(fn(u64) -> u64)
+entry:
+  %child = domain.create %domain
+  %record = aggregate.construct @Env { seed: %seed }
+  %copied = copy_to_domain %domain, %record
+  %one = const.get @one
+  %slot = alloc.checked %domain, @Env, %one else panic
+  store deref %slot, %copied
+  %value = fn.value @thunk(%slot)
+  store local %f, %value
+  %loaded = load local %f
+  %result = copy_to_domain %domain, %loaded
+  domain.destroy %child
+  return %result
+panic:
+  panic
+}
+`)
+	})
+}

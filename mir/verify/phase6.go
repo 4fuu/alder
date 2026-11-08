@@ -429,6 +429,46 @@ func provenanceFreeTypes(m *mir.Module) []bool {
 	return free
 }
 
+// containsFunctionType reports whether a value of this type carries a function
+// value at any depth. Function environments are shared by every copy instead
+// of materialized into the destination domain, so a cross-domain copy of such
+// a value must keep the source's provenance.
+func containsFunctionType(m *mir.Module, t mir.TypeId) bool {
+	seen := map[mir.TypeId]bool{}
+	var walk func(t mir.TypeId, depth int) bool
+	walk = func(t mir.TypeId, depth int) bool {
+		if t == 0 || int(t) >= len(m.Types) || depth > 8 || seen[t] {
+			return false
+		}
+		seen[t] = true
+		ty := &m.Types[t]
+		if ty.Kind == mir.TypeFunction {
+			return true
+		}
+		if ty.Elem != 0 && walk(ty.Elem, depth+1) {
+			return true
+		}
+		if ty.OK != 0 && walk(ty.OK, depth+1) {
+			return true
+		}
+		if ty.Err != 0 && walk(ty.Err, depth+1) {
+			return true
+		}
+		for _, field := range ty.Fields {
+			if field.Type != 0 && walk(field.Type, depth+1) {
+				return true
+			}
+		}
+		for _, variant := range ty.Variants {
+			if variant.Payload != 0 && walk(variant.Payload, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(t, 0)
+}
+
 func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []domainInfo, edges map[mir.ValueId][]mir.ValueId, effects []functionEffect, loadStores [][]mir.ValueId, free []bool, out *domainInfo) bool {
 	v := &f.Values[vid]
 	changed := false
@@ -485,7 +525,13 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		// copy_to_domain materializes an independent value. Its lifetime is
 		// rooted only in the destination domain; retaining source provenance
 		// would incorrectly invalidate the copy when an inner source domain
-		// is destroyed.
+		// is destroyed. A function value is the exception: it is only
+		// {code, environment} and its environment record is shared, not
+		// materialized, so the copy keeps the source's provenance and the
+		// environment's owning domain must outlive every later use.
+		if in.Op == mir.OpCopyToDomain && in.CopyVal != mir.NoValue && containsFunctionType(m, v.Type) {
+			merge(in.CopyVal)
+		}
 		changed = addRoot(out, domainRoot{handle: in.Domain, allocBlk: v.Def.Block, allocIn: v.Def.Instr, param: -1}) || changed
 	case mir.OpLoad:
 		if int(v.Type) < len(free) && free[v.Type] {
