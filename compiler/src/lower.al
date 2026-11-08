@@ -397,18 +397,15 @@ fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, sta
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
     let named = try mir_add_named_type(d, state.mir, mir_type_kind_aggregate(), try lower_decimal_name(d, "AlderClosureEnv_", site.owner))
     var current = lower_with_mir(state, named.store)
-    // One field per capture, named after the captured binding. A record
-    // whose thunk may copy or allocate storage, or whose body contains
-    // another literal, records the domain it lives in first; the thunk uses
-    // it as its active and result domain, and the retain hook rewrites it
-    // when the record moves to another domain.
-    var field_ordinal: U64 = 0
-    if site.carrier == 1 {
-        let domain_type = try lower_domain_mir_type(d, current)
-        current = domain_type.state
-        current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, 0, "alder_env_domain", domain_type.id))
-        field_ordinal = 1
-    }
+    // One field per capture, named after the captured binding. The domain
+    // that owns the record comes first: the thunk uses it as its active and
+    // result domain, so a body that copies or allocates storage has somewhere
+    // to put it, and the retain hook rewrites the field when the record moves
+    // to another domain.
+    let domain_type = try lower_domain_mir_type(d, current)
+    current = domain_type.state
+    current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, 0, "alder_env_domain", domain_type.id))
+    var field_ordinal: U64 = 1
     var ordinal: U64 = 0
     while ordinal < site.capture_count {
         let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
@@ -480,8 +477,7 @@ fn lower_has_storage(store: CheckStore) -> Bool {
     // captures forces the storage model on for the whole program.
     var site_at: U64 = 0
     while site_at < __s0_buffer_len(ClosureSiteRec, store.closures.sites) {
-        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at)
-        if site.capture_count != 0 || site.carrier == 1 { return true }
+        if __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at).capture_count != 0 { return true }
         site_at = site_at + 1
     }
     var at: U64 = 0
@@ -1398,9 +1394,18 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             if lower_closure_site_for(store, owner) != 0 { name = try lower_decimal_name(d, "closure", owner) }
             let function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
-            // Closure thunks take no hidden domain parameter; their domain
-            // arrives in the environment record.
-            if current.has_storage && lower_closure_site_for(store, owner) == 0 && !lower_owner_aliases_domain(source_state, store, owner) {
+            // A capturing closure's thunk receives its domain inside the
+            // environment record; a bare thunk takes the caller's domain as
+            // its leading parameter, like a named function value.
+            let closure_site = lower_closure_site_for(store, owner)
+            var wants_domain = false
+            if closure_site == 0 {
+                wants_domain = !lower_owner_aliases_domain(source_state, store, owner)
+            } else {
+                let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
+                if site.capture_count == 0 { wants_domain = true }
+            }
+            if current.has_storage && wants_domain {
                 let domain = try lower_domain_mir_type(d, current)
                 let hidden = try mir_add_function_param(d, domain.state.mir, function.id, 0, "__domain", domain.id)
                 current = lower_with_mir(domain.state, hidden.store)
@@ -2311,7 +2316,6 @@ fn lower_move_or_copy(d: Domain, source_state: State, spans: __s0_Buffer(Checked
 
 fn lower_copy_result_storage(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
     let typ = try lower_type(d, source_state, store, state, checked_type)
-    if lower_closure_site_for(store, owner) != 0 { return Ok(LowerStep(state: typ.state, id: value)) }
     if !typ.state.has_storage || !(try lower_mir_type_copy_relocatable(d, typ.state.mir, typ.id)) { return Ok(LowerStep(state: typ.state, id: value)) }
     let domain = lower_storage_domain_value(typ.state, store, owner, expression_id)
     if domain == 0 || domain != lower_result_domain_value(typ.state, store, owner) { return Ok(LowerStep(state: lower_invalid(typ.state), id: 0)) }
@@ -3453,7 +3457,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if !fn_type.state.valid { return Ok(fn_type) }
         var current = fn_type.state
         var env_value: U64 = 0
-        if site.capture_count != 0 || site.carrier == 1 {
+        var marker: U64 = 0
+        if site.capture_count != 0 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type) }
             current = env_type.state
@@ -3500,15 +3505,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let record_result = try lower_add_typed_result(d, current, function, block, env_type.id)
             let constructed = try lower_add_instr(d, record_result.state, function, block, mir_op_aggregate_construct(), record_result.id, 0, env_type.id, 0, 0, 0, "")
             current = constructed.state
-            var field_ordinal: U64 = 0
-            if site.carrier == 1 {
-                // The record carries the domain it lives in. A nested
-                // environment is then allocated in that domain by the thunk,
-                // and the record needs no cross-domain copy: its domain field
-                // already gives the stored value its provenance.
-                current = try lower_add_instr_operand(d, current, constructed.id, 0, domain, mir_operand_aggregate_field(), "alder_env_domain")
-                field_ordinal = 1
-            }
+            // The record carries the domain it lives in, so the thunk can
+            // copy or allocate storage, and the stored value needs no
+            // cross-domain copy: its domain field gives it provenance.
+            current = try lower_add_instr_operand(d, current, constructed.id, 0, domain, mir_operand_aggregate_field(), "alder_env_domain")
+            var field_ordinal: U64 = 1
             ordinal = 0
             while ordinal < site.capture_count {
                 let capture_local = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal).local - 1)
@@ -3516,13 +3517,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 current = try lower_add_instr_operand(d, current, constructed.id, field_ordinal + ordinal, __s0_buffer_get(U64, field_values, ordinal), mir_operand_aggregate_field(), field_name)
                 ordinal = ordinal + 1
             }
-            var stored_value = record_result.id
-            if site.carrier == 0 {
-                let copy_result = try lower_add_typed_result(d, current, function, block, env_type.id)
-                let domain_copied = try lower_add_instr(d, copy_result.state, function, block, mir_op_copy_to_domain(), copy_result.id, 0, 0, domain, record_result.id, 0, "")
-                current = domain_copied.state
-                stored_value = copy_result.id
-            }
+            let stored_value = record_result.id
             let one = try lower_helper_const(d, current, function, block, mir_type_u64(), 1, expression_id * 100 + 71)
             current = one.state
             let env_result = try lower_add_typed_result(d, current, function, block, reference.type_id)
@@ -3534,9 +3529,19 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = lower_with_mir(current, env_deref.store)
             let env_stored = try lower_add_instr(d, current, function, block, mir_op_store(), 0, env_deref.id, 0, stored_value, 0, 0, "")
             current = env_stored.state
+        } else {
+            // A bare thunk carries the caller's domain in the environment
+            // member and takes it as its leading parameter, the way a named
+            // function value does.
+            if state.has_storage {
+                env_value = lower_keyed_domain_value(current, lower_env_domain_key(owner))
+                if env_value == 0 { env_value = lower_domain_value(current, store, owner) }
+                if env_value == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                marker = mir_fn_value_domain_marker()
+            }
         }
         let result = try lower_add_typed_result(d, current, function, block, fn_type.id)
-        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, 0, env_value, 0, thunk, "")
+        let made = try lower_add_instr(d, result.state, function, block, mir_op_fn_value(), result.id, 0, marker, env_value, 0, thunk, "")
         return Ok(LowerStep(state: made.state, id: result.id))
     }
     if expression.kind == 19 {
@@ -4751,14 +4756,21 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     // ABI stays (declared parameters..., opaque environment pointer).
     let closure_site = lower_closure_site_for(store, owner)
     var declared_params: U64 = 0
-    if closure_site != 0 { declared_params = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1).declared_count }
+    var bare_thunk = false
+    if closure_site != 0 {
+        let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
+        declared_params = site.declared_count
+        // A thunk with no environment record has nowhere to carry a domain,
+        // so it takes the caller's domain as its leading parameter, exactly
+        // as a named function value does.
+        if site.capture_count == 0 { bare_thunk = true }
+    }
     var current = planned
     var param_ordinal: U64 = 0
-    // Closure thunks never take the hidden domain parameter: they are called
-    // through a raw code pointer. Their domain arrives in the environment
-    // record and is registered during the prologue below.
-    let hidden_domain = state.has_storage && closure_site == 0
-    let aliases_domain = hidden_domain && lower_owner_aliases_domain(source_state, store, owner)
+    // A capturing closure's thunk receives its domain inside the environment
+    // record; a bare thunk receives it as the leading parameter.
+    let hidden_domain = state.has_storage && (closure_site == 0 || bare_thunk)
+    let aliases_domain = hidden_domain && closure_site == 0 && lower_owner_aliases_domain(source_state, store, owner)
     if hidden_domain && !aliases_domain {
         var parameter = __s0_buffer_get(MirParamRec, current.mir.params, 0)
         var parameter_at: U64 = 0
@@ -4771,6 +4783,13 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.value))
         let env_domains = try __s0_buffer_append(LowerValueMapRec, d, domains, LowerValueMapRec(expression: lower_env_domain_key(owner), value: parameter.value))
         current = lower_with_values(current, env_domains)
+        if bare_thunk {
+            // A bare thunk allocates in the caller's domain directly instead
+            // of creating a child domain for a call that may not allocate at
+            // all; the returned value is copied into that same domain.
+            let active = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_active_domain_key(store, owner), value: parameter.value))
+            current = lower_with_values(current, active)
+        }
         param_ordinal = 1
     }
     var local_ordinal: U64 = 0
@@ -4849,7 +4868,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     var env_param: U64 = 0
     if closure_site != 0 {
         let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
-        if site.capture_count != 0 || site.carrier == 1 {
+        if site.capture_count != 0 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type.state) }
             let empty = try __s0_buffer_new(U64, d)
@@ -4898,12 +4917,11 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 ordinal = ordinal + 1
             }
         }
-        if site.carrier == 1 {
-            // A literal whose body contains another literal records the
-            // domain its environment lives in. Register that domain as this
-            // thunk's active and result domain so a nested environment is
-            // allocated beside the outer record instead of inside a frame
-            // domain the thunk does not have.
+        if site.capture_count != 0 {
+            // The environment record records the domain it lives in.
+            // Register that domain as this thunk's active and result domain
+            // so a body that copies or allocates storage works and a nested
+            // environment is allocated beside the outer record.
             let deref = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: env_param))
             current = lower_with_mir(current, deref.store)
             let field = try lower_helper_field_place(d, current, function, deref.id, "alder_env_domain")
@@ -4917,7 +4935,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             current = lower_with_values(current, result_domain)
         }
     }
-    if hidden_domain {
+    if hidden_domain && !bare_thunk {
         let parent = lower_result_domain_value(current, store, owner)
         if parent == 0 { return Ok(lower_invalid(current)) }
         let domain_type = try lower_domain_mir_type(d, current)
@@ -4932,14 +4950,14 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     current = flow.state
     if !current.valid { return Ok(current) }
     if !flow.terminated {
-        if hidden_domain {
+        if hidden_domain && !bare_thunk {
             let destroyed = try lower_add_instr(d, current, function, flow.block, mir_op_domain_destroy(), 0, 0, 0, lower_domain_value(current, store, owner), 0, 0, "")
             current = destroyed.state
         }
         let term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: flow.block, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
         current = lower_with_mir(current, term.store)
     }
-    if hidden_domain {
+    if hidden_domain && !bare_thunk {
         let destroyed = try lower_add_instr(d, current, function, panic.id, mir_op_domain_destroy(), 0, 0, 0, lower_domain_value(current, store, owner), 0, 0, "")
         current = destroyed.state
     }

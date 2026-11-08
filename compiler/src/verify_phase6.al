@@ -560,6 +560,16 @@ return mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table()) }
 // the retain hook rewrites that field when the record moves domains, so its
 // domain handle is safe behind the dereference store that installs it.
 fn mir_v6_env_record(store: MirStore, indexes: MirVIndexes, type_id: U64) -> Bool {
+    // Only an aggregate whose first field is a domain handle can be an
+    // environment record, so every other type answers without a scan.
+    if type_id < 1 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return false }
+    if __s0_buffer_get(MirTypeRec, store.types, type_id - 1).kind != mir_type_kind_aggregate() { return false }
+    if mir_vindex_type_part_count(indexes, type_id) < 1 { return false }
+    let first_id = mir_vindex_type_part(indexes, type_id, 0)
+    if first_id == 0 || first_id > __s0_buffer_len(MirTypePartRec, store.type_parts) { return false }
+    let first = __s0_buffer_get(MirTypePartRec, store.type_parts, first_id - 1)
+    if first.part_type < 1 || first.part_type > __s0_buffer_len(MirTypeRec, store.types) { return false }
+    if __s0_buffer_get(MirTypeRec, store.types, first.part_type - 1).kind != mir_type_kind_domain_handle() { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)

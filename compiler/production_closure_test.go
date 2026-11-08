@@ -497,6 +497,69 @@ fn main() -> I32 {
 }
 `
 
+// A closure with no captures whose body allocates storage needs a domain of
+// its own. It takes the caller's domain as a leading hidden parameter, like a
+// named function value, so the body can build and return a vector. The shapes
+// cover a local closure, one returned from its creating function, and one
+// stored in a vector inside a loop.
+const m75CaptureFreeAllocationProgram = `fn make_adder() -> fn(U64) -> Vec(U64) {
+    let build = fn(n: U64) -> Vec(U64) {
+        var v = Vec.new(U64)
+        v.push(n)
+        return v
+    }
+    return build
+}
+fn make_stored() -> Vec(fn(U64) -> Vec(U64)) {
+    var fns = Vec.new(fn(U64) -> Vec(U64))
+    var i: U64 = 0
+    while i < 2 {
+        let build = fn(n: U64) -> Vec(U64) {
+            var v = Vec.new(U64)
+            v.push(n)
+            v.push(n + 1)
+            return v
+        }
+        fns.push(build)
+        i = i + 1
+    }
+    return fns
+}
+fn main() -> I32 {
+    let local = fn(n: U64) -> Vec(U64) {
+        var v = Vec.new(U64)
+        v.push(n)
+        return v
+    }
+    let one = local(3)
+    if one.len() != 1 { return 1 }
+    let made = make_adder()
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad.push(1)
+        i = i + 1
+    }
+    let two = made(7)
+    if two.len() != 1 { return 2 }
+    let fns = make_stored()
+    var pad2 = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad2.push(2)
+        i = i + 1
+    }
+    let found = fns.get(1)
+    let g = match found {
+        Some(x) => x
+        None => local
+    }
+    let three = g(9)
+    if three.len() != 2 { return 3 }
+    return 0
+}
+`
+
 func TestM75ClosureProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -522,6 +585,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-retain-containers", m75RetainContainerProgram},
 		{"m75-nested-closures", m75NestedClosureProgram},
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
+		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -610,6 +674,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-retain-containers", m75RetainContainerProgram},
 		{"m75-nested-closures", m75NestedClosureProgram},
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
+		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

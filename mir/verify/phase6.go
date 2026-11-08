@@ -41,7 +41,7 @@ func phase6Domains(m *mir.Module, effects []functionEffect, cleanups []*cleanupA
 			continue
 		}
 		info := domainInfos[fi]
-		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi], effects)...)
+		errs = append(errs, rejectLoopCarriedLocals(m, f, info, effects[fi], effects, envRecords)...)
 		var cleanup *cleanupAnalysis
 		if fi < len(cleanups) {
 			cleanup = cleanups[fi]
@@ -1077,13 +1077,12 @@ func envSnapshotScan(m *mir.Module, t mir.TypeId, depth int) (hasEnv, blocked bo
 	return hasEnv, blocked
 }
 
-func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, effects []functionEffect) []Error {
+func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, effects []functionEffect, envRecords map[mir.TypeId]bool) []Error {
 	// Dominance answers "does this loop re-execute the definition" for the
 	// loop-carried parameter rule; the store rule below keeps the coarser
 	// same-cycle test because it has no loop header to hand.
 	dom := dominators(f)
 	var errs []Error
-	envRecords := closureEnvRecords(m)
 	kills := collectLoopKills(f, effects)
 	reachesFor := func(from, to mir.BlockId) bool {
 		if int(from) >= len(f.Blocks) || int(to) >= len(f.Blocks) {

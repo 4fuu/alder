@@ -55,10 +55,6 @@ type ClosureSiteRec {
     declared_count: U64
     capture_count: U64
     first_capture: U64
-    // 1 when the environment records the domain that owns it: the literal's
-    // body contains another literal, or a capture carries storage the thunk
-    // may copy or allocate in that domain.
-    carrier: U64
 }
 
 type ClosureCaptureRec {
@@ -4928,49 +4924,6 @@ fn closure_declared_params(d: Domain, parse: ParseStore, node: SyntaxRec) -> Res
     return Ok(out)
 }
 
-// closure_nests reports whether the subtree under a closure literal's body
-// contains another closure literal.
-fn closure_nests(parse: ParseStore, link_id: U64) -> Bool {
-    if link_id == 0 { return false }
-    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
-    let node = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
-    if node.kind == 58 { return true }
-    if closure_nests(parse, node.children) { return true }
-    return closure_nests(parse, link.next)
-}
-
-// closure_capture_needs_domain reports whether a captured value carries
-// storage the thunk may copy or allocate in the environment's domain.
-fn closure_capture_needs_domain(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
-    if checked_type == 0 || depth > 16 { return false }
-    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 17 || checked.kind == 23 || checked.kind == 24 || checked.kind == 11 || checked.kind == 13 { return true }
-    if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 {
-        if checked.arg_count != 0 && (checked.first_arg == 0 || checked.first_arg - 1 + checked.arg_count > __s0_buffer_len(U64, store.type_args)) { return false }
-        var child: U64 = 0
-        while child < checked.arg_count {
-            if closure_capture_needs_domain(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), depth + 1) { return true }
-            child = child + 1
-        }
-        return false
-    }
-    if checked.kind != 7 { return false }
-    var at: U64 = 0
-    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
-        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
-        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
-            if closure_capture_needs_domain(store, use.checked_type, depth + 1) { return true }
-        }
-        at = at + 1
-    }
-    return false
-}
-
-// Collect the closure's captures: word nodes under the body that resolve to
-// locals of the enclosing owner and are not this closure's own parameters.
-// Type positions never produce kind-24 nodes, so every hit is a value
-// reference. A nested literal's subtree is scanned too, so the outer
-// environment carries everything the inner body reads.
 fn closure_scan_captures(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64, params: __s0_Buffer(U64), found_in: __s0_Buffer(U64), nodes_in: __s0_Buffer(U64)) -> Result(ClosureScanRec, __s0_Error) {
     var found = found_in
     var nodes = nodes_in
@@ -5247,15 +5200,7 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     let first_capture = __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1
     let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: site_index, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
     let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
-    var carrier: U64 = 0
-    if closure_nests(parse, node.children) { carrier = 1 }
-    var carrier_at: U64 = 0
-    while carrier_at < __s0_buffer_len(U64, found) {
-        let carrier_binding = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(U64, found, carrier_at) - 1)
-        if closure_capture_needs_domain(store, carrier_binding.checked_type, 0) { carrier = 1 }
-        carrier_at = carrier_at + 1
-    }
-    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture, carrier: carrier))
+    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture))
     let with_closures = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: captures))
     return expr_draft(with_closures, fn_type, expression_record)
 }

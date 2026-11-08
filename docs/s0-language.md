@@ -179,12 +179,14 @@ work in progress:
   literal records the domain that owns its environment in the record, and its
   thunk allocates the inner environment in that domain. Closure creation
   inside a `while` loop is carried by the immutable environment snapshot.
+- Every closure body has a domain: a capturing closure's environment record
+  carries the domain that owns it, and a closure with no captures takes the
+  caller's domain as its leading hidden parameter, like a named function
+  value. A body may therefore copy or allocate storage and return it.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
   with diagnostic 147; capturing a scoped capability (a slice or view) is
-  rejected with diagnostic 145 until escape-proving capture lands, and a
-  closure with no captures whose body allocates storage still needs an
-  environment domain.
+  rejected with diagnostic 145 until escape-proving capture lands.
 
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.

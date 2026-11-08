@@ -1174,13 +1174,15 @@ both halves were written):
   returns and closures carried in vectors or records stay valid. Captures of
   ordinary storage-backed values and function values snapshot and retain
   correctly.
-- remaining closure capture limits, deliberately rejected rather than
+- remaining closure capture limit, deliberately rejected rather than
   miscompiled: capturing a scoped capability (a slice or a view) still
   rejects with diagnostic 145, because proving that the closure does not
   escape is not implemented and a captured view would alias storage whose
-  scope ends before the closure's lifetime; a closure with no captures whose
-  body allocates storage also still needs an environment domain, since a
-  capture-free closure carries no environment record to hold one.
+  scope ends before the closure's lifetime. Every closure body has a domain:
+  a capturing closure's environment record carries the domain that owns it,
+  and a capture-free closure takes the caller's domain as its leading hidden
+  parameter, so a body that allocates or copies storage works whether or not
+  it captures anything.
 - `mut self` receivers on a field place are not implemented:
   `b.items.push(x)` rejects with 101 and `b.items[i] = x` with "invalid
   assignment target", although the frozen `core.collection` snapshot

@@ -416,12 +416,13 @@ Phase 6 merges the environment operand's domain provenance into the fn value
 and into every `call.value` result, so the value and its results carry the
 captured domain's provenance through the existing lattice.
 
-A closure environment record is one aggregate per site. A record whose thunk
-may copy or allocate storage, or whose body contains another literal, records
-the domain that owns the record as its first field, and the thunk loads that
-field in its prologue and uses it as its active and result domain, so a nested
-environment or a storage copy is materialized beside the outer record instead
-of in a frame domain the thunk does not have. A capture that carries storage is
+A closure environment record is one aggregate per site and records the domain
+that owns it as its first field; the thunk loads that field in its prologue and
+uses it as its active and result domain, so a nested environment or a storage
+copy is materialized beside the outer record instead of in a frame domain the
+thunk does not have. A closure with no captures has no environment record, so
+its thunk takes the caller's domain as a leading hidden parameter, the same way
+a named function value carries it. A capture that carries storage is
 deep-copied into that domain at creation and into the destination domain when
 the record is retained; a function-valued capture is retained recursively. For
 the loop-survival rule such a record is an owning value: its domain field names
