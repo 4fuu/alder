@@ -317,6 +317,41 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"generic-closures.al": `type Cell {
+    v: U64
+}
+
+fn apply(T: type, f: fn(T) -> T, value: T) -> T {
+    return f(value)
+}
+
+fn layer(T: type, seed: U64) -> U64 {
+    let rebased = fn(x: U64) => x + seed
+    return rebased(seed)
+}
+
+fn keep(T: type, value: T) -> T {
+    let same = fn() -> T { return value }
+    return same()
+}
+
+fn thread(T: type, value: T) -> T {
+    let same = fn(x: T) => x
+    return apply(T, same, value)
+}
+
+fn main() -> I32 {
+    if layer(U64, 3) != 6 { return 1 }
+    if layer(Cell, 4) != 8 { return 2 }
+    if keep(U64, 7) != 7 { return 3 }
+    let cell = keep(Cell, Cell(v: 5))
+    if cell.v != 5 { return 4 }
+    if thread(U64, 9) != 9 { return 5 }
+    let other = thread(Cell, Cell(v: 11))
+    if other.v != 11 { return 6 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -403,7 +438,6 @@ fn main() -> I32 {
 		{"closure-vec-capture", "fn main() -> I32 {\n    let values = Vec.new(U64)\n    let first = fn() => values.len()\n    return 0\n}\n", 145},
 		{"closure-string-capture", "fn main() -> I32 {\n    let name = \"ald\"\n    let sized = fn() => len(name)\n    return 0\n}\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
-		{"closure-in-generic-body", "fn layer(T: type, seed: U64) -> U64 {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(seed)\n}\nfn main() -> I32 {\n    if layer(U64, 3) != 6 { return 1 }\n    return 0\n}\n", 160},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

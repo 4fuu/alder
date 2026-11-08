@@ -5058,19 +5058,17 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
         }
         capture_at = capture_at + 1
     }
-    // The reserved thunk symbol and site from the pre-body reserve pass. The
-    // site's expression field still holds the closure syntax node id.
+    // One thunk per site check. A literal inside a generic body is checked
+    // once per instance, and each instance's captures are its own locals with
+    // its own concrete types, so every check materializes a fresh thunk and
+    // site. The thunk's captures are the site's trailing role-5 uses; its
+    // body is checked by the post-body pass once its signature exists.
     let closure_syntax = closure_syntax_id(parse, node)
     if closure_syntax == 0 { return expr_token_fail(d, state, base, 147, node) }
-    var reserved_at: U64 = 0
-    var site_at: U64 = 0
-    while site_at < __s0_buffer_len(ClosureSiteRec, current.closures.sites) {
-        let candidate = __s0_buffer_get(ClosureSiteRec, current.closures.sites, site_at)
-        if candidate.owner == __s0_buffer_len(SymbolRec, current.symbols) + 1 || candidate.owner != 0 && __s0_buffer_get(SymbolRec, current.symbols, candidate.owner - 1).node == closure_syntax { reserved_at = site_at + 1 }
-        site_at = site_at + 1
-    }
-    if reserved_at == 0 { return expr_token_fail(d, state, base, 147, node) }
-    let symbol_id = __s0_buffer_get(ClosureSiteRec, current.closures.sites, reserved_at - 1).owner
+    let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
+    let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: closure_syntax, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: 0, declaration: symbol_id, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: 0, module_source: 0, public: false))
+    current = CheckStore(symbols: symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures)
+    let site_index = __s0_buffer_len(ClosureSiteRec, current.closures.sites) + 1
     // Parameter uses: declared parameters, then captures in first-reference
     // order. Capture uses carry the captured binding's node and spans.
     let with_uses = try closure_append_uses(d, parse, current, symbol_id, param_nodes, args, found, 0)
@@ -5143,23 +5141,15 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
         fn_type = checked_type_for_syntax(current, owner, body_link.node)
     }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, fn_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, fn_type) }
-    // The closure expression record (kind 51) and the site.
-    // Append the expression with its final site index and rebuild the site
-    // record functionally: the arrow inference pass runs the whole site
-    // check on a throwaway store, and in-place buffer sets would leak its
-    // results into the shared backing.
+    // The closure expression record (kind 24) and its site. The site records
+    // the creation expression, the declared parameter count, and the capture
+    // window; the expression points back at the site by index.
     let closure_prior = previous_expression_for_owner(current, owner)
-    let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: reserved_at, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
-    let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
     let captures = try closure_append_captures(d, current.closures.captures, current.locals, found, 0)
-    var sites = try __s0_buffer_new(ClosureSiteRec, d)
-    var rebuild_at: U64 = 0
-    while rebuild_at < __s0_buffer_len(ClosureSiteRec, current.closures.sites) {
-        var record = __s0_buffer_get(ClosureSiteRec, current.closures.sites, rebuild_at)
-        if rebuild_at + 1 == reserved_at { record = ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1) }
-        sites = try __s0_buffer_append(ClosureSiteRec, d, sites, record)
-        rebuild_at = rebuild_at + 1
-    }
+    let first_capture = __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: site_index, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
+    let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
+    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture))
     let with_closures = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: captures))
     return expr_draft(with_closures, fn_type, expression_record)
 }
@@ -8039,13 +8029,16 @@ fn owner_flow_links(store: CheckStore, binding: U64, link_id: U64, state: U64) -
 fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
     if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return Ok(CheckGood(store)) }
-    // A reserved closure thunk whose signature no enclosing body check has
-    // materialized cannot be checked: its parameter and result uses do not
-    // exist yet. Reject instead of reading a missing result use.
-    let thunk_node = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
-    if symbol.kind == 12 && thunk_node.kind == 58 && function_use(store, owner, 6, thunk_node, state) == 0 {
-        return check_token_fail(d, state, store, 160, thunk_node)
-    }
+    // Closure thunks are checked by the post-body pass, after every ordinary
+    // body has run and the site check that materializes each thunk signature
+    // has completed.
+    if symbol.kind == 12 && __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1).kind == 58 { return Ok(CheckGood(store)) }
+    return check_owner_body(d, state, parse, store, owner)
+}
+
+fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return Ok(CheckGood(store)) }
     let declaration = __s0_buffer_get(SymbolRec, store.symbols, instance_declaration(store, owner) - 1)
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, declaration.node - 1)
     let body_link = __s0_buffer_get(SyntaxLinkRec, parse.links, root.children - 1)
@@ -8274,74 +8267,36 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(public_signatures) }
-    // The reserve pass runs after the complete use index is built: thunk
-    // symbols exist before any body is checked, while their site-time uses
-    // stay outside the index and resolve through the scan fallbacks.
+    // The use index covers every symbol that exists now; symbols appended
+    // later (instances and closure thunks) resolve through the scan
+    // fallbacks.
     let indexed = try build_use_indexes(d, after_public_signatures, true)
-    let reserved = try reserve_closure_symbols(d, state, parse, indexed)
-    let after_reserved = match reserved {
-        CheckGood(value) => value
-        CheckBad(value) => value
-    }
-    if match reserved {
-        CheckGood(value) => false
-        CheckBad(value) => true
-    } { return Ok(reserved) }
-    return check_function_bodies(d, state, parse, after_reserved)
+    let bodies = try check_function_bodies(d, state, parse, indexed)
+    let after_bodies = check_result_store(bodies)
+    if check_result_bad(bodies) { return Ok(bodies) }
+    return check_deferred_bodies(d, state, parse, after_bodies, __s0_buffer_len(SymbolRec, after_bodies.symbols))
 }
 
-// Whether a closure literal sits inside a generic declaration body. The
-// innermost kind-12 declaration whose source span contains the literal owns
-// it; its type arity decides whether the enclosing body is checked once per
-// instantiation. Thunk symbols (kind 12 over a kind-58 node) are skipped
-// because they share the literal's own span.
-fn closure_literal_in_generic_body(parse: ParseStore, store: CheckStore, node: SyntaxRec) -> Bool {
-    var found = false
-    var generic = false
-    var best_start: U64 = 0
-    var at: U64 = 0
-    while at < __s0_buffer_len(SymbolRec, store.symbols) {
-        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if symbol.kind == 12 {
-            let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
-            if declaration.kind != 58 && declaration.source == node.source && declaration.start <= node.start && node.end <= declaration.end {
-                if !found || declaration.start >= best_start {
-                    found = true
-                    best_start = declaration.start
-                    generic = symbol.type_arity != 0
-                }
-            }
+// Closure thunks are materialized by the site check inside the enclosing
+// body. For a generic body that happens when an instance is checked, so the
+// linear body walk skips thunks and this pass checks each one after every
+// ordinary body has run. A thunk body may itself instantiate a generic
+// function, so instances appended past the walk are checked here too, in id
+// order; a thunk appended by such an instance is reached later in this pass.
+fn check_deferred_bodies(d: Domain, state: State, parse: ParseStore, store: CheckStore, walked: U64) -> Result(CheckResult, __s0_Error) {
+    var current = store
+    var at: U64 = 1
+    while at <= __s0_buffer_len(SymbolRec, current.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, current.symbols, at - 1)
+        var wanted = false
+        if symbol.kind == 12 && symbol.type_arity == 0 && __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1).kind == 58 { wanted = true }
+        if symbol.kind == 13 && at > walked { wanted = true }
+        if wanted {
+            let checked = try check_owner_body(d, state, parse, current, at)
+            if check_result_bad(checked) { return Ok(checked) }
+            current = check_result_store(checked)
         }
         at = at + 1
-    }
-    return found && generic
-}
-
-// Reserve the synthetic thunk symbol and site record for every closure
-// literal before any function body is checked, in source order. Appending
-// symbols while a body is mid-check destabilizes the deferred body loop and
-// the record-constructor scans, so the symbol exists up front and the site
-// check only fills in types, uses, and captures. The site's expression field
-// holds the closure syntax node id until the site check links the checked
-// expression.
-fn reserve_closure_symbols(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
-    var current = store
-    var node_at: U64 = 1
-    while node_at <= __s0_buffer_len(SyntaxRec, parse.nodes) {
-        let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_at - 1)
-        if node.kind == 58 {
-            // A literal inside a generic declaration body has no single
-            // signature: its thunk is only materialized when an instance of
-            // that body is checked. Reject the shape before the body walk can
-            // reach a thunk whose uses do not exist yet.
-            if closure_literal_in_generic_body(parse, current, node) { return check_token_fail(d, state, current, 160, node) }
-            let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
-            let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: node_at, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: 0, declaration: symbol_id, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: 0, module_source: 0, public: false))
-            var sites = current.closures.sites
-            sites = try __s0_buffer_append(ClosureSiteRec, d, sites, ClosureSiteRec(owner: symbol_id, expression: node_at, declared_count: 0, capture_count: 0, first_capture: 0))
-            current = CheckStore(symbols: symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: current.closures.captures))
-        }
-        node_at = node_at + 1
     }
     return Ok(CheckGood(current))
 }

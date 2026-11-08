@@ -4742,7 +4742,11 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             let empty = try __s0_buffer_new(U64, d)
             let reference = try mir_intern_type(d, env_type.state.mir, mir_type_kind_safe_mut(), env_type.id, 0, 0, empty, 0)
             let parameter = try mir_add_function_param(d, reference.store, function, param_ordinal, "alder_env", reference.type_id)
-            current = lower_with_mir(current, parameter.store)
+            // Thread the memoized state: the environment type is built once
+            // per site across every function that references it, so the
+            // thunk's own prologue and the enclosing creation site share one
+            // record type instead of interning two same-named aggregates.
+            current = lower_with_mir(env_type.state, parameter.store)
             env_param = parameter.id
         }
     }

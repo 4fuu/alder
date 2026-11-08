@@ -2102,11 +2102,26 @@ func validateCheckerManifest(m checkerManifest) error {
 	// zero-expression return has a Unit result.
 	bodySyntax := make(map[[2]int]bool)
 	bindingEnvironments := make([]int, len(m.locals))
+	// A closure thunk is a concrete kind-12 symbol over the syntax node of a
+	// closure expression. The post-body pass checks thunks after every
+	// ordinary body, so a thunk's environment records can follow records of
+	// higher-numbered instances; that is the one allowed owner decrease.
+	closureThunks := make(map[int]bool)
+	for _, expression := range m.expressions {
+		if expression.kind != 24 || expression.syntax < 1 {
+			continue
+		}
+		for _, symbol := range m.symbols {
+			if symbol.kind == 12 && symbol.arity == 0 && symbol.node == expression.syntax {
+				closureThunks[symbol.id] = true
+			}
+		}
+	}
 	lastEnvironment := make(map[int]int)
 	lastEnvironmentOwner := 0
 	for i, environment := range m.environments {
 		validBinding := environment.binding == 0 || environment.binding <= len(m.locals) && m.locals[environment.binding-1].owner == environment.owner
-		if environment.id != i+1 || environment.owner < 1 || environment.owner > len(m.symbols) || environment.owner < lastEnvironmentOwner || !validBinding || environment.parent < 0 || environment.parent >= environment.id || environment.parent != 0 && m.environments[environment.parent-1].owner != environment.owner {
+		if environment.id != i+1 || environment.owner < 1 || environment.owner > len(m.symbols) || (environment.owner < lastEnvironmentOwner && !closureThunks[environment.owner]) || !validBinding || environment.parent < 0 || environment.parent >= environment.id || environment.parent != 0 && m.environments[environment.parent-1].owner != environment.owner {
 			return fmt.Errorf("invalid environment %+v", environment)
 		}
 		if environment.binding != 0 {
@@ -2797,7 +2812,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || (diagnostic.kind > 149 && diagnostic.kind != 160) || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		if diagnostic.kind < 1 || diagnostic.kind > 149 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

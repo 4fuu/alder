@@ -14,16 +14,18 @@ import (
 // implemented by many record types, and a stack of constrained generic
 // layers instantiates itself two ways (layer i calls layer i+1 and i+2), so
 // monomorphization walks a DAG of 8 x 32 instances rather than a chain.
-// Closures live at the concrete level: main snapshots a local into a closure
-// and threads it through a function-typed helper, which exercises function
-// values and indirect calls alongside the generic DAG. The program must
-// terminate with identical diagnostics, MIR, and C across processes and
+// Closures appear at the concrete level, where main snapshots a local into a
+// closure and threads it through a function-typed helper, and inside generic
+// bodies, where each instance materializes its own thunk: a generic layer
+// snapshots a U64 seed at two cell instantiations, and keep_value snapshots a
+// value of the type parameter itself at U64 and at a record type. The program
+// must terminate with identical diagnostics, MIR, and C across processes and
 // across source permutations, and the generated C must run under strict C11.
 //
 // The generator stays inside the fn-value envelope the compiler supports:
-// closures are not created inside generic bodies (that corner still rejects;
-// see the closure work), while named function values and closures mix freely
-// and thread through constrained generic calls and function-typed helpers.
+// named function values and closures mix freely and thread through
+// constrained generic calls and function-typed helpers, and closures inside
+// generic bodies carry only snapshot-copyable captures.
 const (
 	m75LayeredCells  = 8
 	m75LayeredDepth  = 32
@@ -36,6 +38,11 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	declarations = append(declarations, "trait Deliver(Out: type) {\n    fn deliver(self) -> Out\n    fn twice(self) -> Out {\n        return self.deliver()\n    }\n}")
 	declarations = append(declarations, "fn twice_apply(f: fn(U64) -> U64, v: U64) -> U64 {\n    return f(f(v))\n}")
 	declarations = append(declarations, "fn scale(x: U64) -> U64 { return x + 1 }")
+	// Closures inside generic bodies: each instance materializes its own
+	// thunk, one capturing a U64 seed and one capturing a value of the type
+	// parameter itself.
+	declarations = append(declarations, "fn rebased_layer(P: type, p: P, seed: U64) -> U64\nwhere P: Deliver(U64) {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(p.deliver())\n}")
+	declarations = append(declarations, "fn keep_value(T: type, value: T) -> T {\n    let same = fn() -> T { return value }\n    return same()\n}")
 	for cell := 0; cell < m75LayeredCells; cell++ {
 		declarations = append(declarations, fmt.Sprintf("type Cell%03d {\n    v: U64\n}", cell))
 		declarations = append(declarations, fmt.Sprintf("impl Deliver(U64) for Cell%03d {\n    fn deliver(self) -> U64 { return self.v }\n}", cell))
@@ -65,7 +72,11 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	main.WriteString(fmt.Sprintf("    if shifted(layer_000(Cell007, Cell007(v: 70), 0)) != %d { return 2 }\n", want[1]))
 	main.WriteString("    if twice_apply(shifted, 1) != 11 { return 3 }\n")
 	main.WriteString(fmt.Sprintf("    if twice_apply(scale, layer_000(Cell003, Cell003(v: 30), 0)) != %d { return 4 }\n", want[2]))
-	main.WriteString("    if Cell005(v: 50).twice() != 50 { return 5 }\n    return 0\n}")
+	main.WriteString("    if rebased_layer(Cell001, Cell001(v: 10), 5) != 15 { return 5 }\n")
+	main.WriteString("    if rebased_layer(Cell002, Cell002(v: 20), 7) != 27 { return 6 }\n")
+	main.WriteString("    if keep_value(U64, 9) != 9 { return 7 }\n")
+	main.WriteString("    if keep_value(Cell004, Cell004(v: 44)).v != 44 { return 8 }\n")
+	main.WriteString("    if Cell005(v: 50).twice() != 50 { return 9 }\n    return 0\n}")
 	declarations = append(declarations, main.String())
 	return declarations, want
 }

@@ -553,9 +553,7 @@ type EnvironmentRec {
 // view on an affine-element vector, 142 a push into a vector whose binding
 // already carries a using registration, 143 a Table element inside a
 // vector whose heap-stored handle awaits MIR storage rules, 148 a match
-// guard that consumes a binding, 149 a match guard on a table-view arm, and
-// 160 a closure literal inside a generic function body, whose thunk needs
-// per-instance materialization that this slice does not implement yet.
+// guard that consumes a binding, and 149 a match guard on a table-view arm.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is
