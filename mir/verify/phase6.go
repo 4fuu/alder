@@ -897,19 +897,48 @@ func inCycleFor(f *mir.Function, b mir.BlockId) bool {
 	return inCycle(f, b)
 }
 
+// loopSameCycle reports whether a block lies in the same cycle as the loop
+// block being checked. "On some cycle" is not enough: a domain created inside
+// a different, already finished loop is carried across this loop's backedge
+// unchanged, and only a domain created inside THIS loop is per-iteration.
+func loopSameCycle(reaches func(from, to mir.BlockId) bool, anchor, block mir.BlockId) bool {
+	if block == mir.NoBlock {
+		return false
+	}
+	if block == anchor {
+		return true
+	}
+	return reaches(anchor, block) && reaches(block, anchor)
+}
+
+// loopInBody reports whether the loop header dominates the block, which is
+// what makes a definition re-execute once per iteration of that loop. A
+// cycle test cannot answer this: a for loop nested inside a while body shares
+// the while loop's cycle, yet a value the nested loop carries is defined once
+// per outer iteration, not once per inner one.
+func loopInBody(dom [][]bool, header, block mir.BlockId) bool {
+	if block == mir.NoBlock {
+		return false
+	}
+	if block == header {
+		return true
+	}
+	return int(block) < len(dom) && dom[block][header]
+}
+
 // loopValueDies is the precise half of the loop rules: a carried value dies
 // inside its loop when it depends on a domain created in the loop, or when a
 // destroy or reset inside the loop invalidates one of its domain identities
 // (a reset also invalidates descendants, which parent facts record). Entry
 // domains created before the loop and destroyed only after it survive, which
 // is what makes loop-carried collection headers legal.
-func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, from mir.BlockId, v mir.ValueId) bool {
+func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir.BlockId) bool, kills []loopKill, dom [][]bool, anchor, from mir.BlockId, v mir.ValueId) bool {
 	if int(v) >= len(info) {
 		return false
 	}
 	vi := info[v]
 	for d := range vi.deps {
-		if d.blk != mir.NoBlock && inCycle(f, d.blk) {
+		if d.blk != mir.NoBlock && loopInBody(dom, anchor, d.blk) {
 			return true
 		}
 		if loopKeyKilled(f, info, reaches, kills, from, d) {
@@ -922,9 +951,9 @@ func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir
 		}
 	}
 	for r := range vi.roots {
-		// An allocation produced inside a cycle is per-iteration: carrying it
-		// around a backedge conflates iterations, so it stays forbidden.
-		if r.param < 0 && r.allocBlk != mir.NoBlock && inCycleFor(f, r.allocBlk) {
+		// An allocation produced inside THIS loop is per-iteration: carrying
+		// it around the backedge conflates iterations, so it stays forbidden.
+		if r.param < 0 && r.allocBlk != mir.NoBlock && loopInBody(dom, anchor, r.allocBlk) {
 			return true
 		}
 		if r.param < 0 && int(r.handle) < len(info) {
@@ -944,6 +973,10 @@ func loopValueDies(f *mir.Function, info []domainInfo, reaches func(from, to mir
 }
 
 func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, effect functionEffect, effects []functionEffect) []Error {
+	// Dominance answers "does this loop re-execute the definition" for the
+	// loop-carried parameter rule; the store rule below keeps the coarser
+	// same-cycle test because it has no loop header to hand.
+	dom := dominators(f)
 	var errs []Error
 	kills := collectLoopKills(f, effects)
 	reachesFor := func(from, to mir.BlockId) bool {
@@ -981,7 +1014,7 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 					if int(args[v.Def.Param]) < len(f.Values) {
 						capability = !loopCarryOwnerType(m, f.Values[args[v.Def.Param]].Type)
 					}
-					if local && (capability || loopValueDies(f, info, reachesFor, kills, mir.BlockId(bi), args[v.Def.Param])) {
+					if local && (capability || loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param])) {
 						errs = append(errs, Error{Loc: locBlock(f, b), Msg: fmt.Sprintf("block parameter %s carries a function-local domain handle or reference across a backedge", valueName(f, mir.ValueId(vi)))})
 					}
 				}
@@ -1094,7 +1127,7 @@ func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domai
 	}
 	valueInfo := info[in.StoreVal]
 	for d := range valueInfo.deps {
-		if d.blk != mir.NoBlock && (inCycle(f, d.blk) || loopKeyKilled(f, info, reaches, kills, block, d)) {
+		if d.blk != mir.NoBlock && (loopSameCycle(reaches, block, d.blk) || loopKeyKilled(f, info, reaches, kills, block, d)) {
 			return false
 		}
 	}
@@ -1121,7 +1154,7 @@ func stableParameterDomainLoopStore(m *mir.Module, f *mir.Function, info []domai
 			continue
 		}
 		for d := range handleInfo.deps {
-			if d.blk != mir.NoBlock && inCycleFor(f, d.blk) {
+			if d.blk != mir.NoBlock && loopSameCycle(reaches, block, d.blk) {
 				return false
 			}
 			if loopKeyKilled(f, info, reaches, kills, block, d) {

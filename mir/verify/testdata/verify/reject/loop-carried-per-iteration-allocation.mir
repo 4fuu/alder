@@ -1,0 +1,20 @@
+mir 5
+
+const @zero_u64: u64 = 0
+const @true_v: bool = true
+
+fn @f(%root: domain_handle) {
+bb0:
+  %d = domain.create %root
+  %v = vec.new vec(u64)
+  jump loop(%v)
+
+loop(%sequence: vec(u64)):
+  %copy = copy_to_domain %d, %sequence
+  %c = const.get @true_v
+  branch %c, loop(%copy), done
+
+done:
+  domain.destroy %d
+  return
+}

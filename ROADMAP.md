@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `edcf0a0278d6cd69289d42045387e3685a50248bac52c1858cf55dbec71c582e`
+  `75c952372441e13769facf40c546ed768a64523b9eb0daa978b655f4e2c904dd`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `edcf0a0278d6cd69289d42045387e3685a50248bac52c1858cf55dbec71c582e`
+  `75c952372441e13769facf40c546ed768a64523b9eb0daa978b655f4e2c904dd`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1142,7 +1142,9 @@ both halves were written):
   `for x in v` over an owned `Vec(T)` and whole-vector assignment inside a
   `while` body now verify, because the for lowering carries the owning value
   as the loop parameter and phase 6 rejects an owning loop-carried value only
-  when its storage dies inside the loop;
+  when its storage dies inside the loop under check - so `for x in a` over a
+  vector an earlier `while` body rebuilt now compiles, along with the
+  surrounding for/while and Map/Set compositions;
 - a compiler-scale layered DAG input over traits, generics, and closures
   that terminates with deterministic diagnostics, MIR, and C — landed: one
   generic trait with a defaulted method implemented by eight record types,

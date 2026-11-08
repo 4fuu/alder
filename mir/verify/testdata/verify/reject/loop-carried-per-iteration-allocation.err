@@ -1,0 +1,1 @@
+fn @f: block loop: block parameter %sequence carries a function-local domain handle or reference across a backedge

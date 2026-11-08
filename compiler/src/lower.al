@@ -4368,12 +4368,17 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         // slice.len always returns canonical U64 (checked type 9 in the sealed primitive prefix).
         let length_value = try lower_add_result(d, length_state, function, active, 9, source_state, store)
         let length_instr = try lower_add_instr(d, length_value.state, function, active, mir_op_slice_len(), length_value.id, 0, 0, length_operand, 0, 0, "")
-        let zero_value = try lower_int_value(d, source_state, store, length_instr.state, function, active, 0, link.statement)
+        // The sequence-lowering constant name space cannot collide with a
+        // statement-keyed literal name, and two for statements in one function
+        // must not share either.
+        let zero_value = try lower_int_value_seq(d, source_state, store, length_instr.state, function, active, 0)
         let head = try lower_add_block(d, zero_value.state, function, "bb_for_head")
         let body = try lower_add_block(d, head.state, function, "bb_for_body")
         let join = try lower_add_block(d, body.state, function, "bb_for_join")
-        let index_param = try mir_add_block_param(d, join.state.mir, function, head.id, 0, "index", mir_type_u64())
-        let sequence_param = try mir_add_block_param(d, index_param.store, function, head.id, 1, "sequence", sequence_param_type_id)
+        // Parameter names carry the head block so two for statements in one
+        // function do not produce duplicate value names.
+        let index_param = try mir_add_block_param(d, join.state.mir, function, head.id, 0, try lower_decimal_name(d, "__for_index_", head.id), mir_type_u64())
+        let sequence_param = try mir_add_block_param(d, index_param.store, function, head.id, 1, try lower_decimal_name(d, "__for_sequence_", head.id), sequence_param_type_id)
         current = try lower_jump_two(d, lower_with_mir(current, sequence_param.store), function, active, head.id, zero_value.id, sequence.id)
         let compared = try lower_add_result(d, current, function, head.id, 1, source_state, store)
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
@@ -4405,7 +4410,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let body_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, body.id, statement.body, panic_block)
         current = body_flow.state
         if !body_flow.terminated {
-            let one = try lower_int_value(d, source_state, store, current, function, body_flow.block, 1, link.statement + 1)
+            let one = try lower_int_value_seq(d, source_state, store, current, function, body_flow.block, 1)
             let next = try lower_add_result(d, one.state, function, body_flow.block, 9, source_state, store)
             let added = try lower_add_instr(d, next.state, function, body_flow.block, mir_op_int_add_checked(), next.id, 0, 0, index_param.id, one.id, panic_block, "")
             current = try lower_jump_two(d, added.state, function, lower_open_block(added.state.mir, function, body_flow.block), head.id, next.id, sequence_param.id)

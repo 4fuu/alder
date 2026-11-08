@@ -1539,6 +1539,28 @@ fn mir_v6_loop_fact_killed(analysis: MirV6Analysis, reach: MirV6Reachability, ki
     return false
 }
 
+// mir_v6_loop_same_cycle reports whether a block lies in the same cycle as
+// the loop block being checked. "On some cycle" is not enough: an allocation
+// or a domain created inside a different, already finished loop is carried
+// across this loop's backedge unchanged, and only an allocation produced
+// inside THIS loop is per-iteration.
+fn mir_v6_loop_same_cycle(reach: MirV6Reachability, anchor: U64, block: U64) -> Bool {
+    if block == 0 { return false }
+    if block == anchor { return true }
+    return mir_v6_reach_has(reach, anchor, block) && mir_v6_reach_has(reach, block, anchor)
+}
+
+// mir_v6_loop_in_body reports whether the loop header dominates the block,
+// which is what makes a definition re-execute once per iteration of that
+// loop. A cycle test cannot answer this: a for loop nested inside a while
+// body shares the while loop's cycle, yet a value the nested loop carries is
+// defined once per outer iteration, not once per inner one.
+fn mir_v6_loop_in_body(cfg: MirVP4PointCfg, dom: MirVP4Dom, header: U64, block: U64) -> Bool {
+    if block == 0 { return false }
+    if block == header { return true }
+    return mir_vp4_dominates(cfg, dom, mir_vp4_boundary_node(cfg, block, 0), mir_vp4_boundary_node(cfg, header, 0))
+}
+
 // mir_v6_loop_value_dies is the precise half of the loop rules: a carried
 // value dies inside its loop when it depends on a domain created in the
 // loop, or when a destroy or reset inside the loop invalidates one of its
@@ -1546,21 +1568,21 @@ fn mir_v6_loop_fact_killed(analysis: MirV6Analysis, reach: MirV6Reachability, ki
 // facts record). Entry domains created before the loop and destroyed only
 // after it survive, which is what makes loop-carried collection headers
 // legal.
-fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), function: U64, from_block: U64, value: U64) -> Bool {
+fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, anchor: U64, from_block: U64, value: U64) -> Bool {
     var f = mir_v6_fact_start(analysis, function, value)
     let fend = mir_v6_fact_end(analysis, function, value)
     while f < fend {
         let fact = mir_v6_fact_at(analysis, f)
-        if fact.kind == mir_v6_fact_dep() && fact.a != 0 && mir_v6_reach_has(reach, fact.a, fact.a) { return true }
+        if fact.kind == mir_v6_fact_dep() && fact.a != 0 && mir_v6_loop_in_body(cfg, dom, anchor, fact.a) { return true }
         if fact.kind == mir_v6_fact_dep() || fact.kind == mir_v6_fact_parent() {
             if mir_v6_loop_fact_killed(analysis, reach, kills, function, from_block, fact) { return true }
         }
         if fact.kind == mir_v6_fact_root() && fact.b != 0 {
-            // An allocation produced inside a cycle is per-iteration:
-            // carrying it around a backedge conflates iterations, so it
+            // An allocation produced inside THIS loop is per-iteration:
+            // carrying it around the backedge conflates iterations, so it
             // stays forbidden. An allocation whose owning domain dies
             // inside the loop dangles.
-            if mir_v6_reach_has(reach, fact.b, fact.b) { return true }
+            if mir_v6_loop_in_body(cfg, dom, anchor, fact.b) { return true }
             var h = mir_v6_fact_start(analysis, function, fact.a)
             let hend = mir_v6_fact_end(analysis, function, fact.a)
             while h < hend {
@@ -1577,10 +1599,10 @@ fn mir_v6_loop_value_dies(analysis: MirV6Analysis, reach: MirV6Reachability, kil
 // mir_v6_loop_param_dies decides one backedge argument: capability-typed
 // values keep the blanket rejection, owner-typed values die only when their
 // storage dies inside the loop.
-fn mir_v6_loop_param_dies(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), owner_seen: __s0_Buffer(U64), owner_stamp: U64, function: U64, source: U64, value: U64) -> Result(Bool, __s0_Error) {
+fn mir_v6_loop_param_dies(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, reach: MirV6Reachability, kills: __s0_Buffer(MirV6LoopKill), owner_seen: __s0_Buffer(U64), owner_stamp: U64, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, anchor: U64, source: U64, value: U64) -> Result(Bool, __s0_Error) {
     let vi = mir_vindex_value(indexes, function, value)
     if vi == 0 { return Ok(true) }
-    if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type) { return Ok(mir_v6_loop_value_dies(analysis, reach, kills, function, source, value)) }
+    if try mir_v6_loop_carry_owner(d, store, indexes, owner_seen, owner_stamp, __s0_buffer_get(MirValueRec, store.values, vi - 1).value_type) { return Ok(mir_v6_loop_value_dies(analysis, reach, kills, cfg, dom, function, anchor, source, value)) }
     return Ok(true)
 }
 
@@ -1624,7 +1646,7 @@ var f = mir_v6_fact_start(analysis, function, value)
 let fend = mir_v6_fact_end(analysis, function, value)
 while f < fend { let fact = mir_v6_fact_at(analysis, f)
 if fact.kind == mir_v6_fact_dep() && fact.a != 0 && mir_v6_loop_fact_killed(analysis, reach, kills, function, block, fact) { return false }
-if fact.kind == mir_v6_fact_dep() && fact.a != 0 && mir_v6_reach_has(reach, fact.a, fact.a) { return false }
+if fact.kind == mir_v6_fact_dep() && fact.a != 0 && mir_v6_loop_same_cycle(reach, block, fact.a) { return false }
 if fact.kind == mir_v6_fact_root() && fact.b != 0 {
 // A local root is stable when its owning domain survives the whole loop:
 // either the pre-existing parameter-domain path above found no destroying
@@ -1633,7 +1655,7 @@ if fact.kind == mir_v6_fact_root() && fact.b != 0 {
 var h = mir_v6_fact_start(analysis, function, fact.a)
 let hend = mir_v6_fact_end(analysis, function, fact.a)
 while h < hend { let owner = mir_v6_fact_at(analysis, h)
-if owner.kind == mir_v6_fact_dep() && owner.a != 0 && mir_v6_reach_has(reach, owner.a, owner.a) { return false }
+if owner.kind == mir_v6_fact_dep() && owner.a != 0 && mir_v6_loop_same_cycle(reach, block, owner.a) { return false }
 if (owner.kind == mir_v6_fact_dep() || owner.kind == mir_v6_fact_parent()) && mir_v6_loop_fact_killed(analysis, reach, kills, function, block, owner) { return false }
 h = h + 1 } }
 f = f + 1 }
@@ -1682,7 +1704,7 @@ branch = try mir_v6_apply_cleanup_entry(d, store, indexes, cfg, dom, analysis, b
 active = node.parent } }
 si = si + 1 }
 return Ok(out) }
-fn mir_v6_check_loops(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, owner_seen: __s0_Buffer(U64), owner_stamp: U64, function: U64, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = out0
+fn mir_v6_check_loops(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, owner_seen: __s0_Buffer(U64), owner_stamp: U64, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = out0
 let reach = try mir_v6_reachability(d, store, indexes, function)
 let kills = try mir_v6_loop_kills_collect(d, store, indexes, analysis, function)
 let pcount = mir_vindex_param_count(indexes, function)
@@ -1707,7 +1729,7 @@ while pi < pcount {
                     let o = __s0_buffer_get(MirOperandRec, store.operands, oid - 1)
                     if o.kind == mir_operand_checked_edge_arg() && o.target == p.block && o.ordinal == p.ordinal { let source = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1).block
 if mir_v6_reach_has(reach, p.block, source) && mir_v6_local_provenance(analysis, function, o.value) { var param_dies: Bool = true
-let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, function, source, o.value)
+let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, cfg, dom, function, p.block, source, o.value)
 param_dies = decided
 if param_dies { out = try mir_v6_bad(d, out, mir_vdiag_loop_block_resource(), function, p.block, 0, 0, oid, p.value) } } }
                     oi = oi + 1
@@ -1723,7 +1745,7 @@ if param_dies { out = try mir_v6_bad(d, out, mir_vdiag_loop_block_resource(), fu
                     let o = __s0_buffer_get(MirOperandRec, store.operands, oid - 1)
                     if o.kind == mir_operand_terminator_arg() && o.target == p.block && o.ordinal == p.ordinal { let source = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1).block
 if mir_v6_reach_has(reach, p.block, source) && mir_v6_local_provenance(analysis, function, o.value) { var param_dies: Bool = true
-let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, function, source, o.value)
+let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, cfg, dom, function, p.block, source, o.value)
 param_dies = decided
 if param_dies { out = try mir_v6_bad(d, out, mir_vdiag_loop_block_resource(), function, p.block, 0, 0, oid, p.value) } } }
                     oi = oi + 1
@@ -1740,7 +1762,7 @@ if param_dies { out = try mir_v6_bad(d, out, mir_vdiag_loop_block_resource(), fu
                             let a = __s0_buffer_get(MirOperandRec, store.operands, aid - 1)
                             if a.target == p.block && a.ordinal == p.ordinal { let source = __s0_buffer_get(MirTermRec, store.terminators, __s0_buffer_get(MirOperandRec, store.operands, cid - 1).owner - 1).block
 if mir_v6_reach_has(reach, p.block, source) && mir_v6_local_provenance(analysis, function, a.value) { var param_dies: Bool = true
-let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, function, source, a.value)
+let decided = try mir_v6_loop_param_dies(d, store, indexes, analysis, reach, kills, owner_seen, owner_stamp, cfg, dom, function, p.block, source, a.value)
 param_dies = decided
 if param_dies { out = try mir_v6_bad(d, out, mir_vdiag_loop_block_resource(), function, p.block, 0, 0, aid, p.value) } } }
                             ai = ai + 1
@@ -1793,11 +1815,12 @@ while owner_at < __s0_buffer_len(MirTypeRec, store.types) {
 var owner_stamp: U64 = 0
 var function: U64 = 1
 while function <= __s0_buffer_len(MirFunctionRec, store.functions) { owner_stamp = owner_stamp + 1
-out = try mir_v6_check_loops(d, store, indexes, analysis, owner_seen, owner_stamp, function, out)
-// The point CFG and idom tree are built once per function; reset invalidation
-// consults them per mark instead of running an entry BFS per call.
+// The point CFG and idom tree are built once per function; the loop rules use
+// them for the "is this definition inside that loop" test, and reset
+// invalidation consults them per mark instead of running an entry BFS per call.
 let cfg = try mir_vp4_cfg_build(d, store, indexes, function)
 let dom = try mir_vp4_dom_build(d, cfg)
+out = try mir_v6_check_loops(d, store, indexes, analysis, owner_seen, owner_stamp, cfg, dom, function, out)
 let entries = try mir_v6_solve_states(d, store, indexes, analysis, cleanup, cfg, dom, function)
 let reachable = try mir_vreachable(d, store, indexes, function)
 let bcount = mir_vindex_block_count(indexes, function)

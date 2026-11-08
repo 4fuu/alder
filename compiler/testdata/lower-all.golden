@@ -289,9 +289,9 @@ const @lit.bool340: bool = false
 
 const @lit341: u64 = 0
 
-const @lit.int111: u64 = 0
+const @lit.seq205521010: u64 = 0
 
-const @lit.int112: u64 = 1
+const @lit.seq205521011: u64 = 1
 
 const @lit348: i64 = 0
 
@@ -1467,27 +1467,27 @@ bb0:
   %v417 = const.get @lit341
   store local %total, %v417
   %v418 = slice.len %values
-  %v419 = const.get @lit.int111
+  %v419 = const.get @lit.seq205521010
   jump bb_for_head2(%v419, %values)
 
 bb_panic:
   panic
 
-bb_for_head2(%index: u64, %sequence: slice(u64)):
-  %v422 = int.lt %index, %v418
+bb_for_head2(%__for_index_3: u64, %__for_sequence_3: slice(u64)):
+  %v422 = int.lt %__for_index_3, %v418
   branch %v422, bb_for_body3, bb_for_join4
 
 bb_for_body3:
-  %for_ref = slice.index.checked %sequence, %index else bb_panic
+  %for_ref = slice.index.checked %__for_sequence_3, %__for_index_3 else bb_panic
   %v424 = load deref %for_ref
   store local %value, %v424
   %v425 = load local %total
   %v426 = load local %value
   %v427 = int.add.checked %v425, %v426 else bb_panic
   store local %total, %v427
-  %v428 = const.get @lit.int112
-  %v429 = int.add.checked %index, %v428 else bb_panic
-  jump bb_for_head2(%v429, %sequence)
+  %v428 = const.get @lit.seq205521011
+  %v429 = int.add.checked %__for_index_3, %v428 else bb_panic
+  jump bb_for_head2(%v429, %__for_sequence_3)
 
 bb_for_join4:
   %v430 = load local %total
