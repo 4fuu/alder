@@ -165,6 +165,26 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `cleanup.scope.begin` initializes a hidden per-site scope slot; `cleanup.push` fills a per-site context struct and registers a generated adapter; `disarm`, `run`, and `end` call the runtime and terminate on contract violations;
 - `table.create` allocates a zeroed `AlderTable` header in the owning domain and returns its pointer. The header therefore survives an ordinary callee return, all aliases observe growth, and repeated execution of one create site receives fresh storage; `table.insert`/`lookup`/`lookup_mut`/`remove` call the runtime; lookups build the option view (`tag 1`/`0`) with explicit sequencing; `table.view.end` lowers to a no-op because M2 tables never compact and the verifier enforces view discipline.
 
+### Function values
+
+A function value is a three-word struct `{ code, env, retain }`. `code` takes
+the erased parameters plus the trailing opaque `env` pointer. `env` is a
+closure environment record for a capturing closure, or the domain the callee's
+frame will hang off for a named function value that carries the hidden
+storage-model domain. `retain` is the environment's retain hook for a closure
+and `NULL` for a named function value.
+
+`copy_to_domain` of a function type is complete: the per-type copy helper
+passes `retain = 1` and calls `v.retain(d, v.env)` when both are non-null. The
+hook allocates a fresh environment record in the destination domain with
+`alder_domain_alloc`, copies the record, rewrites a captured domain handle to
+the destination domain, and retains every function-valued capture through its
+own hook. Closure captures are storage-free, so the shallow record copy is
+complete. Same-domain copies, such as a vector grow, pass `retain = 0` and stay
+plain bit copies. A named function value's hook returns the destination
+domain, so a value that moves between domains points its future frame at the
+domain that owns it.
+
 ### Calls and C ABI
 
 - ordinary calls lower to direct calls of the generated static functions, with unit arguments omitted;

@@ -180,6 +180,7 @@ fn cgen_variant_payload(store: MirStore, type_id: U64, ordinal: U64) -> U64 {
 fn cgen_copy_trivial(store: MirStore, type_id: U64) -> Bool {
     if type_id <= mir_primitive_type_count() { return true }
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_function() { return false }
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_vec() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() { return false }
     if item.kind == mir_type_kind_domain_handle() || item.kind == mir_type_kind_domain_mark() || item.kind == mir_type_kind_cleanup_scope() || item.kind == mir_type_kind_cleanup_id() || item.kind == mir_type_kind_table() || item.kind == mir_type_kind_table_view() || item.kind == mir_type_kind_table_mut_view() || item.kind == mir_type_kind_raw_ptr() { return false }
     if item.kind == mir_type_kind_array() { return cgen_copy_trivial(store, item.elem) }
@@ -614,7 +615,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         out = try cgen_put(d, out, ", ") }
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
-        if !cgen_copy_trivial(store, type_id) { out = try cgen_put(d, out, ")") }
+        if !cgen_copy_trivial(store, type_id) { out = try cgen_put(d, out, ", 1)") }
         return cgen_put(d, out, ";\n")
     }
     if item.op == mir_op_cleanup_scope_begin() {
@@ -845,7 +846,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, " *)")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         out = try cgen_put(d, out, ".data)[alder_i]")
-        if !cgen_copy_trivial(store, elem) { out = try cgen_put(d, out, ")") }
+        if !cgen_copy_trivial(store, elem) { out = try cgen_put(d, out, ", 0)") }
         out = try cgen_put(d, out, "; }\n  ")
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = (AlderVec){ ")
@@ -1171,6 +1172,14 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
             out = try cgen_put(d, out, "(void *)")
             out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
             if ref_env { out = try cgen_put(d, out, ".data") }
+        }
+        out = try cgen_put(d, out, ", ")
+        let env_aggregate = cgen_fn_env_aggregate(store, indexes, item.function, item.a)
+        if env_aggregate != 0 {
+            out = try cgen_put(d, out, "alder_env_retain_ty")
+            out = try cgen_put_u64(d, out, env_aggregate - 1)
+        } else {
+            if item.a != 0 && item.type_op == mir_fn_value_domain_marker() { out = try cgen_put(d, out, "alder_env_retain_domain") } else { out = try cgen_put(d, out, "NULL") }
         }
         return cgen_put(d, out, "};\n")
     }

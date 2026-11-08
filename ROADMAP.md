@@ -1154,15 +1154,18 @@ both halves were written):
   C, and rejection diagnostics are byte-identical across processes and
   across source/CLI permutations, and the generated C runs under strict
   C11.
-- remaining closure limits: nested closure literals (147) and closure
-  creation inside a `while` loop (the phase-6 loop-store rule) still
-  reject; runtime-backed environments are the follow-up. Literals inside
-  generic function bodies now materialize one thunk per instance and are
-  no longer rejected.
+- remaining closure limits: nested closure literals (147) still reject.
+  Every other closure shape works: a literal inside a generic function body
+  materializes one thunk per instance, a closure created inside a `while` loop
+  carries its immutable environment snapshot across the backedge, and an
+  escaping closure is retained into its destination domain by the
+  `copy_to_domain` retain hook, so chains of returns and closures carried in
+  vectors or records stay valid.
 
-Integrated tip timing (cold `bootstrap/regenerate.sh`): 2:40 / 4.89 GiB,
-against the 2:07 / 3.78 GiB pre-milestone baseline. Each commit's growth
-stayed proportional to the compiler's own source size; profiling the
+Cold `bootstrap/regenerate.sh` timing is recorded per commit and compared only
+on the same host: absolute wall time and peak RSS depend on the host and
+toolchain, so one host's figure is not a baseline for another. Each commit's
+growth stayed proportional to the compiler's own source size; profiling the
 self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation

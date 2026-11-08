@@ -3369,14 +3369,15 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let empty = try __s0_buffer_new(U64, d)
             let reference = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), env_type.id, 0, 0, empty, 0)
             current = lower_with_mir(current, reference.store)
-            let domain = lower_result_domain_value(current, store, owner)
+            let domain = lower_storage_domain_value(current, store, owner, expression_id)
             if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             // Build the environment record value from the captured values,
-            // copy it into the caller-result domain, and store it into the
-            // allocated slot. The environment outlives the creating frame,
-            // so a returned closure stays valid for its caller; the copy also
-            // gives the stored value domain provenance, which keeps closure
-            // creation inside loops within the loop-store rule.
+            // copy it into the creation domain, and store it into the
+            // allocated slot. The copy gives the stored value domain
+            // provenance, which keeps closure creation inside loops within
+            // the loop-store rule. A closure that escapes is retained into
+            // its destination domain by copy_to_domain of the function value,
+            // which allocates a complete environment there.
             var field_values = try __s0_buffer_new(U64, d)
             var ordinal: U64 = 0
             while ordinal < site.capture_count {

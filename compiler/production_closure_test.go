@@ -100,6 +100,144 @@ fn main() -> I32 {
 }
 `
 
+// A closure that escapes through one, two, and three returns stays valid
+// because every return retains its environment into the caller's domain. An
+// intervening vector allocation between each return and its call reuses a
+// freed environment block, so a missing retain gives a wrong answer and not
+// only a sanitizer report.
+const m75RetainChainProgram = `fn inner(seed: U64) -> fn(U64) -> U64 {
+    let f = fn(x: U64) => x + seed
+    return f
+}
+fn middle(seed: U64) -> fn(U64) -> U64 {
+    let g = inner(seed)
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad.push(999)
+        i = i + 1
+    }
+    return g
+}
+fn outer(seed: U64) -> fn(U64) -> U64 {
+    let h = middle(seed)
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad.push(777)
+        i = i + 1
+    }
+    return h
+}
+fn main() -> I32 {
+    let a = inner(4)
+    var pad_a = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad_a.push(1)
+        i = i + 1
+    }
+    if a(1) != 5 { return 1 }
+    let b = middle(5)
+    var pad_b = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_b.push(2)
+        i = i + 1
+    }
+    if b(1) != 6 { return 2 }
+    let c = outer(6)
+    var pad_c = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_c.push(3)
+        i = i + 1
+    }
+    if c(1) != 7 { return 3 }
+    return 0
+}
+`
+
+// A closure carried in a record and in a vector, and a named function value
+// (retain NULL), each returned through two levels. The copy helpers retain
+// every function-valued field and element, and the named value's hook rewrites
+// its captured domain to the destination domain.
+const m75RetainContainerProgram = `type Holder {
+    f: fn(U64) -> U64
+}
+fn make_holder(seed: U64) -> Holder {
+    let f = fn(x: U64) => x + seed
+    return Holder(f: f)
+}
+fn holder_level1(seed: U64) -> Holder {
+    let h = make_holder(seed)
+    return h
+}
+fn holder_level2(seed: U64) -> Holder {
+    let h = holder_level1(seed)
+    return h
+}
+fn make_vec(seed: U64) -> Vec(fn(U64) -> U64) {
+    var v = Vec.new(fn(U64) -> U64)
+    v.push(fn(x: U64) => x + seed)
+    return v
+}
+fn vec_level1(seed: U64) -> Vec(fn(U64) -> U64) {
+    let v = make_vec(seed)
+    return v
+}
+fn vec_level2(seed: U64) -> Vec(fn(U64) -> U64) {
+    let v = vec_level1(seed)
+    return v
+}
+fn plus_one(x: U64) -> U64 { return x + 1 }
+fn named() -> fn(U64) -> U64 {
+    let f = plus_one
+    return f
+}
+fn named_level1() -> fn(U64) -> U64 {
+    let f = named()
+    return f
+}
+fn named_level2() -> fn(U64) -> U64 {
+    let f = named_level1()
+    return f
+}
+fn main() -> I32 {
+    let h = holder_level2(5)
+    var pad_a = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad_a.push(999)
+        i = i + 1
+    }
+    let hf = h.f
+    if hf(2) != 7 { return 1 }
+    let v = vec_level2(6)
+    var pad_b = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_b.push(888)
+        i = i + 1
+    }
+    let found = v.get(0)
+    let g = match found {
+        Some(x) => x
+        None => plus_one
+    }
+    if g(2) != 8 { return 2 }
+    let n = named_level2()
+    var pad_c = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_c.push(777)
+        i = i + 1
+    }
+    if n(2) != 3 { return 3 }
+    return 0
+}
+`
+
 func TestM75ClosureProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -121,6 +259,8 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-generic-closures", m75GenericClosureProgram},
 		{"m75-closure-escape", m75ClosureEscapeProgram},
 		{"m75-loop-closures", m75LoopClosureProgram},
+		{"m75-retain-chains", m75RetainChainProgram},
+		{"m75-retain-containers", m75RetainContainerProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -205,6 +345,8 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-generic-closures", m75GenericClosureProgram},
 		{"m75-closure-escape", m75ClosureEscapeProgram},
 		{"m75-loop-closures", m75LoopClosureProgram},
+		{"m75-retain-chains", m75RetainChainProgram},
+		{"m75-retain-containers", m75RetainContainerProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

@@ -42,7 +42,8 @@ static ALDER_MAYBE_UNUSED void alder_cleanup_0(void *alder_ctx) {
   alder_fn_domain_destroy_0(alder_c->alder_f0);
 }
 
-static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v) {
+static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v, int alder_retain) {
+  (void)alder_retain;
   uint64_t alder_t;
   if (!alder_u64_mul_checked(alder_v.len, (uint64_t)(uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic("copy_to_domain: size overflow"); }
   if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic("copy_to_domain: size exceeds size_t"); }
@@ -81,7 +82,7 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_summarize_1(AlderDomain * alder_v0,
   alder_v3 = &alder_domain_0;
   alder_ctx_0.alder_f0 = alder_v3;
   if (!alder_cleanup_push(alder_v2, alder_cleanup_0, &alder_ctx_0, &alder_v4)) { alder_runtime_panic("cleanup.push failed"); }
-  alder_v5 = alder_copy_ty12(alder_v0, alder_v1);
+  alder_v5 = alder_copy_ty12(alder_v0, alder_v1, 1);
   alder_v6 = (c_fastwords)(alder_v1);
   alder_v7 = (AlderTy13){.alder_f0 = alder_v5, .alder_f1 = alder_v6};
   alder_v8.alder_tag = (uint32_t)0;

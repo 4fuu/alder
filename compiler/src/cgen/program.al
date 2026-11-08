@@ -283,6 +283,13 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
 fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, type_id: U64) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_function() {
+        // A function value is {code, environment, retain}. A cross-domain
+        // copy retains the environment through the hook so the copy owns a
+        // complete environment in the destination domain; a same-domain copy
+        // (a vector grow) passes zero and stays a plain bit copy.
+        out = try cgen_put(d, out, "  if (alder_retain != 0 && alder_v.retain != NULL && alder_v.env != NULL) { alder_v.env = alder_v.retain(alder_d, alder_v.env); }\n")
+    }
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() || item.kind == mir_type_kind_vec() {
         out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(")
         out = try cgen_put_type(d, out, store, item.elem)
@@ -295,7 +302,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
             out = try cgen_put_u64(d, out, item.elem - 1)
             out = try cgen_put(d, out, "(alder_d, ((")
             out = try cgen_put_type(d, out, store, item.elem)
-            out = try cgen_put(d, out, " *)alder_v.data)[alder_i]); }\n") }
+            out = try cgen_put(d, out, " *)alder_v.data)[alder_i], alder_retain); }\n") }
         out = try cgen_put(d, out, "    alder_v.data = alder_p;\n  }\n")
         if item.kind == mir_type_kind_vec() { out = try cgen_put(d, out, "  alder_v.capacity = alder_v.len;\n") }
     }
@@ -304,7 +311,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
         out = try cgen_put_u64(d, out, item.length)
         out = try cgen_put(d, out, "; alder_i++) {\n    alder_v.alder_e[alder_i] = alder_copy_ty")
         out = try cgen_put_u64(d, out, item.elem - 1)
-        out = try cgen_put(d, out, "(alder_d, alder_v.alder_e[alder_i]);\n  }\n")
+        out = try cgen_put(d, out, "(alder_d, alder_v.alder_e[alder_i], alder_retain);\n  }\n")
     }
     if item.kind == mir_type_kind_aggregate() || item.kind == mir_type_kind_enum() {
         var ordinal: U64 = 0
@@ -324,7 +331,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
                 out = try cgen_put(d, out, "(alder_d, alder_v.")
                 if item.kind == mir_type_kind_aggregate() { out = try cgen_put(d, out, "alder_f") } else { out = try cgen_put(d, out, "alder_u.alder_p") }
                 out = try cgen_put_u64(d, out, ordinal)
-                out = try cgen_put(d, out, ");\n")
+                out = try cgen_put(d, out, ", alder_retain);\n")
                 if item.kind == mir_type_kind_enum() { out = try cgen_put(d, out, "  }\n") }
             }
             ordinal = ordinal + 1
@@ -343,7 +350,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
                 out = try cgen_put_u64(d, out, child - 1)
                 out = try cgen_put(d, out, "(alder_d, alder_v.alder_u.alder_p")
                 out = try cgen_put_u64(d, out, ordinal)
-                out = try cgen_put(d, out, ");\n  }\n")
+                out = try cgen_put(d, out, ", alder_retain);\n  }\n")
             }
             ordinal = ordinal + 1
         }
@@ -371,7 +378,7 @@ fn cgen_emit_copy_type(d: Domain, initial: CgenTypeState, store: MirStore, type_
     out = try cgen_put_u64(d, out, type_id - 1)
     out = try cgen_put(d, out, "(AlderDomain *alder_d, ")
     out = try cgen_put_type(d, out, store, type_id)
-    out = try cgen_put(d, out, " alder_v) {\n")
+    out = try cgen_put(d, out, " alder_v, int alder_retain) {\n  (void)alder_retain;\n")
     out = try cgen_emit_copy_helper_body(d, out, store, type_id)
     let emitted = try __s0_buffer_append(U64, d, state.emitted, type_id)
     return Ok(CgenTypeState(writer: out, emitted: emitted))
@@ -390,6 +397,101 @@ fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore, index
     }
     if __s0_buffer_len(U64, state.emitted) > 0 { state.writer = try cgen_put(d, state.writer, "\n") }
     return Ok(state.writer)
+}
+
+// cgen_fn_env_aggregate returns the environment record type of a fn.value's
+// environment operand when that operand is a reference to an aggregate, or 0
+// when the function value has no owned closure environment.
+fn cgen_fn_env_aggregate(store: MirStore, indexes: MirVIndexes, function: U64, env_value: U64) -> U64 {
+    if env_value == 0 { return 0 }
+    let env_type = cgen_value_type(store, indexes, function, env_value)
+    if env_type < 1 || env_type > __s0_buffer_len(MirTypeRec, store.types) { return 0 }
+    let item = __s0_buffer_get(MirTypeRec, store.types, env_type - 1)
+    if item.kind != mir_type_kind_safe_ref() && item.kind != mir_type_kind_safe_mut() && item.kind != mir_type_kind_slice() { return 0 }
+    if item.elem < 1 || item.elem > __s0_buffer_len(MirTypeRec, store.types) { return 0 }
+    if __s0_buffer_get(MirTypeRec, store.types, item.elem - 1).kind != mir_type_kind_aggregate() { return 0 }
+    return item.elem
+}
+
+// cgen_emit_env_retain emits the retain hook for one environment record type.
+// It allocates a complete, independent environment in the destination domain:
+// a shallow record copy is enough because captures are storage-free, a domain
+// field is rewritten to the destination domain, and every function-valued
+// capture is retained recursively through its own hook.
+fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "static ALDER_MAYBE_UNUSED void *alder_env_retain_ty")
+    out = try cgen_put_u64(d, out, type_id - 1)
+    out = try cgen_put(d, out, "(AlderDomain *alder_d, void *alder_env) {\n  ")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " *alder_src = (")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " *)alder_env;\n  ")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " *alder_dst = (")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, " *)alder_domain_alloc(alder_d, sizeof(")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, "), _Alignof(")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, "));\n  if (alder_dst == NULL) { alder_runtime_panic(\"closure environment: out of memory\"); }\n  *alder_dst = *alder_src;\n")
+    var ordinal: U64 = 0
+    let count = mir_type_part_count(store, type_id, mir_type_part_field())
+    while ordinal < count {
+        let child = cgen_type_part(store, type_id, mir_type_part_field(), ordinal).part_type
+        if child >= 1 && child <= __s0_buffer_len(MirTypeRec, store.types) {
+            let child_item = __s0_buffer_get(MirTypeRec, store.types, child - 1)
+            if child_item.kind == mir_type_kind_function() {
+                out = try cgen_put(d, out, "  if (alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ".retain != NULL && alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ".env != NULL) { alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ".env = alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ".retain(alder_d, alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ".env); }\n")
+            }
+            if child_item.kind == mir_type_kind_domain_handle() {
+                out = try cgen_put(d, out, "  alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, " = alder_d;\n")
+            }
+        }
+        ordinal = ordinal + 1
+    }
+    return cgen_put(d, out, "  return alder_dst;\n}\n")
+}
+
+fn cgen_emit_env_retain_helpers(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
+    var emitted = try __s0_buffer_new(U64, d)
+    var domain_emitted = false
+    var wrote = false
+    var out = initial
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_fn_value() {
+            let env_type = cgen_fn_env_aggregate(store, indexes, item.function, item.a)
+            if env_type != 0 && !cgen_emitted(emitted, env_type) {
+                out = try cgen_emit_env_retain(d, out, store, env_type)
+                emitted = try __s0_buffer_append(U64, d, emitted, env_type)
+                wrote = true
+            }
+            if env_type == 0 && item.a != 0 && item.type_op == mir_fn_value_domain_marker() && !domain_emitted {
+                // A named function value's environment is the domain its
+                // frame will hang off, so retaining it into another domain
+                // rewrites it to that domain.
+                out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED void *alder_env_retain_domain(AlderDomain *alder_d, void *alder_env) {\n  (void)alder_env;\n  return alder_d;\n}\n")
+                domain_emitted = true
+                wrote = true
+            }
+        }
+        at = at + 1
+    }
+    if wrote { out = try cgen_put(d, out, "\n") }
+    return Ok(out)
 }
 
 fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
@@ -545,6 +647,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_imports(d, out, store)
     out = try cgen_emit_cleanup_sites(d, out, store, indexes)
     out = try cgen_emit_copy_helpers(d, out, store, indexes)
+    out = try cgen_emit_env_retain_helpers(d, out, store, indexes)
     let fn_value_sites = try cgen_fn_value_sites(d, store, indexes)
     out = try cgen_emit_fn_value_wrappers(d, out, store, indexes, fn_value_sites)
     out = try cgen_emit_bodies(d, out, store)

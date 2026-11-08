@@ -224,7 +224,7 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	}
 	ty := &g.m.Types[t]
 	switch ty.Kind {
-	case mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut,
+	case mir.TypeFunction, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut,
 		mir.TypeDomainHandle, mir.TypeDomainMark, mir.TypeCleanupScope, mir.TypeCleanupID,
 		mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr:
 		return false
@@ -422,6 +422,7 @@ func (g *gen) emitModule(b *strings.Builder) {
 	g.emitImportDecls(b)
 	g.emitCtxSites(b)
 	g.emitCopyHelpers(b)
+	g.emitEnvRetainHelpers(b)
 	g.emitFnValueWrappers(b)
 	for i, f := range g.m.Functions {
 		if f == nil {
@@ -600,7 +601,7 @@ func (g *gen) emitFunctionType(b *strings.Builder, id mir.TypeId, sig mir.FuncSi
 	paramList += "void *alder_env"
 	b.WriteString("typedef struct AlderFnTy" + strconv.Itoa(int(id)) + " AlderFnTy" + strconv.Itoa(int(id)) + ";\n")
 	b.WriteString("typedef " + ret + " (*AlderFnTy" + strconv.Itoa(int(id)) + "_code)(" + paramList + ");\n")
-	b.WriteString("struct AlderFnTy" + strconv.Itoa(int(id)) + " { AlderFnTy" + strconv.Itoa(int(id)) + "_code code; void *env; };\n")
+	b.WriteString("struct AlderFnTy" + strconv.Itoa(int(id)) + " { AlderFnTy" + strconv.Itoa(int(id)) + "_code code; void *env; void *(*retain)(AlderDomain *, void *); };\n")
 }
 
 func (g *gen) emitStruct(b *strings.Builder, id mir.TypeId, ty *mir.Type) {
@@ -686,12 +687,112 @@ func (g *gen) emitCopyHelpers(b *strings.Builder) {
 	}
 }
 
+// fnEnvAggregate returns the environment record type of a fn.value's
+// environment operand when that operand is a reference to an aggregate, or 0
+// when the function value has no owned closure environment.
+func (g *gen) fnEnvAggregate(f *mir.Function, env mir.ValueId) mir.TypeId {
+	if env == mir.NoValue {
+		return 0
+	}
+	t, ok := f.ValueType(env)
+	if !ok || !g.m.ValidType(t) {
+		return 0
+	}
+	ty := &g.m.Types[t]
+	switch ty.Kind {
+	case mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeSlice:
+	default:
+		return 0
+	}
+	if !g.m.ValidType(ty.Elem) || g.m.Types[ty.Elem].Kind != mir.TypeAggregate {
+		return 0
+	}
+	return ty.Elem
+}
+
+// emitEnvRetainHelpers writes the per-environment retain hook used by
+// copy_to_domain of a function value. It allocates a complete, independent
+// environment in the destination domain: a shallow record copy is enough
+// because captures are storage-free, a domain field is rewritten to the
+// destination domain, and every function-valued capture is retained
+// recursively through its own hook.
+func (g *gen) emitEnvRetainHelpers(b *strings.Builder) {
+	seen := make(map[mir.TypeId]bool)
+	domainEmitted := false
+	wrote := false
+	for _, f := range g.m.Functions {
+		if f == nil {
+			continue
+		}
+		for _, blk := range f.Blocks {
+			if blk == nil {
+				continue
+			}
+			for i := range blk.Instrs {
+				in := &blk.Instrs[i]
+				if in.Op != mir.OpFnValue {
+					continue
+				}
+				if t := g.fnEnvAggregate(f, in.A); t != 0 {
+					if !seen[t] {
+						seen[t] = true
+						g.emitEnvRetain(b, t)
+						wrote = true
+					}
+					continue
+				}
+				// A named function value's environment is the domain its
+				// frame will hang off, so retaining it into another domain
+				// rewrites it to that domain.
+				if in.A != mir.NoValue && in.TypeOp == mir.FnValueDomainMarker && !domainEmitted {
+					b.WriteString("static ALDER_MAYBE_UNUSED void *alder_env_retain_domain(AlderDomain *alder_d, void *alder_env) {\n  (void)alder_env;\n  return alder_d;\n}\n")
+					domainEmitted = true
+					wrote = true
+				}
+			}
+		}
+	}
+	if wrote {
+		b.WriteString("\n")
+	}
+}
+
+func (g *gen) emitEnvRetain(b *strings.Builder, t mir.TypeId) {
+	name := "alder_env_retain_ty" + strconv.Itoa(int(t))
+	b.WriteString("static ALDER_MAYBE_UNUSED void *" + name + "(AlderDomain *alder_d, void *alder_env) {\n")
+	b.WriteString("  " + g.cType(t) + " *alder_src = (" + g.cType(t) + " *)alder_env;\n")
+	b.WriteString("  " + g.cType(t) + " *alder_dst = (" + g.cType(t) +
+		" *)alder_domain_alloc(alder_d, sizeof(" + g.cType(t) + "), (size_t)" + g.typeAlign(t) + ");\n")
+	b.WriteString("  if (alder_dst == NULL) { alder_runtime_panic(\"closure environment: out of memory\"); }\n")
+	b.WriteString("  *alder_dst = *alder_src;\n")
+	for i, fld := range g.m.Types[t].Fields {
+		if !g.m.ValidType(fld.Type) {
+			continue
+		}
+		field := "alder_dst->alder_f" + strconv.Itoa(i)
+		switch g.m.Types[fld.Type].Kind {
+		case mir.TypeFunction:
+			b.WriteString("  if (" + field + ".retain != NULL && " + field + ".env != NULL) { " +
+				field + ".env = " + field + ".retain(alder_d, " + field + ".env); }\n")
+		case mir.TypeDomainHandle:
+			b.WriteString("  " + field + " = alder_d;\n")
+		}
+	}
+	b.WriteString("  return alder_dst;\n}\n")
+}
+
 func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 	name := "alder_copy_ty" + strconv.Itoa(int(t))
 	b.WriteString("static ALDER_MAYBE_UNUSED " + g.cType(t) + " " + name +
-		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v) {\n")
+		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v, int alder_retain) {\n  (void)alder_retain;\n")
 	ty := &g.m.Types[t]
 	switch ty.Kind {
+	case mir.TypeFunction:
+		// A function value is {code, environment, retain}. A cross-domain
+		// copy retains the environment through the hook so the copy owns a
+		// complete environment in the destination domain; a same-domain copy
+		// (a vector grow) passes zero and stays a plain bit copy.
+		b.WriteString("  if (alder_retain != 0 && alder_v.retain != NULL && alder_v.env != NULL) { alder_v.env = alder_v.retain(alder_d, alder_v.env); }\n")
 	case mir.TypeSlice, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeVec:
 		elem := ty.Elem
 		b.WriteString("  uint64_t alder_t;\n")
@@ -706,7 +807,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 		if g.copyTrivial(elem) {
 			b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
 		} else {
-			b.WriteString("    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { ((" + g.cType(elem) + " *)alder_p)[alder_i] = " + g.copyCall(elem) + "(alder_d, ((" + g.cType(elem) + " *)alder_v.data)[alder_i]); }\n")
+			b.WriteString("    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { ((" + g.cType(elem) + " *)alder_p)[alder_i] = " + g.copyCall(elem) + "(alder_d, ((" + g.cType(elem) + " *)alder_v.data)[alder_i], alder_retain); }\n")
 		}
 		b.WriteString("    alder_v.data = alder_p;\n")
 		b.WriteString("  }\n")
@@ -716,7 +817,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 	case mir.TypeArray:
 		if !g.copyTrivial(ty.Elem) {
 			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)" + strconv.FormatUint(ty.Length, 10) + "; alder_i++) {\n")
-			b.WriteString("    alder_v.alder_e[alder_i] = " + g.copyCall(ty.Elem) + "(alder_d, alder_v.alder_e[alder_i]);\n")
+			b.WriteString("    alder_v.alder_e[alder_i] = " + g.copyCall(ty.Elem) + "(alder_d, alder_v.alder_e[alder_i], alder_retain);\n")
 			b.WriteString("  }\n")
 		}
 	case mir.TypeAggregate:
@@ -726,7 +827,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 			}
 			field := "alder_f" + strconv.Itoa(i)
 			b.WriteString("  alder_v." + field + " = " +
-				g.copyCall(fld.Type) + "(alder_d, alder_v." + field + ");\n")
+				g.copyCall(fld.Type) + "(alder_d, alder_v." + field + ", alder_retain);\n")
 		}
 	case mir.TypeEnum:
 		vs := ty.Variants
@@ -736,7 +837,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 			}
 			b.WriteString("  if (alder_v.alder_tag == (uint32_t)" + strconv.Itoa(i) + ") {\n")
 			b.WriteString("    alder_v.alder_u.alder_p" + strconv.Itoa(i) + " = " +
-				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ");\n")
+				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ", alder_retain);\n")
 			b.WriteString("  }\n")
 		}
 	case mir.TypeOption, mir.TypeResult:
@@ -747,7 +848,7 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 			}
 			b.WriteString("  if (alder_v.alder_tag == (uint32_t)" + strconv.Itoa(i) + ") {\n")
 			b.WriteString("    alder_v.alder_u.alder_p" + strconv.Itoa(i) + " = " +
-				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ");\n")
+				g.copyCall(v.Payload) + "(alder_d, alder_v.alder_u.alder_p" + strconv.Itoa(i) + ", alder_retain);\n")
 			b.WriteString("  }\n")
 		}
 	}

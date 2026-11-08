@@ -883,31 +883,6 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
     return Ok(consumers)
 }
 
-// mir_v6_type_contains_function reports whether a value of this type carries a
-// function value at any depth. Function environments are shared by every copy
-// instead of materialized into the destination domain, so a cross-domain copy
-// of such a value must keep the source's provenance.
-fn mir_v6_type_contains_function(store: MirStore, indexes: MirVIndexes, type_id: U64, depth: U64) -> Bool {
-    if type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) || depth > 8 { return false }
-    let checked = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
-    if checked.kind == mir_type_kind_function() { return true }
-    if checked.elem != 0 && mir_v6_type_contains_function(store, indexes, checked.elem, depth + 1) { return true }
-    if checked.ok_type != 0 && mir_v6_type_contains_function(store, indexes, checked.ok_type, depth + 1) { return true }
-    if checked.err_type != 0 && mir_v6_type_contains_function(store, indexes, checked.err_type, depth + 1) { return true }
-    if checked.result_type != 0 && mir_v6_type_contains_function(store, indexes, checked.result_type, depth + 1) { return true }
-    var part: U64 = 0
-    let part_count = mir_vindex_type_part_count(indexes, type_id)
-    while part < part_count {
-        let part_id = mir_vindex_type_part(indexes, type_id, part)
-        if part_id != 0 && part_id <= __s0_buffer_len(MirTypePartRec, store.type_parts) {
-            let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part_id - 1)
-            if rec.part_type != 0 && mir_v6_type_contains_function(store, indexes, rec.part_type, depth + 1) { return true }
-        }
-        part = part + 1
-    }
-    return false
-}
-
 fn mir_v6_transfer_value(d: Domain, store: MirStore, indexes: MirVIndexes, transfer: MirV6TransferIndex, index: MirV6RoundIndex, consumers: MirV6ConsumerIndex, durable0: MirV6Durable, function: U64, value_id: U64) -> Result(MirV6Durable, __s0_Error) { var durable = durable0
 let vi = mir_vindex_value(indexes, function, value_id)
 let value = __s0_buffer_get(MirValueRec, store.values, vi - 1)
@@ -950,13 +925,7 @@ durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, v
 // intentionally not merged: destroying its inner domain cannot invalidate the
 // copy rooted in the destination domain.
 if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
-durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1))
-// copy_to_domain materializes independent storage for slices, vectors, and
-// aggregates, so the copy drops the source's provenance. A function value is
-// only {code, environment}: its environment record is shared, not copied, so
-// the copy keeps the source's provenance and the environment's owning domain
-// must still be alive at every later use, including the return exit.
-if x.op == mir_op_copy_to_domain() && x.b != 0 && mir_v6_type_contains_function(store, indexes, value.value_type, 0) { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.b) } }
+durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1)) }
 if x.op == mir_op_load() {
 // A load of a provenance-free type copies plain bits: the value has no
 // lifetime tie to the storage domain it was read from, so a later reset or

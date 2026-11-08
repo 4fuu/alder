@@ -163,7 +163,7 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.CopyVal) + ";\n")
 		} else {
 			b.WriteString("  " + g.val(in.Result) + " = alder_copy_ty" + strconv.Itoa(int(t)) +
-				"(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.CopyVal) + ");\n")
+				"(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.CopyVal) + ", 1);\n")
 		}
 
 	case mir.OpCleanupScopeBegin:
@@ -258,7 +258,7 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		if g.copyTrivial(elem) {
 			b.WriteString("  if (" + g.tmp(in, "n") + " != (uint64_t)0) { memcpy(" + g.tmp(in, "p") + ", " + g.valueExpr(in.Slice) + ".data, (size_t)" + g.tmp(in, "n") + "); }\n")
 		} else {
-			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < " + g.valueExpr(in.Slice) + ".len; alder_i++) { ((" + g.cType(elem) + " *)" + g.tmp(in, "p") + ")[alder_i] = " + g.copyCall(elem) + "(" + g.valueExpr(in.Domain) + ", ((" + g.cType(elem) + " *)" + g.valueExpr(in.Slice) + ".data)[alder_i]); }\n")
+			b.WriteString("  for (uint64_t alder_i = (uint64_t)0; alder_i < " + g.valueExpr(in.Slice) + ".len; alder_i++) { ((" + g.cType(elem) + " *)" + g.tmp(in, "p") + ")[alder_i] = " + g.copyCall(elem) + "(" + g.valueExpr(in.Domain) + ", ((" + g.cType(elem) + " *)" + g.valueExpr(in.Slice) + ".data)[alder_i], 0); }\n")
 		}
 		b.WriteString("  " + g.val(in.Result) + " = (AlderVec){ " + g.tmp(in, "p") + ", " + g.valueExpr(in.Slice) + ".len, " + g.valueExpr(in.Capacity) + " };\n")
 	case mir.OpVecLen:
@@ -424,7 +424,13 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 				}
 			}
 		}
-		b.WriteString("  " + g.val(in.Result) + " = (AlderFnTy" + n + "){alder_fnwrap_" + strconv.Itoa(int(in.Callee)) + "_" + n + ", (void *)" + env + "};\n")
+		retain := "NULL"
+		if agg := g.fnEnvAggregate(g.f, in.A); agg != 0 {
+			retain = "alder_env_retain_ty" + strconv.Itoa(int(agg))
+		} else if in.A != mir.NoValue && in.TypeOp == mir.FnValueDomainMarker {
+			retain = "alder_env_retain_domain"
+		}
+		b.WriteString("  " + g.val(in.Result) + " = (AlderFnTy" + n + "){alder_fnwrap_" + strconv.Itoa(int(in.Callee)) + "_" + n + ", (void *)" + env + ", " + retain + "};\n")
 
 	case mir.OpStrEq:
 		ta, _ := g.f.ValueType(in.A)

@@ -86,8 +86,11 @@ fn cgen_emit_type(d: Domain, initial: CgenTypeState, store: MirStore, id: U64) -
 }
 
 fn cgen_emit_function_type(d: Domain, initial: CgenWriter, store: MirStore, id: U64, t: MirTypeRec) -> Result(CgenWriter, __s0_Error) {
-    // A function value is {code, env}; the code pointer takes the declared
-    // parameters plus the opaque environment pointer.
+    // A function value is {code, env, retain}; the code pointer takes the
+    // declared parameters plus the opaque environment pointer. The retain
+    // hook materializes a complete environment in a destination domain for
+    // copy_to_domain: a closure's environment record, or the destination
+    // domain itself for a named function value's captured domain.
     var out = try cgen_put(d, initial, "typedef struct AlderFnTy")
     out = try cgen_put_u64(d, out, id - 1)
     out = try cgen_put(d, out, " AlderFnTy")
@@ -114,7 +117,7 @@ fn cgen_emit_function_type(d: Domain, initial: CgenWriter, store: MirStore, id: 
     out = try cgen_put_u64(d, out, id - 1)
     out = try cgen_put(d, out, " { AlderFnTy")
     out = try cgen_put_u64(d, out, id - 1)
-    out = try cgen_put(d, out, "_code code; void *env; };\n")
+    out = try cgen_put(d, out, "_code code; void *env; void *(*retain)(AlderDomain *, void *); };\n")
     return Ok(out)
 }
 
