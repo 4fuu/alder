@@ -398,6 +398,81 @@ fn main() -> I32 {
 }
 `
 
+// A scoped-capability capture may also be passed to a parameter that the
+// callee provably does not retain: the checker's per-instance retain summary
+// proves it from the callee's body, transitively through forwards and
+// recursive cycles, and the closure is only used during the call. The shapes
+// cover a two-level forward, a literal argument, a method parameter, and a
+// recursive callee, each after an intervening allocation so a dangling
+// environment would give a wrong answer.
+const m75HigherOrderScopedProgram = `fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    return v
+}
+fn pad(n: U64) -> U64 {
+    var v = Vec.new(U64)
+    var i: U64 = 0
+    while i < n {
+        v.push(i)
+        i = i + 1
+    }
+    return v.len()
+}
+fn apply(f: fn() -> U64) -> U64 {
+    return f()
+}
+fn apply2(f: fn() -> U64) -> U64 {
+    return apply(f)
+}
+fn walk(f: fn(U64) -> U64, n: U64) -> U64 {
+    if n == 0 { return f(0) }
+    return walk(f, n - 1) + f(n)
+}
+type Runner {
+    base: U64
+}
+impl Runner {
+    fn run(self, f: fn(U64) -> U64, n: U64) -> U64 { return f(n) + self.base }
+}
+fn through_calls(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn() -> U64 { return s.len() + s[0] }
+    let filled = pad(16)
+    return apply2(g) + g() + filled - filled
+}
+fn through_literal(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let filled = pad(16)
+    return apply2(fn() -> U64 { return s.len() + s[1] }) + filled - filled
+}
+fn through_method(seed: U64) -> U64 {
+    let runner = Runner(base: 5)
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn(x: U64) -> U64 { return x + s.len() }
+    let filled = pad(16)
+    return runner.run(g, 30) + filled - filled
+}
+fn through_recursion(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn(x: U64) -> U64 { return x + s.len() }
+    let filled = pad(16)
+    return walk(g, 2) + filled - filled
+}
+fn main() -> I32 {
+    if through_calls(40) != 84 { return 1 }
+    if through_literal(40) != 43 { return 2 }
+    if through_method(40) != 37 { return 3 }
+    if through_recursion(40) != 9 { return 4 }
+    return 0
+}
+`
+
 // Captures of ordinary storage-backed values are independent snapshots. The
 // closure sees the length, map entry, and record element it captured even
 // after the source is mutated, each call follows an intervening allocation,
@@ -640,6 +715,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
 		{"m75-scoped-captures", m75ScopedCaptureProgram},
+		{"m75-higher-order-scoped", m75HigherOrderScopedProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -730,6 +806,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 		{"m75-capture-free-allocation", m75CaptureFreeAllocationProgram},
 		{"m75-scoped-captures", m75ScopedCaptureProgram},
+		{"m75-higher-order-scoped", m75HigherOrderScopedProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

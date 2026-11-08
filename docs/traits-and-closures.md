@@ -216,6 +216,24 @@ the checker rejects the shape with diagnostic 153 instead of accepting a
 program the verifier would refuse, and the limitation is listed in the
 roadmap.
 
+A closure that captures a scoped capability may also be passed to a parameter
+that the callee provably does not retain, which is what makes the ordinary
+higher-order call `values.filter(fn(value: I64) => value > 0)` work. The
+compiler summarizes each function instance once per compile: a parameter is
+non-retaining only when every use of it in the callee's body is a call through
+the value or an argument forwarded to a parameter that is itself
+non-retaining. Recursion settles by a monotone fixpoint over the instance call
+graph, so a parameter of a recursive cycle stays non-retaining only when every
+use in the cycle calls it or forwards it. Every use the summary cannot prove
+safe makes the parameter retaining: returning the value, storing it, capturing
+it in another closure, copying it to another domain, passing it to an import or
+an `unsafe c` call, passing it to an unresolved call target, passing it as an
+argument of a call through a function value, or forwarding it to a retaining
+parameter. Passing a view-capturing closure to a retaining parameter is
+rejected with diagnostic 152, and the callee's body keeps the same guarantee
+in its own frame: a non-retaining parameter never reaches a return, a store, a
+capture, or a cross-domain copy.
+
 Alder 1.0 deliberately rejects:
 
 - implicit capture of a mutable local for shared mutation;

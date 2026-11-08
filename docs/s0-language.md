@@ -172,8 +172,10 @@ work in progress:
   closure escapes, and function-valued captures are retained recursively.
   Affine owners are still rejected. A scoped capability (a slice or view) may
   be captured only by a closure that provably does not escape the scope that
-  owns it: every read of the value in that scope must be a call through it,
-  and the restriction carries through captured closures. The thunk ABI is
+  owns it: every read of the value in that scope must be a call through it or
+  an argument at a parameter the callee's per-instance summary proves
+  non-retaining, and the restriction carries through captured closures. The
+  thunk ABI is
   `(declared parameters, opaque environment pointer)`; capture-free closures
   are plain function values.
 - A literal nested inside another literal captures transitively: the outer

@@ -1176,9 +1176,15 @@ both halves were written):
   correctly.
 - scoped-capability captures land for closures that provably do not escape:
   a closure may capture an immutable slice or a mutable view when every read
-  of the value in the owning scope is a call through it, the restriction
-  carries through captured closures, and any other use rejects with
-  diagnostic 152. The environment holds the view header instead of a copy, so
+  of the value in the owning scope is a call through it or an argument at a
+  parameter the callee's per-instance retain summary proves non-retaining, the
+  restriction carries through captured closures, and any other use rejects
+  with diagnostic 152. The summary is computed once per compile as a monotone
+  fixpoint over the instance call graph, so recursion stays non-retaining when
+  the whole cycle only calls or forwards the value, while returns, stores,
+  captures, cross-domain copies, imports, `unsafe c` calls, unresolved targets,
+  function-value callees, and forwards to retaining parameters all count as
+  retaining. The environment holds the view header instead of a copy, so
   the closure reads the original storage, and phase 6's local-store rule is
   narrowed for an environment record that carries a view field (see
   [MIR](docs/mir.md)). Two limits remain, deliberately rejected rather than

@@ -372,6 +372,70 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"closure-slice-higher-order.al": `fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    v.push(seed + 1)
+    return v
+}
+
+fn apply(f: fn() -> U64) -> U64 {
+    return f()
+}
+
+fn apply2(f: fn() -> U64) -> U64 {
+    return apply(f)
+}
+
+fn walk(f: fn(U64) -> U64, n: U64) -> U64 {
+    if n == 0 { return f(0) }
+    return walk(f, n - 1) + f(n)
+}
+
+type Runner {
+    base: U64
+}
+
+impl Runner {
+    fn run(self, f: fn(U64) -> U64, n: U64) -> U64 { return f(n) + self.base }
+}
+
+fn through_calls(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn() -> U64 { return s.len() + s[0] }
+    return apply2(g) + g()
+}
+
+fn through_literal(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    return apply2(fn() -> U64 { return s.len() + s[1] })
+}
+
+fn through_method(seed: U64) -> U64 {
+    let runner = Runner(base: 5)
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn(x: U64) -> U64 { return x + s.len() }
+    return runner.run(g, 30)
+}
+
+fn through_recursion(seed: U64) -> U64 {
+    let v = one(seed)
+    let s = v.slice(0, 2)
+    let g = fn(x: U64) -> U64 { return x + s.len() }
+    return walk(g, 2)
+}
+
+fn main() -> I32 {
+    if through_calls(40) != 84 { return 1 }
+    if through_literal(40) != 43 { return 2 }
+    if through_method(40) != 37 { return 3 }
+    if through_recursion(40) != 9 { return 4 }
+    return 0
+}
+`,
 		"dispatch.al": `type UserCursor {
     row: U64
 }
@@ -458,6 +522,9 @@ fn main() -> I32 {
 		{"closure-slice-return", "fn capture(s: [U64]) -> fn() -> U64 {\n    let g = fn() -> U64 { return s.len() }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 152},
 		{"closure-slice-vec-store", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    var keep = Vec.new(fn() -> U64)\n    keep.push(g)\n    return 0\n}\n", 152},
 		{"closure-slice-outer-capture", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn capture(seed: U64) -> fn() -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let inner = fn() -> U64 { return s.len() }\n    let outer = fn() -> U64 { return inner() }\n    return outer\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"closure-slice-forward-retain", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn keep(f: fn() -> U64) -> U64 {\n    var ks = Vec.new(fn() -> U64)\n    ks.push(f)\n    return ks.len()\n}\nfn forward(f: fn() -> U64) -> U64 {\n    return keep(f)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    return forward(g)\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"closure-slice-indirect-argument", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn indirect(ff: fn(fn() -> U64) -> U64, f: fn() -> U64) -> U64 {\n    return ff(f)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    let call = fn(h: fn() -> U64) -> U64 { return h() }\n    return indirect(call, g)\n}\nfn main() -> I32 { return 0 }\n", 152},
+		{"closure-slice-recursive-retain", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn keep_all(f: fn() -> U64, n: U64) -> U64 {\n    var ks = Vec.new(fn() -> U64)\n    ks.push(f)\n    if n == 0 { return ks.len() }\n    return keep_all(f, n - 1)\n}\nfn f(seed: U64) -> U64 {\n    let v = one(seed)\n    let s = v.slice(0, 1)\n    let g = fn() -> U64 { return s.len() }\n    return keep_all(g, 2)\n}\nfn main() -> I32 { return 0 }\n", 152},
 		{"closure-slice-in-loop", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    var i: U64 = 0\n    while i < 2 {\n        let g = fn() -> U64 { return s.len() }\n        let n = g()\n        i = i + 1\n    }\n    return 0\n}\n", 153},
 		{"closure-affine-capture", "type Res {\n    n: U64\n}\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn capture(r: Res) -> fn() -> U64 {\n    let g = fn() -> U64 { return r.n }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},

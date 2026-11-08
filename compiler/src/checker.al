@@ -8517,15 +8517,222 @@ fn expression_is_indirect_call(store: CheckStore, expression: CheckedExprRec) ->
     return __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1).builtin == 44
 }
 
-// closure_call_callee_ok reports whether expression `child` is the callee (the
-// first child) of an indirect call `parent`.
-fn closure_call_callee_ok(store: CheckStore, parent: U64, child: U64) -> Bool {
+// A retain summary answers one question for every function instance and
+// parameter position: may this parameter retain its argument, so that passing
+// a value here can outlive the caller's scope? It is computed once per compile
+// from the finished store: a parameter is non-retaining only when every use of
+// it in its own body is a call through the value or an argument forwarded to a
+// parameter that is itself non-retaining. Recursion settles by the monotone
+// fixpoint over the instance call graph, so a parameter of a recursive
+// function stays non-retaining only when the whole cycle forwards it. Every
+// use the summary cannot classify - a return, a store, a capture, an import,
+// `unsafe c`, an unresolved call target, a call through a function value, or a
+// `copy_to_domain` - counts as retaining.
+type ClosureRetainSummaryRec {
+    retains: __s0_Buffer(U64)
+    param_ids: __s0_Buffer(U64)
+    param_first: __s0_Buffer(U64)
+    param_total: __s0_Buffer(U64)
+    width: U64
+}
+
+fn summary_parameter_position(summary: ClosureRetainSummaryRec, owner: U64, local: U64) -> U64 {
+    if owner == 0 || local == 0 || owner > __s0_buffer_len(U64, summary.param_total) { return 0 }
+    let count = __s0_buffer_get(U64, summary.param_total, owner - 1)
+    let first = __s0_buffer_get(U64, summary.param_first, owner - 1)
+    if count == 0 || first == 0 { return 0 }
+    var at: U64 = 0
+    while at < count {
+        if first - 1 + at < __s0_buffer_len(U64, summary.param_ids) {
+            if __s0_buffer_get(U64, summary.param_ids, first - 1 + at) == local { return at + 1 }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn summary_retains_parameter(summary: ClosureRetainSummaryRec, owner: U64, position: U64) -> Bool {
+    if owner == 0 || position == 0 || summary.width == 0 { return true }
+    if owner > __s0_buffer_len(U64, summary.param_total) { return true }
+    if position > summary.width { return true }
+    let index = (owner - 1) * summary.width + (position - 1)
+    if index >= __s0_buffer_len(U64, summary.retains) { return true }
+    return __s0_buffer_get(U64, summary.retains, index) == 1
+}
+
+// summary_call_position maps the `child`-th checked child of a resolved call
+// to the parameter it supplies, or zero when the shape is not a plain
+// argument. A direct call records its arguments as children, so child i is
+// parameter i; a method call may or may not record its receiver as the first
+// child, and the receiver is the target's first parameter, so the two method
+// layouts shift by one. Any other child count is not a shape this rule
+// understands and stays retaining.
+fn summary_call_position(summary: ClosureRetainSummaryRec, target: U64, child_count: U64, child: U64) -> U64 {
+    if target == 0 || child == 0 || target > __s0_buffer_len(U64, summary.param_total) { return 0 }
+    let total = __s0_buffer_get(U64, summary.param_total, target - 1)
+    if total == 0 { return 0 }
+    if child_count == total { if child <= total { return child } }
+    if child_count == total + 1 { if child <= total { return child } }
+    if child_count + 1 == total { if child < total { return child + 1 } }
+    return 0
+}
+
+// closure_retain_summary computes the per-instance parameter summary described
+// above from the finished store. `parents` and `parent_index` map each checked
+// expression to its parent expression and to its child position in that
+// parent.
+fn closure_retain_summary(d: Domain, parse: ParseStore, store: CheckStore, parents: __s0_Buffer(U64), parent_index: __s0_Buffer(U64)) -> Result(ClosureRetainSummaryRec, __s0_Error) {
+    let current = store
+    let symbols = __s0_buffer_len(SymbolRec, current.symbols)
+    var param_ids = try __s0_buffer_new(U64, d)
+    var param_first = try __s0_buffer_new(U64, d)
+    var param_total = try __s0_buffer_new(U64, d)
+    var at: U64 = 0
+    while at < symbols {
+        param_first = try __s0_buffer_append(U64, d, param_first, 0)
+        param_total = try __s0_buffer_append(U64, d, param_total, 0)
+        at = at + 1
+    }
+    // Parameter locals are the kind-1 bindings whose syntax node is a
+    // parameter form; they are appended in declaration order per owner.
+    var width: U64 = 0
+    at = 0
+    while at < __s0_buffer_len(LocalRec, current.locals) {
+        let local = __s0_buffer_get(LocalRec, current.locals, at)
+        if local.kind == 1 && local.owner >= 1 && local.owner <= symbols && local.syntax >= 1 && local.syntax <= __s0_buffer_len(SyntaxRec, parse.nodes) {
+            let node = __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1)
+            if node.kind == 13 || node.kind == 47 || node.kind == 48 {
+                let count = __s0_buffer_get(U64, param_total, local.owner - 1)
+                if count == 0 { __s0_buffer_set(U64, param_first, local.owner - 1, __s0_buffer_len(U64, param_ids) + 1) }
+                param_ids = try __s0_buffer_append(U64, d, param_ids, at + 1)
+                __s0_buffer_set(U64, param_total, local.owner - 1, count + 1)
+                if count + 1 > width { width = count + 1 }
+            }
+        }
+        at = at + 1
+    }
+    var retains = try __s0_buffer_new(U64, d)
+    at = 0
+    while at < symbols * width {
+        retains = try __s0_buffer_append(U64, d, retains, 0)
+        at = at + 1
+    }
+    let summary = ClosureRetainSummaryRec(retains: retains, param_ids: param_ids, param_first: param_first, param_total: param_total, width: width)
+    var edge_owner = try __s0_buffer_new(U64, d)
+    var edge_position = try __s0_buffer_new(U64, d)
+    var edge_target = try __s0_buffer_new(U64, d)
+    var edge_parameter = try __s0_buffer_new(U64, d)
+    // Every read of a parameter is either a call through the value, a
+    // forwarded argument, or a retaining use.
+    at = 0
+    while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+        let read = __s0_buffer_get(CheckedExprRec, current.expressions, at)
+        if (read.kind == 1 || read.kind == 5 || read.kind == 22) && read.owner >= 1 && read.owner <= symbols {
+            let position = summary_parameter_position(summary, read.owner, read.parameter_use)
+            if position != 0 {
+                var forwarded = false
+                let parent = __s0_buffer_get(U64, parents, at)
+                if parent != 0 {
+                    let call = __s0_buffer_get(CheckedExprRec, current.expressions, parent - 1)
+                    if (call.kind == 8 || call.kind == 18) && call.annotation >= 1 && call.annotation <= __s0_buffer_len(CallAnnotationRec, current.call_annotations) {
+                        let annotation = __s0_buffer_get(CallAnnotationRec, current.call_annotations, call.annotation - 1)
+                        let child = __s0_buffer_get(U64, parent_index, at)
+                        if annotation.builtin == 44 {
+                            if child == 1 { forwarded = true }
+                        } else {
+                            if annotation.kind == 1 && annotation.target >= 1 && annotation.target <= symbols {
+                                let target_position = summary_call_position(summary, annotation.target, call.child_count, child)
+                                if target_position != 0 {
+                                    edge_owner = try __s0_buffer_append(U64, d, edge_owner, read.owner)
+                                    edge_position = try __s0_buffer_append(U64, d, edge_position, position)
+                                    edge_target = try __s0_buffer_append(U64, d, edge_target, annotation.target)
+                                    edge_parameter = try __s0_buffer_append(U64, d, edge_parameter, target_position)
+                                    forwarded = true
+                                }
+                            }
+                        }
+                    }
+                }
+                if !forwarded {
+                    let index = (read.owner - 1) * width + (position - 1)
+                    if index < __s0_buffer_len(U64, retains) { __s0_buffer_set(U64, retains, index, 1) }
+                }
+            }
+        }
+        at = at + 1
+    }
+    // A closure that captures a parameter copies the value into its
+    // environment, so the capture retains it.
+    at = 0
+    while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, current.expressions, at)
+        if expression.kind == 24 && expression.parameter_use >= 1 && expression.parameter_use <= __s0_buffer_len(ClosureSiteRec, current.closures.sites) {
+            let site = __s0_buffer_get(ClosureSiteRec, current.closures.sites, expression.parameter_use - 1)
+            var capture_at: U64 = 0
+            while capture_at < site.capture_count {
+                let capture = __s0_buffer_get(ClosureCaptureRec, current.closures.captures, site.first_capture - 1 + capture_at)
+                let position = summary_parameter_position(summary, expression.owner, capture.local)
+                if position != 0 {
+                    let index = (expression.owner - 1) * width + (position - 1)
+                    if index < __s0_buffer_len(U64, retains) { __s0_buffer_set(U64, retains, index, 1) }
+                }
+                capture_at = capture_at + 1
+            }
+        }
+        at = at + 1
+    }
+    // Monotone fixpoint over the forwarding edges. Recursion settles here: a
+    // parameter of a cycle stays non-retaining only when every use in the
+    // cycle forwards it to a parameter that stays non-retaining.
+    var changed = true
+    var rounds: U64 = 0
+    while changed && rounds <= symbols {
+        changed = false
+        rounds = rounds + 1
+        var edge_at: U64 = 0
+        while edge_at < __s0_buffer_len(U64, edge_owner) {
+            let target = __s0_buffer_get(U64, edge_target, edge_at)
+            let parameter = __s0_buffer_get(U64, edge_parameter, edge_at)
+            var target_index: U64 = 0
+            var valid = false
+            if target >= 1 && target <= symbols && parameter >= 1 && parameter <= width {
+                target_index = (target - 1) * width + (parameter - 1)
+                valid = target_index < __s0_buffer_len(U64, retains)
+            }
+            if valid && __s0_buffer_get(U64, retains, target_index) == 1 {
+                let owner = __s0_buffer_get(U64, edge_owner, edge_at)
+                let position = __s0_buffer_get(U64, edge_position, edge_at)
+                let index = (owner - 1) * width + (position - 1)
+                if index < __s0_buffer_len(U64, retains) {
+                    if __s0_buffer_get(U64, retains, index) == 0 {
+                        __s0_buffer_set(U64, retains, index, 1)
+                        changed = true
+                    }
+                }
+            }
+            edge_at = edge_at + 1
+        }
+    }
+    return Ok(ClosureRetainSummaryRec(retains: retains, param_ids: param_ids, param_first: param_first, param_total: param_total, width: width))
+}
+
+// closure_use_allowed reports whether a use of a scoped-capture closure value
+// keeps it inside the scope that owns the captured view: the use must be the
+// callee of an indirect call or an argument at a parameter position that the
+// callee's retain summary proves non-retaining.
+fn closure_use_allowed(store: CheckStore, summary: ClosureRetainSummaryRec, parents: __s0_Buffer(U64), parent_index: __s0_Buffer(U64), use: U64) -> Bool {
+    if use == 0 || use > __s0_buffer_len(U64, parents) { return false }
+    let parent = __s0_buffer_get(U64, parents, use - 1)
     if parent == 0 || parent > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
     let call = __s0_buffer_get(CheckedExprRec, store.expressions, parent - 1)
-    if !expression_is_indirect_call(store, call) { return false }
-    if call.child_count < 1 || call.first_child == 0 { return false }
-    if call.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
-    return __s0_buffer_get(CheckedExprChildRec, store.expression_children, call.first_child - 1).expression == child
+    if (call.kind != 8 && call.kind != 18) || call.annotation == 0 || call.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, call.annotation - 1)
+    let child = __s0_buffer_get(U64, parent_index, use - 1)
+    if annotation.builtin == 44 { return child == 1 }
+    if annotation.kind != 1 || annotation.target == 0 { return false }
+    let position = summary_call_position(summary, annotation.target, call.child_count, child)
+    if position == 0 { return false }
+    return !summary_retains_parameter(summary, annotation.target, position)
 }
 
 // check_scoped_capture_escapes enforces the escape rule for closures that
@@ -8542,10 +8749,12 @@ fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, stor
     // for a statement root), plus the statement binding of each root
     // expression and the defining expression of each bound local.
     var parents = try __s0_buffer_new(U64, d)
+    var parent_index = try __s0_buffer_new(U64, d)
     var expression_binding = try __s0_buffer_new(U64, d)
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedExprRec, current.expressions) {
         parents = try __s0_buffer_append(U64, d, parents, 0)
+        parent_index = try __s0_buffer_append(U64, d, parent_index, 0)
         expression_binding = try __s0_buffer_append(U64, d, expression_binding, 0)
         at = at + 1
     }
@@ -8571,12 +8780,16 @@ fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, stor
         while child_at < expression.child_count {
             if expression.first_child != 0 && expression.first_child - 1 + child_at <= __s0_buffer_len(CheckedExprChildRec, current.expression_children) {
                 let child = __s0_buffer_get(CheckedExprChildRec, current.expression_children, expression.first_child - 1 + child_at).expression
-                if child >= 1 && child <= __s0_buffer_len(U64, parents) { __s0_buffer_set(U64, parents, child - 1, at + 1) }
+                if child >= 1 && child <= __s0_buffer_len(U64, parents) {
+                    __s0_buffer_set(U64, parents, child - 1, at + 1)
+                    __s0_buffer_set(U64, parent_index, child - 1, child_at + 1)
+                }
             }
             child_at = child_at + 1
         }
         at = at + 1
     }
+    let summary = try closure_retain_summary(d, parse, current, parents, parent_index)
     // Propagate the restriction through captures to a fixpoint: a closure
     // whose capture was defined by a restricted closure expression is itself
     // restricted, however deep the chain of captures runs.
@@ -8631,7 +8844,7 @@ fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, stor
                 // A non-root use must be the callee of an indirect call;
                 // anything else (argument, field, aggregate, match, ...)
                 // carries the closure out of its scope.
-                if !closure_call_callee_ok(current, parent, at + 1) { escaped_here = true }
+                if !closure_use_allowed(current, summary, parents, parent_index, at + 1) { escaped_here = true }
             } else {
                 let binding = __s0_buffer_get(U64, expression_binding, at)
                 if binding == 0 {
@@ -8642,8 +8855,7 @@ fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, stor
                     while read_at < __s0_buffer_len(CheckedExprRec, current.expressions) {
                         let read = __s0_buffer_get(CheckedExprRec, current.expressions, read_at)
                         if read.owner == expression.owner && read.parameter_use == binding && (read.kind == 1 || read.kind == 5 || read.kind == 22) {
-                            let read_parent = __s0_buffer_get(U64, parents, read_at)
-                            if !closure_call_callee_ok(current, read_parent, read_at + 1) { escaped_here = true
+                            if !closure_use_allowed(current, summary, parents, parent_index, read_at + 1) { escaped_here = true
                                 escape_node = read.syntax }
                         }
                         read_at = read_at + 1
