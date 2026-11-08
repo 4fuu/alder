@@ -58,7 +58,8 @@ var bootstrapRejectFixtures = []string{
 	"match-unknown-variant",
 	"try-not-result",
 	"try-error-mismatch",
-	"using-in-loop",
+	// using-in-loop moved to the Go Stage 0 rejection list only: the Alder
+	// compiler registers a using in a loop body for that iteration's scope.
 	"using-callback-type",
 	"literal-out-of-range",
 	"fall-off-end",
@@ -518,7 +519,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "e8c782ba6a9ec0b430fb570d33f0897b4faef2f7e3a735d1f06603acc8c72a0d"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "47a6f680cbecd688012825dbabb8b7631a992aaa84f15c6209808c583217fe52"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }

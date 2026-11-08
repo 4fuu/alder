@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `64b5ab8b94a97bf94f65b4b89cf9e53b9641ecf2c12d4f6f933b44ba3848839d`
+  `47a6f680cbecd688012825dbabb8b7631a992aaa84f15c6209808c583217fe52`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `64b5ab8b94a97bf94f65b4b89cf9e53b9641ecf2c12d4f6f933b44ba3848839d`
+  `47a6f680cbecd688012825dbabb8b7631a992aaa84f15c6209808c583217fe52`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1212,12 +1212,21 @@ both halves were written):
   enclosing loop's exit and step blocks, `continue` in a `for` reaches a
   dedicated step block so the index still advances, a match arm's statement
   block inherits the enclosing loop context, and the D023 loop-rebuild gate
-  treats both as skipping constructs. A cleanup cannot be crossed because
-  `using` inside a loop body is still rejected, and a table-view arm rejects
-  both jumps as control flow. One pre-existing gap is recorded here rather
-  than fixed: a table-view `match` inside a `while` body is accepted by the
-  checker and then refused by phase 6 ("verification refused"), with or
-  without `break`, so the view region and a loop body do not yet compose.
+  treats both as skipping constructs. A table-view arm rejects both jumps as
+  control flow.
+- `using` inside a loop body landed: a registration belongs to that
+  iteration's scope, so it runs at the end of the iteration, and `break`,
+  `continue`, `return`, and a failed `try` run the registrations they cross in
+  reverse order exactly once. A checked failure while a registration is active
+  now runs the crossed registrations before the shared panic handler instead of
+  being refused, so a loop body may compute inside its scope. A loop body that
+  declares the binding re-establishes it every iteration, so its own transfer
+  is not a partial-path transfer; `break` and `continue` count as exits that
+  require a live affine owner to be transferred or registered. One
+  pre-existing gap is recorded here rather than fixed: a table-view `match`
+  inside a `while` body is accepted by the checker and then refused by phase 6
+  ("verification refused"), with or without `break`, so the view region and a
+  loop body do not yet compose.
 
 Cold `bootstrap/regenerate.sh` timing is recorded per commit and compared only
 on the same host: absolute wall time and peak RSS depend on the host and

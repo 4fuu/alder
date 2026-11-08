@@ -213,7 +213,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// function-value moved out: the Alder checker now accepts a non-generic
 	// function name as a function value (M7.5 C5b); the Go oracle still rejects
 	// it, so the shared fixture keeps testing only the oracle side.
-	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-in-loop", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "float-arithmetic", "index-not-u64", "shadowing", "unreachable-statement"} {
+	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "float-arithmetic", "index-not-u64", "shadowing", "unreachable-statement"} {
 		t.Run("shared-reject-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "reject", fixture+".al"))
 			if err != nil {
@@ -1065,7 +1065,6 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "body-for-leak.al", text: "fn f(values: [U64]) -> U64 { for item in values {}\n return item }\n", kind: 18, marker: "item", last: true},
 		{name: "body-falloff.al", text: "fn f(flag: Bool) -> U64 { if flag { return 1 } }\n", kind: 67, marker: "{"},
 		{name: "body-unreachable.al", text: "fn f() -> U64 { return 1\n missing = 2 }\n", kind: 68, marker: "="},
-		{name: "body-loop-using.al", text: "fn cleanup(value: U64) -> Unit { return }\nfn f(flag: Bool) -> Unit { while flag { if flag { using value = 1 with cleanup } } }\n", kind: 69, marker: "using"},
 		{name: "using-initializer-before-callback.al", text: "fn f() -> Unit { using value = missing with nope }\n", kind: 18, marker: "missing"},
 		{name: "using-unknown-callback.al", text: "fn f(seed: U64) -> Unit { using value = seed with nope }\n", kind: 83, marker: "nope"},
 		{name: "using-zero-arity.al", text: "fn close() -> Unit { return }\nfn f(seed: U64) -> Unit { using value = seed with close }\n", kind: 84, marker: "close", last: true},

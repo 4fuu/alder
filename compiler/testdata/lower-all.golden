@@ -1261,25 +1261,35 @@ bb0:
   store local %handle, %v360
   %cleanup_scope50 = cleanup.scope.begin
   %cleanup_id50 = cleanup.push %cleanup_scope50, @close, (%v360)
-  branch %bad, bb_then2, bb_else3
+  branch %bad, bb_then3, bb_else4
 
 bb_panic:
   panic
 
-bb_then2:
+bb_cleanup_panic2:
+  cleanup.scope.run %cleanup_scope50
+  cleanup.scope.end %cleanup_scope50
+  jump bb_panic
+
+bb_then3:
   %v363 = const.get @lit301
   cleanup.scope.run %cleanup_scope50
   cleanup.scope.end %cleanup_scope50
   return %v363
 
-bb_else3:
-  jump bb_join4
+bb_else4:
+  jump bb_join5
 
-bb_join4:
+bb_join5:
   %v364 = const.get @lit302
   cleanup.scope.run %cleanup_scope50
   cleanup.scope.end %cleanup_scope50
   return %v364
+
+bb_cleanup_panic6:
+  cleanup.scope.run %cleanup_scope50
+  cleanup.scope.end %cleanup_scope50
+  jump bb_panic
 }
 
 fn @before_using(%bad: bool) -> i32 {
@@ -1307,6 +1317,11 @@ bb_join4:
   cleanup.scope.run %cleanup_scope52
   cleanup.scope.end %cleanup_scope52
   return %v370
+
+bb_cleanup_panic5:
+  cleanup.scope.run %cleanup_scope52
+  cleanup.scope.end %cleanup_scope52
+  jump bb_panic
 }
 
 fn @nested_cleanup() -> i32 {
@@ -1331,6 +1346,16 @@ bb0:
 
 bb_panic:
   panic
+
+bb_cleanup_panic2:
+  cleanup.scope.run %cleanup_scope53
+  cleanup.scope.end %cleanup_scope53
+  jump bb_panic
+
+bb_cleanup_panic3:
+  cleanup.scope.run %cleanup_scope53
+  cleanup.scope.end %cleanup_scope53
+  jump bb_panic
 }
 
 fn @cleanup_try(%bad: bool) -> result(i64, i64) {
@@ -1344,51 +1369,66 @@ bb0:
   %cleanup_id56 = cleanup.push %cleanup_scope56, @close, (%v379)
   %v382 = const.get @lit311
   store local %divisor, %v382
-  branch %bad, bb_then2, bb_else3
+  branch %bad, bb_then4, bb_else5
 
 bb_panic:
   panic
 
-bb_then2:
+bb_cleanup_panic2:
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  jump bb_panic
+
+bb_cleanup_panic3:
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  jump bb_panic
+
+bb_then4:
   %v383 = const.get @lit313
   %v384 = const.get @lit314
   %v385 = call @checked(%v383, %v384)
   switch %v385 {
-    ok(%try_ok316) -> bb_try_ok5
-    err(%try_err316) -> bb_try_err6
+    ok(%try_ok316) -> bb_try_ok7
+    err(%try_err316) -> bb_try_err8
   }
 
-bb_else3:
-  jump bb_join4
+bb_else5:
+  jump bb_join6
 
-bb_join4:
+bb_join6:
   %v390 = const.get @lit318
   %v391 = load local %divisor
   %v392 = call @checked(%v390, %v391)
   switch %v392 {
-    ok(%try_ok321) -> bb_try_ok7
-    err(%try_err321) -> bb_try_err8
+    ok(%try_ok321) -> bb_try_ok10
+    err(%try_err321) -> bb_try_err11
   }
 
-bb_try_ok5:
+bb_try_ok7:
   %v389 = enum.construct result(i64, i64), ok, %try_ok316
   cleanup.scope.run %cleanup_scope56
   cleanup.scope.end %cleanup_scope56
   return %v389
 
-bb_try_err6:
+bb_try_err8:
   %v388 = enum.construct result(i64, i64), err, %try_err316
   cleanup.scope.run %cleanup_scope56
   cleanup.scope.end %cleanup_scope56
   fail %v388
 
-bb_try_ok7:
+bb_cleanup_panic9:
+  cleanup.scope.run %cleanup_scope56
+  cleanup.scope.end %cleanup_scope56
+  jump bb_panic
+
+bb_try_ok10:
   %v396 = enum.construct result(i64, i64), ok, %try_ok321
   cleanup.scope.run %cleanup_scope56
   cleanup.scope.end %cleanup_scope56
   return %v396
 
-bb_try_err8:
+bb_try_err11:
   %v395 = enum.construct result(i64, i64), err, %try_err321
   cleanup.scope.run %cleanup_scope56
   cleanup.scope.end %cleanup_scope56

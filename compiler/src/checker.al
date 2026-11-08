@@ -7831,7 +7831,6 @@ fn type_cleanup_method_symbol(state: State, store: CheckStore, type_symbol: U64)
 // loop, initializer, callback resolution/shape/type/result, then duplicates.
 fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64, in_loop: Bool) -> Result(BodyStep, __s0_Error) {
     if reserved_value_name(state, store, statement) { return body_token_fail(d, state, store, 22, statement) }
-    if in_loop { return body_token_fail(d, state, store, 69, statement) }
     let cleanup_link = __s0_buffer_get(SyntaxLinkRec, parse.links, statement.children - 1)
     // The callback clause is optional: a single child names the M7.5 public
     // form whose builtin owner cleanup has no source callback.
@@ -8208,6 +8207,29 @@ fn owner_flow_expression(store: CheckStore, binding: U64, expression_id: U64, st
     return OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0)
 }
 
+// Whether a block declares `binding`, at its own level or inside a nested
+// block, if, or loop. A loop body that declares the binding re-establishes it
+// every iteration, so the loop itself does not carry its transfer state.
+fn owner_flow_declares(store: CheckStore, block_id: U64, binding: U64) -> Bool {
+    if block_id == 0 || block_id > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return false }
+    let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
+    var link_id = block.statements
+    while link_id != 0 {
+        if link_id > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return false }
+        let link = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link_id - 1)
+        if link.statement != 0 && link.statement <= __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
+            if (statement.kind == 1 || statement.kind == 2 || statement.kind == 10) && statement.binding == binding { return true }
+            if statement.kind == 6 || statement.kind == 7 || statement.kind == 8 || statement.kind == 9 {
+                if owner_flow_declares(store, statement.body, binding) { return true }
+            }
+            if statement.kind == 7 && owner_flow_declares(store, statement.alternative, binding) { return true }
+        }
+        link_id = link.next
+    }
+    return false
+}
+
 fn owner_flow_block(store: CheckStore, binding: U64, block_id: U64, state: U64) -> OwnerFlowRec {
     if block_id == 0 { return OwnerFlowRec(state: state, terminated: false, error_kind: 0, syntax: 0) }
     let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
@@ -8221,6 +8243,13 @@ fn owner_flow_statement(store: CheckStore, binding: U64, statement_id: U64, stat
     let current = expression.state
     if statement.kind == 4 {
         if current == 0 { return OwnerFlowRec(state: current, terminated: true, error_kind: 93, syntax: statement.syntax) }
+        return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0)
+    }
+    if statement.kind == 11 || statement.kind == 12 {
+        // break and continue leave the iteration: a live affine owner must
+        // already be transferred or registered on that path, exactly like a
+        // return.
+        if current == 0 && !cleanup_binding_registered(store, statement.owner, binding) { return OwnerFlowRec(state: current, terminated: true, error_kind: 93, syntax: statement.syntax) }
         return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0)
     }
     if statement.kind == 6 { return owner_flow_block(store, binding, statement.body, current) }
@@ -8239,6 +8268,9 @@ fn owner_flow_statement(store: CheckStore, binding: U64, statement_id: U64, stat
     if statement.kind == 8 || statement.kind == 9 {
         let body = owner_flow_block(store, binding, statement.body, current)
         if body.error_kind != 0 { return body }
+        // A body that declares the binding re-establishes it on every
+        // iteration, so its own transfer is not a partial-path transfer.
+        if owner_flow_declares(store, statement.body, binding) { return OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0) }
         if !body.terminated && body.state != current { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: statement.syntax) }
     }
     if (statement.kind == 1 || statement.kind == 2) && statement.binding == binding {

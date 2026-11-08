@@ -520,7 +520,8 @@ type EnvironmentRec {
 // 60 non-struct field root, 61 unknown assignment field, 62 non-slice index
 // root, 63 non-U64 index, 64 non-copy-trivial indexed element, 65 non-Bool
 // condition, 66 unsupported for sequence, 67 valued function fallthrough,
-// 68 unreachable statement, and 69 using under a loop. Match/try diagnostics:
+// 68 unreachable statement (69 retired: a using in a loop body registers for
+// that iteration). Match/try diagnostics:
 // 70 non-enum match, 71 unknown variant, 72 duplicate variant, 73 payload not
 // bound, 74 valueless variant bound, 75 reserved arm binding, 76 duplicate arm
 // binding, 77 arm type mismatch, 78 no arms, 79 nonexhaustive match, 80 try in

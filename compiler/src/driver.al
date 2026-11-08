@@ -285,7 +285,6 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 67 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_function_for_body(state, parse, source, start, json) || !driver_out_message_quote(json) { return false }
         return out_string(" may fall off the end without returning a value") }
     if kind == 68 { return out_string("unreachable statement") }
-    if kind == 69 { return out_string("using inside a loop is rejected (a cleanup scope cannot re-begin while active)") }
     if kind == 79 { if !out_string("match is not exhaustive: variant ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, detail_a, detail_b, json) || !driver_out_message_quote(json) || !out_string(" of ") || !driver_out_source_text(state, source, detail_c, detail_d, json) { return false }
         return out_string(" is not covered") }
     if kind == 80 { return out_string("try requires a function returning Result") }

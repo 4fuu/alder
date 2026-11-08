@@ -266,9 +266,6 @@ func TestM75BreakContinueQualification(t *testing.T) {
 		{"break-outside-loop.al", "break is only allowed inside a loop", "fn main() -> I32 {\n    break\n    return 0\n}\n"},
 		{"continue-outside-loop.al", "continue is only allowed inside a loop", "fn main() -> I32 {\n    continue\n    return 0\n}\n"},
 		{"break-in-closure-body.al", "break is only allowed inside a loop", "fn main() -> I32 {\n    var i: U64 = 0\n    while i < 2 {\n        i = i + 1\n        let f = fn() -> Unit { break }\n    }\n    return 0\n}\n"},
-		// A cleanup scope cannot begin inside a loop, so neither exit has a
-		// cleanup to run and the rejection keeps that guarantee.
-		{"using-inside-loop.al", "using inside a loop is rejected", "fn main() -> I32 {\n    var i: U64 = 0\n    while i < 2 {\n        i = i + 1\n        using t = Vec.new(U64)\n    }\n    return 0\n}\n"},
 		// A table-view arm is one straight-line fail-free region, so it cannot
 		// carry either jump.
 		{"break-in-table-view-arm.al", "table-view match arm may contain only straight-line copy statements", "fn main() -> I32 {\n    using t = Table.new(U64)\n    let id = t.insert(5)\n    var i: U64 = 0\n    while i < 2 {\n        i = i + 1\n        match t.get(id) {\n            Some(v) => { break }\n            None => { }\n        }\n    }\n    return 0\n}\n"},

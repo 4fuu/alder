@@ -500,10 +500,13 @@ owns it. Lexical environments do not leak block,
 branch, loop, or `for` element bindings. Non-`Unit` functions must return on
 every path, statements after a guaranteed return are rejected before their
 contents, and conservative loops fall through. `using` cleanup facts cover
-lexical fallthrough, return, and failed `try`. Current lowering walks the
-checked site environment to run only active callbacks, exactly once in reverse
-lexical order, on those exits. The declaration is rejected anywhere under a
-loop.
+lexical fallthrough, return, failed `try`, `break`, and `continue`. Current
+lowering walks the checked site environment to run only active callbacks,
+exactly once in reverse lexical order, on those exits; a checked failure while
+a registration is active runs the registrations it crosses before the process
+aborts. A registration inside a loop body belongs to that iteration's scope, so
+it runs at the end of the iteration and on every exit that leaves it, and a
+loop-body binding is re-established by each iteration.
 Unannotated let/var bindings infer scalar types from supported literals,
 identifiers, and unary/binary expressions.
 

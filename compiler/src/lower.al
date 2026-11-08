@@ -81,6 +81,9 @@ type LowerState {
     // a loop context through every expression call.
     loop_exit: U64
     loop_step: U64
+    // The environment enclosing the innermost loop body. `break` and
+    // `continue` run the registrations they cross by walking up to it.
+    loop_environment: U64
     valid: Bool
 }
 
@@ -116,15 +119,15 @@ type LowerMoveLoopRec {
 }
 
 fn lower_with_plan(state: LowerState, moves: LowerMovePlan) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
-fn lower_with_loop(state: LowerState, loop_exit: U64, loop_step: U64) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, loop_exit: loop_exit, loop_step: loop_step, valid: state.valid)
+fn lower_with_loop(state: LowerState, loop_exit: U64, loop_step: U64, loop_environment: U64) -> LowerState {
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, loop_exit: loop_exit, loop_step: loop_step, loop_environment: loop_environment, valid: state.valid)
 }
 
 fn lower_with_reports(state: LowerState, reports: __s0_Buffer(CopySiteRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_add_copy_report(d: Domain, state: LowerState, owner: U64, source: U64, start: U64, end: U64, binding: U64, reason: U64) -> Result(LowerState, __s0_Error) {
@@ -160,7 +163,7 @@ enum LowerResult {
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 // Intern an anonymous function type: contiguous parameter parts, an
@@ -212,39 +215,39 @@ fn lower_with_type_parts(state: LowerState, parts: __s0_Buffer(MirTypePartRec)) 
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: false, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: false, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_releases(state: LowerState, releases: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_with_part_index(state: LowerState, index: LowerPartIndex) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment)
 }
 
 fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
@@ -4087,7 +4090,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 // before leaving the arm, and join with a Unit constant. View
                 // arms are straight-line by construction, so the view ends in
                 // the arm's own region block on every fallthrough path.
-                let flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, arm_block, arm.block, panic_block)
+                let arm_body = __s0_buffer_get(CheckedBlockRec, store.control.blocks, arm.block - 1)
+                let arm_panic = try lower_panic_site(d, source_state, store, current, owner, function, arm_body.environment, environment, panic_block)
+                let flow = try lower_block_statements(d, source_state, spans, store, arm_panic.state, owner, function, arm_block, arm.block, arm_panic.id, arm_body.environment)
                 current = flow.state
                 if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
                 if arm.binding != 0 {
@@ -4171,6 +4176,44 @@ fn lower_store_binding(d: Domain, state: LowerState, function: U64, block: U64, 
     let place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
     let instr = try lower_add_instr(d, lower_with_mir(state, place.store), function, block, mir_op_store(), 0, place.id, 0, value, 0, 0, "")
     return Ok(instr.state)
+}
+
+// Whether any registration is active between `environment` and `boundary`,
+// that is, whether the exit walk from the one reaches a using record before
+// the other.
+fn lower_cleanup_active(store: CheckStore, owner: U64, environment: U64, boundary: U64) -> Bool {
+    var at = environment
+    while at != 0 && at != boundary {
+        if at > __s0_buffer_len(EnvironmentRec, store.environments) { return false }
+        let active = __s0_buffer_get(EnvironmentRec, store.environments, at - 1)
+        if active.owner != owner { return false }
+        var cleanup_at: U64 = 0
+        while cleanup_at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+            let candidate = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, cleanup_at)
+            if candidate.owner == owner && candidate.binding == active.binding && candidate.environment == active.parent { return true }
+            cleanup_at = cleanup_at + 1
+        }
+        at = active.parent
+    }
+    return false
+}
+
+// The panic target for one statement. A checked failure inside a registration
+// has to run the registrations it crosses before the shared handler, because a
+// panic leaves every enclosing scope; without an active registration the shared
+// handler is used unchanged, so programs without a using in scope keep their
+// existing shape.
+// `shared` already runs the registrations active at `boundary`, so a nested
+// statement only has to run the ones registered between the two, innermost
+// first. A statement at the same environment as its enclosing one reuses the
+// enclosing site unchanged.
+fn lower_panic_site(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, environment: U64, boundary: U64, shared: U64) -> Result(LowerStep, __s0_Error) {
+    if shared == 0 || environment == 0 || environment == boundary { return Ok(LowerStep(state: state, id: shared)) }
+    if !lower_cleanup_active(store, owner, environment, boundary) { return Ok(LowerStep(state: state, id: shared)) }
+    let site = try lower_add_block(d, state, function, "bb_cleanup_panic")
+    let cleaned = try lower_cleanup_exits(d, source_state, store, lower_with_mir(state, site.state.mir), owner, function, site.id, environment, boundary, 1)
+    let jumped = try lower_jump(d, cleaned, function, site.id, shared)
+    return Ok(LowerStep(state: jumped, id: site.id))
 }
 
 fn lower_cleanup_exits(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, site_environment: U64, boundary_environment: U64, exit_kind: U64) -> Result(LowerState, __s0_Error) {
@@ -4373,50 +4416,62 @@ fn lower_receiver_place(d: Domain, source_state: State, spans: __s0_Buffer(Check
     return lower_checked_place(d, source_state, spans, store, state, owner, function, block, place_id, 0, environment, panic_block)
 }
 
-fn lower_block_statements(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_block: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+fn lower_block_statements(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, checked_block: U64, panic_block: U64, panic_environment: U64) -> Result(LowerFlowStep, __s0_Error) {
     if checked_block == 0 || checked_block > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
     let body = __s0_buffer_get(CheckedBlockRec, store.control.blocks, checked_block - 1)
     if body.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(state), block: block, terminated: true)) }
-    let flow = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, body.statements, panic_block)
+    let flow = try lower_statement_chain(d, source_state, spans, store, state, owner, function, block, body.statements, panic_block, panic_environment)
     if flow.terminated { return Ok(flow) }
     let exit_environment = try lower_chain_environment(d, store, owner, body.statements, body.environment)
     let cleaned = try lower_cleanup_exits(d, source_state, store, flow.state, owner, function, flow.block, exit_environment, body.environment, 1)
     return Ok(LowerFlowStep(state: cleaned, block: flow.block, terminated: false))
 }
 
-fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, statement: CheckedStatementRec, link: CheckedStatementLinkRec, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, statement: CheckedStatementRec, link: CheckedStatementLinkRec, panic_block: U64, panic_environment: U64) -> Result(LowerFlowStep, __s0_Error) {
     var current = state
     var active = block
     if statement.owner != owner { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
+    // A checked failure anywhere in this statement leaves every enclosing
+    // registration, so the panic target runs the crossed ones first.
+    let panic_site = try lower_panic_site(d, source_state, store, current, owner, function, statement.environment, panic_environment, panic_block)
+    current = panic_site.state
+    let panic_here = panic_site.id
+    let panic_env_here = statement.environment
     if statement.kind == 1 || statement.kind == 2 {
-        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         active = lower_open_block(value.state.mir, function, active)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     if statement.kind == 3 {
-        let place = try lower_checked_place(d, source_state, spans, store, current, owner, function, active, statement.place, 0, statement.environment, panic_block)
-        let value = try lower_expression(d, source_state, spans, store, place.state, owner, function, active, statement.expression, statement.environment, panic_block)
+        let place = try lower_checked_place(d, source_state, spans, store, current, owner, function, active, statement.place, 0, statement.environment, panic_here)
+        let value = try lower_expression(d, source_state, spans, store, place.state, owner, function, active, statement.expression, statement.environment, panic_here)
         active = lower_open_block(value.state.mir, function, active)
         let instr = try lower_add_instr(d, value.state, function, active, mir_op_store(), 0, place.id, 0, value.id, 0, 0, "")
         return Ok(LowerFlowStep(state: instr.state, block: active, terminated: false))
     }
     if statement.kind == 11 {
-        // break: leave the innermost enclosing loop.
+        // break: run every registration this jump crosses, innermost first,
+        // then leave the innermost enclosing loop.
         if current.loop_exit == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
-        let jumped = try lower_jump(d, current, function, active, current.loop_exit)
+        let cleaned = try lower_cleanup_exits(d, source_state, store, current, owner, function, active, statement.environment, current.loop_environment, 1)
+        if !cleaned.valid { return Ok(LowerFlowStep(state: cleaned, block: active, terminated: true)) }
+        let jumped = try lower_jump(d, cleaned, function, active, cleaned.loop_exit)
         return Ok(LowerFlowStep(state: jumped, block: active, terminated: true))
     }
     if statement.kind == 12 {
-        // continue: start the next iteration of the innermost enclosing loop.
+        // continue: run every registration this jump crosses, innermost first,
+        // then start the next iteration of the innermost enclosing loop.
         if current.loop_step == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
-        let jumped = try lower_jump(d, current, function, active, current.loop_step)
+        let cleaned = try lower_cleanup_exits(d, source_state, store, current, owner, function, active, statement.environment, current.loop_environment, 1)
+        if !cleaned.valid { return Ok(LowerFlowStep(state: cleaned, block: active, terminated: true)) }
+        let jumped = try lower_jump(d, cleaned, function, active, cleaned.loop_step)
         return Ok(LowerFlowStep(state: jumped, block: active, terminated: true))
     }
     if statement.kind == 4 {
         var value: U64 = 0
         if statement.expression != 0 {
-            let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+            let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
             let expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
             let retained = try lower_copy_result_storage(d, source_state, store, lowered.state, owner, function, active, statement.expression, expression.checked_type, lowered.id)
             current = retained.state
@@ -4428,26 +4483,26 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         return Ok(LowerFlowStep(state: lower_with_mir(current, term.store), block: active, terminated: true))
     }
     if statement.kind == 5 {
-        let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         current = lowered.state
         active = lower_open_block(current.mir, function, active)
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     if statement.kind == 6 {
-        return lower_block_statements(d, source_state, spans, store, current, owner, function, active, statement.body, panic_block)
+        return lower_block_statements(d, source_state, spans, store, current, owner, function, active, statement.body, panic_here, panic_env_here)
     }
     if statement.kind == 7 {
-        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         active = lower_open_block(condition.state.mir, function, active)
         let then_block = try lower_add_block(d, condition.state, function, "bb_then")
         let else_block = try lower_add_block(d, then_block.state, function, "bb_else")
         let join = try lower_add_block(d, else_block.state, function, "bb_join")
         current = try lower_branch(d, join.state, function, active, condition.id, then_block.id, else_block.id)
-        let then_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, then_block.id, statement.body, panic_block)
+        let then_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, then_block.id, statement.body, panic_here, panic_env_here)
         current = then_flow.state
         if !then_flow.terminated { current = try lower_jump(d, current, function, then_flow.block, join.id) }
         var else_flow = LowerFlowStep(state: current, block: else_block.id, terminated: false)
-        if statement.alternative != 0 { else_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, else_block.id, statement.alternative, panic_block) }
+        if statement.alternative != 0 { else_flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, else_block.id, statement.alternative, panic_here, panic_env_here) }
         current = else_flow.state
         if !else_flow.terminated { current = try lower_jump(d, current, function, else_flow.block, join.id) }
         if then_flow.terminated && else_flow.terminated {
@@ -4461,16 +4516,16 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let body = try lower_add_block(d, head.state, function, "bb_body")
         let join = try lower_add_block(d, body.state, function, "bb_join")
         current = try lower_jump(d, join.state, function, active, head.id)
-        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, head.id, statement.expression, statement.environment, panic_block)
+        let condition = try lower_expression(d, source_state, spans, store, current, owner, function, head.id, statement.expression, statement.environment, panic_here)
         let condition_block = lower_open_block(condition.state.mir, function, head.id)
         current = try lower_branch(d, condition.state, function, condition_block, condition.id, body.id, join.id)
-        let body_flow = try lower_block_statements(d, source_state, spans, store, lower_with_loop(current, join.id, head.id), owner, function, body.id, statement.body, panic_block)
+        let body_flow = try lower_block_statements(d, source_state, spans, store, lower_with_loop(current, join.id, head.id, statement.environment), owner, function, body.id, statement.body, panic_here, panic_env_here)
         current = body_flow.state
         if !body_flow.terminated { current = try lower_jump(d, current, function, body_flow.block, head.id) }
-        return Ok(LowerFlowStep(state: lower_with_loop(current, state.loop_exit, state.loop_step), block: join.id, terminated: false))
+        return Ok(LowerFlowStep(state: lower_with_loop(current, state.loop_exit, state.loop_step, state.loop_environment), block: join.id, terminated: false))
     }
     if statement.kind == 9 {
-        let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let sequence = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         let sequence_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
         let sequence_type = __s0_buffer_get(CheckedTypeRec, store.types, sequence_expression.checked_type - 1)
         if sequence_type.kind != 8 && sequence_type.kind != 15 && sequence_type.kind != 16 && sequence_type.kind != 17 && sequence_type.kind != 18 { return Ok(LowerFlowStep(state: lower_invalid(sequence.state), block: active, terminated: true)) }
@@ -4536,23 +4591,23 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         }
         let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
         let ref_value = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, "for_ref"), ref_type.type_id, mir_value_def_instruction(), body.id, lower_instruction_ordinal(ref_type.store, function, body.id) + 1)
-        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, index_sequence, index_param.id, panic_block, "")
+        let indexed = try lower_add_instr(d, lower_with_mir(elem.state, ref_value.store), function, body.id, mir_op_slice_index_checked(), ref_value.id, 0, 0, index_sequence, index_param.id, panic_here, "")
         let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref_value.id))
         let element_value = try lower_add_result(d, lower_with_mir(indexed.state, deref.store), function, body.id, elem_checked, source_state, store)
         let loaded = try lower_add_instr(d, element_value.state, function, body.id, mir_op_load(), element_value.id, deref.id, 0, 0, 0, 0, "")
         let copied = try lower_move_or_copy(d, source_state, spans, store, loaded.state, owner, function, body.id, statement.expression, elem_checked, element_value.id, statement.expression, 0)
         current = try lower_store_binding(d, copied.state, function, body.id, statement.binding, copied.id)
-        let body_flow = try lower_block_statements(d, source_state, spans, store, lower_with_loop(current, join.id, step.id), owner, function, body.id, statement.body, panic_block)
+        let body_flow = try lower_block_statements(d, source_state, spans, store, lower_with_loop(current, join.id, step.id, statement.environment), owner, function, body.id, statement.body, panic_here, panic_env_here)
         current = body_flow.state
         if !body_flow.terminated { current = try lower_jump(d, current, function, body_flow.block, step.id) }
         let one = try lower_int_value_seq(d, source_state, store, current, function, step.id, 1)
         let next = try lower_add_result(d, one.state, function, step.id, 9, source_state, store)
-        let added = try lower_add_instr(d, next.state, function, step.id, mir_op_int_add_checked(), next.id, 0, 0, index_param.id, one.id, panic_block, "")
+        let added = try lower_add_instr(d, next.state, function, step.id, mir_op_int_add_checked(), next.id, 0, 0, index_param.id, one.id, panic_here, "")
         current = try lower_jump_two(d, added.state, function, lower_open_block(added.state.mir, function, step.id), head.id, next.id, sequence_param.id)
-        return Ok(LowerFlowStep(state: lower_with_loop(current, state.loop_exit, state.loop_step), block: join.id, terminated: false))
+        return Ok(LowerFlowStep(state: lower_with_loop(current, state.loop_exit, state.loop_step, state.loop_environment), block: join.id, terminated: false))
     }
     if statement.kind == 10 {
-        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_block)
+        let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
         let empty = try __s0_buffer_new(U64, d)
         let scope_type = try mir_intern_type(d, current.mir, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
@@ -4602,7 +4657,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true))
 }
 
-fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64) -> Result(LowerFlowStep, __s0_Error) {
+fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64, panic_environment: U64) -> Result(LowerFlowStep, __s0_Error) {
     var current = state
     var active = block
     var at = lower_chain_len(store, link_id)
@@ -4621,7 +4676,7 @@ fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(Chec
             }
             if current.valid && link.statement != 0 && link.statement <= __s0_buffer_len(CheckedStatementRec, store.control.statements) {
                 let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, link.statement - 1)
-                next = try lower_one_statement(d, source_state, spans, store, current, owner, function, active, statement, link, panic_block)
+                next = try lower_one_statement(d, source_state, spans, store, current, owner, function, active, statement, link, panic_block, panic_environment)
             }
         }
         last = next
@@ -4967,7 +5022,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     }
     let root = lower_owner_lookup(state.roots, owner)
     if root == 0 { return Ok(lower_invalid(current)) }
-    let flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, entry.id, root, panic.id)
+    let flow = try lower_block_statements(d, source_state, spans, store, current, owner, function, entry.id, root, panic.id, 0)
     current = flow.state
     if !current.valid { return Ok(current) }
     if !flow.terminated {
@@ -6928,7 +6983,7 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
         plan_reasons = try __s0_buffer_append(U64, d, plan_reasons, 0)
         zero_at = zero_at + 1
     }
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons), reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0)
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons), reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0, loop_environment: 0)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)
