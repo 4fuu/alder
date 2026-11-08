@@ -278,9 +278,9 @@ func checkMatchValueNames(t *testing.T, module *mir.Module, functionName string,
 	joins, payloads := 0, 0
 	for _, value := range module.Functions[id].Values {
 		switch {
-		case strings.HasPrefix(value.Name, "__s0_match_join"):
+		case strings.HasPrefix(value.Name, "__alder_match_join"):
 			joins++
-		case strings.HasPrefix(value.Name, "__s0_match_payload"):
+		case strings.HasPrefix(value.Name, "__alder_match_payload"):
 			payloads++
 		case value.Name == "match" || strings.HasPrefix(value.Name, "match_payload") && value.Def.Kind != mir.ValueDefFuncParam:
 			t.Fatalf("%s retained colliding match value name %%%s", functionName, value.Name)
@@ -299,7 +299,7 @@ func checkExactMatchValueNames(t *testing.T, module *mir.Module, functionName st
 	}
 	var got []string
 	for _, value := range module.Functions[id].Values {
-		if strings.HasPrefix(value.Name, "__s0_match_join") || strings.HasPrefix(value.Name, "__s0_match_payload") {
+		if strings.HasPrefix(value.Name, "__alder_match_join") || strings.HasPrefix(value.Name, "__alder_match_payload") {
 			got = append(got, value.Name)
 		}
 	}
@@ -368,7 +368,7 @@ fn nested_match(match_value: Maybe, match_payload0: Maybe, match_payload4: U64) 
 	checkMatchValueNames(t, module, "repeated_matches", 2, 2)
 	checkMatchValueNames(t, module, "repeated_matches_again", 2, 2)
 	checkMatchValueNames(t, module, "nested_match", 2, 2)
-	checkExactMatchValueNames(t, module, "nested_match", []string{"__s0_match_payload10", "__s0_match_join3", "__s0_match_payload12", "__s0_match_join6"})
+	checkExactMatchValueNames(t, module, "nested_match", []string{"__alder_match_payload10", "__alder_match_join3", "__alder_match_payload12", "__alder_match_join6"})
 	runMatchNameCgenBehavior(t, module, exe, files)
 }
 
@@ -515,12 +515,12 @@ fn not_order() -> Bool {
 		return names
 	}
 	for _, id := range []mir.FunctionId{collision, collisionAgain, single} {
-		if got := blockParamNames(id); len(got) != 1 || got[0] != "__s0_short_5" {
-			t.Fatalf("single short-circuit join names = %v, want [__s0_short_5]", got)
+		if got := blockParamNames(id); len(got) != 1 || got[0] != "__alder_short_5" {
+			t.Fatalf("single short-circuit join names = %v, want [__alder_short_5]", got)
 		}
 	}
-	if got := blockParamNames(repeatedAnd); len(got) != 2 || got[0] != "__s0_short_5" || got[1] != "__s0_short_8" {
-		t.Fatalf("repeated short-circuit join names = %v, want [__s0_short_5 __s0_short_8]", got)
+	if got := blockParamNames(repeatedAnd); len(got) != 2 || got[0] != "__alder_short_5" || got[1] != "__alder_short_8" {
+		t.Fatalf("repeated short-circuit join names = %v, want [__alder_short_5 __alder_short_8]", got)
 	}
 	generated := runResourceCgenCompiler(t, exe, files, []string{"short.al"})
 	if second := runResourceCgenCompiler(t, exe, files, []string{"short.al"}); !bytes.Equal(generated, second) {
@@ -1533,7 +1533,7 @@ fn double_not_b(value: Bool) -> Bool { return !!value }
 				if param.Name == "not" {
 					t.Fatalf("unary-not join retained colliding param name %q", param.Name)
 				}
-				if strings.HasPrefix(param.Name, "__s0_not_join") {
+				if strings.HasPrefix(param.Name, "__alder_not_join") {
 					joins++
 				}
 			}
@@ -1547,12 +1547,12 @@ fn double_not_b(value: Bool) -> Bool { return !!value }
 	constNames := map[string]bool{}
 	for _, constant := range module.Constants {
 		switch {
-		case strings.HasPrefix(constant.Name, "__s0_not_true_"):
+		case strings.HasPrefix(constant.Name, "__alder_not_true_"):
 			truths++
-		case strings.HasPrefix(constant.Name, "__s0_not_false_"):
+		case strings.HasPrefix(constant.Name, "__alder_not_false_"):
 			falsities++
 		}
-		if strings.HasPrefix(constant.Name, "__s0_not_") {
+		if strings.HasPrefix(constant.Name, "__alder_not_") {
 			if constNames[constant.Name] {
 				t.Fatalf("duplicate unary-not constant name %q", constant.Name)
 			}

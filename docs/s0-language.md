@@ -21,7 +21,10 @@ There are currently two implementation profiles:
   only after complete V1–V10 verification; C generation also completes its
   supported-operation preflight before writing.
 
-Neither profile is a usable Alder 1.0 compiler.
+Neither profile is a usable Alder 1.0 compiler. The two profiles differ in one
+place: the Alder compiler registers a `using` in a loop body for that
+iteration's scope, while the frozen Go Stage 0 frontend still rejects the
+declaration, so the shared rejection fixture is exercised against Go only.
 
 ## Compilation model
 

@@ -198,6 +198,7 @@ func TestM75FieldReceiverQualification(t *testing.T) {
 			if cRepeat != cResult {
 				t.Fatalf("%s C changed across processes", program.name)
 			}
+			assertPublicMIR(t, program.name, mirText.stdout)
 			if strings.Contains(cResult.stdout, "__s0_") {
 				t.Fatalf("%s generated C exposes bootstrap names", program.name)
 			}

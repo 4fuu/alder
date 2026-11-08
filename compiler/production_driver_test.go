@@ -659,7 +659,7 @@ fn main() -> I32 {
 		t.Fatal("source-local MIR has no repeated function")
 	}
 	repeated := module.Functions[repeatedID]
-	wantNames := []string{"v", "__s0_local_1", "unique"}
+	wantNames := []string{"v", "__alder_local_1", "unique"}
 	if len(repeated.Locals) != len(wantNames) {
 		t.Fatalf("repeated locals = %+v, want names %v", repeated.Locals, wantNames)
 	}
@@ -889,6 +889,16 @@ int main(void) { int context = 0; %s return alder_program_entry(&context) == (in
 	linkGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
 	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
 		t.Fatalf("injected %s failure: %v\n%s", name, err, output)
+	}
+}
+
+// assertPublicMIR checks that generated MIR for an ordinary program carries no
+// bootstrap name. The exit contract covers MIR as well as C, and the lowering
+// names its internal joins, constants, payloads, and shadowed locals itself.
+func assertPublicMIR(t *testing.T, name, mirText string) {
+	t.Helper()
+	if strings.Contains(mirText, "__s0_") {
+		t.Fatalf("%s generated MIR exposes bootstrap names", name)
 	}
 }
 

@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `47a6f680cbecd688012825dbabb8b7631a992aaa84f15c6209808c583217fe52`
+  `f22bb8e3f2c7eeb7e3dafd50bb202d14ad7340cc5a2850cec471e2666722f6cd`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `47a6f680cbecd688012825dbabb8b7631a992aaa84f15c6209808c583217fe52`
+  `f22bb8e3f2c7eeb7e3dafd50bb202d14ad7340cc5a2850cec471e2666722f6cd`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1123,21 +1123,17 @@ Deferred from this half, with reasons:
 
 - `Table.try_insert`: needs a non-panicking MIR insert edge (fallible
   capacity policy) that the current table operations do not expose;
-- `Vec(Table(T))`: the phase-6 MIR verifier lifetime rule
-  (`lifetime_deref_store`) rejects storing a table handle through a deref
-  place, so heap-stored table elements await a storage decision; diagnostic
-  143 keeps the surface honest in the meantime;
 - suspending cleanup behavior: deferred to Milestone 9 as planned.
 
-Compile-time guardrails (cold `bootstrap/regenerate.sh`, 8-core host):
-2a96d07 2:08 / 3.78 GiB; sibling trait commits through `77437ec`
-2:18 / 4.10 GiB; resource-half tip `90dce35` 2:27 / 4.30 GiB. The peak is
-the stage-0 self-compile process itself (gcc on the emitted C peaks at
-0.85 GiB), and its growth is proportional to the compiler's own source
-(+11.5% across both halves), matching the pre-milestone record density
-(2.5-3.4 KB RSS per added source byte against a 2.5 KB baseline). No
-whole-store scan or copy amplification is present: the regenerator stays in
-its 2.5-minute class, far inside the 15-minute CI budget.
+Compile-time guardrails (cold `bootstrap/regenerate.sh`, one host, measured
+back to back): the pre-M7.5 tip `2a96d07` takes 159.25 s / 3.77 GB, and the
+integrated M7.5 tip `1cf2572` takes 216.20 s / 5.62 GB, so the milestone cost
++36% wall time and +49% peak RSS while the compiler sources grew from
+1,549,800 to 2,051,242 bytes (+32.4%). The peak is still the stage-0
+self-compile process itself, at 3.69 KiB RSS per added source byte against
+the pre-milestone band of 2.5-3.4. No whole-store scan or copy amplification
+is present: the regenerator stays in its 3.6-minute class, far inside the
+15-minute CI budget.
 
 Remaining before exit (as of the integration of both halves; the items below
 were added to or reshaped by the 2026-11 design amendment, which landed after
@@ -1396,7 +1392,12 @@ The following items are not part of the current implementation scope:
 - bit-reproducible native binaries without a pinned native toolchain;
 - dynamic trait objects and specialization;
 - detached fire-and-forget tasks;
-- generators, `gen` blocks, and callback sugar such as Gleam's `use`.
+- generators, `gen` blocks, and callback sugar such as Gleam's `use`;
+- `Vec(Table(T))` and other heap-stored table handles: the phase-6 MIR
+  verifier lifetime rule (`lifetime_deref_store`) rejects storing a table
+  handle through a deref place, so table elements await a storage decision.
+  No 1.0 sentence requires the composition, and diagnostic 143 keeps the
+  surface honest in the meantime.
 
 ## LLVM Reconsideration Gate
 

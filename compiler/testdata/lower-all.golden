@@ -75,9 +75,9 @@ const @lit29: u64 = 20
 
 const @lit32: u64 = 1
 
-const @__s0_not_true_7: bool = true
+const @__alder_not_true_7: bool = true
 
-const @__s0_not_false_7: bool = false
+const @__alder_not_false_7: bool = false
 
 const @lit35: i32 = 1
 
@@ -119,9 +119,9 @@ const @lit81: i32 = 1
 
 const @lit83: u64 = 81
 
-const @__s0_not_true_29: bool = true
+const @__alder_not_true_29: bool = true
 
-const @__s0_not_false_29: bool = false
+const @__alder_not_false_29: bool = false
 
 const @lit86: i32 = 2
 
@@ -303,9 +303,9 @@ const @lit363: u64 = 0
 
 const @lit369: u64 = 0
 
-const @__s0_not_true_121: bool = true
+const @__alder_not_true_121: bool = true
 
-const @__s0_not_false_121: bool = false
+const @__alder_not_false_121: bool = false
 
 const @lit376: u64 = 3
 
@@ -547,20 +547,20 @@ fn @option_value(%value: option(u64), %missing: u64) -> u64 {
 bb0:
   switch %value {
     none -> bb_match_arm3
-    some(%__s0_match_payload2) -> bb_match_arm4
+    some(%__alder_match_payload2) -> bb_match_arm4
   }
 
 bb_panic:
   panic
 
-bb_match_join2(%__s0_match_join3: u64):
-  return %__s0_match_join3
+bb_match_join2(%__alder_match_join3: u64):
+  return %__alder_match_join3
 
 bb_match_arm3:
   jump bb_match_join2(%missing)
 
 bb_match_arm4:
-  jump bb_match_join2(%__s0_match_payload2)
+  jump bb_match_join2(%__alder_match_payload2)
 }
 
 fn @map_bridge(%d: domain_handle) -> i32 {
@@ -594,15 +594,15 @@ bb_map_set_ok3:
   branch %v75, bb_not_false5, bb_not_true4
 
 bb_not_true4:
-  %v77 = const.get @__s0_not_true_7
+  %v77 = const.get @__alder_not_true_7
   jump bb_not_join6(%v77)
 
 bb_not_false5:
-  %v78 = const.get @__s0_not_false_7
+  %v78 = const.get @__alder_not_false_7
   jump bb_not_join6(%v78)
 
-bb_not_join6(%__s0_not_join7: bool):
-  branch %__s0_not_join7, bb_then7, bb_else8
+bb_not_join6(%__alder_not_join7: bool):
+  branch %__alder_not_join7, bb_then7, bb_else8
 
 bb_then7:
   %v79 = const.get @lit35
@@ -624,11 +624,11 @@ bb_map_set_ok10:
   %v86 = call @map_get_28(%v84, %v85)
   switch %v86 {
     none -> bb_match_arm12
-    some(%__s0_match_payload4) -> bb_match_arm13
+    some(%__alder_match_payload4) -> bb_match_arm13
   }
 
-bb_match_join11(%__s0_match_join12: u64):
-  store local %found, %__s0_match_join12
+bb_match_join11(%__alder_match_join12: u64):
+  store local %found, %__alder_match_join12
   %v90 = load local %found
   %v91 = const.get @lit47
   %v92 = int.ne %v90, %v91
@@ -639,7 +639,7 @@ bb_match_arm12:
   jump bb_match_join11(%v89)
 
 bb_match_arm13:
-  jump bb_match_join11(%__s0_match_payload4)
+  jump bb_match_join11(%__alder_match_payload4)
 
 bb_then14:
   %v93 = const.get @lit49
@@ -730,15 +730,15 @@ bb_join9:
   branch %v128, bb_not_false11, bb_not_true10
 
 bb_not_true10:
-  %v130 = const.get @__s0_not_true_29
+  %v130 = const.get @__alder_not_true_29
   jump bb_not_join12(%v130)
 
 bb_not_false11:
-  %v131 = const.get @__s0_not_false_29
+  %v131 = const.get @__alder_not_false_29
   jump bb_not_join12(%v131)
 
-bb_not_join12(%__s0_not_join13: bool):
-  branch %__s0_not_join13, bb_then13, bb_else14
+bb_not_join12(%__alder_not_join13: bool):
+  branch %__alder_not_join13, bb_then13, bb_else14
 
 bb_then13:
   %v132 = const.get @lit86
@@ -1149,23 +1149,23 @@ bb_try_ok18:
   %v306 = const.get @lit249
   %v307 = call @buffer_append_27(%d, %v305, %v306)
   switch %v307 {
-    ok(%__s0_match_payload5) -> bb_match_arm21
-    err(%__s0_match_payload6) -> bb_match_arm22
+    ok(%__alder_match_payload5) -> bb_match_arm21
+    err(%__alder_match_payload6) -> bb_match_arm22
   }
 
 bb_try_err19:
   %v304 = enum.construct result(u64, @__s0_Error), err, %try_err246
   fail %v304
 
-bb_match_join20(%__s0_match_join21: u64):
-  store local %attempt, %__s0_match_join21
+bb_match_join20(%__alder_match_join21: u64):
+  store local %attempt, %__alder_match_join21
   %v313 = load local %attempt
   %v314 = const.get @lit256
   %v315 = int.ne %v313, %v314
   branch %v315, bb_then23, bb_else24
 
 bb_match_arm21:
-  %v311 = call @buffer_len_27(%__s0_match_payload5)
+  %v311 = call @buffer_len_27(%__alder_match_payload5)
   jump bb_match_join20(%v311)
 
 bb_match_arm22:
@@ -1495,8 +1495,8 @@ bb_short_const3:
   %v415 = const.get @lit.bool340
   jump bb_short_join4(%v415)
 
-bb_short_join4(%__s0_short_5: bool):
-  return %__s0_short_5
+bb_short_join4(%__alder_short_5: bool):
+  return %__alder_short_5
 }
 
 fn @sum(%values: slice(u64)) -> u64 {
@@ -1591,21 +1591,21 @@ fn @choose(%value: @Maybe) -> u64 {
 bb0:
   switch %value {
     None -> bb_match_arm3
-    Some(%__s0_match_payload8) -> bb_match_arm4
+    Some(%__alder_match_payload8) -> bb_match_arm4
   }
 
 bb_panic:
   panic
 
-bb_match_join2(%__s0_match_join3: u64):
-  return %__s0_match_join3
+bb_match_join2(%__alder_match_join3: u64):
+  return %__alder_match_join3
 
 bb_match_arm3:
   %v450 = const.get @lit363
   jump bb_match_join2(%v450)
 
 bb_match_arm4:
-  jump bb_match_join2(%__s0_match_payload8)
+  jump bb_match_join2(%__alder_match_payload8)
 }
 
 fn @scalar(%pair: @Pair, %values: slice(u64), %flag: bool) -> u64 {
@@ -1627,15 +1627,15 @@ bb_panic:
   panic
 
 bb_not_true2:
-  %v461 = const.get @__s0_not_true_121
+  %v461 = const.get @__alder_not_true_121
   jump bb_not_join4(%v461)
 
 bb_not_false3:
-  %v462 = const.get @__s0_not_false_121
+  %v462 = const.get @__alder_not_false_121
   jump bb_not_join4(%v462)
 
-bb_not_join4(%__s0_not_join5: bool):
-  branch %__s0_not_join5, bb_then5, bb_else6
+bb_not_join4(%__alder_not_join5: bool):
+  branch %__alder_not_join5, bb_then5, bb_else6
 
 bb_then5:
   %v463 = load local %called

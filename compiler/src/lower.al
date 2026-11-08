@@ -3616,16 +3616,16 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let false_block = try lower_add_block(d, true_block.state, function, "bb_not_false")
             let join = try lower_add_block(d, false_block.state, function, "bb_not_join")
             let typ = try lower_type(d, source_state, store, join.state, expression.checked_type)
-            let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_not_join", join.id), typ.id)
+            let param = try mir_add_block_param(d, typ.state.mir, function, join.id, 0, try lower_decimal_name(d, "__alder_not_join", join.id), typ.id)
             var current = lower_with_mir(typ.state, param.store)
             current = try lower_branch(d, current, function, source_block, left.id, false_block.id, true_block.id)
             // Constants are module-scoped, so key unary Boolean constants by the
             // store-const count rather than expression ids: nested or adjacent
             // unaries reuse the same expression_id offsets and would collide.
             let bool_suffix = __s0_buffer_len(MirConstRec, current.mir.constants) + 1
-            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, "__s0_not_true_", bool_suffix)
+            let truth = try lower_bool_value(d, source_state, store, current, function, true_block.id, expression.checked_type, 1, "__alder_not_true_", bool_suffix)
             current = try lower_jump_value(d, truth.state, function, true_block.id, join.id, truth.id)
-            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, "__s0_not_false_", bool_suffix)
+            let falsity = try lower_bool_value(d, source_state, store, current, function, false_block.id, expression.checked_type, 0, "__alder_not_false_", bool_suffix)
             current = try lower_jump_value(d, falsity.state, function, false_block.id, join.id, falsity.id)
             return Ok(LowerStep(state: current, id: param.id))
         }
@@ -3636,7 +3636,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let constant_block = try lower_add_block(d, right_block.state, function, "bb_short_const")
             let join = try lower_add_block(d, constant_block.state, function, "bb_short_join")
             let result_type = try lower_type(d, source_state, store, join.state, expression.checked_type)
-            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_short_", join.id), result_type.id)
+            let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__alder_short_", join.id), result_type.id)
             var current = lower_with_mir(result_type.state, param.store)
             if expression.operator == 16 { current = try lower_branch(d, current, function, source_block, left.id, right_block.id, constant_block.id) }
             if expression.operator == 17 { current = try lower_branch(d, current, function, source_block, left.id, constant_block.id, right_block.id) }
@@ -3991,7 +3991,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let source_block = lower_open_block(scrutinee.state.mir, function, block)
         let join = try lower_add_block(d, scrutinee.state, function, "bb_match_join")
         let result_type = try lower_type(d, source_state, store, join.state, checked.checked_type)
-        let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__s0_match_join", join.id), result_type.id)
+        let join_param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__alder_match_join", join.id), result_type.id)
         var current = lower_with_mir(result_type.state, join_param.store)
         // A guarded arm enters through its own test block; an unguarded arm
         // enters its body block directly. Arms of one variant form a
@@ -4037,7 +4037,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 if arm.binding != 0 {
                     let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
                     let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
-                    let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__s0_match_payload", checked.first_arm + case_ordinal), payload_type.id, mir_value_def_switch_case(), source_block, case_ordinal + 1)
+                    let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__alder_match_payload", checked.first_arm + case_ordinal), payload_type.id, mir_value_def_switch_case(), source_block, case_ordinal + 1)
                     current = lower_with_mir(payload_type.state, value.store)
                     binding_value = value.id
                     let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
@@ -4107,7 +4107,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 }
                 if !flow.terminated {
                     let unit_suffix = __s0_buffer_len(MirConstRec, current.mir.constants) + 1
-                    let unit_name = try lower_decimal_name(d, "__s0_match_unit", unit_suffix)
+                    let unit_name = try lower_decimal_name(d, "__alder_match_unit", unit_suffix)
                     let unit_const = try mir_add_const(d, current.mir, unit_name, mir_type_unit(), mir_const_unit(), 0, 0, 0, "")
                     let unit_result = try lower_add_typed_result(d, lower_with_mir(current, unit_const.store), function, flow.block, mir_type_unit())
                     let unit_instr = try lower_add_instr(d, unit_result.state, function, flow.block, mir_op_const_get(), unit_result.id, 0, 0, 0, 0, 0, unit_name)
@@ -4888,7 +4888,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
         let typ = try lower_local_type(d, source_state, store, current, owner, binding, local)
         current = typ.state
         var name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
-        if local.kind != 1 && lower_local_name_seen(source_state, store, locals, start, at, local) { name = try lower_decimal_name(d, "__s0_local_", local_ordinal) }
+        if local.kind != 1 && lower_local_name_seen(source_state, store, locals, start, at, local) { name = try lower_decimal_name(d, "__alder_local_", local_ordinal) }
         var is_capture = false
         if closure_site != 0 && local.kind == 1 && checked_params_seen >= declared_params { is_capture = true }
         if is_capture {
