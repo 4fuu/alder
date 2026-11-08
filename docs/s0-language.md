@@ -165,9 +165,13 @@ work in progress:
   snapshots taken at creation: captures resolve as hidden trailing
   immutable parameters of a compiler-generated thunk function, so writes to
   a capture are rejected as writes to an immutable binding, and only
-  storage-free ordinary values (primitives and records/enums/options of
-  primitives) may be captured while environments are lowered as plain
-  domain-allocated records. The thunk ABI is `(declared parameters, opaque
+  ordinary snapshot values may be captured: primitives, `String`, `Bytes`,
+  arrays, `Vec(T)`, `Map(K, V)`, `Set(T)`, records and enums over them, and
+  function values. A storage-backed capture is copied into the environment's
+  domain at creation and deep-copied into a destination domain when the
+  closure escapes, and function-valued captures are retained recursively.
+  Affine owners and scoped capabilities (slices and views) are still
+  rejected. The thunk ABI is `(declared parameters, opaque
   environment pointer)`; capture-free closures are plain function values.
 - A literal nested inside another literal captures transitively: the outer
   environment carries every value the inner body reads, including values the
@@ -177,7 +181,10 @@ work in progress:
   inside a `while` loop is carried by the immutable environment snapshot.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
-  with diagnostic 147.
+  with diagnostic 147; capturing a scoped capability (a slice or view) is
+  rejected with diagnostic 145 until escape-proving capture lands, and a
+  closure with no captures whose body allocates storage still needs an
+  environment domain.
 
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.

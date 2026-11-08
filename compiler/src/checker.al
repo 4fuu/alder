@@ -55,10 +55,10 @@ type ClosureSiteRec {
     declared_count: U64
     capture_count: U64
     first_capture: U64
-    // 1 when the literal's body contains another closure literal. Such a
-    // site carries the domain its environment lives in, so the thunk body
-    // can allocate a nested environment in the same domain.
-    nests: U64
+    // 1 when the environment records the domain that owns it: the literal's
+    // body contains another literal, or a capture carries storage the thunk
+    // may copy or allocate in that domain.
+    carrier: U64
 }
 
 type ClosureCaptureRec {
@@ -4869,8 +4869,38 @@ fn callee_link_id(parse: ParseStore, call: SyntaxRec) -> U64 { return call_link_
 // environment record without carrying storage provenance across the
 // function-value boundary. Storage-backed captures (Vec, String, Bytes,
 // function values) wait for the runtime-backed environment work.
+// A capture is an independent snapshot of an ordinary value. Strings, bytes,
+// vectors, collections, records, options, results, arrays, table ids, and
+// function values qualify; affine owners and scoped capabilities do not,
+// because their identity or storage cannot be duplicated.
 fn closure_capture_copyable(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
-    return ordered_value_storage_free(store, checked_type, depth)
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 3 || checked.kind == 19 { return false }
+    if checked.kind == 4 || checked.kind == 8 || checked.kind == 12 || checked.kind == 18 || checked.kind == 21 || checked.kind == 22 { return false }
+    if checked.kind == 6 { return false }
+    if checked.kind == 1 || checked.kind == 2 || checked.kind == 5 || checked.kind == 14 || checked.kind == 16 || checked.kind == 20 || checked.kind == 25 { return true }
+    if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 || checked.kind == 13 || checked.kind == 15 || checked.kind == 17 || checked.kind == 23 || checked.kind == 24 {
+        if checked.arg_count != 0 && (checked.first_arg == 0 || checked.first_arg - 1 + checked.arg_count > __s0_buffer_len(U64, store.type_args)) { return false }
+        var child: U64 = 0
+        while child < checked.arg_count {
+            if !closure_capture_copyable(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), depth + 1) { return false }
+            child = child + 1
+        }
+        return true
+    }
+    if checked.kind != 7 { return false }
+    // A nominal type that implements Cleanup is an affine owner.
+    if type_cleanup_impls(store, checked.target) != 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if !closure_capture_copyable(store, use.checked_type, depth + 1) { return false }
+        }
+        at = at + 1
+    }
+    return true
 }
 
 // Collected captures: enclosing-owner locals in first-reference order, with
@@ -4907,6 +4937,33 @@ fn closure_nests(parse: ParseStore, link_id: U64) -> Bool {
     if node.kind == 58 { return true }
     if closure_nests(parse, node.children) { return true }
     return closure_nests(parse, link.next)
+}
+
+// closure_capture_needs_domain reports whether a captured value carries
+// storage the thunk may copy or allocate in the environment's domain.
+fn closure_capture_needs_domain(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 17 || checked.kind == 23 || checked.kind == 24 || checked.kind == 11 || checked.kind == 13 { return true }
+    if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 {
+        if checked.arg_count != 0 && (checked.first_arg == 0 || checked.first_arg - 1 + checked.arg_count > __s0_buffer_len(U64, store.type_args)) { return false }
+        var child: U64 = 0
+        while child < checked.arg_count {
+            if closure_capture_needs_domain(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + child), depth + 1) { return true }
+            child = child + 1
+        }
+        return false
+    }
+    if checked.kind != 7 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            if closure_capture_needs_domain(store, use.checked_type, depth + 1) { return true }
+        }
+        at = at + 1
+    }
+    return false
 }
 
 // Collect the closure's captures: word nodes under the body that resolve to
@@ -5190,9 +5247,15 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     let first_capture = __s0_buffer_len(ClosureCaptureRec, current.closures.captures) + 1
     let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: closure_prior, syntax: closure_syntax, kind: 24, checked_type: fn_type, parameter_use: site_index, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
     let expression_record = __s0_buffer_len(CheckedExprRec, expressions)
-    var nests: U64 = 0
-    if closure_nests(parse, node.children) { nests = 1 }
-    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture, nests: nests))
+    var carrier: U64 = 0
+    if closure_nests(parse, node.children) { carrier = 1 }
+    var carrier_at: U64 = 0
+    while carrier_at < __s0_buffer_len(U64, found) {
+        let carrier_binding = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(U64, found, carrier_at) - 1)
+        if closure_capture_needs_domain(store, carrier_binding.checked_type, 0) { carrier = 1 }
+        carrier_at = carrier_at + 1
+    }
+    let sites = try __s0_buffer_append(ClosureSiteRec, d, current.closures.sites, ClosureSiteRec(owner: symbol_id, expression: expression_record, declared_count: declared, capture_count: __s0_buffer_len(U64, found), first_capture: first_capture, carrier: carrier))
     let with_closures = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: ClosureStoreRec(sites: sites, captures: captures))
     return expr_draft(with_closures, fn_type, expression_record)
 }

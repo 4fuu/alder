@@ -1462,6 +1462,7 @@ fn mir_v6_loop_carry_owner_walk(store: MirStore, indexes: MirVIndexes, seen: __s
     let checked = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
     let kind = checked.kind
     if kind == mir_type_kind_slice() || kind == mir_type_kind_safe_ref() || kind == mir_type_kind_safe_mut() || kind == mir_type_kind_domain_handle() || kind == mir_type_kind_domain_mark() || kind == mir_type_kind_table() || kind == mir_type_kind_table_view() || kind == mir_type_kind_table_mut_view() || kind == mir_type_kind_raw_ptr() || kind == mir_type_kind_cleanup_scope() || kind == mir_type_kind_cleanup_id() { return Ok(false) }
+    let env_record = mir_v6_env_record(store, indexes, type_id)
     if checked.elem != 0 {
         if !(try mir_v6_loop_carry_owner_seen(store, indexes, seen, stamp, checked.elem)) { return Ok(false) }
     }
@@ -1478,7 +1479,15 @@ fn mir_v6_loop_carry_owner_walk(store: MirStore, indexes: MirVIndexes, seen: __s
         if part_id != 0 && part_id <= __s0_buffer_len(MirTypePartRec, store.type_parts) {
             let rec = __s0_buffer_get(MirTypePartRec, store.type_parts, part_id - 1)
             if rec.part_type != 0 {
-                if !(try mir_v6_loop_carry_owner_seen(store, indexes, seen, stamp, rec.part_type)) { return Ok(false) }
+                // A closure environment record's domain field names the
+                // domain that owns the record, not a borrowed capability.
+                var domain_field = false
+                if env_record && rec.part_type <= __s0_buffer_len(MirTypeRec, store.types) {
+                    if __s0_buffer_get(MirTypeRec, store.types, rec.part_type - 1).kind == mir_type_kind_domain_handle() { domain_field = true }
+                }
+                if !domain_field {
+                    if !(try mir_v6_loop_carry_owner_seen(store, indexes, seen, stamp, rec.part_type)) { return Ok(false) }
+                }
             }
         }
         part = part + 1

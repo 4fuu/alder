@@ -182,6 +182,25 @@ func (g *gen) analyze() error {
 						copySet = make(map[mir.TypeId]bool)
 					}
 					g.collectCopyTypes(t, copySet)
+				case mir.OpFnValue:
+					// The environment retain hook deep-copies a
+					// storage-bearing capture through its per-type copy
+					// helper, so those helpers must exist even when no
+					// copy_to_domain instruction names the type.
+					if t := g.fnEnvAggregate(f, in.A); t != 0 {
+						for _, fld := range g.m.Types[t].Fields {
+							if !g.m.ValidType(fld.Type) || g.m.Types[fld.Type].Kind == mir.TypeDomainHandle || g.copyTrivial(fld.Type) {
+								continue
+							}
+							if err := g.requireCopyable(fld.Type); err != nil {
+								return err
+							}
+							if copySet == nil {
+								copySet = make(map[mir.TypeId]bool)
+							}
+							g.collectCopyTypes(fld.Type, copySet)
+						}
+					}
 				case mir.OpVecGrowChecked:
 					t, ok := f.ValueType(in.Slice)
 					if !ok || !g.m.ValidType(t) {
@@ -776,6 +795,14 @@ func (g *gen) emitEnvRetain(b *strings.Builder, t mir.TypeId) {
 				field + ".env = " + field + ".retain(alder_d, " + field + ".env); }\n")
 		case mir.TypeDomainHandle:
 			b.WriteString("  " + field + " = alder_d;\n")
+		default:
+			// A storage-bearing capture is deep-copied into the destination
+			// domain, and any function inside it is retained by the
+			// recursive copy.
+			if !g.copyTrivial(fld.Type) {
+				b.WriteString("  " + field + " = " + g.copyCall(fld.Type) +
+					"(alder_d, alder_src->alder_f" + strconv.Itoa(i) + ", 1);\n")
+			}
 		}
 	}
 	b.WriteString("  return alder_dst;\n}\n")

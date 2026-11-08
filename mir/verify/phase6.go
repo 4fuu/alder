@@ -875,7 +875,7 @@ func loopKeyKilled(f *mir.Function, info []domainInfo, reaches func(from, to mir
 // conservative loop rules: views alias memory owned elsewhere and are
 // lexically scoped by design, and handles are the resource discipline
 // itself.
-func loopCarryOwnerType(m *mir.Module, t mir.TypeId) bool {
+func loopCarryOwnerType(m *mir.Module, t mir.TypeId, envRecords map[mir.TypeId]bool) bool {
 	if int(t) >= len(m.Types) {
 		return true
 	}
@@ -912,6 +912,12 @@ func loopCarryOwnerType(m *mir.Module, t mir.TypeId) bool {
 			}
 			for _, field := range m.Types[t].Fields {
 				if field.Type != 0 {
+					// A closure environment record's domain field names the
+					// domain that owns the record, not a borrowed capability,
+					// so the record is still an owning value.
+					if envRecords[t] && m.Types[field.Type].Kind == mir.TypeDomainHandle {
+						continue
+					}
 					if !walk(field.Type) {
 						return false
 					}
@@ -1077,6 +1083,7 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 	// same-cycle test because it has no loop header to hand.
 	dom := dominators(f)
 	var errs []Error
+	envRecords := closureEnvRecords(m)
 	kills := collectLoopKills(f, effects)
 	reachesFor := func(from, to mir.BlockId) bool {
 		if int(from) >= len(f.Blocks) || int(to) >= len(f.Blocks) {
@@ -1114,7 +1121,7 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 						carriedType := f.Values[args[v.Def.Param]].Type
 						if envSnapshotType(m, carriedType) {
 							dies = loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param], true)
-						} else if loopCarryOwnerType(m, carriedType) {
+						} else if loopCarryOwnerType(m, carriedType, envRecords) {
 							dies = loopValueDies(f, info, reachesFor, kills, dom, mir.BlockId(bi), mir.BlockId(bi), args[v.Def.Param], false)
 						}
 					}
@@ -1134,7 +1141,7 @@ func rejectLoopCarriedLocals(m *mir.Module, f *mir.Function, info []domainInfo, 
 			if in.Op != mir.OpStore || int(in.StoreVal) >= len(info) || !hasLocalDomainProvenance(info[in.StoreVal]) {
 				continue
 			}
-			if !loopCarryOwnerType(m, f.Values[in.StoreVal].Type) {
+			if !loopCarryOwnerType(m, f.Values[in.StoreVal].Type, envRecords) {
 				// Capability-typed values keep the original conservative
 				// exemption: parameter-domain ownership with no destroying
 				// effect anywhere in the function.

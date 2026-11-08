@@ -363,7 +363,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" is used with the wrong argument shape") }
     if kind == 145 { if !out_string("closure capture ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
-        return out_string(" is not snapshot-copyable; captures are ordinary copyable values or function values") }
+        return out_string(" is not an ordinary snapshot value; affine owners and scoped capabilities cannot be captured, while strings, bytes, vectors, collections, records over them, and function values can") }
     if kind == 147 { if !out_string("closure ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" has an unsupported shape; annotate parameter types and give a body") }
     if kind == 130 { return out_string("table element type is not concrete copyable data") }

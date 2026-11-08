@@ -999,8 +999,13 @@ Exit-criteria evidence (in progress):
   read-only snapshots of enclosing `let`/`var` locals ride a
   compiler-generated thunk (captures are the thunk's hidden trailing
   immutable parameters, so writes to captures are rejected as parameter
-  immutability and capture types are gated to storage-free ordinary
-  values, diagnostic 145; malformed shapes are rejected with 147). The
+  immutability. Captures are ordinary snapshot values: primitives, `String`,
+  `Bytes`, arrays, `Vec(T)`, `Map(K, V)`, `Set(T)`, records and enums over
+  them, and function values; a storage-backed capture is copied into the
+  environment's domain at creation and deep-copied into the destination
+  domain when the closure escapes, and function-valued captures are retained
+  recursively. Affine owners and scoped capabilities are rejected with
+  diagnostic 145, and malformed shapes with 147. The
   environment is one domain-allocated record per closure built through
   `aggregate.construct` plus `copy_to_domain`, so creation stays inside the
   verifier loop-store rule's domain-provenance discipline; thunks take no
@@ -1166,7 +1171,16 @@ both halves were written):
   created inside a `while` loop carries its immutable environment snapshot
   across the backedge, and an escaping closure is retained into its
   destination domain by the `copy_to_domain` retain hook, so chains of
-  returns and closures carried in vectors or records stay valid.
+  returns and closures carried in vectors or records stay valid. Captures of
+  ordinary storage-backed values and function values snapshot and retain
+  correctly.
+- remaining closure capture limits, deliberately rejected rather than
+  miscompiled: capturing a scoped capability (a slice or a view) still
+  rejects with diagnostic 145, because proving that the closure does not
+  escape is not implemented and a captured view would alias storage whose
+  scope ends before the closure's lifetime; a closure with no captures whose
+  body allocates storage also still needs an environment domain, since a
+  capture-free closure carries no environment record to hold one.
 - `mut self` receivers on a field place are not implemented:
   `b.items.push(x)` rejects with 101 and `b.items[i] = x` with "invalid
   assignment target", although the frozen `core.collection` snapshot

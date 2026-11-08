@@ -345,6 +345,158 @@ fn main() -> I32 {
 }
 `
 
+// Captures of ordinary storage-backed values are independent snapshots. The
+// closure sees the length, map entry, and record element it captured even
+// after the source is mutated, each call follows an intervening allocation,
+// and the shapes cover a closure returned through two levels, a closure
+// stored in a vector inside a loop with a per-iteration capture, a closure
+// capturing another closure, and a captured string.
+const m75CaptureSnapshotProgram = `type Holder {
+    items: Vec(U64)
+}
+fn one(seed: U64) -> Vec(U64) {
+    var v = Vec.new(U64)
+    v.push(seed)
+    return v
+}
+fn zero() -> U64 { return 0 }
+fn ignore(s: String) -> U64 { return 0 }
+fn snapshot_vec(seed: U64) -> fn() -> U64 {
+    var v = Vec.new(U64)
+    v.push(seed)
+    let f = fn() -> U64 { return v.len() }
+    v.push(seed + 1)
+    return f
+}
+fn snapshot_map(seed: U64) -> fn() -> U64 {
+    var m = Map.new(String, U64)
+    m.insert("a", seed)
+    let f = fn() -> U64 {
+        let found = m.get("a")
+        return match found {
+            Some(x) => x
+            None => 0
+        }
+    }
+    m.insert("a", seed + 1)
+    return f
+}
+fn snapshot_holder(seed: U64) -> fn() -> U64 {
+    let h = Holder(items: one(seed))
+    let f = fn() -> U64 {
+        let found = h.items.get(0)
+        return match found {
+            Some(x) => x
+            None => 0
+        }
+    }
+    return f
+}
+fn snapshot_string(s: String) -> fn() -> String {
+    let f = fn() -> String { return s }
+    return f
+}
+fn captured_closure(seed: U64) -> fn(U64) -> U64 {
+    let inner = fn(x: U64) => x + seed
+    let outer = fn(x: U64) => inner(x) + 1
+    return outer
+}
+fn two_levels(seed: U64) -> fn() -> U64 {
+    let f = snapshot_vec(seed)
+    var pad = Vec.new(U64)
+    var i: U64 = 0
+    while i < 8 {
+        pad.push(i)
+        i = i + 1
+    }
+    return f
+}
+fn loop_closures(base: U64) -> Vec(fn() -> U64) {
+    var fns = Vec.new(fn() -> U64)
+    var i: U64 = 0
+    while i < 3 {
+        var v = Vec.new(U64)
+        v.push(base + i)
+        let f = fn() -> U64 {
+            let found = v.get(0)
+            return match found {
+                Some(x) => x
+                None => 0
+            }
+        }
+        fns.push(f)
+        v.push(99)
+        i = i + 1
+    }
+    return fns
+}
+fn main() -> I32 {
+    let a = snapshot_vec(3)
+    var pad_a = Vec.new(U64)
+    var i: U64 = 0
+    while i < 64 {
+        pad_a.push(1)
+        i = i + 1
+    }
+    if a() != 1 { return 1 }
+    let b = snapshot_map(4)
+    var pad_b = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_b.push(2)
+        i = i + 1
+    }
+    if b() != 4 { return 2 }
+    let h = snapshot_holder(5)
+    var pad_c = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_c.push(3)
+        i = i + 1
+    }
+    if h() != 5 { return 3 }
+    let s = snapshot_string("hello")
+    let t = s()
+    if ignore(t) != 0 { return 4 }
+    let c = captured_closure(6)
+    var pad_d = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_d.push(4)
+        i = i + 1
+    }
+    if c(1) != 8 { return 5 }
+    let d = two_levels(7)
+    var pad_e = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_e.push(5)
+        i = i + 1
+    }
+    if d() != 1 { return 6 }
+    let fns = loop_closures(10)
+    var pad_f = Vec.new(U64)
+    i = 0
+    while i < 64 {
+        pad_f.push(6)
+        i = i + 1
+    }
+    var total: U64 = 0
+    var k: U64 = 0
+    while k < fns.len() {
+        let found = fns.get(k)
+        let g = match found {
+            Some(x) => x
+            None => zero
+        }
+        total = total + g()
+        k = k + 1
+    }
+    if total != 33 { return 7 }
+    return 0
+}
+`
+
 func TestM75ClosureProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -369,6 +521,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 		{"m75-retain-chains", m75RetainChainProgram},
 		{"m75-retain-containers", m75RetainContainerProgram},
 		{"m75-nested-closures", m75NestedClosureProgram},
+		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {
@@ -456,6 +609,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 		{"m75-retain-chains", m75RetainChainProgram},
 		{"m75-retain-containers", m75RetainContainerProgram},
 		{"m75-nested-closures", m75NestedClosureProgram},
+		{"m75-capture-snapshots", m75CaptureSnapshotProgram},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

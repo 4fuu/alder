@@ -397,14 +397,13 @@ fn lower_closure_env_type(d: Domain, source_state: State, store: CheckStore, sta
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
     let named = try mir_add_named_type(d, state.mir, mir_type_kind_aggregate(), try lower_decimal_name(d, "AlderClosureEnv_", site.owner))
     var current = lower_with_mir(state, named.store)
-    // One field per capture, named after the captured binding. Captures are
-    // storage-free snapshots, so the record holds plain values. A literal
-    // whose body contains another literal records the domain the record
-    // lives in first, so the thunk body can allocate a nested environment in
-    // the same domain; the retain hook rewrites that field when the record
-    // moves to another domain.
+    // One field per capture, named after the captured binding. A record
+    // whose thunk may copy or allocate storage, or whose body contains
+    // another literal, records the domain it lives in first; the thunk uses
+    // it as its active and result domain, and the retain hook rewrites it
+    // when the record moves to another domain.
     var field_ordinal: U64 = 0
-    if site.nests == 1 {
+    if site.carrier == 1 {
         let domain_type = try lower_domain_mir_type(d, current)
         current = domain_type.state
         current = lower_with_mir(current, try mir_add_type_part(d, current.mir, mir_type_part_field(), named.type_id, 0, "alder_env_domain", domain_type.id))
@@ -482,7 +481,7 @@ fn lower_has_storage(store: CheckStore) -> Bool {
     var site_at: U64 = 0
     while site_at < __s0_buffer_len(ClosureSiteRec, store.closures.sites) {
         let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, site_at)
-        if site.capture_count != 0 || site.nests == 1 { return true }
+        if site.capture_count != 0 || site.carrier == 1 { return true }
         site_at = site_at + 1
     }
     var at: U64 = 0
@@ -1910,6 +1909,72 @@ fn lower_mir_type_copy_relocatable(d: Domain, store: MirStore, root: U64) -> Res
         at = at + 1
     }
     return Ok(true)
+}
+
+// lower_mir_type_has_reference reports whether a value of this type holds
+// storage through a reference, slice, vector, or table anywhere.
+fn lower_mir_type_has_reference(d: Domain, store: MirStore, root: U64) -> Bool {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    if root < 1 || root > count { return false }
+    var seen = __s0_alloc(U64, d, count + 1)
+    var zero: U64 = 0
+    while zero <= count { seen[zero] = 0
+        zero = zero + 1 }
+    var work = __s0_alloc(U64, d, count + 1)
+    var total: U64 = 1
+    work[0] = root
+    var at: U64 = 0
+    while at < total {
+        let id = work[at]
+        if id >= 1 && id <= count && seen[id] == 0 {
+            seen[id] = 1
+            let typ = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+            if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_table() { return true }
+            if typ.elem != 0 && total < count { work[total] = typ.elem
+                total = total + 1 }
+            if typ.ok_type != 0 && total < count { work[total] = typ.ok_type
+                total = total + 1 }
+            if typ.err_type != 0 && total < count { work[total] = typ.err_type
+                total = total + 1 }
+            if typ.result_type != 0 && total < count { work[total] = typ.result_type
+                total = total + 1 }
+            var part_at: U64 = 0
+            while part_at < __s0_buffer_len(MirTypePartRec, store.type_parts) && total < count {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, part_at)
+                if part.owner == id && part.part_type != 0 { work[total] = part.part_type
+                    total = total + 1 }
+                part_at = part_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// lower_capture_storage_copy materializes a storage-bearing capture in the
+// environment's domain when the capture path did not already copy it: the
+// vector copy handles vector-based types, and the bootstrap map and buffer
+// records carry references instead.
+fn lower_capture_storage_copy(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, checked_type)
+    if !typ.state.valid { return Ok(typ) }
+    let vec = try lower_mir_type_contains_vec(d, typ.state, typ.id)
+    if !vec.state.valid { return Ok(LowerStep(state: vec.state, id: 0)) }
+    if vec.value { return Ok(LowerStep(state: vec.state, id: value)) }
+    if !lower_mir_type_has_reference(d, vec.state.mir, typ.id) { return Ok(LowerStep(state: vec.state, id: value)) }
+    let domain = lower_storage_domain_value(vec.state, store, owner, expression_id)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(vec.state), id: 0)) }
+    let result = try lower_add_typed_result(d, vec.state, function, block, typ.id)
+    let copied = try lower_add_instr(d, result.state, function, block, mir_op_copy_to_domain(), result.id, 0, 0, domain, value, 0, "")
+    var current = copied.state
+    if expression_id != 0 && expression_id <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let site = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+        if site.syntax != 0 && site.syntax <= __s0_buffer_len(CheckedSpanRec, spans) {
+            let span = __s0_buffer_get(CheckedSpanRec, spans, site.syntax - 1)
+            current = try lower_add_copy_report(d, current, owner, span.source, span.start, span.end, 0, 2)
+        }
+    }
+    return Ok(LowerStep(state: current, id: result.id))
 }
 
 fn lower_copy_if_vec(d: Domain, source_state: State, store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, checked_type: U64, value: U64) -> Result(LowerStep, __s0_Error) {
@@ -3388,7 +3453,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if !fn_type.state.valid { return Ok(fn_type) }
         var current = fn_type.state
         var env_value: U64 = 0
-        if site.capture_count != 0 || site.nests == 1 {
+        if site.capture_count != 0 || site.carrier == 1 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type) }
             current = env_type.state
@@ -3410,6 +3475,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let capture = __s0_buffer_get(ClosureCaptureRec, store.closures.captures, site.first_capture - 1 + ordinal)
                 let local = __s0_buffer_get(LocalRec, store.locals, capture.local - 1)
                 let typ = try lower_local_type(d, source_state, store, current, owner, capture.local, local)
+                if !typ.state.valid { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
                 current = typ.state
                 var captured: U64 = 0
                 let binding = lower_binding_lookup(current, capture.local)
@@ -3425,15 +3491,17 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 }
                 let copied = try lower_move_or_copy(d, source_state, spans, store, current, owner, function, block, expression_id, capture.checked_type, captured, 0, 2)
                 if !copied.state.valid { return Ok(copied) }
-                current = copied.state
-                field_values = try __s0_buffer_append(U64, d, field_values, copied.id)
+                let stored = try lower_capture_storage_copy(d, source_state, spans, store, copied.state, owner, function, block, expression_id, capture.checked_type, copied.id)
+                if !stored.state.valid { return Ok(stored) }
+                current = stored.state
+                field_values = try __s0_buffer_append(U64, d, field_values, stored.id)
                 ordinal = ordinal + 1
             }
             let record_result = try lower_add_typed_result(d, current, function, block, env_type.id)
             let constructed = try lower_add_instr(d, record_result.state, function, block, mir_op_aggregate_construct(), record_result.id, 0, env_type.id, 0, 0, 0, "")
             current = constructed.state
             var field_ordinal: U64 = 0
-            if site.nests == 1 {
+            if site.carrier == 1 {
                 // The record carries the domain it lives in. A nested
                 // environment is then allocated in that domain by the thunk,
                 // and the record needs no cross-domain copy: its domain field
@@ -3449,7 +3517,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 ordinal = ordinal + 1
             }
             var stored_value = record_result.id
-            if site.nests == 0 {
+            if site.carrier == 0 {
                 let copy_result = try lower_add_typed_result(d, current, function, block, env_type.id)
                 let domain_copied = try lower_add_instr(d, copy_result.state, function, block, mir_op_copy_to_domain(), copy_result.id, 0, 0, domain, record_result.id, 0, "")
                 current = domain_copied.state
@@ -4781,7 +4849,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     var env_param: U64 = 0
     if closure_site != 0 {
         let site = __s0_buffer_get(ClosureSiteRec, store.closures.sites, closure_site - 1)
-        if site.capture_count != 0 || site.nests == 1 {
+        if site.capture_count != 0 || site.carrier == 1 {
             let env_type = try lower_closure_env_type(d, source_state, store, current, site)
             if !env_type.state.valid { return Ok(env_type.state) }
             let empty = try __s0_buffer_new(U64, d)
@@ -4814,6 +4882,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 if capture_local == 0 { return Ok(lower_invalid(current)) }
                 let local = __s0_buffer_get(LocalRec, store.locals, capture_local - 1)
                 let typ = try lower_local_type(d, source_state, store, current, owner, capture_local, local)
+                if !typ.state.valid { return Ok(lower_invalid(current)) }
                 current = typ.state
                 let field_name = try lower_source_word(d, source_state, local.source, local.name_start, local.name_end)
                 let field = try lower_helper_field_place(d, current, function, deref.id, field_name)
@@ -4829,7 +4898,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 ordinal = ordinal + 1
             }
         }
-        if site.nests == 1 {
+        if site.carrier == 1 {
             // A literal whose body contains another literal records the
             // domain its environment lives in. Register that domain as this
             // thunk's active and result domain so a nested environment is

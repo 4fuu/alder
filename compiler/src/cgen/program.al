@@ -393,6 +393,24 @@ fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore, index
         if item.op == mir_op_copy_to_domain() { state = try cgen_emit_copy_type(d, state, store, cgen_value_type(store, indexes, item.function, item.b)) }
         if item.op == mir_op_vec_grow_checked() { let vec_type = cgen_value_type(store, indexes, item.function, item.a)
             state = try cgen_emit_copy_type(d, state, store, __s0_buffer_get(MirTypeRec, store.types, vec_type - 1).elem) }
+        if item.op == mir_op_fn_value() {
+            // The environment retain hook deep-copies a storage-bearing
+            // capture through its per-type copy helper, so those helpers must
+            // exist even when no copy_to_domain instruction names the type.
+            let env_type = cgen_fn_env_aggregate(store, indexes, item.function, item.a)
+            if env_type != 0 {
+                var part: U64 = 0
+                while part < mir_type_part_count(store, env_type, mir_type_part_field()) {
+                    let child = cgen_type_part(store, env_type, mir_type_part_field(), part).part_type
+                    var domain_field = false
+                    if child >= 1 && child <= __s0_buffer_len(MirTypeRec, store.types) {
+                        if __s0_buffer_get(MirTypeRec, store.types, child - 1).kind == mir_type_kind_domain_handle() { domain_field = true }
+                    }
+                    if !domain_field { state = try cgen_emit_copy_type(d, state, store, child) }
+                    part = part + 1
+                }
+            }
+        }
         at = at + 1
     }
     if __s0_buffer_len(U64, state.emitted) > 0 { state.writer = try cgen_put(d, state.writer, "\n") }
@@ -457,6 +475,18 @@ fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id
                 out = try cgen_put(d, out, "  alder_dst->alder_f")
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, " = alder_d;\n")
+            }
+            if child_item.kind != mir_type_kind_function() && child_item.kind != mir_type_kind_domain_handle() && !cgen_copy_trivial(store, child) {
+                // A storage-bearing capture is deep-copied into the
+                // destination domain, and any function inside it is retained
+                // by the recursive copy.
+                out = try cgen_put(d, out, "  alder_dst->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, " = alder_copy_ty")
+                out = try cgen_put_u64(d, out, child - 1)
+                out = try cgen_put(d, out, "(alder_d, alder_src->alder_f")
+                out = try cgen_put_u64(d, out, ordinal)
+                out = try cgen_put(d, out, ", 1);\n")
             }
         }
         ordinal = ordinal + 1

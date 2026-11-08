@@ -191,9 +191,14 @@ let render = fn(user: User) -> String {
 ```
 
 Read captures of ordinary values are independent value snapshots made when the
-closure is created. The compiler may elide physical copies while preserving
-that behavior. A closure containing only copyable captures is itself a
-copyable value.
+closure is created. Ordinary values include primitives, `String`, `Bytes`,
+arrays, `Vec(T)`, `Map(K, V)`, `Set(T)`, records and enums over them, and
+function values; a storage-backed capture is deep-copied into the closure's
+environment, so mutating the source afterwards does not change what the
+closure sees, and a function-valued capture is retained recursively. The
+compiler may elide physical copies while preserving that behavior, and it
+reports a copy site with its reason when it does not. A closure containing
+only copyable captures is itself a copyable value.
 
 Alder 1.0 deliberately rejects:
 
