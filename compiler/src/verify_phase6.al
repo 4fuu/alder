@@ -1395,28 +1395,57 @@ fn mir_v6_entry_state(d: Domain, entries: MirV6Entries, block: U64) -> Result(__
     }
     return Ok(state)
 }
-fn mir_v6_successors(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, block: U64, out0: __s0_Buffer(U64)) -> Result(__s0_Buffer(U64), __s0_Error) { var out = out0
+// One successors batch: the shared scratch buffer plus the number of valid
+// entries it wrote. The function overwrites [0, count) of the caller-held
+// buffer in place instead of appending to a fresh buffer, so per-block and
+// per-source loops reuse one buffer across a whole pass. Stale entries beyond
+// count are never read.
+type MirV6SuccSpan {
+    buf: __s0_Buffer(U64)
+    count: U64
+}
+
+fn mir_v6_successors_at(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, block: U64, out0: __s0_Buffer(U64), at: U64) -> Result(MirV6SuccSpan, __s0_Error) { var out = out0
+var n: U64 = 0
 let icount = mir_vindex_instr_count(indexes, function, block)
 var ii: U64 = 0
 while ii < icount {
     let iid = mir_vindex_instr(indexes, function, block, ii)
     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-    if mir_vop_checked(x.op) { out = try __s0_buffer_append(U64, d, out, x.target) }
+    if mir_vop_checked(x.op) {
+        if __s0_buffer_len(U64, out) <= at + n { out = try __s0_buffer_append(U64, d, out, 0) }
+        __s0_buffer_set(U64, out, at + n, x.target)
+        n = n + 1
+    }
     ii = ii + 1
 }
 let term_id = mir_vindex_term(indexes, function, block)
 if term_id != 0 {
     let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
-    if t.kind == mir_term_jump() { out = try __s0_buffer_append(U64, d, out, t.target) }
-    if t.kind == mir_term_branch() { out = try __s0_buffer_append(U64, d, out, t.then_block)
-out = try __s0_buffer_append(U64, d, out, t.else_block) }
+    if t.kind == mir_term_jump() {
+        if __s0_buffer_len(U64, out) <= at + n { out = try __s0_buffer_append(U64, d, out, 0) }
+        __s0_buffer_set(U64, out, at + n, t.target)
+        n = n + 1
+    }
+    if t.kind == mir_term_branch() {
+        if __s0_buffer_len(U64, out) <= at + n { out = try __s0_buffer_append(U64, d, out, 0) }
+        __s0_buffer_set(U64, out, at + n, t.then_block)
+        n = n + 1
+        if __s0_buffer_len(U64, out) <= at + n { out = try __s0_buffer_append(U64, d, out, 0) }
+        __s0_buffer_set(U64, out, at + n, t.else_block)
+        n = n + 1
+    }
     if t.kind == mir_term_switch() { let total = mir_vindex_op_term_count(indexes, term_id)
 var oi: U64 = 0
 while oi < total { let c = __s0_buffer_get(MirOperandRec, store.operands, mir_vindex_op_term(indexes, term_id, oi) - 1)
-if c.kind == mir_operand_switch_case() { out = try __s0_buffer_append(U64, d, out, c.target) }
+if c.kind == mir_operand_switch_case() {
+        if __s0_buffer_len(U64, out) <= at + n { out = try __s0_buffer_append(U64, d, out, 0) }
+        __s0_buffer_set(U64, out, at + n, c.target)
+        n = n + 1
+}
 oi = oi + 1 } }
 }
-return Ok(out) }
+return Ok(MirV6SuccSpan(buf: out, count: n)) }
 fn mir_v6_solve_states(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, cleanup: MirV7Analysis, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64) -> Result(MirV6Entries, __s0_Error) {
 let reachable = try mir_vreachable(d, store, indexes, function)
 let bcount = mir_vindex_block_count(indexes, function)
@@ -1435,6 +1464,7 @@ while block <= bcount {
     block = block + 1
 }
 var queue_at: U64 = 0
+var succ = try __s0_buffer_new(U64, d)
 while queue_at < __s0_buffer_len(U64, queue) {
 block = __s0_buffer_get(U64, queue, queue_at)
 __s0_buffer_set(U64, queued, block, 0)
@@ -1452,9 +1482,10 @@ while ordinal < icount {
     state = try mir_v6_apply(d, store, indexes, cfg, dom, analysis, cleanup, state, iid, x)
     ordinal = ordinal + 1
 }
-let successors = try mir_v6_successors(d, store, indexes, function, block, try __s0_buffer_new(U64, d))
+let span = try mir_v6_successors_at(d, store, indexes, function, block, succ, 0)
+succ = span.buf
 var si: U64 = 0
-while si < __s0_buffer_len(U64, successors) { let target = __s0_buffer_get(U64, successors, si)
+while si < span.count { let target = __s0_buffer_get(U64, succ, si)
 // Checked successors already received the pre-instruction state above.
 var checked = false
 var xi: U64 = 0
@@ -1494,16 +1525,21 @@ fn mir_v6_reachability(d: Domain, store: MirStore, indexes: MirVIndexes, functio
         block = block + 1
     }
     var from: U64 = 1
+    var queue = try __s0_buffer_new(U64, d)
     while from <= bcount {
         span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(MirV6ReachFact, reach))
-        var queue = try mir_v6_successors(d, store, indexes, function, from, try __s0_buffer_new(U64, d))
+        let seed = try mir_v6_successors_at(d, store, indexes, function, from, queue, 0)
+        queue = seed.buf
+        var qlen = seed.count
         var q: U64 = 0
-        while q < __s0_buffer_len(U64, queue) {
+        while q < qlen {
             let to = __s0_buffer_get(U64, queue, q)
             if to >= 1 && to <= bcount && __s0_buffer_get(U64, seen, to) != from {
                 __s0_buffer_set(U64, seen, to, from)
                 reach = try __s0_buffer_append(MirV6ReachFact, d, reach, MirV6ReachFact(from: from, to: to))
-                queue = try mir_v6_successors(d, store, indexes, function, to, queue)
+                let more = try mir_v6_successors_at(d, store, indexes, function, to, queue, qlen)
+                queue = more.buf
+                qlen = qlen + more.count
             }
             q = q + 1
         }

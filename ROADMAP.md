@@ -1248,7 +1248,15 @@ sources now completes at 72.8 s / 2,747,584 KiB, and cold regenerate went
 from 110.5 s / 2,735,652 KiB at `43e6b50` to 105.0 s / 2,794,436 KiB with
 the self-compile at 74.4 s / 2,794,572 KiB; the peak adds about 58,800 KiB
 for the rewrite's 44,968 added source bytes, about 1.3 KiB per added byte,
-below the band above, with the fixed point byte-identical.
+below the band above, with the fixed point byte-identical. The phase-6
+successor enumeration joined the same pattern (`mir_v6_successors_at` now
+overwrites a caller-held buffer in place and returns the valid span, so
+the dataflow solve and the reachability BFS reuse one buffer per pass
+instead of allocating a fresh one per block or per BFS source); back to
+back on one host, cold regenerate peak RSS went from 2,824,784-2,824,864
+KiB at `7fd99e7` to 2,558,092-2,558,180 KiB (about -260 MiB, -9.4%), wall
+unchanged at 106.2-109.0 s across four alternating runs, with the fixed
+point byte-identical.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design
