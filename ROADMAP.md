@@ -1217,7 +1217,29 @@ scratch joined the plan-carried pattern (the builders now grow fifteen
 reusable cfg buffers and seventeen dominator buffers once and rewrite them
 in place per function); back to back on one host, cold regenerate went
 from 133.7 s / 2,966,448 KiB at `58acb34` to 125.7 s / 2,732,244 KiB,
-about -229 MiB of peak, with the fixed point byte-identical.
+about -229 MiB of peak, with the fixed point byte-identical. Separately,
+the quadratic MIR print/validation layer had left `compile --emit=mir`
+unable to finish on the compiler's own sources: every operand, value, and
+type-part lookup rescanned full tables, and the 30-source corpus produced
+no output past 15 minutes of running (the pre-change binary needed
+114.6 s on a synthetic module a quarter the size, scaling quadratically
+with values x instructions). `mir_print` now builds per-key group indexes
+once per print — counting-sort CSR spans per function and block, with
+out-of-range keys kept in exact side lists — and takes the Domain for its
+scratch allocation. The print output is byte-identical to the pre-change
+printer with matching exit codes on every accept, e2e, and reject fixture
+and on synthetic modules up to a 2.0 MB MIR print, the corpus still parses
+and re-verifies everything the printer emits, and a new 500x40-function
+corpus subtest keeps the regression pinned (the fixed harness build
+finishes it in about 47 s, while the quadratic version extrapolates to
+about 95 minutes there, roughly 9x past the 10-minute go test timeout,
+which is why the size is pinned at corpus scale rather than a few
+seconds). On the same host back to back, `compile --emit=mir` on the 30
+sources now completes at 72.8 s / 2,747,584 KiB, and cold regenerate went
+from 110.5 s / 2,735,652 KiB at `43e6b50` to 105.0 s / 2,794,436 KiB with
+the self-compile at 74.4 s / 2,794,572 KiB; the peak adds about 58,800 KiB
+for the rewrite's 44,968 added source bytes, about 1.3 KiB per added byte,
+below the band above, with the fixed point byte-identical.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

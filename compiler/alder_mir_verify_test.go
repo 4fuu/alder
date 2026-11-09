@@ -1415,7 +1415,7 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
 	if !emit_complete(98, try mir_verify_complete(d, try backend_element_fixture(d, try mir_store_new(d), 4), 3, false)) { return Ok(false) }
 	// Mirror the production fail-shut MIR authorization. Any accidental MIR or C
 	// bytes from these rejection checks make the exact process output fail.
-	if rejected_values.complete { if mir_print(duplicate_values) { return Ok(false) } }
+	if rejected_values.complete { if mir_print(d, duplicate_values) { return Ok(false) } }
 	if try cgen_generate(d, duplicate_values, 3, false) { return Ok(false) }
 	if !expect_complete(93, try mir_verify_complete(d, try cross_function_value_names_fixture(d, try mir_store_new(d)), 3, false), true, false, 0, 0, 0) { return Ok(false) }
 	if !emit_complete(100, try mir_verify_complete(d, try fn_value_ops_fixture(d, try mir_store_new(d), 0), 5, false)) { return Ok(false) }

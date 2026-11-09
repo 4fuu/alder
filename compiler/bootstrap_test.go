@@ -187,6 +187,64 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 		})
 	}
 
+	// Regression: the alder1 MIR print/validation layer used to rescan the
+	// whole module for every operand and value lookup, so a module of this
+	// size never completed before the go test timeout (the pre-fix binary
+	// took 114.6 s on a 4x smaller module and was still running after
+	// 240 s on this one, both without the per-key indexes the fix builds
+	// once). The fixed build finishes this module in single-digit seconds,
+	// so assert completion and well-formed output, not a wall-clock bound.
+	// Malformed-MIR rejection stays covered by mir.TestInvalidParseFixtures
+	// and the reject fixtures above; accept/output equivalence for every
+	// fixture module stays covered by the verified-artifact subtests.
+	t.Run("emit-mir-scale", func(t *testing.T) {
+		var b strings.Builder
+		b.WriteString("fn base(n: U64) -> U64 {\n    if n > 5 {\n        return n - 5\n    }\n    return n\n}\n")
+		const fnCount = 500
+		const stmtCount = 40
+		for i := 0; i < fnCount; i++ {
+			prev := i - 1
+			if prev < 0 {
+				prev = 0
+			}
+			fmt.Fprintf(&b, "fn f%d(a: U64, b: U64) -> U64 {\n", i)
+			fmt.Fprintf(&b, "    var acc: U64 = a + %d\n", i)
+			for s := 0; s < stmtCount; s++ {
+				k := s*7 + 1
+				switch s % 4 {
+				case 0:
+					fmt.Fprintf(&b, "    let t%d = acc * b + %d\n", s, k)
+					fmt.Fprintf(&b, "    acc = acc + t%d\n", s)
+				case 1:
+					b.WriteString("    if acc > b {\n")
+					fmt.Fprintf(&b, "        acc = acc - %d\n", k)
+					b.WriteString("    } else {\n")
+					b.WriteString("        acc = acc + b\n")
+					b.WriteString("    }\n")
+				case 2:
+					fmt.Fprintf(&b, "    let u%d = f%d(acc, %d)\n", s, prev, k)
+					fmt.Fprintf(&b, "    acc = acc + u%d / 3\n", s)
+				case 3:
+					fmt.Fprintf(&b, "    var w%d: U64 = acc %% 997\n", s)
+					fmt.Fprintf(&b, "    w%d = w%d * a + %d\n", s, s, k)
+					fmt.Fprintf(&b, "    acc = acc + base(w%d)\n", s)
+				}
+			}
+			b.WriteString("    return acc\n}\n")
+		}
+		b.WriteString("fn main() -> I32 {\n    let r = f0(3, 5)\n")
+		fmt.Fprintf(&b, "    let z = f%d(r, 9)\n", fnCount-1)
+		b.WriteString("    if r + z == 0 {\n        return 1\n    }\n    return 0\n}\n")
+		files := map[string]string{"scale.al": b.String()}
+		got := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", "scale.al")
+		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 5\n") || len(got.stdout) < 1_000_000 {
+			t.Fatalf("scale emit=mir failed or truncated: status=%d stderr=%q stdoutBytes=%d", got.status, got.stderr, len(got.stdout))
+		}
+		if _, err := mir.Parse(got.stdout); err != nil {
+			t.Fatalf("parse scale MIR: %v", err)
+		}
+	})
+
 	t.Run("no-repair", func(t *testing.T) {
 		got := runProductionCompiler(t, exe, map[string]string{"library.al": "fn helper() -> I32 { return 0 }\n"}, "compile", "--emit=c", "library.al")
 		if got.status != 4 || got.stdout != "" || !strings.Contains(got.stderr, "internal compiler failure") {
@@ -519,7 +577,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "7d024b32dd01db57df00fdad091bbbd2c81d59aa49fcc67d84979587dcd5eef9"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "86ff11a4bd7e2eb1368f300a560d80d04dfa3282117e583bb5e620bae041ae88"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

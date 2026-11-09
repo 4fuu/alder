@@ -24,7 +24,7 @@ fn finish_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, resu
     if driver_command() == 1 { return driver_success_check() }
     if driver_command() == 2 {
         if !driver_artifact_start("mir") { return driver_failure(3, "io", "cannot write compiler output") }
-        if !mir_print(mir) {
+        if !mir_print(d, mir) {
             if driver_output_failed() { return driver_failure(3, "io", "cannot write compiler output") }
             return driver_internal_error()
         }

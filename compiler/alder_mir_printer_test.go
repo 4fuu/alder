@@ -43,15 +43,15 @@ fn printer_fixture(d: Domain, initial: MirStore) -> Result(MirStore, __s0_Error)
 fn run_print(d: Domain, store: MirStore) -> Result(I32, __s0_Error) {
     // A raw invalid constant type must be rejected without writing "mir 5".
     let bad = try mir_add_const(d, store, "bad", 999, mir_const_int(), 0, 1, 0, "")
-    if mir_print(bad.store) { return Ok(5) }
+    if mir_print(d, bad.store) { return Ok(5) }
     let fixture = try printer_fixture(d, store)
     let duplicate_term = try mir_add_terminator(d, fixture, MirTermRec(function: 1, block: 1, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
-    if mir_print(duplicate_term.store) { return Ok(7) }
+    if mir_print(d, duplicate_term.store) { return Ok(7) }
     let unterminated = try mir_add_block(d, fixture, 1, 1, "open")
-    if mir_print(unterminated.store) { return Ok(9) }
+    if mir_print(d, unterminated.store) { return Ok(9) }
     let wrong_owner = try mir_add_operand(d, fixture, MirOperandRec(kind: mir_operand_instruction(), owner: 999, ordinal: 0, edge: 0, value: 0, target: 0, operand_type: 0, name_start: 0, name_end: 0))
-    if mir_print(wrong_owner.store) { return Ok(8) }
-    if mir_print(fixture) { return Ok(0) }
+    if mir_print(d, wrong_owner.store) { return Ok(8) }
+    if mir_print(d, fixture) { return Ok(0) }
     return Ok(6)
 }
 

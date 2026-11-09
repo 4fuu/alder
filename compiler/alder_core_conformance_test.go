@@ -137,8 +137,8 @@ func coreConformanceWrapper() string {
 	verifier := strings.TrimPrefix(mirVerifyWrapper, "\nimport c alderhost_stdout_byte: fn(U8) -> Bool\n")
 	verifier = strings.Replace(verifier, "fn main(d: Domain)", "fn verifier_mode(d: Domain)", 1)
 	return checker + printer + verifier + storageAnalysisWrapper + cgenBodyWrapper + cgenSkeletonWrapper + `
-fn lower_print(mir: MirStore) -> I32 {
-    if mir_print(mir) { return 0 }
+fn lower_print(d: Domain, mir: MirStore) -> I32 {
+    if mir_print(d, mir) { return 0 }
     return 5
 }
 fn lower_cgen_status(wrote: Bool) -> I32 {
@@ -162,7 +162,7 @@ fn lower_emit(d: Domain, mir: MirStore) -> I32 {
             Ok(verified) => lower_cgen_verified(d, mir, verified)
         }
     }
-    return lower_print(mir)
+    return lower_print(d, mir)
 }
 fn lower_expect_bad(result: LowerResult) -> I32 { return match result {
     LowerBad => 0
