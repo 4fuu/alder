@@ -920,7 +920,7 @@ Exit-criteria evidence:
 
 ## Milestone 7.5: Static Abstraction, Resources, and Identity
 
-Status: **in progress (both implementation halves are integrated; the items under "Remaining before exit" below, including those added by the 2026-11 design amendment, are still ahead)**
+Status: **complete**
 
 Complete the remaining 1.0 language and memory model from
 [Syntax](docs/syntax.md), [Language Semantics](docs/language-semantics.md),
@@ -942,7 +942,7 @@ monomorphization, and compiler-scale layered DAGs. The public language and
 generated MIR/C may no longer expose `__s0_*`, `Domain`, `DomainMark`, fixed S0
 Map/Buffer, or callback-bearing bootstrap cleanup forms.
 
-Exit-criteria evidence (in progress):
+Exit-criteria evidence (complete):
 
 - the static-abstraction half adds `trait`/`where`/`impl Trait(...) for`
   declaration checking with builtin standard-trait names
@@ -1132,24 +1132,44 @@ this evidence record):
   exactly once per element on normal and early-return exits, guard programs
   assert the fall-through chain at runtime, deterministic MIR/C across
   processes, no `__s0_` names in generated C for ordinary programs).
+- exit audit: every exit clause maps to concrete evidence. Trait coherence
+  and static dispatch, closure capture and escape, deterministic ordered
+  collections, cleanup on every normal synchronous control exit, table
+  staleness and overlapping access, resource composition, generic
+  monomorphization, and compiler-scale layered DAGs each resolve to the
+  bullets and conformance suites above. The public-surface clause holds by
+  inspection: ordinary programs compiled without `--bootstrap-private`
+  produce MIR and C free of `__s0_*`, `Domain`, `DomainMark`, and the
+  fixed S0 Map/Buffer names, the checker rejects each of those names in
+  public source, and `7221ce9` renamed the last MIR-internal `__s0_`
+  names, so the generated MIR is `__s0_`-free as well. The closing
+  commits are try_insert with the non-panicking `Err` edge (`fbf3b91`),
+  the `__s0_`-free MIR rename (`7221ce9`), views per loop iteration
+  (`6f734a3`), and the same-table owning-element insert fix (`ac4169b`),
+  whose production program pins straight-line and in-loop double inserts
+  of an owning record through strict C11 with snapshot independence; the
+  production qualification and its sanitizer run pass on the exit tip.
 
 Deferred from this half, with reasons:
 
 - suspending cleanup behavior: deferred to Milestone 9 as planned.
 
 Compile-time guardrails (cold `bootstrap/regenerate.sh`, one host, measured
-back to back): the pre-M7.5 tip `2a96d07` takes 159.25 s / 3.77 GB, and the
-integrated M7.5 tip `1cf2572` takes 216.20 s / 5.62 GB, so the milestone cost
-+36% wall time and +49% peak RSS while the compiler sources grew from
-1,549,800 to 2,051,242 bytes (+32.4%). The peak is still the stage-0
-self-compile process itself, at 3.69 KiB RSS per added source byte against
-the pre-milestone band of 2.5-3.4. No whole-store scan or copy amplification
-is present: the regenerator stays in its 3.6-minute class, far inside the
-15-minute CI budget.
+back to back on the exit audit): the pre-M7.5 tip `2a96d07` takes 160.16 s /
+3,769,260 KiB peak RSS, and the M7.5 exit tip `ac4169b` takes 234.45 s /
+5,704,880 KiB, so the milestone cost +46% wall time and +51% peak RSS while
+the compiler sources grew from 1,549,800 to 2,080,120 bytes (+34.2%). The
+peak is still the stage-0 self-compile process itself, at 3.65 KiB RSS per
+added source byte against the pre-milestone band of 2.5-3.4 — at the top of
+the band, tracked, not regressed. No whole-store scan or copy amplification
+is present: the regenerator stays in its four-minute class, far inside the
+15-minute CI budget. Absolute figures vary by host: a different host
+measured `2a96d07` at 159.25 s / 3.77 GB and `1cf2572` at 216.20 s / 5.62 GB;
+only same-host back-to-back comparisons are meaningful.
 
-Remaining before exit (as of the integration of both halves; the items below
-were added to or reshaped by the 2026-11 design amendment, which landed after
-both halves were written):
+Exit record (as of the integration of both halves; every item below landed
+before exit; the items were added to or reshaped by the 2026-11 design
+amendment, which landed after both halves were written):
 
 - (D023 landed; see the evidence below) the D023 loop-rebuild move landed with
   it: a read inside a loop body transfers its storage when the next access to
@@ -1237,11 +1257,13 @@ both halves were written):
   being refused, so a loop body may compute inside its scope. A loop body that
   declares the binding re-establishes it every iteration, so its own transfer
   is not a partial-path transfer; `break` and `continue` count as exits that
-  require a live affine owner to be transferred or registered. One
-  pre-existing gap is recorded here rather than fixed: a table-view `match`
-  inside a `while` body is accepted by the checker and then refused by phase 6
-  ("verification refused"), with or without `break`, so the view region and a
-  loop body do not yet compose.
+  require a live affine owner to be transferred or registered. A table-view `match`
+  inside a `while` body composes with the loop once cleanup registration runs
+  on the loop's panic path: the straight-line arm compiles end to end on the
+  exit tip (re-verified by recompiling the shape), and `break`/`continue`
+  inside such an arm are rejected by the checker's straight-line arm rule
+  (a table-view arm may contain only straight-line copy statements), so the
+  checker never accepts what the verifier refuses.
 
 Cold `bootstrap/regenerate.sh` timing is recorded per commit and compared only
 on the same host: absolute wall time and peak RSS depend on the host and
