@@ -1189,9 +1189,19 @@ removing the last full-CFG walk per uninitialized-place leaf; back to back
 on one loaded host with identical sources, the stage-0 self-compile went
 from 147.0 s / 3,344,412 KiB to 124.0 s / 3,348,560 KiB (-15.6% wall, +4.1
 MB peak for the predecessor arrays, to be reclaimed by reusing the
-per-function verifier scratch across functions). Remaining self-compile
-time sits in the phase-6 merge family and lower_expression; remaining wall
-time is dominated by the self-compile itself.
+per-function verifier scratch across functions). A presized reusable
+scratch buffer in the lowering (`lower_move_analyze` now clears one
+plan-carried `excluded` buffer in place instead of regrowing a fresh one
+on every call) cut the stage-0 self-compile to 126.4 s / 2,959,944 KiB
+peak on its own commit, measured back to back on the unloaded host
+(128.9 s / 3,333,572 KiB before; cold regenerate 153.6 s / 2,960,252 KiB,
+wall within run-to-run noise), removing about 365 MiB of dead-but-retained
+doubling garbage from the peak. On the combined tip with the verifier
+changes above, the same unloaded host measures the stage-0 self-compile at
+101.4 s / 2,976,232 KiB and cold regenerate at 123.2 s / 2,976,444 KiB.
+Remaining self-compile time sits in the
+phase-6 merge family and lower_expression; remaining wall time is
+dominated by the self-compile itself.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

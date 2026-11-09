@@ -104,6 +104,11 @@ type LowerState {
 type LowerMovePlan {
     movable: __s0_Buffer(U64)
     reasons: __s0_Buffer(U64)
+    // Reusable exclusion flags for lower_move_analyze: one buffer sized to
+    // the global local count at plan creation and cleared in place per
+    // function, so per-function analysis stops leaving a dead doubling chain
+    // in the compile domain.
+    excluded_scratch: __s0_Buffer(U64)
 }
 
 // One binding access in lowering order: a read of expression, or a
@@ -2248,12 +2253,14 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
     let locals_count = __s0_buffer_len(LocalRec, store.locals)
     // Exclusions are per binding and permanent: parameters (7) share the
     // caller's storage, captured bindings (2) are snapshot by closures, and
-    // view receivers (3) keep an implicit later reference.
-    var excluded = try __s0_buffer_new(U64, d)
-    var excluded_at: U64 = 0
-    while excluded_at < locals_count {
-        excluded = try __s0_buffer_append(U64, d, excluded, 0)
-        excluded_at = excluded_at + 1
+    // view receivers (3) keep an implicit later reference. The flags live in
+    // the plan's reusable buffer, cleared here in place for this function;
+    // entries beyond the local count hold stale flags that no guard reads.
+    var excluded = plan.excluded_scratch
+    var clear_at: U64 = 0
+    while clear_at < locals_count {
+        __s0_buffer_set(U64, excluded, clear_at, 0)
+        clear_at = clear_at + 1
     }
     var at: U64 = 0
     while at < locals_count {
@@ -2309,7 +2316,7 @@ fn lower_move_analyze(d: Domain, store: CheckStore, owner: U64, root_block: U64,
         }
         index = index + 1
     }
-    return Ok(LowerMovePlan(movable: movable, reasons: reasons))
+    return Ok(LowerMovePlan(movable: movable, reasons: reasons, excluded_scratch: excluded))
 }
 
 // lower_move_or_copy applies the D023 rule at one value-semantics copy
@@ -7038,13 +7045,19 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
     // lower_move_analyze.
     var plan_movable = try __s0_buffer_new(U64, d)
     var plan_reasons = try __s0_buffer_new(U64, d)
+    var plan_excluded = try __s0_buffer_new(U64, d)
     var zero_at: U64 = 0
     while zero_at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         plan_movable = try __s0_buffer_append(U64, d, plan_movable, 0)
         plan_reasons = try __s0_buffer_append(U64, d, plan_reasons, 0)
         zero_at = zero_at + 1
     }
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons), reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0, loop_environment: 0, vec_memo_flag: vec_memo_flag, vec_memo_ans: vec_memo_ans, vec_memo_seen: vec_memo_seen, vec_memo_gen: 0)
+    zero_at = 0
+    while zero_at < __s0_buffer_len(LocalRec, store.locals) {
+        plan_excluded = try __s0_buffer_append(U64, d, plan_excluded, 0)
+        zero_at = zero_at + 1
+    }
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons, excluded_scratch: plan_excluded), reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0, loop_environment: 0, vec_memo_flag: vec_memo_flag, vec_memo_ans: vec_memo_ans, vec_memo_seen: vec_memo_seen, vec_memo_gen: 0)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)
