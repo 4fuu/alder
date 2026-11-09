@@ -1199,9 +1199,20 @@ wall within run-to-run noise), removing about 365 MiB of dead-but-retained
 doubling garbage from the peak. On the combined tip with the verifier
 changes above, the same unloaded host measures the stage-0 self-compile at
 101.4 s / 2,976,232 KiB and cold regenerate at 123.2 s / 2,976,444 KiB.
-Remaining self-compile time sits in the
-phase-6 merge family and lower_expression; remaining wall time is
-dominated by the self-compile itself.
+The call-argument borrow scan in `lower_expression` walked the whole
+locals table once per call argument (621 million table reads per
+self-compile); it now resolves the callee's ordinal-th parameter through
+the owner-keyed local index the lowering already builds, riding in the
+state, cutting the stage-0 self-compile to 78.3 s / 2,979,912 KiB and
+cold regenerate to 105.8 s / 2,979,688 KiB on the same host, with the
+pre-change binary compiling the identical sources emitting byte-for-byte
+identical C and the peak unchanged. Remaining self-compile time sits in
+the verifier phase-6 merge family and phase-4 initialization; the largest
+non-verifier items are the lowering's storage planning, cgen emission,
+and the MIR builder. On this commit's tip, which also carries the
+verifier's phase-4 table reuse, the same host measures the stage-0
+self-compile at 80.8 s / 2,970,040 KiB and cold regenerate at
+111.6 s / 2,970,016 KiB.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

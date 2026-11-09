@@ -73,6 +73,11 @@ type LowerState {
     // D023 move plan of the function being lowered: per-expression move
     // verdicts and per-site copy reasons, computed once per owner.
     moves: LowerMovePlan
+    // Owner-keyed CSR over store.locals (lower_local_indexes), built once
+    // per compile: the checked store is fixed while lowering, and the
+    // call-argument borrow scan below must not walk the whole locals table
+    // per argument.
+    local_index: LowerLocalIndex
     // Copy-site report records (D023), collected as copies are emitted.
     reports: __s0_Buffer(CopySiteRec)
     // Innermost enclosing loop: the block `break` jumps to and the block
@@ -132,19 +137,19 @@ type LowerMoveLoopRec {
 }
 
 fn lower_with_plan(state: LowerState, moves: LowerMovePlan) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_loop(state: LowerState, loop_exit: U64, loop_step: U64, loop_environment: U64) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, loop_exit: loop_exit, loop_step: loop_step, loop_environment: loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen, valid: state.valid)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, loop_exit: loop_exit, loop_step: loop_step, loop_environment: loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen, valid: state.valid)
 }
 
 fn lower_with_reports(state: LowerState, reports: __s0_Buffer(CopySiteRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_vec_memo(state: LowerState, flag: __s0_Buffer(U64), ans: __s0_Buffer(U64), seen: __s0_Buffer(U64), gen: U64) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: flag, vec_memo_ans: ans, vec_memo_seen: seen, vec_memo_gen: gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: flag, vec_memo_ans: ans, vec_memo_seen: seen, vec_memo_gen: gen)
 }
 
 fn lower_add_copy_report(d: Domain, state: LowerState, owner: U64, source: U64, start: U64, end: U64, binding: U64, reason: U64) -> Result(LowerState, __s0_Error) {
@@ -180,7 +185,7 @@ enum LowerResult {
 }
 
 fn lower_with_mir(state: LowerState, mir: MirStore) -> LowerState {
-    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 // Intern an anonymous function type: contiguous parameter parts, an
@@ -232,39 +237,39 @@ fn lower_with_type_parts(state: LowerState, parts: __s0_Buffer(MirTypePartRec)) 
 }
 
 fn lower_invalid(state: LowerState) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: false, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: false, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_types(state: LowerState, types: __s0_Buffer(LowerTypeMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_owners(state: LowerState, owners: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_imports(state: LowerState, imports: __s0_Buffer(LowerOwnerMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_bindings(state: LowerState, bindings: __s0_Buffer(LowerBindingMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_values(state: LowerState, values: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_releases(state: LowerState, releases: __s0_Buffer(LowerValueMapRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: releases, bridges: state.bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_bridges(state: LowerState, bridges: __s0_Buffer(LowerBridgeRec)) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: bridges, storage: state.storage, part_index: state.part_index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_with_part_index(state: LowerState, index: LowerPartIndex) -> LowerState {
-    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, moves: state.moves, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
+    return LowerState(mir: state.mir, types: state.types, owners: state.owners, roots: state.roots, binding_statements: state.binding_statements, imports: state.imports, bindings: state.bindings, values: state.values, releases: state.releases, bridges: state.bridges, storage: state.storage, part_index: index, has_storage: state.has_storage, moves: state.moves, local_index: state.local_index, reports: state.reports, valid: state.valid, loop_exit: state.loop_exit, loop_step: state.loop_step, loop_environment: state.loop_environment, vec_memo_flag: state.vec_memo_flag, vec_memo_ans: state.vec_memo_ans, vec_memo_seen: state.vec_memo_seen, vec_memo_gen: state.vec_memo_gen)
 }
 
 fn lower_bridge_lookup(state: LowerState, checked_type: U64) -> LowerBridgeRec {
@@ -3777,19 +3782,18 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_child.checked_type - 1)
                     sequence_borrow = expected.kind == 8 && (actual.kind == 15 || actual.kind == 17)
                 }
-                var parameter_at: U64 = 0
-                var parameter_ordinal: U64 = 0
-                while parameter_at < __s0_buffer_len(LocalRec, store.locals) {
-                    let parameter = __s0_buffer_get(LocalRec, store.locals, parameter_at)
-                    if parameter.owner == annotation.target && parameter.kind == 1 {
-                        if parameter_ordinal == ordinal {
-                            if parameter.mutable == 1 { borrow_kind = 2 }
-                            let parameter_source = __s0_buffer_get(SourceRec, source_state.sources, parameter.source)
-                            if parameter.mutable == 0 && target_symbol.inherent_owner != 0 && source_word(source_state, parameter_source, parameter.name_start, parameter.name_end, "self") { borrow_kind = 1 }
-                        }
-                        parameter_ordinal = parameter_ordinal + 1
+                // The ordinal-th declared parameter of the callee: the
+                // owner-keyed local index visits exactly the locals the
+                // full-table walk used to visit, in the same order, without
+                // rescanning every local of every function per argument.
+                let parameter_binding = lower_closure_param_local(store, current.local_index, annotation.target, ordinal)
+                if parameter_binding != 0 {
+                    let parameter = __s0_buffer_get(LocalRec, store.locals, parameter_binding - 1)
+                    if parameter.mutable == 1 { borrow_kind = 2 }
+                    if parameter.mutable == 0 && target_symbol.inherent_owner != 0 {
+                        let parameter_source = __s0_buffer_get(SourceRec, source_state.sources, parameter.source)
+                        if source_word(source_state, parameter_source, parameter.name_start, parameter.name_end, "self") { borrow_kind = 1 }
                     }
-                    parameter_at = parameter_at + 1
                 }
             }
             if sequence_borrow {
@@ -7057,7 +7061,7 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
         plan_excluded = try __s0_buffer_append(U64, d, plan_excluded, 0)
         zero_at = zero_at + 1
     }
-    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons, excluded_scratch: plan_excluded), reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0, loop_environment: 0, vec_memo_flag: vec_memo_flag, vec_memo_ans: vec_memo_ans, vec_memo_seen: vec_memo_seen, vec_memo_gen: 0)
+    var state = LowerState(mir: mir, types: types, owners: owners, roots: roots, binding_statements: binding_statements, imports: imports, bindings: bindings, values: values, releases: releases, bridges: bridges, storage: storage, part_index: LowerPartIndex(head: part_head, next: part_next, indexed: 0), has_storage: lower_has_storage(store), moves: LowerMovePlan(movable: plan_movable, reasons: plan_reasons, excluded_scratch: plan_excluded), local_index: locals, reports: copy_reports, valid: true, loop_exit: 0, loop_step: 0, loop_environment: 0, vec_memo_flag: vec_memo_flag, vec_memo_ans: vec_memo_ans, vec_memo_seen: vec_memo_seen, vec_memo_gen: 0)
     state = try lower_declarations(d, source_state, store, state)
     if !state.valid {
         return Ok(LowerBad)
