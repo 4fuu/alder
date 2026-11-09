@@ -1165,7 +1165,15 @@ the band, tracked, not regressed. No whole-store scan or copy amplification
 is present: the regenerator stays in its four-minute class, far inside the
 15-minute CI budget. Absolute figures vary by host: a different host
 measured `2a96d07` at 159.25 s / 3.77 GB and `1cf2572` at 216.20 s / 5.62 GB;
-only same-host back-to-back comparisons are meaningful.
+only same-host back-to-back comparisons are meaningful. On the first host,
+the M7.5-exit tip measured 212.0 s / 5,704,676 KiB before the verifier
+memoization landed; after it, the same host measures 221.5 s / 3,335,880 KiB
+cold: the stage-0 self-compile fell from 152.7 s / 5,704,676 KiB to 144.5 s /
+3,335,888 KiB peak RSS (-41.5%, below even the pre-M7.5 tip) with
+byte-identical output, while the stage-0 gcc build grew about ten seconds
+compiling the larger regenerated C, leaving wall time flat within noise.
+The self-compile is no longer the RSS outlier; remaining time sits in
+per-function phase-4 analysis, phase-6 fact hashing, and the gcc share.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

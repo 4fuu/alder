@@ -155,6 +155,16 @@ type MirVIndexes {
     place_root: __s0_Buffer(U64)
     place_depth: __s0_Buffer(U64)
     place_deref: __s0_Buffer(U64)
+    // Memo tables over the MIR type graph, filled on demand by the
+    // mir_vmemo_* helpers below. Verification never adds or patches types, so
+    // a computed entry stays valid for the whole run. Writes go through
+    // __s0_buffer_set, which mutates the shared backing allocation, so every
+    // copy of the indexes sees the memo grow without rethreading the struct.
+    contains_flag: __s0_Buffer(U64)
+    contains_ans: __s0_Buffer(U64)
+    forbidden_val: __s0_Buffer(U64)
+    memo_seen: __s0_Buffer(U64)
+    memo_gen: __s0_Buffer(U64)
 }
 
 // Intermediate results of a per-table index build. Buffers are assembled here
@@ -1027,6 +1037,7 @@ fn mir_vindex_build_places(d: Domain, store: MirStore) -> Result(MirVIndexPlaceR
 }
 
 fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Error) {
+    let count_types = __s0_buffer_len(MirTypeRec, store.types)
     let blocks = try mir_vindex_build_blocks(d, store)
     let values = try mir_vindex_build_values(d, store)
     let locals = try mir_vindex_build_locals(d, store)
@@ -1040,7 +1051,29 @@ fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Erro
     let type_unary = try mir_vindex_build_type_unary(d, store)
     let type_results = try mir_vindex_build_type_results(d, store)
     let places = try mir_vindex_build_places(d, store)
-    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_field_count: tps.field_count, tp_ids: tps.ids, const_slot: constants.slots, type_first: type_first, type_unary: type_unary, type_result_ok: type_results.ok, type_result_err: type_results.err, type_result_id: type_results.id, place_root: places.root, place_depth: places.depth, place_deref: places.deref))
+    // Zeroed memo tables sized once here: verification freezes the type list,
+    // so (count+1)*22 kind answers and (count+1) verdicts and generations
+    // never need to grow. Filling them is a few append loops at build time.
+    var memo_at: U64 = 0
+    let memo_cells = (count_types + 1) * mir_vmemo_kind_columns()
+    var contains_flag = try __s0_buffer_new(U64, d)
+    var contains_ans = try __s0_buffer_new(U64, d)
+    while memo_at < memo_cells {
+        contains_flag = try __s0_buffer_append(U64, d, contains_flag, 0)
+        contains_ans = try __s0_buffer_append(U64, d, contains_ans, 0)
+        memo_at = memo_at + 1
+    }
+    memo_at = 0
+    var forbidden_val = try __s0_buffer_new(U64, d)
+    var memo_seen = try __s0_buffer_new(U64, d)
+    while memo_at <= count_types {
+        forbidden_val = try __s0_buffer_append(U64, d, forbidden_val, 0)
+        memo_seen = try __s0_buffer_append(U64, d, memo_seen, 0)
+        memo_at = memo_at + 1
+    }
+    var memo_gen = try __s0_buffer_new(U64, d)
+    memo_gen = try __s0_buffer_append(U64, d, memo_gen, 0)
+    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_field_count: tps.field_count, tp_ids: tps.ids, const_slot: constants.slots, type_first: type_first, type_unary: type_unary, type_result_ok: type_results.ok, type_result_err: type_results.err, type_result_id: type_results.id, place_root: places.root, place_depth: places.depth, place_deref: places.deref, contains_flag: contains_flag, contains_ans: contains_ans, forbidden_val: forbidden_val, memo_seen: memo_seen, memo_gen: memo_gen))
 }
 
 fn mir_vindex_block(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
@@ -1765,3 +1798,110 @@ fn mir_vp4_avail_dominates(cfg: MirVP4PointCfg, dom: MirVP4Dom, def_kind: U64, d
     if use_node == 0 { return false }
     return mir_vp4_dominates(cfg, dom, use_node, def_node)
 }
+
+// --- type-graph memo tables ---
+//
+// mir_v6_type_contains and mir_vtype_has_forbidden used to allocate a fresh
+// visited array and work list per query; on the self-compile corpus they ran
+// hundreds of thousands of times and dominated the bootstrap's peak memory.
+// The answers are pure functions of the type graph, which mir_build finishes
+// building before verification starts and which verification never extends or
+// patches, so each (type id, kind) answer and each phase-2 verdict is computed
+// once and recorded in dense arrays indexed by the stable numeric type id.
+// Every recorded value comes from running the original walk, so results -
+// including which forbidden kind a walk reports first - are unchanged; only
+// repeat walks are avoided. There is no ordering-sensitive structure here:
+// array indexes are type ids and kind numbers.
+//
+// The walk marks visited ids in memo_seen by generation stamping (the entry
+// equals the current generation while the walk is live), so no walk allocates
+// its own visited array, and a fresh work list is the only per-query scratch.
+// memo_gen lives in a one-entry buffer because __s0_buffer_set writes through
+// the shared allocation, while a scalar field would be private to the copy.
+
+fn mir_vmemo_kind_columns() -> U64 { return 22 }
+
+fn mir_vmemo_contains(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64, wanted: U64) -> Result(Bool, __s0_Error) {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    if root < 1 || root > count || wanted >= mir_vmemo_kind_columns() { return mir_vmemo_contains_walk(d, store, indexes, root, wanted) }
+    let cell = root * mir_vmemo_kind_columns() + wanted
+    if __s0_buffer_get(U64, indexes.contains_flag, cell) != 0 { return Ok(__s0_buffer_get(U64, indexes.contains_ans, cell) != 0) }
+    let gen = __s0_buffer_get(U64, indexes.memo_gen, 0) + 1
+    __s0_buffer_set(U64, indexes.memo_gen, 0, gen)
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var found = false
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        at = at + 1
+        if id >= 1 && id <= count && __s0_buffer_get(U64, indexes.memo_seen, id) != gen {
+            __s0_buffer_set(U64, indexes.memo_seen, id, gen)
+            if mir_vtype_kind(store, id) == wanted { found = true }
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
+        }
+    }
+    __s0_buffer_set(U64, indexes.contains_flag, cell, 1)
+    if found { __s0_buffer_set(U64, indexes.contains_ans, cell, 1) }
+    return Ok(found)
+}
+
+// Direct walk for queries the memo does not cover: out-of-range roots and
+// kinds beyond the fixed column count. Same traversal and visited discipline
+// as the memo fill, generation-stamped so cyclic type graphs still terminate.
+fn mir_vmemo_contains_walk(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64, wanted: U64) -> Result(Bool, __s0_Error) {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    let gen = __s0_buffer_get(U64, indexes.memo_gen, 0) + 1
+    __s0_buffer_set(U64, indexes.memo_gen, 0, gen)
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var found = false
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) {
+        let id = __s0_buffer_get(U64, work, at)
+        at = at + 1
+        if id >= 1 && id <= count && __s0_buffer_get(U64, indexes.memo_seen, id) != gen {
+            __s0_buffer_set(U64, indexes.memo_seen, id, gen)
+            if mir_vtype_kind(store, id) == wanted { found = true }
+            work = try mir_vappend_type_children(d, store, indexes, work, id)
+        }
+    }
+    return Ok(found)
+}
+
+// Per-root phase-2 verdict memo. The verdict encodes which forbidden kind the
+// walk reports first (kind + 1, zero when clean), so the recorded value is
+// exactly what the unmemoized walk returned for this root. Storage: zero
+// means not computed, one means clean, and k + 2 means the walk reported k.
+fn mir_vmemo_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(U64, __s0_Error) {
+    let count = __s0_buffer_len(MirTypeRec, store.types)
+    if root < 1 || root > count { return Ok(0) }
+    let recorded = __s0_buffer_get(U64, indexes.forbidden_val, root)
+    if recorded != 0 {
+        if recorded == 1 { return Ok(0) }
+        return Ok(recorded - 1)
+    }
+    let gen = __s0_buffer_get(U64, indexes.memo_gen, 0) + 1
+    __s0_buffer_set(U64, indexes.memo_gen, 0, gen)
+    var work = try __s0_buffer_new(U64, d)
+    work = try __s0_buffer_append(U64, d, work, root)
+    var found: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, work) && found == 0 {
+        let id = __s0_buffer_get(U64, work, at)
+        at = at + 1
+        if id >= 1 && id <= count && __s0_buffer_get(U64, indexes.memo_seen, id) != gen {
+            __s0_buffer_set(U64, indexes.memo_seen, id, gen)
+            let kind = mir_vtype_kind(store, id)
+            if kind == mir_type_kind_table_view() || kind == mir_type_kind_table_mut_view() || kind == mir_type_kind_cleanup_scope() || kind == mir_type_kind_cleanup_id() { found = kind + 1 }
+            else { work = try mir_vappend_type_children(d, store, indexes, work, id) }
+        }
+    }
+    if found == 0 {
+        __s0_buffer_set(U64, indexes.forbidden_val, root, 1)
+        return Ok(0)
+    }
+    __s0_buffer_set(U64, indexes.forbidden_val, root, found + 1)
+    return Ok(found)
+}
+

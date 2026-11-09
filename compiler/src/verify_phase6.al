@@ -534,22 +534,12 @@ fn mir_v6_merge_from(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, 
     return Ok(MirV6MergeStep(durable: durable, merged: merged))
 }
 
-fn mir_v6_type_contains(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64, wanted: U64) -> Result(Bool, __s0_Error) { var work = try __s0_buffer_new(U64, d)
-work = try __s0_buffer_append(U64, d, work, root)
-// O(1) visited probe; the linear seen scan was quadratic on the dense type
-// graph and ran once per value/use in phases 6, 9, and 10.
-let tcount = __s0_buffer_len(MirTypeRec, store.types)
-var seen = __s0_alloc(U64, d, tcount + 1)
-var z: U64 = 0
-while z <= tcount { seen[z] = 0
-z = z + 1 }
-var at: U64 = 0
-while at < __s0_buffer_len(U64, work) { let id = __s0_buffer_get(U64, work, at)
-if id >= 1 && id <= tcount && seen[id] == 0 { if mir_vtype_kind(store, id) == wanted { return Ok(true) }
-seen[id] = 1
-work = try mir_vappend_type_children(d, store, indexes, work, id) }
-at = at + 1 }
-return Ok(false) }
+fn mir_v6_type_contains(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64, wanted: U64) -> Result(Bool, __s0_Error) {
+    // The answer per (type id, kind) pair is a pure function of the frozen
+    // type graph; the memo fills the dense per-kind columns on demand, so
+    // results are unchanged while repeat walks and their per-call scratch
+    // allocations disappear.
+    return mir_vmemo_contains(d, store, indexes, root, wanted) }
 fn mir_v6_type_reference(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(Bool, __s0_Error) { if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_ref()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_safe_mut()) { return Ok(true) }
 if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_slice()) { return Ok(true) }

@@ -39,27 +39,10 @@ p = p + 1 } }
     return Ok(out)
 }
 fn mir_vtype_has_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(U64, __s0_Error) {
-    var work = try __s0_buffer_new(U64, d)
-    work = try __s0_buffer_append(U64, d, work, root)
-    // O(1) visited probe instead of a linear seen scan; the type graph is
-    // dense enough on the self-compile corpus that the scan dominated phase 2.
-    let tcount = __s0_buffer_len(MirTypeRec, store.types)
-    var seen = __s0_alloc(U64, d, tcount + 1)
-    var z: U64 = 0
-    while z <= tcount { seen[z] = 0
-        z = z + 1 }
-    var at: U64 = 0
-    while at < __s0_buffer_len(U64, work) {
-        let id = __s0_buffer_get(U64, work, at)
-        if id >= 1 && id <= tcount && seen[id] == 0 {
-            seen[id] = 1
-            let kind = mir_vtype_kind(store, id)
-            if kind == mir_type_kind_table_view() || kind == mir_type_kind_table_mut_view() || kind == mir_type_kind_cleanup_scope() || kind == mir_type_kind_cleanup_id() { return Ok(kind + 1) }
-            work = try mir_vappend_type_children(d, store, indexes, work, id)
-        }
-        at = at + 1
-    }
-    return Ok(0)
+    // The verdict per root is a pure function of the frozen type graph; the
+    // memo records the first forbidden kind each walk reports, so results are
+    // unchanged while repeat walks disappear.
+    return mir_vmemo_forbidden(d, store, indexes, root)
 }
 fn mir_vtype_cycles(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
     var work = try __s0_buffer_new(U64, d)
