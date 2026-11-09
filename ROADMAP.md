@@ -1273,6 +1273,25 @@ regenerate peak RSS went from 2,558,100-2,558,180 KiB at `f6cbd9b` to
 from 75.70 s / 2,560,004 KiB to 73.84 s / 2,195,132 KiB, wall otherwise
 unchanged at 107.5-109.1 s, with the fixed point byte-identical.
 
+The checker's interpretation worklists joined the same pattern: the seven
+interpreted-type probes plus `push_decl_members` now carry five stable,
+pre-grown worklist/seen/memo backings on `CheckStore` (appended onto once
+in `check_parsed`) instead of allocating fresh work, seen, target, and
+pair buffers per probe, with per-probe `used` counts bounding every
+membership scan and set-or-append pushes; back to back on one host at
+the loop-check bit-matrix tip, cold regenerate peak RSS went from
+2,194,724-2,194,964 KiB to 1,803,348-1,803,544 KiB (about -382 MiB,
+-17.4%) and self-compile peak RSS from 2,339,988-2,340,020 KiB to
+1,803,424-1,803,800 KiB (about -524 MiB, -22.4%), requested allocator
+bytes from 2.50 GiB in 3,659,938 allocations to 1.99 GiB in 2,737,476
+(-526 MiB, -25.2% of calls), with self-compile wall unchanged
+(67.8/66.0 s before, 66.3/67.1 s after), cold regenerate wall within
+this host's run-to-run drift (90.7/92.2 s before, 97.8/95.6 s after
+across two order-swapped pairs; the split gcc stage measured in
+isolation is faster after the change, 27.6 vs 23.3 s, and the stage-0
+run is unchanged, 66.9 vs 66.7 s mean), the push_decl_members chain
+gone from the allocation profile, and the fixed point byte-identical.
+
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design
 amendment, which landed after both halves were written):

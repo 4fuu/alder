@@ -151,7 +151,10 @@ fn init_check_diagnostics(d: Domain, output: ParseOutput, symbols: __s0_Buffer(S
                                                     Err(error) => storage_error()
                                                     Ok(traits) => match empty_closure_store(d) {
                                                     Err(error) => storage_error()
-                                                    Ok(closures) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups, table_views: table_views), diagnostics: diagnostics, traits: traits, closures: closures))
+                                                    Ok(closures) => match empty_interp_scratch(d) {
+                                                        Err(error) => storage_error()
+                                                        Ok(interp) => run_check(d, output, CheckStore(symbols: symbols, type_params: type_params, types: types, type_args: type_args, type_annotations: type_annotations, uses: uses, indexes: CheckerIndexes(uses: use_indexes, use_order: use_order, complete: false), locals: locals, environments: environments, expressions: expressions, call_annotations: call_annotations, expression_children: expression_children, returns: returns, control: CheckedControlStore(blocks: blocks, statement_links: links, statements: statements, places: places, matches: matches, match_arms: arms, tries: tries, cleanups: cleanups, table_views: table_views), diagnostics: diagnostics, traits: traits, closures: closures, interp: interp))
+                                                    }
                                                 }
                                                 }
                                             }
