@@ -938,10 +938,28 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         if elem_type == mir_type_unit() { out = try cgen_put(d, out, "  uint8_t ")
         out = try cgen_put_tmp(d, out, item.result, "u")
         out = try cgen_put(d, out, " = (uint8_t)0;\n") }
+        // A storage-bearing element is deep-copied into the table's own
+        // domain first: the slot memcpy only duplicates the element struct,
+        // so internal storage must already live where the table does, or it
+        // would die with this function's storage domain while the table
+        // outlives it.
+        if elem_type != mir_type_unit() && !cgen_copy_trivial(store, elem_type) {
+            out = try cgen_put(d, out, "  ")
+            out = try cgen_put_type(d, out, store, elem_type)
+            out = try cgen_put(d, out, " ")
+            out = try cgen_put_tmp(d, out, item.result, "e")
+            out = try cgen_put(d, out, " = alder_copy_ty")
+            out = try cgen_put_u64(d, out, elem_type - 1)
+            out = try cgen_put(d, out, "(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, "->domain, ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+            out = try cgen_put(d, out, ", 1);\n")
+        }
         out = try cgen_put(d, out, "  if (!alder_table_insert(")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         out = try cgen_put(d, out, ", &")
-        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { out = try cgen_put_value(d, out, item.b) }
+        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { if !cgen_copy_trivial(store, elem_type) { out = try cgen_put_tmp(d, out, item.result, "e") } else { out = try cgen_put_value(d, out, item.b) } }
         out = try cgen_put(d, out, ", &")
         out = try cgen_put_value(d, out, item.result)
         return cgen_put(d, out, ")) { alder_runtime_panic(\"table.insert failed\"); }\n")
@@ -954,12 +972,29 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         if elem_type == mir_type_unit() { out = try cgen_put(d, out, "  uint8_t ")
         out = try cgen_put_tmp(d, out, item.result, "u")
         out = try cgen_put(d, out, " = (uint8_t)0;\n") }
+        // Storage-bearing elements are deep-copied into the table's own
+        // domain before the insert, like the panicking insert; a failed
+        // insert never uses the copy, because the Err payload carries the
+        // caller-owned element operand instead.
+        if elem_type != mir_type_unit() && !cgen_copy_trivial(store, elem_type) {
+            out = try cgen_put(d, out, "  ")
+            out = try cgen_put_type(d, out, store, elem_type)
+            out = try cgen_put(d, out, " ")
+            out = try cgen_put_tmp(d, out, item.result, "e")
+            out = try cgen_put(d, out, " = alder_copy_ty")
+            out = try cgen_put_u64(d, out, elem_type - 1)
+            out = try cgen_put(d, out, "(")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, "->domain, ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+            out = try cgen_put(d, out, ", 1);\n")
+        }
         out = try cgen_put(d, out, "  AlderTableId ")
         out = try cgen_put_tmp(d, out, item.result, "id")
         out = try cgen_put(d, out, ";\n  if (alder_table_insert(")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
         out = try cgen_put(d, out, ", &")
-        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { out = try cgen_put_value(d, out, item.b) }
+        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { if !cgen_copy_trivial(store, elem_type) { out = try cgen_put_tmp(d, out, item.result, "e") } else { out = try cgen_put_value(d, out, item.b) } }
         out = try cgen_put(d, out, ", &")
         out = try cgen_put_tmp(d, out, item.result, "id")
         out = try cgen_put(d, out, ")) {\n    ")

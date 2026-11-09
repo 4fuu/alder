@@ -2286,6 +2286,13 @@ fn lower_move_or_copy(d: Domain, source_state: State, spans: __s0_Buffer(Checked
     let typ = try lower_type(d, source_state, store, state, checked_type)
     let vec = try lower_mir_type_contains_vec(d, typ.state, typ.id)
     if !vec.value { return Ok(LowerStep(state: vec.state, id: value)) }
+    // A value-semantics read copies only storage that copy_to_domain can
+    // carry. An affine owner nested inside a vec-bearing type (for example
+    // Table(Vec(T))) is borrowed, never copied or moved by a plain read:
+    // copying it would forge a second generational-identity handle, which
+    // backend verification refuses. Such reads pass through unchanged, the
+    // same way a plain Table(T) read already does.
+    if !(try lower_mir_type_copy_relocatable(d, vec.state.mir, typ.id)) { return Ok(LowerStep(state: vec.state, id: value)) }
     var current = vec.state
     var binding: U64 = 0
     if source_expression != 0 && source_expression <= __s0_buffer_len(CheckedExprRec, store.expressions) {

@@ -97,6 +97,112 @@ fn main() -> I32 {
 }
 `
 
+const m75TableOwningProgram = `type Row {
+    n: U64
+    xs: Vec(U64)
+}
+fn main() -> I32 {
+    using t = Table.new(Row)
+    var a = Row(n: 1, xs: Vec.new(U64))
+    a.xs.push(10)
+    let first = t.insert(a)
+    let second = t.insert(a)
+    let n1 = match t.get(first) {
+        Some(v) => v.n
+        None => 0
+    }
+    let x1 = match t.get(first) {
+        Some(v) => v.xs.len()
+        None => 0
+    }
+    let n2 = match t.get(second) {
+        Some(v) => v.n
+        None => 0
+    }
+    if n1 != 1 { return 1 }
+    if x1 != 1 { return 2 }
+    if n2 != 1 { return 3 }
+    a.n = 9
+    a.xs.push(99)
+    let n1b = match t.get(first) {
+        Some(v) => v.n
+        None => 0
+    }
+    let x1b = match t.get(first) {
+        Some(v) => v.xs.len()
+        None => 0
+    }
+    if n1b != 1 { return 4 }
+    if x1b != 1 { return 5 }
+    var filler = Vec.new(U64)
+    var f: U64 = 0
+    while f < 64 {
+        filler.push(f * 3)
+        f = f + 1
+    }
+    var i: U64 = 0
+    var last = first
+    while i < 3 {
+        var r = Row(n: i + 2, xs: Vec.new(U64))
+        r.xs.push(i * 10)
+        last = t.insert(r)
+        i = i + 1
+    }
+    let nlast = match t.get(last) {
+        Some(v) => v.n
+        None => 0
+    }
+    let xlast = match t.get(last) {
+        Some(v) => v.xs.len()
+        None => 0
+    }
+    if nlast != 4 { return 6 }
+    if xlast != 1 { return 7 }
+    let nfirst = match t.get(first) {
+        Some(v) => v.n
+        None => 0
+    }
+    if nfirst != 1 { return 8 }
+    if filler.len() != 64 { return 9 }
+    return 0
+}
+`
+
+// m75TableOwningEscapeProgram pins that owning elements inserted in one
+// function are still intact after the table crosses a take/return round trip
+// and is read back in the caller: the element copies must live where the
+// table lives, not in the inserting function's storage domain.
+const m75TableOwningEscapeProgram = `type Row {
+    n: U64
+    xs: Vec(U64)
+}
+fn fill(take rows: Table(Row), n: U64) -> Table(Row) {
+    var a = Row(n: n, xs: Vec.new(U64))
+    a.xs.push(n * 2)
+    let first = rows.insert(a)
+    let second = rows.insert(a)
+    return rows
+}
+fn main() -> I32 {
+    let fresh = Table.new(Row)
+    using rows = fill(fresh, 5)
+    var a = Row(n: 50, xs: Vec.new(U64))
+    a.xs.push(7)
+    let id = rows.insert(a)
+    let n1 = match rows.get(id) {
+        Some(v) => v.n
+        None => 0
+    }
+    let x1 = match rows.get(id) {
+        Some(v) => v.xs.len()
+        None => 0
+    }
+    if n1 != 50 { return 1 }
+    if x1 != 1 { return 2 }
+    return 0
+}
+`
+
 const m75CleanupTraitProgram = `import c counter: fn(U64) -> Unit
 type Res {
     n: U64
@@ -189,6 +295,8 @@ func TestM75TableProductionQualification(t *testing.T) {
 		{"m75-table-transfer.al", m75TableTransferProgram},
 		{"m75-table-generic.al", m75TableGenericProgram},
 		{"m75-table-compose.al", m75TableComposeProgram},
+		{"m75-table-owning.al", m75TableOwningProgram},
+		{"m75-table-owning-escape.al", m75TableOwningEscapeProgram},
 		{"m75-cleanup-trait.al", m75CleanupTraitProgram},
 	} {
 		program := program
@@ -250,6 +358,78 @@ int main(void) {
 	}
 }
 
+// TestM75TableProductionSanitizers reruns the owning-element table programs
+// under ASan/UBSan when the host toolchain supports them. An owning element
+// whose internal storage died with the creating function is a use-after-free
+// that strict C11 alone cannot see.
+func TestM75TableProductionSanitizers(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	if !closureSanitizersSupported(t, cc) {
+		t.Skip("ASan/UBSan not supported by this host toolchain")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	sanitizer := []string{"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer"}
+	runtimeObject := filepath.Join(t.TempDir(), "alder-san.o")
+	runtimeArgs := append(append([]string{}, strictC11Flags()...), sanitizer...)
+	runtimeArgs = append(runtimeArgs, "-I", filepath.Join(root, "runtime", "c"),
+		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-o", runtimeObject)
+	if out, err := exec.Command(cc, runtimeArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("sanitized runtime compile: %v\n%s", err, out)
+	}
+
+	const driverText = `#include "alder_host.h"
+#include <stdint.h>
+int main(void) { int context = 0; return (int)alder_program_entry(&context); }
+`
+	for _, program := range []struct {
+		name, source string
+	}{
+		{"m75-table-owning", m75TableOwningProgram},
+		{"m75-table-owning-escape", m75TableOwningEscapeProgram},
+	} {
+		program := program
+		t.Run(program.name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{program.name + ".al": program.source}
+			cResult := runProductionCompiler(t, exe, files, "compile", "--emit=c", program.name+".al")
+			if cResult.status != 0 || cResult.stderr != "" {
+				t.Fatalf("%s C result: %+v stderr=%s", program.name, cResult, cResult.stderr)
+			}
+			dir := t.TempDir()
+			cfile := filepath.Join(dir, "program.c")
+			driver := filepath.Join(dir, "driver.c")
+			binary := filepath.Join(dir, "program")
+			if err := os.WriteFile(cfile, []byte(cResult.stdout), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(driver, []byte(driverText), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			args := append(append([]string{}, strictC11Flags()...), sanitizer...)
+			args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"),
+				cfile, driver, runtimeObject, "-o", binary)
+			if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("%s sanitized generated C compile: %v\n%s", program.name, err, out)
+			}
+			cmd := exec.Command(binary)
+			cmd.Env = append(os.Environ(), "ASAN_OPTIONS=detect_leaks=0")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%s sanitized run: %v\n%s", program.name, err, out)
+			}
+		})
+	}
+}
+
 // m75TableTryInsertOkProgram pins the Ok edge: the insert succeeds, the
 // returned id resolves through get, and the stored element is readable
 // through the view (the view arm stores the field into an outer local because
@@ -276,10 +456,12 @@ fn main() -> I32 {
 `
 
 // m75TableTryInsertErrOomProgram pins the Err edge for a heap-backed element:
-// the driver makes the element-storage allocation fail deterministically
-// (three allocations succeed first: the table slot array and the vector's two
-// buffer allocations), the insert reports Err instead of panicking, and the
-// Err payload hands the vector back with its contents intact. The sum over
+// the driver makes the insert's slot-storage allocation fail deterministically
+// (four allocations succeed first: the table slot array, the vector's two
+// buffer allocations, and the element deep copy's buffer, which follows the
+// infallible copy_to_domain abort contract), the insert reports Err instead
+// of panicking, and the Err payload hands the vector back with its contents
+// intact. The sum over
 // the returned vector proves the payload carries the original bytes.
 const m75TableTryInsertErrOomProgram = `fn main() -> I32 {
     using players = Table.new(Vec(U64))
@@ -371,16 +553,18 @@ int main(void) {
 }
 `
 
-// m75TableAllocFailDriver makes the fourth domain allocation fail, which in
-// the Err-payload fixture is the element-storage allocation of the first
-// insert (the table slot array and the vector's two buffer allocations come
-// first). This is how the exhaustion-policy Err edge is reached without any
-// earlier same-table insert.
+// m75TableAllocFailDriver makes the fifth domain allocation fail, which in
+// the Err-payload fixture is the insert's slot-storage allocation (the table
+// slot array, the vector's two buffer allocations, and the element deep
+// copy's buffer come first; the copy aborts on its own OOM per the
+// copy_to_domain contract, so the fixture must exhaust past it). This is how
+// the exhaustion-policy Err edge is reached without any earlier same-table
+// insert.
 const m75TableAllocFailDriver = `#include "alder_host.h"
 #include "alder.h"
 #include <stdint.h>
 int main(void) {
-	alder_runtime_test_fail_domain_alloc_after(3);
+	alder_runtime_test_fail_domain_alloc_after(4);
 	int context = 0;
 	return (int)alder_program_entry(&context);
 }

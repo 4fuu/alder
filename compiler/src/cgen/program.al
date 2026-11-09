@@ -393,6 +393,13 @@ fn cgen_emit_copy_helpers(d: Domain, initial: CgenWriter, store: MirStore, index
         if item.op == mir_op_copy_to_domain() { state = try cgen_emit_copy_type(d, state, store, cgen_value_type(store, indexes, item.function, item.b)) }
         if item.op == mir_op_vec_grow_checked() { let vec_type = cgen_value_type(store, indexes, item.function, item.a)
             state = try cgen_emit_copy_type(d, state, store, __s0_buffer_get(MirTypeRec, store.types, vec_type - 1).elem) }
+        if item.op == mir_op_table_insert() || item.op == mir_op_table_insert_try() {
+            // A storage-bearing element is deep-copied into the table's own
+            // domain at insert, so its copy helper must exist even when no
+            // copy_to_domain instruction names the type.
+            let elem_type = cgen_value_type(store, indexes, item.function, item.b)
+            if !cgen_copy_trivial(store, elem_type) { state = try cgen_emit_copy_type(d, state, store, elem_type) }
+        }
         if item.op == mir_op_fn_value() {
             // The environment retain hook deep-copies a storage-bearing
             // capture through its per-type copy helper, so those helpers must

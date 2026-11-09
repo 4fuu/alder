@@ -438,7 +438,17 @@ neither the symbol nor its state.
 
 Element storage and the slot array are allocated from the table's domain;
 removal marks the slot empty but leaves element storage in the domain until
-reset or destroy. Every successful domain reset changes the domain epoch and
+reset or destroy. Inserting a storage-bearing element deep-copies it into
+the table's domain (`alder_copy_tyN(table->domain, elem, 1)`) before its
+slot bytes are stored: the element may have been built in the inserting
+function's hidden caller-result domain, which is released at return, so the
+slot must own storage tied to the table's domain rather than alias the
+caller's. A source that is dead after the insert transfers its storage
+instead (the copy-site elision D023 already applies to the element read).
+The copy follows the `copy_to_domain` abort contract on allocation
+exhaustion; only the insert's own slot-storage allocation reports failure
+back to the caller (`false`, the `try_insert` `Err` payload).
+Every successful domain reset changes the domain epoch and
 invalidates all of its existing tables; the current MIR profile enforces this conservatively
 because inserts and slot growth contain hidden runtime allocations. M2 tables
 never compact, so a view stays valid memory until the domain releases it.

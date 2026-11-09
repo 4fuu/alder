@@ -56,6 +56,26 @@ struct AlderTy23 {
 };
 static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, AlderTy13 alder_v1);
 
+static ALDER_MAYBE_UNUSED AlderSlice alder_copy_ty12(AlderDomain *alder_d, AlderSlice alder_v, int alder_retain) {
+  (void)alder_retain;
+  uint64_t alder_t;
+  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)(uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic("copy_to_domain: size overflow"); }
+  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic("copy_to_domain: size exceeds size_t"); }
+  if (alder_v.len > (uint64_t)0) {
+    if (alder_v.data == NULL) { alder_runtime_panic("copy_to_domain: null source"); }
+    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)(uint64_t)_Alignof(uint8_t));
+    if (alder_p == NULL) { alder_runtime_panic("copy_to_domain: out of memory"); }
+    memcpy(alder_p, alder_v.data, (size_t)alder_t);
+    alder_v.data = alder_p;
+  }
+  return alder_v;
+}
+static ALDER_MAYBE_UNUSED AlderTy13 alder_copy_ty13(AlderDomain *alder_d, AlderTy13 alder_v, int alder_retain) {
+  (void)alder_retain;
+  alder_v.alder_f1 = alder_copy_ty12(alder_d, alder_v.alder_f1, alder_retain);
+  return alder_v;
+}
+
 static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, AlderTy13 alder_v1) {
   ALDER_MAYBE_UNUSED AlderTable * alder_v2;
   ALDER_MAYBE_UNUSED AlderTableId alder_v3;
@@ -78,7 +98,8 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, A
   alder_v2 = (AlderTable *)alder_t2p;
   *alder_v2 = (AlderTable){0};
   if (!alder_table_init(alder_v2, alder_v0, (uint64_t)sizeof(AlderTy13), (uint64_t)_Alignof(AlderTy13))) { alder_runtime_panic("table.create failed"); }
-  if (!alder_table_insert(alder_v2, &alder_v1, &alder_v3)) { alder_runtime_panic("table.insert failed"); }
+  AlderTy13 alder_t3e = alder_copy_ty13(alder_v2->domain, alder_v1, 1);
+  if (!alder_table_insert(alder_v2, &alder_t3e, &alder_v3)) { alder_runtime_panic("table.insert failed"); }
   alder_v4 = (int64_t)(0LL);
   void *alder_t5;
   if (alder_table_lookup(alder_v2, alder_v3, &alder_t5)) {
@@ -122,8 +143,9 @@ alder_b3: ALDER_MAYBE_UNUSED ;
   return alder_v11;
 alder_b4: ALDER_MAYBE_UNUSED ;
   alder_v12 = alder_table_remove(alder_v2, alder_v3);
+  AlderTy13 alder_t13e = alder_copy_ty13(alder_v2->domain, alder_v1, 1);
   AlderTableId alder_t13id;
-  if (alder_table_insert(alder_v2, &alder_v1, &alder_t13id)) {
+  if (alder_table_insert(alder_v2, &alder_t13e, &alder_t13id)) {
     alder_v13.alder_tag = (uint32_t)0;
     alder_v13.alder_u.alder_p0 = alder_t13id;
   } else {

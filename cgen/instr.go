@@ -301,10 +301,22 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			")) { alder_runtime_panic(\"table.create failed\"); }\n")
 
 	case mir.OpTableInsert:
+		elemType, _ := g.f.ValueType(in.TableVal)
 		elemAddr := "&" + g.val(in.TableVal)
-		if t, _ := g.f.ValueType(in.TableVal); t == mir.TypeUnit {
+		if elemType == mir.TypeUnit {
 			b.WriteString("  uint8_t " + g.tmp(in, "u") + " = (uint8_t)0;\n")
 			elemAddr = "&" + g.tmp(in, "u")
+		}
+		// A storage-bearing element is deep-copied into the table's own
+		// domain first: the slot memcpy only duplicates the element struct,
+		// so internal storage must already live where the table does, or it
+		// would die with this function's storage domain while the table
+		// outlives it.
+		if elemType != mir.TypeUnit && !g.copyTrivial(elemType) {
+			b.WriteString("  " + g.cType(elemType) + " " + g.tmp(in, "e") + " = " +
+				g.copyCall(elemType) + "(" + g.valueExpr(in.Table) + "->domain, " +
+				g.valueExpr(in.TableVal) + ", 1);\n")
+			elemAddr = "&" + g.tmp(in, "e")
 		}
 		b.WriteString("  if (!alder_table_insert(" + g.valueExpr(in.Table) + ", " + elemAddr +
 			", &" + g.val(in.Result) + ")) { alder_runtime_panic(\"table.insert failed\"); }\n")
@@ -313,10 +325,21 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		// table.insert.try <table>, <elem> -> result(id(elem), elem). No
 		// failure edge: exhaustion or the slot-limit policy is the Err
 		// payload, which carries the element value back to the caller.
+		elemType, _ := g.f.ValueType(in.TableVal)
 		elemAddr := "&" + g.val(in.TableVal)
-		if t, _ := g.f.ValueType(in.TableVal); t == mir.TypeUnit {
+		if elemType == mir.TypeUnit {
 			b.WriteString("  uint8_t " + g.tmp(in, "u") + " = (uint8_t)0;\n")
 			elemAddr = "&" + g.tmp(in, "u")
+		}
+		// Storage-bearing elements are deep-copied into the table's own
+		// domain before the insert, like the panicking insert; a failed
+		// insert never uses the copy, because the Err payload carries the
+		// caller-owned element operand instead.
+		if elemType != mir.TypeUnit && !g.copyTrivial(elemType) {
+			b.WriteString("  " + g.cType(elemType) + " " + g.tmp(in, "e") + " = " +
+				g.copyCall(elemType) + "(" + g.valueExpr(in.Table) + "->domain, " +
+				g.valueExpr(in.TableVal) + ", 1);\n")
+			elemAddr = "&" + g.tmp(in, "e")
 		}
 		rt, _ := g.f.ValueType(in.Result)
 		okIdx, _ := g.m.VariantIndex(rt, "ok")

@@ -324,11 +324,16 @@ Implemented expressions include:
   guard only borrows its bindings (kinds 148 and 149);
 - prefix `try` with the exact same error type;
 - a single direct imported call in `unsafe c { ... }`;
-- M7.5 table identity: `Table(T)` over concrete copyable elements,
+- M7.5 table identity: `Table(T)` over concrete ordinary values (including
+  vec-bearing records),
   `Table.new(T)`, `t.insert(value) -> T.Id`, `t.remove(id) -> Bool`, and
   `t.get(id)`/`t.get_mut(id)` consumed only as a match scrutinee, where the
   `Some` arm binds a scoped view usable for field reads (and field writes
-  through `get_mut`) inside a straight-line fail-free arm body;
+  through `get_mut`) inside a straight-line fail-free arm body. Inserting an
+  element snapshots it into the table's domain: a still-live source is
+  deep-copied there at insert, and a source dead after the insert transfers
+  its storage instead, so stored owning elements survive the inserting
+  function; reads of the table itself are borrows and never copy it;
 - the callback-free `using name = Table.new(T)` registration, whose owner is
   cleanup-covered at every exit and disarmed on transfer;
 - M7.5 resource composition: affine owners transfer into aggregate

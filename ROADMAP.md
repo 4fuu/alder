@@ -1083,6 +1083,15 @@ this evidence record):
   while plain `insert` keeps the capacity-refusal abort — the C-side
   slot-limit hook forcing the capacity `Err` deterministically is a test
   hook, not language surface (see `docs/c-backend.md`);
+- same-table owning-element inserts are buildable: reads of a vec-bearing
+  type that carries an affine owner (for example `Table(Row)` with
+  `xs: Vec(U64)` fields) are borrows like plain table reads, so reading the
+  table binding again after an insert no longer emits the `copy_to_domain`
+  that phase 10 refuses, and `insert`/`insert.try` deep-copy a
+  storage-bearing element into the table's domain at insert so stored
+  owning elements stay valid after the inserting function returns
+  (straight-line and per-iteration loop inserts pinned through strict C11
+  and ASan/UBSan, with snapshot independence and take/return escape);
 - affine owners compose into records, enums, `Option`, `Result`, and fixed
   arrays: construction transfers parts, affine scrutinees are consumed as a
   whole, and parts leave only by transferring the whole aggregate or

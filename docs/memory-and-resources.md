@@ -267,8 +267,19 @@ ID exhaustion is checked and terminates for infallible insertion. A fallible
 `try_insert` returns `Result(T.Id, T)`: `Ok` carries the fresh ID, and `Err`
 carries the element value itself back to the caller, so a failed insertion
 never drops or copies away the value it was given. `Err` means the table
-refused the insert (identity exhaustion or the runtime capacity policy); the
-table is unchanged.
+refused the insert (identity exhaustion, the runtime capacity policy, or
+slot-storage exhaustion); the table is unchanged. Exhaustion inside the
+element copy itself follows the `copy_to_domain` abort contract instead,
+because the copy is an infallible value operation.
+
+Element placement: inserting a storage-bearing element deep-copies it into
+the table's domain before its slot bytes are stored, so a stored owning
+element stays valid as long as the table itself, even when its source was
+allocated in the inserting function's hidden caller-result domain; a source
+that is dead after the insert transfers its storage instead. A table value
+itself is never copied (`copy_to_domain` rejects it, phase 10), so reads of
+a table are borrows and the same table can be read again after an insert
+without a value copy.
 
 ## Deterministic cleanup
 

@@ -221,6 +221,25 @@ func (g *gen) analyze() error {
 						copySet = make(map[mir.TypeId]bool)
 					}
 					g.collectCopyTypes(elem, copySet)
+				case mir.OpTableInsert, mir.OpTableInsertTry:
+					// A storage-bearing element is deep-copied into the
+					// table's own domain at insert, so its copy helper must
+					// exist even when no copy_to_domain instruction names
+					// the type.
+					t, ok := f.ValueType(in.TableVal)
+					if !ok || !g.m.ValidType(t) || t == mir.TypeUnit {
+						continue
+					}
+					if g.copyTrivial(t) {
+						continue
+					}
+					if err := g.requireCopyable(t); err != nil {
+						return err
+					}
+					if copySet == nil {
+						copySet = make(map[mir.TypeId]bool)
+					}
+					g.collectCopyTypes(t, copySet)
 				}
 			}
 		}
