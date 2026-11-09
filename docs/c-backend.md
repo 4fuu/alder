@@ -422,6 +422,20 @@ Lookup performs, in order:
 4. generation comparison;
 5. creation of a scoped view (a pointer to the element storage).
 
+`table.insert.try` calls the same `alder_table_insert` but turns its `false`
+return into the `err` payload of the MIR `result(id(T), T)` value instead of a
+panic; the `ok` payload receives the fresh id. The element value is written
+into the result unchanged, so the caller keeps the value it passed.
+
+Under `ALDER_RUNTIME_TESTING`, the runtime additionally exposes
+`alder_runtime_test_set_table_slot_limit(uint64_t slots)`: a process-wide
+test/diagnostic hook that refuses table growth past `slots` slot-array
+entries, so insertion into a full table fails deterministically (and
+`try_insert` returns its error payload). The default of zero means unlimited
+shipped behavior. The hook is not part of the language surface: Alder source
+cannot reach it, generated code never calls it, and production builds expose
+neither the symbol nor its state.
+
 Element storage and the slot array are allocated from the table's domain;
 removal marks the slot empty but leaves element storage in the domain until
 reset or destroy. Every successful domain reset changes the domain epoch and

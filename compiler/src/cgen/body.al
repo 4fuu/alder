@@ -225,7 +225,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_fn_value() { return false }
+        if item.op > mir_op_table_insert_try() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -945,6 +945,40 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, ", &")
         out = try cgen_put_value(d, out, item.result)
         return cgen_put(d, out, ")) { alder_runtime_panic(\"table.insert failed\"); }\n")
+    }
+    if item.op == mir_op_table_insert_try() {
+        // table.insert.try <table>, <elem> -> result(id(elem), elem). No
+        // failure edge: exhaustion or the slot-limit policy is the Err
+        // payload, which carries the element value back to the caller.
+        let elem_type = cgen_value_type(store, indexes, item.function, item.b)
+        if elem_type == mir_type_unit() { out = try cgen_put(d, out, "  uint8_t ")
+        out = try cgen_put_tmp(d, out, item.result, "u")
+        out = try cgen_put(d, out, " = (uint8_t)0;\n") }
+        out = try cgen_put(d, out, "  AlderTableId ")
+        out = try cgen_put_tmp(d, out, item.result, "id")
+        out = try cgen_put(d, out, ";\n  if (alder_table_insert(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", &")
+        if elem_type == mir_type_unit() { out = try cgen_put_tmp(d, out, item.result, "u") } else { out = try cgen_put_value(d, out, item.b) }
+        out = try cgen_put(d, out, ", &")
+        out = try cgen_put_tmp(d, out, item.result, "id")
+        out = try cgen_put(d, out, ")) {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)0;\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p0 = ")
+        out = try cgen_put_tmp(d, out, item.result, "id")
+        out = try cgen_put(d, out, ";\n  } else {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n")
+        if elem_type != mir_type_unit() {
+            out = try cgen_put(d, out, "    ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, ".alder_u.alder_p1 = ")
+            out = try cgen_put_value(d, out, item.b)
+            out = try cgen_put(d, out, ";\n")
+        }
+        return cgen_put(d, out, "  }\n")
     }
     if item.op == mir_op_table_lookup() || item.op == mir_op_table_lookup_mut() {
         out = try cgen_put(d, out, "  void *")

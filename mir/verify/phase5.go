@@ -258,6 +258,11 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.expectExact(in.TableVal, "insert value", elem)
 		}
 
+	case mir.OpTableInsertTry:
+		if elem, ok := tableElem(m, f, in.Table); ok {
+			c.expectExact(in.TableVal, "insert value", elem)
+		}
+
 	case mir.OpTableLookup, mir.OpTableLookupMut, mir.OpTableRemove:
 		if elem, ok := tableElem(m, f, in.Table); ok {
 			c.expectExact(in.ID, "id operand", m.ID(elem))

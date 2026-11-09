@@ -55,6 +55,7 @@ static uint64_t g_next_table_serial = 1; /* 0 is never a valid serial */
 
 #if defined(ALDER_RUNTIME_TESTING)
 static uint64_t g_test_domain_allocations_before_failure = UINT64_MAX;
+static uint64_t g_table_slot_limit = 0;
 
 void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls) {
     g_test_domain_allocations_before_failure = allowed_calls;
@@ -66,6 +67,10 @@ void alder_runtime_test_clear_domain_alloc_failure(void) {
 
 void alder_runtime_test_exhaust_segment_identities(void) {
     g_next_segment_serial = 0;
+}
+
+void alder_runtime_test_set_table_slot_limit(uint64_t slots) {
+    g_table_slot_limit = slots;
 }
 #endif
 
@@ -490,6 +495,16 @@ static bool table_grow(AlderTable *table) {
     if (new_capacity > (uint64_t)(SIZE_MAX / sizeof(AlderTableSlot))) {
         return false; /* overflow */
     }
+    /* Test/diagnostic slot limit (alder_runtime_test_set_table_slot_limit):
+       refuse growth past the configured slot budget so capacity-policy paths
+       are deterministically reachable in tests. Zero means unlimited, which
+       is the shipped behavior. The limit exists only in testing builds, so
+       the shipped runtime carries neither the state nor the check. */
+#if defined(ALDER_RUNTIME_TESTING)
+    if (g_table_slot_limit != 0 && new_capacity > g_table_slot_limit) {
+        return false;
+    }
+#endif
     size_t slot_bytes = (size_t)new_capacity * sizeof(AlderTableSlot);
     AlderTableSlot *fresh = (AlderTableSlot *)alder_domain_alloc(
         table->domain, slot_bytes, (size_t)_Alignof(AlderTableSlot));

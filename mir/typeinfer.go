@@ -314,6 +314,17 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return m.ID(elem), true
+	case OpTableInsertTry:
+		elem, ok := m.tableElem(f, in.Table)
+		if !ok {
+			return NoType, false
+		}
+		if vt, ok := f.ValueType(in.TableVal); !ok || vt != elem {
+			return NoType, false
+		}
+		// Ok carries the fresh id; Err carries the element value back to the
+		// caller, so an affine element would stay owned by its caller.
+		return m.Result(m.ID(elem), elem), true
 	case OpTableLookup, OpTableLookupMut:
 		elem, ok := m.tableElem(f, in.Table)
 		if !ok {

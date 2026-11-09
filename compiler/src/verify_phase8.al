@@ -66,7 +66,7 @@ var changed = true
 while changed { let before = __s0_buffer_len(MirV8Effect, effects)
 var iid: U64 = 1
 while iid <= __s0_buffer_len(MirInstrRec, store.instructions) { let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-if x.op == mir_op_table_insert() || x.op == mir_op_table_remove() { effects = try mir_v8_add_effects(d, facts, effects, x.function, x.a) }
+if x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove() { effects = try mir_v8_add_effects(d, facts, effects, x.function, x.a) }
 if x.op == mir_op_call() { var e: U64 = 0
 while e < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(MirV8Effect, effects, e)
 if effect.function == x.target { effects = try mir_v8_add_effects(d, facts, effects, x.function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)) }
@@ -91,7 +91,7 @@ si = si + 1 }
 return false }
 fn mir_v8_mutates(store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), function: U64, iid: U64, table: U64) -> Bool {
     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-    if (x.op == mir_op_table_insert() || x.op == mir_op_table_remove()) && mir_v8_same_table(facts, function, x.a, table) { return true }
+    if (x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove()) && mir_v8_same_table(facts, function, x.a, table) { return true }
     if x.op == mir_op_call() { var e: U64 = 0
         while e < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(MirV8Effect, effects, e)
             if effect.function == x.target && mir_v8_same_table(facts, function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1), table) { return true }

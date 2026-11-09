@@ -5658,6 +5658,7 @@ fn check_table_static_builtin(d: Domain, state: State, parse: ParseStore, base: 
 fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     var identity: U64 = 0
     if node_word(state, callee, "insert") { identity = 27 }
+    if node_word(state, callee, "try_insert") { identity = 46 }
     if node_word(state, callee, "get") { identity = 28 }
     if node_word(state, callee, "get_mut") { identity = 29 }
     if node_word(state, callee, "remove") { identity = 45 }
@@ -5668,14 +5669,14 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
     let local = __s0_buffer_get(LocalRec, store.locals, local_id - 1)
     var owning_receiver = local.kind == 2 || local.mutable == 1
     if local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 { owning_receiver = true }
-    if identity == 27 || identity == 29 || identity == 45 {
+    if identity == 27 || identity == 29 || identity == 45 || identity == 46 {
         // A structural mutation or exclusive view needs the owning binding,
         // an exclusive receiver, or a consuming parameter; a read-borrowed
         // table parameter stays immutable.
         if !owning_receiver { return expr_token_fail(d, state, base, 131, receiver_node) }
     }
     var mode: U64 = 1
-    if identity == 27 || identity == 45 { mode = 2 }
+    if identity == 27 || identity == 45 || identity == 46 { mode = 2 }
     if identity == 28 { mode = 3 }
     if identity == 29 { mode = 4 }
     if lexical_access_conflict(store, owner, local_id, mode) { return expr_token_fail(d, state, base, 134, receiver_node) }
@@ -5684,7 +5685,7 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
     let id_made = try canonical_application(d, store, owner, 20, element, 0, 1)
     var current = id_made.store
     var wanted = id_made.checked_type
-    if identity == 27 { wanted = element }
+    if identity == 27 || identity == 46 { wanted = element }
     let argument_link = call_link_at(parse, call, 2)
     let argument = __s0_buffer_get(SyntaxRec, parse.nodes, argument_link.node - 1)
     let checked_argument = try check_value_expression_inner(d, state, parse, base, current, owner, argument, argument_link.node, wanted, 42, argument, 0, 0, in_loop)
@@ -5703,6 +5704,13 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
     if draft.deferred { return expr_deferred(base) }
     let id_result = id_made.checked_type
     var result = id_result
+    if identity == 46 {
+        // try_insert: Ok carries the fresh id, Err carries the element value
+        // back to the caller, so a failed insert never drops its argument.
+        let result_made = try canonical_application(d, current, owner, 10, id_result, element, 2)
+        current = result_made.store
+        result = result_made.checked_type
+    }
     if identity == 28 {
         let view_made = try canonical_application(d, current, owner, 21, element, 0, 1)
         current = view_made.store

@@ -324,7 +324,7 @@ func directView(f *mir.Function, v *mir.Value, info []tableOrigins) (mir.BlockId
 
 func mutationOf(m *mir.Module, f *mir.Function, b *mir.Block, i int, info []tableOrigins, effects []functionEffect, cleanup *cleanupAnalysis, want tableOrigins) bool {
 	in := &b.Instrs[i]
-	if (in.Op == mir.OpTableInsert || in.Op == mir.OpTableRemove) && originsOverlap(info[in.Table], want) {
+	if (in.Op == mir.OpTableInsert || in.Op == mir.OpTableInsertTry || in.Op == mir.OpTableRemove) && originsOverlap(info[in.Table], want) {
 		return true
 	}
 	if in.Op == mir.OpCall && int(in.Callee) < len(effects) {

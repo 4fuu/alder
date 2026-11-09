@@ -107,6 +107,32 @@ fn main() -> I32 {
  return 0
 }
 `,
+		"table-try-insert.al": `fn main() -> I32 {
+ using players = Table.new(Vec(U64))
+ var seeded: Vec(U64) = Vec.new(U64)
+ seeded.push(7)
+ let first = players.try_insert(seeded)
+ var answer: U64 = 0
+ match first {
+  Ok(id) => { answer = 1 }
+  Err(back) => {
+   if back.len() != 1 { return 1 }
+   answer = 2
+  }
+ }
+ let spare = Vec.new(U64)
+ let second = players.try_insert(spare)
+ match second {
+  Ok(id) => { answer = answer + 1 }
+  Err(back) => {
+   if back.len() != 0 { return 2 }
+   answer = answer + 2
+  }
+ }
+ if answer != 4 { return 3 }
+ return 0
+}
+`,
 		"table-transfer.al": `fn move_out() -> Table(U64) {
  using fresh = Table.new(U64)
  return fresh
@@ -155,6 +181,7 @@ fn main() -> I32 {
 		{"table-view-control-arm", "fn f(t: Table(U64), id: U64.Id, flag: Bool) -> Unit {\n match t.get(id) {\n  Some(value) => { if flag { let x = 1 } }\n  None => {}\n }\n}\n", 133},
 		{"table-mixed-arms", "fn f(t: Table(U64), id: U64.Id) -> U64 {\n return match t.get(id) {\n  Some(value) => 1\n  None => {}\n }\n}\n", 135},
 		{"table-mutation-under-view", "fn f(mut t: Table(U64), id: U64.Id) -> Unit {\n match t.get(id) {\n  Some(value) => { let fresh = t.insert(2) }\n  None => {}\n }\n}\n", 134},
+		{"table-tryinsert-under-view", "fn f(mut t: Table(U64), id: U64.Id) -> Unit {\n match t.get(id) {\n  Some(value) => { let outcome = t.try_insert(2) }\n  None => {}\n }\n}\n", 134},
 		// A nested lookup inside a view arm is structurally excluded by the
 		// arm region rule (no nested match), so the exclusive-view overlap is
 		// pinned through remove under a live view instead.

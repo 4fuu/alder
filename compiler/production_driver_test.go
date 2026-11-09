@@ -748,6 +748,22 @@ func strictC11Flags() []string {
 	return []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
 }
 
+// buildRuntimeObjectTesting compiles the runtime under the strict warning set
+// with ALDER_RUNTIME_TESTING, so fixtures that drive a test hook through a
+// custom C main link a runtime that actually exposes it. Shipped behavior is
+// unchanged: every hook is inert unless a test calls it.
+func buildRuntimeObjectTesting(t *testing.T, cc, root string) string {
+	t.Helper()
+	object := filepath.Join(t.TempDir(), "alder-testing.o")
+	args := strictC11Flags()
+	args = append(args, "-DALDER_RUNTIME_TESTING", "-I", filepath.Join(root, "runtime", "c"),
+		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-o", object)
+	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of the testing runtime: %v\n%s", err, outputText)
+	}
+	return object
+}
+
 func alder1LinkFlags() []string {
 	switch runtime.GOOS {
 	case "windows":
@@ -792,8 +808,9 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 
 // compileAndRunProductionArtifactWithDriver links the generated program
 // against an arbitrary driver, for fixtures that observe cleanup through an
-// imported C hook.
-func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, generated, driverText string, want int) {
+// imported C hook. Extra compile flags are appended to the strict set, which
+// is how a fixture opts into ALDER_RUNTIME_TESTING on the runtime object.
+func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, generated, driverText string, want int, extra ...string) {
 	t.Helper()
 	dir := t.TempDir()
 	cfile := filepath.Join(dir, "program.c")
@@ -805,7 +822,9 @@ func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, g
 	if err := os.WriteFile(driver, []byte(driverText), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args = append(args, extra...)
+	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe)
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict generated C compile: %v\n%s", err, output)
 	}

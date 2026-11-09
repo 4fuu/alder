@@ -81,7 +81,7 @@ func computeFunctionEffectsWithCleanup(m *mir.Module) ([]functionEffect, []*clea
 				} else if in.Op == mir.OpDomainReset {
 					fnChanged = addParamDeps(e.resets, info, in.Domain) || fnChanged
 				}
-				if in.Op == mir.OpTableInsert || in.Op == mir.OpTableRemove {
+				if in.Op == mir.OpTableInsert || in.Op == mir.OpTableInsertTry || in.Op == mir.OpTableRemove {
 					fnChanged = addTableParamDeps(e.tableMutates, tables, in.Table) || fnChanged
 				}
 				if in.Op == mir.OpCall && int(in.Callee) < len(out) {

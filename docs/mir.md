@@ -341,6 +341,7 @@ float.from_int value, T
 ```text
 table.create element_type, domain -> table(element_type)
 table.insert table, value -> id(element_type)
+table.insert.try table, value -> result(id(element_type), element_type)
 table.lookup table, id -> option(table_view(element_type))
 table.lookup_mut table, id -> option(table_mut_view(element_type))
 table.remove table, id -> bool
@@ -355,6 +356,13 @@ Required invariants:
 - table views cannot outlive the operation or access scope that stabilizes their slot;
 - compaction may relocate values without changing valid IDs;
 - mutation that could invalidate a view is rejected or sequenced after the view ends.
+
+`table.insert.try` carries no failure edge: exhaustion or the capacity policy
+surfaces as the result value, whose `ok` payload is the fresh id and whose
+`err` payload is the element value handed back to the caller. The verifier
+therefore treats the result's lifetime as derived from the element operand
+(not from the table), and `table.insert.try` counts as a table mutation for
+the live-view rules exactly like `table.insert` and `table.remove`.
 
 ## Constants
 
@@ -571,7 +579,7 @@ Initial conservative rules:
 - `unreachable` terminators are accepted only in blocks unreachable from the entry block;
 - table identities originate at function table parameters and `table.create` sites and are preserved through block parameters, memory, aggregate/enum values, and ordinary calls. A call returning a newly-created table receives a stable call-site identity;
 - any domain reset invalidates tables that may be owned by that domain, even when the table was created before the mark. This conservative rule prevents hidden element or slot allocations made after the mark from surviving behind a stale table handle;
-- a table lookup result is consumed exactly once, in its defining block, by a `some` switch binding or checked `some` payload extraction. From lookup until extraction, and from successful extraction through `table.view.end`, insert, remove, and ordinary-call or active-cleanup effects that may mutate the same table are forbidden. The checked extraction failure edge observes the pre-extraction state and a switch `none` path has no view to end;
+- a table lookup result is consumed exactly once, in its defining block, by a `some` switch binding or checked `some` payload extraction. From lookup until extraction, and from successful extraction through `table.view.end`, insert, insert.try, remove, and ordinary-call or active-cleanup effects that may mutate the same table are forbidden. The checked extraction failure edge observes the pre-extraction state and a switch `none` path has no view to end;
 - table views are ephemeral: every use of a view must stay in its access block, exactly one `table.view.end` follows all other uses, and neither insert nor remove of the same table may occur while any related view remains active;
 - `raw_ptr` values may only cross explicit unsafe boundaries: FFI calls, function boundaries, and returns;
 - `alloc` and `table.create` element types must be plain value types without handles, cleanup identifiers, views, or raw pointers, recursively.

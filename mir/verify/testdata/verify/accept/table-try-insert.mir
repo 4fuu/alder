@@ -1,0 +1,11 @@
+mir 1
+
+type @P {
+  x: i64
+}
+
+fn @f(%t: table(@P), %row: @P) -> result(id(@P), @P) {
+bb0:
+  %tried = table.insert.try %t, %row
+  return %tried
+}

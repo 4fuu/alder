@@ -340,7 +340,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpFnValue {
+	if in.Op > mir.OpTableInsertTry {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -507,6 +507,9 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpTableInsert:
 		require(in.Table, "table operand")
 		require(in.TableVal, "insert value")
+	case mir.OpTableInsertTry:
+		require(in.Table, "table operand")
+		require(in.TableVal, "insert value")
 	case mir.OpTableLookup, mir.OpTableLookupMut, mir.OpTableRemove:
 		require(in.Table, "table operand")
 		require(in.ID, "id operand")
@@ -647,6 +650,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpTableCreate:
 		add(in.Domain)
 	case mir.OpTableInsert:
+		add(in.Table)
+		add(in.TableVal)
+	case mir.OpTableInsertTry:
 		add(in.Table)
 		add(in.TableVal)
 	case mir.OpTableLookup, mir.OpTableLookupMut, mir.OpTableRemove:

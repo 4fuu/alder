@@ -1128,6 +1128,16 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		in.TableVal, err = p.parseValueRef()
 
+	case "table.insert.try":
+		in.Op = OpTableInsertTry
+		if in.Table, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.TableVal, err = p.parseValueRef()
+
 	case "table.lookup", "table.lookup_mut", "table.remove":
 		if t.text == "table.lookup" {
 			in.Op = OpTableLookup

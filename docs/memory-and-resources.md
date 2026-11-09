@@ -264,8 +264,11 @@ exclusive view. A structural table mutation cannot overlap a live view. Graphs
 and cycles use IDs, so graph topology does not control memory reclamation.
 
 ID exhaustion is checked and terminates for infallible insertion. A fallible
-`try_insert` returns `Result` for programs that must handle exhaustion or
-capacity policy explicitly.
+`try_insert` returns `Result(T.Id, T)`: `Ok` carries the fresh ID, and `Err`
+carries the element value itself back to the caller, so a failed insertion
+never drops or copies away the value it was given. `Err` means the table
+refused the insert (identity exhaustion or the runtime capacity policy); the
+table is unchanged.
 
 ## Deterministic cleanup
 

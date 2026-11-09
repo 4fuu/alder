@@ -40,6 +40,7 @@ fn mir_v5_array_view_type(store: MirStore, t: U64) -> U64 {
     return 0
 }
 fn mir_v5_find_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 { return mir_vindex_type_unary(indexes, kind, elem) }
+fn mir_v5_find_result(indexes: MirVIndexes, ok: U64, err: U64) -> U64 { return mir_vindex_type_result(indexes, ok, err) }
 fn mir_v5_find_kind(indexes: MirVIndexes, kind: U64) -> U64 { return mir_vindex_type_kind(indexes, kind) }
 fn mir_v5_const_type(store: MirStore, indexes: MirVIndexes, start: U64, end: U64) -> U64 { let at = mir_vindex_const(store, indexes, start, end)
 if at == 0 { return 0 }
@@ -299,6 +300,9 @@ return MirVTypeResult(valid: mir_v5_is_enum(store, x.type_op) && payload != 0 &&
     if x.op == mir_op_table_create() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()), type_id: mir_v5_find_unary(indexes, mir_type_kind_table(), x.type_op)) }
     if x.op == mir_op_table_insert() { let elem = __s0_buffer_get(MirTypeRec, store.types, ta - 1).elem
 return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() && tb == elem, type_id: mir_v5_find_unary(indexes, mir_type_kind_id(), elem)) }
+    if x.op == mir_op_table_insert_try() { let elem = __s0_buffer_get(MirTypeRec, store.types, ta - 1).elem
+let id_type = mir_v5_find_unary(indexes, mir_type_kind_id(), elem)
+return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() && tb == elem, type_id: mir_v5_find_result(indexes, id_type, elem)) }
     if x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() { let elem = __s0_buffer_get(MirTypeRec, store.types, ta - 1).elem
 var view_kind = mir_type_kind_table_view()
 if x.op == mir_op_table_lookup_mut() { view_kind = mir_type_kind_table_mut_view() }
@@ -492,10 +496,10 @@ if x.op == mir_op_enum_construct() { et = x.type_op }
 let payload = mir_vcase_payload(store, indexes, et, x.name_start, x.name_end)
 if !mir_v5_is_enum(store, et) || payload == 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_variant(), x.function, x.block, id, 0, 0, et, 0, et) } else { if x.op == mir_op_enum_construct() { if payload == mir_type_unit() && x.a != 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_variant(), x.function, x.block, id, 0, 0, 0, mir_v5_value_type(store, indexes, x.function, x.a), et) }
 if payload != mir_type_unit() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, payload) } } } }
-    if x.op >= mir_op_table_insert() && x.op <= mir_op_table_remove() { let table = mir_v5_value_type(store, indexes, x.function, x.a)
+    if (x.op >= mir_op_table_insert() && x.op <= mir_op_table_remove()) || x.op == mir_op_table_insert_try() { let table = mir_v5_value_type(store, indexes, x.function, x.a)
 if mir_vtype_kind(store, table) != mir_type_kind_table() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_table(), mir_vtype_kind(store, table), x.a) } else { let elem = __s0_buffer_get(MirTypeRec, store.types, table - 1).elem
 var want = mir_v5_find_unary(indexes, mir_type_kind_id(), elem)
-if x.op == mir_op_table_insert() { want = elem }
+if x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() { want = elem }
 result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, want) } }
     if x.op == mir_op_table_view_end() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a))
 if k != mir_type_kind_table_view() && k != mir_type_kind_table_mut_view() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_table_view(), k, x.a) } }

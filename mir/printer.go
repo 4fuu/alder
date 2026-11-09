@@ -311,6 +311,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpTableInsert:
 		b.WriteString(" " + valueName(f, in.Table) + ", " + valueName(f, in.TableVal))
 
+	case OpTableInsertTry:
+		b.WriteString(" " + valueName(f, in.Table) + ", " + valueName(f, in.TableVal))
+
 	case OpTableLookup, OpTableLookupMut, OpTableRemove:
 		b.WriteString(" " + valueName(f, in.Table) + ", " + valueName(f, in.ID))
 

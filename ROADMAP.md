@@ -632,7 +632,7 @@ Exit-criteria evidence:
 
 - `alder1 -> C2 -> alder2 -> C3` completes for the current 30-source compiler
   root, and `C2` and `C3` are byte-identical with SHA-256
-  `f22bb8e3f2c7eeb7e3dafd50bb202d14ad7340cc5a2850cec471e2666722f6cd`
+  `292dca13e065ca6e0a6e0d52c69c3277732e801e57ac1091332463ffcbdad1ea`
 - `bootstrap/alder.c` is that fixed-point C, and its digest is pinned by an
   ordinary compiler test;
 - `bootstrap/compiler-sources.manifest` records canonical lengths and SHA-256
@@ -713,7 +713,7 @@ Exit-criteria evidence:
 - `go test ./...`, `go vet ./...`, both strict C11 syntax checks, and the
   Go-free `bootstrap/regenerate.sh` fixed-point gate pass on the 30-source
   compiler root. The committed fixed-point C has SHA-256
-  `f22bb8e3f2c7eeb7e3dafd50bb202d14ad7340cc5a2850cec471e2666722f6cd`
+  `292dca13e065ca6e0a6e0d52c69c3277732e801e57ac1091332463ffcbdad1ea`
 
 ## Milestone 7: Core Value Categories and Owned Foundations
 
@@ -1077,7 +1077,12 @@ this evidence record):
   table-view registrations reject overlapping mutation or exclusive access
   under a live view. Table storage allocates in the caller-result domain so
   an escaping owner outlives its function; the builtin registration is a
-  compiler-synthesized no-op release;
+  compiler-synthesized no-op release; `try_insert` adds the non-panicking
+  edge, returning `Result(T.Id, T)` where a failed insert hands its affine
+  element back through the `Err` payload (`table.insert.try`, MIR op 68)
+  while plain `insert` keeps the capacity-refusal abort — the C-side
+  slot-limit hook forcing the capacity `Err` deterministically is a test
+  hook, not language surface (see `docs/c-backend.md`);
 - affine owners compose into records, enums, `Option`, `Result`, and fixed
   arrays: construction transfers parts, affine scrutinees are consumed as a
   whole, and parts leave only by transferring the whole aggregate or
@@ -1121,8 +1126,6 @@ this evidence record):
 
 Deferred from this half, with reasons:
 
-- `Table.try_insert`: needs a non-panicking MIR insert edge (fallible
-  capacity policy) that the current table operations do not expose;
 - suspending cleanup behavior: deferred to Milestone 9 as planned.
 
 Compile-time guardrails (cold `bootstrap/regenerate.sh`, one host, measured

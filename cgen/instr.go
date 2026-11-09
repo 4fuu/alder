@@ -309,6 +309,28 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		b.WriteString("  if (!alder_table_insert(" + g.valueExpr(in.Table) + ", " + elemAddr +
 			", &" + g.val(in.Result) + ")) { alder_runtime_panic(\"table.insert failed\"); }\n")
 
+	case mir.OpTableInsertTry:
+		// table.insert.try <table>, <elem> -> result(id(elem), elem). No
+		// failure edge: exhaustion or the slot-limit policy is the Err
+		// payload, which carries the element value back to the caller.
+		elemAddr := "&" + g.val(in.TableVal)
+		if t, _ := g.f.ValueType(in.TableVal); t == mir.TypeUnit {
+			b.WriteString("  uint8_t " + g.tmp(in, "u") + " = (uint8_t)0;\n")
+			elemAddr = "&" + g.tmp(in, "u")
+		}
+		rt, _ := g.f.ValueType(in.Result)
+		okIdx, _ := g.m.VariantIndex(rt, "ok")
+		errIdx, _ := g.m.VariantIndex(rt, "err")
+		b.WriteString("  AlderTableId " + g.tmp(in, "id") + ";\n")
+		b.WriteString("  if (alder_table_insert(" + g.valueExpr(in.Table) + ", " + elemAddr +
+			", &" + g.tmp(in, "id") + ")) {\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)" + strconv.Itoa(okIdx) + ";\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p" + strconv.Itoa(okIdx) + " = " + g.tmp(in, "id") + ";\n")
+		b.WriteString("  } else {\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)" + strconv.Itoa(errIdx) + ";\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p" + strconv.Itoa(errIdx) + " = " + g.val(in.TableVal) + ";\n")
+		b.WriteString("  }\n")
+
 	case mir.OpTableLookup, mir.OpTableLookupMut:
 		t, _ := g.f.ValueType(in.Table)
 		elem := g.m.Types[t].Elem

@@ -93,6 +93,9 @@ const (
 	OpCallValue
 	OpStrEq
 	OpFnValue
+	// Fallible table insertion carries no failure edge: exhaustion and the
+	// slot-limit policy surface as the Err payload of the result value.
+	OpTableInsertTry
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -239,6 +242,8 @@ func (k OpKind) String() string {
 		return "str.eq"
 	case OpFnValue:
 		return "fn.value"
+	case OpTableInsertTry:
+		return "table.insert.try"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

@@ -249,3 +249,198 @@ int main(void) {
 		})
 	}
 }
+
+// m75TableTryInsertOkProgram pins the Ok edge: the insert succeeds, the
+// returned id resolves through get, and the stored element is readable
+// through the view (the view arm stores the field into an outer local because
+// view arms admit only straight-line copy statements and expose field reads).
+// It links the unlimited runtime with the plain driver.
+const m75TableTryInsertOkProgram = `type Slot {
+    n: U64
+}
+fn main() -> I32 {
+    using players = Table.new(Slot)
+    var seen: U64 = 0
+    match players.try_insert(Slot(n: 41)) {
+        Ok(id) => {
+            match players.get(id) {
+                Some(row) => { seen = row.n }
+                None => { return 2 }
+            }
+        }
+        Err(back) => { return 3 }
+    }
+    if seen != 41 { return 1 }
+    return 0
+}
+`
+
+// m75TableTryInsertErrOomProgram pins the Err edge for a heap-backed element:
+// the driver makes the element-storage allocation fail deterministically
+// (three allocations succeed first: the table slot array and the vector's two
+// buffer allocations), the insert reports Err instead of panicking, and the
+// Err payload hands the vector back with its contents intact. The sum over
+// the returned vector proves the payload carries the original bytes.
+const m75TableTryInsertErrOomProgram = `fn main() -> I32 {
+    using players = Table.new(Vec(U64))
+    var overflow: Vec(U64) = Vec.new(U64)
+    overflow.push(99)
+    match players.try_insert(overflow) {
+        Ok(id) => { return 2 }
+        Err(back) => {
+            var total: U64 = 0
+            for item in back {
+                total = total + item
+            }
+            if total != 99 { return 4 }
+        }
+    }
+    return 0
+}
+`
+
+// m75TableTryInsertErrCapProgram pins the capacity-policy Err edge: with the
+// slot limit at the initial capacity, the ninth insert refuses to grow, the
+// caller gets Err with the element value handed back, and the payload's field
+// still matches the argument. A copyable record element is used because
+// owning elements cannot be inserted repeatedly into one table until the
+// pre-existing verifier gap is fixed.
+const m75TableTryInsertErrCapProgram = `type Slot {
+    n: U64
+}
+fn main() -> I32 {
+    using players = Table.new(Slot)
+    var round: U64 = 0
+    while round < 8 {
+        players.insert(Slot(n: round + 1))
+        round = round + 1
+    }
+    match players.try_insert(Slot(n: 99)) {
+        Ok(id) => { return 2 }
+        Err(back) => {
+            if back.n != 99 { return 4 }
+        }
+    }
+    return 0
+}
+`
+
+// m75TableTryInsertDefaultProgram pins the shipped default: without the test
+// hook the table grows without bound, so every one of these try_inserts takes
+// the Ok edge. It links the unlimited runtime with the plain driver.
+const m75TableTryInsertDefaultProgram = `fn main() -> I32 {
+    using players = Table.new(U64)
+    var round: U64 = 0
+    var inserted: U64 = 0
+    while round < 64 {
+        match players.try_insert(round) {
+            Ok(id) => { inserted = inserted + 1 }
+            Err(back) => { return 1 }
+        }
+        round = round + 1
+    }
+    if inserted != 64 { return 2 }
+    return 0
+}
+`
+
+// m75TableInsertAbortProgram pins the panic edge that try_insert deliberately
+// does not take: plain insert past the slot limit still aborts the process,
+// so the non-panicking form is an explicit caller choice, not a silent
+// change of insert behavior.
+const m75TableInsertAbortProgram = `fn main() -> I32 {
+    using players = Table.new(U64)
+    var round: U64 = 0
+    while round < 9 {
+        let id = players.insert(round)
+        round = round + 1
+    }
+    return 0
+}
+`
+
+// m75TableSlotLimitDriver is the custom C main for the slot-limit fixtures: it
+// installs the cap and then hands control to the Alder entry point.
+const m75TableSlotLimitDriver = `#include "alder_host.h"
+#include "alder.h"
+#include <stdint.h>
+int main(void) {
+	alder_runtime_test_set_table_slot_limit(8);
+	int context = 0;
+	return (int)alder_program_entry(&context);
+}
+`
+
+// m75TableAllocFailDriver makes the fourth domain allocation fail, which in
+// the Err-payload fixture is the element-storage allocation of the first
+// insert (the table slot array and the vector's two buffer allocations come
+// first). This is how the exhaustion-policy Err edge is reached without any
+// earlier same-table insert.
+const m75TableAllocFailDriver = `#include "alder_host.h"
+#include "alder.h"
+#include <stdint.h>
+int main(void) {
+	alder_runtime_test_fail_domain_alloc_after(3);
+	int context = 0;
+	return (int)alder_program_entry(&context);
+}
+`
+
+func TestM75TableTryInsertProduction(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	runtimeObject := buildRuntimeObject(t, cc, root)
+	testingObject := buildRuntimeObjectTesting(t, cc, root)
+
+	for _, program := range []struct {
+		name, text, driver string
+		object             string
+		want               int
+	}{
+		{"m75-table-try-insert-ok.al", m75TableTryInsertOkProgram, "", runtimeObject, 0},
+		{"m75-table-try-insert-err-oom.al", m75TableTryInsertErrOomProgram, m75TableAllocFailDriver, testingObject, 0},
+		{"m75-table-try-insert-err-cap.al", m75TableTryInsertErrCapProgram, m75TableSlotLimitDriver, testingObject, 0},
+		{"m75-table-try-insert-default.al", m75TableTryInsertDefaultProgram, "", runtimeObject, 0},
+		{"m75-table-insert-abort.al", m75TableInsertAbortProgram, m75TableSlotLimitDriver, testingObject, -1},
+	} {
+		program := program
+		t.Run(program.name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{program.name: program.text}
+			mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", program.name)
+			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+				t.Fatalf("%s MIR result: %+v stderr=%s", program.name, mirText, mirText.stderr)
+			}
+			assertPublicMIR(t, program.name, mirText.stdout)
+			if strings.Contains(mirText.stdout, "__s0_") {
+				t.Fatalf("%s generated MIR exposes bootstrap names", program.name)
+			}
+			if strings.HasPrefix(program.name, "m75-table-try-insert") &&
+				!strings.Contains(mirText.stdout, "table.insert.try") {
+				t.Fatalf("%s MIR does not lower try_insert to table.insert.try", program.name)
+			}
+			cResult := runProductionCompiler(t, exe, files, "compile", "--emit=c", program.name)
+			if cResult.status != 0 || cResult.stderr != "" || !strings.HasPrefix(cResult.stdout, "/* Generated by the Alder C11 backend.") {
+				t.Fatalf("%s C result: %+v stderr=%s", program.name, cResult, cResult.stderr)
+			}
+			if strings.Contains(cResult.stdout, "__s0_") {
+				t.Fatalf("%s generated C exposes bootstrap names", program.name)
+			}
+			if program.driver == "" {
+				compileAndRunProductionArtifact(t, cc, root, program.object, cResult.stdout, program.want)
+			} else {
+				compileAndRunProductionArtifactWithDriver(t, cc, root, program.object, cResult.stdout, program.driver, program.want, "-DALDER_RUNTIME_TESTING")
+			}
+		})
+	}
+}

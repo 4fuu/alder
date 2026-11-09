@@ -746,8 +746,9 @@ fn cleanup_lifo_fixture(d: Domain, initial: MirStore, parent_last: Bool) -> Resu
 
 // mode 0 is valid; 1 misses and 3 duplicates lookup consumption; 2 mutates an
 // active view; 4 misses and 5 duplicates view.end; 6 uses a view after end; 7
-// mutates before consumption; 8/9 add failure bypass before consume/end; and
-// 10 has two distinct uses after end.
+// mutates before consumption; 8/9 add failure bypass before consume/end; 10
+// has two distinct uses after end; and 11 mutates an active view through
+// table.insert.try, which counts as a mutation exactly like table.insert.
 fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore, __s0_Error) {
     let empty = try __s0_buffer_new(U64, d)
     let row = try mir_add_named_type(d, initial, mir_type_kind_aggregate(), "Row")
@@ -794,6 +795,15 @@ fn table_v8_fixture(d: Domain, initial: MirStore, mode: U64) -> Result(MirStore,
         if mode == 2 {
             let inserted = try mir_add_value(d, store, function.id, "inserted", id.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
             let insert = try mir_add_instruction(d, inserted.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_insert(), result: inserted.id, place: 0, type_op: 0, a: table_arg.id, b: row_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
+            store = insert.store
+            ordinal = ordinal + 1
+        }
+        if mode == 11 {
+            // table.insert.try counts as a table mutation while the view is
+            // live, exactly like table.insert at the same position.
+            let tried_type = try mir_intern_type(d, store, mir_type_kind_result(), 0, id.type_id, row.type_id, empty, 0)
+            let tried = try mir_add_value(d, tried_type.store, function.id, "tried", tried_type.type_id, mir_value_def_instruction(), entry.id, ordinal + 1)
+            let insert = try mir_add_instruction(d, tried.store, MirInstrRec(function: function.id, block: entry.id, ordinal: ordinal, op: mir_op_table_insert_try(), result: tried.id, place: 0, type_op: 0, a: table_arg.id, b: row_arg.id, c: 0, target: 0, name_start: 0, name_end: 0))
             store = insert.store
             ordinal = ordinal + 1
         }
@@ -1420,6 +1430,10 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(109, try mir_verify_module(d, try closure_env_escape_fixture(d, try mir_store_new(d), false, false), 5)) { return Ok(false) }
     if !emit_complete(110, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), true, false), 5, false)) { return Ok(false) }
     if !emit_complete(111, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), true, true), 5, false)) { return Ok(false) }
+    // Mode 11 introduces table.insert.try, which the format-version gate
+    // only accepts at version 4 or later, so this case verifies at the
+    // current format version instead of the harness's usual 3.
+    if !emit_verification(112, try mir_verify_module(d, try table_v8_fixture(d, try mir_store_new(d), 11), 5)) { return Ok(false) }
     return Ok(true)
 }
 
@@ -1447,6 +1461,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 5\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
 	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\n"
+	want += "V 112 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\n"
 	var baseline string
 	for i := 0; i < 3; i++ {
 		dir := t.TempDir()

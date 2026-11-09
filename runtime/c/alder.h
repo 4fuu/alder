@@ -120,6 +120,12 @@ void alder_runtime_test_fail_domain_alloc_after(uint64_t allowed_calls);
 void alder_runtime_test_clear_domain_alloc_failure(void);
 /* Irreversibly force identity exhaustion for the remainder of the test process. */
 void alder_runtime_test_exhaust_segment_identities(void);
+/* Deterministic table-capacity limit for tests and diagnostics: refuse table
+ * growth that would take the slot array past `slots` entries, so insertion
+ * into a full table fails. Zero (the default) means unlimited shipped
+ * behavior. Not part of the language surface and unreachable from Alder
+ * source; production builds expose neither the symbol nor its state. */
+void alder_runtime_test_set_table_slot_limit(uint64_t slots);
 #endif
 
 /* ------------------------------------------------------------------ */

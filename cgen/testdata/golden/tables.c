@@ -9,6 +9,7 @@ typedef struct AlderTy14 AlderTy14;
 typedef struct AlderTy16 AlderTy16;
 typedef struct AlderTy20 AlderTy20;
 typedef struct AlderTy22 AlderTy22;
+typedef struct AlderTy23 AlderTy23;
 
 /* @Pair */
 struct AlderTy13 {
@@ -45,6 +46,14 @@ struct AlderTy22 {
   } alder_u;
   uint32_t alder_tag;
 };
+/* result(id(@Pair), @Pair) */
+struct AlderTy23 {
+  union {
+    AlderTableId alder_p0;
+    AlderTy13 alder_p1;
+  } alder_u;
+  uint32_t alder_tag;
+};
 static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, AlderTy13 alder_v1);
 
 static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, AlderTy13 alder_v1) {
@@ -59,9 +68,10 @@ static ALDER_MAYBE_UNUSED AlderTy16 alder_fn_players_0(AlderDomain * alder_v0, A
   ALDER_MAYBE_UNUSED void * alder_v10;
   ALDER_MAYBE_UNUSED AlderTy16 alder_v11;
   ALDER_MAYBE_UNUSED bool alder_v12;
-  ALDER_MAYBE_UNUSED AlderTy16 alder_v13;
-  ALDER_MAYBE_UNUSED AlderTy14 alder_v14;
-  ALDER_MAYBE_UNUSED AlderTy16 alder_v15;
+  ALDER_MAYBE_UNUSED AlderTy23 alder_v13;
+  ALDER_MAYBE_UNUSED AlderTy16 alder_v14;
+  ALDER_MAYBE_UNUSED AlderTy14 alder_v15;
+  ALDER_MAYBE_UNUSED AlderTy16 alder_v16;
 
   void *alder_t2p = alder_domain_alloc(alder_v0, sizeof(AlderTable), _Alignof(AlderTable));
   if (alder_t2p == NULL) { alder_runtime_panic("table.create: out of memory"); }
@@ -112,13 +122,21 @@ alder_b3: ALDER_MAYBE_UNUSED ;
   return alder_v11;
 alder_b4: ALDER_MAYBE_UNUSED ;
   alder_v12 = alder_table_remove(alder_v2, alder_v3);
-  alder_v13.alder_tag = (uint32_t)0;
-  alder_v13.alder_u.alder_p0 = alder_v1;
-  return alder_v13;
+  AlderTableId alder_t13id;
+  if (alder_table_insert(alder_v2, &alder_v1, &alder_t13id)) {
+    alder_v13.alder_tag = (uint32_t)0;
+    alder_v13.alder_u.alder_p0 = alder_t13id;
+  } else {
+    alder_v13.alder_tag = (uint32_t)1;
+    alder_v13.alder_u.alder_p1 = alder_v1;
+  }
+  alder_v14.alder_tag = (uint32_t)0;
+  alder_v14.alder_u.alder_p0 = alder_v1;
+  return alder_v14;
 alder_b5: ALDER_MAYBE_UNUSED ;
-  alder_v14.alder_tag = (uint32_t)1;
-  alder_v14.alder_u.alder_p1 = alder_v4;
   alder_v15.alder_tag = (uint32_t)1;
-  alder_v15.alder_u.alder_p1 = alder_v14;
-  return alder_v15;
+  alder_v15.alder_u.alder_p1 = alder_v4;
+  alder_v16.alder_tag = (uint32_t)1;
+  alder_v16.alder_u.alder_p1 = alder_v15;
+  return alder_v16;
 }

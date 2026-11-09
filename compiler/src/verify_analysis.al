@@ -149,6 +149,9 @@ type MirVIndexes {
     const_slot: __s0_Buffer(U64)
     type_first: __s0_Buffer(U64)
     type_unary: __s0_Buffer(U64)
+    type_result_ok: __s0_Buffer(U64)
+    type_result_err: __s0_Buffer(U64)
+    type_result_id: __s0_Buffer(U64)
     place_root: __s0_Buffer(U64)
     place_depth: __s0_Buffer(U64)
     place_deref: __s0_Buffer(U64)
@@ -201,6 +204,12 @@ type MirVIndexPlaceRec {
     root: __s0_Buffer(U64)
     depth: __s0_Buffer(U64)
     deref: __s0_Buffer(U64)
+}
+
+type MirVIndexTypeResultRec {
+    ok: __s0_Buffer(U64)
+    err: __s0_Buffer(U64)
+    id: __s0_Buffer(U64)
 }
 
 fn mir_vindex_build_blocks(d: Domain, store: MirStore) -> Result(MirVIndexTableRec, __s0_Error) {
@@ -970,6 +979,25 @@ fn mir_vindex_build_type_unary(d: Domain, store: MirStore) -> Result(__s0_Buffer
     return Ok(out)
 }
 
+fn mir_vindex_build_type_results(d: Domain, store: MirStore) -> Result(MirVIndexTypeResultRec, __s0_Error) {
+    // One compact entry per interned result type: ok payload, err payload,
+    // and the type id itself. The list stays small because only Result-using
+    // programs intern result types, and lookups scan it linearly.
+    var oks = try __s0_buffer_new(U64, d)
+    var errs = try __s0_buffer_new(U64, d)
+    var ids = try __s0_buffer_new(U64, d)
+    var at: U64 = 1
+    while at <= __s0_buffer_len(MirTypeRec, store.types) { let item = __s0_buffer_get(MirTypeRec, store.types, at - 1)
+        if item.kind == mir_type_kind_result() {
+            oks = try __s0_buffer_append(U64, d, oks, item.ok_type)
+            errs = try __s0_buffer_append(U64, d, errs, item.err_type)
+            ids = try __s0_buffer_append(U64, d, ids, at)
+        }
+        at = at + 1
+    }
+    return Ok(MirVIndexTypeResultRec(ok: oks, err: errs, id: ids))
+}
+
 fn mir_vindex_build_places(d: Domain, store: MirStore) -> Result(MirVIndexPlaceRec, __s0_Error) {
     let total = __s0_buffer_len(MirPlaceRec, store.places)
     var roots = try __s0_buffer_new(U64, d)
@@ -1010,8 +1038,9 @@ fn mir_vindex_build(d: Domain, store: MirStore) -> Result(MirVIndexes, __s0_Erro
     let constants = try mir_vindex_build_constants(d, store)
     let type_first = try mir_vindex_build_type_first(d, store)
     let type_unary = try mir_vindex_build_type_unary(d, store)
+    let type_results = try mir_vindex_build_type_results(d, store)
     let places = try mir_vindex_build_places(d, store)
-    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_field_count: tps.field_count, tp_ids: tps.ids, const_slot: constants.slots, type_first: type_first, type_unary: type_unary, place_root: places.root, place_depth: places.depth, place_deref: places.deref))
+    return Ok(MirVIndexes(block_pos: blocks.pos, block_span: blocks.span, value_pos: values.pos, value_span: values.span, local_pos: locals.pos, local_span: locals.span, term_pos: terms.pos, term_span: terms.span, block_count: blocks.count, value_count: values.count, local_count: locals.count, instr_span: instrs.span, instr_count: instrs.count, instr_off: instrs.off, instr_ids: instrs.ids, param_span: params.span, param_ids: params.ids, op_instr_start: ops.instr_start, op_instr_count: ops.instr_count, op_instr_ids: ops.instr_ids, op_term_start: ops.term_start, op_term_count: ops.term_count, op_term_ids: ops.term_ids, op_case_start: ops.case_start, op_case_count: ops.case_count, op_case_ids: ops.case_ids, tp_start: tps.start, tp_count: tps.count, tp_field_count: tps.field_count, tp_ids: tps.ids, const_slot: constants.slots, type_first: type_first, type_unary: type_unary, type_result_ok: type_results.ok, type_result_err: type_results.err, type_result_id: type_results.id, place_root: places.root, place_depth: places.depth, place_deref: places.deref))
 }
 
 fn mir_vindex_block(indexes: MirVIndexes, function: U64, block: U64) -> U64 {
@@ -1089,6 +1118,16 @@ fn mir_vindex_type_unary(indexes: MirVIndexes, kind: U64, elem: U64) -> U64 {
     let type_count = __s0_buffer_len(U64, indexes.type_unary) / kind_count
     if kind >= kind_count || elem == 0 || elem > type_count { return 0 }
     return __s0_buffer_get(U64, indexes.type_unary, kind * type_count + elem - 1)
+}
+
+fn mir_vindex_type_result(indexes: MirVIndexes, ok: U64, err: U64) -> U64 {
+    let count = __s0_buffer_len(U64, indexes.type_result_id)
+    var at: U64 = 0
+    while at < count {
+        if __s0_buffer_get(U64, indexes.type_result_ok, at) == ok && __s0_buffer_get(U64, indexes.type_result_err, at) == err { return __s0_buffer_get(U64, indexes.type_result_id, at) }
+        at = at + 1
+    }
+    return 0
 }
 
 fn mir_vindex_place_root(indexes: MirVIndexes, place: U64) -> U64 {

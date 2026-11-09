@@ -873,6 +873,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
                     consumers = try mir_v6_consumer_add(d, round, consumers, function, x.a, value_id)
                 }
                 if x.op == mir_op_copy_to_domain() { consumers = try mir_v6_consumer_add(d, round, consumers, function, x.b, value_id) }
+                if x.op == mir_op_table_insert_try() { consumers = try mir_v6_consumer_add(d, round, consumers, function, x.b, value_id) }
                 if x.op == mir_op_load() {
                     let place = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
                     if place.kind == mir_place_deref() { consumers = try mir_v6_consumer_add(d, round, consumers, function, place.deref_value, value_id) }
@@ -985,6 +986,7 @@ if o.kind == mir_operand_aggregate_field() { durable = try mir_v6_merge_edge(d, 
 oi = oi + 1 } }
 if x.op == mir_op_enum_construct() || x.op == mir_op_enum_payload_checked() || x.op == mir_op_slice_index_checked() || x.op == mir_op_array_index_checked() || x.op == mir_op_slice_range_checked() || x.op == mir_op_table_lookup() || x.op == mir_op_table_lookup_mut() || (x.op >= mir_op_vec_construct_checked() && x.op <= mir_op_vec_as_mut_slice()) || x.op == mir_op_array_as_slice() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a) }
 if x.op == mir_op_vec_grow_checked() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.b) }
+if x.op == mir_op_table_insert_try() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.b) }
 if x.op == mir_op_fn_value() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a) }
 if x.op == mir_op_call_value() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
 var av: U64 = 0

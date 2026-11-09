@@ -526,6 +526,11 @@ func transferDomain(m *mir.Module, f *mir.Function, vid mir.ValueId, info []doma
 		merge(in.Array)
 	case mir.OpTableLookup, mir.OpTableLookupMut:
 		merge(in.Table)
+	case mir.OpTableInsertTry:
+		// The Err payload is the element value handed back to the caller, so
+		// the result shares the element operand's provenance. The Ok payload
+		// is a plain identity value with no storage of its own.
+		merge(in.TableVal)
 	case mir.OpCall:
 		if int(in.Callee) < len(effects) {
 			e := effects[in.Callee]

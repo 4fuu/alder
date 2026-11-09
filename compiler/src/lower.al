@@ -3330,10 +3330,10 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     return Ok(LowerStep(state: lower_invalid(current), id: 0))
 }
 
-// M7.5 table builtins: 26 Table.new, 27 insert, 28 get, 29 get_mut, and
-// 30 remove. Table.new materializes the owner in the hidden storage domain;
-// method children are the receiver read and the single runtime argument in
-// checked order.
+// M7.5 table builtins: 26 Table.new, 27 insert, 28 get, 29 get_mut, 45
+// remove, and 46 try_insert. Table.new materializes the owner in the hidden
+// storage domain; method children are the receiver read and the single
+// runtime argument in checked order.
 fn lower_m75_table_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     // Table.new carries no runtime children; every method carries exactly the
     // receiver read and one runtime argument.
@@ -3367,6 +3367,7 @@ fn lower_m75_table_builtin(d: Domain, source_state: State, spans: __s0_Buffer(Ch
     if annotation.builtin == 28 { op = mir_op_table_lookup() }
     if annotation.builtin == 29 { op = mir_op_table_lookup_mut() }
     if annotation.builtin == 45 { op = mir_op_table_remove() }
+    if annotation.builtin == 46 { op = mir_op_table_insert_try() }
     let result = try lower_add_result(d, argument.state, function, block, expression.checked_type, source_state, store)
     let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, receiver.id, argument.id, 0, "")
     return Ok(LowerStep(state: instr.state, id: result.id))
@@ -3850,8 +3851,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 45 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
-        if annotation.builtin >= 26 && annotation.builtin <= 29 || annotation.builtin == 45 {
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 46 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin >= 26 && annotation.builtin <= 29 || annotation.builtin == 45 || annotation.builtin == 46 {
             return lower_m75_table_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block)
         }
         if annotation.builtin >= 30 { return lower_m75_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -5900,8 +5901,8 @@ fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 45 { return false }
-    if annotation.builtin >= 30 && annotation.builtin != 45 { return lower_ordered_model_valid(store, annotation, expression) }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 46 { return false }
+    if annotation.builtin >= 30 && annotation.builtin != 45 && annotation.builtin != 46 { return lower_ordered_model_valid(store, annotation, expression) }
     if annotation.target != 0 { return false }
     var expected_count: U64 = 1
     if annotation.builtin == 18 { expected_count = 0 }
@@ -5930,6 +5931,14 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         if first.kind != 19 || first.arg_count != 1 { return false }
         let element = __s0_buffer_get(U64, store.type_args, first.first_arg - 1)
         if annotation.builtin == 27 { return second_type == element && result.kind == 20 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element }
+        if annotation.builtin == 46 {
+            // try_insert: same argument model as insert, but the result is
+            // Result(T.Id, T) so the Err edge can hand the element back.
+            if second_type != element { return false }
+            if result.kind != 10 || result.arg_count != 2 { return false }
+            let ok_id = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, result.first_arg - 1) - 1)
+            return ok_id.kind == 20 && ok_id.arg_count == 1 && __s0_buffer_get(U64, store.type_args, ok_id.first_arg - 1) == element && __s0_buffer_get(U64, store.type_args, result.first_arg) == element
+        }
         if second.kind != 20 || second.arg_count != 1 || __s0_buffer_get(U64, store.type_args, second.first_arg - 1) != element { return false }
         if annotation.builtin == 45 { return result.kind == 1 && result.target == 1 }
         if result.kind != 9 || result.arg_count != 1 { return false }
@@ -6301,7 +6310,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 45 { return false } }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 46 { return false } }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }

@@ -519,7 +519,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "f22bb8e3f2c7eeb7e3dafd50bb202d14ad7340cc5a2850cec471e2666722f6cd"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "292dca13e065ca6e0a6e0d52c69c3277732e801e57ac1091332463ffcbdad1ea"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 }
