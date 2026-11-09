@@ -28,7 +28,9 @@ const artifactCacheEnv = "ALDER_TEST_CACHE"
 
 // artifactCacheSchema is part of every cache key. Bump it whenever the
 // meaning of a cached entry changes, so an old layout is never reused.
-const artifactCacheSchema = "alder-go-test-artifact-1"
+// "-2" moved the two heavy builds from one strict C object to the four
+// strict-compiled parts of the shared bootstrap/split-c.awk splitter.
+const artifactCacheSchema = "alder-go-test-artifact-2"
 
 // cacheEnabled reports whether an identical artifact may be reused from a
 // previous go test process.

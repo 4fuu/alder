@@ -77,20 +77,27 @@ artifact. `bootstrap/regenerate.sh --write` replaces the artifact and is
 reserved for an intentional bootstrap update after reviewing the resulting
 diff and updating its pinned test digest.
 
+The stage-0 build and the Go test harness's own compiler builds share
+`bootstrap/split-c.awk`, which splits the generated compiler C into four
+fixed translation units that compile in parallel. It validates the generated
+shape it relies on and fails loudly instead of producing a silently wrong
+split.
+
 ### Stage-0 build cache
 
 `ALDER_BOOTSTRAP_CACHE=1` lets the harness reuse a compiler binary it built
 earlier instead of repeating the C compile of the committed sources. Entries
 live in `.alder-cache/`, which the repository ignores, and each one is keyed by
-the SHA-256 of `bootstrap/alder.c`, `bootstrap/alder_host.c`, and
-`runtime/c/alder.c` together with the complete flag set and the host compiler's
-path, version, and target, so a changed source, flag, or toolchain always
-misses. An entry replaces only the C compile: the inventory checks, the
-regeneration, and the byte-for-byte comparison all still run, and the
-fixed-point claim is unchanged. A missing, empty, or non-executable entry, an
-unwritable cache directory, or a missing `sha256sum` falls back to a full
-build, and a failed store is not an error. Without the variable the run is cold
-and hermetic exactly as before. Deleting `.alder-cache/` discards every entry.
+the SHA-256 of `bootstrap/alder.c`, `bootstrap/alder_host.c`,
+`bootstrap/split-c.awk`, and `runtime/c/alder.c` together with the complete
+flag set and the host compiler's path, version, and target, so a changed
+source, splitter, flag, or toolchain always misses. An entry replaces only the
+C compile: the inventory checks, the regeneration, and the byte-for-byte
+comparison all still run, and the fixed-point claim is unchanged. A missing,
+empty, or non-executable entry, an unwritable cache directory, or a missing
+`sha256sum` falls back to a full build, and a failed store is not an error.
+Without the variable the run is cold and hermetic exactly as before. Deleting
+`.alder-cache/` discards every entry.
 
 Regeneration requires a POSIX shell, a C11 compiler, and common host utilities
 (`awk`, `cmp`, `dirname`, `mktemp`, `mv`, `rm`, and `uname`). The opt-in stage-0

@@ -52,9 +52,13 @@ type productionEnvelope struct {
 }
 
 type sharedProductionBuildResult struct {
-	dir, object, exe string
-	cached           bool
-	err              error
+	dir string
+	// objects are the strict-compiled parts of the generated compiler C, in
+	// part order, ready to link.
+	objects []string
+	exe     string
+	cached  bool
+	err     error
 }
 
 var (
@@ -80,7 +84,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func getSharedProductionBuild(t *testing.T, cc, root string) (object, exe, dir string) {
+func getSharedProductionBuild(t *testing.T, cc, root string) (objects []string, exe, dir string) {
 	t.Helper()
 	sharedProductionBuildOnce.Do(func() {
 		sharedProductionBuild = buildSharedProductionCompiler(t, cc, root)
@@ -88,7 +92,7 @@ func getSharedProductionBuild(t *testing.T, cc, root string) (object, exe, dir s
 	if sharedProductionBuild.err != nil {
 		t.Fatalf("build shared production compiler: %v", sharedProductionBuild.err)
 	}
-	return sharedProductionBuild.object, sharedProductionBuild.exe, sharedProductionBuild.dir
+	return sharedProductionBuild.objects, sharedProductionBuild.exe, sharedProductionBuild.dir
 }
 
 func buildSharedProductionCompiler(t *testing.T, cc, root string) sharedProductionBuildResult {
@@ -121,16 +125,24 @@ func buildSharedProductionCompiler(t *testing.T, cc, root string) sharedProducti
 		if err := writeProductionCompiler(dir, cc, root, &result); err != nil {
 			return nil, err
 		}
-		return []string{"compiler.c", "compiler.c.o", "alder1"}, nil
+		return []string{"compiler.c", "part0.o", "part1.o", "part2.o", "part3.o", "alder1"}, nil
 	})
 	result.cached = cacheEnabled()
-	result.object = filepath.Join(result.dir, "compiler.c.o")
+	result.objects = []string{
+		filepath.Join(result.dir, "part0.o"),
+		filepath.Join(result.dir, "part1.o"),
+		filepath.Join(result.dir, "part2.o"),
+		filepath.Join(result.dir, "part3.o"),
+	}
 	result.exe = filepath.Join(result.dir, "alder1")
 	return result
 }
 
 // writeProductionCompiler performs the actual build into dir: one Go-side
-// compile of the compiler source root, then a strict C compile and link.
+// compile of the compiler source root, then the generated C is split into
+// four fixed translation units with the shared bootstrap/split-c.awk
+// splitter — the same transform the stage-0 bootstrap build uses — and the
+// parts are strict-compiled in parallel and linked.
 func writeProductionCompiler(dir, cc, root string, result *sharedProductionBuildResult) error {
 	var sources []frontend.Source
 	for i, name := range compilerSourceManifest {
@@ -145,23 +157,28 @@ func writeProductionCompiler(dir, cc, root string, result *sharedProductionBuild
 		return fmt.Errorf("compile production root: result=%+v error=%v", compiled, compileErr)
 	}
 	cfile := filepath.Join(dir, "compiler.c")
-	result.object = cfile + ".o"
 	result.exe = filepath.Join(dir, "alder1")
 	if err := os.WriteFile(cfile, []byte(compiled.Artifact.Text), 0o644); err != nil {
 		return err
 	}
-	strict := strictC11Flags()
-	compileArgs := append(append([]string{}, strict...), "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), "-c", cfile, "-o", result.object)
-	if output, commandErr := exec.Command(cc, compileArgs...).CombinedOutput(); commandErr != nil {
-		return fmt.Errorf("strict C11 compile: %w\n%s", commandErr, output)
+	parts, err := os.MkdirTemp("", "alder-compiler-parts-")
+	if err != nil {
+		return err
 	}
-	linkArgs := append(append([]string{}, strict...), alder1LinkFlags()...)
+	defer os.RemoveAll(parts)
+	objects, err := splitCompilerCErr(cc, root, cfile, parts, dir)
+	if err != nil {
+		return err
+	}
+	linkArgs := append(append([]string{}, strictC11Flags()...), alder1LinkFlags()...)
 	linkArgs = append(linkArgs,
 		fmt.Sprintf("-DALDER_HOST_RUNTIME_C=%q", filepath.Join(root, "runtime", "c", "alder.c")),
 		fmt.Sprintf("-DALDER_HOST_RUNTIME_INCLUDE_DIR=%q", filepath.Join(root, "runtime", "c")),
 		fmt.Sprintf("-DALDER_HOST_INCLUDE_DIR=%q", filepath.Join(root, "bootstrap")),
 	)
-	linkArgs = append(linkArgs, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), result.object, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", result.exe)
+	linkArgs = append(linkArgs, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"))
+	linkArgs = append(linkArgs, objects...)
+	linkArgs = append(linkArgs, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", result.exe)
 	if output, commandErr := exec.Command(cc, linkArgs...).CombinedOutput(); commandErr != nil {
 		return fmt.Errorf("strict C11 link: %w\n%s", commandErr, output)
 	}
@@ -784,9 +801,19 @@ func alder1OptimizeFlags() []string {
 
 func linkGeneratedProgram(t *testing.T, cc, root, object, host, output string, extra ...string) {
 	t.Helper()
+	linkGeneratedObjects(t, cc, root, []string{object}, host, output, extra...)
+}
+
+// linkGeneratedObjects strict-compiles nothing: it links already-compiled
+// objects with the host shim and the runtime under the strict warning set.
+// Callers that hold one generated C file use linkGeneratedProgram.
+func linkGeneratedObjects(t *testing.T, cc, root string, objects []string, host, output string, extra ...string) {
+	t.Helper()
 	args := strictC11Flags()
 	args = append(args, extra...)
-	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), object, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
+	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"))
+	args = append(args, objects...)
+	args = append(args, host, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output)
 	if outputText, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", err, outputText)
 	}
@@ -841,7 +868,7 @@ func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, g
 	}
 }
 
-func testProductionInjectedFailure(t *testing.T, cc, root, generated, dir string, storage bool, want int) {
+func testProductionInjectedFailure(t *testing.T, cc, root string, objects []string, dir string, storage bool, want int) {
 	t.Helper()
 	name := "output"
 	setup := ""
@@ -905,7 +932,7 @@ int main(void) { int context = 0; %s return alder_program_entry(&context) == (in
 	if err := os.WriteFile(host, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	linkGeneratedProgram(t, cc, root, generated, host, exe, "-DALDER_RUNTIME_TESTING")
+	linkGeneratedObjects(t, cc, root, objects, host, exe, "-DALDER_RUNTIME_TESTING")
 	if output, err := exec.Command(exe).CombinedOutput(); err != nil {
 		t.Fatalf("injected %s failure: %v\n%s", name, err, output)
 	}

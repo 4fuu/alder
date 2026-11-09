@@ -81,12 +81,14 @@ if [ "$cache" = true ]; then
         cc_path=$(command -v "$cc" 2>/dev/null || echo "$cc")
         script_digest=$(sha256sum "$script_dir/regenerate.sh")
         script_digest=${script_digest%% *}
+        splitter_digest=$(sha256sum "$script_dir/split-c.awk")
+        splitter_digest=${splitter_digest%% *}
         cache_key=$(
-            printf 'cc=%s\nversion=%s\nmachine=%s\nstrict=%s\ncflags=%s\nlinkflags=%s\nhost=%s\nldflags=%s\nincludes=%s\nscript=%s\n' \
+            printf 'cc=%s\nversion=%s\nmachine=%s\nstrict=%s\ncflags=%s\nlinkflags=%s\nhost=%s\nldflags=%s\nincludes=%s\nscript=%s\nsplitter=%s\n' \
                 "$cc_path" "$cc_version" "$cc_machine" \
                 "$strict" "$bootstrap_cflags" "$link_cflags" "$host_flags" "$bootstrap_ldflags" \
                 '-I runtime/c -I bootstrap' \
-                "$script_digest"
+                "$script_digest" "$splitter_digest"
             sha256sum bootstrap/alder.c bootstrap/alder_host.c runtime/c/alder.c
         )
         cache_key=$(printf '%s\n' "$cache_key" | sha256sum)
@@ -126,94 +128,16 @@ if [ "$alder_bin" = "$tmp/alder" ]; then
     # dominates the cold bootstrap, and four concurrent -O2 compiles cut that
     # stage roughly fourfold on a four-CPU host. bootstrap/alder.c stays the
     # single pinned artifact; the split exists only inside this temporary
-    # build tree. The splitter is POSIX awk, reads the file twice (plan, then
-    # write), validates the generated shape it relies on, and fails loudly
-    # instead of producing a silently wrong split. The part count is fixed so
-    # the split is identical on every host; parallelism is plain &/wait.
+    # build tree. The splitter is the committed bootstrap/split-c.awk, POSIX
+    # awk, shared with the Go test harness so the two heavy harness builds
+    # and the stage-0 build split identically. It reads the file twice (plan,
+    # then write), validates the generated shape it relies on, and fails
+    # loudly instead of producing a silently wrong split. The part count is
+    # fixed so the split is identical on every host; parallelism is plain
+    # &/wait.
     split_dir=$tmp/alder-split
     mkdir -p "$split_dir"
-    awk '
-        function fail(msg) {
-            print "bootstrap: splitter: " msg > "/dev/stderr"
-            failed = 1
-            exit 1
-        }
-        {
-            line = $0
-            lastc = substr(line, length(line))
-            cls = "other"
-            if (!in_inline) {
-                if (line ~ /^static inline ALDER_MAYBE_UNUSED /) {
-                    if (lastc == "{") cls = "idef"
-                    else if (lastc == ";") cls = "iproto"
-                    else fail("unclassified static inline line " NR)
-                } else if (line ~ /^static ALDER_MAYBE_UNUSED /) {
-                    if (line ~ /alder_fn_[A-Za-z0-9_]+\(/) {
-                        if (lastc == "{") cls = "fdef"
-                        else if (lastc == ";") cls = "fproto"
-                        else fail("unclassified function line " NR)
-                    } else if (lastc == ";") {
-                        cls = "data"
-                    } else {
-                        fail("unclassified static line " NR ": " line)
-                    }
-                } else if (line ~ /^static /) {
-                    fail("unexpected static-prefixed line " NR ": " line)
-                } else if (line ~ /^int32_t alder_program_entry/) {
-                    cls = "entry"
-                }
-            }
-            if (cls == "entry" && entry)
-                fail("duplicate program entry at " NR " and " entry)
-            if (hdr_end) cum++
-            if (in_inline) {
-                if (substr(line, 1, 1) == "}") in_inline = 0
-                next
-            }
-            if (cls == "idef") {
-                in_inline = 1
-                last_inline = NR
-                if (!hdr_end) hdr_end = NR
-            } else if (cls == "fdef") {
-                if (!hdr_end) hdr_end = NR
-                ndefs++
-                defnr[ndefs] = NR
-                defcum[ndefs] = cum
-            } else if (cls == "entry") {
-                entry = NR
-                cum_entry = cum - 1
-            } else if (cls == "data" && hdr_end) {
-                fail("data definition after first function definition at line " NR)
-            }
-        }
-        END {
-            if (failed) exit 1
-            if (!hdr_end) fail("no function definition found")
-            if (!entry) fail("no program entry found")
-            if (entry <= defnr[ndefs])
-                fail("program entry is not after the last function definition")
-            if (in_inline)
-                fail("unterminated static-inline block starting at line " last_inline)
-            if (ndefs < 4) fail("too few function definitions to split")
-            if (cum_entry <= 0)
-                fail("no function body lines between header and entry")
-            thresh[1] = int(cum_entry / 4)
-            thresh[2] = int(cum_entry / 2)
-            thresh[3] = int(cum_entry * 3 / 4)
-            j = 1
-            for (i = 1; i <= ndefs; i++) {
-                while (j <= 3 && defcum[i] >= thresh[j]) {
-                    cutnr[j] = defnr[i]
-                    j++
-                }
-            }
-            if (j <= 3) fail("could not place three cut points")
-            if (cutnr[1] <= hdr_end || cutnr[1] >= cutnr[2] ||
-                cutnr[2] >= cutnr[3] || cutnr[3] >= entry)
-                fail("cut points are not strictly ordered")
-            print hdr_end, cutnr[1], cutnr[2], cutnr[3], entry
-        }
-    ' bootstrap/alder.c > "$tmp/split-plan.txt"
+    awk -v mode=plan -f "$script_dir/split-c.awk" bootstrap/alder.c > "$tmp/split-plan.txt"
     read -r hdr_end cut1 cut2 cut3 entry rest < "$tmp/split-plan.txt"
     for number in "$hdr_end" "$cut1" "$cut2" "$cut3" "$entry"; do
         case $number in
@@ -227,81 +151,10 @@ if [ "$alder_bin" = "$tmp/alder" ]; then
         echo "bootstrap: splitter produced an invalid plan" >&2
         exit 1
     }
-    awk -v hdr_end="$hdr_end" -v cut1="$cut1" -v cut2="$cut2" \
+    awk -v mode=write -v split_dir="$split_dir" \
+        -v hdr_end="$hdr_end" -v cut1="$cut1" -v cut2="$cut2" \
         -v cut3="$cut3" -v entry="$entry" \
-        -v h="$split_dir/alder_split.h" \
-        -v ih="$split_dir/alder_split_inline.h" \
-        -v p0="$split_dir/part0.c" -v p1="$split_dir/part1.c" \
-        -v p2="$split_dir/part2.c" -v p3="$split_dir/part3.c" '
-        BEGIN {
-            print "#include \"alder_split.h\"" > p0
-            print "#include \"alder_split_inline.h\"" > p0
-            print "#include \"alder_split.h\"" > p1
-            print "#include \"alder_split_inline.h\"" > p1
-            print "#include \"alder_split.h\"" > p2
-            print "#include \"alder_split_inline.h\"" > p2
-            print "#include \"alder_split.h\"" > p3
-            print "#include \"alder_split_inline.h\"" > p3
-        }
-        function fail(msg) {
-            print "bootstrap: splitter: " msg > "/dev/stderr"
-            failed = 1
-            exit 1
-        }
-        function external(line,   t) {
-            if (line ~ /^static ALDER_MAYBE_UNUSED / &&
-                line ~ /alder_fn_[A-Za-z0-9_]+\(/) {
-                t = substr(line, length(line))
-                if (t == ";" || t == "{") sub(/^static /, "", line)
-            }
-            return line
-        }
-        {
-            lastc = substr($0, length($0))
-            if (in_inline) {
-                print $0 > ih
-                ih_lines++
-                if (substr($0, 1, 1) == "}") in_inline = 0
-                next
-            }
-            if ($0 ~ /^static inline ALDER_MAYBE_UNUSED / && lastc == "{") {
-                print $0 > ih
-                ih_lines++
-                in_inline = 1
-                next
-            }
-            if (NR < hdr_end) {
-                print external($0) > h
-                hdr_lines++
-                next
-            }
-            if (NR >= entry) {
-                print $0 > p3
-                p3n++
-                next
-            }
-            if (NR < cut1) {
-                print external($0) > p0
-                p0n++
-            } else if (NR < cut2) {
-                print external($0) > p1
-                p1n++
-            } else if (NR < cut3) {
-                print external($0) > p2
-                p2n++
-            } else {
-                print external($0) > p3
-                p3n++
-            }
-        }
-        END {
-            if (failed) exit 1
-            if (in_inline) fail("unterminated static-inline block")
-            total = hdr_lines + ih_lines + p0n + p1n + p2n + p3n
-            if (total != NR) fail("wrote " total " of " NR " lines")
-            if (p0n == 0 || p1n == 0 || p2n == 0 || p3n == 0) fail("empty part")
-        }
-    ' bootstrap/alder.c
+        -f "$script_dir/split-c.awk" bootstrap/alder.c
     for unit in alder_split.h alder_split_inline.h part0.c part1.c part2.c part3.c; do
         [ -s "$split_dir/$unit" ] || {
             echo "bootstrap: splitter did not produce $unit" >&2

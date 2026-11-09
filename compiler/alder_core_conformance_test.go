@@ -290,8 +290,12 @@ func writeCoreConformance(dir string, t *testing.T, cc, root string, sources []f
 	// test object sits within a few hundred kilobytes of the default 8 MiB
 	// stack on the deep-blocks fixture, so any growth of the checked-store
 	// records tips it over. Both builds must use the same stack contract.
-	compileGeneratedProgram(t, cc, root, cfile, filepath.Join(root, "bootstrap", "alder_host.c"), exe, "-DALDER_HOST_CONFORMANCE", "-DALDER_HOST_LARGE_STACK")
-	return []string{"core-conformance.mir", "core-conformance.c", "core-conformance.exe"}, nil
+	// The generated C is split and parallel-compiled exactly like the
+	// production compiler build, through the same bootstrap/split-c.awk.
+	parts := t.TempDir()
+	objects := splitCompilerC(t, cc, root, cfile, parts, dir, "-DALDER_HOST_CONFORMANCE", "-DALDER_HOST_LARGE_STACK")
+	linkGeneratedObjects(t, cc, root, objects, filepath.Join(root, "bootstrap", "alder_host.c"), exe, "-DALDER_HOST_CONFORMANCE", "-DALDER_HOST_LARGE_STACK")
+	return []string{"core-conformance.mir", "core-conformance.c", "part0.o", "part1.o", "part2.o", "part3.o", "core-conformance.exe"}, nil
 }
 
 // loadCoreConformanceModule re-parses the printed MIR of a core conformance

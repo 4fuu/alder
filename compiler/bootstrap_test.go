@@ -522,6 +522,14 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 	if got, want := fmt.Sprintf("%x", digest), "6384892d9c354b8e6453f8d44be133abfdadb667fe3cbb3d338dcf8f026ee035"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
+	// The shared splitter feeds both the stage-0 build in regenerate.sh and
+	// this package's two heavy builds. Its bytes are part of the stage-0
+	// cache key, so the test only pins that the committed file is the
+	// splitter both consumers expect.
+	splitter, err := os.ReadFile(filepath.Join(root, "bootstrap", "split-c.awk"))
+	if err != nil || len(splitter) == 0 || !strings.Contains(string(splitter), "alder_program_entry") {
+		t.Fatal("committed bootstrap/split-c.awk is missing or does not reference the program entry it splits on")
+	}
 }
 
 func readBootstrapFixture(t *testing.T, root, rel string) string {
