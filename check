@@ -6,6 +6,12 @@
 # artifact cache the compiler package tests use is on by default; set
 # ALDER_TEST_CACHE=0 to rebuild everything.
 #
+# The steps are independent, so they run concurrently: with --bootstrap the
+# whole check takes about as long as bootstrap/regenerate.sh alone instead of
+# that plus the Go checks. Each step's output is reported grouped under its
+# own header, in the same fixed order as before, after all steps have
+# finished; the exit status reflects every step.
+#
 # usage: ./check [--bootstrap] [--no-cache]
 set -eu
 
@@ -24,19 +30,11 @@ for arg in "$@"; do
     esac
 done
 
-status=0
-
-step() {
-    name=$1
-    shift
-    printf '== %s\n' "$name"
-    if "$@"; then
-        printf '   ok: %s\n' "$name"
-    else
-        printf '   FAILED: %s\n' "$name" >&2
-        status=1
-    fi
-}
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/alder-check.XXXXXX")
+trap 'rm -rf "$tmp"' 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # gofmt -l . must print nothing, so a non-empty result is a failure.
 check_gofmt() {
@@ -48,18 +46,65 @@ check_gofmt() {
     return 0
 }
 
-step "gofmt -l ." check_gofmt
-step "go vet ./..." go vet ./...
-step "gcc -fsyntax-only runtime/c/alder.c" \
+# step_bg launches one canonical step in the background. The subshell writes
+# the step's whole report (output plus ok/FAILED line and exit status) to
+# files of its own, so a failing step neither cuts the other steps short nor
+# reaches the parent shell while it is still launching steps.
+step_bg() {
+    key=$1
+    name=$2
+    shift 2
+    (
+        status=0
+        if ! "$@"; then
+            status=1
+        fi
+        if [ "$status" -eq 0 ]; then
+            printf '   ok: %s\n' "$name"
+        else
+            printf '   FAILED: %s\n' "$name"
+        fi
+        echo "$status" > "$tmp/$key.status"
+        exit "$status"
+    ) > "$tmp/$key.log" 2>&1 &
+}
+
+echo "running the canonical checks concurrently; grouped reports follow"
+
+step_bg gofmt "gofmt -l ." check_gofmt
+step_bg vet "go vet ./..." go vet ./...
+step_bg gcc "gcc -fsyntax-only runtime/c/alder.c" \
     gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion \
     -fsyntax-only runtime/c/alder.c
-step "go test ./... -count=1" go test ./... -count=1
-
+step_bg go-test "go test ./... -count=1" go test ./... -count=1
 if [ "$bootstrap" = true ]; then
-    echo "== bootstrap/regenerate.sh (this takes about 3 minutes)"
-    step "bootstrap/regenerate.sh" ./bootstrap/regenerate.sh
-else
-    echo "== bootstrap/regenerate.sh (skipped; pass --bootstrap to run it)"
+    step_bg bootstrap "bootstrap/regenerate.sh" ./bootstrap/regenerate.sh
+fi
+
+status=0
+wait || true
+
+report() {
+    key=$1
+    name=$2
+    printf '== %s\n' "$name"
+    cat "$tmp/$key.log"
+    if [ -f "$tmp/$key.status" ] && [ "$(cat "$tmp/$key.status")" -eq 0 ]; then
+        return 0
+    fi
+    if [ ! -f "$tmp/$key.status" ]; then
+        # The step was killed before it could record its status.
+        printf '   FAILED: %s\n' "$name" >&2
+    fi
+    status=1
+}
+
+report gofmt "gofmt -l ."
+report vet "go vet ./..."
+report gcc "gcc -fsyntax-only runtime/c/alder.c"
+report go-test "go test ./... -count=1"
+if [ "$bootstrap" = true ]; then
+    report bootstrap "bootstrap/regenerate.sh"
 fi
 
 if [ "$status" -eq 0 ]; then

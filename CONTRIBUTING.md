@@ -134,9 +134,12 @@ path comparison cannot be made. Keep the workflow in step with the commands
 above.
 
 `./check` runs the same commands in one shot for the inner loop. It is a thin
-wrapper with no extra flags: `--bootstrap` adds `bootstrap/regenerate.sh`,
-`--no-cache` sets `ALDER_TEST_CACHE=0`, and every step runs and is reported
-even when an earlier one fails, so a single invocation shows the whole picture.
+wrapper with no extra flags: `--bootstrap` adds `bootstrap/regenerate.sh` and
+`--no-cache` sets `ALDER_TEST_CACHE=0`. The steps are independent and run
+concurrently; each step's output is reported grouped under its own header, in
+the fixed order above, after every step has finished, and the exit status
+reflects every step. A full run therefore takes about as long as its slowest
+step, which is `bootstrap/regenerate.sh` under `--bootstrap`.
 
 ## C Runtime and Backend Standards
 
