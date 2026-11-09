@@ -97,7 +97,7 @@ func compilerVersion(t *testing.T, cc string) string {
 func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, error)) string {
 	t.Helper()
 	if !cacheEnabled() {
-		dir := scratchDir()
+		dir := scratchDir(t)
 		if _, err := build(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +106,7 @@ func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, err
 	root, err := cacheRoot()
 	if err != nil {
 		t.Logf("artifact cache: unavailable (%v); rebuilding", err)
-		dir := scratchDir()
+		dir := scratchDir(t)
 		if _, err := build(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +119,7 @@ func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, err
 	}
 	if err := os.MkdirAll(filepath.Dir(entry), 0o755); err != nil {
 		t.Logf("artifact cache: entry directory failed (%v); rebuilding", err)
-		dir := scratchDir()
+		dir := scratchDir(t)
 		if _, err := build(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, err
 	staging, err := os.MkdirTemp(filepath.Dir(entry), "staging-")
 	if err != nil {
 		t.Logf("artifact cache: staging directory failed (%v); rebuilding", err)
-		dir := scratchDir()
+		dir := scratchDir(t)
 		if _, err := build(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, err
 	if err := writeManifest(key, staging, names); err != nil {
 		t.Logf("artifact cache: manifest failed (%v); rebuilding", err)
 		_ = os.RemoveAll(staging)
-		dir := scratchDir()
+		dir := scratchDir(t)
 		if _, err := build(dir); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +165,7 @@ func loadOrBuild(t *testing.T, key string, build func(dir string) ([]string, err
 				t.Logf("artifact cache: reused %s", key[:12])
 				return dir
 			}
-			dir := scratchDir()
+			dir := scratchDir(t)
 			if _, err := build(dir); err != nil {
 				t.Fatal(err)
 			}
@@ -184,10 +184,13 @@ var (
 )
 
 // scratchDir creates a directory for an artifact built outside the cache.
-func scratchDir() string {
+// An empty directory would direct every build and host stub into the test
+// binary's working directory (the package itself), so a failed allocation
+// fails the test instead of returning "".
+func scratchDir(t *testing.T) string {
 	dir, err := os.MkdirTemp("", "alder-artifact-test-")
 	if err != nil {
-		return ""
+		t.Fatalf("scratch directory: %v", err)
 	}
 	scratchMu.Lock()
 	scratchDirs = append(scratchDirs, dir)
