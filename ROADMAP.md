@@ -1212,7 +1212,12 @@ non-verifier items are the lowering's storage planning, cgen emission,
 and the MIR builder. On this commit's tip, which also carries the
 verifier's phase-4 table reuse, the same host measures the stage-0
 self-compile at 80.8 s / 2,970,040 KiB and cold regenerate at
-111.6 s / 2,970,016 KiB.
+111.6 s / 2,970,016 KiB. The phase-4 CFG, dominator, and Euler-tour
+scratch joined the plan-carried pattern (the builders now grow fifteen
+reusable cfg buffers and seventeen dominator buffers once and rewrite them
+in place per function); back to back on one host, cold regenerate went
+from 133.7 s / 2,966,448 KiB at `58acb34` to 125.7 s / 2,732,244 KiB,
+about -229 MiB of peak, with the fixed point byte-identical.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

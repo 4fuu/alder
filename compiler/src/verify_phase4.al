@@ -482,11 +482,54 @@ fn mir_vphase4_with_uses(d: Domain, store: MirStore, indexes: MirVIndexes, inven
     var v_instr = try __s0_buffer_new(U64, d)
     var v_pstart = try __s0_buffer_new(U64, d)
     var v_pnode = try __s0_buffer_new(U64, d)
+    // The point cfg and dominator plans carry the same idea further: both
+    // analyses rebuild roughly twenty arrays per function from the
+    // never-reset root domain. The plans own every buffer the builders
+    // touch; the builders grow them lazily, rewrite them in place per
+    // function, and return the grown handles with each result for the next
+    // function.
+    var p_boundary = try __s0_buffer_new(U64, d)
+    var p_bicount = try __s0_buffer_new(U64, d)
+    var p_succ = try __s0_buffer_new(U64, d)
+    var p_succ_start = try __s0_buffer_new(U64, d)
+    var p_succ_count = try __s0_buffer_new(U64, d)
+    var p_pred = try __s0_buffer_new(U64, d)
+    var p_pred_start = try __s0_buffer_new(U64, d)
+    var p_pred_count = try __s0_buffer_new(U64, d)
+    var p_case_edge = try __s0_buffer_new(U64, d)
+    var p_edge_from = try __s0_buffer_new(U64, d)
+    var p_edge_to = try __s0_buffer_new(U64, d)
+    var p_ecnt = try __s0_buffer_new(U64, d)
+    var p_ebase = try __s0_buffer_new(U64, d)
+    var p_eids = try __s0_buffer_new(U64, d)
+    var p_eused = try __s0_buffer_new(U64, d)
+    var cfg_plan = MirVP4CfgPlan(boundary_offset: p_boundary, block_instr_count: p_bicount, succ: p_succ, succ_start: p_succ_start, succ_count: p_succ_count, pred: p_pred, pred_start: p_pred_start, pred_count: p_pred_count, case_edge: p_case_edge, edge_from: p_edge_from, edge_to: p_edge_to, scratch_edge_cnt: p_ecnt, scratch_edge_base: p_ebase, scratch_edge_ids: p_eids, scratch_edge_used: p_eused)
+    var q_idom = try __s0_buffer_new(U64, d)
+    var q_rpo_index = try __s0_buffer_new(U64, d)
+    var q_dom_in = try __s0_buffer_new(U64, d)
+    var q_dom_out = try __s0_buffer_new(U64, d)
+    var q_seen = try __s0_buffer_new(U64, d)
+    var q_phase = try __s0_buffer_new(U64, d)
+    var q_stack = try __s0_buffer_new(U64, d)
+    var q_post = try __s0_buffer_new(U64, d)
+    var q_rpo = try __s0_buffer_new(U64, d)
+    var q_child_count = try __s0_buffer_new(U64, d)
+    var q_counts = try __s0_buffer_new(U64, d)
+    var q_child_start = try __s0_buffer_new(U64, d)
+    var q_filled = try __s0_buffer_new(U64, d)
+    var q_children = try __s0_buffer_new(U64, d)
+    var q_estack = try __s0_buffer_new(U64, d)
+    var q_edata = try __s0_buffer_new(U64, d)
+    var dom_plan = MirVP4DomPlan(idom: q_idom, rpo_index: q_rpo_index, dom_in: q_dom_in, dom_out: q_dom_out, scratch_seen: q_seen, scratch_phase: q_phase, scratch_stack: q_stack, scratch_post: q_post, scratch_rpo: q_rpo, scratch_child_count: q_child_count, scratch_counts: q_counts, scratch_child_start: q_child_start, scratch_filled: q_filled, scratch_children: q_children, scratch_estack: q_estack, scratch_edata: q_edata)
     var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         let reach = try mir_vreachable(d, store, indexes, function)
-        let cfg = try mir_vp4_cfg_build(d, store, indexes, function)
-        let dom = try mir_vp4_dom_build(d, cfg)
+        let cfg_built = try mir_vp4_cfg_build(cfg_plan, d, store, indexes, function)
+        cfg_plan = cfg_built.plan
+        let cfg = cfg_built.cfg
+        let dom_built = try mir_vp4_dom_build(dom_plan, d, cfg)
+        dom_plan = dom_built.plan
+        let dom = dom_built.dom
         let node_count = cfg.node_count
         var grow = __s0_buffer_len(U64, v_seen)
         while grow < node_count + 1 { v_seen = try __s0_buffer_append(U64, d, v_seen, 0)

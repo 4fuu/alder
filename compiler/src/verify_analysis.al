@@ -1317,35 +1317,158 @@ type MirVP4PointCfg {
     case_edge: __s0_Buffer(U64)
 }
 
-fn mir_vp4_cfg_empty(d: Domain, function: U64) -> Result(MirVP4PointCfg, __s0_Error) {
-    let empty = try __s0_buffer_new(U64, d)
-    return Ok(MirVP4PointCfg(function: function, block_count: 0, node_count: 0, boundary_count: 0, entry: 0, boundary_offset: empty, block_instr_count: empty, succ: empty, succ_start: empty, succ_count: empty, pred: empty, pred_start: empty, pred_count: empty, case_edge: empty))
+type MirVP4CfgPlan {
+    boundary_offset: __s0_Buffer(U64)
+    block_instr_count: __s0_Buffer(U64)
+    succ: __s0_Buffer(U64)
+    succ_start: __s0_Buffer(U64)
+    succ_count: __s0_Buffer(U64)
+    pred: __s0_Buffer(U64)
+    pred_start: __s0_Buffer(U64)
+    pred_count: __s0_Buffer(U64)
+    case_edge: __s0_Buffer(U64)
+    edge_from: __s0_Buffer(U64)
+    edge_to: __s0_Buffer(U64)
+    scratch_edge_cnt: __s0_Buffer(U64)
+    scratch_edge_base: __s0_Buffer(U64)
+    scratch_edge_ids: __s0_Buffer(U64)
+    scratch_edge_used: __s0_Buffer(U64)
 }
 
-fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(MirVP4PointCfg, __s0_Error) {
+type MirVP4CfgBuilt {
+    plan: MirVP4CfgPlan
+    cfg: MirVP4PointCfg
+}
+
+type MirVP4Dom {
+    idom: __s0_Buffer(U64)
+    rpo_index: __s0_Buffer(U64)
+    dom_in: __s0_Buffer(U64)
+    dom_out: __s0_Buffer(U64)
+}
+
+type MirVP4DomPlan {
+    idom: __s0_Buffer(U64)
+    rpo_index: __s0_Buffer(U64)
+    dom_in: __s0_Buffer(U64)
+    dom_out: __s0_Buffer(U64)
+    scratch_seen: __s0_Buffer(U64)
+    scratch_phase: __s0_Buffer(U64)
+    scratch_stack: __s0_Buffer(U64)
+    scratch_post: __s0_Buffer(U64)
+    scratch_rpo: __s0_Buffer(U64)
+    scratch_child_count: __s0_Buffer(U64)
+    scratch_counts: __s0_Buffer(U64)
+    scratch_child_start: __s0_Buffer(U64)
+    scratch_filled: __s0_Buffer(U64)
+    scratch_children: __s0_Buffer(U64)
+    scratch_estack: __s0_Buffer(U64)
+    scratch_edata: __s0_Buffer(U64)
+}
+
+type MirVP4DomBuilt {
+    plan: MirVP4DomPlan
+    dom: MirVP4Dom
+}
+
+// The point cfg and dominator analysis are rebuilt for every function, and
+// without reuse every function's arrays stayed in the root domain, which is
+// never reset, so the peak footprint held the sum over all functions. The
+// plans own every buffer the two builders need; the builders grow them once
+// to the largest function's bounds and rewrite the used range in place per
+// function. The returned MirVP4PointCfg and MirVP4Dom alias the plan's
+// buffers, and every consumer reads only slots covered by the current
+// function's counts or guards on the counts first, so stale slots from a
+// larger previous function are never observable. Growth (buffer_append)
+// returns a new handle, so the builders return the updated plan alongside
+// the analysis and the caller carries it to the next function.
+
+fn mir_vp4_plan_grow(d: Domain, buf: __s0_Buffer(U64), need: U64) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var out = buf
+    var grow = __s0_buffer_len(U64, out)
+    while grow < need { out = try __s0_buffer_append(U64, d, out, 0)
+        grow = grow + 1 }
+    return Ok(out)
+}
+
+fn mir_vp4_u64_at(buf: __s0_Buffer(U64), index: U64) -> U64 {
+    if index == 0 || index > __s0_buffer_len(U64, buf) { return 0 }
+    return __s0_buffer_get(U64, buf, index - 1)
+}
+
+fn mir_vp4_cfg_build(plan: MirVP4CfgPlan, d: Domain, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(MirVP4CfgBuilt, __s0_Error) {
     let block_count = mir_vindex_block_count(indexes, function)
-    if block_count == 0 { return mir_vp4_cfg_empty(d, function) }
-    var boundary_offset = try __s0_buffer_new(U64, d)
-    var block_instr_count = try __s0_buffer_new(U64, d)
+    if block_count == 0 {
+        return Ok(MirVP4CfgBuilt(plan: plan, cfg: MirVP4PointCfg(function: function, block_count: 0, node_count: 0, boundary_count: 0, entry: 0, boundary_offset: plan.boundary_offset, block_instr_count: plan.block_instr_count, succ: plan.succ, succ_start: plan.succ_start, succ_count: plan.succ_count, pred: plan.pred, pred_start: plan.pred_start, pred_count: plan.pred_count, case_edge: plan.case_edge)))
+    }
+    var boundary_offset = plan.boundary_offset
+    var block_instr_count = plan.block_instr_count
+    var succ = plan.succ
+    var succ_start = plan.succ_start
+    var succ_count = plan.succ_count
+    var pred = plan.pred
+    var pred_start = plan.pred_start
+    var pred_count = plan.pred_count
+    var case_edge = plan.case_edge
+    var edge_from = plan.edge_from
+    var edge_to = plan.edge_to
+    var edge_cnt = plan.scratch_edge_cnt
+    var edge_base = plan.scratch_edge_base
+    var edge_ids = plan.scratch_edge_ids
+    var edge_used = plan.scratch_edge_used
+    // Capacity first: every buffer this function writes is grown to its
+    // per-function need before the first store. boundary_offset,
+    // block_instr_count, and case_edge hold block_count slots, the edge
+    // bookkeeping arrays hold block_count + 1; the edge scan output bound is
+    // derived below and grown before the scan.
+    boundary_offset = try mir_vp4_plan_grow(d, boundary_offset, block_count)
+    block_instr_count = try mir_vp4_plan_grow(d, block_instr_count, block_count)
+    case_edge = try mir_vp4_plan_grow(d, case_edge, block_count)
+    edge_cnt = try mir_vp4_plan_grow(d, edge_cnt, block_count + 1)
+    edge_base = try mir_vp4_plan_grow(d, edge_base, block_count + 1)
+    edge_used = try mir_vp4_plan_grow(d, edge_used, block_count + 1)
     var offset: U64 = 1
     var b: U64 = 1
     while b <= block_count {
         let count = mir_vindex_instr_count(indexes, function, b)
-        boundary_offset = try __s0_buffer_append(U64, d, boundary_offset, offset)
-        block_instr_count = try __s0_buffer_append(U64, d, block_instr_count, count)
+        __s0_buffer_set(U64, boundary_offset, b - 1, offset)
+        __s0_buffer_set(U64, block_instr_count, b - 1, count)
         offset = offset + count + 1
         b = b + 1
     }
     let boundary_count = offset - 1
-    var edge_from = try __s0_buffer_new(U64, d)
-    var edge_to = try __s0_buffer_new(U64, d)
-    // case_edge[block - 1] = 1-based index of the block's first switch-case
-    // edge node, or 0 when the block has no switch with valid cases. Built in
-    // a local array and emitted once at the end.
-    var case_edge_arr = __s0_alloc(U64, d, block_count)
+    // Upper bound on the edge count, from the same per-block data the edge
+    // scan reads: every instruction can add a checked edge, and a terminator
+    // adds at most one jump edge, two branch edges, or one edge per switch
+    // operand. The scan never exceeds this bound, so the edge arrays are
+    // grown once here and then written in place.
+    var edge_bound: U64 = 0
+    b = 1
+    while b <= block_count {
+        let count = __s0_buffer_get(U64, block_instr_count, b - 1)
+        var term_edges: U64 = 0
+        let term_id = mir_vindex_term(indexes, function, b)
+        if term_id != 0 {
+            let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
+            if t.kind == mir_term_jump() { term_edges = 1 }
+            if t.kind == mir_term_branch() { term_edges = 2 }
+            if t.kind == mir_term_switch() { term_edges = mir_vindex_op_term_count(indexes, term_id) }
+        }
+        edge_bound = edge_bound + count + term_edges
+        b = b + 1
+    }
+    edge_from = try mir_vp4_plan_grow(d, edge_from, edge_bound)
+    edge_to = try mir_vp4_plan_grow(d, edge_to, edge_bound)
+    edge_ids = try mir_vp4_plan_grow(d, edge_ids, edge_bound)
     var z: U64 = 0
-    while z < block_count { case_edge_arr[z] = 0
+    while z < block_count { __s0_buffer_set(U64, case_edge, z, 0)
         z = z + 1 }
+    z = 0
+    while z <= block_count { __s0_buffer_set(U64, edge_cnt, z, 0)
+        __s0_buffer_set(U64, edge_base, z, 0)
+        __s0_buffer_set(U64, edge_used, z, 0)
+        z = z + 1 }
+    var edge_len: U64 = 0
     b = 1
     while b <= block_count {
         let count = __s0_buffer_get(U64, block_instr_count, b - 1)
@@ -1356,8 +1479,9 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
             if ins_id != 0 {
                 let ins = __s0_buffer_get(MirInstrRec, store.instructions, ins_id - 1)
                 if mir_vop_checked(ins.op) && mir_vindex_block(indexes, function, ins.target) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + p)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, ins.target)
+                    __s0_buffer_set(U64, edge_from, edge_len, base + p)
+                    __s0_buffer_set(U64, edge_to, edge_len, ins.target)
+                    edge_len = edge_len + 1
                 }
             }
             p = p + 1
@@ -1366,21 +1490,24 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
         if term_id != 0 {
             let t = __s0_buffer_get(MirTermRec, store.terminators, term_id - 1)
             if t.kind == mir_term_jump() && mir_vindex_block(indexes, function, t.target) != 0 {
-                edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                edge_to = try __s0_buffer_append(U64, d, edge_to, t.target)
+                __s0_buffer_set(U64, edge_from, edge_len, base + count)
+                __s0_buffer_set(U64, edge_to, edge_len, t.target)
+                edge_len = edge_len + 1
             }
             if t.kind == mir_term_branch() {
                 if mir_vindex_block(indexes, function, t.then_block) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, t.then_block)
+                    __s0_buffer_set(U64, edge_from, edge_len, base + count)
+                    __s0_buffer_set(U64, edge_to, edge_len, t.then_block)
+                    edge_len = edge_len + 1
                 }
                 if mir_vindex_block(indexes, function, t.else_block) != 0 {
-                    edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                    edge_to = try __s0_buffer_append(U64, d, edge_to, t.else_block)
+                    __s0_buffer_set(U64, edge_from, edge_len, base + count)
+                    __s0_buffer_set(U64, edge_to, edge_len, t.else_block)
+                    edge_len = edge_len + 1
                 }
             }
             if t.kind == mir_term_switch() {
-                let first_case = __s0_buffer_len(U64, edge_from)
+                let first_case = edge_len
                 // Switch cases are the switch_case-kind operands of this
                 // terminator in ascending operand-id order, which on a
                 // validated store is their ordinal order.
@@ -1390,53 +1517,64 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
                     let case_id = mir_vindex_op_term(indexes, term_id, at)
                     let c = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
                     if c.kind == mir_operand_switch_case() && mir_vindex_block(indexes, function, c.target) != 0 {
-                        edge_from = try __s0_buffer_append(U64, d, edge_from, base + count)
-                        edge_to = try __s0_buffer_append(U64, d, edge_to, c.target)
+                        __s0_buffer_set(U64, edge_from, edge_len, base + count)
+                        __s0_buffer_set(U64, edge_to, edge_len, c.target)
+                        edge_len = edge_len + 1
                     }
                     at = at + 1
                 }
-                if __s0_buffer_len(U64, edge_from) > first_case {
-                    case_edge_arr[b - 1] = first_case + 1
+                if edge_len > first_case {
+                    __s0_buffer_set(U64, case_edge, b - 1, first_case + 1)
                 }
             }
         }
         b = b + 1
     }
-    let edge_count = __s0_buffer_len(U64, edge_from)
+    let edge_count = edge_len
     let node_count = boundary_count + edge_count
-    if node_count == 0 { return mir_vp4_cfg_empty(d, function) }
-    var succ = try __s0_buffer_new(U64, d)
-    var succ_start = try __s0_buffer_new(U64, d)
-    var succ_count = try __s0_buffer_new(U64, d)
+    if node_count == 0 {
+        let empty_plan = MirVP4CfgPlan(boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge, edge_from: edge_from, edge_to: edge_to, scratch_edge_cnt: edge_cnt, scratch_edge_base: edge_base, scratch_edge_ids: edge_ids, scratch_edge_used: edge_used)
+        return Ok(MirVP4CfgBuilt(plan: empty_plan, cfg: MirVP4PointCfg(function: function, block_count: block_count, node_count: 0, boundary_count: boundary_count, entry: 0, boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge)))
+    }
+    succ = try mir_vp4_plan_grow(d, succ, boundary_count + edge_count + edge_count)
+    succ_start = try mir_vp4_plan_grow(d, succ_start, node_count)
+    succ_count = try mir_vp4_plan_grow(d, succ_count, node_count)
+    pred = try mir_vp4_plan_grow(d, pred, boundary_count + edge_count + edge_count)
+    pred_start = try mir_vp4_plan_grow(d, pred_start, node_count)
+    pred_count = try mir_vp4_plan_grow(d, pred_count, node_count)
     // Boundary nodes ascending: a linear successor n + 1 unless n is the
     // terminator position of its block, plus the edge nodes whose edge_from
     // equals n. edge_from is non-decreasing, so a cursor replaces the per-node
     // full scans.
+    var succ_len: U64 = 0
     var bb: U64 = 1
     var e: U64 = 0
     var n: U64 = 1
     while n <= boundary_count {
-        let start = __s0_buffer_len(U64, succ)
+        let start = succ_len
         while bb < block_count && n > __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) { bb = bb + 1 }
         if n != __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) {
-            succ = try __s0_buffer_append(U64, d, succ, n + 1)
+            __s0_buffer_set(U64, succ, succ_len, n + 1)
+            succ_len = succ_len + 1
         }
         while e < edge_count && __s0_buffer_get(U64, edge_from, e) < n { e = e + 1 }
         while e < edge_count && __s0_buffer_get(U64, edge_from, e) == n {
-            succ = try __s0_buffer_append(U64, d, succ, boundary_count + 1 + e)
+            __s0_buffer_set(U64, succ, succ_len, boundary_count + 1 + e)
+            succ_len = succ_len + 1
             e = e + 1
         }
-        succ_start = try __s0_buffer_append(U64, d, succ_start, start)
-        succ_count = try __s0_buffer_append(U64, d, succ_count, __s0_buffer_len(U64, succ) - start)
+        __s0_buffer_set(U64, succ_start, n - 1, start)
+        __s0_buffer_set(U64, succ_count, n - 1, succ_len - start)
         n = n + 1
     }
     n = 1
     while n <= edge_count {
-        let start = __s0_buffer_len(U64, succ)
+        let start = succ_len
         let target = __s0_buffer_get(U64, edge_to, n - 1)
-        succ = try __s0_buffer_append(U64, d, succ, __s0_buffer_get(U64, boundary_offset, target - 1))
-        succ_start = try __s0_buffer_append(U64, d, succ_start, start)
-        succ_count = try __s0_buffer_append(U64, d, succ_count, 1)
+        __s0_buffer_set(U64, succ, succ_len, __s0_buffer_get(U64, boundary_offset, target - 1))
+        succ_len = succ_len + 1
+        __s0_buffer_set(U64, succ_start, boundary_count + n - 1, start)
+        __s0_buffer_set(U64, succ_count, boundary_count + n - 1, 1)
         n = n + 1
     }
     // Pred lists: a non-entry boundary node n > 1 has the single linear pred
@@ -1445,169 +1583,161 @@ fn mir_vp4_cfg_build(d: Domain, store: MirStore, indexes: MirVIndexes, function:
     // edge node boundary_count + e has the single pred edge_from[e]. This is
     // the exact inverse of the succ lists above, with preds in ascending
     // source order like the old per-node scan.
-    var pred = try __s0_buffer_new(U64, d)
-    var pred_start = try __s0_buffer_new(U64, d)
-    var pred_count = try __s0_buffer_new(U64, d)
-    var edge_cnt = __s0_alloc(U64, d, block_count + 1)
-    var edge_base = __s0_alloc(U64, d, block_count + 1)
-    z = 0
-    while z <= block_count { edge_cnt[z] = 0
-        edge_base[z] = 0
-        z = z + 1 }
+    var pred_len: U64 = 0
     var e2: U64 = 0
     while e2 < edge_count {
         let target = __s0_buffer_get(U64, edge_to, e2)
-        edge_cnt[target] = edge_cnt[target] + 1
+        __s0_buffer_set(U64, edge_cnt, target, __s0_buffer_get(U64, edge_cnt, target) + 1)
         e2 = e2 + 1
     }
     var blk: U64 = 1
-    while blk <= block_count { edge_base[blk] = edge_base[blk - 1] + edge_cnt[blk - 1]
+    while blk <= block_count { __s0_buffer_set(U64, edge_base, blk, __s0_buffer_get(U64, edge_base, blk - 1) + __s0_buffer_get(U64, edge_cnt, blk - 1))
         blk = blk + 1 }
-    var edge_ids = __s0_alloc(U64, d, edge_count)
-    var edge_used = __s0_alloc(U64, d, block_count + 1)
-    z = 0
-    while z < edge_count { edge_ids[z] = 0
-        z = z + 1 }
-    z = 0
-    while z <= block_count { edge_used[z] = 0
-        z = z + 1 }
+    e2 = 0
+    while e2 < edge_count { __s0_buffer_set(U64, edge_ids, e2, 0)
+        e2 = e2 + 1 }
     e2 = 0
     while e2 < edge_count {
         let target = __s0_buffer_get(U64, edge_to, e2)
-        let pos = edge_base[target] + edge_used[target]
-        edge_ids[pos] = e2 + 1
-        edge_used[target] = edge_used[target] + 1
+        let pos = __s0_buffer_get(U64, edge_base, target) + __s0_buffer_get(U64, edge_used, target)
+        __s0_buffer_set(U64, edge_ids, pos, e2 + 1)
+        __s0_buffer_set(U64, edge_used, target, __s0_buffer_get(U64, edge_used, target) + 1)
         e2 = e2 + 1
     }
     bb = 1
     n = 1
     while n <= boundary_count {
-        let start = __s0_buffer_len(U64, pred)
+        let start = pred_len
         while bb < block_count && n > __s0_buffer_get(U64, boundary_offset, bb - 1) + __s0_buffer_get(U64, block_instr_count, bb - 1) { bb = bb + 1 }
         let offb = __s0_buffer_get(U64, boundary_offset, bb - 1)
-        if n > 1 && n != offb { pred = try __s0_buffer_append(U64, d, pred, n - 1) }
+        if n > 1 && n != offb {
+            __s0_buffer_set(U64, pred, pred_len, n - 1)
+            pred_len = pred_len + 1
+        }
         if n == offb {
             var k: U64 = 0
-            while k < edge_cnt[bb] {
-                let eid = edge_ids[edge_base[bb] + k]
-                pred = try __s0_buffer_append(U64, d, pred, boundary_count + eid)
+            while k < __s0_buffer_get(U64, edge_cnt, bb) {
+                let eid = __s0_buffer_get(U64, edge_ids, __s0_buffer_get(U64, edge_base, bb) + k)
+                __s0_buffer_set(U64, pred, pred_len, boundary_count + eid)
+                pred_len = pred_len + 1
                 k = k + 1
             }
         }
-        pred_start = try __s0_buffer_append(U64, d, pred_start, start)
-        pred_count = try __s0_buffer_append(U64, d, pred_count, __s0_buffer_len(U64, pred) - start)
+        __s0_buffer_set(U64, pred_start, n - 1, start)
+        __s0_buffer_set(U64, pred_count, n - 1, pred_len - start)
         n = n + 1
     }
     e2 = 0
     while e2 < edge_count {
-        let start = __s0_buffer_len(U64, pred)
-        pred = try __s0_buffer_append(U64, d, pred, __s0_buffer_get(U64, edge_from, e2))
-        pred_start = try __s0_buffer_append(U64, d, pred_start, start)
-        pred_count = try __s0_buffer_append(U64, d, pred_count, __s0_buffer_len(U64, pred) - start)
+        let start = pred_len
+        __s0_buffer_set(U64, pred, pred_len, __s0_buffer_get(U64, edge_from, e2))
+        pred_len = pred_len + 1
+        __s0_buffer_set(U64, pred_start, boundary_count + e2, start)
+        __s0_buffer_set(U64, pred_count, boundary_count + e2, 1)
         e2 = e2 + 1
     }
-    var case_edge = try __s0_buffer_new(U64, d)
-    var ci: U64 = 0
-    while ci < block_count {
-        case_edge = try __s0_buffer_append(U64, d, case_edge, case_edge_arr[ci])
-        ci = ci + 1
-    }
-    return Ok(MirVP4PointCfg(function: function, block_count: block_count, node_count: node_count, boundary_count: boundary_count, entry: 1, boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge))
+    let out_plan = MirVP4CfgPlan(boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge, edge_from: edge_from, edge_to: edge_to, scratch_edge_cnt: edge_cnt, scratch_edge_base: edge_base, scratch_edge_ids: edge_ids, scratch_edge_used: edge_used)
+    return Ok(MirVP4CfgBuilt(plan: out_plan, cfg: MirVP4PointCfg(function: function, block_count: block_count, node_count: node_count, boundary_count: boundary_count, entry: 1, boundary_offset: boundary_offset, block_instr_count: block_instr_count, succ: succ, succ_start: succ_start, succ_count: succ_count, pred: pred, pred_start: pred_start, pred_count: pred_count, case_edge: case_edge)))
 }
 
-type MirVP4Dom {
-    idom: __s0_Buffer(U64)
-    rpo_index: __s0_Buffer(U64)
-    dom_in: __s0_Buffer(U64)
-    dom_out: __s0_Buffer(U64)
-}
-
-fn mir_vp4_dom_empty(d: Domain) -> Result(MirVP4Dom, __s0_Error) {
-    let empty = try __s0_buffer_new(U64, d)
-    return Ok(MirVP4Dom(idom: empty, rpo_index: empty, dom_in: empty, dom_out: empty))
-}
-
-fn mir_vp4_u64_at(buf: __s0_Buffer(U64), index: U64) -> U64 {
-    if index == 0 || index > __s0_buffer_len(U64, buf) { return 0 }
-    return __s0_buffer_get(U64, buf, index - 1)
-}
-
-fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_Error) {
+fn mir_vp4_dom_build(plan: MirVP4DomPlan, d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4DomBuilt, __s0_Error) {
     let n = cfg.node_count
     let entry = cfg.entry
-    if n == 0 || entry == 0 || entry > n { return mir_vp4_dom_empty(d) }
-    // Iterative DFS postorder over the CFG. The phase-6 domain-provenance
-    // analysis forbids stores inside loops of values read back out of
-    // function-local allocations, so data movement goes through append-only
-    // buffers (post/rpo below) while arrays that only ever receive constants
-    // or arithmetic results stay local __s0_alloc arrays (seen, phase, stack,
-    // rpo_index, idom, ...). The stack is an alloc array indexed by a logical
-    // top (an append-only buffer would read stale entries after pops). The
-    // visited probe is a direct O(1) array check instead of the old linear
-    // scan.
-    var seen = __s0_alloc(U64, d, n + 1)
-    var phase = __s0_alloc(U64, d, n + 1)
-    var stack = __s0_alloc(U64, d, n + 1)
+    if n == 0 || entry == 0 || entry > n {
+        return Ok(MirVP4DomBuilt(plan: plan, dom: MirVP4Dom(idom: plan.idom, rpo_index: plan.rpo_index, dom_in: plan.dom_in, dom_out: plan.dom_out)))
+    }
+    var idom = plan.idom
+    var rpo_index = plan.rpo_index
+    var dom_in = plan.dom_in
+    var dom_out = plan.dom_out
+    var seen = plan.scratch_seen
+    var phase = plan.scratch_phase
+    var stack = plan.scratch_stack
+    var post = plan.scratch_post
+    var rpo = plan.scratch_rpo
+    var child_count = plan.scratch_child_count
+    var counts = plan.scratch_counts
+    var child_start = plan.scratch_child_start
+    var filled = plan.scratch_filled
+    var children = plan.scratch_children
+    var estack = plan.scratch_estack
+    var edata = plan.scratch_edata
+    idom = try mir_vp4_plan_grow(d, idom, n + 1)
+    rpo_index = try mir_vp4_plan_grow(d, rpo_index, n + 1)
+    dom_in = try mir_vp4_plan_grow(d, dom_in, n + 1)
+    dom_out = try mir_vp4_plan_grow(d, dom_out, n + 1)
+    seen = try mir_vp4_plan_grow(d, seen, n + 1)
+    phase = try mir_vp4_plan_grow(d, phase, n + 1)
+    stack = try mir_vp4_plan_grow(d, stack, n + 1)
+    post = try mir_vp4_plan_grow(d, post, n + 1)
+    rpo = try mir_vp4_plan_grow(d, rpo, n + 1)
+    child_count = try mir_vp4_plan_grow(d, child_count, n + 1)
+    counts = try mir_vp4_plan_grow(d, counts, n + 1)
+    child_start = try mir_vp4_plan_grow(d, child_start, n + 1)
+    filled = try mir_vp4_plan_grow(d, filled, n + 1)
+    children = try mir_vp4_plan_grow(d, children, n + 1)
+    estack = try mir_vp4_plan_grow(d, estack, n + 1)
+    edata = try mir_vp4_plan_grow(d, edata, n + 1)
+    // Iterative DFS postorder over the CFG. All scratch lives in the plan's
+    // reusable buffers: the stack is a buffer written and read by explicit
+    // slot index with a logical top, so pops leave only stale slots that the
+    // walk never reads, and the visited probe stays a direct O(1) slot check.
     var z: U64 = 0
-    while z <= n { seen[z] = 0
-        phase[z] = 0
-        stack[z] = 0
-        z = z + 1 }
-    var post = try __s0_buffer_new(U64, d)
-    stack[0] = entry
-    phase[0] = 0
-    seen[entry] = 1
+    while z <= n {
+        __s0_buffer_set(U64, seen, z, 0)
+        __s0_buffer_set(U64, phase, z, 0)
+        __s0_buffer_set(U64, stack, z, 0)
+        z = z + 1
+    }
+    __s0_buffer_set(U64, stack, 0, entry)
+    __s0_buffer_set(U64, phase, 0, 0)
+    __s0_buffer_set(U64, seen, entry - 1, 1)
     var top: U64 = 1
     var plen: U64 = 0
     while top != 0 {
-        let v = stack[top - 1]
-        if phase[top - 1] == 0 {
-            phase[top - 1] = 1
+        let v = __s0_buffer_get(U64, stack, top - 1)
+        if __s0_buffer_get(U64, phase, top - 1) == 0 {
+            __s0_buffer_set(U64, phase, top - 1, 1)
             let base = mir_vp4_u64_at(cfg.succ_start, v)
             let count = mir_vp4_u64_at(cfg.succ_count, v)
             var k: U64 = 0
             while k < count {
                 let s = __s0_buffer_get(U64, cfg.succ, base + k)
-                if s != 0 && seen[s] == 0 {
-                    seen[s] = 1
-                    stack[top] = s
-                    phase[top] = 0
+                if s != 0 && __s0_buffer_get(U64, seen, s - 1) == 0 {
+                    __s0_buffer_set(U64, seen, s - 1, 1)
+                    __s0_buffer_set(U64, stack, top, s)
+                    __s0_buffer_set(U64, phase, top, 0)
                     top = top + 1
                 }
                 k = k + 1
             }
         } else {
-            post = try __s0_buffer_append(U64, d, post, v)
+            __s0_buffer_set(U64, post, plen, v)
             plen = plen + 1
             top = top - 1
         }
     }
     // rpo is the reverse postorder; rpo_index maps a node to its 1-based rpo
-    // position. All alloc stores below are constants or arithmetic results.
-    var rpo = try __s0_buffer_new(U64, d)
-    var rpo_index = __s0_alloc(U64, d, n + 1)
+    // position. All stores below are constants or arithmetic results.
     z = 0
-    while z <= n { rpo_index[z] = 0
+    while z <= n { __s0_buffer_set(U64, rpo_index, z, 0)
         z = z + 1 }
     var i: U64 = 0
     while i < plen {
-        rpo = try __s0_buffer_append(U64, d, rpo, __s0_buffer_get(U64, post, plen - 1 - i))
+        __s0_buffer_set(U64, rpo, i, __s0_buffer_get(U64, post, plen - 1 - i))
         i = i + 1
     }
     i = 0
     while i < plen {
-        rpo_index[__s0_buffer_get(U64, rpo, i)] = i + 1
+        __s0_buffer_set(U64, rpo_index, __s0_buffer_get(U64, rpo, i) - 1, i + 1)
         i = i + 1
     }
-    // idom fixpoint: identical iteration order and semantics to the buffer
-    // version, with O(1) element writes. The stored value is an arithmetic
-    // identity (new_idom + 0) because the intersect walk reads idom entries
-    // back out of the local allocation, which phase 6 treats as a reference.
-    var idom = __s0_alloc(U64, d, n + 1)
+    // idom fixpoint: identical iteration order and semantics to the original
+    // walk, with O(1) slot reads and writes through the shared plan buffer.
     z = 0
-    while z <= n { idom[z] = 0
+    while z <= n { __s0_buffer_set(U64, idom, z, 0)
         z = z + 1 }
-    idom[entry] = entry
+    __s0_buffer_set(U64, idom, entry - 1, entry)
     var changed = true
     while changed {
         changed = false
@@ -1620,12 +1750,12 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
             var k: U64 = 0
             while k < count {
                 let p = __s0_buffer_get(U64, cfg.pred, base + k)
-                if idom[p] != 0 {
+                if __s0_buffer_get(U64, idom, p - 1) != 0 {
                     if new_idom == 0 {
                         new_idom = p
                     } else {
                         // CHK intersect of p and new_idom, inlined because the
-                        // alloc arrays cannot cross a function boundary.
+                        // plan scratch cannot cross a function boundary.
                         var x = p
                         var y = new_idom
                         var done = false
@@ -1634,16 +1764,16 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
                                 x = 0
                                 done = true
                             } else {
-                                let xi = rpo_index[x]
-                                let yi = rpo_index[y]
+                                let xi = __s0_buffer_get(U64, rpo_index, x - 1)
+                                let yi = __s0_buffer_get(U64, rpo_index, y - 1)
                                 if xi == 0 || yi == 0 {
                                     x = 0
                                     done = true
                                 } else {
                                     if xi > yi {
-                                        x = idom[x]
+                                        x = __s0_buffer_get(U64, idom, x - 1)
                                     } else {
-                                        y = idom[y]
+                                        y = __s0_buffer_get(U64, idom, y - 1)
                                     }
                                 }
                             }
@@ -1653,114 +1783,93 @@ fn mir_vp4_dom_build(d: Domain, cfg: MirVP4PointCfg) -> Result(MirVP4Dom, __s0_E
                 }
                 k = k + 1
             }
-            if new_idom != 0 && idom[b] != new_idom {
-                idom[b] = new_idom + 0
+            if new_idom != 0 && __s0_buffer_get(U64, idom, b - 1) != new_idom {
+                __s0_buffer_set(U64, idom, b - 1, new_idom)
                 changed = true
             }
             i = i + 1
         }
     }
-    // Children lists from idom, in the same 0-based layout as the old
-    // child_start/child_count/children buffers. child_count is appended in
-    // node order because its values are read back out of the counts
-    // allocation; child_start/counts/filled only store arithmetic results.
-    var counts = __s0_alloc(U64, d, n + 1)
-    var child_start = __s0_alloc(U64, d, n + 1)
-    var filled = __s0_alloc(U64, d, n + 1)
+    // Children lists from idom, in the same 0-based layout as before.
+    // child_count is written in node order because its values are read back
+    // through the shared plan buffer during the Euler tour.
     z = 0
-    while z <= n { counts[z] = 0
-        child_start[z] = 0
-        filled[z] = 0
-        z = z + 1 }
+    while z <= n {
+        __s0_buffer_set(U64, counts, z, 0)
+        __s0_buffer_set(U64, child_start, z, 0)
+        __s0_buffer_set(U64, filled, z, 0)
+        z = z + 1
+    }
     var v: U64 = 1
     while v <= n {
-        let p = idom[v]
-        if p != 0 && p != v { counts[p] = counts[p] + 1 }
+        let p = __s0_buffer_get(U64, idom, v - 1)
+        if p != 0 && p != v { __s0_buffer_set(U64, counts, p - 1, __s0_buffer_get(U64, counts, p - 1) + 1) }
         v = v + 1
     }
-    var child_count = try __s0_buffer_new(U64, d)
     var start: U64 = 0
     v = 1
     while v <= n {
-        child_start[v] = start
-        let count = counts[v]
-        child_count = try __s0_buffer_append(U64, d, child_count, count)
+        __s0_buffer_set(U64, child_start, v - 1, start)
+        let count = __s0_buffer_get(U64, counts, v - 1)
+        __s0_buffer_set(U64, child_count, v - 1, count)
         start = start + count
         v = v + 1
     }
-    var children = __s0_alloc(U64, d, start)
     z = 0
-    while z < start { children[z] = 0
+    while z < start { __s0_buffer_set(U64, children, z, 0)
         z = z + 1 }
     v = 1
     while v <= n {
-        let p = idom[v]
+        let p = __s0_buffer_get(U64, idom, v - 1)
         if p != 0 && p != v {
-            let used = filled[p]
-            children[child_start[p] + used] = v
-            filled[p] = used + 1
+            let used = __s0_buffer_get(U64, filled, p - 1)
+            __s0_buffer_set(U64, children, __s0_buffer_get(U64, child_start, p - 1) + used, v)
+            __s0_buffer_set(U64, filled, p - 1, used + 1)
         }
         v = v + 1
     }
     // Euler tour over the idom tree: dom_in is the preorder stamp, dom_out
-    // the stamp at subtree exit. Same traversal order and stamps as the old
-    // buffers; dom_in is written at entry time (identical value). Children
-    // are pushed onto the estack alloc array through an arithmetic identity
-    // (c + 0) because they are read back out of the children allocation,
-    // which phase 6 treats as a reference; the edata phases hold only the
-    // current stamp and constants.
-    var dom_in = __s0_alloc(U64, d, n + 1)
-    var dom_out = __s0_alloc(U64, d, n + 1)
-    var estack = __s0_alloc(U64, d, n + 1)
-    var edata = __s0_alloc(U64, d, n + 1)
+    // the stamp at subtree exit. Same traversal order and stamps as the
+    // original walk; children are pushed onto the plan's estack buffer and
+    // read back through the same shared buffer.
     z = 0
-    while z <= n { dom_in[z] = 0
-        dom_out[z] = 0
-        estack[z] = 0
-        edata[z] = 0
-        z = z + 1 }
-    estack[0] = entry
-    edata[0] = 0
+    while z <= n {
+        __s0_buffer_set(U64, dom_in, z, 0)
+        __s0_buffer_set(U64, dom_out, z, 0)
+        __s0_buffer_set(U64, estack, z, 0)
+        __s0_buffer_set(U64, edata, z, 0)
+        z = z + 1
+    }
+    __s0_buffer_set(U64, estack, 0, entry)
+    __s0_buffer_set(U64, edata, 0, 0)
     var stamp: U64 = 0
     var etop: U64 = 1
     while etop != 0 {
-        let v2 = estack[etop - 1]
-        let data = edata[etop - 1]
+        let v2 = __s0_buffer_get(U64, estack, etop - 1)
+        let data = __s0_buffer_get(U64, edata, etop - 1)
         if data == 0 {
             stamp = stamp + 1
-            edata[etop - 1] = stamp
-            dom_in[v2] = stamp
-            let base = child_start[v2]
+            __s0_buffer_set(U64, edata, etop - 1, stamp)
+            __s0_buffer_set(U64, dom_in, v2 - 1, stamp)
+            let base = __s0_buffer_get(U64, child_start, v2 - 1)
             let count = __s0_buffer_get(U64, child_count, v2 - 1)
             var k: U64 = 0
             while k < count {
-                let c = children[base + k]
+                let c = __s0_buffer_get(U64, children, base + k)
                 if c != 0 {
-                    estack[etop] = c + 0
-                    edata[etop] = 0
+                    __s0_buffer_set(U64, estack, etop, c)
+                    __s0_buffer_set(U64, edata, etop, 0)
                     etop = etop + 1
                 }
                 k = k + 1
             }
         } else {
-            dom_out[v2] = stamp
+            __s0_buffer_set(U64, dom_out, v2 - 1, stamp)
             etop = etop - 1
         }
     }
-    // Emit the arrays as buffers so MirVP4Dom keeps its buffer field types.
-    var idom_buf = try __s0_buffer_new(U64, d)
-    var rpo_index_buf = try __s0_buffer_new(U64, d)
-    var dom_in_buf = try __s0_buffer_new(U64, d)
-    var dom_out_buf = try __s0_buffer_new(U64, d)
-    var i2: U64 = 1
-    while i2 <= n {
-        idom_buf = try __s0_buffer_append(U64, d, idom_buf, idom[i2])
-        rpo_index_buf = try __s0_buffer_append(U64, d, rpo_index_buf, rpo_index[i2])
-        dom_in_buf = try __s0_buffer_append(U64, d, dom_in_buf, dom_in[i2])
-        dom_out_buf = try __s0_buffer_append(U64, d, dom_out_buf, dom_out[i2])
-        i2 = i2 + 1
-    }
-    return Ok(MirVP4Dom(idom: idom_buf, rpo_index: rpo_index_buf, dom_in: dom_in_buf, dom_out: dom_out_buf))
+    let out_plan = MirVP4DomPlan(idom: idom, rpo_index: rpo_index, dom_in: dom_in, dom_out: dom_out, scratch_seen: seen, scratch_phase: phase, scratch_stack: stack, scratch_post: post, scratch_rpo: rpo, scratch_child_count: child_count, scratch_counts: counts, scratch_child_start: child_start, scratch_filled: filled, scratch_children: children, scratch_estack: estack, scratch_edata: edata)
+    return Ok(MirVP4DomBuilt(plan: out_plan, dom: MirVP4Dom(idom: idom, rpo_index: rpo_index, dom_in: dom_in, dom_out: dom_out)))
 }
 
 fn mir_vp4_boundary_node(cfg: MirVP4PointCfg, block: U64, position: U64) -> U64 {
