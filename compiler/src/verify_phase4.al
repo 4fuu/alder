@@ -279,102 +279,32 @@ type MirVP4InitWork {
 // boundary.  seen and the bounded point queue are per-function scratch arrays
 // (node id = boundary_offset of the point's block plus its position); each leaf
 // BFS uses a fresh stamp, so no immutable queue allocations survive a leaf.
-fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: MirVP4PointCfg, function: U64, reach: __s0_Buffer(U64), initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_vp4_init_function(d: Domain, seen: __s0_Buffer(U64), queue: __s0_Buffer(U64), instruction_at: __s0_Buffer(U64), pred_start: __s0_Buffer(U64), pred_node: __s0_Buffer(U64), store: MirStore, indexes: MirVIndexes, cfg: MirVP4PointCfg, function: U64, reach: __s0_Buffer(U64), initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let node_count = cfg.node_count
-    var seen = __s0_alloc(U64, d, node_count + 1)
-    var queue = __s0_alloc(U64, d, node_count + 1)
-    var instruction_at = __s0_alloc(U64, d, node_count + 1)
     let queue_base = node_count + 1
-    var z: U64 = 0
-    while z <= node_count { seen[z] = 0
-        instruction_at[z] = 0
-        z = z + 1 }
-    var indexed_block: U64 = 1
-    while indexed_block <= cfg.block_count {
-        let indexed_count = __s0_buffer_get(U64, cfg.block_instr_count, indexed_block - 1)
-        let indexed_base = __s0_buffer_get(U64, cfg.boundary_offset, indexed_block - 1)
-        var indexed_position: U64 = 0
-        while indexed_position < indexed_count {
-            instruction_at[indexed_base + indexed_position] = mir_vindex_instr(indexes, function, indexed_block, indexed_position)
-            indexed_position = indexed_position + 1
-        }
-        indexed_block = indexed_block + 1
-    }
-    // Predecessor CSR over point nodes, built once per function before any
-    // leaf walk: pred_start[n] is where node n's predecessor list starts in
-    // pred_node. Every forward transition (fall-through, checked failure
-    // edge, or terminator successor) contributes one reversed entry,
-    // enumerated in block then position order on both passes so the fill is
-    // deterministic. The fill advances pred_start cursors, so the final
-    // shift pass restores the starts.
-    var pred_start = __s0_alloc(U64, d, node_count + 2)
-    var pred_total: U64 = 0
-    var z2: U64 = 0
-    while z2 <= node_count + 1 { pred_start[z2] = 0
-        z2 = z2 + 1 }
-    var count_block: U64 = 1
-    while count_block <= cfg.block_count {
-        let count_instr = __s0_buffer_get(U64, cfg.block_instr_count, count_block - 1)
-        let count_base = __s0_buffer_get(U64, cfg.boundary_offset, count_block - 1)
-        var count_pos: U64 = 0
-        while count_pos < count_instr {
-            let count_iid = instruction_at[count_base + count_pos]
-            if count_iid != 0 {
-                let count_ins = __s0_buffer_get(MirInstrRec, store.instructions, count_iid - 1)
-                pred_start[count_base + count_pos + 1] = pred_start[count_base + count_pos + 1] + 1
-                if mir_vop_checked(count_ins.op) && count_ins.target >= 1 && count_ins.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, count_ins.target - 1)
-                    pred_start[node] = pred_start[node] + 1 }
-            }
-            count_pos = count_pos + 1
-        }
-        let count_term = mir_vindex_term(indexes, function, count_block)
-        if count_term != 0 {
-            let t = __s0_buffer_get(MirTermRec, store.terminators, count_term - 1)
-            if t.kind == mir_term_jump() && t.target >= 1 && t.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.target - 1)
-                pred_start[node] = pred_start[node] + 1 }
-            if t.kind == mir_term_branch() {
-                if t.then_block >= 1 && t.then_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.then_block - 1)
-                    pred_start[node] = pred_start[node] + 1 }
-                if t.else_block >= 1 && t.else_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.else_block - 1)
-                    pred_start[node] = pred_start[node] + 1 }
-            }
-            if t.kind == mir_term_switch() { let case_count = mir_vindex_op_term_count(indexes, count_term)
-                var case_at: U64 = 0
-                while case_at < case_count { let case_id = mir_vindex_op_term(indexes, count_term, case_at)
-                    let c = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
-                    if c.kind == mir_operand_switch_case() && c.target >= 1 && c.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, c.target - 1)
-                        pred_start[node] = pred_start[node] + 1 }
-                    case_at = case_at + 1
-                } }
-        }
-        count_block = count_block + 1
-    }
-    var running: U64 = 0
-    var prefix_at: U64 = 0
-    while prefix_at <= node_count + 1 { let bucket = pred_start[prefix_at]
-        pred_start[prefix_at] = running
-        running = running + bucket
-        prefix_at = prefix_at + 1 }
-    pred_total = running
-    var pred_node = __s0_alloc(U64, d, pred_total + 1)
+    // The caller owns these five buffers, sizes them from the point cfg, and
+    // has already zeroed the slots this function uses, built instruction_at,
+    // and prefixed pred_start to the start offsets of each node's
+    // predecessor list in pred_node. This function only fills the
+    // predecessor lists, restores the starts, and walks ancestors.
     var fill_block: U64 = 1
     while fill_block <= cfg.block_count {
         let fill_count = __s0_buffer_get(U64, cfg.block_instr_count, fill_block - 1)
         let fill_base = __s0_buffer_get(U64, cfg.boundary_offset, fill_block - 1)
         var fill_pos: U64 = 0
         while fill_pos < fill_count {
-            let fill_iid = instruction_at[fill_base + fill_pos]
+            let fill_iid = __s0_buffer_get(U64, instruction_at, fill_base + fill_pos)
             if fill_iid != 0 {
                 let fill_ins = __s0_buffer_get(MirInstrRec, store.instructions, fill_iid - 1)
                 let fill_source = fill_block * queue_base + fill_pos
-                let slot = pred_start[fill_base + fill_pos + 1]
-                pred_node[slot] = fill_source
-                pred_start[fill_base + fill_pos + 1] = slot + 1
+                let slot = __s0_buffer_get(U64, pred_start, fill_base + fill_pos + 1)
+                __s0_buffer_set(U64, pred_node, slot, fill_source)
+                __s0_buffer_set(U64, pred_start, fill_base + fill_pos + 1, slot + 1)
                 if mir_vop_checked(fill_ins.op) && fill_ins.target >= 1 && fill_ins.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, fill_ins.target - 1)
-                    let tslot = pred_start[node]
-                    pred_node[tslot] = fill_source
-                    pred_start[node] = tslot + 1 }
+                    let tslot = __s0_buffer_get(U64, pred_start, node)
+                    __s0_buffer_set(U64, pred_node, tslot, fill_source)
+                    __s0_buffer_set(U64, pred_start, node, tslot + 1) }
             }
             fill_pos = fill_pos + 1
         }
@@ -383,36 +313,36 @@ fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: 
             let t = __s0_buffer_get(MirTermRec, store.terminators, fill_term - 1)
             let fill_source = fill_block * queue_base + fill_count
             if t.kind == mir_term_jump() && t.target >= 1 && t.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.target - 1)
-                let tslot = pred_start[node]
-                pred_node[tslot] = fill_source
-                pred_start[node] = tslot + 1 }
+                let tslot = __s0_buffer_get(U64, pred_start, node)
+                __s0_buffer_set(U64, pred_node, tslot, fill_source)
+                __s0_buffer_set(U64, pred_start, node, tslot + 1) }
             if t.kind == mir_term_branch() {
                 if t.then_block >= 1 && t.then_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.then_block - 1)
-                    let tslot = pred_start[node]
-                    pred_node[tslot] = fill_source
-                    pred_start[node] = tslot + 1 }
+                    let tslot = __s0_buffer_get(U64, pred_start, node)
+                    __s0_buffer_set(U64, pred_node, tslot, fill_source)
+                    __s0_buffer_set(U64, pred_start, node, tslot + 1) }
                 if t.else_block >= 1 && t.else_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.else_block - 1)
-                    let tslot = pred_start[node]
-                    pred_node[tslot] = fill_source
-                    pred_start[node] = tslot + 1 }
+                    let tslot = __s0_buffer_get(U64, pred_start, node)
+                    __s0_buffer_set(U64, pred_node, tslot, fill_source)
+                    __s0_buffer_set(U64, pred_start, node, tslot + 1) }
             }
             if t.kind == mir_term_switch() { let case_count = mir_vindex_op_term_count(indexes, fill_term)
                 var case_at: U64 = 0
                 while case_at < case_count { let case_id = mir_vindex_op_term(indexes, fill_term, case_at)
                     let c = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
                     if c.kind == mir_operand_switch_case() && c.target >= 1 && c.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, c.target - 1)
-                        let tslot = pred_start[node]
-                        pred_node[tslot] = fill_source
-                        pred_start[node] = tslot + 1 }
+                        let tslot = __s0_buffer_get(U64, pred_start, node)
+                        __s0_buffer_set(U64, pred_node, tslot, fill_source)
+                        __s0_buffer_set(U64, pred_start, node, tslot + 1) }
                     case_at = case_at + 1
                 } }
         }
         fill_block = fill_block + 1
     }
     var unfill: U64 = node_count + 1
-    while unfill >= 1 { pred_start[unfill] = pred_start[unfill - 1]
+    while unfill >= 1 { __s0_buffer_set(U64, pred_start, unfill, __s0_buffer_get(U64, pred_start, unfill - 1))
         unfill = unfill - 1 }
-    pred_start[0] = 0
+    __s0_buffer_set(U64, pred_start, 0, 0)
     var stamp: U64 = 0
     var block: U64 = 1
     while block <= cfg.block_count {
@@ -421,7 +351,7 @@ fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: 
             let block_base = __s0_buffer_get(U64, cfg.boundary_offset, block - 1)
             var position: U64 = 0
             while position < icount {
-                let iid = instruction_at[block_base + position]
+                let iid = __s0_buffer_get(U64, instruction_at, block_base + position)
                 if iid != 0 {
                     let ins = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
                     if ins.op == mir_op_load() || ins.op == mir_op_borrow() || ins.op == mir_op_borrow_mut() {
@@ -453,7 +383,7 @@ fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: 
                                     var initialized_here = false
                                     var prior_position = position
                                     while prior_position > 0 && !initialized_here { prior_position = prior_position - 1
-                                        let prior_id = instruction_at[block_base + prior_position]
+                                        let prior_id = __s0_buffer_get(U64, instruction_at, block_base + prior_position)
                                         let prior = __s0_buffer_get(MirInstrRec, store.instructions, prior_id - 1)
                                         if prior.op == mir_op_store() && mir_vp4_store_covers(store, indexes, prior.place, ins.place, load_root, load_depth, suffix) { initialized_here = true }
                                     }
@@ -474,34 +404,34 @@ fn mir_vp4_init_function(d: Domain, store: MirStore, indexes: MirVIndexes, cfg: 
                                         // visited instead of the whole function.
                                         stamp = stamp + 1
                                         var queue_count: U64 = 1
-                                        queue[0] = block * queue_base + position
-                                        seen[block_base + position] = stamp
+                                        __s0_buffer_set(U64, queue, 0, block * queue_base + position)
+                                        __s0_buffer_set(U64, seen, block_base + position, stamp)
                                         let entry_node = __s0_buffer_get(U64, cfg.boundary_offset, 0)
                                         var qq: U64 = 0
                                         var reached = false
                                         while qq < queue_count && !reached {
-                                        let encoded = queue[qq]
+                                        let encoded = __s0_buffer_get(U64, queue, qq)
                                         let point_block = encoded / queue_base
                                         let point_position = encoded % queue_base
                                         let point_node = __s0_buffer_get(U64, cfg.boundary_offset, point_block - 1) + point_position
                                         if point_node == entry_node { reached = true } else {
-                                            var pred_at = pred_start[point_node]
-                                            while pred_at < pred_start[point_node + 1] && !reached {
-                                                let pred = pred_node[pred_at]
+                                            var pred_at = __s0_buffer_get(U64, pred_start, point_node)
+                                            while pred_at < __s0_buffer_get(U64, pred_start, point_node + 1) && !reached {
+                                                let pred = __s0_buffer_get(U64, pred_node, pred_at)
                                                 let pred_block = pred / queue_base
                                                 let pred_position = pred % queue_base
                                                 let pred_node_id = __s0_buffer_get(U64, cfg.boundary_offset, pred_block - 1) + pred_position
-                                                if seen[pred_node_id] != stamp {
+                                                if __s0_buffer_get(U64, seen, pred_node_id) != stamp {
                                                     var blocked = false
                                                     if pred_position < __s0_buffer_get(U64, cfg.block_instr_count, pred_block - 1) {
-                                                        let pred_iid = instruction_at[pred_node_id]
+                                                        let pred_iid = __s0_buffer_get(U64, instruction_at, pred_node_id)
                                                         if pred_iid != 0 {
                                                             let step = __s0_buffer_get(MirInstrRec, store.instructions, pred_iid - 1)
                                                             if step.op == mir_op_store() && mir_vp4_store_covers(store, indexes, step.place, ins.place, load_root, load_depth, suffix) { blocked = true }
                                                         }
                                                     }
-                                                    if !blocked { seen[pred_node_id] = stamp
-                                                        queue[queue_count] = pred
+                                                    if !blocked { __s0_buffer_set(U64, seen, pred_node_id, stamp)
+                                                        __s0_buffer_set(U64, queue, queue_count, pred)
                                                         queue_count = queue_count + 1 }
                                                 }
                                                 pred_at = pred_at + 1
@@ -541,11 +471,103 @@ at = at + 1 }
 
 fn mir_vphase4_with_uses(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
+    // Plan-carried per-function verifier scratch for the init analysis: five
+    // U64 buffers grown once to the largest function's needs and then
+    // rewritten in place every function, so the tables stop accumulating in
+    // the root domain. Sizes come from the point cfg; the predecessor edge
+    // total comes from the same counting walk the fill relies on. Diagnostics
+    // stay in the caller's domain and outlive the reuse.
+    var v_seen = try __s0_buffer_new(U64, d)
+    var v_queue = try __s0_buffer_new(U64, d)
+    var v_instr = try __s0_buffer_new(U64, d)
+    var v_pstart = try __s0_buffer_new(U64, d)
+    var v_pnode = try __s0_buffer_new(U64, d)
     var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         let reach = try mir_vreachable(d, store, indexes, function)
         let cfg = try mir_vp4_cfg_build(d, store, indexes, function)
         let dom = try mir_vp4_dom_build(d, cfg)
+        let node_count = cfg.node_count
+        var grow = __s0_buffer_len(U64, v_seen)
+        while grow < node_count + 1 { v_seen = try __s0_buffer_append(U64, d, v_seen, 0)
+            grow = grow + 1 }
+        grow = __s0_buffer_len(U64, v_queue)
+        while grow < node_count + 1 { v_queue = try __s0_buffer_append(U64, d, v_queue, 0)
+            grow = grow + 1 }
+        grow = __s0_buffer_len(U64, v_instr)
+        while grow < node_count + 1 { v_instr = try __s0_buffer_append(U64, d, v_instr, 0)
+            grow = grow + 1 }
+        grow = __s0_buffer_len(U64, v_pstart)
+        while grow < node_count + 2 { v_pstart = try __s0_buffer_append(U64, d, v_pstart, 0)
+            grow = grow + 1 }
+        var z: U64 = 0
+        while z <= node_count { __s0_buffer_set(U64, v_seen, z, 0)
+            __s0_buffer_set(U64, v_instr, z, 0)
+            z = z + 1 }
+        var z2: U64 = 0
+        while z2 <= node_count + 1 { __s0_buffer_set(U64, v_pstart, z2, 0)
+            z2 = z2 + 1 }
+        var indexed_block: U64 = 1
+        while indexed_block <= cfg.block_count {
+            let indexed_count = __s0_buffer_get(U64, cfg.block_instr_count, indexed_block - 1)
+            let indexed_base = __s0_buffer_get(U64, cfg.boundary_offset, indexed_block - 1)
+            var indexed_position: U64 = 0
+            while indexed_position < indexed_count {
+                __s0_buffer_set(U64, v_instr, indexed_base + indexed_position, mir_vindex_instr(indexes, function, indexed_block, indexed_position))
+                indexed_position = indexed_position + 1
+            }
+            indexed_block = indexed_block + 1
+        }
+        // Count predecessor edges per point node, then prefix the buckets
+        // into start offsets. The enumeration (block then position order,
+        // fall-through, checked failure edge, terminator successors) is the
+        // same one the fill pass replays, so the fill is deterministic.
+        var count_block: U64 = 1
+        while count_block <= cfg.block_count {
+            let count_instr = __s0_buffer_get(U64, cfg.block_instr_count, count_block - 1)
+            let count_base = __s0_buffer_get(U64, cfg.boundary_offset, count_block - 1)
+            var count_pos: U64 = 0
+            while count_pos < count_instr {
+                let count_iid = __s0_buffer_get(U64, v_instr, count_base + count_pos)
+                if count_iid != 0 {
+                    let count_ins = __s0_buffer_get(MirInstrRec, store.instructions, count_iid - 1)
+                    __s0_buffer_set(U64, v_pstart, count_base + count_pos + 1, __s0_buffer_get(U64, v_pstart, count_base + count_pos + 1) + 1)
+                    if mir_vop_checked(count_ins.op) && count_ins.target >= 1 && count_ins.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, count_ins.target - 1)
+                        __s0_buffer_set(U64, v_pstart, node, __s0_buffer_get(U64, v_pstart, node) + 1) }
+                }
+                count_pos = count_pos + 1
+            }
+            let count_term = mir_vindex_term(indexes, function, count_block)
+            if count_term != 0 {
+                let t = __s0_buffer_get(MirTermRec, store.terminators, count_term - 1)
+                if t.kind == mir_term_jump() && t.target >= 1 && t.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.target - 1)
+                    __s0_buffer_set(U64, v_pstart, node, __s0_buffer_get(U64, v_pstart, node) + 1) }
+                if t.kind == mir_term_branch() {
+                    if t.then_block >= 1 && t.then_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.then_block - 1)
+                        __s0_buffer_set(U64, v_pstart, node, __s0_buffer_get(U64, v_pstart, node) + 1) }
+                    if t.else_block >= 1 && t.else_block <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, t.else_block - 1)
+                        __s0_buffer_set(U64, v_pstart, node, __s0_buffer_get(U64, v_pstart, node) + 1) }
+                }
+                if t.kind == mir_term_switch() { let case_count = mir_vindex_op_term_count(indexes, count_term)
+                    var case_at: U64 = 0
+                    while case_at < case_count { let case_id = mir_vindex_op_term(indexes, count_term, case_at)
+                        let c = __s0_buffer_get(MirOperandRec, store.operands, case_id - 1)
+                        if c.kind == mir_operand_switch_case() && c.target >= 1 && c.target <= cfg.block_count { let node = __s0_buffer_get(U64, cfg.boundary_offset, c.target - 1)
+                            __s0_buffer_set(U64, v_pstart, node, __s0_buffer_get(U64, v_pstart, node) + 1) }
+                        case_at = case_at + 1
+                    } }
+            }
+            count_block = count_block + 1
+        }
+        var running: U64 = 0
+        var prefix_at: U64 = 0
+        while prefix_at <= node_count + 1 { let bucket = __s0_buffer_get(U64, v_pstart, prefix_at)
+            __s0_buffer_set(U64, v_pstart, prefix_at, running)
+            running = running + bucket
+            prefix_at = prefix_at + 1 }
+        grow = __s0_buffer_len(U64, v_pnode)
+        while grow < running + 1 { v_pnode = try __s0_buffer_append(U64, d, v_pnode, 0)
+            grow = grow + 1 }
         let use_start = __s0_buffer_get(U64, inventory.function_start, function - 1)
         let use_count = __s0_buffer_get(U64, inventory.function_count, function - 1)
         var at: U64 = 0
@@ -565,7 +587,7 @@ fn mir_vphase4_with_uses(d: Domain, store: MirStore, indexes: MirVIndexes, inven
             }
             at = at + 1
         }
-        out = try mir_vp4_init_function(d, store, indexes, cfg, function, reach, out)
+        out = try mir_vp4_init_function(d, v_seen, v_queue, v_instr, v_pstart, v_pnode, store, indexes, cfg, function, reach, out)
         function = function + 1
     }
     return Ok(out)
