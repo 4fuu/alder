@@ -1167,13 +1167,23 @@ is present: the regenerator stays in its four-minute class, far inside the
 measured `2a96d07` at 159.25 s / 3.77 GB and `1cf2572` at 216.20 s / 5.62 GB;
 only same-host back-to-back comparisons are meaningful. On the first host,
 the M7.5-exit tip measured 212.0 s / 5,704,676 KiB before the verifier
-memoization landed; after it, the same host measures 221.5 s / 3,335,880 KiB
-cold: the stage-0 self-compile fell from 152.7 s / 5,704,676 KiB to 144.5 s /
-3,335,888 KiB peak RSS (-41.5%, below even the pre-M7.5 tip) with
-byte-identical output, while the stage-0 gcc build grew about ten seconds
-compiling the larger regenerated C, leaving wall time flat within noise.
-The self-compile is no longer the RSS outlier; remaining time sits in
-per-function phase-4 analysis, phase-6 fact hashing, and the gcc share.
+optimizations landed. Memoized verifier type queries (`130e604`) cut the
+stage-0 self-compile to 144.5 s / 3,335,888 KiB peak; the division-free fact
+hash (`641015a`) cut it to 127.8 s. The stage-0 gcc build used to compile the
+whole ~25 MB `bootstrap/alder.c` as one translation unit (73.5 s / 911 MiB);
+`regenerate.sh` now splits the generated file into four fixed translation
+units compiled in parallel inside its temporary build tree (the pinned
+artifact stays single-file), taking the stage-0 build to about 23 s wall and
+cold regenerate to 147.6-148.5 s / ~3.33 GB peak across two back-to-back
+runs — below even the pre-M7.5 tip — with the self-compile byte-identical
+and peak RSS unchanged, because the self-compile still dominates. The split
+stage-0 build alone adds plain `-Wno-uninitialized`: gcc's jump threading
+reports one parse_array_literal false-positive class on tag-guarded payload
+reads that `-Wno-maybe-uninitialized` does not cover; single-TU compiles of
+the pinned artifact (`go test ./compiler`, -O0) stay clean under the full
+strict set. `./check --bootstrap` on the same host dropped from about 6.7 to
+3.9 minutes. Remaining self-compile time sits in per-function phase-4
+analysis; remaining wall time is dominated by the self-compile itself.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design

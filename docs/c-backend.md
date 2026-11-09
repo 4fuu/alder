@@ -502,6 +502,8 @@ The backend requires:
 
 When a MIR interpreter exists, generated C should be differentially tested against it. The interpreter is optional until evidence shows that it materially improves semantic validation.
 
+The source-bootstrap build compiles the four split stage-0 translation units of `bootstrap/alder.c` with plain `-Wno-uninitialized` on GCC: jump threading reports the tag-guarded payload reads of one aggregate local (through `offsetof`) as definitely uninitialized, although MIR phase verification already proves definite initialization of the generated code, so the warning duplicates a check the verifier owns; the host shim and the runtime stay under the full strict set.
+
 ## Explicitly Deferred
 
 - LLVM IR generation;
