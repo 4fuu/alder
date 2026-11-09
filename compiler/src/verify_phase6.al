@@ -113,6 +113,10 @@ type MirV6ConsumerIndex {
     target: __s0_Buffer(U64)
     next: __s0_Buffer(U64)
     merged: __s0_Buffer(U64)
+    // Per edge: the source's per-key fact-list tail the last time this edge
+    // merged. Facts are append-only per key, so an unchanged tail means the
+    // merge would add nothing and can be skipped outright.
+    source_len: __s0_Buffer(U64)
 }
 
 // Result of a merge: the updated durable state plus the last source fact
@@ -454,6 +458,8 @@ fn mir_v6_merge_chain_limit() -> U64 { return 1024 }
 fn mir_v6_merge_edge(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, consumers: MirV6ConsumerIndex, function: U64, target: U64, source: U64) -> Result(MirV6Durable, __s0_Error) {
     var edge: U64 = 0
     let key = mir_v6_round_fact_key(index, function, source)
+    var source_tail: U64 = 0
+    if key != 0 { source_tail = __s0_buffer_get(U64, index.fact_key_tail, key) }
     if key != 0 && key < __s0_buffer_len(U64, consumers.head) {
         var at = __s0_buffer_get(U64, consumers.head, key)
         var steps: U64 = 0
@@ -462,10 +468,18 @@ fn mir_v6_merge_edge(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, 
             steps = steps + 1
         }
     }
+    if edge != 0 && source_tail == __s0_buffer_get(U64, consumers.source_len, edge - 1) {
+        // The source's fact list has not grown since this edge last merged,
+        // so the merge would re-add only facts the target already has.
+        return Ok(durable0)
+    }
     var after: U64 = 0
     if edge != 0 { after = __s0_buffer_get(U64, consumers.merged, edge - 1) }
     let step = try mir_v6_merge_from(d, durable0, index, function, target, source, after)
-    if edge != 0 { __s0_buffer_set(U64, consumers.merged, edge - 1, step.merged) }
+    if edge != 0 {
+        __s0_buffer_set(U64, consumers.merged, edge - 1, step.merged)
+        __s0_buffer_set(U64, consumers.source_len, edge - 1, source_tail)
+    }
     return Ok(step.durable)
 }
 
@@ -774,6 +788,7 @@ fn mir_v6_consumer_add(d: Domain, index: MirV6RoundIndex, consumers0: MirV6Consu
     consumers.target = try __s0_buffer_append(U64, d, consumers.target, target)
     consumers.next = try __s0_buffer_append(U64, d, consumers.next, 0)
     consumers.merged = try __s0_buffer_append(U64, d, consumers.merged, 0)
+    consumers.source_len = try __s0_buffer_append(U64, d, consumers.source_len, 0)
     let edge = __s0_buffer_len(U64, consumers.target)
     if old_tail == 0 { __s0_buffer_set(U64, consumers.head, key, edge) }
     else { __s0_buffer_set(U64, consumers.next, old_tail - 1, edge) }
@@ -790,7 +805,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
         tail = try __s0_buffer_append(U64, d, tail, 0)
         key = key + 1
     }
-    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d), merged: try __s0_buffer_new(U64, d))
+    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d), merged: try __s0_buffer_new(U64, d), source_len: try __s0_buffer_new(U64, d))
     var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         var value_id: U64 = 1
