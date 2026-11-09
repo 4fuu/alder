@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Pull requests share one group per ref, so a newer push to the PR cancels
+  # the older run. Pushes to main get one group per commit and are never
+  # cancelled or replaced while pending: the bootstrap job compares each push
+  # only against its own parent, so a dropped run would leave that push's
+  # bootstrap changes unchecked.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
