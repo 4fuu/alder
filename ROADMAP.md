@@ -1217,7 +1217,16 @@ scratch joined the plan-carried pattern (the builders now grow fifteen
 reusable cfg buffers and seventeen dominator buffers once and rewrite them
 in place per function); back to back on one host, cold regenerate went
 from 133.7 s / 2,966,448 KiB at `58acb34` to 125.7 s / 2,732,244 KiB,
-about -229 MiB of peak, with the fixed point byte-identical. Separately,
+about -229 MiB of peak, with the fixed point byte-identical. The merge_edge
+resume lookup became a bucket-table probe instead of a per-key chain walk
+(first edge per pair wins, so the probe returns exactly the edge the walk
+returned); the slot hash multiplies the key and target by fixed constants
+modulo the prime 2^32-5 before reducing, because a linear fold mod a
+power-of-two table clusters consecutive inserts into quadratic probe runs.
+Back to back on one host, the stage-0 self-compile went from 82.8-83.4 s to
+71.5-72.0 s (-13%), cold regenerate from 117.5 s to 108.7 s, peak RSS about
++29 MiB for the bucket table, with the fixed point byte-identical.
+Separately,
 the quadratic MIR print/validation layer had left `compile --emit=mir`
 unable to finish on the compiler's own sources: every operand, value, and
 type-part lookup rescanned full tables, and the 30-source corpus produced

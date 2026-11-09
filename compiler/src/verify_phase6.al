@@ -117,6 +117,17 @@ type MirV6ConsumerIndex {
     // merged. Facts are append-only per key, so an unchanged tail means the
     // merge would add nothing and can be skipped outright.
     source_len: __s0_Buffer(U64)
+    // Per edge: the source's fact key, parallel to target. The bucket table
+    // below compares it against a probe's key so an edge is only ever
+    // returned for its own (key, target) pair.
+    edge_key: __s0_Buffer(U64)
+    // Open-addressed (key, target) -> first edge, probed by merge_edge so a
+    // resume lookup does not walk the per-key chain. Slots hold edge ids or
+    // zero; the chain in head/next stays the only iteration order, and the
+    // table stores the earliest edge per pair, exactly the edge the former
+    // chain walk returned.
+    buckets: __s0_Buffer(U64)
+    bucket_mask: U64
 }
 
 // Result of a merge: the updated durable state plus the last source fact
@@ -437,17 +448,9 @@ while at != 0 {
 }
 return Ok(durable) }
 
-// Bound on the consumer-edge chain walk. A source's edge list is its set of
-// merge targets, which is small in practice; the cap only guards against a
-// pathological fan-out, and a walk that reaches it simply merges from the head.
-// Measured on the compiler's own sources: the longest chain is 500 edges and
-// every merge site is present in its source's chain, so 1024 gives full resume
-// coverage with two times headroom.
-fn mir_v6_merge_chain_limit() -> U64 { return 1024 }
-
 // Merge `source` into `target`, resuming from the last position an earlier merge
 // of the same (function, target, source) reached. The resume state lives on the
-// consumer edge for that pair, found by walking the source key's edge chain.
+// consumer edge for that pair, found by probing the consumer bucket table.
 //
 // The consumer index is a superset of the merge sites, not an exact mirror:
 // mir_v6_consumer_add records x.a for vec_grow_checked where transfer_value
@@ -460,14 +463,7 @@ fn mir_v6_merge_edge(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, 
     let key = mir_v6_round_fact_key(index, function, source)
     var source_tail: U64 = 0
     if key != 0 { source_tail = __s0_buffer_get(U64, index.fact_key_tail, key) }
-    if key != 0 && key < __s0_buffer_len(U64, consumers.head) {
-        var at = __s0_buffer_get(U64, consumers.head, key)
-        var steps: U64 = 0
-        while at != 0 && edge == 0 && steps < mir_v6_merge_chain_limit() {
-            if __s0_buffer_get(U64, consumers.target, at - 1) == target { edge = at } else { at = __s0_buffer_get(U64, consumers.next, at - 1) }
-            steps = steps + 1
-        }
-    }
+    if key != 0 { edge = mir_v6_consumer_edge_find(consumers, key, target) }
     if edge != 0 && source_tail == __s0_buffer_get(U64, consumers.source_len, edge - 1) {
         // The source's fact list has not grown since this edge last merged,
         // so the merge would re-add only facts the target already has.
@@ -789,11 +785,110 @@ fn mir_v6_consumer_add(d: Domain, index: MirV6RoundIndex, consumers0: MirV6Consu
     consumers.next = try __s0_buffer_append(U64, d, consumers.next, 0)
     consumers.merged = try __s0_buffer_append(U64, d, consumers.merged, 0)
     consumers.source_len = try __s0_buffer_append(U64, d, consumers.source_len, 0)
+    consumers.edge_key = try __s0_buffer_append(U64, d, consumers.edge_key, key)
     let edge = __s0_buffer_len(U64, consumers.target)
     if old_tail == 0 { __s0_buffer_set(U64, consumers.head, key, edge) }
     else { __s0_buffer_set(U64, consumers.next, old_tail - 1, edge) }
     __s0_buffer_set(U64, consumers.tail, key, edge)
+    consumers = try mir_v6_consumer_bucket_add(d, consumers, edge)
     return Ok(consumers)
+}
+
+// Slot hash for a (key, target) pair. Consecutive edges are inserted with
+// nearly consecutive keys and targets, so a fold taken directly mod the power-
+// of-two bucket count clusters their slots into long probe runs (multiplied by
+// the rebuild at each resize). Each field is therefore multiplied by a fixed
+// constant modulo the prime 2^32-5 first: the wide prime modulus spreads a
+// consecutive-value step over the whole residue range, and reducing afterwards
+// keeps the slots uniform. The multiply is a double-and-add over the constant's
+// bits using only the wrapping modular add, since plain Alder multiplication
+// is overflow-checked.
+fn mir_v6_edge_scatter(value: U64, mult: U64, buckets: U64) -> U64 {
+    var term = value % buckets
+    var result: U64 = 0
+    var m = mult
+    while m != 0 {
+        if m % 2 == 1 { result = mir_vindex_hash_add(result, term, buckets) }
+        term = mir_vindex_hash_add(term, term, buckets)
+        m = m / 2
+    }
+    return result
+}
+
+fn mir_v6_edge_pair_hash(key: U64, target: U64, buckets: U64) -> U64 {
+    let prime: U64 = 4294967291
+    let sk = mir_v6_edge_scatter(key, 2654435761, prime)
+    let st = mir_v6_edge_scatter(target, 362437, prime)
+    return (sk + st) % buckets
+}
+
+// Place one edge in the bucket table. The first edge for a pair wins, which is
+// the earliest in the per-key chain and exactly the edge the former chain walk
+// returned. The table always keeps at least one empty slot, so the probe stops.
+fn mir_v6_consumer_bucket_place(consumers: MirV6ConsumerIndex, edge: U64) -> MirV6ConsumerIndex {
+    let bucket_count = consumers.bucket_mask + 1
+    let key = __s0_buffer_get(U64, consumers.edge_key, edge - 1)
+    let target = __s0_buffer_get(U64, consumers.target, edge - 1)
+    var slot = mir_v6_edge_pair_hash(key, target, bucket_count)
+    var placed = false
+    while !placed {
+        let cur = __s0_buffer_get(U64, consumers.buckets, slot)
+        if cur == 0 {
+            __s0_buffer_set(U64, consumers.buckets, slot, edge)
+            placed = true
+        } else {
+            if __s0_buffer_get(U64, consumers.edge_key, cur - 1) == key && __s0_buffer_get(U64, consumers.target, cur - 1) == target { placed = true }
+            else { slot = mir_vindex_hash_add(slot, 1, bucket_count) }
+        }
+    }
+    return consumers
+}
+
+// Grow the bucket table when the load would pass three quarters, then place
+// the new edge. A rebuild re-places every edge in insertion order, so the
+// first edge per pair stays the first.
+fn mir_v6_consumer_bucket_add(d: Domain, consumers0: MirV6ConsumerIndex, edge: U64) -> Result(MirV6ConsumerIndex, __s0_Error) {
+    var consumers = consumers0
+    let count = __s0_buffer_len(U64, consumers.target)
+    let bucket_count = consumers.bucket_mask + 1
+    if bucket_count == 0 || count * 4 > bucket_count * 3 {
+        var want: U64 = 64
+        while want * 3 < count * 4 { want = want * 2 }
+        let old_len = __s0_buffer_len(U64, consumers.buckets)
+        var at = old_len
+        while at < want { consumers.buckets = try __s0_buffer_append(U64, d, consumers.buckets, 0)
+            at = at + 1 }
+        var z: U64 = 0
+        while z < want { __s0_buffer_set(U64, consumers.buckets, z, 0)
+            z = z + 1 }
+        consumers.bucket_mask = want - 1
+        var e: U64 = 1
+        while e <= count { consumers = mir_v6_consumer_bucket_place(consumers, e)
+            e = e + 1 }
+        return Ok(consumers)
+    }
+    return Ok(mir_v6_consumer_bucket_place(consumers, edge))
+}
+
+// The first edge whose (key, target) pair matches the probe, or zero. The
+// answer equals the former chain walk's first match because the table keeps
+// the earliest edge per pair.
+fn mir_v6_consumer_edge_find(consumers: MirV6ConsumerIndex, key: U64, target: U64) -> U64 {
+    if __s0_buffer_len(U64, consumers.buckets) == 0 { return 0 }
+    let bucket_count = consumers.bucket_mask + 1
+    var slot = mir_v6_edge_pair_hash(key, target, bucket_count)
+    var result: U64 = 0
+    var probing = true
+    while probing {
+        let cur = __s0_buffer_get(U64, consumers.buckets, slot)
+        if cur == 0 { probing = false }
+        else {
+            if __s0_buffer_get(U64, consumers.edge_key, cur - 1) == key && __s0_buffer_get(U64, consumers.target, cur - 1) == target { result = cur
+                probing = false }
+            else { slot = mir_vindex_hash_add(slot, 1, bucket_count) }
+        }
+    }
+    return result
 }
 
 fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes, transfer: MirV6TransferIndex, round: MirV6RoundIndex) -> Result(MirV6ConsumerIndex, __s0_Error) {
@@ -805,7 +900,7 @@ fn mir_v6_consumer_index_build(d: Domain, store: MirStore, indexes: MirVIndexes,
         tail = try __s0_buffer_append(U64, d, tail, 0)
         key = key + 1
     }
-    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d), merged: try __s0_buffer_new(U64, d), source_len: try __s0_buffer_new(U64, d))
+    var consumers = MirV6ConsumerIndex(head: head, tail: tail, target: try __s0_buffer_new(U64, d), next: try __s0_buffer_new(U64, d), merged: try __s0_buffer_new(U64, d), source_len: try __s0_buffer_new(U64, d), edge_key: try __s0_buffer_new(U64, d), buckets: try __s0_buffer_new(U64, d), bucket_mask: 0)
     var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         var value_id: U64 = 1
