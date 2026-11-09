@@ -198,6 +198,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	// and the reject fixtures above; accept/output equivalence for every
 	// fixture module stays covered by the verified-artifact subtests.
 	t.Run("emit-mir-scale", func(t *testing.T) {
+		t.Parallel()
 		var b strings.Builder
 		b.WriteString("fn base(n: U64) -> U64 {\n    if n > 5 {\n        return n - 5\n    }\n    return n\n}\n")
 		const fnCount = 500
