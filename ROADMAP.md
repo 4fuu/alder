@@ -1182,8 +1182,16 @@ reports one parse_array_literal false-positive class on tag-guarded payload
 reads that `-Wno-maybe-uninitialized` does not cover; single-TU compiles of
 the pinned artifact (`go test ./compiler`, -O0) stay clean under the full
 strict set. `./check --bootstrap` on the same host dropped from about 6.7 to
-3.9 minutes. Remaining self-compile time sits in per-function phase-4
-analysis; remaining wall time is dominated by the self-compile itself.
+3.9 minutes. The phase-6 fixpoint skips provably no-op fact merges
+(`7c50f15`), and the phase-4 per-leaf forward BFS from the function entry
+became a backward walk over a per-function predecessor CSR (`3f79ec0`),
+removing the last full-CFG walk per uninitialized-place leaf; back to back
+on one loaded host with identical sources, the stage-0 self-compile went
+from 147.0 s / 3,344,412 KiB to 124.0 s / 3,348,560 KiB (-15.6% wall, +4.1
+MB peak for the predecessor arrays, to be reclaimed by reusing the
+per-function verifier scratch across functions). Remaining self-compile
+time sits in the phase-6 merge family and lower_expression; remaining wall
+time is dominated by the self-compile itself.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design
