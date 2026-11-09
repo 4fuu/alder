@@ -94,9 +94,41 @@ type MirV6ReachFact {
     from: U64
     to: U64
 }
+
+// Per-function scratch for the loop-check reachability closure, carried by
+// the caller across functions: the matrix words, the pair-list fallback, the
+// per-source span, the seen stamps, and the successor BFS queue. Each buffer
+// grows to its maximum over functions once and is rewritten in place after.
+type MirV6ReachPlan {
+    words: __s0_Buffer(U64)
+    pairs: __s0_Buffer(MirV6ReachFact)
+    span: __s0_Buffer(U64)
+    seen: __s0_Buffer(U64)
+    queue: __s0_Buffer(U64)
+}
+
+type MirV6ReachBuilt {
+    reach: MirV6Reachability
+    plan: MirV6ReachPlan
+}
+
+type MirV6LoopBuilt {
+    out: __s0_Buffer(MirVerifyDiagRec)
+    plan: MirV6ReachPlan
+}
+
 type MirV6Reachability {
+    // Matrix representation: bit (from-1, to-1) is ((words[row] >> shift) % 2)
+    // with row = (from-1)*row_words + (to-1)/64 and shift = (to-1)%64. Each
+    // bit is written once per closure, so the checked add cannot overflow.
+    words: __s0_Buffer(U64)
+    row_words: U64
+    // Pair-list representation: span[from-1] .. span[from] delimit
+    // function-local pair indices into pairs, ordered by BFS discovery.
     facts: __s0_Buffer(MirV6ReachFact)
     span: __s0_Buffer(U64)
+    use_matrix: Bool
+    bcount: U64
 }
 type MirV6TransferIndex {
     incoming_start: __s0_Buffer(U64)
@@ -1505,7 +1537,12 @@ queue_at = queue_at + 1
 return Ok(entries) }
 
 fn mir_v6_reach_has(reach: MirV6Reachability, from: U64, to: U64) -> Bool {
-    if from == 0 || from >= __s0_buffer_len(U64, reach.span) { return false }
+    if from == 0 || from > reach.bcount { return false }
+    if to == 0 || to > reach.bcount { return false }
+    if reach.use_matrix {
+        let row = (from - 1) * reach.row_words + (to - 1) / 64
+        return (__s0_buffer_get(U64, reach.words, row) >> ((to - 1) % 64)) % 2 == 1
+    }
     var at = __s0_buffer_get(U64, reach.span, from - 1)
     let end = __s0_buffer_get(U64, reach.span, from)
     while at < end {
@@ -1514,39 +1551,111 @@ fn mir_v6_reach_has(reach: MirV6Reachability, from: U64, to: U64) -> Bool {
     }
     return false
 }
-fn mir_v6_reachability(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(MirV6Reachability, __s0_Error) {
-    var reach = try __s0_buffer_new(MirV6ReachFact, d)
-    var span = try __s0_buffer_new(U64, d)
+
+// One BFS layer write: successors of `block` overwrite queue[at .. at+count)
+// in the plan-carried scratch and return the grown buffer with the count.
+// Membership of the closure is decided twice over the same traversal, so the
+// pre-pass below and the fill pass see exactly the same pairs.
+fn mir_v6_reach_seen_grow(plan: MirV6ReachPlan, d: Domain, index: U64) -> Result(MirV6ReachPlan, __s0_Error) { var out = plan
+if __s0_buffer_len(U64, out.seen) <= index { out.seen = try __s0_buffer_append(U64, d, out.seen, 0) }
+return Ok(out) }
+fn mir_v6_reach_span_grow(plan: MirV6ReachPlan, d: Domain, index: U64) -> Result(MirV6ReachPlan, __s0_Error) { var out = plan
+if __s0_buffer_len(U64, out.span) <= index { out.span = try __s0_buffer_append(U64, d, out.span, 0) }
+return Ok(out) }
+
+fn mir_v6_reachability(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, plan0: MirV6ReachPlan) -> Result(MirV6ReachBuilt, __s0_Error) { var plan = plan0
     let bcount = mir_vindex_block_count(indexes, function)
-    var seen = try __s0_buffer_new(U64, d)
-    var block: U64 = 0
-    while block <= bcount {
-        seen = try __s0_buffer_append(U64, d, seen, 0)
-        block = block + 1
+    // Reset the function-local scratch in place: seen stamps and span bounds
+    // are cleared, the queue's valid length is tracked by the walks.
+    var si: U64 = 0
+    while si <= bcount {
+        plan = try mir_v6_reach_seen_grow(plan, d, si)
+        plan = try mir_v6_reach_span_grow(plan, d, si)
+        __s0_buffer_set(U64, plan.seen, si, 0)
+        __s0_buffer_set(U64, plan.span, si, 0)
+        si = si + 1
     }
+    // Counting pass: membership-only BFS over the same traversal the fill
+    // pass uses, to size the representation deterministically before any
+    // closure storage is materialized.
+    var count: U64 = 0
     var from: U64 = 1
-    var queue = try __s0_buffer_new(U64, d)
     while from <= bcount {
-        span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(MirV6ReachFact, reach))
-        let seed = try mir_v6_successors_at(d, store, indexes, function, from, queue, 0)
-        queue = seed.buf
+        let seed = try mir_v6_successors_at(d, store, indexes, function, from, plan.queue, 0)
+        plan.queue = seed.buf
         var qlen = seed.count
         var q: U64 = 0
         while q < qlen {
-            let to = __s0_buffer_get(U64, queue, q)
-            if to >= 1 && to <= bcount && __s0_buffer_get(U64, seen, to) != from {
-                __s0_buffer_set(U64, seen, to, from)
-                reach = try __s0_buffer_append(MirV6ReachFact, d, reach, MirV6ReachFact(from: from, to: to))
-                let more = try mir_v6_successors_at(d, store, indexes, function, to, queue, qlen)
-                queue = more.buf
+            let to = __s0_buffer_get(U64, plan.queue, q)
+            if to >= 1 && to <= bcount && __s0_buffer_get(U64, plan.seen, to) != from {
+                __s0_buffer_set(U64, plan.seen, to, from)
+                count = count + 1
+                let more = try mir_v6_successors_at(d, store, indexes, function, to, plan.queue, qlen)
+                plan.queue = more.buf
                 qlen = qlen + more.count
             }
             q = q + 1
         }
         from = from + 1
     }
-    span = try __s0_buffer_append(U64, d, span, __s0_buffer_len(MirV6ReachFact, reach))
-    return Ok(MirV6Reachability(facts: reach, span: span))
+    // Representation choice: the matrix wins only when it is strictly
+    // cheaper than 16 bytes per closure pair for this function's own shape,
+    // so a sparse giant never pays the quadratic matrix for a thin closure.
+    let row_words = (bcount + 63) / 64
+    let use_matrix = bcount * row_words * 8 < count * 16
+    var one: U64 = 1
+    var reach = MirV6Reachability(words: plan.words, row_words: row_words, facts: plan.pairs, span: plan.span, use_matrix: use_matrix, bcount: bcount)
+    if use_matrix {
+        // Clear exactly the rows this function owns; the carried buffer may
+        // be longer from a larger earlier function.
+        let need = bcount * row_words
+        var wi: U64 = 0
+        while wi < need {
+            if __s0_buffer_len(U64, plan.words) <= wi { plan.words = try __s0_buffer_append(U64, d, plan.words, 0) }
+            __s0_buffer_set(U64, plan.words, wi, 0)
+            wi = wi + 1
+        }
+        reach.words = plan.words
+    }
+    // Fill pass: same traversal, same discovery order.
+    var pos: U64 = 0
+    from = 1
+    while from <= bcount {
+        if !use_matrix {
+            __s0_buffer_set(U64, plan.span, from - 1, pos)
+        }
+        let seed = try mir_v6_successors_at(d, store, indexes, function, from, plan.queue, 0)
+        plan.queue = seed.buf
+        var qlen = seed.count
+        var q: U64 = 0
+        while q < qlen {
+            let to = __s0_buffer_get(U64, plan.queue, q)
+            if to >= 1 && to <= bcount && __s0_buffer_get(U64, plan.seen, to) != from {
+                __s0_buffer_set(U64, plan.seen, to, from)
+                if use_matrix {
+                    let row = (from - 1) * row_words + (to - 1) / 64
+                    let word = __s0_buffer_get(U64, plan.words, row)
+                    __s0_buffer_set(U64, plan.words, row, word + (one << ((to - 1) % 64)))
+                } else {
+                    if __s0_buffer_len(MirV6ReachFact, plan.pairs) <= pos { plan.pairs = try __s0_buffer_append(MirV6ReachFact, d, plan.pairs, MirV6ReachFact(from: 0, to: 0)) }
+                    __s0_buffer_set(MirV6ReachFact, plan.pairs, pos, MirV6ReachFact(from: from, to: to))
+                    pos = pos + 1
+                }
+                let more = try mir_v6_successors_at(d, store, indexes, function, to, plan.queue, qlen)
+                plan.queue = more.buf
+                qlen = qlen + more.count
+            }
+            q = q + 1
+        }
+        from = from + 1
+    }
+    if !use_matrix {
+        __s0_buffer_set(U64, plan.span, bcount, pos)
+    }
+    reach.words = plan.words
+    reach.facts = plan.pairs
+    reach.span = plan.span
+    return Ok(MirV6ReachBuilt(reach: reach, plan: plan))
 }
 // mir_v6_loop_kills records one domain death site inside a loop: a direct
 // destroy or reset, or a call argument a callee effect may destroy or reset.
@@ -2051,8 +2160,10 @@ branch = try mir_v6_apply_cleanup_entry(d, store, indexes, cfg, dom, analysis, b
 active = node.parent } }
 si = si + 1 }
 return Ok(out) }
-fn mir_v6_check_loops(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, owner_seen: __s0_Buffer(U64), owner_stamp: U64, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = out0
-let reach = try mir_v6_reachability(d, store, indexes, function)
+fn mir_v6_check_loops(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, owner_seen: __s0_Buffer(U64), owner_stamp: U64, cfg: MirVP4PointCfg, dom: MirVP4Dom, function: U64, reach_plan0: MirV6ReachPlan, out0: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirV6LoopBuilt, __s0_Error) { var out = out0
+let reach_built = try mir_v6_reachability(d, store, indexes, function, reach_plan0)
+let reach = reach_built.reach
+var reach_plan = reach_built.plan
 let kills = try mir_v6_loop_kills_collect(d, store, indexes, analysis, function)
 let pcount = mir_vindex_param_count(indexes, function)
 var pi: U64 = 0
@@ -2183,7 +2294,7 @@ while b3 <= bcount {
     }
     b3 = b3 + 1
 }
-return Ok(out) }
+return Ok(MirV6LoopBuilt(out: out, plan: reach_plan)) }
 fn mir_vphase6_with(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, analysis: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var out = initial
 // One owner-classifier buffer for the whole module: one U64 per interned type,
 // stamped per function, instead of a fresh buffer of that size per function.
@@ -2231,6 +2342,12 @@ var q_children = try __s0_buffer_new(U64, d)
 var q_estack = try __s0_buffer_new(U64, d)
 var q_edata = try __s0_buffer_new(U64, d)
 var dom_plan = MirVP4DomPlan(idom: q_idom, rpo_index: q_rpo_index, dom_in: q_dom_in, dom_out: q_dom_out, scratch_seen: q_seen, scratch_phase: q_phase, scratch_stack: q_stack, scratch_post: q_post, scratch_rpo: q_rpo, scratch_child_count: q_child_count, scratch_counts: q_counts, scratch_child_start: q_child_start, scratch_filled: q_filled, scratch_children: q_children, scratch_estack: q_estack, scratch_edata: q_edata)
+var r_words = try __s0_buffer_new(U64, d)
+var r_pairs = try __s0_buffer_new(MirV6ReachFact, d)
+var r_span = try __s0_buffer_new(U64, d)
+var r_seen = try __s0_buffer_new(U64, d)
+var r_queue = try __s0_buffer_new(U64, d)
+var reach_plan = MirV6ReachPlan(words: r_words, pairs: r_pairs, span: r_span, seen: r_seen, queue: r_queue)
 var function: U64 = 1
 while function <= __s0_buffer_len(MirFunctionRec, store.functions) { owner_stamp = owner_stamp + 1
 // The point CFG and idom tree are built once per function; the loop rules use
@@ -2242,7 +2359,9 @@ let cfg = cfg_built.cfg
 let dom_built = try mir_vp4_dom_build(dom_plan, d, cfg)
 dom_plan = dom_built.plan
 let dom = dom_built.dom
-out = try mir_v6_check_loops(d, store, indexes, analysis, owner_seen, owner_stamp, cfg, dom, function, out)
+let loops_built = try mir_v6_check_loops(d, store, indexes, analysis, owner_seen, owner_stamp, cfg, dom, function, reach_plan, out)
+out = loops_built.out
+reach_plan = loops_built.plan
 let entries = try mir_v6_solve_states(d, store, indexes, analysis, cleanup, cfg, dom, function)
 let reachable = try mir_vreachable(d, store, indexes, function)
 let bcount = mir_vindex_block_count(indexes, function)

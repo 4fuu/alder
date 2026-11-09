@@ -1256,7 +1256,22 @@ instead of allocating a fresh one per block or per BFS source); back to
 back on one host, cold regenerate peak RSS went from 2,824,784-2,824,864
 KiB at `7fd99e7` to 2,558,092-2,558,180 KiB (about -260 MiB, -9.4%), wall
 unchanged at 106.2-109.0 s across four alternating runs, with the fixed
-point byte-identical.
+point byte-identical. The loop-check reachability closure stopped being a
+pair list: a membership-only pre-pass counts each function's reachable
+pairs, and the closure is stored as a bit matrix (rows of U64 words,
+cleared per function, reached-bit test in place of the per-source linear
+scan) whenever the matrix is strictly cheaper than 16 bytes per pair for
+that function's own shape, falling back to the presized pair list on the
+same comparison otherwise; all five buffers (matrix, pairs, span, seen,
+successor queue) are carried across functions and rewritten in place. The
+largest self-compile function measures 2,340 blocks (`lower_model_valid`;
+next 1,497 and 1,153), so its matrix is about 0.66 MiB against a pair
+list that reached a 128 MiB doubling capacity, and the sum of n^2/8 over
+all 2,082 functions is under 2 MiB. Back to back on one host, cold
+regenerate peak RSS went from 2,558,100-2,558,180 KiB at `f6cbd9b` to
+2,195,012-2,195,052 KiB (about -355 MiB, -14%), the stage-0 self-compile
+from 75.70 s / 2,560,004 KiB to 73.84 s / 2,195,132 KiB, wall otherwise
+unchanged at 107.5-109.1 s, with the fixed point byte-identical.
 
 Exit record (as of the integration of both halves; every item below landed
 before exit; the items were added to or reshaped by the 2026-11 design
