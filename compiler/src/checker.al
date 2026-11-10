@@ -6546,6 +6546,16 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
                 return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
             }
         }
+        // A dotted callee whose qualified name misses is a method call only
+        // when its base resolves as a value in this scope. When the base is a
+        // plain word naming no local, symbol, or reserved name, the dotted
+        // name itself is the problem: report it as unknown over its full
+        // qualified span instead of diagnosing the base word as a missing
+        // value.
+        if receiver_node.kind == 24 && local_lookup(store, owner, receiver_node, state) == 0 && symbol_named(state, parse, store, receiver_node) == 0 && !reserved_symbol(state, receiver_node) {
+            let dotted = SyntaxRec(kind: 29, token: callee.token, source: callee.source, start: receiver_node.start, end: callee.end, name_start: receiver_node.name_start, name_end: callee.name_end, children: 0)
+            return expr_fail(d, base, 18, dotted)
+        }
         let checked_receiver = try check_value_expression_inner(d, state, parse, base, store, owner, receiver_node, receiver_link.node, 0, 60, callee, 0, 0, in_loop)
         let current = match checked_receiver {
             ExprGood(value) => value.store

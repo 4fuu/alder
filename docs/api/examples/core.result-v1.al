@@ -41,15 +41,18 @@ pub fn result_example() -> I64 {
         Err(_) => { total = total + 1000 }
     }
 
-    match result.ok(I64, String, mapped) {
+    let projected: Option(I64) = result.ok(I64, String, mapped)
+    match projected {
         Some(v) => { if v == 42 { total = total + 16 } }
         None => { total = total + 1000 }
     }
-    match result.err(I64, String, good) {
+    let none_side: Option(String) = result.err(I64, String, good)
+    match none_side {
         Some(_) => { total = total + 1000 }
         None => { total = total + 32 }
     }
-    match result.err(I64, String, bad) {
+    let error_side: Option(String) = result.err(I64, String, bad)
+    match error_side {
         Some(_) => { total = total + 64 }
         None => { total = total + 1000 }
     }

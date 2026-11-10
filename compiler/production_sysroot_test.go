@@ -315,3 +315,208 @@ func TestProductionSysrootReservedPackageName(t *testing.T) {
 		t.Fatalf("reserved package name rejection: %+v", result)
 	}
 }
+
+// The qualified-call sequence programs pin that imported generic calls
+// compose across let, var, and argument position under every import
+// spelling. Before the qualified-name fix, a follow-up qualified call after
+// a let-position generic call could be misdiagnosed through receiver
+// dispatch, so these programs guard resolution state across a whole body.
+func sysrootSequenceProjects() map[string]map[string]string {
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	qualified := `module hello.main
+
+import core.option
+import core.result
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    let held: Option(I64) = Some(5)
+    let bad: Result(I64, String) = Err("rejected")
+    let good: Result(I64, String) = Ok(30)
+    let projected = result.ok(I64, String, good)
+    let error_side = result.err(I64, String, bad)
+    var total: I64 = option.unwrap_or(I64, projected, 0)
+    total = total + option.unwrap_or(I64, option.map(I64, I64, held, double), 0)
+    if result.is_err(bad) { total = total + 1 }
+    if option.is_none(error_side) { total = total + 2 }
+    if option.is_some(option.and_then(I64, I64, held, half)) { total = total + 4 }
+    if option.is_none(empty) { total = total + 8 }
+    if total == 53 { return 0 }
+    return 1
+}
+
+fn double(v: I64) -> I64 { return v * 2 }
+
+fn half(v: I64) -> Option(I64) {
+    return Some(v / 2)
+}
+`
+	aliased := `module hello.main
+
+import core.option as opt
+import core.result as res
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    let held: Option(I64) = Some(5)
+    let bad: Result(I64, String) = Err("rejected")
+    let good: Result(I64, String) = Ok(30)
+    let projected = res.ok(I64, String, good)
+    let error_side = res.err(I64, String, bad)
+    var total: I64 = opt.unwrap_or(I64, projected, 0)
+    total = total + opt.unwrap_or(I64, opt.map(I64, I64, held, double), 0)
+    if res.is_err(bad) { total = total + 1 }
+    if opt.is_none(error_side) { total = total + 2 }
+    if opt.is_some(opt.and_then(I64, I64, held, half)) { total = total + 4 }
+    if opt.is_none(empty) { total = total + 8 }
+    if total == 53 { return 0 }
+    return 1
+}
+
+fn double(v: I64) -> I64 { return v * 2 }
+
+fn half(v: I64) -> Option(I64) {
+    return Some(v / 2)
+}
+`
+	braced := `module hello.main
+
+import core.option { is_none, is_some, map, and_then, unwrap_or }
+import core.result { is_err, ok, err }
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    let held: Option(I64) = Some(5)
+    let bad: Result(I64, String) = Err("rejected")
+    let good: Result(I64, String) = Ok(30)
+    let projected = ok(I64, String, good)
+    let error_side = err(I64, String, bad)
+    var total: I64 = unwrap_or(I64, projected, 0)
+    total = total + unwrap_or(I64, map(I64, I64, held, double), 0)
+    if is_err(bad) { total = total + 1 }
+    if is_none(error_side) { total = total + 2 }
+    if is_some(and_then(I64, I64, held, half)) { total = total + 4 }
+    if is_none(empty) { total = total + 8 }
+    if total == 53 { return 0 }
+    return 1
+}
+
+fn double(v: I64) -> I64 { return v * 2 }
+
+fn half(v: I64) -> Option(I64) {
+    return Some(v / 2)
+}
+`
+	files := func(mainText string) map[string]string {
+		return map[string]string{"alder.toml": manifest, "src/main.al": mainText}
+	}
+	return map[string]map[string]string{
+		"qualified": files(qualified),
+		"aliased":   files(aliased),
+		"braced":    files(braced),
+	}
+}
+
+func TestProductionSysrootImportedCallsCompose(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+	// Expected checksum: 30 (projected) + 10 (doubled) + 1 (bad is_err)
+	// (error_side is Some so is_none adds 0) + 4 (and_then is_some)
+	// + 8 (empty is_none).
+	for name, files := range sysrootSequenceProjects() {
+		run := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+		if run != (productionResult{}) {
+			t.Fatalf("%s sequence run failed: %+v", name, run)
+		}
+	}
+}
+
+func TestProductionSysrootQualifiedNameDiagnostics(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+
+	// A typo'd member under a real sysroot namespace is reported against the
+	// full dotted name at its qualified span, never as the bare qualifier.
+	typo := `module hello.main
+
+import core.option
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    return option.typo(empty)
+}
+`
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{"alder.toml": manifest, "src/main.al": typo}, "check")
+	if result.status != 1 || result.stdout != "" || !strings.Contains(result.stderr, `unknown name "option.typo"`) {
+		t.Fatalf("typo member rejection: %+v", result)
+	}
+
+	// A qualifier the program never imports under is the same dotted-name
+	// miss, not a receiver dispatch on the unknown word.
+	wrongQualifier := `module hello.main
+
+import core.option as opt
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    return opt.unwrap_or(I64, option.map(I64, I64, empty, double), 0)
+}
+
+fn double(v: I64) -> I64 { return v * 2 }
+`
+	result = runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{"alder.toml": manifest, "src/main.al": wrongQualifier}, "check")
+	if result.status != 1 || result.stdout != "" || !strings.Contains(result.stderr, `unknown name "option.map"`) {
+		t.Fatalf("wrong qualifier rejection: %+v", result)
+	}
+
+	// The same rule holds for the result namespace.
+	resultTypo := `module hello.main
+
+import core.result
+
+pub fn main() -> I32 {
+    let good: Result(I64, String) = Ok(30)
+    return result.typo(I64, String, good)
+}
+`
+	result = runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{"alder.toml": manifest, "src/main.al": resultTypo}, "check")
+	if result.status != 1 || result.stdout != "" || !strings.Contains(result.stderr, `unknown name "result.typo"`) {
+		t.Fatalf("result typo rejection: %+v", result)
+	}
+
+	// A dotted callee that resolves but fails to type check keeps the type
+	// diagnostic; the old defect turned this shape into an unknown-name
+	// report against the qualifier.
+	mismatch := `module hello.main
+
+import core.option
+
+pub fn main() -> I32 {
+    let empty: Option(I64) = None
+    let verdict = option.ok_or(I64, I64, empty, 9)
+    if option.is_some(verdict) { return 1 }
+    return 0
+}
+`
+	result = runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{"alder.toml": manifest, "src/main.al": mismatch}, "check")
+	if result.status != 1 || result.stdout != "" || !strings.Contains(result.stderr, "semantic error") || strings.Contains(result.stderr, `unknown name "option`) {
+		t.Fatalf("type mismatch diagnostic: %+v", result)
+	}
+}
