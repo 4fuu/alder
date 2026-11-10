@@ -248,6 +248,30 @@ binding @sys "time.h" {
 
 }
 
+func TestBindingRecordTaggedSpellingAccepted(t *testing.T) {
+	const text = `mir 6
+
+binding @ctime "time.h" {
+  c_type scalar @Sec = "time_t"
+  c_type record @Timespec = "struct timespec" { sec: @Sec = "tv_sec" }
+  c_fn @get = "timespec_get"(c_ptr(@Timespec), c_int) -> c_int
+}
+`
+	if errs := Module(mustParse(t, text)); len(errs) != 0 {
+		t.Fatalf("tagged record spelling accepted module rejected: %s", Errors(errs).String())
+	}
+}
+
+func TestBindingScalarTaggedSpellingRejected(t *testing.T) {
+	const text = `mir 6
+
+binding @ctime "time.h" {
+  c_type scalar @Bad = "struct timespec"
+}
+`
+	mustReject(t, text, "scalar binding spelling may not use a struct tag form")
+}
+
 func TestBindingUnitResultUnbound(t *testing.T) {
 	const text = `mir 6
 

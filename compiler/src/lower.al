@@ -6260,7 +6260,10 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let item = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 12 && item.kind != 13 && item.kind != 50 { return false }
+        // Binding blocks (61) are fully validated in the checker; their MIR
+        // declarations lower from the checked binding model in a later
+        // milestone, so they carry no ordinary parts here.
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 12 && item.kind != 13 && item.kind != 50 && item.kind != 61 { return false }
         if item.node == 0 || item.node > __s0_buffer_len(CheckedSpanRec, spans) { return false }
         if !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
         if item.kind == 13 {

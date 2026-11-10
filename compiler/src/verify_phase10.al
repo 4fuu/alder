@@ -52,6 +52,23 @@ fn mir_v10_binding_name(store: MirStore, start: U64, end: U64) -> Bool {
     return !mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while")
 }
 
+// A named C binding type's spelling may carry a struct/union/enum tag, which
+// the member's own identifier follows; a scalar member binds a typedef or
+// enum name, so its tag form is rejected like the Go verifier's
+// checkCSpelling.
+fn mir_v10_c_member_spelling_ok(store: MirStore, t: MirTypeRec) -> Bool {
+    var start = t.c_name_start
+    var tagged = false
+    if mir_v10_name_prefix(store, start, t.c_name_end, "struct ") { tagged = true
+        start = start + 7 }
+    if !tagged && mir_v10_name_prefix(store, start, t.c_name_end, "union ") { tagged = true
+        start = start + 6 }
+    if !tagged && mir_v10_name_prefix(store, start, t.c_name_end, "enum ") { tagged = true
+        start = start + 5 }
+    if tagged && t.c_class == mir_c_class_scalar() { return false }
+    return mir_v10_binding_name(store, start, t.c_name_end)
+}
+
 fn mir_v10_bindings(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     var fn_at: U64 = 0
@@ -70,7 +87,7 @@ fn mir_v10_bindings(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDi
     while at < __s0_buffer_len(MirTypeRec, store.types) {
         let t = __s0_buffer_get(MirTypeRec, store.types, at)
         if t.kind == mir_type_kind_c_named() {
-            if !mir_v10_binding_name(store, t.c_name_start, t.c_name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, at + 1, at + 1, 0, 0, at + 1)) }
+            if !mir_v10_c_member_spelling_ok(store, t) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, at + 1, at + 1, 0, 0, at + 1)) }
             var field_at: U64 = 0
             while field_at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
                 let part = __s0_buffer_get(MirTypePartRec, store.type_parts, field_at)

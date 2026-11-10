@@ -185,6 +185,10 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 11 { return out_string("statements must be separated by a physical line break") }
     if kind == 12 { return out_string("expected expression") }
     if kind == 14 { return out_string("invalid assignment target") }
+    if kind == 20 { return out_string("expected a C spelling string") }
+    if kind == 21 { return out_string("expected a C binding member declaration") }
+    if kind == 22 { return out_string("public C binding blocks are not supported; bind through a private binding block") }
+    if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
     return out_string("invalid source syntax")
 }
 
@@ -228,8 +232,20 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
 
 // Checker diagnostic kinds 107 through 129 are reserved for the Milestone
 // 7.5 static-abstraction half (traits, constraints, closures, function
-// values, Map/Set); 130 and above are reserved for the resource half.
+// values, Map/Set); 130 and above are reserved for the resource half;
+// 155 and above also carry C binding block diagnostics (156-167).
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
+    if kind == 156 { return out_string("a module binds the same C header twice") }
+    if kind == 157 { return out_string("C spelling must be a non-reserved C identifier") }
+    if kind == 158 { return out_string("scalar binding spelling may not use a struct, union, or enum tag form") }
+    if kind == 160 { return out_string("a binding block declares the same member name twice") }
+    if kind == 161 { return out_string("a binding block maps two members to the same C spelling") }
+    if kind == 162 { return out_string("unknown C type in the c namespace") }
+    if kind == 163 { return out_string("unknown binding type name in a C binding block") }
+    if kind == 164 { return out_string("c.Ptr and c.ConstPtr take exactly one type argument") }
+    if kind == 165 { return out_string("invalid type in a C binding block") }
+    if kind == 166 { return out_string("non-scalar C binding types are only valid behind c.Ptr or c.ConstPtr") }
+    if kind == 167 { return out_string("a C binding constant must have an integral c.* type") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

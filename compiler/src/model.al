@@ -66,6 +66,16 @@ type LexDiagRec {
 // and cleanup identifiers tokenize and name their identifier.
 // Type-parameter nodes span the complete `Name: type` declaration and retain
 // the name as their semantic token.
+// C binding blocks add kinds 61-65: 61 the block itself (it names the `as`
+// alias and links the header string first, then members in source order),
+// 62 a scalar/opaque/record type member (it names the Alder name, links the
+// spelling string first, then kind-65 fields for records), 63 a raw fn
+// member (it names the fn and links the optional spelling string, then
+// kind-13 parameters, then the result type), 64 a c const member (it names
+// the constant and links the optional spelling string, then the type), and
+// 65 a record field (it names the field and links the type, then the
+// optional spelling string). Member and field nodes tokenize their Alder
+// name; spelling strings are kind-22 string nodes read through token values.
 // Top-level declaration IDs are recorded separately in
 // ParseStore.roots in canonical source order; they are never inferred by kind.
 // Token IDs preserve the lossless lexical identity needed by later checking;
@@ -97,7 +107,9 @@ type SyntaxLinkRec {
 // separator, 10 parameter ordering, 11 block/statement separator,
 // 12 expected expression, 13 line continuation, and 14 invalid assignment
 // target, 15 expected match pattern, 16 match-arm separator, 17 expected `c`
-// after unsafe, and 18 unsafe-c requires exactly one root call and closing brace.
+// after unsafe, and 18 unsafe-c requires exactly one root call and closing brace,
+// 20 a missing C spelling string, 21 a malformed C binding member,
+// 22 a public C binding block, and 23 a C binding record field separator.
 type ParseDiagRec {
     kind: U64
     source: U64
