@@ -114,6 +114,507 @@ pub fn main() -> I32 {
 	}
 }
 
+func sysrootPathEnvMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.env { EnvError, PlatformInfo, Target, TargetArch, TargetOs }
+import std.path { OsString, Path }
+
+pub fn main() -> I32 {
+    let first = check_os_parse()
+    if first != 0 { return first }
+    let second = check_os_reject()
+    if second != 0 { return second }
+    let third = check_os_from_bytes()
+    if third != 0 { return third }
+    let fourth = check_os_non_text()
+    if fourth != 0 { return fourth }
+    let fifth = check_path_queries()
+    if fifth != 0 { return fifth }
+    let sixth = check_path_join()
+    if sixth != 0 { return sixth }
+    let seventh = check_path_normalize()
+    if seventh != 0 { return seventh }
+    let eighth = check_path_names()
+    if eighth != 0 { return eighth }
+    let ninth = check_path_parent()
+    if ninth != 0 { return ninth }
+    let tenth = check_env_types()
+    if tenth != 0 { return tenth }
+    return 0
+}
+
+fn text_same(left: String, right: String) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn host_text_is(left: Option(OsString), right: String) -> Bool {
+    var same: Bool = false
+    match left {
+        Some(host) => {
+            match host.to_string() {
+                Some(text) => { same = text_same(text, right) }
+                None => {}
+            }
+        }
+        None => {}
+    }
+    return same
+}
+
+fn path_text_is(left: Option(Path), right: String) -> Bool {
+    var same: Bool = false
+    match left {
+        Some(value) => {
+            let host = value.to_os()
+            match host.to_string() {
+                Some(text) => { same = text_same(text, right) }
+                None => {}
+            }
+        }
+        None => {}
+    }
+    return same
+}
+
+fn check_os_parse() -> I32 {
+    var code: I32 = 0
+    match OsString.parse("hello") {
+        Ok(value) => {
+            if !host_text_is(Some(value), "hello") { code = 1 }
+        }
+        Err(_) => { code = 2 }
+    }
+    return code
+}
+
+fn check_os_reject() -> I32 {
+    var code: I32 = 0
+    match OsString.parse("bad\0name") {
+        Ok(_) => { code = 1 }
+        Err(_) => {}
+    }
+    match Path.parse("bad\0name") {
+        Ok(_) => { code = 2 }
+        Err(_) => {}
+    }
+    return code
+}
+
+fn check_os_from_bytes() -> I32 {
+    var code: I32 = 0
+    let raw = "ready"
+    match OsString.from_bytes(raw.to_bytes()) {
+        Ok(value) => {
+            if !host_text_is(Some(value), "ready") { code = 1 }
+            let again = raw.to_bytes()
+            match OsString.from_bytes(again) {
+                Ok(twin) => {
+                    let one = value.to_string()
+                    let two = twin.to_string()
+                    var equal: Bool = false
+                    match one {
+                        Some(first) => {
+                            match two {
+                                Some(second) => { equal = text_same(first, second) }
+                                None => {}
+                            }
+                        }
+                        None => {}
+                    }
+                    if !equal { code = 2 }
+                }
+                Err(_) => { code = 3 }
+            }
+        }
+        Err(_) => { code = 4 }
+    }
+    return code
+}
+
+fn check_os_non_text() -> I32 {
+    var code: I32 = 0
+    let raw: Bytes = "\xff\xfe"
+    match OsString.from_bytes(raw) {
+        Ok(value) => {
+            match value.to_string() {
+                Some(_) => { code = 1 }
+                None => {}
+            }
+        }
+        Err(_) => { code = 2 }
+    }
+    return code
+}
+
+fn check_path_queries() -> I32 {
+    var code: I32 = 0
+    match Path.parse("/usr/local/app.conf") {
+        Ok(entry) => {
+            let parts = entry.components()
+            if parts.len() != 4 { code = 1 }
+            if code == 0 {
+                match parts[0] {
+                    RootDir => {}
+                    CurDir => { code = 2 }
+                    ParentDir => { code = 2 }
+                    Normal(_) => { code = 2 }
+                }
+            }
+            if code == 0 {
+                match parts[1] {
+                    Normal(name) => {
+                        if !host_text_is(Some(name), "usr") { code = 3 }
+                    }
+                    RootDir => { code = 3 }
+                    CurDir => { code = 3 }
+                    ParentDir => { code = 3 }
+                }
+            }
+            if code == 0 {
+                if !host_text_is(entry.file_name(), "app.conf") { code = 4 }
+            }
+            if code == 0 {
+                if !host_text_is(entry.file_stem(), "app") { code = 5 }
+            }
+            if code == 0 {
+                if !host_text_is(entry.extension(), "conf") { code = 6 }
+            }
+            if code == 0 {
+                if !path_text_is(entry.parent(), "/usr/local") { code = 7 }
+            }
+            if code == 0 {
+                if !entry.is_absolute() { code = 8 }
+            }
+        }
+        Err(_) => { code = 9 }
+    }
+    return code
+}
+
+fn check_path_join() -> I32 {
+    var code: I32 = 0
+    match Path.parse("a/b/./c") {
+        Ok(base) => {
+            match Path.parse("d/../../e") {
+                Ok(suffix) => {
+                    let joined = base.join(suffix)
+                    let norm = joined.normalize()
+                    if !path_text_is(Some(norm), "a/b/e") { code = 1 }
+                }
+                Err(_) => { code = 2 }
+            }
+            if code == 0 {
+                match Path.parse("/absolute") {
+                    Ok(absolute) => {
+                        let replaced = base.join(absolute)
+                        if !path_text_is(Some(replaced), "/absolute") { code = 3 }
+                    }
+                    Err(_) => { code = 4 }
+                }
+            }
+        }
+        Err(_) => { code = 5 }
+    }
+    if code == 0 {
+        match Path.parse("") {
+            Ok(empty) => {
+                match Path.parse("b") {
+                    Ok(other) => {
+                        let grown = empty.join(other)
+                        if !path_text_is(Some(grown), "b") { code = 6 }
+                        let kept = other.join(empty)
+                        if !path_text_is(Some(kept), "b") { code = 7 }
+                    }
+                    Err(_) => { code = 8 }
+                }
+            }
+            Err(_) => { code = 9 }
+        }
+    }
+    return code
+}
+
+fn check_path_normalize() -> I32 {
+    var code: I32 = 0
+    match Path.parse("a/../../..") {
+        Ok(base) => {
+            let up = base.normalize()
+            if !path_text_is(Some(up), "../..") { code = 1 }
+        }
+        Err(_) => { code = 2 }
+    }
+    if code == 0 {
+        match Path.parse("/a/../../b") {
+            Ok(deep) => {
+                let norm = deep.normalize()
+                if !path_text_is(Some(norm), "/../b") { code = 3 }
+            }
+            Err(_) => { code = 4 }
+        }
+    }
+    if code == 0 {
+        match Path.parse(".") {
+            Ok(dot) => {
+                let plain = dot.normalize()
+                if !path_text_is(Some(plain), "") { code = 5 }
+            }
+            Err(_) => { code = 6 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("/..") {
+            Ok(over) => {
+                let kept = over.normalize()
+                if !path_text_is(Some(kept), "/..") { code = 7 }
+            }
+            Err(_) => { code = 8 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("a/./b/..") {
+            Ok(mixed) => {
+                let clean = mixed.normalize()
+                if !path_text_is(Some(clean), "a") { code = 9 }
+            }
+            Err(_) => { code = 10 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("") {
+            Ok(empty) => {
+                let flat = empty.normalize()
+                if !path_text_is(Some(flat), "") { code = 11 }
+                if empty.is_absolute() { code = 12 }
+            }
+            Err(_) => { code = 13 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("/") {
+            Ok(root) => {
+                let same = root.normalize()
+                if !path_text_is(Some(same), "/") { code = 14 }
+                if !root.is_absolute() { code = 15 }
+            }
+            Err(_) => { code = 16 }
+        }
+    }
+    return code
+}
+
+fn check_path_names() -> I32 {
+    var code: I32 = 0
+    match Path.parse("a/b/") {
+        Ok(slash) => {
+            if !host_text_is(slash.file_name(), "b") { code = 1 }
+        }
+        Err(_) => { code = 2 }
+    }
+    if code == 0 {
+        match Path.parse("a/.") {
+            Ok(dot_end) => {
+                var absent: Bool = true
+                match dot_end.file_name() {
+                    Some(_) => { absent = false }
+                    None => {}
+                }
+                if !absent { code = 3 }
+            }
+            Err(_) => { code = 4 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("a/..") {
+            Ok(up_end) => {
+                var absent: Bool = true
+                match up_end.file_name() {
+                    Some(_) => { absent = false }
+                    None => {}
+                }
+                if !absent { code = 5 }
+            }
+            Err(_) => { code = 6 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("foo.tar.gz") {
+            Ok(archive) => {
+                if !host_text_is(archive.file_stem(), "foo.tar") { code = 7 }
+                if !host_text_is(archive.extension(), "gz") { code = 8 }
+            }
+            Err(_) => { code = 9 }
+        }
+    }
+    if code == 0 {
+        match Path.parse(".gitignore") {
+            Ok(dotfile) => {
+                if !host_text_is(dotfile.file_stem(), ".gitignore") { code = 10 }
+                var none: Bool = true
+                match dotfile.extension() {
+                    Some(_) => { none = false }
+                    None => {}
+                }
+                if !none { code = 11 }
+            }
+            Err(_) => { code = 12 }
+        }
+    }
+    if code == 0 {
+        match Path.parse(".foo.tar.gz") {
+            Ok(hidden) => {
+                if !host_text_is(hidden.file_stem(), ".foo.tar") { code = 13 }
+                if !host_text_is(hidden.extension(), "gz") { code = 14 }
+            }
+            Err(_) => { code = 15 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("a.") {
+            Ok(trailing) => {
+                var empty: Bool = false
+                match trailing.extension() {
+                    Some(ext) => {
+                        match ext.to_string() {
+                            Some(text) => {
+                                if text.len() == 0 { empty = true }
+                            }
+                            None => {}
+                        }
+                    }
+                    None => { code = 16 }
+                }
+                if !empty { code = 17 }
+            }
+            Err(_) => { code = 18 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("foo") {
+            Ok(plain) => {
+                var none: Bool = true
+                match plain.extension() {
+                    Some(_) => { none = false }
+                    None => {}
+                }
+                if !none { code = 19 }
+            }
+            Err(_) => { code = 20 }
+        }
+    }
+    return code
+}
+
+fn check_path_parent() -> I32 {
+    var code: I32 = 0
+    match Path.parse("foo") {
+        Ok(plain) => {
+            let up = plain.parent()
+            var found: Bool = false
+            match up {
+                Some(remainder) => {
+                    let host = remainder.to_os()
+                    match host.to_string() {
+                        Some(text) => {
+                            if text.len() == 0 { found = true }
+                        }
+                        None => {}
+                    }
+                }
+                None => {}
+            }
+            if !found { code = 1 }
+        }
+        Err(_) => { code = 2 }
+    }
+    if code == 0 {
+        match Path.parse("/") {
+            Ok(root) => {
+                var none: Bool = true
+                match root.parent() {
+                    Some(_) => { none = false }
+                    None => {}
+                }
+                if !none { code = 3 }
+            }
+            Err(_) => { code = 4 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("") {
+            Ok(empty) => {
+                var none: Bool = true
+                match empty.parent() {
+                    Some(_) => { none = false }
+                    None => {}
+                }
+                if !none { code = 5 }
+            }
+            Err(_) => { code = 6 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("a/.") {
+            Ok(dot_end) => {
+                if !path_text_is(dot_end.parent(), "a") { code = 7 }
+            }
+            Err(_) => { code = 8 }
+        }
+    }
+    if code == 0 {
+        match Path.parse("a/..") {
+            Ok(up_end) => {
+                if !path_text_is(up_end.parent(), "a") { code = 9 }
+            }
+            Err(_) => { code = 10 }
+        }
+    }
+    return code
+}
+
+fn check_env_types() -> I32 {
+    var code: I32 = 0
+    let info: PlatformInfo = PlatformInfo(code: 2, message: "no entry")
+    if info.code != 2 { code = 1 }
+    if info.message.len() != 8 { code = 2 }
+    if code == 0 {
+        let failure: EnvError = Platform(info)
+        match failure {
+            Platform(carried) => {
+                if carried.code != 2 { code = 3 }
+                if !text_same(carried.message, "no entry") { code = 4 }
+            }
+            InvalidEncoding => { code = 5 }
+            InvalidName => { code = 5 }
+            Unsupported => { code = 5 }
+        }
+    }
+    if code == 0 {
+        let target: Target = Target(os: Linux, arch: X64)
+        match target.os {
+            Linux => {}
+            MacOS => { code = 6 }
+            Windows => { code = 6 }
+        }
+        match target.arch {
+            X64 => {}
+            AArch64 => { code = 7 }
+        }
+    }
+    return code
+}
+`,
+	}
+}
+
 func sysrootEnvMain() map[string]string {
 	return map[string]string{
 		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
@@ -214,6 +715,50 @@ func TestProductionSysrootCoreResolves(t *testing.T) {
 	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootOptionMain(), "run")
 	if run != (productionResult{}) {
 		t.Fatalf("sysroot project run failed: %+v", run)
+	}
+}
+
+func TestProductionSysrootPathEnvRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootPathEnvMain(), "test-plan")
+	pathSeed := sysrootModuleSeed(t, repoRoot, "path.al")
+	envSeed := sysrootModuleSeed(t, repoRoot, "env.al")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("std.path/std.env plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, "\nsysroot v1:") {
+		t.Fatalf("plan lost the sysroot identity line: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/path.al bytes "+pathSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.path\n") {
+		t.Fatalf("plan does not list the std.path source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/env.al bytes "+envSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.env\n") {
+		t.Fatalf("plan does not list the std.env source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "edge hello.main -> std.path\n") ||
+		!strings.Contains(plan.stdout, "edge hello.main -> std.env\n") {
+		t.Fatalf("plan does not record the std edges: %q", plan.stdout)
+	}
+	repeat := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootPathEnvMain(), "test-plan")
+	if repeat != plan {
+		t.Fatalf("std.path/std.env plan changed across processes: first=%q repeat=%q", plan.stdout, repeat.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootPathEnvMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.path/std.env behavior run failed: %+v", run)
 	}
 }
 
