@@ -18,12 +18,16 @@ Current implementation work is limited to:
 - Alder MIR representation, textual format, verification, and tests;
 - deterministic lowering from verified MIR to conservative C11;
 - the minimal C runtime required by that lowering;
-- the Alder-written compiler core and fixed-point bootstrap work required by
-  active Roadmap Milestones 5.4 and 5.5;
+- the Alder-written compiler core and its fixed-point bootstrap;
+- Roadmap Milestone 8: verified C binding blocks and the C interop contract
+  in `docs/c-interop.md`, the installed sysroot with `core`/`std` module
+  resolution, and the provider-free hosted standard-library foundation listed
+  in that milestone;
 - design and bootstrap infrastructure directly supporting those goals.
 
 The full Alder 1.0 product is a frozen documentation target. Do not implement
-later modules, async, package, standard-library, xmake-provider, or tooling
+async (Milestone 9), the remaining standard library beyond Milestone 8
+(networking, HTTP/TLS, data formats), package, xmake-provider, or tooling
 milestones ahead of their roadmap gate unless an explicit scope decision
 changes the sequence.
 

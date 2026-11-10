@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **planned after Milestone 7.5 completes the 1.0 resource/type model**
+Status: **in progress (started after Milestone 7.5 completed the 1.0 resource/type model)**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
