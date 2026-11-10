@@ -20,6 +20,10 @@ import c alderhost_project_output_finish: fn() -> Bool
 import c alderhost_project_target_kind: fn(U64) -> Bool
 import c alderhost_project_selected_kind: fn() -> U64
 import c alderhost_project_entry_source_set: fn(U64) -> Bool
+import c alderhost_sysroot_available: fn() -> Bool
+import c alderhost_sysroot_request_reset: fn() -> Bool
+import c alderhost_sysroot_request_byte: fn(U8) -> Bool
+import c alderhost_sysroot_request_finish: fn() -> U64
 
 type ProjectTargetRec {
     name_start: U64
@@ -61,7 +65,6 @@ type ProjectPlanRec {
     action: U64
     profile: U64
     triple: U64
-    sysroot: U64
 }
 
 enum ProjectBuild {
@@ -83,7 +86,10 @@ fn project_fail(message: U64) -> I32 {
     if message == 8 { return driver_failure(2, "package", "local module source is unavailable") }
     if message == 9 { return driver_failure(2, "package", "duplicate module in package") }
     if message == 10 { return driver_failure(2, "package", "module import cycle") }
-    if message == 11 { return driver_failure(2, "package", "core and std require compiler-coupled sysroot support") }
+    if message == 11 { return driver_failure(2, "package", "no installed Alder sysroot is available for a core or std import") }
+    if message == 12 { return driver_failure(2, "package", "compiler storage failure while preparing project") }
+    if message == 13 { return driver_failure(2, "package", "a required sysroot module is unavailable in the installed sysroot") }
+    if message == 14 { return driver_failure(2, "package", "the package name core or std is reserved") }
     return driver_failure(2, "package", "compiler storage failure while preparing project")
 }
 
@@ -283,6 +289,7 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
                 if table == 1 && project_equal(b, ls, ke, "name") {
                     let q = project_string(b, vs, le)
                     if package_e != 0 || q == 0 || !project_package_name(b, vs + 1, q) { return Ok(ProjectRejected(2)) }
+                    if project_equal(b, vs + 1, q, "core") || project_equal(b, vs + 1, q, "std") { return Ok(ProjectRejected(14)) }
                     package_s = vs + 1
                     package_e = q
                     handled = true
@@ -373,7 +380,7 @@ fn project_parse_manifest(d: Domain, b: __s0_Buffer(U8)) -> Result(ProjectBuild,
         if !((c >= 97 && c <= 122) || digit(c) || c == 45 || c == 95) { return Ok(ProjectRejected(1)) }
         x = x + 1
     }
-    return Ok(ProjectBuilt(ProjectPlanRec(bytes: b, targets: targets, modules: modules, edges: edges, package_start: package_s, package_end: package_e, selected: selected, action: project_action(), profile: profile, triple: 1, sysroot: 1)))
+    return Ok(ProjectBuilt(ProjectPlanRec(bytes: b, targets: targets, modules: modules, edges: edges, package_start: package_s, package_end: package_e, selected: selected, action: project_action(), profile: profile, triple: 1)))
 }
 
 fn project_request(plan: ProjectPlanRec, start: U64, end: U64) -> U64 {
@@ -563,8 +570,78 @@ fn project_request_module(plan: ProjectPlanRec, source: U64, start: U64, end: U6
     return unsafe c { alderhost_source_request_finish() }
 }
 
+// A rooted import is exactly `core`, `std`, `core.…`, or `std.…`.  Package
+// roots that merely start with the same letters, such as `corefoo`, stay
+// ordinary package imports.
+fn project_source_rooted(source: U64, start: U64, end: U64) -> Bool {
+    if end - start == 4 && project_source_word(source, start, start + 4, "core") { return true }
+    if end - start > 4 && project_source_word(source, start, start + 4, "core") && project_source_byte(source, start + 4) == 46 { return true }
+    if end - start == 3 && project_source_word(source, start, start + 3, "std") { return true }
+    if end - start > 3 && project_source_word(source, start, start + 3, "std") && project_source_byte(source, start + 3) == 46 { return true }
+    return false
+}
+
+fn project_sysroot_request_byte(byte: U8) -> Bool {
+    return unsafe c { alderhost_sysroot_request_byte(byte) }
+}
+
+// Request one sysroot source for a rooted import.  A bare root maps to
+// `<root>.al`; every dot below the root maps to a slash, so `core.option`
+// requests `core/option.al` inside the installed sysroot and never inside the
+// project.
+fn project_request_sysroot_module(source: U64, start: U64, end: U64) -> U64 {
+    if !project_source_rooted(source, start, end) { return 0 }
+    if !unsafe c { alderhost_sysroot_request_reset() } { return 0 }
+    var at = start
+    while at < end {
+        var byte = project_source_byte(source, at)
+        if byte == 46 { byte = 47 }
+        if !project_sysroot_request_byte(byte) { return 0 }
+        at = at + 1
+    }
+    if !project_sysroot_request_byte(46) { return 0 }
+    if !project_sysroot_request_byte(97) { return 0 }
+    if !project_sysroot_request_byte(108) { return 0 }
+    return unsafe c { alderhost_sysroot_request_finish() }
+}
+
+fn project_source_path_prefix_is(source: U64, word: __s0_String) -> Bool {
+    let end = unsafe c { alderhost_source_path_len(source - 1) }
+    if end < len(word) { return false }
+    var at: U64 = 0
+    while at < len(word) {
+        if unsafe c { alderhost_source_path_byte(source - 1, at) } != word[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// A sysroot source is any loaded file below the `core` or `std` root.
+fn project_source_is_sysroot(source: U64) -> Bool {
+    if project_source_path_prefix_is(source, "core/") { return true }
+    if project_source_path_prefix_is(source, "std/") { return true }
+    if project_source_path_is(source, "core.al") { return true }
+    return project_source_path_is(source, "std.al")
+}
+
+// A sysroot module declaration must equal its sysroot-relative path with the
+// `.al` suffix removed and slashes spelled as dots: core/option.al declares
+// `module core.option`.
+fn project_declared_sysroot_matches(source: U64, start: U64, end: U64) -> Bool {
+    let path_end = unsafe c { alderhost_source_path_len(source - 1) }
+    if path_end < 4 || end - start != path_end - 3 { return false }
+    var at: U64 = 0
+    while at < path_end - 3 {
+        var expected = unsafe c { alderhost_source_path_byte(source - 1, at) }
+        if expected == 47 { expected = 46 }
+        if project_source_byte(source, start + at) != expected { return false }
+        at = at + 1
+    }
+    return true
+}
+
 fn project_with_graph(plan: ProjectPlanRec, modules: __s0_Buffer(ProjectModuleRec), edges: __s0_Buffer(ProjectEdgeRec)) -> ProjectPlanRec {
-    return ProjectPlanRec(bytes: plan.bytes, targets: plan.targets, modules: modules, edges: edges, package_start: plan.package_start, package_end: plan.package_end, selected: plan.selected, action: plan.action, profile: plan.profile, triple: plan.triple, sysroot: plan.sysroot)
+    return ProjectPlanRec(bytes: plan.bytes, targets: plan.targets, modules: modules, edges: edges, package_start: plan.package_start, package_end: plan.package_end, selected: plan.selected, action: plan.action, profile: plan.profile, triple: plan.triple)
 }
 
 fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(ProjectBuild, __s0_Error) {
@@ -573,7 +650,13 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
     if !leading.valid || leading.at + 6 > source_end || !project_source_word(source, leading.at, leading.at + 6, "module") { return Ok(ProjectRejected(7)) }
     let after_module = project_skip_source_trivia(source, leading.at + 6, source_end)
     let declared = project_parse_source_path(source, after_module.at, source_end)
-    if !after_module.valid || !declared.valid || !project_source_module_path(source, declared.start, declared.end) || !project_declared_module_matches(plan, source, declared.start, declared.end) { return Ok(ProjectRejected(7)) }
+    var declared_ok = false
+    if project_source_is_sysroot(source) {
+        declared_ok = project_declared_sysroot_matches(source, declared.start, declared.end)
+    } else {
+        declared_ok = project_declared_module_matches(plan, source, declared.start, declared.end)
+    }
+    if !after_module.valid || !declared.valid || !project_source_module_path(source, declared.start, declared.end) || !declared_ok { return Ok(ProjectRejected(7)) }
     var module_at: U64 = 0
     while module_at < __s0_buffer_len(ProjectModuleRec, plan.modules) {
         let old = __s0_buffer_get(ProjectModuleRec, plan.modules, module_at)
@@ -628,9 +711,15 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
                             if after_c.at < source_end && project_source_ident_start(project_source_byte(source, after_c.at)) { c_import = true }
                         }
                         if !c_import {
-                            if project_source_word(source, imported.start, imported.end, "core") || project_source_word(source, imported.start, imported.end, "std") { return Ok(ProjectRejected(11)) }
-                            let target = project_request_module(plan, source, imported.start, imported.end)
-                            if target == 0 { return Ok(ProjectRejected(8)) }
+                            var target: U64 = 0
+                            if project_source_rooted(source, imported.start, imported.end) {
+                                if !unsafe c { alderhost_sysroot_available() } { return Ok(ProjectRejected(11)) }
+                                target = project_request_sysroot_module(source, imported.start, imported.end)
+                                if target == 0 { return Ok(ProjectRejected(13)) }
+                            } else {
+                                target = project_request_module(plan, source, imported.start, imported.end)
+                                if target == 0 { return Ok(ProjectRejected(8)) }
+                            }
                             var prior: U64 = 0
                             while prior < __s0_buffer_len(ProjectEdgeRec, edges) {
                                 let old = __s0_buffer_get(ProjectEdgeRec, edges, prior)
@@ -812,6 +901,34 @@ fn project_source_crc(source: U64) -> U64 {
     return crc
 }
 
+// The sysroot identity folds every sysroot source in this build's import
+// closure in canonical source order, the same poly64-v1 fold as the package
+// snapshot: path bytes, a zero separator, then text bytes per source.
+fn project_sysroot_crc() -> U64 {
+    var crc: U64 = 0
+    var source: U64 = 1
+    let count = unsafe c { alderhost_source_count() }
+    while source <= count {
+        if project_source_is_sysroot(source) {
+            var at: U64 = 0
+            let path_end = unsafe c { alderhost_source_path_len(source - 1) }
+            while at < path_end {
+                crc = project_hash_byte(crc, unsafe c { alderhost_source_path_byte(source - 1, at) })
+                at = at + 1
+            }
+            crc = project_hash_byte(crc, 0)
+            at = 0
+            let text_end = unsafe c { alderhost_source_text_len(source - 1) }
+            while at < text_end {
+                crc = project_hash_byte(crc, project_source_byte(source, at))
+                at = at + 1
+            }
+        }
+        source = source + 1
+    }
+    return crc
+}
+
 fn project_out_hex_digit(value: U64) -> Bool {
     if value < 10 { return out_digit(value) }
     if value == 10 { return out(97) }
@@ -887,7 +1004,7 @@ fn project_emit_plan(plan: ProjectPlanRec) -> Bool {
     if !out_string("\ntriple ") || !project_out_triple() || !out_string("\ntoolchain system-cc-c11\nflags strict-c11,") { return false }
     if plan.profile == 1 { if !out_string("O0") { return false } }
     else { if !out_string("O2") { return false } }
-    if !out_string("\nsysroot compiler-coupled-v1\nsnapshot poly64-v1:") || !project_out_hex_u64(project_snapshot_crc(plan)) || !out_string("\npackage ") || !project_out_manifest_range(plan, plan.package_start, plan.package_end) || !out(10) { return false }
+    if !out_string("\nsysroot v1:") || !project_out_hex_u64(project_sysroot_crc()) || !out_string("\nsnapshot poly64-v1:") || !project_out_hex_u64(project_snapshot_crc(plan)) || !out_string("\npackage ") || !project_out_manifest_range(plan, plan.package_start, plan.package_end) || !out(10) { return false }
     if !out_string("root ") || !project_out_manifest_range(plan, target.root_start, target.root_end) || !out_string("\noutput c ") || !project_out_output_path(plan, target, 1) { return false }
     if target.kind == 1 { if !out_string("\noutput executable ") { return false } }
     else { if !out_string("\noutput object ") { return false } }

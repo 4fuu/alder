@@ -1428,6 +1428,12 @@ exactly-once release, callbacks and foreign threads. Standard APIs expose only
 safe values, affine owners, `Result`, and locally audited `unsafe c`; no S0 C
 bridge appears publicly.
 
+Deferred from this milestone by scope decision: the `Range` library type stays
+out until source syntax uses it (no current syntax does), and `Error` remains a
+reserved name until the hosted OS wrappers need it. Builtins stay builtins in
+this milestone: the prelude is the builtin names, and library helpers are
+imported explicitly.
+
 ## Milestone 9: Async Runtime and Structured Concurrency
 
 Status: **required before Alder 1.0**

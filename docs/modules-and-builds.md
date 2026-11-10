@@ -240,6 +240,42 @@ keyed by its inputs. CLI commands, tests, documentation, queries, the LSP, and
 the package cache all read that artifact instead of re-resolving the project,
 so every tool sees the same module graph. There is no separate IDE resolver.
 
+## Installed sysroot
+
+The installed sysroot carries the platform-neutral `core` library and the
+hosted `std` library as ordinary Alder sources distributed with the toolchain
+and used offline; nothing fetches or scans for them at build time. Module
+`core.option` lives at `<sysroot>/core/option.al`, `std.text` at
+`<sysroot>/std/text.al`, and a bare root import would live at
+`<sysroot>/core.al` or `<sysroot>/std.al`. Each file declares the module its
+path spells, and every path below a root follows the same one-file/one-module
+mapping as a package. `core` is implicitly available through the documented
+prelude of builtin types and traits; its helper modules are imported
+explicitly like any module, and `std` is imported explicitly.
+
+The driver locates the sysroot once per build, before resolving the first
+rooted import:
+
+1. `ALDER_SYSROOT` when set to a nonempty path;
+2. `<driver directory>/../lib/alder` for an installed layout;
+3. otherwise a `core` or `std` import fails with a deterministic package
+   error.
+
+The project directory, its `src/` tree, and the working directory never
+satisfy a `core` or `std` import, and `core` and `std` are reserved package
+names, so a rooted import has exactly one meaning. Package imports continue
+to resolve only below the package root.
+
+The build plan's `sysroot v1:<16 hex>` line identifies the sysroot content a
+build depends on: the same `poly64-v1` fold as the snapshot hash, applied in
+canonical source order to one `path bytes, zero byte, text bytes` group per
+sysroot source in the import closure. Sysroot sources appear in the plan like
+package sources under their sysroot-relative logical paths. Importing a
+module the installed sysroot does not contain, or building with no sysroot
+installed, are deterministic package errors; the line changes only when the
+sysroot content in the closure changes, so plans stay reproducible offline
+across hosts and working directories.
+
 ## xmake/xrepo native provider
 
 Managed xmake/xrepo is the default provider for third-party C and C++

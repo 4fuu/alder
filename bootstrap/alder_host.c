@@ -1,3 +1,6 @@
+/* Enable POSIX declarations (readlink and friends) under strict ISO C11. */
+#define _POSIX_C_SOURCE 200808L
+
 #include "alder_host.h"
 
 #include <errno.h>
@@ -13,6 +16,12 @@
 #include <process.h>
 #include <direct.h>
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <mach-o/dyld.h>
 #else
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -56,6 +65,7 @@
 
 struct AlderHostSource {
     const char *path;
+    const char *base;
     uint64_t path_len;
     uint8_t *text;
     uint64_t text_len;
@@ -79,6 +89,11 @@ struct AlderHostContext {
     char *source_request;
     size_t source_request_len;
     size_t source_request_capacity;
+    char *sysroot_root;
+    bool sysroot_probed;
+    char *sysroot_request;
+    size_t sysroot_request_len;
+    size_t sysroot_request_capacity;
     char *project_paths[2];
     char *project_path_request;
     size_t project_path_request_len;
@@ -549,10 +564,13 @@ static void alderhost_cleanup(struct AlderHostContext *context) {
         if (context->sources[(size_t)i].owned_path) {
             free((void *)context->sources[(size_t)i].path);
         }
+        free((void *)context->sources[(size_t)i].base);
     }
     free(context->sources);
     free(context->manifest);
     free(context->source_request);
+    free(context->sysroot_root);
+    free(context->sysroot_request);
     free(context->project_paths[0]);
     free(context->project_paths[1]);
     free(context->project_path_request);
@@ -1066,7 +1084,7 @@ static int alderhost_parse_conformance(int argc, char **argv,
 #endif
 
 static bool alderhost_load(struct AlderHostSource *source) {
-    FILE *file = fopen(source->path, "rb");
+    FILE *file = fopen(source->base != NULL ? source->base : source->path, "rb");
     uint8_t *data = NULL;
     size_t length = 0;
     size_t capacity = 0;
@@ -1143,13 +1161,54 @@ static bool alderhost_load(struct AlderHostSource *source) {
     return true;
 }
 
-uint64_t alderhost_source_request_finish(void) {
-    struct AlderHostContext *context = alderhost_active_context;
+/* One shared insert path for project sources and sysroot sources.  `path` is
+ * the logical source path that diagnostics and build plans print; `base`, when
+ * non-NULL, is the filesystem path to load, and both are owned by the source. */
+static uint64_t alderhost_source_insert(struct AlderHostContext *context, char *path,
+                                        char *base) {
     struct AlderHostSource *grown;
     struct AlderHostSource *source;
+    size_t next;
+    if (context->source_count == UINT64_MAX) {
+        free(path);
+        free(base);
+        return UINT64_C(0);
+    }
+    if ((size_t)context->source_count == context->source_capacity) {
+        next = context->source_capacity == 0 ? (size_t)4 : context->source_capacity * (size_t)2;
+        if (next < context->source_capacity) {
+            free(path);
+            free(base);
+            return UINT64_C(0);
+        }
+        grown = (struct AlderHostSource *)realloc(context->sources, next * sizeof(*grown));
+        if (grown == NULL) {
+            free(path);
+            free(base);
+            return UINT64_C(0);
+        }
+        context->sources = grown;
+        context->source_capacity = next;
+    }
+    source = &context->sources[(size_t)context->source_count];
+    (void)memset(source, 0, sizeof(*source));
+    source->path = path;
+    source->owned_path = true;
+    source->base = base;
+    if (!alderhost_size_to_u64(strlen(path), &source->path_len) || !alderhost_load(source)) {
+        free(path);
+        free(base);
+        (void)memset(source, 0, sizeof(*source));
+        return UINT64_C(0);
+    }
+    context->source_count++;
+    return context->source_count;
+}
+
+uint64_t alderhost_source_request_finish(void) {
+    struct AlderHostContext *context = alderhost_active_context;
     char *path;
     uint64_t i;
-    size_t next;
     if (context == NULL || !context->project_mode || context->source_request_len == 0 ||
         context->source_request_len == SIZE_MAX) {
         return UINT64_C(0);
@@ -1168,27 +1227,161 @@ uint64_t alderhost_source_request_finish(void) {
             return i + UINT64_C(1);
         }
     }
-    if (context->source_count == UINT64_MAX) { free(path); return UINT64_C(0); }
-    if ((size_t)context->source_count == context->source_capacity) {
-        next = context->source_capacity == 0 ? (size_t)4 : context->source_capacity * (size_t)2;
-        if (next < context->source_capacity) { free(path); return UINT64_C(0); }
-        grown = (struct AlderHostSource *)realloc(context->sources, next * sizeof(*grown));
-        if (grown == NULL) { free(path); return UINT64_C(0); }
-        context->sources = grown;
-        context->source_capacity = next;
+    return alderhost_source_insert(context, path, NULL);
+}
+
+static char *alderhost_copy_text(const char *text) {
+    size_t length = strlen(text);
+    char *copy = (char *)malloc(length + (size_t)1);
+    if (copy != NULL) {
+        (void)memcpy(copy, text, length + (size_t)1);
     }
-    source = &context->sources[(size_t)context->source_count];
-    (void)memset(source, 0, sizeof(*source));
-    source->path = path;
-    source->owned_path = true;
-    if (!alderhost_size_to_u64(context->source_request_len, &source->path_len) ||
-        !alderhost_load(source)) {
-        free(path);
-        (void)memset(source, 0, sizeof(*source));
+    return copy;
+}
+
+#ifdef _WIN32
+static bool alderhost_path_is_dir(const char *path) {
+    DWORD attributes = GetFileAttributesA(path);
+    return attributes != INVALID_FILE_ATTRIBUTES &&
+           (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
+}
+#else
+static bool alderhost_path_is_dir(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
+}
+#endif
+
+/* Resolve the directory holding the running driver, without consulting the
+ * working directory.  Returns NULL when the platform gives no usable answer. */
+static char *alderhost_exe_dir(void) {
+    char buffer[4096];
+    char *at;
+    size_t length;
+#if defined(_WIN32)
+    DWORD count = GetModuleFileNameA(NULL, buffer, (DWORD)sizeof(buffer));
+    if (count == 0U || (size_t)count >= sizeof(buffer)) { return NULL; }
+    length = (size_t)count;
+#elif defined(__APPLE__)
+    uint32_t size = (uint32_t)sizeof(buffer);
+    if (_NSGetExecutablePath(buffer, &size) != 0) { return NULL; }
+    length = strlen(buffer);
+#elif defined(__linux__)
+    ssize_t got = readlink("/proc/self/exe", buffer, sizeof(buffer) - (size_t)1);
+    if (got <= 0 || (size_t)got >= sizeof(buffer)) { return NULL; }
+    buffer[got] = '\0';
+    length = (size_t)got;
+#else
+    return NULL;
+#endif
+    at = buffer + length;
+    while (at > buffer && *at != '/' && *at != '\\') { at--; }
+    if (at == buffer) { return NULL; }
+    *at = '\0';
+    return alderhost_copy_text(buffer);
+}
+
+/* The installed sysroot is $ALDER_SYSROOT when set, else `<exe dir>/../lib/alder`
+ * beside the running driver, else unavailable.  The project directory is never
+ * consulted, so a project cannot shadow core or std. */
+static char *alderhost_sysroot_root(struct AlderHostContext *context) {
+    const char *env;
+    char *dir;
+    char *candidate;
+    if (context->sysroot_probed) { return context->sysroot_root; }
+    context->sysroot_probed = true;
+    env = getenv("ALDER_SYSROOT");
+    if (env != NULL && env[0] != '\0') {
+        context->sysroot_root = alderhost_copy_text(env);
+        return context->sysroot_root;
+    }
+    dir = alderhost_exe_dir();
+    if (dir != NULL) {
+        candidate = (char *)malloc(strlen(dir) + strlen("/../lib/alder") + (size_t)1);
+        if (candidate != NULL) {
+            (void)strcpy(candidate, dir);
+            (void)strcat(candidate, "/../lib/alder");
+            if (alderhost_path_is_dir(candidate)) {
+                context->sysroot_root = candidate;
+            } else {
+                free(candidate);
+            }
+        }
+        free(dir);
+    }
+    return context->sysroot_root;
+}
+
+bool alderhost_sysroot_available(void) {
+    struct AlderHostContext *context = alderhost_active_context;
+    if (context == NULL || !context->project_mode) { return false; }
+    return alderhost_sysroot_root(context) != NULL;
+}
+
+bool alderhost_sysroot_request_reset(void) {
+    if (alderhost_active_context == NULL || !alderhost_active_context->project_mode) {
+        return false;
+    }
+    alderhost_active_context->sysroot_request_len = 0;
+    return true;
+}
+
+bool alderhost_sysroot_request_byte(uint8_t byte) {
+    struct AlderHostContext *context = alderhost_active_context;
+    char *grown;
+    size_t next;
+    if (context == NULL || !context->project_mode || byte == UINT8_C(0)) {
+        return false;
+    }
+    if (context->sysroot_request_len == context->sysroot_request_capacity) {
+        next = context->sysroot_request_capacity == 0 ? (size_t)64 : context->sysroot_request_capacity * (size_t)2;
+        if (next < context->sysroot_request_capacity) { return false; }
+        grown = (char *)realloc(context->sysroot_request, next);
+        if (grown == NULL) { return false; }
+        context->sysroot_request = grown;
+        context->sysroot_request_capacity = next;
+    }
+    context->sysroot_request[context->sysroot_request_len++] = (char)byte;
+    return true;
+}
+
+uint64_t alderhost_sysroot_request_finish(void) {
+    struct AlderHostContext *context = alderhost_active_context;
+    char *root;
+    char *path;
+    char *base;
+    uint64_t i;
+    size_t root_length;
+    if (context == NULL || !context->project_mode || context->sysroot_request_len == 0 ||
+        context->sysroot_request_len == SIZE_MAX) {
         return UINT64_C(0);
     }
-    context->source_count++;
-    return context->source_count;
+    root = alderhost_sysroot_root(context);
+    if (root == NULL) { return UINT64_C(0); }
+    path = (char *)malloc(context->sysroot_request_len + (size_t)1);
+    if (path == NULL) { return UINT64_C(0); }
+    (void)memcpy(path, context->sysroot_request, context->sysroot_request_len);
+    path[context->sysroot_request_len] = '\0';
+    if (!alderhost_valid_logical_path(path) || !alderhost_al_extension(path)) {
+        free(path);
+        return UINT64_C(0);
+    }
+    for (i = 0; i < context->source_count; i++) {
+        if (strcmp(context->sources[(size_t)i].path, path) == 0) {
+            free(path);
+            return i + UINT64_C(1);
+        }
+    }
+    root_length = strlen(root);
+    base = (char *)malloc(root_length + (size_t)1 + context->sysroot_request_len + (size_t)1);
+    if (base == NULL) {
+        free(path);
+        return UINT64_C(0);
+    }
+    (void)memcpy(base, root, root_length);
+    base[root_length] = '/';
+    (void)memcpy(base + root_length + (size_t)1, path, context->sysroot_request_len + (size_t)1);
+    return alderhost_source_insert(context, path, base);
 }
 
 #ifndef ALDER_HOST_CONFORMANCE

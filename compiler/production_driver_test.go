@@ -233,7 +233,7 @@ func TestAlderProductionDriverEndToEnd(t *testing.T) {
 	}
 	plan := runProductionCompiler(t, exe, project, "test-plan")
 	triple := productionHostTriple()
-	wantPlan := "ALDER-BUILD-PLAN 1\nedition 1\ntarget hello\nkind bin\nprofile debug\ntriple " + triple + "\ntoolchain system-cc-c11\nflags strict-c11,O0\nsysroot compiler-coupled-v1\nsnapshot poly64-v1:43a83e5f2cf81c50\npackage hello\nroot src/main.al\noutput c build/" + triple + "/debug/hello/hello.c\noutput executable build/" + triple + "/debug/hello/hello\nsource src/main.al bytes 90 poly64-v1:2c61e11e166e386b module hello.main\nsource src/util.al bytes 55 poly64-v1:44cb2f09be53d6de module hello.util\nedge hello.main -> hello.util\n"
+	wantPlan := "ALDER-BUILD-PLAN 1\nedition 1\ntarget hello\nkind bin\nprofile debug\ntriple " + triple + "\ntoolchain system-cc-c11\nflags strict-c11,O0\nsysroot v1:0000000000000000\nsnapshot poly64-v1:43a83e5f2cf81c50\npackage hello\nroot src/main.al\noutput c build/" + triple + "/debug/hello/hello.c\noutput executable build/" + triple + "/debug/hello/hello\nsource src/main.al bytes 90 poly64-v1:2c61e11e166e386b module hello.main\nsource src/util.al bytes 55 poly64-v1:44cb2f09be53d6de module hello.util\nedge hello.main -> hello.util\n"
 	if plan.status != 0 || plan.stderr != "" || plan.stdout != wantPlan {
 		t.Fatalf("project test plan: %+v want stdout %q", plan, wantPlan)
 	}
@@ -909,6 +909,10 @@ uint8_t alderhost_triple_byte(uint64_t offset) { (void)offset; return 0; }
 bool alderhost_source_request_reset(void) { return false; }
 bool alderhost_source_request_byte(uint8_t byte) { (void)byte; return false; }
 uint64_t alderhost_source_request_finish(void) { return 0; }
+bool alderhost_sysroot_available(void) { return false; }
+bool alderhost_sysroot_request_reset(void) { return false; }
+bool alderhost_sysroot_request_byte(uint8_t byte) { (void)byte; return false; }
+uint64_t alderhost_sysroot_request_finish(void) { return 0; }
 bool alderhost_sources_sort(void) { return false; }
 bool alderhost_project_output_reset(uint64_t kind) { (void)kind; return false; }
 bool alderhost_project_output_byte(uint8_t byte) { (void)byte; return false; }
