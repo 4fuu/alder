@@ -18,7 +18,11 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`core.collection` public snapshot v1](api/core.collection-v1.md), covering
   the Milestone 7.1 `Vec(T)` surface;
 - [`core.slice` public snapshot v1](api/core.slice-v1.md), covering the
-  Milestone 7.1 immutable and mutable view surface.
+  Milestone 7.1 immutable and mutable view surface;
+- [`core.option` public snapshot v1](api/core.option-v1.md), covering the
+  Milestone 8 `Option(T)` helper surface in the installed sysroot;
+- [`core.result` public snapshot v1](api/core.result-v1.md), covering the
+  Milestone 8 `Result(T, E)` helper surface in the installed sysroot.
 
 ## Distribution layers
 
