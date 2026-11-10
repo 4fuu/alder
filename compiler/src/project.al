@@ -708,7 +708,17 @@ fn project_scan_source(d: Domain, plan: ProjectPlanRec, source: U64) -> Result(P
                         var c_import = false
                         if project_source_word(source, imported.start, imported.end, "c") {
                             let after_c = project_skip_source_trivia(source, imported.end, source_end)
-                            if after_c.at < source_end && project_source_ident_start(project_source_byte(source, after_c.at)) { c_import = true }
+                            if after_c.at < source_end {
+                                let next = project_source_byte(source, after_c.at)
+                                // Both C binding spellings stay out of the
+                                // module graph: `import c name` (the S0
+                                // bridge) and `import c "header.h" as name
+                                // { ... }` (the M8 binding block, whose
+                                // header is a string literal, not a module
+                                // path).
+                                if project_source_ident_start(next) { c_import = true }
+                                else { if next == 34 { c_import = true } }
+                            }
                         }
                         if !c_import {
                             var target: U64 = 0

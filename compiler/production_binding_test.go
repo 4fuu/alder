@@ -497,3 +497,68 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 `
 	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, generated.stdout, driverText, 0)
 }
+
+// TestM8BindingProjectLoader pins project-mode loading of binding blocks.
+// Before this regression the import scan classified `import c` only when
+// an identifier followed, so `import c "header.h" as name { ... }` fell
+// through to local module resolution and every project that imported a
+// module carrying a binding block was rejected with "local module source
+// is unavailable". The scan must keep both C binding spellings out of the
+// module graph: a binding block in an imported local module, a binding
+// block in the project's own module, and one module with two binding
+// blocks all check cleanly in project mode.
+func TestM8BindingProjectLoader(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+
+	manifest := "manifest = 1\nedition = \"1\"\n\n[package]\nname = \"proj\"\nversion = \"0.1.0\"\n\n[targets.proj]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	header := "void *proj_value(void);\nvoid *proj_zero(void);\n"
+	cases := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "binding block in imported local module",
+			files: map[string]string{
+				"alder.toml":  manifest,
+				"proj.h":      header,
+				"src/main.al": "module proj.main\n\nimport proj.util { helper }\n\npub fn main() -> I32 { return helper() }\n",
+				"src/util.al": "module proj.util\n\nimport c \"proj.h\" as px {\n    opaque type File = \"proj_file\"\n    raw fn value = \"proj_value\"() -> c.Ptr(c.Char)\n}\n\npub fn helper() -> I32 { return 5 }\n",
+			},
+		},
+		{
+			name: "binding block in project's own module",
+			files: map[string]string{
+				"alder.toml":  manifest,
+				"proj.h":      header,
+				"src/main.al": "module proj.main\n\nimport c \"proj.h\" as px {\n    raw fn value = \"proj_value\"() -> c.Ptr(c.Char)\n}\n\npub fn main() -> I32 {\n    let p = unsafe c { px.value() }\n    if c.is_null(p) { return 1 }\n    return 0\n}\n",
+			},
+		},
+		{
+			name: "two binding blocks in one module",
+			files: map[string]string{
+				"alder.toml":  manifest,
+				"proj.h":      header,
+				"other.h":     header,
+				"src/main.al": "module proj.main\n\nimport c \"proj.h\" as px {\n    raw fn value = \"proj_value\"() -> c.Ptr(c.Char)\n}\n\nimport c \"other.h\" as po {\n    raw fn zero = \"proj_zero\"() -> c.Ptr(c.Char)\n}\n\npub fn main() -> I32 {\n    let a = unsafe c { px.value() }\n    let b = unsafe c { po.zero() }\n    if c.is_null(a) { return 1 }\n    if c.is_null(b) { return 2 }\n    return 0\n}\n",
+			},
+		},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		result := runProductionCompilerAtRoot(t, exe, dir, tc.files, "check")
+		if result.status != 0 || result.stderr != "" || result.stdout != "" {
+			t.Fatalf("%s: project check failed: %+v stderr=%s", tc.name, result, result.stderr)
+		}
+	}
+}
