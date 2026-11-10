@@ -20,12 +20,14 @@ fn mir_v8_is_view(store: MirStore, indexes: MirVIndexes, function: U64, value: U
 fn mir_v8_same_use(a: MirVP4Use, b: MirVP4Use) -> Bool {
     return a.value == b.value && a.block == b.block && a.instruction == b.instruction && a.terminator == b.terminator && a.operand == b.operand && a.switch_case == b.switch_case
 }
-fn mir_v8_same_table(facts: __s0_Buffer(MirV6Fact), function: U64, a: U64, b: U64) -> Bool {
-    var x: U64 = 0
-    while x < __s0_buffer_len(MirV6Fact, facts) { let left = __s0_buffer_get(MirV6Fact, facts, x)
-        if left.function == function && left.value == a && left.kind == mir_v6_fact_root() { var y: U64 = 0
-            while y < __s0_buffer_len(MirV6Fact, facts) { let right = __s0_buffer_get(MirV6Fact, facts, y)
-                if right.function == function && right.value == b && right.kind == mir_v6_fact_root() && ((left.b == 0 && right.b == 0) || (left.a == right.a && left.b == right.b && left.c == right.c)) { return true }
+fn mir_v8_same_table(analysis: MirV6Analysis, function: U64, a: U64, b: U64) -> Bool {
+    var x = mir_v6_fact_start(analysis, function, a)
+    let xend = mir_v6_fact_end(analysis, function, a)
+    while x < xend { let left = mir_v6_fact_at(analysis, x)
+        if left.kind == mir_v6_fact_root() { var y = mir_v6_fact_start(analysis, function, b)
+            let yend = mir_v6_fact_end(analysis, function, b)
+            while y < yend { let right = mir_v6_fact_at(analysis, y)
+                if right.kind == mir_v6_fact_root() && ((left.b == 0 && right.b == 0) || (left.a == right.a && left.b == right.b && left.c == right.c)) { return true }
                 y = y + 1 } }
         x = x + 1 }
     return false
@@ -39,13 +41,14 @@ while at < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(
 if effect.function == function && effect.parameter == parameter { return true }
 at = at + 1 }
 return false }
-fn mir_v8_add_effects(d: Domain, facts: __s0_Buffer(MirV6Fact), effects0: __s0_Buffer(MirV8Effect), function: U64, value: U64) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = effects0
-var at: U64 = 0
-while at < __s0_buffer_len(MirV6Fact, facts) { let fact = __s0_buffer_get(MirV6Fact, facts, at)
-if fact.function == function && fact.value == value && fact.kind == mir_v6_fact_root() && fact.b == 0 && fact.c != 0 && !mir_v8_effect_has(effects, function, fact.c) { effects = try __s0_buffer_append(MirV8Effect, d, effects, MirV8Effect(function: function, parameter: fact.c)) }
+fn mir_v8_add_effects(d: Domain, analysis: MirV6Analysis, effects0: __s0_Buffer(MirV8Effect), function: U64, value: U64) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = effects0
+var at = mir_v6_fact_start(analysis, function, value)
+let atend = mir_v6_fact_end(analysis, function, value)
+while at < atend { let fact = mir_v6_fact_at(analysis, at)
+if fact.kind == mir_v6_fact_root() && fact.b == 0 && fact.c != 0 && !mir_v8_effect_has(effects, function, fact.c) { effects = try __s0_buffer_append(MirV8Effect, d, effects, MirV8Effect(function: function, parameter: fact.c)) }
 at = at + 1 }
 return Ok(effects) }
-fn mir_v8_cleanup_effects(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects0: __s0_Buffer(MirV8Effect), function: U64, iid: U64) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = effects0
+fn mir_v8_cleanup_effects(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, cleanup: MirV7Analysis, effects0: __s0_Buffer(MirV8Effect), function: U64, iid: U64) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = effects0
 var si: U64 = 0
 while si < __s0_buffer_len(MirV7RunSet, cleanup.run_sets) { let set = __s0_buffer_get(MirV7RunSet, cleanup.run_sets, si)
 if set.function == function && set.instruction == iid { var active = set.active
@@ -56,26 +59,26 @@ if push_id != 0 { let push = __s0_buffer_get(MirInstrRec, store.instructions, pu
 var e: U64 = 0
 while e < __s0_buffer_len(MirV8Effect, effects0) { let effect = __s0_buffer_get(MirV8Effect, effects0, e)
 if effect.function == push.target { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), push_id, 0, effect.parameter - 1)
-effects = try mir_v8_add_effects(d, facts, effects, function, arg) }
+effects = try mir_v8_add_effects(d, analysis, effects, function, arg) }
 e = e + 1 } } }
 active = node.parent } }
 si = si + 1 }
 return Ok(effects) }
-fn mir_v8_compute_effects(d: Domain, store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = try __s0_buffer_new(MirV8Effect, d)
+fn mir_v8_compute_effects(d: Domain, store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, cleanup: MirV7Analysis) -> Result(__s0_Buffer(MirV8Effect), __s0_Error) { var effects = try __s0_buffer_new(MirV8Effect, d)
 var changed = true
 while changed { let before = __s0_buffer_len(MirV8Effect, effects)
 var iid: U64 = 1
 while iid <= __s0_buffer_len(MirInstrRec, store.instructions) { let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-if x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove() { effects = try mir_v8_add_effects(d, facts, effects, x.function, x.a) }
+if x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove() { effects = try mir_v8_add_effects(d, analysis, effects, x.function, x.a) }
 if x.op == mir_op_call() { var e: U64 = 0
 while e < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(MirV8Effect, effects, e)
-if effect.function == x.target { effects = try mir_v8_add_effects(d, facts, effects, x.function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)) }
+if effect.function == x.target { effects = try mir_v8_add_effects(d, analysis, effects, x.function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)) }
 e = e + 1 } }
-if x.op == mir_op_cleanup_scope_run() { effects = try mir_v8_cleanup_effects(d, store, indexes, facts, cleanup, effects, x.function, iid) }
+if x.op == mir_op_cleanup_scope_run() { effects = try mir_v8_cleanup_effects(d, store, indexes, analysis, cleanup, effects, x.function, iid) }
 iid = iid + 1 }
 changed = before != __s0_buffer_len(MirV8Effect, effects) }
 return Ok(effects) }
-fn mir_v8_cleanup_mutates(store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), function: U64, iid: U64, table: U64) -> Bool { var si: U64 = 0
+fn mir_v8_cleanup_mutates(store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), function: U64, iid: U64, table: U64) -> Bool { var si: U64 = 0
 while si < __s0_buffer_len(MirV7RunSet, cleanup.run_sets) { let set = __s0_buffer_get(MirV7RunSet, cleanup.run_sets, si)
 if set.function == function && set.instruction == iid { var active = set.active
 while active != 0 { let node = __s0_buffer_get(MirV7Node, cleanup.nodes, active - 1)
@@ -84,22 +87,22 @@ if vi != 0 { let push_id = mir_v6_instruction_for_value(store, indexes, __s0_buf
 if push_id != 0 { let push = __s0_buffer_get(MirInstrRec, store.instructions, push_id - 1)
 var e: U64 = 0
 while e < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(MirV8Effect, effects, e)
-if effect.function == push.target && mir_v8_same_table(facts, function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), push_id, 0, effect.parameter - 1), table) { return true }
+if effect.function == push.target && mir_v8_same_table(analysis, function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), push_id, 0, effect.parameter - 1), table) { return true }
 e = e + 1 } } }
 active = node.parent } }
 si = si + 1 }
 return false }
-fn mir_v8_mutates(store: MirStore, indexes: MirVIndexes, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), function: U64, iid: U64, table: U64) -> Bool {
+fn mir_v8_mutates(store: MirStore, indexes: MirVIndexes, analysis: MirV6Analysis, cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), function: U64, iid: U64, table: U64) -> Bool {
     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
-    if (x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove()) && mir_v8_same_table(facts, function, x.a, table) { return true }
+    if (x.op == mir_op_table_insert() || x.op == mir_op_table_insert_try() || x.op == mir_op_table_remove()) && mir_v8_same_table(analysis, function, x.a, table) { return true }
     if x.op == mir_op_call() { var e: U64 = 0
         while e < __s0_buffer_len(MirV8Effect, effects) { let effect = __s0_buffer_get(MirV8Effect, effects, e)
-            if effect.function == x.target && mir_v8_same_table(facts, function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1), table) { return true }
+            if effect.function == x.target && mir_v8_same_table(analysis, function, mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1), table) { return true }
             e = e + 1 } }
-    if x.op == mir_op_cleanup_scope_run() { return mir_v8_cleanup_mutates(store, indexes, facts, cleanup, effects, function, iid, table) }
+    if x.op == mir_op_cleanup_scope_run() { return mir_v8_cleanup_mutates(store, indexes, analysis, cleanup, effects, function, iid, table) }
     return false
 }
-fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, facts: __s0_Buffer(MirV6Fact), cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, analysis: MirV6Analysis, cleanup: MirV7Analysis, effects: __s0_Buffer(MirV8Effect), initial: __s0_Buffer(MirVerifyDiagRec), function: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     var value: U64 = 1
         while mir_vindex_value(indexes, function, value) != 0 { let vi = mir_vindex_value(indexes, function, value)
@@ -129,7 +132,7 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: 
                     if consumers == 1 && end_instruction != 0 { var scan = iid + 1
                         while scan < end_instruction { let between = __s0_buffer_get(MirInstrRec, store.instructions, scan - 1)
                             if between.function == function && between.block == lookup.block { if mir_vop_checked(between.op) { out = try mir_v8_diag(d, out, mir_vdiag_table_failure_bypass(), function, lookup.block, scan, 0, value) }
-                                if mir_v8_mutates(store, indexes, facts, cleanup, effects, function, scan, lookup.a) { out = try mir_v8_diag(d, out, mir_vdiag_table_mutation_before_consume(), function, lookup.block, scan, 0, value) } }
+                                if mir_v8_mutates(store, indexes, analysis, cleanup, effects, function, scan, lookup.a) { out = try mir_v8_diag(d, out, mir_vdiag_table_mutation_before_consume(), function, lookup.block, scan, 0, value) } }
                             scan = scan + 1 } } }
             }
             if mir_v8_is_view(store, indexes, function, value) { var source: U64 = 0
@@ -176,7 +179,7 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: 
                 if source != 0 && ends == 1 { var scan2 = start_instruction + 1
                     while scan2 < end_id { let active = __s0_buffer_get(MirInstrRec, store.instructions, scan2 - 1)
                         if active.function == function && active.block == region { if mir_vop_checked(active.op) { out = try mir_v8_diag(d, out, mir_vdiag_table_view_failure_bypass(), function, region, scan2, 0, value) }
-                            if mir_v8_mutates(store, indexes, facts, cleanup, effects, function, scan2, source) { out = try mir_v8_diag(d, out, mir_vdiag_table_view_active_mutation(), function, region, scan2, 0, value) } }
+                            if mir_v8_mutates(store, indexes, analysis, cleanup, effects, function, scan2, source) { out = try mir_v8_diag(d, out, mir_vdiag_table_view_active_mutation(), function, region, scan2, 0, value) } }
                         scan2 = scan2 + 1 } }
             }
             value = value + 1 }
@@ -185,9 +188,9 @@ fn mir_v8_function(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: 
 
 fn mir_vphase8_with(d: Domain, store: MirStore, indexes: MirVIndexes, inventory: MirVP4UseInventory, initial: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
-let effects = try mir_v8_compute_effects(d, store, indexes, provenance.facts, cleanup)
+let effects = try mir_v8_compute_effects(d, store, indexes, provenance, cleanup)
 var function: U64 = 1
-    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v8_function(d, store, indexes, inventory, provenance.facts, cleanup, effects, out, function)
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) { out = try mir_v8_function(d, store, indexes, inventory, provenance, cleanup, effects, out, function)
 function = function + 1 }
     return Ok(out)
 }

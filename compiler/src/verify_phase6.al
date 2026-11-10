@@ -17,13 +17,20 @@ fn mir_v6_state_dead() -> U64 { return 1 }
 fn mir_v6_state_root() -> U64 { return 2 }
 fn mir_v6_state_mark() -> U64 { return 3 }
 
+// A durable domain-identity fact for one (function, value) key, stored
+// dense: the key folds function and value into one slot index, so records
+// carry `key` instead of both fields. `next` links the dedup slot chain of
+// a uniform full-tuple hash. The slot must spread facts of one key widely:
+// self-compile profiles show keys holding 500+ facts, so a per-key slot
+// (key * constant + subbucket) walked 9 hops per probe on average while the
+// uniform hash stays at the load factor regardless of key skew.
 type MirV6Fact {
-    function: U64
-    value: U64
+    key: U64
     kind: U64
     a: U64
     b: U64
     c: U64
+    next: U64
 }
 type MirV6Effect {
     function: U64
@@ -50,7 +57,6 @@ type MirV6Durable {
     facts: __s0_Buffer(MirV6Fact)
     effects: __s0_Buffer(MirV6Effect)
     fact_key_next: __s0_Buffer(U64)
-    fact_hash_next: __s0_Buffer(U64)
     effect_next: __s0_Buffer(U64)
 }
 type MirV6RoundIndex {
@@ -190,148 +196,38 @@ return __s0_buffer_get(U64, span, function + 1) }
 fn mir_v6_fact_at(analysis: MirV6Analysis, at: U64) -> MirV6Fact { return __s0_buffer_get(MirV6Fact, analysis.facts, __s0_buffer_get(U64, analysis.fact_pos, at) - 1) }
 fn mir_v6_effect_at(analysis: MirV6Analysis, at: U64) -> MirV6Effect { return __s0_buffer_get(MirV6Effect, analysis.effects, __s0_buffer_get(U64, analysis.effect_pos, at) - 1) }
 
-// Rebuilds the fact and effect buckets from the current buffers. One pass
-// counts records per bucket into function-local arrays, a prefix pass fixes
-// the start positions, and a placement pass writes each record id once; the
-// results are copied into buffers for storage in the analysis record. The
-// index is exact for the buffer contents at build time. Appends made later in
-// the same fixpoint iteration are found in the ordered tail. Once an iteration
-// adds no new fact or effect, the loop terminates with an exact index that the
-// per-function query passes can rely on.
-fn mir_v6_fact_hash(item: MirV6Fact, buckets: U64) -> U64 {
+// Rebuilds the fact and effect buckets by walking the durable key and effect
+// chains, so the placement matches the chains the add sites maintain and no
+// whole-buffer scan is needed.
+fn mir_v6_fact_hash(key: U64, kind: U64, a: U64, b: U64, c: U64, buckets: U64) -> U64 {
     // Probes only: the slot picks a bucket, never an iteration order. Each
     // field is reduced by compare rather than division (fields at or above
     // the bucket count are rare), then folded at successive powers of four,
-    // so a hash costs no division regardless of bucket count.
-    var f = item.function
-    if f >= buckets { f = f % buckets }
-    var v = item.value
-    if v >= buckets { v = v % buckets }
-    var k = item.kind
+    // so a hash costs no division regardless of bucket count. Each input is
+    // reduced before folding: mir_vindex_hash_add requires both operands
+    // below the modulus.
+    var k = key
     if k >= buckets { k = k % buckets }
-    var a = item.a
-    if a >= buckets { a = a % buckets }
-    var b = item.b
-    if b >= buckets { b = b % buckets }
-    var c = item.c
-    if c >= buckets { c = c % buckets }
-    var hash = mir_vindex_hash_add(f, v, buckets)
+    var f = kind
+    if f >= buckets { f = f % buckets }
+    var x = a
+    if x >= buckets { x = x % buckets }
+    var y = b
+    if y >= buckets { y = y % buckets }
+    var z = c
+    if z >= buckets { z = z % buckets }
+    var hash = mir_vindex_hash_add(k, f, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
-    hash = mir_vindex_hash_add(hash, k, buckets)
+    hash = mir_vindex_hash_add(hash, x, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
-    hash = mir_vindex_hash_add(hash, a, buckets)
+    hash = mir_vindex_hash_add(hash, y, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
     hash = mir_vindex_hash_add(hash, hash, buckets)
-    hash = mir_vindex_hash_add(hash, b, buckets)
-    hash = mir_vindex_hash_add(hash, hash, buckets)
-    hash = mir_vindex_hash_add(hash, hash, buckets)
-    hash = mir_vindex_hash_add(hash, c, buckets)
+    hash = mir_vindex_hash_add(hash, z, buckets)
     return hash
 }
-
-fn mir_v6_round_index_build(d: Domain, store: MirStore, indexes: MirVIndexes, durable: MirV6Durable) -> Result(MirV6RoundIndex, __s0_Error) {
-let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
-let total = __s0_buffer_len(MirV6Fact, durable.facts)
-var key_base = __s0_alloc(U64, d, fcount + 1)
-var z: U64 = 0
-while z <= fcount { key_base[z] = 0
-z = z + 1 }
-var f: U64 = 1
-while f <= fcount { key_base[f] = key_base[f - 1] + __s0_buffer_get(U64, indexes.value_count, f - 1)
-f = f + 1 }
-let total_keys = key_base[fcount]
-var cnt = __s0_alloc(U64, d, total_keys + 2)
-var base = __s0_alloc(U64, d, total_keys + 2)
-var cursor = __s0_alloc(U64, d, total_keys + 2)
-var k: U64 = 0
-while k <= total_keys + 1 { cnt[k] = 0
-base[k] = 0
-cursor[k] = 0
-k = k + 1 }
-var i: U64 = 0
-while i < total {
-    let fact = __s0_buffer_get(MirV6Fact, durable.facts, i)
-    if fact.function >= 1 && fact.function <= fcount {
-        let key = key_base[fact.function - 1] + fact.value
-        if key >= 1 && key <= total_keys { cnt[key] = cnt[key] + 1 }
-    }
-    i = i + 1
-}
-k = 0
-while k <= total_keys { base[k + 1] = base[k] + cnt[k]
-k = k + 1 }
-k = 0
-while k <= total_keys + 1 { cursor[k] = base[k] + 0
-k = k + 1 }
-var pos = __s0_alloc(U64, d, total)
-i = 0
-while i < total {
-    let fact = __s0_buffer_get(MirV6Fact, durable.facts, i)
-    if fact.function >= 1 && fact.function <= fcount {
-        let key = key_base[fact.function - 1] + fact.value
-        if key >= 1 && key <= total_keys { let slot = cursor[key]
-pos[slot] = i + 1
-cursor[key] = slot + 1 }
-    }
-    i = i + 1
-}
-var span = try __s0_buffer_new(U64, d)
-k = 0
-while k <= total_keys + 1 { span = try __s0_buffer_append(U64, d, span, base[k])
-k = k + 1 }
-var pos_buf = try __s0_buffer_new(U64, d)
-var p: U64 = 0
-while p < total { pos_buf = try __s0_buffer_append(U64, d, pos_buf, pos[p])
-p = p + 1 }
-var kb = try __s0_buffer_new(U64, d)
-var f2: U64 = 0
-while f2 < fcount { kb = try __s0_buffer_append(U64, d, kb, key_base[f2])
-f2 = f2 + 1 }
-// Membership lives in the live index's hash buckets, which are probes only;
-// this index carries the dense key and effect placement that query passes
-// read. No hash placement is stored here.
-let etotal = __s0_buffer_len(MirV6Effect, durable.effects)
-var ecnt = __s0_alloc(U64, d, fcount + 1)
-var ebase = __s0_alloc(U64, d, fcount + 2)
-var ecursor = __s0_alloc(U64, d, fcount + 2)
-var e: U64 = 0
-while e <= fcount + 1 { if e <= fcount { ecnt[e] = 0 }
-ebase[e] = 0
-ecursor[e] = 0
-e = e + 1 }
-i = 0
-while i < etotal {
-    let effect = __s0_buffer_get(MirV6Effect, durable.effects, i)
-    if effect.function >= 1 && effect.function <= fcount { ecnt[effect.function] = ecnt[effect.function] + 1 }
-    i = i + 1
-}
-f = 1
-while f <= fcount + 1 { ebase[f] = ebase[f - 1] + ecnt[f - 1]
-f = f + 1 }
-e = 0
-while e <= fcount + 1 { ecursor[e] = ebase[e] + 0
-e = e + 1 }
-var epos = __s0_alloc(U64, d, etotal)
-i = 0
-while i < etotal {
-    let effect = __s0_buffer_get(MirV6Effect, durable.effects, i)
-    if effect.function >= 1 && effect.function <= fcount { let slot = ecursor[effect.function]
-epos[slot] = i + 1
-ecursor[effect.function] = slot + 1 }
-    i = i + 1
-}
-var espan = try __s0_buffer_new(U64, d)
-e = 0
-while e <= fcount + 1 { espan = try __s0_buffer_append(U64, d, espan, ebase[e])
-e = e + 1 }
-var epos_buf = try __s0_buffer_new(U64, d)
-p = 0
-while p < etotal { epos_buf = try __s0_buffer_append(U64, d, epos_buf, epos[p])
-p = p + 1 }
-let empty_index = try __s0_buffer_new(U64, d)
-return Ok(MirV6RoundIndex(stable_fact_count: total, fact_key_base: kb, fact_span: span, fact_pos: pos_buf, effect_span: espan, effect_pos: epos_buf, fact_key_head: empty_index, fact_key_tail: empty_index, fact_hash_head: empty_index, effect_head: empty_index, effect_tail: empty_index)) }
 
 fn mir_v6_live_index_build(d: Domain, store: MirStore, indexes: MirVIndexes) -> Result(MirV6RoundIndex, __s0_Error) {
     let fcount = __s0_buffer_len(MirFunctionRec, store.functions)
@@ -351,9 +247,11 @@ fn mir_v6_live_index_build(d: Domain, store: MirStore, indexes: MirVIndexes) -> 
         key_tail = try __s0_buffer_append(U64, d, key_tail, 0)
         key = key + 1
     }
-    // Sixteen buckets per MIR value keeps the final compiler corpus below
-    // one fact per bucket while retaining deterministic fixed storage.
-    let hash_buckets = total_keys * 16 + 1
+    // Sixteen buckets per MIR value keeps the final compiler corpus at a
+    // load factor near one. The slot comes from the uniform full-tuple
+    // hash, so chain length tracks the load factor instead of the skew of
+    // any one key's fact count.
+    let hash_buckets = total_keys * 16 + 16
     var hash_head = try __s0_buffer_new(U64, d)
     var bucket: U64 = 0
     while bucket < hash_buckets {
@@ -430,20 +328,22 @@ fn mir_v6_round_effect_next(durable: MirV6Durable, effect: U64) -> U64 {
 }
 fn mir_v6_round_effect_at(durable: MirV6Durable, at: U64) -> MirV6Effect { return __s0_buffer_get(MirV6Effect, durable.effects, at - 1) }
 
-fn mir_v6_fact_add(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, item: MirV6Fact) -> Result(MirV6Durable, __s0_Error) { var durable = durable0
-let slot = mir_v6_fact_hash(item, __s0_buffer_len(U64, index.fact_hash_head))
+fn mir_v6_fact_add(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, function: U64, value: U64, kind: U64, a: U64, b: U64, c: U64) -> Result(MirV6Durable, __s0_Error) { var durable = durable0
+let key = mir_v6_round_fact_key(index, function, value)
+if key == 0 { return Ok(durable) }
+// Dedup probes a uniform full-tuple hash: the record carries the key, so
+// the chain compare is exact, and the slot spreads hot keys' facts across
+// the whole head array instead of grouping them by key.
+let slot = mir_v6_fact_hash(key, kind, a, b, c, __s0_buffer_len(U64, index.fact_hash_head))
 var at = __s0_buffer_get(U64, index.fact_hash_head, slot)
 while at != 0 { let x = __s0_buffer_get(MirV6Fact, durable.facts, at - 1)
-    if x.function == item.function && x.value == item.value && x.kind == item.kind && x.a == item.a && x.b == item.b && x.c == item.c { return Ok(durable) }
-    at = __s0_buffer_get(U64, durable.fact_hash_next, at - 1)
+    if x.key == key && x.kind == kind && x.a == a && x.b == b && x.c == c { return Ok(durable) }
+    at = x.next
 }
-let key = mir_v6_round_fact_key(index, item.function, item.value)
-if key == 0 { return Ok(durable) }
 let old_hash = __s0_buffer_get(U64, index.fact_hash_head, slot)
 let old_tail = __s0_buffer_get(U64, index.fact_key_tail, key)
-durable.facts = try __s0_buffer_append(MirV6Fact, d, durable.facts, item)
+durable.facts = try __s0_buffer_append(MirV6Fact, d, durable.facts, MirV6Fact(key: key, kind: kind, a: a, b: b, c: c, next: old_hash))
 durable.fact_key_next = try __s0_buffer_append(U64, d, durable.fact_key_next, 0)
-durable.fact_hash_next = try __s0_buffer_append(U64, d, durable.fact_hash_next, old_hash)
 let fact = __s0_buffer_len(MirV6Fact, durable.facts)
 if old_tail == 0 { __s0_buffer_set(U64, index.fact_key_head, key, fact) }
 else { __s0_buffer_set(U64, durable.fact_key_next, old_tail - 1, fact) }
@@ -474,7 +374,7 @@ let stop = __s0_buffer_get(U64, index.fact_key_tail, key)
 while at != 0 {
     let x = mir_v6_round_fact_at(durable, at)
     let next = mir_v6_round_fact_next(durable, at)
-    durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: target, kind: x.kind, a: x.a, b: x.b, c: x.c))
+    durable = try mir_v6_fact_add(d, durable, index, function, target, x.kind, x.a, x.b, x.c)
     if at == stop { return Ok(durable) }
     at = next
 }
@@ -525,7 +425,7 @@ fn mir_v6_merge_from(d: Domain, durable0: MirV6Durable, index: MirV6RoundIndex, 
     while at != 0 {
         let x = mir_v6_round_fact_at(durable, at)
         let next = mir_v6_round_fact_next(durable, at)
-        durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: target, kind: x.kind, a: x.a, b: x.b, c: x.c))
+        durable = try mir_v6_fact_add(d, durable, index, function, target, x.kind, x.a, x.b, x.c)
         merged = at
         if at == stop { return Ok(MirV6MergeStep(durable: durable, merged: merged)) }
         at = next
@@ -1010,14 +910,14 @@ fn mir_v6_transfer_value(d: Domain, store: MirStore, indexes: MirVIndexes, trans
 let vi = mir_vindex_value(indexes, function, value_id)
 let value = __s0_buffer_get(MirValueRec, store.values, vi - 1)
 if value.def_kind == mir_value_def_function_param() { let parameter = mir_v6_function_param_ordinal(store, indexes, function, value_id)
-durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_param(), a: parameter, b: 0, c: 0))
+durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_param(), parameter, 0, 0)
 if try mir_v6_type_reference(d, store, indexes, value.value_type) { let pcount = mir_vindex_param_count(indexes, function)
 var pi: U64 = 0
 while pi < pcount { let p = __s0_buffer_get(MirParamRec, store.params, mir_vindex_param(indexes, function, pi) - 1)
-if p.kind == mir_param_function() && mir_vtype_kind(store, p.param_type) == mir_type_kind_domain_handle() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_dep(), a: 0, b: p.ordinal + 1, c: 0)) }
+if p.kind == mir_param_function() && mir_vtype_kind(store, p.param_type) == mir_type_kind_domain_handle() { durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_dep(), 0, p.ordinal + 1, 0) }
 pi = pi + 1 }
-durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: value_id, b: 0, c: parameter)) }
-if mir_vtype_kind(store, value.value_type) == mir_type_kind_domain_handle() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_dep(), a: 0, b: parameter, c: 0)) }
+durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_root(), value_id, 0, parameter) }
+if mir_vtype_kind(store, value.value_type) == mir_type_kind_domain_handle() { durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_dep(), 0, parameter, 0) }
 return Ok(durable) }
 if value.def_kind == mir_value_def_block_param() {
     let parameter = mir_v6_block_param_record(store, indexes, function, value.block, value.item - 1)
@@ -1041,14 +941,14 @@ if iid == 0 { return Ok(durable) }
 let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
 if x.op == mir_op_domain_create() { var at = mir_v6_round_fact_start(index, function, x.a)
 while at != 0 { let f = mir_v6_round_fact_at(durable, at)
-if f.kind == mir_v6_fact_dep() || f.kind == mir_v6_fact_parent() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_parent(), a: f.a, b: f.b, c: f.c)) }
+if f.kind == mir_v6_fact_dep() || f.kind == mir_v6_fact_parent() { durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_parent(), f.a, f.b, f.c) }
 at = mir_v6_round_fact_next(durable, at) }
-durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_dep(), a: x.block, b: x.ordinal + 1, c: 0)) }
+durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_dep(), x.block, x.ordinal + 1, 0) }
 // A cross-domain copy has independent value/storage provenance. The source is
 // intentionally not merged: destroying its inner domain cannot invalidate the
 // copy rooted in the destination domain.
 if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() { durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, x.a)
-durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: x.a, b: x.block, c: x.ordinal + 1)) }
+durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_root(), x.a, x.block, x.ordinal + 1) }
 if x.op == mir_op_load() {
 // A load of a provenance-free type copies plain bits: the value has no
 // lifetime tie to the storage domain it was read from, so a later reset or
@@ -1087,7 +987,7 @@ if x.op == mir_op_call() { var e = mir_v6_round_effect_start(index, x.target)
 while e != 0 { let effect = mir_v6_round_effect_at(durable, e)
 if effect.kind == mir_v6_effect_result_from() || effect.kind == mir_v6_effect_result_alloc() { let arg = mir_v6_operand_value(store, indexes, mir_operand_instruction(), iid, 0, effect.parameter - 1)
 durable = try mir_v6_merge_edge(d, durable, index, consumers, function, value_id, arg)
-if effect.kind == mir_v6_effect_result_alloc() { durable = try mir_v6_fact_add(d, durable, index, MirV6Fact(function: function, value: value_id, kind: mir_v6_fact_root(), a: arg, b: x.block, c: x.ordinal + 1)) } }
+if effect.kind == mir_v6_effect_result_alloc() { durable = try mir_v6_fact_add(d, durable, index, function, value_id, mir_v6_fact_root(), arg, x.block, x.ordinal + 1) } }
 e = mir_v6_round_effect_next(durable, e) } }
 return Ok(durable) }
 
@@ -1210,7 +1110,7 @@ let changed = before_facts != __s0_buffer_len(MirV6Fact, durable.facts) || befor
 return Ok(MirV6RoundResult(durable: durable, changed: changed)) }
 
 fn mir_v6_compute(d: Domain, store: MirStore, indexes: MirVIndexes, cleanup: MirV7Analysis) -> Result(MirV6Analysis, __s0_Error) {
-var durable = MirV6Durable(facts: try __s0_buffer_new(MirV6Fact, d), effects: try __s0_buffer_new(MirV6Effect, d), fact_key_next: try __s0_buffer_new(U64, d), fact_hash_next: try __s0_buffer_new(U64, d), effect_next: try __s0_buffer_new(U64, d))
+var durable = MirV6Durable(facts: try __s0_buffer_new(MirV6Fact, d), effects: try __s0_buffer_new(MirV6Effect, d), fact_key_next: try __s0_buffer_new(U64, d), effect_next: try __s0_buffer_new(U64, d))
 let index = try mir_v6_live_index_build(d, store, indexes)
 let transfer = try mir_v6_transfer_index_build(d, store, indexes)
 let consumers = try mir_v6_consumer_index_build(d, store, indexes, transfer, index)

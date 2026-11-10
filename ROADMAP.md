@@ -1271,7 +1271,21 @@ all 2,082 functions is under 2 MiB. Back to back on one host, cold
 regenerate peak RSS went from 2,558,100-2,558,180 KiB at `f6cbd9b` to
 2,195,012-2,195,052 KiB (about -355 MiB, -14%), the stage-0 self-compile
 from 75.70 s / 2,560,004 KiB to 73.84 s / 2,195,132 KiB, wall otherwise
-unchanged at 107.5-109.1 s, with the fixed point byte-identical.
+unchanged at 107.5-109.1 s, with the fixed point byte-identical. The
+phase-6 fact record folded function and value into the dense key its add
+site already computes and chained dedup slots through the record itself,
+dropping the separate hash-next buffer (64 to 56 bytes per fact), and
+phase-8's effect and mutates queries joined the bucket pattern, walking
+per-key chains instead of the whole fact buffer; a measured detour worth
+recording: grouping dedup slots per key walked about nine hops per probe
+on the self-compile (2,800 hot keys carry 513-545 facts each, so per-key
+slot chains track the skew, not the load factor), tripling `fact_add`
+cost until the uniform full-tuple hash was restored. Back to back on one
+host, cold regenerate went from 91.36 s / 2,195,072 KiB to 90.63 s /
+2,135,796 KiB (wall within run-to-run noise, peak about -58 MiB), `go
+test ./compiler` from 163 s to 128 s on the phase-8 walks, with
+identical accept, reject, and end-to-end fixtures and the fixed point
+byte-identical.
 
 The checker's interpretation worklists joined the same pattern: the seven
 interpreted-type probes plus `push_decl_members` now carry five stable,
