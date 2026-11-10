@@ -6,6 +6,7 @@ import c alderhost_source_text_byte: fn(U64, U64) -> U8
 import c alderhost_stdout_byte: fn(U8) -> Bool
 import c alderhost_stdout_f64_bits: fn(U64) -> Bool
 import c alderhost_decimal_f64_bits: fn(U64, U64, I64) -> U64
+import c alderhost_f32_bits_from_f64_bits: fn(U64) -> U64
 import c alderhost_i64_from_u64_bits: fn(U64) -> I64
 import c alderhost_u64_from_i64_bits: fn(I64) -> U64
 import c alderhost_stderr_byte: fn(U8) -> Bool

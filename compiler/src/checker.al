@@ -7187,6 +7187,291 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, receiver_place, site_kind, site_syntax)
 }
 
+// C-boundary conversion methods (M8): to_T, to_T_checked, and to_T_wrapping
+// between c.* numeric scalars and Alder primitives. A c receiver converts
+// into Alder exact-width targets: integer c scalars into i8..u64 in all
+// three forms, and the float c scalars into their equal-precision Alder
+// float (or F64 from c.Float) in the bare total form only. An Alder
+// receiver converts into c.* scalar targets: integer primitives into the
+// integer c scalars in all three forms, plus the named float specials
+// F32.to_c_float, F64.to_c_double, and F64.to_c_float_checked. The builtin
+// id encodes direction, target, and form (0 total, 1 checked, 2 wrapping)
+// so the lowering and the model validator decode it without a name table:
+// c receivers use 65 + scalar*30 + alder_index*3 + form, Alder receivers
+// use 520 + alder_index*45 + scalar*3 + form, and the float specials sit
+// at 965..967. The 65 base keeps the family disjoint from the integer
+// conversion methods' 62..64 builtins and from the byte-sequence surface
+// below. Zero means the callee is not a conversion name this receiver can
+// carry.
+fn c_convert_builtin(state: State, callee: SyntaxRec, receiver: CheckedTypeRec) -> U64 {
+    let source = __s0_buffer_get(SourceRec, state.sources, callee.source)
+    var end = callee.name_end
+    let base = callee.name_start
+    if end < base + 4 { return 0 }
+    if !source_word(state, source, base, base + 3, "to_") { return 0 }
+    var form: U64 = 0
+    if end >= base + 12 && source_word(state, source, end - 9, end, "_wrapping") { form = 2
+        end = end - 9 }
+    else { if end >= base + 11 && source_word(state, source, end - 8, end, "_checked") { form = 1
+        end = end - 8 } }
+    let at = base + 3
+    if end <= at { return 0 }
+    // Alder integer and float target spellings, as the primitive target
+    // minus two: the kind-1 primitive targets run I8 I16 I32 I64 U8 U16
+    // U32 U64 F32 F64 across 2..11, so the stored index 0..9 decodes back
+    // with target = index + 2 everywhere.
+    var alder_index: U64 = 0
+    var saw_alder = false
+    if source_word(state, source, at, end, "i8") { alder_index = 0
+        saw_alder = true }
+    if source_word(state, source, at, end, "i16") { alder_index = 1
+        saw_alder = true }
+    if source_word(state, source, at, end, "i32") { alder_index = 2
+        saw_alder = true }
+    if source_word(state, source, at, end, "i64") { alder_index = 3
+        saw_alder = true }
+    if source_word(state, source, at, end, "u8") { alder_index = 4
+        saw_alder = true }
+    if source_word(state, source, at, end, "u16") { alder_index = 5
+        saw_alder = true }
+    if source_word(state, source, at, end, "u32") { alder_index = 6
+        saw_alder = true }
+    if source_word(state, source, at, end, "u64") { alder_index = 7
+        saw_alder = true }
+    if source_word(state, source, at, end, "f32") { alder_index = 8
+        saw_alder = true }
+    if source_word(state, source, at, end, "f64") { alder_index = 9
+        saw_alder = true }
+    // c target spellings, in C scalar id order with the float spellings
+    // mapped to their own ids (c_float 11, c_double 12).
+    var scalar_index: U64 = 0
+    var saw_c = false
+    if source_word(state, source, at, end, "c_char") { scalar_index = 0
+        saw_c = true }
+    if source_word(state, source, at, end, "c_schar") { scalar_index = 1
+        saw_c = true }
+    if source_word(state, source, at, end, "c_uchar") { scalar_index = 2
+        saw_c = true }
+    if source_word(state, source, at, end, "c_short") { scalar_index = 3
+        saw_c = true }
+    if source_word(state, source, at, end, "c_ushort") { scalar_index = 4
+        saw_c = true }
+    if source_word(state, source, at, end, "c_int") { scalar_index = 5
+        saw_c = true }
+    if source_word(state, source, at, end, "c_uint") { scalar_index = 6
+        saw_c = true }
+    if source_word(state, source, at, end, "c_long") { scalar_index = 7
+        saw_c = true }
+    if source_word(state, source, at, end, "c_ulong") { scalar_index = 8
+        saw_c = true }
+    if source_word(state, source, at, end, "c_longlong") { scalar_index = 9
+        saw_c = true }
+    if source_word(state, source, at, end, "c_ulonglong") { scalar_index = 10
+        saw_c = true }
+    if source_word(state, source, at, end, "c_float") { scalar_index = 11
+        saw_c = true }
+    if source_word(state, source, at, end, "c_double") { scalar_index = 12
+        saw_c = true }
+    if source_word(state, source, at, end, "c_size") { scalar_index = 13
+        saw_c = true }
+    if source_word(state, source, at, end, "c_ptrdiff") { scalar_index = 14
+        saw_c = true }
+    if saw_alder && !saw_c {
+        if receiver.kind != 26 { return 0 }
+        if alder_index >= 8 {
+            // Only the float pairs the total cast form accepts: equal
+            // precision from c.Float, and F64 from c.Float or c.Double.
+            // Integer c scalars never convert to Alder floats here, and
+            // the checked and wrapping forms have no float meaning.
+            if form != 0 { return 0 }
+            if receiver.target != 11 && !(receiver.target == 12 && alder_index == 9) { return 0 }
+        }
+        return receiver.target * 30 + alder_index * 3 + form + 65
+    }
+    if saw_c && !saw_alder {
+        if receiver.kind != 1 { return 0 }
+        if receiver.target == 10 {
+            if scalar_index == 11 && form == 0 { return 965 }
+            return 0
+        }
+        if receiver.target == 11 {
+            if scalar_index == 12 && form == 0 { return 966 }
+            if scalar_index == 11 && form == 1 { return 967 }
+            return 0
+        }
+        if receiver.target < 2 { return 0 }
+        if receiver.target > 9 { return 0 }
+        // Integer receivers convert only into integer c scalars; the
+        // float spellings are rejected so every accepted pair crosses the
+        // boundary with a defined MIR conversion form.
+        if scalar_index >= 11 { return 0 }
+        return (receiver.target - 2) * 45 + scalar_index * 3 + form + 520
+    }
+    return 0
+}
+
+// The conversion form of a builtin id: 0 total, 1 checked, 2 wrapping. The
+// float specials are total except 967, the only checked float pair.
+fn c_convert_form(builtin: U64) -> U64 {
+    if builtin >= 962 {
+        if builtin == 967 { return 1 }
+        return 0
+    }
+    if builtin >= 520 { return (builtin - 520) % 3 }
+    return (builtin - 65) % 3
+}
+
+// Width and signedness of a c scalar under the documented hosted target
+// model: long, unsigned long, size_t, and ptrdiff_t are 64-bit; char's
+// signedness is target-dependent, so no conversion from or into c.Char is
+// total. Width is in bits; the signed flag is false for unsigned and
+// unknown signedness.
+fn c_convert_scalar_width(scalar: U64) -> U64 {
+    if scalar == 0 { return 8 }
+    if scalar == 1 || scalar == 2 { return 8 }
+    if scalar == 3 || scalar == 4 { return 16 }
+    if scalar == 5 || scalar == 6 { return 32 }
+    if scalar == 7 || scalar == 8 { return 64 }
+    if scalar == 9 || scalar == 10 { return 64 }
+    if scalar == 13 || scalar == 14 { return 64 }
+    return 0
+}
+
+fn c_convert_scalar_signed(scalar: U64) -> Bool {
+    if scalar == 1 || scalar == 3 || scalar == 5 { return true }
+    if scalar == 7 || scalar == 9 || scalar == 14 { return true }
+    return false
+}
+
+fn c_convert_scalar_known(scalar: U64) -> Bool { return scalar != 0 }
+
+// Whether the conversion's total form is lossless on every target Alder
+// supports: signed into signed or unsigned into unsigned needs a target at
+// least as wide, unsigned into signed needs a strictly wider target, and
+// signed into unsigned is never total. c.Char's target-dependent
+// signedness excludes every total pair it participates in. The listed
+// float pairs are total because C float and double are IEEE single and
+// double on every hosted target.
+fn c_convert_total(builtin: U64) -> Bool {
+    if builtin >= 962 { return true }
+    if builtin >= 520 {
+        let rest = builtin - 520
+        let alder_index = rest / 45
+        let scalar = (rest % 45) / 3
+        if !c_convert_scalar_known(scalar) { return false }
+        let source_width = alder_index_width(alder_index)
+        let source_signed = alder_index < 4
+        let target_width = c_convert_scalar_width(scalar)
+        let target_signed = c_convert_scalar_signed(scalar)
+        if source_signed && target_signed { return target_width >= source_width }
+        if !source_signed && !target_signed { return target_width >= source_width }
+        if !source_signed && target_signed { return target_width > source_width }
+        return false
+    }
+    let rest = builtin - 65
+    let scalar = rest / 30
+    let alder_index = (rest % 30) / 3
+    if alder_index >= 8 { return true }
+    if !c_convert_scalar_known(scalar) { return false }
+    let source_width = c_convert_scalar_width(scalar)
+    let source_signed = c_convert_scalar_signed(scalar)
+    let target_width = alder_index_width(alder_index)
+    let target_signed = alder_index < 4
+    if source_signed && target_signed { return target_width >= source_width }
+    if !source_signed && !target_signed { return target_width >= source_width }
+    if !source_signed && target_signed { return target_width > source_width }
+    return false
+}
+
+fn alder_index_width(alder_index: U64) -> U64 {
+    // The index is the primitive target minus two: 0..3 are the signed
+    // integers I8 I16 I32 I64 and 4..7 the unsigned U8 U16 U32 U64, so
+    // each band of four climbs 8, 16, 32, 64.
+    if alder_index <= 3 {
+        if alder_index == 0 { return 8 }
+        if alder_index == 1 { return 16 }
+        if alder_index == 2 { return 32 }
+        return 64
+    }
+    if alder_index == 4 { return 8 }
+    if alder_index == 5 { return 16 }
+    if alder_index == 6 { return 32 }
+    return 64
+}
+
+// Type checking for the C-boundary conversion methods. The result type is
+// the target scalar, except the checked form, which wraps it in Option:
+// the option application matches the integer arithmetic methods' checked
+// results. Zero-argument calls only; the receiver is already checked by the
+// dispatching member-call path.
+fn check_c_convert_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    // Method-call links include both the selected callee and its receiver.
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 41, call) }
+    let builtin = c_convert_builtin(state, callee, receiver)
+    if builtin == 0 { return expr_token_fail(d, state, base, 205, callee) }
+    if c_convert_form(builtin) == 0 && !c_convert_total(builtin) { return expr_token_fail(d, state, base, 205, callee) }
+    if builtin >= 962 { return check_c_convert_float_special(d, state, parse, base, store, owner, call_id, callee, builtin, receiver_expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+    var current = store
+    var target: U64 = 0
+    if builtin >= 520 {
+        // Alder receiver into c scalar: every accepted integer-receiver
+        // pair targets an integer c scalar (the encode rejects the float
+        // spellings), so the result is that c_raw scalar itself.
+        let scalar = ((builtin - 520) % 45) / 3
+        let made = try binding_type_intern(d, current, 26, scalar, 0, 0)
+        current = made.store
+        target = made.id
+    }
+    else {
+        let rest = builtin - 65
+        let alder_index = (rest % 30) / 3
+        target = canonical_type_id(current, 1, alder_index + 2, 0, 0)
+    }
+    if target == 0 { return expr_token_fail(d, state, base, 205, callee) }
+    var result = target
+    if c_convert_form(builtin) == 1 {
+        let made = try canonical_application(d, current, owner, 9, target, 0, 1)
+        current = made.store
+        result = made.checked_type
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, 0, 0, 0, site_kind, site_syntax)
+}
+
+// The named float specials outside the two integer families: F32.to_c_float
+// (965) and F64.to_c_double (966) are total and produce the C float and
+// double scalars; F64.to_c_float_checked (967) is the one checked float
+// pair, because double may not fit float, and yields Option(c.Float). The
+// reverse spellings c.Float.to_f32, c.Float.to_f64, and c.Double.to_f64 are
+// ordinary 65-band pairs with Alder float targets.
+fn check_c_convert_float_special(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call_id: U64, callee: SyntaxRec, builtin: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    var current = store
+    if builtin == 967 {
+        let made = try binding_type_intern(d, current, 26, 11, 0, 0)
+        current = made.store
+        let option = try canonical_application(d, current, owner, 9, made.id, 0, 1)
+        if expected != 0 && !(try expression_type_equal(d, state, parse, option.store, option.checked_type, expected)) { return expr_token_type_fail(d, state, option.store, mismatch_kind, mismatch_node, expected, option.checked_type) }
+        return append_sequence_method(d, option.store, owner, call_id, option.checked_type, builtin, receiver_expression, 0, 0, 0, site_kind, site_syntax)
+    }
+    // 965 targets c.Float and 966 targets c.Double; both exact on every
+    // hosted target, so the plain scalar is the result type.
+    var scalar: U64 = 11
+    if builtin == 966 { scalar = 12 }
+    let made = try binding_type_intern(d, current, 26, scalar, 0, 0)
+    if expected != 0 && !(try expression_type_equal(d, state, parse, made.store, made.id, expected)) { return expr_token_type_fail(d, state, made.store, mismatch_kind, mismatch_node, expected, made.id) }
+    return append_sequence_method(d, made.store, owner, call_id, made.id, builtin, receiver_expression, 0, 0, 0, site_kind, site_syntax)
+}
+
+fn c_convert_route(state: State, callee: SyntaxRec, receiver_type: CheckedTypeRec) -> Bool {
+    if callee.name_end < callee.name_start + 4 { return false }
+    let source = __s0_buffer_get(SourceRec, state.sources, callee.source)
+    if !source_word(state, source, callee.name_start, callee.name_start + 3, "to_") { return false }
+    if receiver_type.kind == 26 { return true }
+    if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 11 { return true }
+    return false
+}
+
 // Integer overflow surface (M8): the checked/saturating/wrapping arithmetic
 // methods on the eight integer primitive receivers. add_checked, sub_checked,
 // and mul_checked report overflow as Option(T) (none on overflow) instead of
@@ -8048,6 +8333,14 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // integer receivers fall through to the unknown-method reject.
         if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "to_i8") || node_word(state, callee, "to_i16") || node_word(state, callee, "to_i32") || node_word(state, callee, "to_i64") || node_word(state, callee, "to_u8") || node_word(state, callee, "to_u16") || node_word(state, callee, "to_u32") || node_word(state, callee, "to_u64") || node_word(state, callee, "to_i8_checked") || node_word(state, callee, "to_i16_checked") || node_word(state, callee, "to_i32_checked") || node_word(state, callee, "to_i64_checked") || node_word(state, callee, "to_u8_checked") || node_word(state, callee, "to_u16_checked") || node_word(state, callee, "to_u32_checked") || node_word(state, callee, "to_u64_checked") || node_word(state, callee, "to_i8_wrapping") || node_word(state, callee, "to_i16_wrapping") || node_word(state, callee, "to_i32_wrapping") || node_word(state, callee, "to_i64_wrapping") || node_word(state, callee, "to_u8_wrapping") || node_word(state, callee, "to_u16_wrapping") || node_word(state, callee, "to_u32_wrapping") || node_word(state, callee, "to_u64_wrapping")) {
             return check_int_convert_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+        }
+        // C-boundary conversion methods (M8): the to_T families on c scalar
+        // receivers and on the Alder integer and float primitives. Routed
+        // after the builtin surfaces above so their names keep winning, and
+        // before the nominal-impl fallthrough, which cannot own these
+        // receivers.
+        if c_convert_route(state, callee, receiver_type) {
+            return check_c_convert_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)

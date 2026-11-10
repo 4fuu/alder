@@ -542,6 +542,20 @@ uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand,
     return bits;
 }
 
+/* Narrow a double's bit pattern to the 32-bit pattern of the float with
+ * the same value. Callers only pass patterns the MIR verifier has proven
+ * exactly representable in float, so the conversion is exact and never
+ * out of range. */
+uint64_t alderhost_f32_bits_from_f64_bits(uint64_t bits) {
+    double value;
+    float narrowed;
+    uint32_t pattern = 0U;
+    (void)memcpy(&value, &bits, sizeof(value));
+    narrowed = (float)value;
+    (void)memcpy(&pattern, &narrowed, sizeof(pattern));
+    return pattern;
+}
+
 /* Reinterpret a U64 digit-string value as the I64 with the same 64-bit
  * pattern. Mirrors alder_i64_from_twos_bits in runtime/c/alder.h and avoids
  * the implementation-defined out-of-range unsigned-to-signed conversion. */

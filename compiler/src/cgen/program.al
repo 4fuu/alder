@@ -106,15 +106,7 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
             }
             out = try cgen_put(d, out, ";\n")
         }
-        if item.kind == mir_const_float() {
-            out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED const ")
-            if item.const_type == mir_type_f32() { out = try cgen_put(d, out, "uint32_t") } else { out = try cgen_put(d, out, "uint64_t") }
-            out = try cgen_put(d, out, " alder_const_")
-            out = try cgen_put_u64(d, out, at)
-            if item.const_type == mir_type_f32() { out = try cgen_put(d, out, "_bits = UINT32_C(") } else { out = try cgen_put(d, out, "_bits = UINT64_C(") }
-            out = try cgen_put_u64(d, out, item.float_bits)
-            out = try cgen_put(d, out, ");\n")
-        }
+        if item.kind == mir_const_float() { out = try cgen_emit_const_float_decl(d, out, at, item.const_type, item.float_bits) }
         if item.kind == mir_const_string() {
             out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED ")
             if mir_vtype_kind(store, item.const_type) != mir_type_kind_slice() { out = try cgen_put(d, out, "const ") }
@@ -135,6 +127,25 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
         at = at + 1
     }
     if __s0_buffer_len(MirConstRec, store.constants) > 0 { out = try cgen_put(d, out, "\n") }
+    return Ok(out)
+}
+
+// A float constant's MIR pattern is always the f64 bit pattern of its
+// value. f32 constants store the 32-bit float pattern in their table slot,
+// so the emission narrows the verified-exact pattern through the host.
+fn cgen_emit_const_float_decl(d: Domain, initial: CgenWriter, at: U64, const_type: U64, float_bits: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED const ")
+    if const_type == mir_type_f32() { out = try cgen_put(d, out, "uint32_t") } else { out = try cgen_put(d, out, "uint64_t") }
+    out = try cgen_put(d, out, " alder_const_")
+    out = try cgen_put_u64(d, out, at)
+    if const_type == mir_type_f32() { out = try cgen_put(d, out, "_bits = UINT32_C(") } else { out = try cgen_put(d, out, "_bits = UINT64_C(") }
+    if const_type == mir_type_f32() {
+        out = try cgen_put_u64(d, out, unsafe c { alderhost_f32_bits_from_f64_bits(float_bits) })
+    } else {
+        out = try cgen_put_u64(d, out, float_bits)
+    }
+    out = try cgen_put(d, out, ");\n")
     return Ok(out)
 }
 

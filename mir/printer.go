@@ -407,6 +407,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		OpIntConvertChecked, OpIntConvertWrap:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
 
+	case OpCNumTry, OpCNumWrap, OpCNumCast:
+		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
+
 	case OpConstGet:
 		b.WriteString(" @" + in.Const)
 

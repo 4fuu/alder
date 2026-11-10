@@ -395,6 +395,32 @@ operations on non-integer operands, on a non-`option` result type for
 `int.convert.checked`, and on `int.convert.wrap` results not equal to the
 target type.
 
+## C Scalar Conversion Methods
+
+MIR 6 exposes the C-boundary scalar conversions as operations 88, 89, and 90,
+produced only by named builtin method calls on receivers that live on one
+side of the C boundary:
+
+```text
+c.num.try value, option(E)   (checked form; E is the scalar target)
+c.num.wrap value, E          (wrapping form; integers only)
+c.num.cast value, E          (total bare form)
+```
+
+The value operand has an Alder numeric type (`i8`..`u64`, `f32`, `f64`) or a
+`c_raw` scalar; the target has the other kind. The endpoints must live on
+opposite sides of the boundary and carry matching numeric classes: integer to
+integer, `c_float` to `f32` (or the reverse), `c_double` to `f64` (or the
+reverse), or the widening `c_float` to `f64`. `c.num.try` additionally
+carries the whole option type as its target and accepts the checked integer
+pairs plus the one narrowing float pair (`c_double` to `f32`); `c.num.wrap`
+accepts only integer pairs; `c.num.cast` accepts every verified pair. The
+verifier rejects operations whose endpoints share a world, mix numeric
+classes, use a non-option result for `c.num.try`, or pair a target that does
+not match the class rule above. The checker never emits a total-bare pair
+that is lossy on some target: those calls become `c.num.try` or are rejected
+at the source level.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -755,8 +781,8 @@ format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
 function-type environments, `fn.value`, and `call.value`; and current `mir 6`
 adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 `c.is_null`, the integer overflow method operations (71-79), the
-byte-sequence method operations (80-85), and the integer conversion method
-operations (86-87).
+byte-sequence method operations (80-85), the integer conversion method
+operations (86-87), and the C scalar conversion method operations (88-90).
 Incompatible changes must use a new version and update:
 
 - this document;

@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, and the errno/strerror shims are checked end to end, while records by value, unsafe field access, conversions, exports, and callbacks are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, and the checked scalar conversions are checked end to end, while records by value, unsafe field access, exports, and callbacks are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -160,6 +160,55 @@ module-private and whose construction from a raw pointer is itself an unsafe
 root operation, as above. Implementing `Cleanup` makes an owned wrapper affine.
 Such records cannot accidentally gain structural equality, hashing,
 task-transfer safety, or ordinary dereference from a raw pointer field.
+
+## Scalar conversions
+
+Crossing between `c.*` scalars and Alder numerics is explicit and named. Each
+direction offers up to three forms per pair:
+
+- `to_T()` is total: the pair is lossless on every target, so bare calls are
+  accepted and cannot fail;
+- `to_T_checked() -> Option(T)` yields `some` when the receiver value fits
+  `T` and `none` otherwise;
+- `to_T_wrapping()` truncates on the two's-complement pattern, keeping the
+  low bits of the receiver; offered for integer pairs only, never floats.
+
+On `c.Char`, `c.SChar`, `c.UChar`, `c.Short`, `c.UShort`, `c.Int`, `c.UInt`,
+`c.Long`, `c.ULong`, `c.LongLong`, `c.ULongLong`, `c.Size`, and `c.Ptrdiff`
+receivers, the integer targets are Alder `I8` through `I64` and `U8` through
+`U64`: `to_i8` .. `to_u64` in all three forms, with the total form accepted
+only where the pair is lossless on every target. `c.Size` and `c.Ptrdiff`
+participate at their target widths; `c.Char` participates at the target's
+`char` width and signedness, so its checked forms decide per target and a
+program must not assume `c.Char` behaves like `U8` or `I8`.
+
+Reading floats from C is by value-preserving total forms: `c.Float.to_f32()`,
+`c.Double.to_f64()`, and the widening `c.Float.to_f64()`. Narrowing `F64`
+into `c.Float` exists as `to_c_float_checked() -> Option(c.Float)`, which
+yields `none` for NaN, infinities, and magnitudes beyond `float`'s range by
+comparing in `double` against `float`'s limits before any value conversion.
+In-range values convert with C11 `double`-to-`float` rounding. `F32` has no
+checked narrowing into `c.Float` because the widths are equal; `to_c_float()`
+is total both ways. `F64.to_c_double()` is total. Float comparison and float
+arithmetic are outside the S0/MIR profile while their NaN, division-by-zero,
+and signed-zero semantics await a design decision, so wrappers currently
+observe float values through the checked narrowing's `some`/`none` or through
+integer projections, not through `==`.
+
+Writing Alder integers into C integer scalars is the mirror surface:
+`to_c_char`, `to_c_schar`, `to_c_uchar`, `to_c_short`, `to_c_ushort`,
+`to_c_int`, `to_c_uint`, `to_c_long`, `to_c_ulong`, `to_c_longlong`,
+`to_c_ulonglong`, `to_c_size`, `to_c_ptrdiff`, each in the same three forms
+subject to the same totality rule at the target's width and signedness.
+`c.Float`/`c.Double` receivers also expose the float targets above.
+
+These calls lower to MIR's C-boundary conversion operations (`c.num.try`,
+`c.num.wrap`, `c.num.cast`), which verify endpoint worlds and classes; the C
+backend widens integers with their own signedness before comparing and emits
+no comparison where the pair is total. A call naming none of these methods on
+a `c.*` or numeric receiver is rejected with diagnostic 205 ("no such C
+conversion method on this receiver"). Rust-style `as` casts do not exist; the
+checked and wrapping forms are the only lossy spellings.
 
 ## Ownership and retention
 

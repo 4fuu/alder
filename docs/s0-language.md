@@ -368,6 +368,16 @@ Implemented expressions include:
   form truncating to the target width on the two's-complement pattern. The
   lossy bare form, identity conversions, and the checked or wrapping form on
   a widening pair are rejected (kinds 251, 252, and 253);
+- named builtin C scalar conversion methods between `c.*` scalars and Alder
+  numerics: `c.*` integer scalars carry `to_i8` .. `to_u64` in bare,
+  `_checked`, and `_wrapping` forms (bare accepted only where the pair is
+  lossless on every target, including `c.Char` whose width and signedness
+  are target properties), `c.Float` carries `to_f32` and `to_f64`, and
+  `c.Double` carries `to_f64`; Alder integers carry `to_c_char` through
+  `to_c_ptrdiff` in the same three forms, and the float specials are
+  `F32.to_c_float`, `F64.to_c_double`, and `F64.to_c_float_checked() ->
+  Option(c.Float)`. Any other conversion name on such a receiver is rejected
+  with kind 205. See [C Interoperability](c-interop.md);
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`

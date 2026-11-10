@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpIntConvertWrap {
+	if in.Op > mir.OpCNumCast {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -423,7 +423,8 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	for _, op := range []mir.OpKind{mir.OpAlloc, mir.OpAllocChecked, mir.OpTableCreate, mir.OpEnumConstruct,
 		mir.OpVecNew,
 		mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
-		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap} {
+		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap,
+		mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast} {
 		if in.Op == op && !m.ValidType(in.TypeOp) {
 			errs = append(errs, Error{Loc: loc, Msg: "type operand out of range"})
 		}
@@ -551,7 +552,8 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpTableViewEnd:
 		require(in.View, "view operand")
 	case mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
-		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap:
+		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap,
+		mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast:
 		require(in.A, "conversion operand")
 	case mir.OpCall, mir.OpFFICallUnsafe, mir.OpCBindingCall:
 		requireAll(in.Args, "call argument")
@@ -718,7 +720,8 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpTableViewEnd:
 		add(in.View)
 	case mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
-		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap:
+		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap,
+		mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast:
 		add(in.A)
 	case mir.OpCall, mir.OpFFICallUnsafe:
 		for _, v := range in.Args {

@@ -1197,7 +1197,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     if rec.op >= mir_op_int_trunc() && rec.op <= mir_op_float_from_int() {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op) { return false }
     }
-    if rec.op == mir_op_int_convert_checked() || rec.op == mir_op_int_convert_wrap() {
+    if rec.op == mir_op_int_convert_checked() || rec.op == mir_op_int_convert_wrap() || (rec.op >= mir_op_c_num_try() && rec.op <= mir_op_c_num_cast()) {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op) { return false }
     }
     if rec.op == mir_op_const_get() && !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
@@ -1207,7 +1207,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
 }
 
 fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_int_convert_wrap() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
+    if rec.op > mir_op_c_num_cast() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -1901,6 +1901,9 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 85 { return out_string("str.from_bytes") }
     if op == 86 { return out_string("int.convert.checked") }
     if op == 87 { return out_string("int.convert.wrap") }
+    if op == 88 { return out_string("c.num.try") }
+    if op == 89 { return out_string("c.num.wrap") }
+    if op == 90 { return out_string("c.num.cast") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -2063,7 +2066,7 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     if rec.op >= mir_op_int_trunc() && rec.op <= mir_op_float_from_int() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
     }
-    if rec.op == mir_op_int_convert_checked() || rec.op == mir_op_int_convert_wrap() {
+    if rec.op == mir_op_int_convert_checked() || rec.op == mir_op_int_convert_wrap() || (rec.op >= mir_op_c_num_try() && rec.op <= mir_op_c_num_cast()) {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
     }
     if rec.op == mir_op_const_get() {

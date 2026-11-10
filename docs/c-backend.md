@@ -158,6 +158,8 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `int.convert.checked` widens the receiver to 64 bits with its own signedness (always a defined conversion), range-checks against the target bounds, and fills the option payload with a defined cast only in range. A signed source into an unsigned target rejects negatives through an explicit `uint64_t` comparison, and for `u64` into `i64` the limit comparison itself stays in `uint64_t` so no limit is narrowed;
 - `int.convert.wrap` casts to an unsigned target type; to a signed target it transfers the width-bit two's-complement pattern with `memcpy`;
 - `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
+- the C-boundary conversion operations widen integer crossings to 64 bits with the source's own signedness (always a defined conversion) and then either cast directly (`c.num.wrap`, `c.num.cast`, and total pairs) or range-check into the option (`c.num.try`). A signed source compares `INT64_C(min)` and `INT64_C(max)` in `int64_t` so no negative value wraps before the maximum check; an unsigned target rejects negatives first and compares `UINT64_C(max)` in `uint64_t`; a `uint64_t` source compares the target maximum alone, and an unsigned 64-bit target needs no comparison at all. Static total pairs set the `some` tag and cast without a comparison, because a comparison would be tautological under `-Wtype-limits`;
+- float `c.num` pairs cast directly, except `c.num.try` narrowing `f64` to `c_float`: the value is first held in a `double` temporary and compared against `-(double)FLT_MAX` and `(double)FLT_MAX`, so NaN and out-of-range magnitudes yield `none` before any value conversion, and in-range values convert with C11 `double`-to-`float` rounding;
 
 ### Domains, cleanup, and tables
 
@@ -197,7 +199,7 @@ domain that owns it.
 
 ### Constants and strings
 
-- scalar constants inline as typed literals (`INT64_MIN` uses the portable `(-9223372036854775807LL - 1)` form; negative zero prints as `-0.0`);
+- scalar constants inline as typed literals (`INT64_MIN` uses the portable `(-9223372036854775807LL - 1)` form; negative zero prints as `-0.0`). Float constants in the static table store the `f64` bit pattern of the value; an `f32` slot narrows that verified-exact pattern to the 32-bit `float` pattern through the host shim at emission, so the generated `UINT32_C` constant always fits and bit-copies to the right value;
 - string and bytes constants reference immutable, possibly-unused static numeric byte arrays named by their module constant IDs. Every element is an exact `UINT8_C(N)` value; empty values retain a non-null one-byte backing while exposing length zero. Private bootstrap `slice(u8)` constants retain their legacy mutable backing until M7.3.
 
 ### Unchecked failure policy

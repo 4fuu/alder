@@ -1440,6 +1440,31 @@ parser and checker, the trait fixtures, and docs/s0-language.md migrate in one
 commit before the sysroot library uses `Order` or `Display`; `where` is then
 rejected with a diagnostic that names the new form.
 
+Landed C-interop progress: the checked scalar conversions between `c.*`
+scalars and Alder numerics are installed end to end. The checker accepts the
+documented method surface (`to_i8`..`to_u64` in bare/checked/wrapping forms
+from integer C scalars, the total float reads `c.Float.to_f32`,
+`c.Float.to_f64`, `c.Double.to_f64`, the mirror `to_c_*` integer targets
+from Alder integers, and the float specials `F32.to_c_float`,
+`F64.to_c_double`, `F64.to_c_float_checked`), rejecting any other conversion
+name on such receivers with diagnostic 205 and rejecting lossy bare pairs;
+MIR gains operations 88-90 (`c.num.try`/`c.num.wrap`/`c.num.cast`) whose
+endpoints must cross the boundary with matching numeric classes, mirrored in
+the Go verifier and the Alder mirror; and the C backend widens integer
+crossings in 64-bit signedness before range-checking, handles the one checked
+float narrowing by comparing against `float`'s limits in `double`, and emits
+`f32` constant-table slots as true 32-bit patterns narrowed at emission.
+Evidence: MIR-level accept/reject/inference tests in `mir/verify`, the cgen
+run fixture `cgen/testdata/run/cnum.mir`, and the production qualification
+`compiler/production_c_convert_test.go` (errno and C-fixture programs
+compiled and run under the strict warning set, print/MIR and cross-process
+determinism, and eight checker rejections); the surface is documented in
+[docs/c-interop.md](docs/c-interop.md) "Scalar conversions", with the
+emission contract in [docs/c-backend.md](docs/c-backend.md). Float
+comparison and float arithmetic remain outside the S0/MIR profile pending
+the semantics decision, so float-value assertions currently observe the
+checked narrowing's `some`/`none`.
+
 ## Milestone 9: Async Runtime and Structured Concurrency
 
 Status: **required before Alder 1.0**

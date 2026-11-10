@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_int_convert_wrap() { return false }
+        if item.op > mir_op_c_num_cast() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -968,6 +968,284 @@ fn cgen_emit_int_convert_wrap(d: Domain, initial: CgenWriter, store: MirStore, i
     out = try cgen_put(d, out, ", sizeof(")
     out = try cgen_put_tmp(d, out, item.result, "")
     return cgen_put(d, out, "));\n")
+}
+
+// C-boundary conversion emission (M8). Total pairs and wrapping forms emit a
+// plain C cast; checked pairs emit a range check in a widened integer chosen
+// by the source's width and signedness, with the target's own limit macros
+// cast to the widened type so no comparison is tautological under
+// -Wtype-limits. c.Char keeps its target-dependent signedness: it is read
+// through its own C spelling, so the widened value always carries the true
+// C value on every platform.
+fn cgen_emit_c_convert(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    let src_id = cgen_value_type(store, indexes, item.function, item.a)
+    let dst_id = item.type_op
+    // The try form carries the whole option(E) type in type_op; the scalar
+    // target is its payload. The wrap and cast forms carry the scalar.
+    var dst_scalar = dst_id
+    if item.op == mir_op_c_num_try() {
+        let opt = __s0_buffer_get(MirTypeRec, store.types, dst_id - 1)
+        if opt.kind == mir_type_kind_option() { dst_scalar = opt.elem }
+    }
+    let src_c = cgen_convert_c_raw(store, src_id)
+    let dst_c = cgen_convert_c_raw(store, dst_scalar)
+    var out = initial
+    if cgen_convert_float_class(store, src_id) != 0 {
+        if item.op == mir_op_c_num_try() {
+            // F64 -> c.Float checked: none for NaN and for magnitudes beyond
+            // float's range; the comparison runs in double so no value
+            // conversion precedes it.
+            out = try cgen_put(d, out, "  double ")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " = ")
+            out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+            out = try cgen_put(d, out, ";\n  ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, ".alder_tag = (")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " >= -(double)FLT_MAX && ")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " <= (double)FLT_MAX) ? (uint32_t)1 : (uint32_t)0;\n  if (")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, ".alder_tag) { ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, ".alder_u.alder_p1 = (float)")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            return cgen_put(d, out, "; }\n")
+        }
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (")
+        let spelled = try cgen_put_type(d, out, store, dst_scalar)
+        out = try cgen_put(d, spelled, ")(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op != mir_op_c_num_try() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (")
+        let spelled = try cgen_put_type(d, out, store, dst_id)
+        out = try cgen_put(d, spelled, ")(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    let src_wide_unsigned = cgen_convert_u64_wide(store, src_id)
+    if cgen_convert_int_total(store, src_id, dst_scalar) {
+        // The pair is lossless on every target: an always-some result needs
+        // no comparison, and a comparison here would be tautological under
+        // -Wtype-limits.
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1 = (")
+        let spelled = try cgen_put_type(d, out, store, dst_scalar)
+        out = try cgen_put(d, spelled, ")(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    out = try cgen_put(d, out, "  ")
+    if src_wide_unsigned { out = try cgen_put(d, out, "uint64_t ") } else { out = try cgen_put(d, out, "int64_t ") }
+    out = try cgen_put_tmp(d, out, item.result, "")
+    out = try cgen_put(d, out, " = (")
+    if src_wide_unsigned { out = try cgen_put(d, out, "uint64_t)(") } else { out = try cgen_put(d, out, "int64_t)(") }
+    let spelled_src = try cgen_put_type(d, out, store, src_id)
+    out = try cgen_put(d, spelled_src, ")")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ";\n  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = (")
+    let compared = try cgen_put_convert_compare(d, out, store, src_id, dst_scalar, dst_c, item.result)
+    out = compared
+    out = try cgen_put(d, out, ") ? (uint32_t)1 : (uint32_t)0;\n  if (")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag) { ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_u.alder_p1 = (")
+    let spelled_dst = try cgen_put_type(d, out, store, dst_scalar)
+    out = try cgen_put(d, spelled_dst, ")")
+    out = try cgen_put_tmp(d, out, item.result, "")
+    return cgen_put(d, out, "; }\n")
+}
+
+// The range comparison for a checked integer conversion whose widened tmp is
+// named after the result value. Unsigned 64-bit sources compare in uint64_t
+// against the target maximum; everything else widens to int64_t, checks the
+// target minimum only when the widened value can be negative, and casts the
+// tmp explicitly before comparing against unsigned maxima so no signedness
+// warning can fire. Pairs whose target is as wide as the widened value
+// itself are total and never reach this path.
+fn cgen_put_convert_compare(d: Domain, initial: CgenWriter, store: MirStore, src_id: U64, dst_id: U64, dst_c: U64, result: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    if cgen_convert_u64_wide(store, src_id) {
+        out = try cgen_put(d, out, "(uint64_t)alder_t")
+        out = try cgen_put_u64(d, out, result - 1)
+        out = try cgen_put(d, out, " <= (uint64_t)")
+        return cgen_put_convert_limit(d, out, store, dst_c, dst_id, false)
+    }
+    let src_may_negate = cgen_convert_signed(store, src_id) || cgen_convert_c_raw(store, src_id) == 0
+    if cgen_convert_signed(store, dst_id) {
+        // Signed targets compare minimum and maximum in int64_t: casting a
+        // negative widened value to uint64_t here would wrap and wrongly
+        // reject the target's own negative range.
+        if src_may_negate {
+            out = try cgen_put(d, out, "alder_t")
+            out = try cgen_put_u64(d, out, result - 1)
+            out = try cgen_put(d, out, " >= (int64_t)")
+            out = try cgen_put_convert_limit(d, out, store, dst_c, dst_id, true)
+            out = try cgen_put(d, out, " && ")
+        }
+        out = try cgen_put(d, out, "(int64_t)alder_t")
+        out = try cgen_put_u64(d, out, result - 1)
+        out = try cgen_put(d, out, " <= (int64_t)")
+        return cgen_put_convert_limit(d, out, store, dst_c, dst_id, false)
+    }
+    // The unsigned maximum of a 64-bit target needs no comparison: no
+    // widened value can exceed it, and a tautological compare would be an
+    // error under -Wtype-limits. Narrower unsigned targets reject negatives
+    // first and then compare the maximum in uint64_t.
+    if !cgen_convert_u64_wide(store, dst_id) {
+        if src_may_negate {
+            out = try cgen_put(d, out, "alder_t")
+            out = try cgen_put_u64(d, out, result - 1)
+            out = try cgen_put(d, out, " >= 0 && ")
+        }
+        out = try cgen_put(d, out, "(uint64_t)alder_t")
+        out = try cgen_put_u64(d, out, result - 1)
+        out = try cgen_put(d, out, " <= (uint64_t)")
+        return cgen_put_convert_limit(d, out, store, dst_c, dst_id, false)
+    }
+    if src_may_negate {
+        out = try cgen_put(d, out, "alder_t")
+        out = try cgen_put_u64(d, out, result - 1)
+        return cgen_put(d, out, " >= 0")
+    }
+    return cgen_put(d, out, "1")
+}
+
+// C spelling of one conversion endpoint's limit macro: the c raw scalars use
+// their own macros (CHAR for the target-dependent char, SIZE and PTRDIFF for
+// the 64-bit typedefs); Alder integer targets use the fixed-width macros via
+// the existing limit printer. The caller applies any widening cast.
+fn cgen_put_convert_limit(d: Domain, initial: CgenWriter, store: MirStore, dst_c: U64, dst_id: U64, minimum: Bool) -> Result(CgenWriter, __s0_Error) {
+    if dst_c == 0 { if minimum { return cgen_put(d, initial, "CHAR_MIN") }
+        return cgen_put(d, initial, "CHAR_MAX") }
+    if dst_c == 1 { if minimum { return cgen_put(d, initial, "INT8_MIN") }
+        return cgen_put(d, initial, "INT8_MAX") }
+    if dst_c == 2 { return cgen_put(d, initial, "UINT8_MAX") }
+    if dst_c == 3 { if minimum { return cgen_put(d, initial, "INT16_MIN") }
+        return cgen_put(d, initial, "INT16_MAX") }
+    if dst_c == 4 { return cgen_put(d, initial, "UINT16_MAX") }
+    if dst_c == 5 { if minimum { return cgen_put(d, initial, "INT32_MIN") }
+        return cgen_put(d, initial, "INT32_MAX") }
+    if dst_c == 6 { return cgen_put(d, initial, "UINT32_MAX") }
+    if dst_c == 7 { if minimum { return cgen_put(d, initial, "LONG_MIN") }
+        return cgen_put(d, initial, "LONG_MAX") }
+    if dst_c == 8 { return cgen_put(d, initial, "ULONG_MAX") }
+    if dst_c == 9 { if minimum { return cgen_put(d, initial, "LLONG_MIN") }
+        return cgen_put(d, initial, "LLONG_MAX") }
+    if dst_c == 10 { return cgen_put(d, initial, "ULLONG_MAX") }
+    if dst_c == 13 { return cgen_put(d, initial, "SIZE_MAX") }
+    if dst_c == 14 { if minimum { return cgen_put(d, initial, "PTRDIFF_MIN") }
+        return cgen_put(d, initial, "PTRDIFF_MAX") }
+    return cgen_put_int_limit(d, initial, cgen_convert_signed(store, dst_id), cgen_convert_int_width(store, dst_id), minimum)
+}
+
+// c raw scalar id of a conversion endpoint, or 15 when the endpoint is an
+// Alder primitive or another kind. The id order matches CScalar: 0 char,
+// 1 signed char, 2 unsigned char, 3 short, 4 unsigned short, 5 int,
+// 6 unsigned int, 7 long, 8 unsigned long, 9 long long, 10 unsigned
+// long long, 11 float, 12 double, 13 size_t, 14 ptrdiff_t.
+fn cgen_convert_c_raw(store: MirStore, type_id: U64) -> U64 {
+    if type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return 15 }
+    let t = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if t.kind == mir_type_kind_c_raw() { return t.length }
+    return 15
+}
+
+// Alder primitive target of a conversion endpoint: 2..11 for the integer
+// and float primitives (I8..U64, then F32, F64), 0 for anything else. The
+// decode mirrors the checker's alder_index encoding (target - 2).
+fn cgen_convert_alder_target(store: MirStore, type_id: U64) -> U64 {
+    if type_id >= mir_type_i8() && type_id <= mir_type_i64() { return type_id - mir_type_i8() + 2 }
+    if type_id >= mir_type_u8() && type_id <= mir_type_u64() { return type_id - mir_type_u8() + 6 }
+    if type_id == mir_type_f32() { return 10 }
+    if type_id == mir_type_f64() { return 11 }
+    return 0
+}
+
+// Bit width of one conversion endpoint's integer side, 0 when the endpoint
+// is not an integer. c.Char counts as 8 bits: its signedness is what stays
+// unknown, never its width.
+fn cgen_convert_int_width(store: MirStore, type_id: U64) -> U64 {
+    let at = cgen_convert_alder_target(store, type_id)
+    if at == 2 || at == 6 { return 8 }
+    if at == 3 || at == 7 { return 16 }
+    if at == 4 || at == 8 { return 32 }
+    if at == 5 || at == 9 { return 64 }
+    let c = cgen_convert_c_raw(store, type_id)
+    if c == 0 || c == 1 || c == 2 { return 8 }
+    if c == 3 || c == 4 { return 16 }
+    if c == 5 || c == 6 { return 32 }
+    if c == 7 || c == 8 || c == 9 || c == 10 || c == 13 || c == 14 { return 64 }
+    return 0
+}
+
+// Whether one conversion endpoint's integer side is signed. c.Char returns
+// false: its signedness is target-dependent, and the callers that need to
+// know test for it separately.
+fn cgen_convert_signed(store: MirStore, type_id: U64) -> Bool {
+    let at = cgen_convert_alder_target(store, type_id)
+    if at >= 2 && at <= 5 { return true }
+    let c = cgen_convert_c_raw(store, type_id)
+    return c == 1 || c == 3 || c == 5 || c == 7 || c == 9 || c == 14
+}
+
+// Whether one conversion endpoint's integer side must widen into uint64_t:
+// exactly the 64-bit unsigned scalars, whose values do not fit int64_t.
+fn cgen_convert_u64_wide(store: MirStore, type_id: U64) -> Bool {
+    if cgen_convert_alder_target(store, type_id) == 9 { return true }
+    let c = cgen_convert_c_raw(store, type_id)
+    return c == 8 || c == 10 || c == 13
+}
+
+// IEEE class of a conversion endpoint: 1 single, 2 double, 0 not a float.
+fn cgen_convert_float_class(store: MirStore, type_id: U64) -> U64 {
+    let at = cgen_convert_alder_target(store, type_id)
+    if at == 10 { return 1 }
+    if at == 11 { return 2 }
+    let c = cgen_convert_c_raw(store, type_id)
+    if c == 11 { return 1 }
+    if c == 12 { return 2 }
+    return 0
+}
+
+// Whether the conversion is lossless on every target Alder supports, so the
+// checked form is statically always some. Mirrors the checker's
+// c_convert_total: same-sign needs a target at least as wide, unsigned into
+// signed needs a strictly wider target, signed into unsigned is never
+// total. c.Char's target-dependent signedness keeps the runtime check even
+// where both platforms happen to be lossless: only the strictly wider
+// signed targets are total either way.
+fn cgen_convert_int_total(store: MirStore, src_id: U64, dst_id: U64) -> Bool {
+    let src_c = cgen_convert_c_raw(store, src_id)
+    let dst_c = cgen_convert_c_raw(store, dst_id)
+    if src_c == 0 {
+        if dst_c != 15 { return false }
+        let dst_at = cgen_convert_alder_target(store, dst_id)
+        return dst_at == 3 || dst_at == 4 || dst_at == 5
+    }
+    if dst_c == 0 { return false }
+    let src_width = cgen_convert_int_width(store, src_id)
+    let dst_width = cgen_convert_int_width(store, dst_id)
+    if src_width == 0 || dst_width == 0 { return false }
+    let src_signed = cgen_convert_signed(store, src_id)
+    let dst_signed = cgen_convert_signed(store, dst_id)
+    if src_signed && dst_signed { return dst_width >= src_width }
+    if !src_signed && !dst_signed { return dst_width >= src_width }
+    if !src_signed && dst_signed { return dst_width > src_width }
+    return false
 }
 
 fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
@@ -1762,6 +2040,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_c_is_null() { return cgen_emit_c_is_null(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_int_convert_checked() { return cgen_emit_int_convert_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_int_convert_wrap() { return cgen_emit_int_convert_wrap(d, out, store, indexes, instruction, item) }
+    if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
 

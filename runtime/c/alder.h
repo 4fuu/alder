@@ -20,6 +20,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <limits.h>
+#include <float.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -136,6 +136,14 @@ const (
 	// the value's low bits at the target width in two's complement.
 	OpIntConvertChecked
 	OpIntConvertWrap
+
+	// Explicit conversions across the C boundary: try produces option(T)
+	// (none when the value does not fit T on this target), wrap applies the
+	// C cast modulo pattern, and cast covers the total pairs. All three read
+	// one operand and name their target through TypeOp.
+	OpCNumTry
+	OpCNumWrap
+	OpCNumCast
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -322,6 +330,12 @@ func (k OpKind) String() string {
 		return "int.convert.checked"
 	case OpIntConvertWrap:
 		return "int.convert.wrap"
+	case OpCNumTry:
+		return "c.num.try"
+	case OpCNumWrap:
+		return "c.num.wrap"
+	case OpCNumCast:
+		return "c.num.cast"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

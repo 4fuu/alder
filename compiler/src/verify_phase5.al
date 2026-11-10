@@ -12,6 +12,75 @@ fn mir_v5_value_type(store: MirStore, indexes: MirVIndexes, function: U64, value
 }
 fn mir_v5_is_int(t: U64) -> Bool { return t >= mir_type_i8() && t <= mir_type_u64() }
 fn mir_v5_is_float(t: U64) -> Bool { return t == mir_type_f32() || t == mir_type_f64() }
+
+// World of a c.num conversion endpoint: 1 an Alder primitive, 2 a c_raw
+// scalar, 0 anything else.
+fn mir_v5_c_num_world(store: MirStore, t: U64) -> U64 {
+    if t == 0 || t > __s0_buffer_len(MirTypeRec, store.types) { return 0 }
+    if t >= mir_type_i8() && t <= mir_type_u64() { return 1 }
+    if t == mir_type_f32() || t == mir_type_f64() { return 1 }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, t - 1)
+    if rec.kind == mir_type_kind_c_raw() && rec.length <= 14 { return 2 }
+    return 0
+}
+
+// Numeric class of a c.num conversion endpoint: 1 integer, 2 IEEE single,
+// 3 IEEE double, 0 anything else. c_raw lengths 13 and 14 (size_t,
+// ptrdiff_t) are integer scalars like the fixed-width C integers. The
+// Alder integer primitives are the fixed type ids i8..u64.
+fn mir_v5_c_num_class(store: MirStore, t: U64) -> U64 {
+    if t == 0 || t > __s0_buffer_len(MirTypeRec, store.types) { return 0 }
+    if t >= mir_type_i8() && t <= mir_type_u64() { return 1 }
+    if t == mir_type_f32() { return 2 }
+    if t == mir_type_f64() { return 3 }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, t - 1)
+    if rec.kind == mir_type_kind_c_raw() {
+        if rec.length <= 10 || rec.length == 13 || rec.length == 14 { return 1 }
+        if rec.length == 11 { return 2 }
+        if rec.length == 12 { return 3 }
+        return 0
+    }
+    return 0
+}
+
+// Pair legality for one c.num conversion (source, target): 1 integer
+// across the boundary, 2 float same precision, 3 float widening
+// (c.Float -> F64), 0 anything else. The two endpoints must live on
+// opposite sides of the C boundary.
+fn mir_v5_c_num_pair(store: MirStore, source: U64, target: U64) -> U64 {
+    let sw = mir_v5_c_num_world(store, source)
+    let tw = mir_v5_c_num_world(store, target)
+    if sw == 0 || tw == 0 || sw == tw { return 0 }
+    let sc = mir_v5_c_num_class(store, source)
+    let tc = mir_v5_c_num_class(store, target)
+    if sc == 1 && tc == 1 { return 1 }
+    if sc == 2 && tc == 3 { return 3 }
+    if sc == tc { return 2 }
+    return 0
+}
+
+// Result typing for c.num.try/wrap/cast. type_op names the target: an
+// option(E) for the try form (E is the payload type), the bare target for
+// wrap and cast. try narrows or converts integers and narrows IEEE double
+// to single; wrap converts integers; cast accepts the total pairs the
+// checker can produce: every integer pair plus same-precision and
+// widening float pairs.
+fn mir_v5_c_num_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, ta: U64) -> MirVTypeResult {
+    if x.type_op == 0 || x.type_op > __s0_buffer_len(MirTypeRec, store.types) { return MirVTypeResult(valid: false, type_id: 0) }
+    let named = __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1)
+    if x.op == mir_op_c_num_try() {
+        if named.kind != mir_type_kind_option() { return MirVTypeResult(valid: false, type_id: 0) }
+        let sc = mir_v5_c_num_class(store, ta)
+        let tc = mir_v5_c_num_class(store, named.elem)
+        if mir_v5_c_num_pair(store, ta, named.elem) == 1 { return MirVTypeResult(valid: true, type_id: x.type_op) }
+        if sc == 3 && tc == 2 { return MirVTypeResult(valid: true, type_id: x.type_op) }
+        return MirVTypeResult(valid: false, type_id: 0)
+    }
+    let pair = mir_v5_c_num_pair(store, ta, x.type_op)
+    if x.op == mir_op_c_num_wrap() { return MirVTypeResult(valid: pair == 1, type_id: x.type_op) }
+    return MirVTypeResult(valid: pair != 0, type_id: x.type_op)
+}
+
 fn mir_v5_is_enum(store: MirStore, t: U64) -> Bool { let k = mir_vtype_kind(store, t)
 return k == mir_type_kind_enum() || k == mir_type_kind_option() || k == mir_type_kind_result() }
 fn mir_v5_width(t: U64) -> U64 { if t == mir_type_i8() || t == mir_type_u8() { return 8 }
@@ -319,6 +388,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op >= mir_op_int_add_try() && x.op <= mir_op_int_mul_wrapping() { let pair = mir_v5_is_int(ta) && ta == tb
     if x.op <= mir_op_int_mul_try() { return MirVTypeResult(valid: pair, type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), ta)) }
     return MirVTypeResult(valid: pair, type_id: ta) }
+    if x.op >= mir_op_c_num_try() && x.op <= mir_op_c_num_cast() { return mir_v5_c_num_result(store, indexes, x, ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)

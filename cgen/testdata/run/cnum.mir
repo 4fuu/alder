@@ -1,0 +1,73 @@
+mir 6
+
+fn @try_u32_size(%u: u32) -> option(c_size) {
+entry:
+  %r = c.num.try %u, option(c_size)
+  return %r
+}
+
+fn @try_cint_i8(%s: c_int) -> option(i8) {
+entry:
+  %r = c.num.try %s, option(i8)
+  return %r
+}
+
+fn @try_culong_i64(%u: c_ulong) -> option(i64) {
+entry:
+  %r = c.num.try %u, option(i64)
+  return %r
+}
+
+fn @try_cchar_u8(%c: c_char) -> option(u8) {
+entry:
+  %r = c.num.try %c, option(u8)
+  return %r
+}
+
+fn @wrap_i16_cushort(%s: i16) -> c_ushort {
+entry:
+  %r = c.num.wrap %s, c_ushort
+  return %r
+}
+
+fn @wrap_i32_cschar(%s: i32) -> c_schar {
+entry:
+  %r = c.num.wrap %s, c_schar
+  return %r
+}
+
+fn @cast_u32_culong(%u: u32) -> c_ulong {
+entry:
+  %r = c.num.cast %u, c_ulong
+  return %r
+}
+
+fn @cast_f32_cfloat(%f: f32) -> c_float {
+entry:
+  %r = c.num.cast %f, c_float
+  return %r
+}
+
+fn @cast_cdouble_f64(%d: c_double) -> f64 {
+entry:
+  %r = c.num.cast %d, f64
+  return %r
+}
+
+fn @try_f64_cfloat(%d: f64) -> option(c_float) {
+entry:
+  %r = c.num.try %d, option(c_float)
+  return %r
+}
+
+fn @try_cllong_cuint(%s: i64) -> option(c_uint) {
+entry:
+  %r = c.num.try %s, option(c_uint)
+  return %r
+}
+
+fn @try_clong_culong(%s: i64) -> option(c_ulong) {
+entry:
+  %r = c.num.try %s, option(c_ulong)
+  return %r
+}

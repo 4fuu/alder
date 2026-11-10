@@ -90,6 +90,68 @@ func intWidth(t TypeId) int {
 	return 0
 }
 
+// CNumWorldOf classifies a c.num conversion endpoint's world: 1 an Alder
+// numeric primitive, 2 a c_raw scalar, 0 anything else.
+func CNumWorldOf(m *Module, t TypeId) int {
+	if IsIntType(t) || IsFloatType(t) {
+		return 1
+	}
+	if m.ValidType(t) && m.Types[t].Kind == TypeCRaw {
+		return 2
+	}
+	return 0
+}
+
+// CNumClassOf classifies a c.num conversion endpoint's numeric class:
+// 1 integer, 2 IEEE single, 3 IEEE double, 0 anything else. c_raw size_t
+// and ptrdiff_t are integer scalars like the fixed-width C integers.
+func CNumClassOf(m *Module, t TypeId) int {
+	if IsIntType(t) {
+		return 1
+	}
+	if t == TypeF32 {
+		return 2
+	}
+	if t == TypeF64 {
+		return 3
+	}
+	if m.ValidType(t) && m.Types[t].Kind == TypeCRaw {
+		switch id := m.Types[t].Length; {
+		case id <= CScalarULongLong || id == CScalarSize || id == CScalarPtrdiff:
+			return 1
+		case id == CScalarFloat:
+			return 2
+		case id == CScalarDouble:
+			return 3
+		}
+	}
+	return 0
+}
+
+// CNumPairClass classifies one C-boundary conversion pair: 0 invalid,
+// 1 integer across the boundary, 2 float same precision, 3 float widening
+// (c.Float -> F64). The two endpoints must live on opposite sides of the
+// boundary.
+func CNumPairClass(m *Module, source, target TypeId) int {
+	sw := CNumWorldOf(m, source)
+	tw := CNumWorldOf(m, target)
+	if sw == 0 || tw == 0 || sw == tw {
+		return 0
+	}
+	sc := CNumClassOf(m, source)
+	tc := CNumClassOf(m, target)
+	if sc == 1 && tc == 1 {
+		return 1
+	}
+	if sc == 2 && tc == 3 {
+		return 3
+	}
+	if sc == tc {
+		return 2
+	}
+	return 0
+}
+
 // InferResultType computes the result type of a value-producing instruction
 // from its operands, or false when the instruction is not well-typed. The
 // parser uses this to build typed values; the verifier uses it to validate
@@ -531,6 +593,29 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 	case OpFloatFromInt:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsFloatType(in.TypeOp) {
+			return NoType, false
+		}
+		return in.TypeOp, true
+
+	case OpCNumTry:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(in.TypeOp) || m.Types[in.TypeOp].Kind != TypeOption {
+			return NoType, false
+		}
+		class := CNumPairClass(m, ta, m.Types[in.TypeOp].Elem)
+		if class == 1 || (CNumClassOf(m, ta) == 3 && CNumClassOf(m, m.Types[in.TypeOp].Elem) == 2) {
+			return in.TypeOp, true
+		}
+		return NoType, false
+	case OpCNumWrap:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(in.TypeOp) || CNumPairClass(m, ta, in.TypeOp) != 1 {
+			return NoType, false
+		}
+		return in.TypeOp, true
+	case OpCNumCast:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(in.TypeOp) || CNumPairClass(m, ta, in.TypeOp) == 0 {
 			return NoType, false
 		}
 		return in.TypeOp, true

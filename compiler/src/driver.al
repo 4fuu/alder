@@ -261,6 +261,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 202 { return out_string("c.is_null takes one raw C pointer") }
     if kind == 203 { return out_string("a C binding call's non-unit result must be used") }
     if kind == 204 { return out_string("unsafe c does not name a raw fn of a C binding block") }
+    if kind == 205 { return out_string("no such C conversion method on this receiver") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

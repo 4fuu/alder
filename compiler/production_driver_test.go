@@ -930,6 +930,7 @@ bool alderhost_response_reset(void) { return true; }
 bool alderhost_stdout_byte(uint8_t byte) { (void)byte; return %s; }
 bool alderhost_stdout_f64_bits(uint64_t bits) { (void)bits; return true; }
 uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent) { double value = (double)significand; uint64_t bits = 0; while (exponent > 0) { value *= 10.0; exponent--; } while (exponent < 0) { value /= 10.0; exponent++; } if (negative != 0) { value = -value; } memcpy(&bits, &value, sizeof(bits)); return bits; }
+uint64_t alderhost_f32_bits_from_f64_bits(uint64_t bits) { double value; float narrowed; uint32_t pattern = 0U; memcpy(&value, &bits, sizeof(value)); narrowed = (float)value; memcpy(&pattern, &narrowed, sizeof(pattern)); return pattern; }
 int64_t alderhost_i64_from_u64_bits(uint64_t bits) { int64_t out; memcpy(&out, &bits, sizeof(out)); return out; }
 uint64_t alderhost_u64_from_i64_bits(int64_t value) { uint64_t out; memcpy(&out, &value, sizeof(out)); return out; }
 bool alderhost_stderr_byte(uint8_t byte) { (void)byte; return true; }

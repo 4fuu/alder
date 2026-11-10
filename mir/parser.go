@@ -1453,6 +1453,16 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = parseConv(op)
 
+	case "c.num.try", "c.num.wrap", "c.num.cast":
+		op, ok := cNumOpByName[t.text]
+		if !ok {
+			return in, p.errf(t, "internal error: unknown c conversion %q", t.text)
+		}
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		err = parseConv(op)
+
 	case "const.get":
 		in.Op = OpConstGet
 		nameTok, err := p.expectAtName("a constant name")
@@ -2188,4 +2198,9 @@ var convOpByName = map[string]OpKind{
 	"int.convert.checked": OpIntConvertChecked, "int.convert.wrap": OpIntConvertWrap,
 	"float.convert": OpFloatConvert, "int.from_float": OpIntFromFloat,
 	"float.from_int": OpFloatFromInt,
+}
+
+// cNumOpByName maps the C-boundary conversion names to operations.
+var cNumOpByName = map[string]OpKind{
+	"c.num.try": OpCNumTry, "c.num.wrap": OpCNumWrap, "c.num.cast": OpCNumCast,
 }

@@ -337,6 +337,32 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "float.from_int result type must be f32 or f64"})
 		}
 
+	case mir.OpCNumTry:
+		ta, ok := f.ValueType(in.A)
+		if !ok || ta == mir.NoType || !m.ValidType(in.TypeOp) || m.Types[in.TypeOp].Kind != mir.TypeOption {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.num.try result type must be option(T) of a C-boundary numeric"})
+			break
+		}
+		elem := m.Types[in.TypeOp].Elem
+		class := mir.CNumPairClass(m, ta, elem)
+		narrow := mir.CNumClassOf(m, ta) == 3 && mir.CNumClassOf(m, elem) == 2
+		if class != 1 && !narrow {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.num.try must cross the C boundary between an integer and an integer or narrow a double to a float"})
+		}
+
+	case mir.OpCNumWrap, mir.OpCNumCast:
+		ta, ok := f.ValueType(in.A)
+		if !ok || ta == mir.NoType || !m.ValidType(in.TypeOp) {
+			break
+		}
+		class := mir.CNumPairClass(m, ta, in.TypeOp)
+		if in.Op == mir.OpCNumWrap && class != 1 {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.num.wrap must cross the C boundary between two integers"})
+		}
+		if in.Op == mir.OpCNumCast && class == 0 {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.num.cast must cross the C boundary between matching numeric kinds"})
+		}
+
 	case mir.OpConstGet:
 		// Constant existence is checked in phase 1; result type below.
 

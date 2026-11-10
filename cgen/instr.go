@@ -509,6 +509,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpIntConvertWrap:
 		g.emitTrunc(b, in)
 
+	case mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast:
+		g.emitCNumConvert(b, in)
+
 	case mir.OpFFICallUnsafe:
 		imp := &g.m.Imports[in.FFIImport]
 		b.WriteString("  ")
@@ -1061,6 +1064,287 @@ func (g *gen) emitIntConvertChecked(b *strings.Builder, in *mir.Instr) {
 	b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p1 = (" + g.cType(in.TypeOp) + ")" + tmp + ";\n")
 	b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)1;\n")
 	b.WriteString("  }\n")
+}
+
+// cConvScalarID maps a conversion endpoint to its c scalar id, 15 for an
+// Alder primitive or another kind. The id order matches CScalar: 0 char,
+// 1 signed char, 2 unsigned char, 3 short, 4 unsigned short, 5 int,
+// 6 unsigned int, 7 long, 8 unsigned long, 9 long long, 10 unsigned
+// long long, 11 float, 12 double, 13 size_t, 14 ptrdiff_t.
+func cConvScalarID(m *mir.Module, t mir.TypeId) uint64 {
+	if m.ValidType(t) && m.Types[t].Kind == mir.TypeCRaw {
+		return m.Types[t].Length
+	}
+	return 15
+}
+
+// cConvAlderTarget returns the Alder primitive target of a conversion
+// endpoint: 2..11 for the integer and float primitives (I8..U64, then F32,
+// F64), 0 for anything else. The decode mirrors the checker's alder_index
+// encoding (target - 2).
+func cConvAlderTarget(t mir.TypeId) uint64 {
+	if t >= mir.TypeI8 && t <= mir.TypeI64 {
+		return uint64(t) - uint64(mir.TypeI8) + 2
+	}
+	if t >= mir.TypeU8 && t <= mir.TypeU64 {
+		return uint64(t) - uint64(mir.TypeU8) + 6
+	}
+	if t == mir.TypeF32 {
+		return 10
+	}
+	if t == mir.TypeF64 {
+		return 11
+	}
+	return 0
+}
+
+// cConvIntWidth returns the bit width of one conversion endpoint's integer
+// side, 0 when the endpoint is not an integer. c.Char counts as 8 bits: its
+// signedness is what stays unknown, never its width.
+func cConvIntWidth(m *mir.Module, t mir.TypeId) int {
+	if mir.IsIntType(t) {
+		w, _ := intInfo(t)
+		return w
+	}
+	switch cConvScalarID(m, t) {
+	case 0, 1, 2:
+		return 8
+	case 3, 4:
+		return 16
+	case 5, 6:
+		return 32
+	case 7, 8, 9, 10, 13, 14:
+		return 64
+	}
+	return 0
+}
+
+// cConvSigned reports whether one conversion endpoint's integer side is
+// signed. c.Char returns false: its signedness is target-dependent, and the
+// callers that need to know test for it separately.
+func cConvSigned(m *mir.Module, t mir.TypeId) bool {
+	if mir.IsIntType(t) {
+		_, signed := intInfo(t)
+		return signed
+	}
+	switch cConvScalarID(m, t) {
+	case 1, 3, 5, 7, 9, 14:
+		return true
+	}
+	return false
+}
+
+// cConvU64Wide reports whether one conversion endpoint's integer side must
+// widen into uint64_t: exactly the 64-bit unsigned scalars, whose values do
+// not fit int64_t.
+func cConvU64Wide(m *mir.Module, t mir.TypeId) bool {
+	if t == mir.TypeU64 {
+		return true
+	}
+	switch cConvScalarID(m, t) {
+	case 8, 10, 13:
+		return true
+	}
+	return false
+}
+
+// cConvFloatClass returns the IEEE class of a conversion endpoint: 1 single,
+// 2 double, 0 not a float.
+func cConvFloatClass(m *mir.Module, t mir.TypeId) int {
+	switch t {
+	case mir.TypeF32:
+		return 1
+	case mir.TypeF64:
+		return 2
+	}
+	switch cConvScalarID(m, t) {
+	case 11:
+		return 1
+	case 12:
+		return 2
+	}
+	return 0
+}
+
+// cConvIntTotal reports whether the conversion is lossless on every target
+// Alder supports, so the checked form is statically always some. Mirrors the
+// checker's c_convert_total: same-sign needs a target at least as wide,
+// unsigned into signed needs a strictly wider target, signed into unsigned
+// is never total. c.Char's target-dependent signedness keeps the runtime
+// check even where both platforms happen to be lossless: only the strictly
+// wider signed targets are total either way.
+func cConvIntTotal(m *mir.Module, src, dst mir.TypeId) bool {
+	srcC := cConvScalarID(m, src)
+	dstC := cConvScalarID(m, dst)
+	if srcC == 0 {
+		if dstC != 15 {
+			return false
+		}
+		at := cConvAlderTarget(dst)
+		return at == 3 || at == 4 || at == 5
+	}
+	if dstC == 0 {
+		return false
+	}
+	srcWidth := cConvIntWidth(m, src)
+	dstWidth := cConvIntWidth(m, dst)
+	if srcWidth == 0 || dstWidth == 0 {
+		return false
+	}
+	srcSigned := cConvSigned(m, src)
+	dstSigned := cConvSigned(m, dst)
+	if srcSigned == dstSigned {
+		return dstWidth >= srcWidth
+	}
+	if !srcSigned && dstSigned {
+		return dstWidth > srcWidth
+	}
+	return false
+}
+
+// cConvLimit returns the C spelling of one conversion endpoint's limit
+// macro: the c raw scalars use their own macros (CHAR for the
+// target-dependent char, SIZE and PTRDIFF for the 64-bit typedefs); Alder
+// integer targets use the fixed-width macros. The caller applies any
+// widening cast.
+func cConvLimit(m *mir.Module, dst mir.TypeId, minimum bool) string {
+	switch cConvScalarID(m, dst) {
+	case 0:
+		if minimum {
+			return "CHAR_MIN"
+		}
+		return "CHAR_MAX"
+	case 1:
+		if minimum {
+			return "INT8_MIN"
+		}
+		return "INT8_MAX"
+	case 2:
+		return "UINT8_MAX"
+	case 3:
+		if minimum {
+			return "INT16_MIN"
+		}
+		return "INT16_MAX"
+	case 4:
+		return "UINT16_MAX"
+	case 5:
+		if minimum {
+			return "INT32_MIN"
+		}
+		return "INT32_MAX"
+	case 6:
+		return "UINT32_MAX"
+	case 7:
+		if minimum {
+			return "LONG_MIN"
+		}
+		return "LONG_MAX"
+	case 8:
+		return "ULONG_MAX"
+	case 9:
+		if minimum {
+			return "LLONG_MIN"
+		}
+		return "LLONG_MAX"
+	case 10:
+		return "ULLONG_MAX"
+	case 13:
+		return "SIZE_MAX"
+	case 14:
+		if minimum {
+			return "PTRDIFF_MIN"
+		}
+		return "PTRDIFF_MAX"
+	}
+	width, signed := intInfo(dst)
+	if signed {
+		min, max := intLimits(width)
+		if minimum {
+			return min
+		}
+		return max
+	}
+	return uintLimit(width)
+}
+
+// cConvCompare renders the in-range condition of a checked integer C
+// conversion. tmp holds the source widened to 64 bits with its own
+// signedness. A uint64_t tmp compares against the target maximum alone;
+// signed targets compare minimum and maximum in int64_t, so no negative
+// value wraps before the maximum check; unsigned targets reject negatives
+// first and then compare the maximum in uint64_t. The statically always-true
+// shapes never reach here because cConvIntTotal handles those pairs without
+// a comparison, and the unsigned 64-bit maximum needs no comparison at all.
+func (g *gen) cConvCompare(src, dst mir.TypeId, tmp string) string {
+	if cConvU64Wide(g.m, src) {
+		return "(uint64_t)" + tmp + " <= (uint64_t)" + cConvLimit(g.m, dst, false)
+	}
+	srcChar := cConvScalarID(g.m, src) == 0
+	srcMayNeg := cConvSigned(g.m, src) || srcChar
+	if cConvSigned(g.m, dst) {
+		if srcMayNeg {
+			return tmp + " >= (int64_t)" + cConvLimit(g.m, dst, true) + " && (int64_t)" + tmp +
+				" <= (int64_t)" + cConvLimit(g.m, dst, false)
+		}
+		return "(int64_t)" + tmp + " <= (int64_t)" + cConvLimit(g.m, dst, false)
+	}
+	if srcMayNeg {
+		return tmp + " >= 0 && (uint64_t)" + tmp + " <= (uint64_t)" + cConvLimit(g.m, dst, false)
+	}
+	return "(uint64_t)" + tmp + " <= (uint64_t)" + cConvLimit(g.m, dst, false)
+}
+
+// emitCNumConvert lowers the C-boundary conversion operations. Integer
+// crossings widen into 64 bits with their own signedness and either cast
+// directly (wrap, cast, or a total pair) or range-check into the option
+// (try). Float pairs cast directly except the f64 to c_float narrowing,
+// whose checked form compares in double against float's limits so NaN and
+// out-of-range magnitudes yield none without a value conversion.
+func (g *gen) emitCNumConvert(b *strings.Builder, in *mir.Instr) {
+	src, _ := g.f.ValueType(in.A)
+	dst := in.TypeOp
+	if in.Op == mir.OpCNumTry {
+		// The try form carries the whole option(E) type; the scalar target
+		// is its payload.
+		if g.m.ValidType(dst) && g.m.Types[dst].Kind == mir.TypeOption {
+			dst = g.m.Types[dst].Elem
+		}
+	}
+	if cConvFloatClass(g.m, src) != 0 {
+		if in.Op == mir.OpCNumTry {
+			tmp := g.tmp(in, "")
+			v := g.valueExpr(in.A)
+			b.WriteString("  double " + tmp + " = " + v + ";\n")
+			b.WriteString("  " + g.val(in.Result) + ".alder_tag = (" + tmp + " >= -(double)FLT_MAX && " + tmp +
+				" <= (double)FLT_MAX) ? (uint32_t)1 : (uint32_t)0;\n")
+			b.WriteString("  if (" + g.val(in.Result) + ".alder_tag) { " + g.val(in.Result) + ".alder_u.alder_p1 = (float)" + tmp + "; }\n")
+			return
+		}
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(dst) + ")" + g.valueExpr(in.A) + ";\n")
+		return
+	}
+	if in.Op != mir.OpCNumTry {
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(dst) + ")" + g.valueExpr(in.A) + ";\n")
+		return
+	}
+	if cConvIntTotal(g.m, src, dst) {
+		// The pair is lossless on every target: an always-some result needs
+		// no comparison, and a comparison here would be tautological under
+		// -Wtype-limits.
+		b.WriteString("  " + g.val(in.Result) + ".alder_tag = (uint32_t)1;\n")
+		b.WriteString("  " + g.val(in.Result) + ".alder_u.alder_p1 = (" + g.cType(dst) + ")" + g.valueExpr(in.A) + ";\n")
+		return
+	}
+	wide := "int64_t"
+	if cConvU64Wide(g.m, src) {
+		wide = "uint64_t"
+	}
+	tmp := g.tmp(in, "")
+	b.WriteString("  " + wide + " " + tmp + " = (" + wide + ")(" + g.cType(src) + ")" + g.valueExpr(in.A) + ";\n")
+	b.WriteString("  " + g.val(in.Result) + ".alder_tag = (" + g.cConvCompare(src, dst, tmp) + ") ? (uint32_t)1 : (uint32_t)0;\n")
+	b.WriteString("  if (" + g.val(in.Result) + ".alder_tag) { " + g.val(in.Result) + ".alder_u.alder_p1 = (" +
+		g.cType(dst) + ")" + tmp + "; }\n")
 }
 
 // emitFloatConvert avoids C11's undefined out-of-range real conversion. MIR
