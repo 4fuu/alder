@@ -8778,7 +8778,25 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     }
     var result_type = left_draft.checked_type
     if operator >= 10 && operator <= 15 {
-        if !left_limits.integer && !float_type(state, parse, right_store, left_draft.checked_type) { return expr_token_fail(d, state, base, 36, expression) }
+        // `==` and `!=` dispatch on Eq: every primitive keeps the existing
+        // comparison profile (floats included), String and Bytes compare by
+        // bytes, and records and enums — generic applications included —
+        // need structural Eq on every component. Ordering keeps its
+        // integer-or-float profile.
+        var comparable = left_limits.integer || float_type(state, parse, right_store, left_draft.checked_type)
+        var unsupported_kind: U64 = 36
+        if operator == 10 || operator == 11 {
+            unsupported_kind = 303
+            if left_draft.checked_type != 0 {
+                let operand_kind = __s0_buffer_get(CheckedTypeRec, right_store.types, left_draft.checked_type - 1).kind
+                comparable = operand_kind == 1 || operand_kind == 2 || operand_kind == 14
+                if !comparable && operand_kind == 7 {
+                    let structural = try structural_eq_supported(d, right_store, left_draft.checked_type, 0)
+                    comparable = structural
+                }
+            }
+        }
+        if !comparable { return expr_token_fail(d, state, base, unsupported_kind, expression) }
         result_type = expected
         if !primitive_type_named(state, parse, right_store, result_type, "Bool") { result_type = primitive_type_id(state, parse, right_store, "Bool") }
         if result_type == 0 { return expr_deferred(base) }
@@ -12137,25 +12155,47 @@ fn type_implements_cleanup(store: CheckStore, checked_type: U64) -> Bool {
     return trait_impl_for_builtin_type(store, 6, checked_type) != 0
 }
 
-// Structural Eq/Hash support: unsigned integers, Bool, String, Bytes, and
-// non-generic records or enums whose every component supports them.
-fn structural_key_supported(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
-    if checked_type == 0 || depth > 16 { return false }
+// Structural Eq support: Bool, unsigned integers, String, Bytes, and
+// records or enums whose every component supports them. Generic
+// applications participate: each component substitutes through the
+// application's own arguments before the recursion, so a generic record
+// supports structural equality exactly when its components do. Builtin
+// Option and Result stay outside for now: their payload comparison is not
+// lowered yet, so `==` on them is rejected until the dedicated commit
+// lands. Signed integers and floats stay outside the structural domain, so
+// the synthesized Eq/Hash impl surface and the map-key domain are
+// unchanged.
+fn structural_eq_supported(d: Domain, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 || depth > 16 { return Ok(false) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 1 { return checked.target == 1 || checked.target == 6 || checked.target == 7 || checked.target == 8 || checked.target == 9 }
-    if checked.kind == 2 || checked.kind == 14 { return true }
-    if checked.kind != 7 { return false }
+    if checked.kind == 1 { return Ok(checked.target == 1 || checked.target == 6 || checked.target == 7 || checked.target == 8 || checked.target == 9) }
+    if checked.kind == 2 || checked.kind == 14 { return Ok(true) }
+    if checked.kind != 7 { return Ok(false) }
+    if checked.target == 0 || checked.target > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
-    if symbol.type_arity != 0 { return false }
+    if symbol.kind != 2 && symbol.kind != 3 { return Ok(false) }
+    if symbol.type_arity != 0 && checked.first_arg == 0 { return Ok(false) }
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    let bound = try bind_expected_application(d, store, checked.target, checked, 0, 0, empty)
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
         let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
         if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
-            if !structural_key_supported(store, use.checked_type, depth + 1) { return false }
+            let substituted = try substitute_type(d, store, bound, use.checked_type)
+            let supported = try structural_eq_supported(d, substituted.store, substituted.checked_type, depth + 1)
+            if !supported { return Ok(false) }
         }
         at = at + 1
     }
-    return true
+    return Ok(true)
+}
+
+// Checked entry for the synthesis loops: a zero id has no type yet, and the
+// call stays in statement position so every synthesis site keeps the same
+// shape.
+fn structural_eq_supported_gate(d: Domain, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 { return Ok(false) }
+    return structural_eq_supported(d, store, checked_type, 0)
 }
 
 // One structural Eq and Hash impl record for a supported concrete type.
@@ -12175,7 +12215,8 @@ fn synthesize_structural_impls(d: Domain, state: State, parse: ParseStore, store
     var seeded: U64 = 1
     while seeded <= 12 {
         let checked = __s0_buffer_get(CheckedTypeRec, current.types, seeded - 1)
-        if structural_key_supported(current, seeded, 0) {
+        let gate = try structural_eq_supported_gate(d, current, seeded)
+        if gate {
             let with_impls = try append_structural_impls_for(d, current, seeded)
             current = with_impls
         }
@@ -12200,7 +12241,8 @@ fn synthesize_structural_impls(d: Domain, state: State, parse: ParseStore, store
         if (symbol.kind == 2 || symbol.kind == 3) && symbol.type_arity == 0 {
             let appended = try append_checked_type(d, current, symbol_at + 1, 7, symbol.node, symbol_at + 1, 0, 0)
             let checked_type = checked_type_for_syntax(appended, symbol_at + 1, symbol.node)
-            if checked_type != 0 && structural_key_supported(appended, checked_type, 0) {
+            let gate = try structural_eq_supported_gate(d, appended, checked_type)
+            if gate {
                 let with_impls = try append_structural_impls_for(d, appended, checked_type)
                 current = with_impls
             } else {

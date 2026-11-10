@@ -31,6 +31,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m75-constrained-shapes", func(t *testing.T) { runAlderConstrainedShapesLowerBehavior(t, exe) })
 	t.Run("m75-generic-methods", func(t *testing.T) { runAlderM75GenericMethodLowerBehavior(t, exe) })
 	t.Run("m75-generic-trait-defaults", func(t *testing.T) { runAlderGenericTraitDefaultLowerBehavior(t, exe) })
+	t.Run("m8-eq-operators", func(t *testing.T) { runAlderEqOperatorBehavior(t, exe) })
 	t.Run("m75-fn-value-domain", func(t *testing.T) { runAlderFnValueDomainLowerBehavior(t, exe) })
 	t.Run("m75-vec-loop-scalars", func(t *testing.T) { runAlderVecLoopLowerBehavior(t, exe) })
 	files := map[string]string{

@@ -818,6 +818,12 @@ fn main() -> I32 {
 		{"generic-impl-bare-target", "trait Io {\n}\n\ntrait Writer {\n    fn write(self) -> U64\n}\n\nimpl(I: type(Io)) Writer for I {\n    fn write(self) -> U64 {\n        return 1\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 301},
 		{"generic-impl-restatement", "trait Tag {\n}\n\ntrait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\nimpl Io for Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Tag)) Reader for File(I) {\n    fn read(self) -> U64 {\n        return 1\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 302},
 		{"generic-impl-overlap", "trait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\nimpl Io for Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Io)) Reader for File(I) {\n    fn read(self) -> U64 {\n        return 1\n    }\n}\n\nimpl(J: type(Io)) Reader for File(J) {\n    fn read(self) -> U64 {\n        return 2\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 107},
+		{"eq-float-field", "type Bad {\n    ratio: F64\n}\nfn main() -> I32 {\n    let a = Bad(ratio: 1.0)\n    let b = Bad(ratio: 2.0)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
+		{"eq-function-value", "fn one() -> U64 { return 1 }\nfn main() -> I32 {\n    if one == one { return 1 }\n    return 0\n}\n", 303},
+		// Option and Result are Eq per the standard-library docs, but their
+		// payload comparison is not lowered yet; the checker rejects the
+		// operators until the dedicated Option/Result commit lands.
+		{"eq-option-payload-pending", "fn main() -> I32 {\n    let a: Option(U64) = Some(5)\n    let b: Option(U64) = Some(6)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1218,3 +1218,104 @@ fn main() -> I32 {
 	}
 	t.Logf("fn-value domain program exited cleanly under strict C11")
 }
+
+// M8 Eq dispatch: `==` and `!=` beyond the primitive integer comparison.
+// The operators compare Bool, String, and Bytes byte-wise, records
+// field-wise, enums by tag and payload, and generic applications over Eq
+// components, reusing the Map-key structural walk. Option and Result are
+// not Eq yet: the checker rejects them with the Eq diagnostic instead of
+// lowering them. Alder-only: the Go oracle frontend has no operator mirror
+// for the structural families.
+func runAlderEqOperatorBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"eq-operators.al": `type Point {
+    x: U64
+    y: U64
+}
+
+type Wrap(T: type(Eq)) {
+    value: T
+}
+
+enum Shape {
+    Empty
+    Pair(at: Point)
+}
+
+fn main() -> I32 {
+    if 3 != 3 { return 1 }
+    if 4 == 5 { return 2 }
+    if true == false { return 3 }
+    if true != true { return 4 }
+    if "abc" != "abc" { return 5 }
+    if "abc" == "abd" { return 6 }
+    if "abc".to_bytes() != "abc".to_bytes() { return 7 }
+    if "abc".to_bytes() == "abd".to_bytes() { return 8 }
+    let a = Point(x: 1, y: 2)
+    let b = Point(x: 1, y: 2)
+    let c = Point(x: 1, y: 3)
+    if a != b { return 9 }
+    if a == c { return 10 }
+    let e1: Shape = Empty
+    let e2: Shape = Empty
+    if e1 != e2 { return 11 }
+    let q1: Shape = Pair(a)
+    if e1 == q1 { return 12 }
+    let q2: Shape = Pair(c)
+    let p1: Shape = Pair(a)
+    let p2: Shape = Pair(b)
+    if p1 != p2 { return 13 }
+    if p1 == q2 { return 14 }
+    let w1 = Wrap(value: a)
+    let w2 = Wrap(value: b)
+    if w1 != w2 { return 15 }
+    let w3 = Wrap(value: c)
+    if w1 == w3 { return 16 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"eq-operators.al"})
+	second := runLowerCompiler(t, exe, files, []string{"eq-operators.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered Eq operator MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered Eq operator MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("Eq operator MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"eq-operators.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"eq-operators.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written Eq operator C changed across processes")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "eq-operators.c")
+	program := filepath.Join(dir, "eq-operators.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of Eq operator dispatch: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run Eq operator behavior: %v\n%s", err, output)
+	}
+	t.Logf("Eq operator program exited cleanly under strict C11")
+}

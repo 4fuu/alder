@@ -236,7 +236,8 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
 // 7.5 static-abstraction half (traits, constraints, closures, function
 // values, Map/Set); 130 and above are reserved for the resource half;
 // 155 and above also carry C binding block diagnostics (156-167);
-// 300 through 349 are the generic-implementation block.
+// 300 through 349 are this thread's checker block (generic implementations
+// and Eq operator dispatch).
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 156 { return out_string("a module binds the same C header twice") }
     if kind == 157 { return out_string("C spelling must be a non-reserved C identifier") }
@@ -307,6 +308,8 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return driver_out_message_quote(json) }
     if kind == 37 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" requires integer operands (float arithmetic is not available in the current MIR profile)") }
+    if kind == 303 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
+        return out_string(" requires a type that implements Eq (integers, Bool, String, Bytes, or records and enums of Eq components)") }
     if kind == 39 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" must be called") }
     if kind == 40 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }

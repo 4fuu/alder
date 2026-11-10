@@ -898,7 +898,9 @@ func runCheckerConformance(t *testing.T, exe string) {
 		{name: "operator-shift-left.al", text: "fn f(a: Bool, b: Bool) -> Bool { return a << b }\n", marker: "<<", kind: 33},
 		{name: "operator-shift-count.al", text: "fn f(a: I64, b: U64) -> I64 { return a << b }\n", marker: "<<", kind: 34},
 		{name: "operator-comparison-mismatch.al", text: "fn f(a: I64, b: U64) -> Bool { return a == b }\n", marker: "==", kind: 35},
-		{name: "operator-comparison-type.al", text: "fn f(a: Bool, b: Bool) -> Bool { return a == b }\n", marker: "==", kind: 36},
+		// Bool == Bool is accepted since the Eq dispatch commit: Bool
+		// implements Eq per docs/standard-library.md, and the acceptance
+		// behavior lives in runAlderEqOperatorBehavior.
 		{name: "operator-arithmetic-type.al", text: "fn f(a: Bool, b: Bool) -> Bool { return a + b }\n", marker: "+", kind: 37},
 		{name: "operator-float-arithmetic.al", text: "fn f(a: F64, b: F64) -> F64 { return a + b }\n", marker: "+", kind: 37},
 		{name: "operator-arithmetic-mismatch.al", text: "fn f(a: I64, b: U64) -> I64 { return a + b }\n", marker: "+", kind: 38},

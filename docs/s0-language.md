@@ -153,7 +153,12 @@ Milestone 7.5 adds the static trait surface of
 - Structural `Eq` and `Hash` implementations are synthesized by the
   language for unsigned integers, `Bool`, `String`, `Bytes`, and
   non-generic records and enums whose every component supports them, so
-  `K: type(Eq, Hash)` accepts those types. Per
+  `K: type(Eq, Hash)` accepts those types. `==` and `!=` dispatch to that
+  synthesized implementation: integers and `Bool` compare as primitives,
+  `String` and `Bytes` compare byte-wise, and records and enums decompose
+  into their components; a type outside the synthesized domain is rejected
+  with a diagnostic. Builtin `Option` and `Result` payloads are not
+  compared by these operators yet. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override
   structural `==` with a surprising user implementation": user `impl Eq`
   and `impl Hash` blocks are rejected. The synthesized methods are not
