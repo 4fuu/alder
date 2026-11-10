@@ -376,6 +376,42 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.eq operands must have the same type"})
 		}
 
+	case mir.OpStrLen, mir.OpStrByteChecked, mir.OpStrToBytes:
+		c.expect(in.A, "byte-sequence operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}, "string or bytes")
+		if in.Op == mir.OpStrByteChecked {
+			c.expectExact(in.B, "index operand", mir.TypeU64)
+		}
+		if in.Op == mir.OpStrToBytes {
+			if t, ok := f.ValueType(in.A); ok && m.ValidType(t) && m.Types[t].Kind != mir.TypeString {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.to_bytes operand must be string, not bytes"})
+			}
+		}
+
+	case mir.OpStrConcat:
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		c.expect(in.A, "byte-sequence operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}, "string or bytes")
+		c.expectSamePair(in.A, in.B, "byte-sequence operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}, "string or bytes")
+
+	case mir.OpStrSliceChecked:
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		c.expect(in.A, "byte-sequence operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}, "string or bytes")
+		c.expectExact(in.Lo, "low operand", mir.TypeU64)
+		c.expectExact(in.Hi, "high operand", mir.TypeU64)
+
+	case mir.OpStrFromBytes:
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		c.expect(in.A, "bytes operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && m.Types[t].Kind == mir.TypeBytes
+		}, "bytes")
+
 	case mir.OpFFICallUnsafe:
 		if int(in.FFIImport) < len(m.Imports) {
 			imp := &m.Imports[in.FFIImport]

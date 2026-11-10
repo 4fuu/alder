@@ -451,6 +451,65 @@ static inline uint64_t alder_u64_mul_wrapping(uint64_t a, uint64_t b) {
     return a * b;
 }
 
+/* ------------------------------------------------------------------ */
+/* Byte sequences                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Strict UTF-8 validation of len bytes at data, used by str.from_bytes
+ * lowering. Rejects invalid leading and continuation bytes, truncated
+ * sequences, overlong encodings, surrogate code points, and code points
+ * beyond U+10FFFF. Embedded NUL bytes are ordinary data. data may be NULL
+ * only when len is zero.
+ */
+static inline bool alder_string_utf8_valid(const uint8_t *data, uint64_t len) {
+    if (len == 0) {
+        return true;
+    }
+    if (data == NULL) {
+        return false;
+    }
+    uint64_t i = 0;
+    while (i < len) {
+        uint8_t b0 = data[i];
+        uint32_t cp;
+        uint64_t seq;
+        if (b0 < 0x80u) {
+            i++;
+            continue;
+        } else if ((b0 & 0xE0u) == 0xC0u) {
+            cp = (uint32_t)(b0 & 0x1Fu);
+            seq = 2;
+        } else if ((b0 & 0xF0u) == 0xE0u) {
+            cp = (uint32_t)(b0 & 0x0Fu);
+            seq = 3;
+        } else if ((b0 & 0xF8u) == 0xF0u) {
+            cp = (uint32_t)(b0 & 0x07u);
+            seq = 4;
+        } else {
+            return false;
+        }
+        if (len - i < seq) {
+            return false;
+        }
+        for (uint64_t j = 1; j < seq; j++) {
+            uint8_t bj = data[i + j];
+            if ((bj & 0xC0u) != 0x80u) {
+                return false;
+            }
+            cp = (cp << 6) | (uint32_t)(bj & 0x3Fu);
+        }
+        i += seq;
+        /* Reject overlong encodings, surrogates, and out-of-range values. */
+        if ((seq == 2 && cp < 0x80u) || (seq == 3 && cp < 0x800u) ||
+            (seq == 4 && cp < 0x10000u) || cp > 0x10FFFFu ||
+            (cp >= 0xD800u && cp <= 0xDFFFu)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
  * Defined float-to-integer conversion for int.from_float lowering. Returns
  * false for NaN and for values outside the destination range (truncation

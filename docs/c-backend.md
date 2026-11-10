@@ -153,6 +153,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - failure edges use the same parallel-copy temporaries as ordinary edges before the `goto`;
 - a checked failure edge may reach `panic` after all current-function cleanup scopes on that path have been explicitly run and ended; the runtime call does not unwind caller frames;
 - `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AlderSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
+- the byte-sequence method operations follow the slice shape: `str.byte.checked` is a direct bounds comparison; `str.slice.checked` checks `lo > hi` and `hi > len` before a `memcpy` of the byte range; `str.concat` length-checks the sum with `alder_u64_add_checked` before copying both operands;
 - `int.trunc` to an unsigned target wraps by casting; to a signed target it transfers the two's-complement bit pattern with `memcpy`;
 - `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
 
@@ -271,6 +272,8 @@ Depending on the final language rule, checked operations lower to:
 - carefully specified unsigned arithmetic followed by conversion.
 
 The integer overflow method operations (71-79) need no new runtime surface beyond `runtime/c/alder.h`: 64-bit `try` forms reuse the `alder_i64_*_checked`/`alder_u64_*_checked` boolean helpers, 64-bit and narrow `sat`/`wrap` forms call the twelve `alder_i64_*_saturating`/`alder_i64_*_wrapping` and `alder_u64_*_saturating`/`alder_u64_*_wrapping` helpers, and narrow `try` forms compute with plain 64-bit arithmetic plus a range check. The wrapping helpers compute directly on `int64_t`/`uint64_t`, whose overflow behavior is defined, so no undefined signed arithmetic is introduced.
+
+The byte-sequence method operations (80-85) need one new runtime helper, the strict `alder_string_utf8_valid` validator in `runtime/c/alder.h`; everything else reuses the existing surface: `str.len`, `str.byte.checked`, and `str.to_bytes` read the sequence record directly with no runtime call; `str.concat` length-checks with `alder_u64_add_checked`; `str.concat`, `str.slice.checked`, and `str.from_bytes` allocate the fresh bytes with `alder_domain_alloc` and fail only when that returns `NULL`; and `str.from_bytes` validates UTF-8 with the new helper, reporting invalid input as a `none` value instead of taking the failure edge. The owning forms produce `AlderString`/`AlderBytes` records whose data pointer is non-NULL even for an empty result, because a zero-size request allocates one byte.
 
 The backend must also define lowering for:
 

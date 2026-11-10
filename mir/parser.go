@@ -1551,6 +1551,103 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		return in, nil
 
+	case "str.len", "str.to_bytes":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		in.Op = OpStrLen
+		if t.text == "str.to_bytes" {
+			in.Op = OpStrToBytes
+		}
+		in.A, err = p.parseValueRef()
+		return in, err
+
+	case "str.byte.checked":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "str.byte.checked requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpStrByteChecked
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.B, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
+	case "str.concat":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "str.concat requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpStrConcat
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.B, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
+	case "str.slice.checked":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "str.slice.checked requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpStrSliceChecked
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Lo, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.Hi, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
+	case "str.from_bytes":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "str.from_bytes requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpStrFromBytes
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
 	case "ffi.call.unsafe":
 		in.Op = OpFFICallUnsafe
 		impTok, err := p.expectAtName("an import name")

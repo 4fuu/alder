@@ -202,6 +202,15 @@ fn mir_v5_bad(d: Domain, out: __s0_Buffer(MirVerifyDiagRec), kind: U64, f: U64, 
 fn mir_v5_expect(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), f: U64, b: U64, i: U64, t: U64, operand: U64, value: U64, want: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { let got = mir_v5_value_type(store, indexes, f, value)
 if got != want { return mir_v5_bad(d, out, mir_vdiag_bad_operand_type(), f, b, i, t, operand, want, got, value) }
 return Ok(out) }
+
+// The value type of a slice-checked's high bound, held as the first ordered
+// instruction operand (the a/b/c slots carry domain, sequence, and low).
+fn mir_v5_ordered_operand_type(store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64) -> U64 {
+    let oi = mir_v5_operand(store, indexes, mir_operand_instruction(), instruction, 0, 0)
+    if oi == 0 { return 0 }
+    let o = __s0_buffer_get(MirOperandRec, store.operands, oi - 1)
+    return mir_v5_value_type(store, indexes, function, o.value)
+}
 fn mir_v5_edge(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), f: U64, b: U64, i: U64, t: U64, kind: U64, owner: U64, edge: U64, target: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var result = out
 let count = mir_v5_operand_count(store, indexes, kind, owner, edge)
 var n: U64 = 0
@@ -358,6 +367,15 @@ return MirVTypeResult(valid: ct != 0, type_id: ct) }
     if x.op == mir_op_call_value() { if ta == 0 || mir_vtype_kind(store, ta) != mir_type_kind_function() { return MirVTypeResult(valid: false, type_id: 0) }
 return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.function, id, ta), type_id: __s0_buffer_get(MirTypeRec, store.types, ta - 1).result_type) }
     if x.op == mir_op_str_eq() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
+    if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() { let seq = mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()
+    if x.op == mir_op_str_len() { return MirVTypeResult(valid: seq, type_id: mir_type_u64()) }
+    return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_string(), type_id: mir_v5_find_kind(indexes, mir_type_kind_bytes())) }
+    if x.op == mir_op_str_byte_checked() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == mir_type_u64(), type_id: mir_type_u8()) }
+    if x.op == mir_op_str_concat() { let tc = mir_v5_value_type(store, indexes, x.function, x.c)
+return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && (mir_vtype_kind(store, tb) == mir_type_kind_string() || mir_vtype_kind(store, tb) == mir_type_kind_bytes()) && tc == tb, type_id: tb) }
+    if x.op == mir_op_str_slice_checked() { let tc = mir_v5_value_type(store, indexes, x.function, x.c)
+return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && (mir_vtype_kind(store, tb) == mir_type_kind_string() || mir_vtype_kind(store, tb) == mir_type_kind_bytes()) && tc == mir_type_u64() && mir_v5_ordered_operand_type(store, indexes, x.function, id) == mir_type_u64(), type_id: tb) }
+    if x.op == mir_op_str_from_bytes() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && mir_vtype_kind(store, tb) == mir_type_kind_bytes(), type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), mir_v5_find_kind(indexes, mir_type_kind_string()))) }
     if x.op == mir_op_fn_value() { if x.target == 0 || x.target > __s0_buffer_len(MirFunctionRec, store.functions) { return MirVTypeResult(valid: false, type_id: 0) }
 let callee = __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1)
 var param_total = mir_v5_function_param_count(store, indexes, x.target)
@@ -571,6 +589,24 @@ if !valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_conversion(), x.fun
         else { result = try mir_v5_check_binding_args(d, store, indexes, result, x, id, x.target) }
     }
     if x.op == mir_op_c_is_null() && !mir_v5_is_raw_pointer(store, mir_v5_value_type(store, indexes, x.function, x.a)) { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_c_ptr(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
+    if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() || x.op == mir_op_str_byte_checked() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a))
+if k != mir_type_kind_string() && k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), k, x.a) }
+if x.op == mir_op_str_byte_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) } }
+    if x.op == mir_op_str_to_bytes() && mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)) == mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), mir_type_kind_bytes(), x.a) }
+    if x.op == mir_op_str_concat() || x.op == mir_op_str_slice_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_domain_handle()))
+let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.b))
+if k != mir_type_kind_string() && k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), k, x.b) } }
+    if x.op == mir_op_str_concat() { let b_type = mir_v5_value_type(store, indexes, x.function, x.b)
+let c_type = mir_v5_value_type(store, indexes, x.function, x.c)
+let ck = mir_vtype_kind(store, c_type)
+if ck != mir_type_kind_string() && ck != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, b_type, c_type, x.c) } else if c_type != b_type { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, b_type, c_type, x.c) } }
+    if x.op == mir_op_str_slice_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.c, mir_type_u64())
+let oi = mir_v5_operand(store, indexes, mir_operand_instruction(), id, 0, 0)
+if oi != 0 { let o = __s0_buffer_get(MirOperandRec, store.operands, oi - 1)
+result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, oi, o.value, mir_type_u64()) } }
+    if x.op == mir_op_str_from_bytes() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_domain_handle()))
+let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.b))
+if k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_bytes(), k, x.b) } }
     if mir_vop_checked(x.op) { result = try mir_v5_edge(d, store, indexes, result, x.function, x.block, id, 0, mir_operand_checked_edge_arg(), id, 0, x.target) }
     if x.result != 0 { let inferred = mir_v5_infer(store, indexes, id, x)
 let stored = mir_v5_value_type(store, indexes, x.function, x.result)

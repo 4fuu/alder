@@ -538,6 +538,17 @@ fn lower_has_storage(store: CheckStore) -> Bool {
         if __s0_buffer_get(CheckedTypeRec, store.types, at).kind == 19 { return true }
         at = at + 1
     }
+    // The M8 byte-sequence surface allocates its fresh String and Bytes
+    // results in the function's hidden domain, so any concat, slice, or
+    // from-bytes call enables the storage machinery for the module. Length,
+    // byte reads, and to_bytes reinterprets never allocate and stay outside
+    // this gate.
+    at = 0
+    while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
+        let builtin = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at).builtin
+        if builtin == 58 || builtin == 59 || builtin == 61 { return true }
+        at = at + 1
+    }
     return false
 }
 
@@ -3904,7 +3915,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 55 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 61 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 47 { return lower_int_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 26 && annotation.builtin <= 29 || annotation.builtin == 45 || annotation.builtin == 46 {
             return lower_m75_table_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block)
@@ -5983,8 +5995,98 @@ fn lower_int_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     return Ok(LowerStep(state: instr.state, id: result.id))
 }
 
+// M8 byte-sequence surface: lower the String and Bytes methods to their MIR
+// operations. Slot mapping follows the MirInstrRec layout the mirrors print:
+// len and to_bytes read slot a; byte.checked reads a (receiver) and b
+// (index); concat and from_bytes take the storage domain in a and their
+// sequence values in b and c; slice.checked takes domain, receiver, and lo in
+// a, b, and c with hi attached as an instruction operand. Every allocating or
+// bounds-checked form carries the panic block as its failure edge; len and
+// to_bytes cannot fail.
+fn lower_str_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    var expected_count: U64 = 1
+    if annotation.builtin == 57 || annotation.builtin == 58 { expected_count = 2 }
+    if annotation.builtin == 59 { expected_count = 3 }
+    if expression.child_count != expected_count || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_syntax, environment, panic_block)
+    var current = receiver.state
+    var first: U64 = 0
+    var second: U64 = 0
+    if expected_count >= 2 {
+        let argument_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+        let argument = try lower_expression(d, source_state, spans, store, current, owner, function, block, argument_syntax, environment, panic_block)
+        current = argument.state
+        first = argument.id
+    }
+    if expected_count == 3 {
+        let argument_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child + 1).expression
+        let argument = try lower_expression(d, source_state, spans, store, current, owner, function, block, argument_syntax, environment, panic_block)
+        current = argument.state
+        second = argument.id
+    }
+    var op: U64 = 0
+    if annotation.builtin == 56 { op = mir_op_str_len() }
+    if annotation.builtin == 57 { op = mir_op_str_byte_checked() }
+    if annotation.builtin == 58 { op = mir_op_str_concat() }
+    if annotation.builtin == 59 { op = mir_op_str_slice_checked() }
+    if annotation.builtin == 60 { op = mir_op_str_to_bytes() }
+    if annotation.builtin == 61 { op = mir_op_str_from_bytes() }
+    if op == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let domain = lower_storage_domain_value(current, store, owner, expression_id)
+    let result = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+    var instr = LowerStep(state: result.state, id: 0)
+    if annotation.builtin == 56 || annotation.builtin == 60 {
+        let added = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, receiver.id, 0, 0, "")
+        instr = added
+    } else {
+        if annotation.builtin == 57 {
+            let added = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, receiver.id, first, panic_block, "")
+            instr = added
+        } else {
+            if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            let added = try lower_add_instr_three(d, result.state, function, block, op, result.id, 0, domain, receiver.id, first, panic_block)
+            instr = added
+        }
+    }
+    if annotation.builtin == 59 {
+        let wired = try lower_add_instr_operand(d, instr.state, instr.id, 0, second, mir_operand_instruction(), "")
+        return Ok(LowerStep(state: wired, id: result.id))
+    }
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 55 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 61 { return false }
+    if annotation.builtin >= 56 {
+        // M8 byte-sequence surface: String and Bytes receivers, U64 index
+        // and bounds arguments, same-type concat and slice results, and
+        // Option(String) from bytes.
+        var expected_count: U64 = 1
+        if annotation.builtin == 57 || annotation.builtin == 58 { expected_count = 2 }
+        if annotation.builtin == 59 { expected_count = 3 }
+        if expression.child_count != expected_count { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 { return false }
+        let first = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if first.kind != 2 && first.kind != 14 { return false }
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        if annotation.builtin == 56 { return result.kind == 1 && result.target == 9 }
+        if annotation.builtin == 57 {
+            let index = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
+            return index.kind == 1 && index.target == 9 && result.kind == 1 && result.target == 6
+        }
+        if annotation.builtin == 58 { return lower_builtin_child_type(store, expression, 1) == receiver_type && annotation.checked_type == receiver_type }
+        if annotation.builtin == 59 {
+            let lo = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 1) - 1)
+            let hi = __s0_buffer_get(CheckedTypeRec, store.types, lower_builtin_child_type(store, expression, 2) - 1)
+            return lo.kind == 1 && lo.target == 9 && hi.kind == 1 && hi.target == 9 && annotation.checked_type == receiver_type
+        }
+        if annotation.builtin == 60 { return first.kind == 2 && result.kind == 14 }
+        if result.kind != 9 || result.arg_count != 1 { return false }
+        let payload = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, result.first_arg - 1) - 1)
+        return first.kind == 14 && payload.kind == 2
+    }
     if annotation.builtin >= 47 {
         // M8 integer overflow surface: receiver and right operand share the
         // exact integer primitive type; checked methods produce Option(T),
@@ -6410,7 +6512,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 55 { return false } }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 61 { return false } }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }

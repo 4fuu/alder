@@ -381,6 +381,52 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return TypeBool, true
 
+	case OpStrLen, OpStrByteChecked, OpStrToBytes:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || (m.Types[ta].Kind != TypeString && m.Types[ta].Kind != TypeBytes) {
+			return NoType, false
+		}
+		switch in.Op {
+		case OpStrLen:
+			return TypeU64, true
+		case OpStrToBytes:
+			if m.Types[ta].Kind != TypeString {
+				return NoType, false
+			}
+			return m.Bytes(), true
+		default:
+			if !m.isU64(f, in.B) {
+				return NoType, false
+			}
+			return TypeU8, true
+		}
+
+	case OpStrConcat, OpStrSliceChecked, OpStrFromBytes:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || (m.Types[ta].Kind != TypeString && m.Types[ta].Kind != TypeBytes) {
+			return NoType, false
+		}
+		if !m.isHandleType(f, in.Domain) {
+			return NoType, false
+		}
+		switch in.Op {
+		case OpStrConcat:
+			if tb, ok := f.ValueType(in.B); !ok || tb != ta {
+				return NoType, false
+			}
+			return ta, true
+		case OpStrSliceChecked:
+			if !m.isU64(f, in.Lo) || !m.isU64(f, in.Hi) {
+				return NoType, false
+			}
+			return ta, true
+		default:
+			if m.Types[ta].Kind != TypeBytes {
+				return NoType, false
+			}
+			return m.Option(m.String()), true
+		}
+
 	case OpCallValue:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !m.ValidType(ta) || m.Types[ta].Kind != TypeFunction {

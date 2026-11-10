@@ -115,6 +115,18 @@ const (
 	OpIntAddWrapping
 	OpIntSubWrapping
 	OpIntMulWrapping
+
+	// Byte-sequence surface over the owned string and bytes value types.
+	// len and byte read expose the byte backing; concat and the checked
+	// slice build fresh domain-owned storage; to_bytes reinterprets a
+	// string's bytes; from_bytes validates UTF-8 and yields none on invalid
+	// input, with allocation failure on the failure edge.
+	OpStrLen
+	OpStrByteChecked
+	OpStrConcat
+	OpStrSliceChecked
+	OpStrToBytes
+	OpStrFromBytes
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -285,6 +297,18 @@ func (k OpKind) String() string {
 		return "int.sub.wrapping"
 	case OpIntMulWrapping:
 		return "int.mul.wrapping"
+	case OpStrLen:
+		return "str.len"
+	case OpStrByteChecked:
+		return "str.byte.checked"
+	case OpStrConcat:
+		return "str.concat"
+	case OpStrSliceChecked:
+		return "str.slice.checked"
+	case OpStrToBytes:
+		return "str.to_bytes"
+	case OpStrFromBytes:
+		return "str.from_bytes"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -308,6 +332,8 @@ func (k OpKind) HasFailEdge() bool {
 		OpEnumPayloadChecked, OpArrayIndexChecked:
 		return true
 	case OpVecConstructChecked, OpVecGrowChecked:
+		return true
+	case OpStrByteChecked, OpStrConcat, OpStrSliceChecked, OpStrFromBytes:
 		return true
 	}
 	return false

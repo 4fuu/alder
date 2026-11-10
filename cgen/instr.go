@@ -490,6 +490,19 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		}
 		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
 
+	case mir.OpStrLen:
+		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + ".len;\n")
+
+	case mir.OpStrByteChecked:
+		b.WriteString("  if (" + g.valueExpr(in.B) + " >= " + g.valueExpr(in.A) + ".len) { " + g.failBody(in) + " }\n")
+		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + ".data[" + g.valueExpr(in.B) + "];\n")
+
+	case mir.OpStrConcat, mir.OpStrSliceChecked, mir.OpStrFromBytes:
+		g.emitStrOwned(b, in)
+
+	case mir.OpStrToBytes:
+		b.WriteString("  " + g.val(in.Result) + " = (AlderBytes){ " + g.valueExpr(in.A) + ".data, " + g.valueExpr(in.A) + ".len };\n")
+
 	case mir.OpFFICallUnsafe:
 		imp := &g.m.Imports[in.FFIImport]
 		b.WriteString("  ")
@@ -793,6 +806,59 @@ func (g *gen) emitIntMode(b *strings.Builder, in *mir.Instr) {
 	// Wrapping: truncating the 64-bit wrap result to the narrow type keeps
 	// exactly the low bits the width-w wrap produces.
 	b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(t) + ")" + tmp + ";\n")
+}
+
+// emitStrOwned lowers the byte-sequence operations that build domain-owned
+// storage: str.concat, str.slice.checked, and str.from_bytes. All three fail
+// to the checked edge when the bytes cannot be produced: allocation failure
+// for concat and the slice, invalid UTF-8 or allocation failure for
+// from_bytes. The result is always a fresh AlderString or AlderBytes whose
+// data pointer is non-NULL, so later reads and copies never test it.
+func (g *gen) emitStrOwned(b *strings.Builder, in *mir.Instr) {
+	fail := g.failBody(in)
+	a := g.valueExpr(in.A)
+	p := g.tmp(in, "p")
+	switch in.Op {
+	case mir.OpStrConcat:
+		result := "AlderString"
+		if t, ok := g.f.ValueType(in.Result); ok && g.m.ValidType(t) && g.m.Types[t].Kind == mir.TypeBytes {
+			result = "AlderBytes"
+		}
+		n := g.tmp(in, "n")
+		bArg := g.valueExpr(in.B)
+		b.WriteString("  uint64_t " + n + ";\n")
+		b.WriteString("  if (!alder_u64_add_checked(" + a + ".len, " + bArg + ".len, &" + n + ") || " + n + " > (uint64_t)SIZE_MAX) " + fail + "\n")
+		b.WriteString("  void *" + p + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + n + ", (size_t)1);\n")
+		b.WriteString("  if (" + p + " == NULL) " + fail + "\n")
+		b.WriteString("  if (" + a + ".len != (uint64_t)0) { memcpy(" + p + ", " + a + ".data, (size_t)" + a + ".len); }\n")
+		b.WriteString("  if (" + bArg + ".len != (uint64_t)0) { memcpy((uint8_t *)" + p + " + " + a + ".len, " + bArg + ".data, (size_t)" + bArg + ".len); }\n")
+		b.WriteString("  " + g.val(in.Result) + " = (" + result + "){ (const uint8_t *)" + p + ", " + n + " };\n")
+	case mir.OpStrSliceChecked:
+		lo := g.valueExpr(in.Lo)
+		hi := g.valueExpr(in.Hi)
+		result, _ := g.f.ValueType(in.A)
+		n := g.tmp(in, "n")
+		b.WriteString("  uint64_t " + n + ";\n")
+		b.WriteString("  if (" + lo + " > " + hi + " || " + hi + " > " + a + ".len) " + fail + "\n")
+		b.WriteString("  " + n + " = " + hi + " - " + lo + ";\n")
+		b.WriteString("  void *" + p + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + n + ", (size_t)1);\n")
+		b.WriteString("  if (" + p + " == NULL) " + fail + "\n")
+		b.WriteString("  if (" + n + " != (uint64_t)0) { memcpy(" + p + ", " + a + ".data + " + lo + ", (size_t)" + n + "); }\n")
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(result) + "){ (const uint8_t *)" + p + ", " + n + " };\n")
+	default: // mir.OpStrFromBytes
+		// The result value is option(string): none on invalid UTF-8, some
+		// carrying the fresh string otherwise. Only allocation failure
+		// takes the instruction's failure edge.
+		b.WriteString("  if (!alder_string_utf8_valid(" + a + ".data, " + a + ".len)) {\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)0;\n")
+		b.WriteString("  } else {\n")
+		b.WriteString("    void *" + p + " = alder_domain_alloc(" + g.valueExpr(in.Domain) + ", (size_t)" + a + ".len, (size_t)1);\n")
+		b.WriteString("    if (" + p + " == NULL) " + fail + "\n")
+		b.WriteString("    if (" + a + ".len != (uint64_t)0) { memcpy(" + p + ", " + a + ".data, (size_t)" + a + ".len); }\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p1 = (AlderString){ (const uint8_t *)" + p + ", " + a + ".len };\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)1;\n")
+		b.WriteString("  }\n")
+	}
 }
 
 // emitShiftChecked lowers int.shl.checked and int.shr.checked.

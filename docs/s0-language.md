@@ -329,6 +329,14 @@ Implemented expressions include:
   overflow, `some` with the wrapped result otherwise), `*_saturating` clamp
   at the type's boundary, and `*_wrapping` wrap on the two's-complement
   pattern;
+- named builtin byte-sequence methods on `String` and `Bytes`: `len()` is
+  the byte count, `byte(index) -> U8` rejects an index at or above the
+  length through the panic path, `concat(other) -> Self` joins two sequences
+  of the same type, `slice(lo, hi) -> Self` rejects an inverted or
+  out-of-range range through the panic path, `String.to_bytes()` reinterprets
+  the string's bytes without copying, and
+  `Bytes.to_string_checked() -> Option(String)` validates UTF-8 and yields
+  `none` on invalid input;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`

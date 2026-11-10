@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpIntMulWrapping {
+	if in.Op > mir.OpStrFromBytes {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -454,6 +454,23 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpStrEq:
 		require(in.A, "left operand")
 		require(in.B, "right operand")
+	case mir.OpStrLen, mir.OpStrToBytes:
+		require(in.A, "byte-sequence operand")
+	case mir.OpStrByteChecked:
+		require(in.A, "byte-sequence operand")
+		require(in.B, "index operand")
+	case mir.OpStrConcat:
+		require(in.Domain, "domain operand")
+		require(in.A, "left operand")
+		require(in.B, "right operand")
+	case mir.OpStrSliceChecked:
+		require(in.Domain, "domain operand")
+		require(in.A, "byte-sequence operand")
+		require(in.Lo, "low operand")
+		require(in.Hi, "high operand")
+	case mir.OpStrFromBytes:
+		require(in.Domain, "domain operand")
+		require(in.A, "bytes operand")
 	case mir.OpFnValue:
 		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
 			errs = append(errs, Error{Loc: loc, Msg: "fn.value target is not a function"})
@@ -660,6 +677,23 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpStrEq:
 		add(in.A)
 		add(in.B)
+	case mir.OpStrLen, mir.OpStrToBytes:
+		add(in.A)
+	case mir.OpStrByteChecked:
+		add(in.A)
+		add(in.B)
+	case mir.OpStrConcat:
+		add(in.Domain)
+		add(in.A)
+		add(in.B)
+	case mir.OpStrSliceChecked:
+		add(in.Domain)
+		add(in.A)
+		add(in.Lo)
+		add(in.Hi)
+	case mir.OpStrFromBytes:
+		add(in.Domain)
+		add(in.A)
 	case mir.OpFnValue:
 		add(in.A)
 	case mir.OpVecLen, mir.OpVecCapacity, mir.OpVecStorage, mir.OpVecAsSlice, mir.OpVecAsMutSlice:

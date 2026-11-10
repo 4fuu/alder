@@ -1,0 +1,59 @@
+mir 6
+
+const @one: u64 = 1
+const @zero8: u8 = 0
+const @empty: string = ""
+const @no_bytes: bytes = ""
+const @bad_utf8: bytes = "\xc3"
+
+fn @len_of(%t: string) -> u64 {
+bb0:
+  %n = str.len %t
+  return %n
+}
+
+fn @byte_of(%t: string, %i: u64) -> u8 {
+bb0:
+  %b = str.byte.checked %t, %i else bb_oob
+  return %b
+
+bb_oob:
+  %z = const.get @zero8
+  return %z
+}
+
+fn @cat(%d: domain_handle, %a: string, %b: string) -> string {
+bb0:
+  %c = str.concat %d, %a, %b else bb_oom
+  return %c
+
+bb_oom:
+  %e = const.get @empty
+  fail %e
+}
+
+fn @cut(%d: domain_handle, %src: bytes, %lo: u64, %hi: u64) -> bytes {
+bb0:
+  %s = str.slice.checked %d, %src, %lo, %hi else bb_bad
+  return %s
+
+bb_bad:
+  %n = const.get @no_bytes
+  fail %n
+}
+
+fn @as_bytes(%t: string) -> bytes {
+bb0:
+  %b = str.to_bytes %t
+  return %b
+}
+
+fn @parse(%d: domain_handle, %src: bytes) -> option(string) {
+bb0:
+  %o = str.from_bytes %d, %src else bb_oom
+  return %o
+
+bb_oom:
+  %e = enum.construct option(string), none
+  fail %e
+}

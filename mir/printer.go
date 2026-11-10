@@ -430,6 +430,20 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(")")
 	case OpStrEq:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
+	case OpStrLen, OpStrToBytes:
+		b.WriteString(" " + valueName(f, in.A))
+	case OpStrByteChecked:
+		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
+		printFailEdge(b, f, in)
+	case OpStrConcat:
+		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.A) + ", " + valueName(f, in.B))
+		printFailEdge(b, f, in)
+	case OpStrSliceChecked:
+		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.A) + ", " + valueName(f, in.Lo) + ", " + valueName(f, in.Hi))
+		printFailEdge(b, f, in)
+	case OpStrFromBytes:
+		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.A))
+		printFailEdge(b, f, in)
 	case OpFnValue:
 		b.WriteString(" @" + fnName(m, in.Callee))
 		if in.A != NoValue {

@@ -171,6 +171,12 @@ fn mir_op_int_mul_saturating() -> U64 { return 76 }
 fn mir_op_int_add_wrapping() -> U64 { return 77 }
 fn mir_op_int_sub_wrapping() -> U64 { return 78 }
 fn mir_op_int_mul_wrapping() -> U64 { return 79 }
+fn mir_op_str_len() -> U64 { return 80 }
+fn mir_op_str_byte_checked() -> U64 { return 81 }
+fn mir_op_str_concat() -> U64 { return 82 }
+fn mir_op_str_slice_checked() -> U64 { return 83 }
+fn mir_op_str_to_bytes() -> U64 { return 84 }
+fn mir_op_str_from_bytes() -> U64 { return 85 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

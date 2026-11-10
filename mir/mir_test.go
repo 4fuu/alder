@@ -245,6 +245,32 @@ func TestInferResultType(t *testing.T) {
 	want("call", Instr{Op: OpCall, Callee: 0}, pair)
 	want("ffi", Instr{Op: OpFFICallUnsafe, FFIImport: 0, Args: []ValueId{x}}, TypeI64)
 
+	// M8 byte-sequence surface: len reads u64, byte.checked reads u8,
+	// concat and slice.checked preserve the sequence type, to_bytes reinterprets
+	// a string, and from_bytes yields option(string).
+	fs := m.AddFunction("fs", []Param{
+		{Name: "d", Type: m.DomainHandle()},
+		{Name: "t", Type: m.String()},
+		{Name: "b", Type: m.Bytes()},
+	}, TypeI64)
+	fs.AddBlock("bb0", nil)
+	sIdx := addResult(t, m, fs, Instr{Op: OpConstGet, Const: "ku"})
+	str, byt := ValueId(1), ValueId(2)
+	wantFs := func(name string, in Instr, wantType TypeId) {
+		t.Helper()
+		got, ok := m.InferResultType(fs, &in)
+		if !ok || got != wantType {
+			t.Errorf("%s: got %d, %v; want %d", name, got, ok, wantType)
+		}
+	}
+	wantFs("str.len", Instr{Op: OpStrLen, A: str}, TypeU64)
+	wantFs("str.byte.checked", Instr{Op: OpStrByteChecked, A: str, B: sIdx}, TypeU8)
+	wantFs("str.concat string", Instr{Op: OpStrConcat, Domain: 0, A: str, B: str}, m.String())
+	wantFs("str.concat bytes", Instr{Op: OpStrConcat, Domain: 0, A: byt, B: byt}, m.Bytes())
+	wantFs("str.slice.checked", Instr{Op: OpStrSliceChecked, Domain: 0, A: byt, Lo: sIdx, Hi: sIdx}, m.Bytes())
+	wantFs("str.to_bytes", Instr{Op: OpStrToBytes, A: str}, m.Bytes())
+	wantFs("str.from_bytes", Instr{Op: OpStrFromBytes, Domain: 0, A: byt}, m.Option(m.String()))
+
 	// A producing value used by a later instruction.
 	v := addResult(t, m, f, Instr{Op: OpConstGet, Const: "k"})
 	want("add on value", Instr{Op: OpIntAddChecked, A: v, B: x}, TypeI64)

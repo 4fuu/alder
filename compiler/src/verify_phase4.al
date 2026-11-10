@@ -38,7 +38,13 @@ uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0) }
     if i.op == mir_op_slice_range_checked() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.c, i.block, id, 0, 0, 0) }
-    if i.op == mir_op_vec_construct_checked() || i.op == mir_op_vec_grow_checked() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
+    if i.op == mir_op_vec_construct_checked() || i.op == mir_op_vec_grow_checked() || i.op == mir_op_str_concat() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
+uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0)
+uses = try mir_vp4_use(d, uses, i.c, i.block, id, 0, 0, 0) }
+    if i.op == mir_op_str_len() || i.op == mir_op_str_to_bytes() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0) }
+    if i.op == mir_op_str_byte_checked() || i.op == mir_op_str_from_bytes() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
+uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0) }
+    if i.op == mir_op_str_slice_checked() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.c, i.block, id, 0, 0, 0) }
     return Ok(uses)
@@ -67,7 +73,7 @@ fn mir_vp4_collect_uses_into(d: Domain, store: MirStore, indexes: MirVIndexes, f
                     var kind = mir_operand_instruction()
                     if pass == 1 { kind = mir_operand_aggregate_field() }
                     if pass == 2 { kind = mir_operand_checked_edge_arg() }
-                    var belongs = i.op == mir_op_cleanup_push() || i.op == mir_op_call() || i.op == mir_op_ffi_call_unsafe()
+                    var belongs = i.op == mir_op_cleanup_push() || i.op == mir_op_call() || i.op == mir_op_ffi_call_unsafe() || i.op == mir_op_str_slice_checked()
                     if pass == 1 { belongs = i.op == mir_op_aggregate_construct() }
                     if pass == 2 { belongs = mir_vop_checked(i.op) }
                     if belongs {

@@ -339,6 +339,38 @@ operations are total and carry no failure edge. The verifier rejects them on
 mismatched operand types, non-integer operand types, and `try` results not
 consumed as `option(T)` of the operand type.
 
+## Byte-Sequence Methods
+
+MIR 6 also exposes the byte-sequence surface as operations 80-85, produced
+only by named builtin method calls on `string` and `bytes` receivers (`len`,
+`byte`, `concat`, `slice`, `to_bytes`, and `to_string_checked`):
+
+```text
+str.len a -> u64
+str.byte.checked a, b else edge -> u8
+str.concat domain, a, b else edge -> T
+str.slice.checked domain, a, lo, hi else edge -> T
+str.to_bytes a -> bytes
+str.from_bytes domain, a else edge -> option(string)
+```
+
+A `string` is a sequence of UTF-8 bytes and `bytes` is a sequence of raw
+bytes; every length and index below counts bytes. The receiver type `T` of
+`str.concat` and `str.slice.checked` is the operand type: both operands of
+`str.concat` and the `str.slice.checked` base must have that same type, and
+`str.byte.checked` and `str.slice.checked` take `u64` indices. `str.len`
+reports the byte count. `str.byte.checked` fails when the index is at least
+the length. `str.slice.checked` fails when `lo > hi` or `hi` exceeds the
+length. `str.concat` and `str.slice.checked` allocate a fresh sequence of
+type `T` in the domain and fail only when that allocation fails.
+`str.to_bytes` reinterprets a string's bytes without copying and cannot
+fail. `str.from_bytes` validates UTF-8: invalid input yields `none` as an
+ordinary value, while only allocation failure takes the failure edge; a
+`some` payload owns a fresh copy of the bytes in the domain. The verifier
+rejects these operations on non-sequence operand types, on mismatched
+sequence operand types within one operation, on non-`u64` indices, and on
+`str.from_bytes` results not consumed as `option(string)`.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -698,7 +730,8 @@ format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
 `mir 4` adds `vec(T)` and the minimal Vec operations; `mir 5` adds
 function-type environments, `fn.value`, and `call.value`; and current `mir 6`
 adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
-`c.is_null`, and the integer overflow method operations (71-79).
+`c.is_null`, the integer overflow method operations (71-79), and the
+byte-sequence method operations (80-85).
 Incompatible changes must use a new version and update:
 
 - this document;

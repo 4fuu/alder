@@ -6621,6 +6621,94 @@ fn check_int_method(d: Domain, state: State, parse: ParseStore, base: CheckStore
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
 }
 
+// Byte-sequence surface (M8): builtin methods on String and Bytes receivers.
+// len and byte read the byte backing store, with byte bounds-checked;
+// concat and slice build fresh domain-owned storage, with slice
+// range-checked lo <= hi <= len; to_bytes reinterprets a string's bytes;
+// to_string_checked validates UTF-8 and yields Option(String), none on
+// invalid input. Index and bound arguments are U64; both slice arguments are
+// required.
+fn check_str_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    if receiver.kind != 2 && receiver.kind != 14 { return expr_token_fail(d, state, base, 61, callee) }
+    var builtin: U64 = 0
+    var arity: U64 = 0
+    if node_word(state, callee, "len") { builtin = 56 }
+    if node_word(state, callee, "byte") { builtin = 57
+        arity = 1 }
+    if node_word(state, callee, "concat") { builtin = 58
+        arity = 1 }
+    if node_word(state, callee, "slice") { builtin = 59
+        arity = 2 }
+    if node_word(state, callee, "to_bytes") { builtin = 60 }
+    if node_word(state, callee, "to_string_checked") { builtin = 61 }
+    // Method-call links include both the selected callee and its receiver.
+    if builtin == 0 || call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 41, call) }
+    if builtin == 60 && receiver.kind != 2 { return expr_token_fail(d, state, base, 61, callee) }
+    if builtin == 61 && receiver.kind != 14 { return expr_token_fail(d, state, base, 61, callee) }
+    let u64_type = primitive_type_id(state, parse, store, "U64")
+    let u8_type = primitive_type_id(state, parse, store, "U8")
+    var current = store
+    var first_expression: U64 = 0
+    var second_expression: U64 = 0
+    var first_expected: U64 = u64_type
+    if builtin == 58 { first_expected = receiver_type_id }
+    if arity >= 1 {
+        let link = call_link_at(parse, call, 2)
+        let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+        let checked = try check_value_expression_inner(d, state, parse, base, current, owner, argument, link.node, first_expected, 42, argument, 0, 0, in_loop)
+        current = match checked {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(ExprBad(current)) }
+        let draft = match checked {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return expr_deferred(base) }
+        first_expression = draft.expression
+    }
+    if arity == 2 {
+        let link = call_link_at(parse, call, 3)
+        let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+        let checked = try check_value_expression_inner(d, state, parse, base, current, owner, argument, link.node, u64_type, 42, argument, 0, 0, in_loop)
+        current = match checked {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(ExprBad(current)) }
+        let draft = match checked {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return expr_deferred(base) }
+        second_expression = draft.expression
+    }
+    var result = receiver_type_id
+    if builtin == 56 { result = u64_type }
+    if builtin == 57 { result = u8_type }
+    if builtin == 60 {
+        current = try append_checked_type(d, current, owner, 14, call_id, 0, 0, 0)
+        result = canonical_type_id(current, 14, 0, 0, 0)
+    }
+    if builtin == 61 {
+        current = try append_checked_type(d, current, owner, 2, call_id, 0, 0, 0)
+        let string_id = canonical_type_id(current, 2, 0, 0, 0)
+        let made = try canonical_application(d, current, owner, 9, string_id, 0, 1)
+        current = made.store
+        result = made.checked_type
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, 0, site_kind, site_syntax)
+}
+
 // Ordered-collection key domain (M7.5): the domain the inline structural
 // compare lowers. Unsigned integers and Bool compare directly; String and
 // Bytes compare through str.eq; records and enums compare through place
@@ -7228,6 +7316,10 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
         if receiver_type.kind == 19 { return check_table_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+        // Byte-sequence surface (M8): String and Bytes methods. Routed before
+        // the sequence-method names, which otherwise capture len and slice and
+        // reject these receivers at the sequence guard.
+        if receiver_type.kind == 2 || receiver_type.kind == 14 { return check_str_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
