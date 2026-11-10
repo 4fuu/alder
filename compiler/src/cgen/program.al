@@ -600,6 +600,11 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
 fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, type_id: U64) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     let item = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if item.kind == mir_type_kind_string() || item.kind == mir_type_kind_bytes() {
+        // The descriptor is {data, len}; the buffer moves into the
+        // destination domain, keeping the slice-branch checks and style.
+        out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) {\n    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)1);\n    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n    alder_v.data = alder_p;\n  }\n")
+    }
     if item.kind == mir_type_kind_function() {
         // A function value is {code, environment, retain}. A cross-domain
         // copy retains the environment through the hook so the copy owns a

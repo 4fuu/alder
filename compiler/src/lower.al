@@ -2273,7 +2273,9 @@ fn lower_mir_type_copy_relocatable(d: Domain, store: MirStore, root: U64) -> Res
 }
 
 // lower_mir_type_has_reference reports whether a value of this type holds
-// storage through a reference, slice, vector, or table anywhere.
+// storage through a reference, slice, vector, string, bytes, or table
+// anywhere. String and Bytes count because their buffers may be
+// domain-allocated, so a capture must copy the value, not alias the frame.
 fn lower_mir_type_has_reference(d: Domain, store: MirStore, root: U64) -> Bool {
     let count = __s0_buffer_len(MirTypeRec, store.types)
     if root < 1 || root > count { return false }
@@ -2290,7 +2292,7 @@ fn lower_mir_type_has_reference(d: Domain, store: MirStore, root: U64) -> Bool {
         if id >= 1 && id <= count && seen[id] == 0 {
             seen[id] = 1
             let typ = __s0_buffer_get(MirTypeRec, store.types, id - 1)
-            if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_table() { return true }
+            if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_string() || typ.kind == mir_type_kind_bytes() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_table() { return true }
             if typ.elem != 0 && total < count { work[total] = typ.elem
                 total = total + 1 }
             if typ.ok_type != 0 && total < count { work[total] = typ.ok_type

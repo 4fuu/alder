@@ -255,6 +255,171 @@ var strMethodsRejections = []struct {
 	},
 }
 
+// The C5 String/Bytes storage defect: slice, concat, and from_bytes allocate
+// their result buffers in a domain, so every copy_to_domain of a String, a
+// Bytes, or an aggregate over them must reallocate the buffer into the
+// destination domain. Treating the descriptors as plain bits handed callers
+// pointers into storage the callee's domain destroyed at return. These
+// programs cover the shapes that showed the use-after-free: a String and a
+// Bytes returned from a helper after slice or concat, a record holding
+// Bytes, an enum payload, a Vec of payload enums returned through two call
+// levels, a String built in a loop and carried across iterations, and an
+// escaped closure whose environment captured domain-owned values. The
+// pinned evidence is the ASan/UBSan run: without the deep copies the freed
+// reads fire deterministically under the sanitizer redzones.
+const strStorageProgram = `enum Payload {
+    Word(data: Bytes)
+    Empty
+}
+type Box {
+    data: Bytes
+}
+fn slice_at(data: Bytes, lo: U64, hi: U64) -> Bytes {
+    return data.slice(lo, hi)
+}
+fn make_payload(data: Bytes) -> Payload {
+    return Word(slice_at(data, 0, 5))
+}
+fn make_box(data: Bytes) -> Box {
+    let sliced = slice_at(data, 0, 5)
+    return Box(data: sliced)
+}
+fn make_vec(data: Bytes) -> Vec(Payload) {
+    var out: Vec(Payload) = Vec.new(Payload)
+    out.push(make_payload(data))
+    return out
+}
+fn make_vec2(data: Bytes) -> Vec(Payload) {
+    let inner = make_vec(data)
+    var out: Vec(Payload) = Vec.new(Payload)
+    out.push(inner[0])
+    return out
+}
+fn concat_loop(seed: Bytes) -> String {
+    var acc: String = "x"
+    var i: U64 = 0
+    while i < 4 {
+        acc = acc.concat("y")
+        i = i + 1
+    }
+    return acc
+}
+fn check_bytes(got: Bytes, want: Bytes) -> I32 {
+    if got.len() != want.len() { return 1 }
+    var i: U64 = 0
+    while i < want.len() {
+        if got.byte(i) != want.byte(i) { return 2 }
+        i = i + 1
+    }
+    return 0
+}
+fn check_string(got: String, want: String) -> I32 {
+    if got.len() != want.len() { return 1 }
+    var i: U64 = 0
+    while i < want.len() {
+        if got.byte(i) != want.byte(i) { return 2 }
+        i = i + 1
+    }
+    return 0
+}
+fn main() -> I32 {
+    let raw: Bytes = "ready".to_bytes()
+    var code: I32 = 0
+    let sliced = slice_at(raw, 0, 5)
+    code = check_bytes(sliced, raw)
+    if code != 0 { return code + 10 }
+    let piece = make_payload(raw)
+    var v: Vec(Payload) = Vec.new(Payload)
+    v.push(piece)
+    match v[0] {
+        Word(name) => { code = check_bytes(name, raw) }
+        Empty => { code = 99 }
+    }
+    if code != 0 { return code + 20 }
+    let parts = make_vec2(raw)
+    if parts.len() != 1 { return 30 }
+    match parts[0] {
+        Word(name) => { code = check_bytes(name, raw) }
+        Empty => { code = 99 }
+    }
+    if code != 0 { return code + 31 }
+    let boxed = make_box(raw)
+    code = check_bytes(boxed.data, raw)
+    if code != 0 { return code + 40 }
+    let acc = concat_loop(raw)
+    let want: String = "xyyyy"
+    code = check_string(acc, want)
+    if code != 0 { return code + 50 }
+    let joined = raw.concat("!".to_bytes())
+    if joined.len() != 6 { return 60 }
+    if joined.byte(5) != 33 { return 61 }
+    return 0
+}
+`
+
+const strStorageClosureProgram = `fn bind(data: Bytes) -> fn() -> I32 {
+    let name = data.slice(0, 5)
+    let title = "ok".concat("ay")
+    return fn() -> I32 {
+        if name.len() != 5 { return 7 }
+        if name.byte(4) != 121 { return 8 }
+        if title.len() != 4 { return 9 }
+        if title.byte(3) != 121 { return 10 }
+        return 0
+    }
+}
+fn main() -> I32 {
+    let raw = "ready".to_bytes()
+    let check = bind(raw)
+    return check()
+}
+`
+
+func TestStringBytesStorageQualification(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+
+	// The sanitizer build needs the runtime instrumented too, so the freed
+	// domain segments get redzones instead of silent reuse.
+	sanitized := append([]string{"-fsanitize=address,undefined", "-g", "-O0"}, strictC11Flags()...)
+	rtObject := filepath.Join(t.TempDir(), "alder-asan.o")
+	rtArgs := append(append([]string{}, sanitized...),
+		"-I", filepath.Join(root, "runtime", "c"),
+		"-c", filepath.Join(root, "runtime", "c", "alder.c"), "-o", rtObject)
+	if output, err := exec.Command(cc, rtArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("sanitized runtime compile: %v\n%s", err, output)
+	}
+
+	for _, program := range []struct{ name, source string }{
+		{"str-storage-shapes.al", strStorageProgram},
+		{"str-storage-closure.al", strStorageClosureProgram},
+	} {
+		program := program
+		t.Run(program.name, func(t *testing.T) {
+			t.Parallel()
+			cResult := runProductionCompiler(t, exe, map[string]string{program.name: program.source}, "compile", "--emit=c", program.name)
+			if cResult.status != 0 || cResult.stderr != "" || !strings.HasPrefix(cResult.stdout, "/* Generated by the Alder C11 backend.") {
+				t.Fatalf("%s C result: %+v stderr=%s", program.name, cResult, cResult.stderr)
+			}
+			const driverText = `#include "alder_host.h"
+#include <stdint.h>
+int main(void) { int context = 0; return (int)alder_program_entry(&context); }
+`
+			compileAndRunProductionArtifactWithDriver(t, cc, root, rtObject, cResult.stdout, driverText, 0, sanitized...)
+		})
+	}
+}
+
 func TestStrMethodsProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()

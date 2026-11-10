@@ -258,8 +258,10 @@ func (g *gen) analyze() error {
 }
 
 // copyTrivial reports whether a value of the type can be copied by identity:
-// it contains no slice or safe reference anywhere, so there is no storage to
-// move between domains.
+// it contains no slice, safe reference, string, or bytes anywhere, so there
+// is no storage to move between domains. String and Bytes descriptors carry
+// a domain-allocated byte buffer whenever a str/bytes op produced them, so
+// their copies must reallocate the buffer.
 func (g *gen) copyTrivial(t mir.TypeId) bool {
 	if !g.m.ValidType(t) {
 		return true
@@ -268,7 +270,8 @@ func (g *gen) copyTrivial(t mir.TypeId) bool {
 	switch ty.Kind {
 	case mir.TypeFunction, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut,
 		mir.TypeDomainHandle, mir.TypeDomainMark, mir.TypeCleanupScope, mir.TypeCleanupID,
-		mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr:
+		mir.TypeTable, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr,
+		mir.TypeString, mir.TypeBytes:
 		return false
 	case mir.TypeOption, mir.TypeArray:
 		return g.copyTrivial(ty.Elem)
@@ -949,6 +952,19 @@ func (g *gen) emitCopyHelper(b *strings.Builder, t mir.TypeId) {
 		"(AlderDomain *alder_d, " + g.cType(t) + " alder_v, int alder_retain) {\n  (void)alder_retain;\n")
 	ty := &g.m.Types[t]
 	switch ty.Kind {
+	case mir.TypeString, mir.TypeBytes:
+		// The descriptor is {data, len}; the buffer moves into the
+		// destination domain, keeping the slice-branch checks and style.
+		b.WriteString("  uint64_t alder_t;\n")
+		b.WriteString("  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n")
+		b.WriteString("  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n")
+		b.WriteString("  if (alder_v.len > (uint64_t)0) {\n")
+		b.WriteString("    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n")
+		b.WriteString("    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)1);\n")
+		b.WriteString("    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
+		b.WriteString("    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n")
+		b.WriteString("    alder_v.data = alder_p;\n")
+		b.WriteString("  }\n")
 	case mir.TypeFunction:
 		// A function value is {code, environment, retain}. A cross-domain
 		// copy retains the environment through the hook so the copy owns a
