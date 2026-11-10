@@ -25,7 +25,26 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   Milestone 8 `Result(T, E)` helper surface in the installed sysroot;
 - [`core.num` public snapshot v1](api/core.num-v1.md), covering the
   Milestone 8 integer limits and explicit-overflow absolute value in the
-  installed sysroot.
+  installed sysroot;
+- [`std.io` public snapshot v1](api/std.io-v1.md), covering the Milestone 8
+  hosted capability layer (`Io`, `BlockingIo`, `Blocking`, `Reader`,
+  `Writer`, `Seek`, buffers, standard streams, exact helpers, `IoError`, and
+  the prelude `Error` trait contract);
+- [`std.path` public snapshot v1](api/std.path-v1.md), covering the Milestone
+  8 owned `Path` surface and lexical operations;
+- [`std.fs` public snapshot v1](api/std.fs-v1.md), covering the Milestone 8
+  affine `File`, metadata, directory iteration, and temporary-file surface;
+- [`std.env` public snapshot v1](api/std.env-v1.md), covering the Milestone 8
+  `OsString`, argument, environment, and target-information surface;
+- [`std.process` public snapshot v1](api/std.process-v1.md), covering the
+  Milestone 8 `Command`, `Child`, pipe, and exit-status surface;
+- [`std.time` public snapshot v1](api/std.time-v1.md), covering the
+  Milestone 8 `Instant`, `SystemTime`, `Duration`, `sleep`, and UTC civil
+  conversion surface;
+- [`std.random` public snapshot v1](api/std.random-v1.md), covering the
+  Milestone 8 OS randomness and seeded deterministic generator surface;
+- [`std.math` public snapshot v1](api/std.math-v1.md), covering the Milestone
+  8 scalar float surface.
 
 ## Distribution layers
 
