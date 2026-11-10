@@ -491,19 +491,24 @@ fn cgen_emit_int_mode(d: Domain, initial: CgenWriter, store: MirStore, indexes: 
     if width < 64 && item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_try() {
         // Narrow try: the widened operands cannot overflow 64 bits, so
         // plain 64-bit arithmetic needs no checked helper; the width check
-        // below alone decides none versus some.
-        out = try cgen_put(d, out, "(")
+        // below alone decides none versus some. Each operand is widened to
+        // 64 bits BEFORE the arithmetic: a narrow cast alone would let C
+        // compute the operation in the operands' promoted 32-bit int
+        // width, where i32 signed subtraction overflows (undefined) and
+        // u32 wraparound silently corrupts the value.
+        if signed { out = try cgen_put(d, out, "(int64_t)((") } else { out = try cgen_put(d, out, "(uint64_t)((") }
         out = try cgen_put_type(d, out, store, type_id)
         out = try cgen_put(d, out, ")")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ")")
         if item.op == mir_op_int_add_try() { out = try cgen_put(d, out, " + ") }
         if item.op == mir_op_int_sub_try() { out = try cgen_put(d, out, " - ") }
         if item.op == mir_op_int_mul_try() { out = try cgen_put(d, out, " * ") }
-        out = try cgen_put(d, out, "(")
+        if signed { out = try cgen_put(d, out, "(int64_t)((") } else { out = try cgen_put(d, out, "(uint64_t)((") }
         out = try cgen_put_type(d, out, store, type_id)
         out = try cgen_put(d, out, ")")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
-        out = try cgen_put(d, out, ";\n")
+        out = try cgen_put(d, out, ");\n")
     } else {
     out = try cgen_put(d, out, "alder_")
     if signed { out = try cgen_put(d, out, "i64_") } else { out = try cgen_put(d, out, "u64_") }

@@ -733,7 +733,15 @@ func (g *gen) emitIntMode(b *strings.Builder, in *mir.Instr) {
 	if tryForm {
 		// Narrow try: the widened operands cannot overflow 64 bits, so
 		// plain 64-bit arithmetic needs no checked helper; the width
-		// check below alone decides none versus some.
+		// check below alone decides none versus some. Each operand is
+		// widened to 64 bits BEFORE the arithmetic: a narrow cast alone
+		// would let C compute the operation in the operands' promoted
+		// 32-bit int width, where i32 signed subtraction overflows
+		// (undefined) and u32 wraparound silently corrupts the value.
+		wide := "int64_t"
+		if !signed {
+			wide = "uint64_t"
+		}
 		op := "+"
 		switch in.Op {
 		case mir.OpIntSubTry:
@@ -741,8 +749,8 @@ func (g *gen) emitIntMode(b *strings.Builder, in *mir.Instr) {
 		case mir.OpIntMulTry:
 			op = "*"
 		}
-		b.WriteString("  " + signed64Name(signed) + " " + tmp + " = (" + srcCast + ")" + a + " " + op +
-			" (" + srcCast + ")" + bArg + ";\n")
+		b.WriteString("  " + signed64Name(signed) + " " + tmp + " = " + wide + "((" + srcCast + ")" + a + ") " + op +
+			" " + wide + "((" + srcCast + ")" + bArg + ");\n")
 	} else {
 		b.WriteString("  " + signed64Name(signed) + " " + tmp + " = " + helper + opName +
 			"(" + narrowA + ", " + narrowB + ");\n")

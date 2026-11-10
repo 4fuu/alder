@@ -68,6 +68,51 @@ fn t_checked_narrow() -> I32 {
     return code
 }
 
+fn t_checked_wide32() -> I32 {
+    let zero: I32 = 0
+    let min: I32 = -2147483648
+    var code: I32 = 9
+    match zero.sub_checked(min) {
+        Some(_) => { code = 1 }
+        None => { code = 0 }
+    }
+    if code != 0 { return code }
+    match min.add_checked(-1) {
+        Some(_) => { code = 2 }
+        None => { code = 0 }
+    }
+    if code != 0 { return code }
+    let h: I32 = 65536
+    match h.mul_checked(65536) {
+        Some(_) => { code = 3 }
+        None => { code = 0 }
+    }
+    if code != 0 { return code }
+    let uz: U32 = 0
+    let umax: U32 = 4294967295
+    match uz.sub_checked(umax) {
+        None => { code = 0 }
+        Some(_) => { code = 4 }
+    }
+    if code != 0 { return code }
+    match umax.sub_checked(1) {
+        Some(v) => { if v != 4294967294 { code = 8 } }
+        None => { code = 5 }
+    }
+    if code != 0 { return code }
+    match umax.add_checked(1) {
+        Some(_) => { code = 6 }
+        None => { code = 0 }
+    }
+    if code != 0 { return code }
+    let uh: U32 = 65536
+    match uh.mul_checked(65536) {
+        Some(_) => { code = 7 }
+        None => { code = 0 }
+    }
+    return code
+}
+
 fn t_checked_u64() -> I32 {
     let m: U64 = 18446744073709551615
     var code: I32 = 9
@@ -133,6 +178,8 @@ fn main() -> I32 {
     if a != 0 { return a }
     let b = t_checked_narrow()
     if b != 0 { return b }
+    let b32 = t_checked_wide32()
+    if b32 != 0 { return b32 }
     let c = t_checked_u64()
     if c != 0 { return c }
     let d = t_saturating()
