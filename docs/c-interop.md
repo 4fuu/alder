@@ -283,18 +283,21 @@ The runtime ships an audited shim header for exactly these operations:
 
 ```c
 /* runtime/c/alder_errno.h */
-int c_errno(void);
-const char *c_strerror(int number);
+static inline int c_errno(void) { return errno; }
+static inline const char *c_strerror(int number) { return strerror(number); }
 ```
 
 Wrapper modules bind the shim like any other header, e.g.
 `import c "alder_errno.h" as cerrno { raw fn last = "c_errno"() -> c.Int }`,
 and the generated probe unit pins the shim signatures through the same
 `_Static_assert` evidence as user bindings. The shims are the whole surface of
-that header. Their C names stay outside the `alder_` runtime prefix because
-the binding spelling policy reserves that prefix, and the policy has no
-exceptions. Reading the errno value's integer into Alder requires the explicit
-checked conversions and is therefore available only once those land.
+that header. Both definitions are `static inline`: including the header never
+adds an exported symbol to a program, so a user C library cannot collide with
+them at link time, and every including translation unit gets its own copy.
+Their C names stay outside the `alder_` runtime prefix because the binding
+spelling policy reserves that prefix, and the policy has no exceptions.
+Reading the errno value's integer into Alder requires the explicit checked
+conversions between `c.*` scalars and Alder numerics.
 
 ## Native linking and tooling
 
