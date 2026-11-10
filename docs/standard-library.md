@@ -31,11 +31,11 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   `Writer`, `Seek`, buffers, standard streams, exact helpers, `IoError`, and
   the prelude `Error` trait contract);
 - [`std.path` public snapshot v1](api/std.path-v1.md), covering the Milestone
-  8 owned `Path` surface and lexical operations;
+  8 shared `OsString`, owned `Path` surface, and lexical operations;
 - [`std.fs` public snapshot v1](api/std.fs-v1.md), covering the Milestone 8
   affine `File`, metadata, directory iteration, and temporary-file surface;
 - [`std.env` public snapshot v1](api/std.env-v1.md), covering the Milestone 8
-  `OsString`, argument, environment, and target-information surface;
+  argument, environment, and target-information surface;
 - [`std.process` public snapshot v1](api/std.process-v1.md), covering the
   Milestone 8 `Command`, `Child`, pipe, and exit-status surface;
 - [`std.time` public snapshot v1](api/std.time-v1.md), covering the
@@ -142,14 +142,20 @@ all remaining elements exactly once.
 
 Required modules:
 
-- `std.path`: owned `Path`, component iteration, lexical join/normalize,
-  extension/name operations, and explicit platform conversion;
+- `std.path`: the shared exact host `OsString`, owned `Path`, component
+  iteration, lexical join/normalize, extension/name operations, and explicit
+  platform conversion;
 - `std.io`: the `Io`, `BlockingIo`, and `AsyncIo` capability traits; the
   `Blocking` and `Evented` capabilities; `Reader`, `Writer`, and `Seek` traits;
   buffered readers/writers; standard input/output/error; exact/copy/line
   helpers; `IoError`;
 - `std.fs`: affine `File`, directory iteration, metadata, permissions,
   canonicalization, copy/rename/remove, and temporary files/directories.
+
+The hosted `std` module graph is acyclic and fixed by the snapshots:
+`std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports
+`std.path` and `std.env`; `std.fs` and `std.process` additionally build on
+`std.io`, and `std.time` and `std.random` on `std.io`.
 
 Every operation that waits on the host takes an I/O capability and is written
 once against `I: Io`, so the same API serves blocking tools and evented
@@ -169,8 +175,8 @@ merely because fallback cleanup cannot return an error.
 
 Required modules:
 
-- `std.env`: exact host `OsString`, arguments, environment lookup/update,
-  checked `String` conversion, current executable and directory, and
+- `std.env`: arguments, environment lookup/update, checked `String`
+  conversion for host-facing details, current executable and directory, and
   platform/target information;
 - `std.process`: value-semantic `Command`, affine `Child`, pipes, exit status,
   output capture, wait, cancellation-aware termination, and explicit

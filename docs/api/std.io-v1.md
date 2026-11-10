@@ -23,8 +23,8 @@ lowering arrive with Milestone 9 as an additive v2 of this snapshot.
 ```alder
 module std.io
 
-import std.env { OsString, PlatformInfo }
-import std.path { Path }
+import std.env { PlatformInfo }
+import std.path { OsString, Path }
 
 /// One open host file. Affine: exactly one owner closes it exactly once,
 /// through `io.close` or best-effort cleanup. The capability constructs
@@ -553,6 +553,6 @@ pub fn std_io_example() -> U64 {
   requirements, including generic methods such as `Reader.copy_to`; the
   default lands as designed and no free `io.copy` bridge is needed.
 - Needs the sysroot thread's `String` byte access for `print`/`read_line` and
-  `OsString` from `std.env` (this snapshot family).
+  `OsString` from `std.path` (this snapshot family).
 - The example avoids string building, interpolation, and `while let` so it
   compiles on the current S0 boundary.

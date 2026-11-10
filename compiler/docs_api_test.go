@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -90,6 +91,97 @@ pub fn main() -> I32 {
 }
 `,
 		},
+	}
+}
+
+// The frozen snapshot import lines form the hosted std module graph. The
+// graph must stay acyclic — a cycle between modules can never build, since
+// the driver rejects one with a canonical cycle path — so the snapshot docs
+// reject a cycle the moment an import line introduces it. A missing
+// docs/api directory or no std.*-v1.md files fails loudly rather than
+// silently passing.
+func TestDocsApiSnapshotImportsAcyclic(t *testing.T) {
+	t.Parallel()
+	apiDir := filepath.Join("..", "docs", "api")
+	entries, err := os.ReadDir(apiDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	importLine := func(text string) (string, string, bool) {
+		if !strings.HasPrefix(text, "import std.") {
+			return "", "", false
+		}
+		rest := strings.TrimPrefix(text, "import std.")
+		end := strings.IndexAny(rest, " \t{")
+		if end < 0 {
+			end = len(rest)
+		}
+		name := rest[:end]
+		if name == "" {
+			return "", "", false
+		}
+		return name, rest, true
+	}
+	edges := map[string][]string{}
+	found := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "std.") || !strings.HasSuffix(entry.Name(), "-v1.md") {
+			continue
+		}
+		module := strings.TrimSuffix(entry.Name(), "-v1.md")
+		text, readErr := os.ReadFile(filepath.Join(apiDir, entry.Name()))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		found++
+		seen := map[string]bool{}
+		for _, line := range strings.Split(string(text), "\n") {
+			line = strings.TrimSpace(line)
+			name, _, ok := importLine(line)
+			// The example block imports the module the snapshot documents;
+			// that self-reference is not a dependency edge.
+			if !ok || "std."+name == module || seen[name] {
+				continue
+			}
+			seen[name] = true
+			edges[module] = append(edges[module], "std."+name)
+		}
+	}
+	if found == 0 {
+		t.Fatal("no std.*-v1.md snapshots found under docs/api")
+	}
+	// Depth-first cycle detection with a sorted, deterministic visit order.
+	var visit func(node string, path []string, onPath map[string]bool) []string
+	visited := map[string]bool{}
+	visit = func(node string, path []string, onPath map[string]bool) []string {
+		if onPath[node] {
+			return append(path, node)
+		}
+		if visited[node] {
+			return nil
+		}
+		visited[node] = true
+		onPath[node] = true
+		successors := append([]string(nil), edges[node]...)
+		sort.Strings(successors)
+		for _, next := range successors {
+			if cycle := visit(next, append(path, node), onPath); cycle != nil {
+				return cycle
+			}
+		}
+		delete(onPath, node)
+		return nil
+	}
+	var roots []string
+	for node := range edges {
+		roots = append(roots, node)
+	}
+	sort.Strings(roots)
+	for _, root := range roots {
+		var onPath map[string]bool = map[string]bool{}
+		if cycle := visit(root, nil, onPath); cycle != nil {
+			t.Fatalf("snapshot import cycle: %s", strings.Join(cycle, " -> "))
+		}
 	}
 }
 

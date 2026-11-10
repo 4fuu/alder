@@ -24,9 +24,8 @@ because `Path` construction is checked.
 ```alder
 module std.fs
 
-import std.env { OsString }
 import std.io
-import std.path { Path }
+import std.path { OsString, Path }
 import std.time { SystemTime }
 
 /// Options for `File.open_options`. Construct with `Options.read` or
@@ -294,33 +293,134 @@ import std.path
 // The executable std.fs v1 snapshot example. Everything happens inside one
 // temporary directory that cleanup removes; the checksum is deterministic.
 
+// Byte equality between text and a literal.
+// uses == once Eq equality lands
+fn text_is(left: String, right: String) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// Option equality between two host strings.
+// uses == once Eq equality lands
+fn name_opt_eq(left: Option(OsString), right: Option(OsString)) -> Bool {
+    match left {
+        Some(one) => {
+            match right {
+                Some(two) => {
+                    if one.len() != two.len() { return false }
+                    var at: U64 = 0
+                    while at < one.len() {
+                        if one.byte(at) != two.byte(at) { return false }
+                        at = at + 1
+                    }
+                    return true
+                }
+                None => { return false }
+            }
+        }
+        None => {
+            match right {
+                Some(_) => { return false }
+                None => { return true }
+            }
+        }
+    }
+}
+
+// The example inputs are fixed, so any early failure aborts with zero.
 pub fn std_fs_example(io: io.Blocking) -> U64 {
     var total: U64 = 0
-    let room = try fs.TempDir.new(io, "alder-fs-example")
+    let room = match fs.TempDir.new(io, "alder-fs-example") {
+        Ok(value) => { value }
+        Err(_) => { return 0 }
+    }
     let base = room.path()
 
     // Write, read back, and confirm exact bytes.
-    let note = base.join(try path.Path.parse("note.txt"))
-    try fs.write_text(io, note, "alder")
-    let text = try fs.read_text(io, note)
-    if text == "alder" { total = total + 1 }
+    let note = match path.Path.parse("note.txt") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    match fs.write_text(io, note, "alder") {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    let text = match fs.read_text(io, note) {
+        Ok(value) => { value }
+        Err(_) => { return 0 }
+    }
+    // uses == once Eq equality lands
+    if text_is(text, "alder") { total = total + 1 }
 
     // The frozen files.copy shape: open, copy_to, finish.
-    let source = base.join(try path.Path.parse("source.bin"))
+    let source = match path.Path.parse("source.bin") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
     let raw: Array(U8, 5) = [1, 2, 3, 4, 5]
-    try fs.write(io, source, raw.slice(0, 5))
-    let target = base.join(try path.Path.parse("target.bin"))
-    using input = try fs.File.open(io, source)
-    var output = try fs.File.create(io, target)
-    let copied = try input.copy_to(output)
-    try output.finish()
-    total = total + copied
+    match fs.write(io, source, raw.slice(0, 5)) {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    let target = match path.Path.parse("target.bin") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    match fs.File.open(io, source) {
+        Ok(opened) => {
+            using input = opened
+            match fs.File.create(io, target) {
+                Ok(created) => {
+                    var output = created
+                    let copied = match input.copy_to(output) {
+                        Ok(value) => { value }
+                        Err(_) => { return 0 }
+                    }
+                    match output.finish() {
+                        Ok(_) => { total = total + copied }
+                        Err(_) => { return 0 }
+                    }
+                }
+                Err(_) => { return 0 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
 
     // Deterministic sorted iteration over a fixed set of names.
-    try fs.write_text(io, base.join(try path.Path.parse("c.txt")), "3")
-    try fs.write_text(io, base.join(try path.Path.parse("a.txt")), "1")
-    try fs.write_text(io, base.join(try path.Path.parse("b.txt")), "2")
-    let sorted = try fs.read_dir_sorted(io, base)
+    let c_name = match path.Path.parse("c.txt") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    let a_name = match path.Path.parse("a.txt") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    let b_name = match path.Path.parse("b.txt") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    match fs.write_text(io, c_name, "3") {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    match fs.write_text(io, a_name, "1") {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    match fs.write_text(io, b_name, "2") {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    let sorted = match fs.read_dir_sorted(io, base) {
+        Ok(value) => { value }
+        Err(_) => { return 0 }
+    }
     total = total + sorted.len() * 100
     var sum: U64 = 0
     var at: U64 = 0
@@ -334,15 +434,32 @@ pub fn std_fs_example(io: io.Blocking) -> U64 {
 
     // Canonicalize inside the temporary directory: the resolved suffix and
     // existence are checked, the host-specific prefix is not.
-    let canonical = try fs.canonicalize(io, note)
-    if canonical.file_name() == note.file_name() { total = total + 1 }
+    let canonical = match fs.canonicalize(io, note) {
+        Ok(value) => { value }
+        Err(_) => { return 0 }
+    }
+    // uses == once Eq equality lands
+    if name_opt_eq(canonical.file_name(), note.file_name()) { total = total + 1 }
 
     // Rename and remove.
-    try fs.rename(io, target, base.join(try path.Path.parse("moved.bin")))
-    try fs.remove_file(io, base.join(try path.Path.parse("moved.bin")))
+    let moved = match path.Path.parse("moved.bin") {
+        Ok(value) => { base.join(value) }
+        Err(_) => { return 0 }
+    }
+    match fs.rename(io, target, moved) {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
+    match fs.remove_file(io, moved) {
+        Ok(_) => {}
+        Err(_) => { return 0 }
+    }
 
     // Metadata query on a fresh write.
-    let meta = try fs.metadata(io, note)
+    let meta = match fs.metadata(io, note) {
+        Ok(value) => { value }
+        Err(_) => { return 0 }
+    }
     match meta.kind {
         File => { total = total + 1 }
         Directory => { total = total - 100 }
@@ -360,8 +477,8 @@ pub fn std_fs_example(io: io.Blocking) -> U64 {
 ## Dependencies and sequencing
 
 - Integer conversions in the example use the settled builtin surface: total `to_u64()` for all-fitting pairs, with `to_u64_checked()` available where a value may not fit; the methods land with the sysroot thread's numeric surface after the String/Bytes byte work.
-- Builds on `std.io` (capability traits, `IoError`, `Reader`), `std.path`, and
-  `std.env` (`OsString`).
+- Builds on `std.io` (capability traits, `IoError`, `Reader`), `std.path`
+  (`Path`, `OsString`), and `std.env`.
 - Needs the sysroot thread's `String` byte operations for `read_text`/
   `write_text` and their UTF-8 check.
 - Needs the generic implementation parameter list (D024 extension, decided)

@@ -23,9 +23,9 @@ exactly as built, with no quoting or expansion anywhere in the layer.
 ```alder
 module std.process
 
-import std.env { OsString, PlatformInfo }
+import std.env { PlatformInfo }
 import std.io
-import std.path { Path }
+import std.path { OsString, Path }
 
 /// Value-semantic child-process description. Copying a `Command` copies the
 /// whole configuration; builder methods mutate a uniquely owned value in
@@ -240,35 +240,72 @@ module hello.std_process_example
 
 import std.env
 import std.io
+import std.path
 import std.process
 
 // The executable std.process v1 snapshot example. One fixed program with
 // fixed arguments and piped capture; the checksum is deterministic.
 
+// Byte equality between a byte vector and a literal.
+// uses == once Eq equality lands
+fn bytes_are(left: Bytes, right: String) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// The example inputs are fixed, so any early failure aborts with a
+// distinctive negative checksum.
 pub fn std_process_example(io: io.Blocking) -> I64 {
     var total: I64 = 0
 
     // Value-semantic builder, then capture through Command.output.
-    let program = try env.OsString.parse("/bin/echo")
-    let message = try env.OsString.parse("alder")
+    let program = match path.OsString.parse("/bin/echo") {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
+    let message = match path.OsString.parse("alder") {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
     var command = process.Command.new(program)
     command.argument(message)
-    let result = try process.Command.output(io, command)
+    let result = match process.Command.output(io, command) {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
     if result.status.success() { total = total + 1 }
-    let expected: Bytes = "alder\n"
-    if result.stdout == expected { total = total + 10 }
+    // uses == once Eq equality lands
+    if bytes_are(result.stdout, "alder\n") { total = total + 10 }
 
     // Explicit environment override path, same fixed program.
     var scripted = process.Command.new(program)
-    scripted.argument("alder")
-    scripted.env(try env.OsString.parse("ALDER_STD_PROCESS_EXAMPLE"),
-        try env.OsString.parse("1"))
-    let second = try process.Command.output(io, scripted)
+    scripted.argument(message)
+    let key = match path.OsString.parse("ALDER_STD_PROCESS_EXAMPLE") {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
+    let flag = match path.OsString.parse("1") {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
+    scripted.env(key, flag)
+    let second = match process.Command.output(io, scripted) {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
     if second.status.success() { total = total + 100 }
-    if second.stderr.is_empty() { total = total + 1 }
+    if second.stderr.len() == 0 { total = total + 1 }
 
     // An unsatisfiable program reports NotFound instead of panicking.
-    let missing = try env.OsString.parse("/alder/does/not/exist")
+    let missing = match path.OsString.parse("/alder/does/not/exist") {
+        Ok(value) => { value }
+        Err(_) => { return -1000000 }
+    }
     var gone = process.Command.new(missing)
     match process.Command.status(io, gone) {
         Ok(_) => { total = total - 100000 }
@@ -282,7 +319,8 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
 ## Dependencies and sequencing
 
 - Builds on `std.io` (`Reader`/`Writer` for the pipe ends, the capability for
-  descriptor operations) and `std.env` (`OsString`, `PlatformInfo`).
+  descriptor operations), `std.path` (`OsString`), and `std.env`
+  (`PlatformInfo`).
 - Needs the generic implementation parameter list (D024 extension, decided)
   for the trait and `Cleanup` impls over `Child(I)` and the pipe ends; the
   syntax lands with the constraint-syntax thread before the `std.io` commit.

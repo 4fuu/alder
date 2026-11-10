@@ -21,7 +21,30 @@ so that extension does not change any v1 signature.
 ```alder
 module std.path
 
-import std.env { OsString }
+/// One owned exact host string: the bytes are precisely what the host gave
+/// or will receive, with no encoding assumption. Interior NUL bytes are
+/// rejected at construction because no host interface can carry them.
+/// Equality is exact bytes. This is the one host-string type the hosted
+/// modules share; `std.env`, `std.io`, and `std.process` convert to and
+/// from it explicitly and nothing reinterprets its bytes as text.
+pub type OsString {
+    // private: data
+}
+
+impl OsString {
+    /// Checks text as a host string.
+    pub fn parse(text: String) -> Result(OsString, PathError)
+    /// Builds from owned bytes, rejecting interior NUL bytes.
+    pub fn from_bytes(data: Bytes) -> Result(OsString, PathError)
+    /// The exact bytes.
+    pub fn to_bytes(self) -> Bytes
+    /// The text when the bytes are valid UTF-8, `None` otherwise.
+    /// (Checked-total convention: non-text host strings are a
+    /// representable state, not an error.)
+    pub fn to_string(self) -> Option(String)
+    /// The byte length.
+    pub fn len(self) -> U64
+}
 
 /// One owned, checked path value. The bytes are exactly the host path:
 /// interior NUL bytes are rejected at construction because no target can
@@ -30,7 +53,8 @@ pub type Path {
     // private: data
 }
 
-/// Failure of path construction from text.
+/// Failure of host-string or path construction from text: the only
+/// rejected byte is interior NUL.
 pub enum PathError {
     /// The input contained an interior NUL byte.
     InvalidEncoding
@@ -51,10 +75,10 @@ pub enum Component {
 impl Path {
     /// Checks text as a path: every UTF-8 sequence is accepted except one
     /// containing an interior NUL byte.
-    pub fn parse(T: type, text: T) -> Result(Path, PathError)
+    pub fn parse(text: String) -> Result(Path, PathError)
     /// Builds a path from host bytes. Infallible: `OsString` already
     /// rejects interior NUL bytes.
-    pub fn from_os(T: type, name: T) -> Path
+    pub fn from_os(name: OsString) -> Path
     /// The exact bytes as an `OsString`.
     pub fn to_os(self) -> OsString
     /// The bytes as text when they are valid UTF-8, `None` otherwise.
@@ -94,12 +118,13 @@ impl Error for PathError {
 }
 ```
 
-Equality for `Path` is structural: two paths are equal exactly when their
-bytes are equal. No ordering relation is public in v1; the sorted directory
-iterator in `std.fs` sorts by exact bytes internally.
+Equality for `Path` and for `OsString` is structural: values are equal
+exactly when their bytes are equal. No ordering relation is public in v1; the
+sorted directory iterator in `std.fs` sorts by exact bytes internally.
 
-`Display` for `Path` (rendering non-UTF-8 components with escapes) lands with
-the sysroot formatting snapshot and is additive.
+`Display` for `Path` and for `OsString` (rendering non-UTF-8 components with
+escapes, and host strings lossily with replacement characters) lands with the
+sysroot formatting snapshot and is additive.
 
 ## Contracts
 
@@ -133,43 +158,88 @@ import std.path
 // fixed inputs; every stage contributes a deterministic share of the
 // returned checksum.
 
+// Byte equality between a host string and a literal.
+// uses == once Eq equality lands
+fn os_is(left: OsString, right: String) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// Option equality against a literal.
+// uses == once Eq equality lands
+fn os_option_is(left: Option(OsString), right: String) -> Bool {
+    match left {
+        Some(value) => { return os_is(value, right) }
+        None => { return false }
+    }
+}
+
+// The example inputs are fixed valid paths, so failed parses contribute
+// nothing; `try` is reserved for functions returning `Result`.
 pub fn std_path_example() -> U64 {
     var total: U64 = 0
 
     // Component iteration over an absolute path with an extension.
-    let entry = try path.Path.parse("/usr/local/app.conf")
-    var names: U64 = 0
-    var dots: U64 = 0
-    let parts = entry.components()
-    var at: U64 = 0
-    while at < parts.len() {
-        match parts[at] {
-            RootDir => { dots = dots + 1 }
-            CurDir => { dots = dots + 2 }
-            ParentDir => { dots = dots + 4 }
-            Normal(name) => { names = names + name.len() }
-        }
-        at = at + 1
-    }
-    total = total + names * 10 + dots
+    match path.Path.parse("/usr/local/app.conf") {
+        Ok(entry) => {
+            var names: U64 = 0
+            var dots: U64 = 0
+            let parts = entry.components()
+            var at: U64 = 0
+            while at < parts.len() {
+                match parts[at] {
+                    RootDir => { dots = dots + 1 }
+                    CurDir => { dots = dots + 2 }
+                    ParentDir => { dots = dots + 4 }
+                    Normal(name) => { names = names + name.len() }
+                }
+                at = at + 1
+            }
+            total = total + names * 10 + dots
 
-    // Name, stem, extension, and parent queries.
-    if entry.file_name() == some_os("app.conf") { total = total + 100 }
-    if entry.file_stem() == some_os("app") { total = total + 200 }
-    if entry.extension() == some_os("conf") { total = total + 400 }
-    match entry.parent() {
-        Some(up) => { total = total + up.to_os().len() }
-        None => { total = total - 1000 }
+            // Name, stem, extension, and parent queries.
+            // uses == once Eq equality lands
+            if os_option_is(entry.file_name(), "app.conf") { total = total + 100 }
+            // uses == once Eq equality lands
+            if os_option_is(entry.file_stem(), "app") { total = total + 200 }
+            // uses == once Eq equality lands
+            if os_option_is(entry.extension(), "conf") { total = total + 400 }
+            match entry.parent() {
+                Some(up) => { total = total + up.to_os().len() }
+                None => { total = total - 1000 }
+            }
+            if entry.is_absolute() { total = total + 1000 }
+        }
+        Err(_) => { total = total - 10000000 }
     }
-    if entry.is_absolute() { total = total + 1000 }
 
     // Lexical join and normalize, including a climb past a relative root.
-    let base = try path.Path.parse("a/b/./c")
-    let joined = base.join(try path.Path.parse("d/../../e"))
-    let norm = joined.normalize()
-    if norm.to_os() == os_bytes("a/b/e") { total = total + 10000 }
-    let up = try path.Path.parse("a/../../..").normalize()
-    if up.to_os() == os_bytes("../../..") { total = total + 100000 }
+    match path.Path.parse("a/b/./c") {
+        Ok(base) => {
+            match path.Path.parse("d/../../e") {
+                Ok(suffix) => {
+                    let norm = base.join(suffix).normalize()
+                    // uses == once Eq equality lands
+                    if os_is(norm.to_os(), "a/b/e") { total = total + 10000 }
+                }
+                Err(_) => { total = total - 10000000 }
+            }
+        }
+        Err(_) => { total = total - 10000000 }
+    }
+    match path.Path.parse("a/../../..") {
+        Ok(base) => {
+            let up = base.normalize()
+            // uses == once Eq equality lands
+            if os_is(up.to_os(), "../../..") { total = total + 100000 }
+        }
+        Err(_) => { total = total - 10000000 }
+    }
 
     // Rejected construction.
     match path.Path.parse("bad\0name") {
@@ -184,12 +254,13 @@ pub fn std_path_example() -> U64 {
 ## Dependencies and sequencing
 
 - Integer conversions in the example use the settled builtin surface: total `to_u64()` for all-fitting pairs, with `to_u64_checked()` available where a value may not fit; the methods land with the sysroot thread's numeric surface after the String/Bytes byte work.
-- Needs `OsString` and its `len` from `std.env` (this snapshot family) and the
-  sysroot thread's `String` byte-level construction for `parse` and
-  `to_string` (decode and UTF-8 validation helpers).
+- `OsString` is defined by this module (v1 amendment: it moved here from
+  `std.env` so the module graph stays acyclic); its byte access rides the
+  sysroot thread's landed `String`/`Bytes` byte-sequence methods, including
+  UTF-8 validation for `to_string`.
 - No C bindings: the module is pure computation and can land as soon as the
   sysroot string byte operations are on main.
-- The example avoids string building, interpolation, and `while let`; helper
-  functions `os_bytes`/`some_os` in the example file build fixed `OsString`
-  values through the module's own checked constructors so the checksum reads
-  as ordinary comparisons.
+- The example avoids string building, interpolation, and `while let`; its
+  `os_is`/`os_option_is` helpers compare host strings against fixed `String`
+  literals byte by byte so the checksum reads as ordinary comparisons, and
+  return to `==` once Eq equality lands.

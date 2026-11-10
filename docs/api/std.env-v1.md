@@ -10,28 +10,23 @@ module's implementation commit: the docs example runner resolves sysroot
 modules, so the example file cannot precede the module it imports. The module
 lives at `<sysroot>/std/env.al`.
 
-Snapshot v1 fixes `OsString` as the exact-host-bytes string type every other
-hosted module shares, and `PlatformInfo` as the shared host-error-detail
-record used by `IoError`, `EnvError`, and `ProcessError`. Environment access
-deliberately takes no I/O capability: it never waits on the host, and the
-frozen capability list (`files`, `streams`, `processes`, `sleeps`, `clocks`,
-randomness) does not include it. Operations observe and update process-global
-host state; the contract below pins what that means for tests and programs.
+Snapshot v1 fixes the host-environment surface (process arguments,
+environment, working directory, executable location, and target information)
+and `PlatformInfo`, the shared host-error-detail record used by `IoError`,
+`EnvError`, and `ProcessError`. The shared host-string type `OsString` is
+defined by `std.path` (v1 amendment: it moved there so the module graph stays
+acyclic) and imported here. Environment access deliberately takes no I/O
+capability: it never waits on the host, and the frozen capability list
+(`files`, `streams`, `processes`, `sleeps`, `clocks`, randomness) does not
+include it. Operations observe and update process-global host state; the
+contract below pins what that means for tests and programs.
 
 ## Signatures
 
 ```alder
 module std.env
 
-import std.path { Path }
-
-/// One owned exact host string: the bytes are precisely what the host
-/// gave or will receive, with no encoding assumption. Interior NUL bytes
-/// are rejected at construction because no host interface can carry them.
-/// Equality is exact bytes.
-pub type OsString {
-    // private: data
-}
+import std.path { OsString, Path }
 
 /// Failure of checked construction or environment update.
 pub enum EnvError {
@@ -52,21 +47,6 @@ pub enum EnvError {
 pub type PlatformInfo {
     code: I32
     message: String
-}
-
-impl OsString {
-    /// Checks text as a host string.
-    pub fn parse(text: String) -> Result(OsString, EnvError)
-    /// Builds from owned bytes, rejecting interior NUL bytes.
-    pub fn from_bytes(data: Vec(U8)) -> Result(OsString, EnvError)
-    /// The exact bytes.
-    pub fn to_bytes(self) -> Bytes
-    /// The text when the bytes are valid UTF-8, `None` otherwise.
-    /// (Checked-total convention: non-text host strings are a
-    /// representable state, not an error.)
-    pub fn to_string(self) -> Option(String)
-    /// The byte length.
-    pub fn len(self) -> U64
 }
 
 impl env {
@@ -116,15 +96,16 @@ impl Error for EnvError {
 }
 ```
 
-Equality for `OsString` is structural over exact bytes. `Display` for
-`OsString` (lossy UTF-8 rendering with replacement characters) lands with the
-sysroot formatting snapshot and is additive.
+Equality for `OsString` is structural over exact bytes (owned by `std.path`,
+like the type itself). `Display` for `OsString` (lossy UTF-8 rendering with
+replacement characters) lands with the sysroot formatting snapshot and is
+additive.
 
 ## Contracts
 
-- `OsString` is the one host-string type of the hosted modules; `std.path`
-  and `std.io` convert to and from it explicitly and nothing reinterprets
-  bytes as text.
+- `OsString` is the one host-string type of the hosted modules; it is defined
+  by `std.path` and imported here. `std.env` and `std.io` convert to and from
+  it explicitly and nothing reinterprets bytes as text.
 - Construction is checked and total; the only universally rejected byte is
   interior NUL. No operation trims, splits, or otherwise rewrites bytes.
 - `arguments`, `var`, and `target` are pure host observations: they never
@@ -157,6 +138,20 @@ import std.path
 // The executable std.env v1 snapshot example. Only self-set values are
 // observed; every stage contributes a deterministic share of the checksum.
 
+// Byte equality between two host strings.
+// uses == once Eq equality lands
+fn os_eq(left: OsString, right: OsString) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// The example inputs are fixed valid values, so failed constructions
+// contribute nothing; `try` is reserved for functions returning `Result`.
 pub fn std_env_example() -> U64 {
     var total: U64 = 0
 
@@ -164,47 +159,73 @@ pub fn std_env_example() -> U64 {
     let args = env.arguments()
     if args.len() >= 1 { total = total + 1 }
 
-    // Self-set variable round-trip.
-    let key = try env.OsString.parse("ALDER_STD_ENV_EXAMPLE")
-    let value = try env.OsString.parse("ready")
-    try env.set_var(key, value)
-    match env.var(key) {
-        Some(found) => {
-            if found == value { total = total + 10 }
-        }
-        None => { total = total - 1000 }
-    }
+    // Self-set variable round-trip, removal, rejected construction, and the
+    // byte round-trip, over fixed key and value strings.
+    match path.OsString.parse("ALDER_STD_ENV_EXAMPLE") {
+        Ok(key) => {
+            match path.OsString.parse("ready") {
+                Ok(value) => {
+                    match env.set_var(key, value) {
+                        Ok(_) => {
+                            match env.var(key) {
+                                Some(found) => {
+                                    // uses == once Eq equality lands
+                                    if os_eq(found, value) { total = total + 10 }
+                                }
+                                None => { total = total - 1000 }
+                            }
+                        }
+                        Err(_) => { total = total - 1000 }
+                    }
 
-    // Removal.
-    try env.remove_var(key)
-    match env.var(key) {
-        Some(_) => { total = total - 10000 }
-        None => { total = total + 100 }
+                    // Removal.
+                    match env.remove_var(key) {
+                        Ok(_) => {
+                            match env.var(key) {
+                                Some(_) => { total = total - 10000 }
+                                None => { total = total + 100 }
+                            }
+                        }
+                        Err(_) => { total = total - 10000 }
+                    }
+
+                    // Byte round-trip: `Bytes` into a fresh host string.
+                    let raw = "ready"
+                    match path.OsString.from_bytes(raw.to_bytes()) {
+                        Ok(rebuilt) => {
+                            // uses == once Eq equality lands
+                            if os_eq(rebuilt, value) && rebuilt.len() == 5 {
+                                total = total + 1
+                            }
+                        }
+                        Err(_) => { total = total - 1 }
+                    }
+                }
+                Err(_) => { total = total - 100000 }
+            }
+        }
+        Err(_) => { total = total - 100000 }
     }
 
     // Rejected construction.
-    match env.OsString.parse("bad\0value") {
+    match path.OsString.parse("bad\0value") {
         Ok(_) => { total = total - 100000 }
         Err(_) => { total = total + 1 }
     }
 
-    // Byte round-trip.
-    let rebuilt = try env.OsString.from_bytes([114, 101, 97, 100, 121])
-    if rebuilt == value && rebuilt.len() == 5 { total = total + 1 }
-
     // Working directory and executable resolve on every supported target.
     match env.current_dir() {
-        Some(dir) => { if dir.to_os().len() > 0 { total = total + 1 } }
-        None => { total = total - 100 }
+        Ok(dir) => { if dir.to_os().len() > 0 { total = total + 1 } }
+        Err(_) => { total = total - 100 }
     }
     match env.current_exe() {
-        Some(exe) => {
+        Ok(exe) => {
             match exe.file_name() {
                 Some(name) => { total = total + name.len() * 100 }
                 None => { total = total - 100 }
             }
         }
-        None => { total = total - 100 }
+        Err(_) => { total = total - 100 }
     }
 
     // Target information is fixed for the build.
@@ -225,8 +246,9 @@ fn arch_bonus(arch: env.TargetArch) -> U64 {
 ## Dependencies and sequencing
 
 - Integer conversions in the example use the settled builtin surface: total `to_u64()` for all-fitting pairs, with `to_u64_checked()` available where a value may not fit; the methods land with the sysroot thread's numeric surface after the String/Bytes byte work.
-- Needs the sysroot thread's `String` byte access for `parse`, `to_string`,
-  and the UTF-8 validation inside `OsString`.
+- `OsString` construction comes from `std.path` (v1 amendment), riding the
+  sysroot thread's landed `String`/`Bytes` byte-sequence methods, including
+  UTF-8 validation for `to_string`.
 - Needs host access to argv, environ, `/proc/self/exe`-style paths, and
   `getcwd`/`chdir` through the C-binding thread's binding blocks plus small
   runtime additions; no capability plumbing.
