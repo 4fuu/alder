@@ -45,8 +45,7 @@ impl Walker(U64) for AdminCursor {
     }
 }
 
-fn take_first(W: type, walker: W) -> U64
-where W: Walker(U64) {
+fn take_first(W: type(Walker(U64)), walker: W) -> U64 {
     let value = walker.next()
     return match value {
         Some(v) => v
@@ -703,8 +702,7 @@ impl Iterator(U64) for Cursor {
     }
 }
 
-fn drain(I: type, T: type, mut iterator: I, total: U64) -> U64
-where I: Iterator(T) {
+fn drain(I: type(Iterator(T)), T: type, mut iterator: I, total: U64) -> U64 {
     return match iterator.next() {
         Some(value) => drain(I, T, iterator, total + value)
         None => total
@@ -756,6 +754,119 @@ fn main() -> I32 {
 		t.Fatalf("run mut-cursor drain behavior: %v\n%s", err, output)
 	}
 	t.Logf("mut-cursor drain program exited cleanly under strict C11")
+}
+
+// Constrained type parameters end to end: constraints on a trait, a record,
+// an enum, and a trait method, with a constraint naming a later parameter of
+// the same list. Dispatch through the constrained generics must run and
+// produce the expected results. Alder-only: the Go oracle frontend does not
+// implement the trait surface.
+func runAlderConstrainedShapesLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"constrained-shapes.al": `type Tag {
+    id: U64
+}
+
+trait Show {
+    fn show(self) -> U64
+}
+
+impl Show for Tag {
+    fn show(self) -> U64 { return self.id }
+}
+
+type Boxed(K: type(Show)) {
+    inner: K
+}
+
+enum Wrap(T: type(Show)) {
+    Held(value: T)
+    Empty
+}
+
+trait Carrier(Carried: type(Show)) {
+    fn carry(self) -> Carried
+}
+
+impl Carrier(Tag) for Tag {
+    fn carry(self) -> Tag {
+        return self
+    }
+}
+
+fn describe(C: type(Carrier(Item)), Item: type(Show), c: C) -> U64 {
+    return c.carry().show()
+}
+
+trait Maker {
+    fn make(New: type(Show), self, seed: New) -> New
+}
+
+impl Maker for Tag {
+    fn make(New: type(Show), self, seed: New) -> New {
+        return seed
+    }
+}
+
+fn use_maker(M: type(Maker), New: type(Show), m: M, seed: New) -> New {
+    return m.make(New, seed)
+}
+
+fn main() -> I32 {
+    let tag = Tag(id: 7)
+    let boxed = Boxed(inner: tag)
+    if boxed.inner.show() != 7 { return 1 }
+    let wrap: Wrap(Tag) = Held(tag)
+    let shown = match wrap {
+        Held(value) => value.show()
+        Empty => 0
+    }
+    if shown != 7 { return 2 }
+    if describe(Tag, Tag, tag) != 7 { return 3 }
+    let made = tag.make(Tag, tag)
+    if made.show() != 7 { return 4 }
+    let made2 = use_maker(Tag, Tag, tag, tag)
+    if made2.show() != 7 { return 5 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"constrained-shapes.al"})
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse constrained-shapes MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify constrained-shapes MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("constrained-shapes MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"constrained-shapes.al"})
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "constrained-shapes.c")
+	program := filepath.Join(dir, "constrained-shapes.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of constrained shapes: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run constrained shapes behavior: %v\n%s", err, output)
+	}
+	t.Logf("constrained shapes program exited cleanly under strict C11")
 }
 
 // Generic trait methods end to end: a requirement with its own type
@@ -855,8 +966,7 @@ impl Produce(String) for TextBox {
     fn produce(self) -> String { return self.t }
 }
 
-fn through(P: type, O: type, p: P) -> O
-where P: Produce(O) {
+fn through(P: type(Produce(O)), O: type, p: P) -> O {
     return p.identity_default()
 }
 

@@ -1275,7 +1275,7 @@ fn builtin_trait_arity(id: U64) -> U64 {
 }
 
 // Trait references resolve against the builtin standard traits first, then
-// declared trait symbols. Only where-clause and impl-head resolution calls
+// declared trait symbols. Only constraint and impl-head resolution calls
 // this; expression checking never scans for traits.
 fn trait_symbol_named(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
     var at: U64 = 0
@@ -1698,33 +1698,17 @@ fn find_type_param(state: State, store: CheckStore, owner: U64, node: SyntaxRec)
 
 // A `mut` non-self parameter of copyable category is legal only in the
 // iterator-cursor shape: its type is exactly a type parameter of the owner,
-// and a where-constraint on that parameter names a trait with at least one
-// `mut self` requirement. The where syntax is read directly because
+// and a constraint on that parameter names a trait with at least one
+// `mut self` requirement. The constraint syntax is read directly because
 // parameter types check before the owner's constraints are recorded; the
-// constraint-recording pass still validates the clause itself afterwards.
+// constraint-recording pass still validates the traits themselves afterwards.
 fn mut_cursor_param_ok(state: State, parse: ParseStore, store: CheckStore, owner: U64, type_node: SyntaxRec) -> Bool {
     if type_node.kind != 4 { return false }
-    if find_type_param(state, store, owner, type_node) == 0 { return false }
-    let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-    let root = __s0_buffer_get(SyntaxRec, parse.nodes, owner_symbol.node - 1)
-    var clause_at = root.children
-    while clause_at != 0 {
-        let clause_link = __s0_buffer_get(SyntaxLinkRec, parse.links, clause_at - 1)
-        let clause = __s0_buffer_get(SyntaxRec, parse.nodes, clause_link.node - 1)
-        if clause.kind == 52 {
-            var constraint_at = clause.children
-            while constraint_at != 0 {
-                let constraint_link = __s0_buffer_get(SyntaxLinkRec, parse.links, constraint_at - 1)
-                let constraint = __s0_buffer_get(SyntaxRec, parse.nodes, constraint_link.node - 1)
-                if constraint.kind == 55 && same_name(state, constraint.source, constraint.name_start, constraint.name_end, type_node.source, type_node.name_start, type_node.name_end) {
-                    if mut_cursor_trait_named(state, parse, store, constraint.children) { return true }
-                }
-                constraint_at = constraint_link.next
-            }
-        }
-        clause_at = clause_link.next
-    }
-    return false
+    let param = find_type_param(state, store, owner, type_node)
+    if param == 0 { return false }
+    let recorded = __s0_buffer_get(TypeParamRec, store.type_params, param - 1)
+    let annotation = __s0_buffer_get(SyntaxRec, parse.nodes, recorded.node - 1)
+    return mut_cursor_trait_named(state, parse, store, annotation.children)
 }
 
 // One constraint's trait applications: the builtin Iterator is the mut-self
@@ -3193,7 +3177,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         CheckBad(value) => true
     } { return Ok(before) }
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
-    if child.kind == 7 || child.kind == 14 || child.kind == 16 || child.kind == 52 || child.kind == 55 || child.kind == skip_kind { return Ok(CheckGood(current)) }
+    if child.kind == 7 || child.kind == 14 || child.kind == 16 || child.kind == skip_kind { return Ok(CheckGood(current)) }
     var actual_role = role
     if role == 5 && child.kind != 13 && child.kind != 47 && child.kind != 48 { actual_role = 6 }
     var actual_ordinal: U64 = 0
@@ -9969,9 +9953,11 @@ fn emit_check_manifest(state: State, parse: ParseStore, store: CheckStore) -> Bo
     return out_string("END\n")
 }
 
-// Where-clause checking walks declaration children recursively: resolved
-// trait references carry storage (the checked store), and storage-bearing
-// call results must not cross loop backedges.
+// Constraint checking walks declaration children in explicit tail calls:
+// resolved trait references carry storage (the checked store), and
+// storage-bearing call results must not cross loop backedges. Every kind-7
+// type parameter child carries its trait applications (D024), resolved in the
+// declaration's scope, so a constraint may name a parameter declared after it.
 fn check_owner_constraints(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, root: SyntaxRec) -> Result(CheckResult, __s0_Error) {
     return check_constraint_children(d, state, parse, store, owner, root.children)
 }
@@ -9980,28 +9966,12 @@ fn check_constraint_children(d: Domain, state: State, parse: ParseStore, store: 
     if link_at == 0 { return Ok(CheckGood(store)) }
     let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
-    if child.kind != 52 { return check_constraint_children(d, state, parse, store, owner, item.next) }
-    return check_constraint_items(d, state, parse, store, owner, child.children, item.next, store.traits.constraints)
+    if child.kind != 7 { return check_constraint_children(d, state, parse, store, owner, item.next) }
+    return check_constraint_traits(d, state, parse, store, owner, item.node, child.children, item.next)
 }
 
-// After one where clause completes, resume the outer declaration walk.
-fn check_constraint_items(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, constraint_at: U64, continue_at: U64, initial: __s0_Buffer(TraitConstraintRec)) -> Result(CheckResult, __s0_Error) {
-    if constraint_at == 0 {
-        if __s0_buffer_len(TraitConstraintRec, store.traits.constraints) == __s0_buffer_len(TraitConstraintRec, initial) { return check_constraint_children(d, state, parse, store, owner, continue_at) }
-        return check_constraint_children(d, state, parse, store, owner, continue_at)
-    }
-    let item = __s0_buffer_get(SyntaxLinkRec, parse.links, constraint_at - 1)
-    let constraint = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
-    let param = find_type_param(state, store, owner, constraint)
-    if param == 0 { return check_token_fail(d, state, store, 112, constraint) }
-    return check_constraint_traits(d, state, parse, store, owner, param, item.node, constraint.children, constraint_at, continue_at, initial)
-}
-
-fn check_constraint_traits(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, param: U64, constraint_node: U64, trait_at: U64, constraint_at: U64, continue_at: U64, initial: __s0_Buffer(TraitConstraintRec)) -> Result(CheckResult, __s0_Error) {
-    if trait_at == 0 {
-        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, constraint_at - 1)
-        return check_constraint_items(d, state, parse, store, owner, item.next, continue_at, initial)
-    }
+fn check_constraint_traits(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, param_node: U64, trait_at: U64, continue_at: U64) -> Result(CheckResult, __s0_Error) {
+    if trait_at == 0 { return check_constraint_children(d, state, parse, store, owner, continue_at) }
     let item = __s0_buffer_get(SyntaxLinkRec, parse.links, trait_at - 1)
     let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
     let reference = try resolve_trait_reference(d, state, parse, store, owner, trait_node)
@@ -10017,9 +9987,10 @@ fn check_constraint_traits(d: Domain, state: State, parse: ParseStore, store: Ch
         TraitRefGood(value) => value.reference
         TraitRefBad(value) => TraitRefRec(builtin: 0, symbol: 0, first_arg: 0, arg_count: 0)
     }
-    let constraints = try __s0_buffer_append(TraitConstraintRec, d, current.traits.constraints, TraitConstraintRec(owner: owner, param: param, trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, syntax: constraint_node))
+    let param = find_type_param(state, current, owner, __s0_buffer_get(SyntaxRec, parse.nodes, param_node - 1))
+    let constraints = try __s0_buffer_append(TraitConstraintRec, d, current.traits.constraints, TraitConstraintRec(owner: owner, param: param, trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, syntax: param_node))
     let recorded = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: TraitStoreRec(constraints: constraints, impls: current.traits.impls, impl_index: current.traits.impl_index, args: current.traits.args, receiver_index: current.traits.receiver_index), closures: current.closures, interp: current.interp, bindings: current.bindings)
-    return check_constraint_traits(d, state, parse, recorded, owner, param, constraint_node, item.next, constraint_at, continue_at, initial)
+    return check_constraint_traits(d, state, parse, recorded, owner, param_node, item.next, continue_at)
 }
 
 // Trait method requirements: resolve parameter and result types in the
@@ -10542,18 +10513,9 @@ fn validate_trait_impls(d: Domain, state: State, parse: ParseStore, store: Check
 fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
     let root_id = __s0_buffer_get(U64, parse.roots, root_at)
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
-    // Where clauses on impls are not supported yet: impl arguments and
-    // implementing types are concrete, so nothing could bind.
-    var link_at = root.children
-    while link_at != 0 {
-        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
-        if child.kind == 52 { return check_token_fail(d, state, store, 113, child) }
-        link_at = item.next
-    }
     // The trait application is the chain tail.
     var tail: U64 = 0
-    link_at = root.children
+    var link_at = root.children
     while link_at != 0 {
         let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
         if item.next == 0 { tail = item.node }

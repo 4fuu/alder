@@ -339,6 +339,11 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"field.al", "type A { x: U64 y: U64\n}", 8, 16, 17},
 		{"variant.al", "enum E { A B\n}", 9, 11, 12},
 		{"eof.al", "type A {", 4, 8, 8},
+		{"where-fn.al", "fn bad(T: type) -> U64\nwhere T: Eq {\n    return 0\n}\n", 24, 23, 28},
+		{"where-record.al", "type Slot(K: type, V: type)\nwhere K: Eq {\n    key: K\n}\n", 24, 28, 33},
+		{"where-trait.al", "trait Bad(T: type)\nwhere T: Eq {\n    fn next(self) -> U64\n}\n", 24, 19, 24},
+		{"where-impl.al", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box\nwhere Box: Mark {\n}\n", 24, 53, 58},
+		{"constraint-plus.al", "fn bad(T: type(Eq + Hash), t: T) -> U64 {\n    return 0\n}\n", 4, 18, 19},
 	}
 	for _, tc := range rejects {
 		t.Run(tc.name, func(t *testing.T) {

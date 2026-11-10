@@ -991,59 +991,44 @@ fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
     return Ok(Parsed(node))
 }
 
-// A single `where` constraint is `Param: TraitApplication + TraitApplication`.
-// The constraint node names the constrained parameter and carries the trait
-// application type nodes as children.
-fn parse_constraint(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
-    if !token_ident(state, initial) { return reject_parse(d, state, initial, 3) }
-    let param = parse_token(state, initial)
-    let colon = try expect_punct(d, state, ParseCursor(token: initial.token + 1, store: initial.store), ":")
-    if parse_step_bad(colon) { return Ok(colon) }
-    var cursor = parse_step_cursor(colon)
+// One type-parameter annotation is `Name: type` or, constrained, `Name:
+// type(Trait, ...)` (D024). The trait applications inside the parentheses are
+// the parameter's constraints and link as the kind-7 node's children in
+// source order; a bare `Name: type` stays unconstrained. Each application is
+// an ordinary type node, so `Iterator(Item)` is an applied type. Only `,` and
+// `)` continue the list; a constraint may name any parameter of the same
+// declaration, including ones declared later in the list.
+fn parse_type_param(d: Domain, state: State, param: TokenRec, colon: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    let checked = try expect_punct(d, state, colon, ":")
+    if parse_step_bad(checked) { return Ok(checked) }
+    let after = parse_step_cursor(checked)
+    if parse_token(state, after).keyword != 2 { return reject_parse(d, state, after, 4) }
+    var cursor = ParseCursor(token: after.token + 1, store: after.store)
     var children: U64 = 0
-    var application: ParseStep = Rejected(cursor)
-    application = try parse_type(d, state, cursor)
-    if parse_step_bad(application) { return Ok(application) }
-    let first = parse_step_value(application)
-    cursor = try add_link(d, first.cursor, first.node, children)
-    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    while token_punct(state, cursor, "+") {
-        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-        var next: ParseStep = Rejected(cursor)
-        next = try parse_type(d, state, cursor)
-        if parse_step_bad(next) { return Ok(next) }
-        let value = parse_step_value(next)
-        cursor = try add_link(d, value.cursor, value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+    if token_punct(state, cursor, "(") {
+        let open = try expect_punct(d, state, cursor, "(")
+        if parse_step_bad(open) { return Ok(open) }
+        cursor = parse_step_cursor(open)
+        if !token_punct(state, cursor, ")") {
+            var more = true
+            while more {
+                let application = try parse_type(d, state, cursor)
+                if parse_step_bad(application) { return Ok(application) }
+                let value = parse_step_value(application)
+                cursor = try add_link(d, value.cursor, value.node, children)
+                children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+                if token_punct(state, cursor, ",") {
+                    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                    if token_punct(state, cursor, ")") { more = false }
+                } else { more = false }
+            }
+        }
+        let close = try expect_punct(d, state, cursor, ")")
+        if parse_step_bad(close) { return Ok(close) }
+        cursor = parse_step_cursor(close)
     }
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let node = try add_syntax(d, cursor, 55, initial.token + 1, param.source, param.start, end, param.start, param.end, children)
-    return Ok(Parsed(node))
-}
-
-// A `where` clause is a comma-separated constraint list following a
-// declaration signature or head. The returned node keeps source order.
-fn parse_where(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
-    let start = parse_token(state, initial)
-    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
-    var children: U64 = 0
-    var constraint: ParseStep = Rejected(cursor)
-    constraint = try parse_constraint(d, state, cursor)
-    if parse_step_bad(constraint) { return Ok(constraint) }
-    let first = parse_step_value(constraint)
-    cursor = try add_link(d, first.cursor, first.node, children)
-    children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    while token_punct(state, cursor, ",") {
-        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-        var next: ParseStep = Rejected(cursor)
-        next = try parse_constraint(d, state, cursor)
-        if parse_step_bad(next) { return Ok(next) }
-        let value = parse_step_value(next)
-        cursor = try add_link(d, value.cursor, value.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    }
-    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let node = try add_syntax(d, cursor, 52, initial.token + 1, start.source, start.start, end, 0, 0, children)
+    let node = try add_syntax(d, cursor, 7, colon.token, param.source, param.start, end, param.start, param.end, children)
     return Ok(Parsed(node))
 }
 
@@ -1093,7 +1078,9 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
                 cursor = parse_step_cursor(colon)
                 if parse_token(state, cursor).keyword == 2 {
                     if runtime { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: colon_cursor.store), 10) }
-                    pnode = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 7, colon_cursor.token, param.source, param.start, parse_token(state, cursor).end, param.start, param.end, 0)
+                    let typed = try parse_type_param(d, state, param, colon_cursor)
+                    if parse_step_bad(typed) { return Ok(typed) }
+                    pnode = parse_step_value(typed)
                 } else {
                     let ty = try parse_type(d, state, cursor)
                     if parse_step_bad(ty) { return Ok(ty) }
@@ -1121,13 +1108,7 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
     let rv = parse_step_value(result)
     cursor = try add_link(d, rv.cursor, rv.node, children)
     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    if parse_token(state, cursor).keyword == 28 {
-        let clause = try parse_where(d, state, cursor)
-        if parse_step_bad(clause) { return Ok(clause) }
-        let cv = parse_step_value(clause)
-        cursor = try add_link(d, cv.cursor, cv.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    }
+    if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
     var end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
     if token_punct(state, cursor, "{") {
         let body = try parse_block(d, state, cursor)
@@ -1156,11 +1137,9 @@ fn parse_trait(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
             if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
             let param = parse_token(state, cursor)
             cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            if !token_punct(state, cursor, ":") { return reject_parse(d, state, cursor, 4) }
-            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            if parse_token(state, cursor).keyword != 2 { return reject_parse(d, state, cursor, 4) }
-            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            let pnode = try add_syntax(d, cursor, 7, cursor.token - 2, param.source, param.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, param.start, param.end, 0)
+            let typed = try parse_type_param(d, state, param, cursor)
+            if parse_step_bad(typed) { return Ok(typed) }
+            let pnode = parse_step_value(typed)
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
             if token_punct(state, cursor, ",") {
@@ -1172,13 +1151,7 @@ fn parse_trait(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
         if parse_step_bad(close) { return Ok(close) }
         cursor = parse_step_cursor(close)
     }
-    if parse_token(state, cursor).keyword == 28 {
-        let clause = try parse_where(d, state, cursor)
-        if parse_step_bad(clause) { return Ok(clause) }
-        let cv = parse_step_value(clause)
-        cursor = try add_link(d, cv.cursor, cv.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    }
+    if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
@@ -1246,7 +1219,9 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
             if parse_token(state, cursor).keyword == 2 {
                 if parameter_kind != 13 { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
                 if runtime { return reject_parse(d, state, ParseCursor(token: colon_cursor.token - 1, store: cursor.store), 10) }
-                pnode = try add_syntax(d, ParseCursor(token: cursor.token + 1, store: cursor.store), 7, colon_cursor.token, param.source, param.start, parse_token(state, cursor).end, param.start, param.end, 0)
+                let typed = try parse_type_param(d, state, param, colon_cursor)
+                if parse_step_bad(typed) { return Ok(typed) }
+                pnode = parse_step_value(typed)
             } else {
                 let ty = try parse_type(d, state, cursor)
                 if parse_step_bad(ty) { return Ok(ty) }
@@ -1274,13 +1249,7 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
     let rv = parse_step_value(result)
     cursor = try add_link(d, rv.cursor, rv.node, children)
     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    if parse_token(state, cursor).keyword == 28 {
-        let clause = try parse_where(d, state, cursor)
-        if parse_step_bad(clause) { return Ok(clause) }
-        let cv = parse_step_value(clause)
-        cursor = try add_link(d, cv.cursor, cv.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    }
+    if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
     let body = try parse_block(d, state, cursor)
     if parse_step_bad(body) { return Ok(body) }
     let bv = parse_step_value(body)
@@ -1312,13 +1281,7 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         let impl_value = parse_step_value(impl_type)
         cursor = try add_link(d, impl_value.cursor, impl_value.node, trait_children)
         trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-        if parse_token(state, cursor).keyword == 28 {
-            let clause = try parse_where(d, state, cursor)
-            if parse_step_bad(clause) { return Ok(clause) }
-            let cv = parse_step_value(clause)
-            cursor = try add_link(d, cv.cursor, cv.node, trait_children)
-            trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-        }
+        if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
         let trait_open = try expect_punct(d, state, cursor, "{")
         if parse_step_bad(trait_open) { return Ok(trait_open) }
         cursor = parse_step_cursor(trait_open)
@@ -1759,11 +1722,9 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
             if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
             let param = parse_token(state, cursor)
             cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            if !token_punct(state, cursor, ":") { return reject_parse(d, state, cursor, 4) }
-            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            if parse_token(state, cursor).keyword != 2 { return reject_parse(d, state, cursor, 4) }
-            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-            let pnode = try add_syntax(d, cursor, 7, cursor.token - 2, param.source, param.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, param.start, param.end, 0)
+            let typed = try parse_type_param(d, state, param, cursor)
+            if parse_step_bad(typed) { return Ok(typed) }
+            let pnode = parse_step_value(typed)
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
             if token_punct(state, cursor, ",") {
@@ -1775,13 +1736,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         if parse_step_bad(close) { return Ok(close) }
         cursor = parse_step_value(close).cursor
     }
-    if parse_token(state, cursor).keyword == 28 {
-        let clause = try parse_where(d, state, cursor)
-        if parse_step_bad(clause) { return Ok(clause) }
-        let cv = parse_step_value(clause)
-        cursor = try add_link(d, cv.cursor, cv.node, children)
-        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-    }
+    if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_value(open).cursor

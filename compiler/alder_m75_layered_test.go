@@ -41,7 +41,7 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	// Closures inside generic bodies: each instance materializes its own
 	// thunk, one capturing a U64 seed and one capturing a value of the type
 	// parameter itself.
-	declarations = append(declarations, "fn rebased_layer(P: type, p: P, seed: U64) -> U64\nwhere P: Deliver(U64) {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(p.deliver())\n}")
+	declarations = append(declarations, "fn rebased_layer(P: type(Deliver(U64)), p: P, seed: U64) -> U64 {\n    let rebased = fn(x: U64) => x + seed\n    return rebased(p.deliver())\n}")
 	declarations = append(declarations, "fn keep_value(T: type, value: T) -> T {\n    let same = fn() -> T { return value }\n    return same()\n}")
 	// Nested closure literals: the inner literal reads the generic layer's
 	// seed, which the outer literal never reads itself, so the outer
@@ -55,7 +55,7 @@ func m75LayeredDeclarations() (declarations []string, want []uint64) {
 	}
 	for i := 0; i < m75LayeredDepth; i++ {
 		var layer strings.Builder
-		layer.WriteString(fmt.Sprintf("fn layer_%03d(P: type, p: P, seed: U64) -> U64\nwhere P: Deliver(U64) {\n", i))
+		layer.WriteString(fmt.Sprintf("fn layer_%03d(P: type(Deliver(U64)), p: P, seed: U64) -> U64 {\n", i))
 		if i == m75LayeredDepth-1 {
 			layer.WriteString("    return seed + p.twice()\n")
 		} else {
@@ -120,7 +120,7 @@ func m75LayeredRejectProgram() string {
 	broken := append([]string(nil), declarations...)
 	for at, declaration := range broken {
 		if strings.HasPrefix(declaration, "fn layer_017(") {
-			broken[at] = strings.Replace(declaration, "where P: Deliver(U64) {\n", "where P: Deliver(U64) {\n    if p.absent() { return 0 }\n", 1)
+			broken[at] = strings.Replace(declaration, "fn layer_017(P: type(Deliver(U64)), p: P, seed: U64) -> U64 {\n", "fn layer_017(P: type(Deliver(U64)), p: P, seed: U64) -> U64 {\n    if p.absent() { return 0 }\n", 1)
 		}
 	}
 	return strings.Join(broken, "\n\n") + "\n"

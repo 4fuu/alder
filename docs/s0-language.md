@@ -95,7 +95,9 @@ receivers plus associated functions. They do not provide extension methods.
 Milestone 7.5 adds the static trait surface of
 [Traits and Closures](traits-and-closures.md) up to constraint gating:
 
-- `trait Name(Params) where ... { ... }` declares a trait. Method
+- `trait Name(Params) { ... }` declares a trait; each parameter carries its
+  constraints in `Params` itself (`trait Collect(Item: type(Iterator(Item)))
+  { ... }`). Method
   requirements are `fn` signatures; a requirement with a body carries a
   default implementation. `Self` names the implementing type inside a trait
   or one of its implementations. Trait and impl methods may declare their
@@ -111,9 +113,15 @@ Milestone 7.5 adds the static trait surface of
   non-generic declared record or enum type with concrete trait arguments.
   Methods are ordinary functions; their bodies are checked and lowered even
   before trait-method dispatch exists.
-- `where Param: Trait + Trait, ...` constraints may follow function,
-  record, enum, and trait signatures. Constraint arguments resolve in the
-  declaration's scope.
+- Constraints are written on the type parameter itself (D024):
+  `T: type` is unconstrained, and `T: type(Order)`, `K: type(Eq, Hash)`, and
+  `I: type(Iterator(T))` attach the listed traits to the parameter in
+  function, record, enum, trait, and method signatures. There is no `where`
+  clause and no `+` between traits; a `where` after a signature is rejected
+  with the syntax diagnostic `SYN0001` kind 24. Constraint arguments resolve
+  in the declaration's scope across the whole parameter list, so a
+  constraint may name a parameter declared before or after it
+  (`IntoIterator(IteratorType, Item)` keeps that order).
 - The builtin standard traits `Eq`, `Hash`, `Iterator(Item)`,
   `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
   without source declarations; `Order`, `Display`, and `Error` are reserved
@@ -134,7 +142,7 @@ Milestone 7.5 adds the static trait surface of
 - Structural `Eq` and `Hash` implementations are synthesized by the
   language for unsigned integers, `Bool`, `String`, `Bytes`, and
   non-generic records and enums whose every component supports them, so
-  `where K: Eq + Hash` accepts those types. Per
+  `K: type(Eq, Hash)` accepts those types. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override
   structural `==` with a surprising user implementation": user `impl Eq`
   and `impl Hash` blocks are rejected. The synthesized methods are not

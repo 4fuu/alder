@@ -189,6 +189,7 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 21 { return out_string("expected a C binding member declaration") }
     if kind == 22 { return out_string("public C binding blocks are not supported; bind through a private binding block") }
     if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
+    if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
     return out_string("invalid source syntax")
 }
 
@@ -342,9 +343,6 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("type does not implement a trait required here") { return false }
         return out_string("")
     }
-    if kind == 112 { if !out_string("constraint parameter ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
-        return out_string(" is not a type parameter of this declaration") }
-    if kind == 113 { return out_string("where clauses on trait implementations are not supported yet") }
     if kind == 114 { if !out_string("trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" is a trait, not a type") }
     if kind == 116 { return out_string("trait implementation arguments must be concrete types") }

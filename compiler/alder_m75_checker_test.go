@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// M7.5 slice 1: trait declarations, `where` constraints, trait
+// M7.5 slice 1: trait declarations, type-parameter constraints (D024), trait
 // implementations, coherence, and constraint-gated instantiation. These
 // fixtures are Alder-only: the Go oracle frontend does not implement the
 // trait surface, so they stay out of the shared comparison corpora.
@@ -34,8 +34,7 @@ impl Walker(U64) for UserCursor {
     }
 }
 
-fn drain(W: type, T: type, walker: W) -> U64
-where W: Walker(T) {
+fn drain(W: type(Walker(T)), T: type, walker: W) -> U64 {
     return 0
 }
 
@@ -111,8 +110,7 @@ trait Marker(A: type) {
 impl Marker(U64) for Box {
 }
 
-fn use_mark(M: type, A: type, b: M) -> U64
-where M: Marker(A) {
+fn use_mark(M: type(Marker(A)), A: type, b: M) -> U64 {
     return 0
 }
 
@@ -122,8 +120,7 @@ fn main() -> I32 {
     return 0
 }
 `,
-		"trait-params.al": `trait IntoWalker(Iter: type, Item: type)
-where Iter: Stepper(Item) {
+		"trait-params.al": `trait IntoWalker(Iter: type(Stepper(Item)), Item: type) {
     fn into_walker(self) -> Iter
 }
 
@@ -132,6 +129,73 @@ trait Stepper(Item: type) {
 }
 
 fn main() -> I32 { return 0 }
+`,
+		"constrained-shapes.al": `type Tag {
+    id: U64
+}
+
+trait Show {
+    fn show(self) -> U64
+}
+
+impl Show for Tag {
+    fn show(self) -> U64 { return self.id }
+}
+
+type Boxed(K: type(Show)) {
+    inner: K
+}
+
+enum Wrap(T: type(Show)) {
+    Held(value: T)
+    Empty
+}
+
+trait Carrier(Carried: type(Show)) {
+    fn carry(self) -> Carried
+}
+
+impl Carrier(Tag) for Tag {
+    fn carry(self) -> Tag {
+        return self
+    }
+}
+
+fn describe(C: type(Carrier(Item)), Item: type(Show), c: C) -> U64 {
+    return c.carry().show()
+}
+
+trait Maker {
+    fn make(New: type(Show), self, seed: New) -> New
+}
+
+impl Maker for Tag {
+    fn make(New: type(Show), self, seed: New) -> New {
+        return seed
+    }
+}
+
+fn use_maker(M: type(Maker), New: type(Show), m: M, seed: New) -> New {
+    return m.make(New, seed)
+}
+
+fn main() -> I32 {
+    let tag = Tag(id: 7)
+    let boxed = Boxed(inner: tag)
+    if boxed.inner.show() != 7 { return 1 }
+    let wrap: Wrap(Tag) = Held(tag)
+    let shown = match wrap {
+        Held(value) => value.show()
+        Empty => 0
+    }
+    if shown != 7 { return 2 }
+    if describe(Tag, Tag, tag) != 7 { return 3 }
+    let made = tag.make(Tag, tag)
+    if made.show() != 7 { return 4 }
+    let made2 = use_maker(Tag, Tag, tag, tag)
+    if made2.show() != 7 { return 5 }
+    return 0
+}
 `,
 		"impl-body.al": `type Box {
     v: U64
@@ -162,8 +226,7 @@ enum Mode {
     Slow(code: U32)
 }
 
-fn keyed(K: type, k: K) -> U64
-where K: Eq + Hash {
+fn keyed(K: type(Eq, Hash), k: K) -> U64 {
     return 1
 }
 
@@ -191,8 +254,7 @@ impl Combine(U64) for Box {
     }
 }
 
-fn use_combine(C: type, I: type, c: C, extra: U64) -> U64
-where C: Combine(I) {
+fn use_combine(C: type(Combine(I)), I: type, c: C, extra: U64) -> U64 {
     return c.combine(extra)
 }
 
@@ -276,8 +338,7 @@ impl Produce(String) for TextBox {
     fn produce(self) -> String { return self.t }
 }
 
-fn through(P: type, O: type, p: P) -> O
-where P: Produce(O) {
+fn through(P: type(Produce(O)), O: type, p: P) -> O {
     return p.identity_default()
 }
 
@@ -511,8 +572,7 @@ impl Walker(U64) for AdminCursor {
     }
 }
 
-fn take_first(W: type, walker: W) -> U64
-where W: Walker(U64) {
+fn take_first(W: type(Walker(U64)), walker: W) -> U64 {
     let value = walker.next()
     return match value {
         Some(v) => v
@@ -548,13 +608,12 @@ fn main() -> I32 {
 		{"indirect-call-arg-type", "fn double(x: U64) -> U64 { return x + x }\nfn main() -> I32 {\n    let f = double\n    if f(true) != 2 { return 1 }\n    return 0\n}\n", 42},
 		{"bare-generic-function", "fn pair(A: type, a: A) -> A { return a }\nfn main() -> I32 {\n    let f = pair\n    return 0\n}\n", 39},
 		{"duplicate-impl", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box { }\nimpl Mark for Box { }\nfn main() -> I32 { return 0 }\n", 107},
-		{"unknown-trait", "type Box { v: U64 }\nfn f(M: type, b: M) -> U64\nwhere M: Missing {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 108},
-		{"trait-arity", "type Box { v: U64 }\ntrait Mark(A: type) { }\nfn f(M: type, b: M) -> U64\nwhere M: Mark {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 109},
+		{"unknown-trait", "type Box { v: U64 }\nfn f(M: type(Missing), b: M) -> U64 {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 108},
+		{"constraint-non-trait-name", "type Box { v: U64 }\nfn f(T: type(Box), t: T) -> U64 {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 108},
+		{"trait-arity", "type Box { v: U64 }\ntrait Mark(A: type) { }\nfn f(M: type(Mark), b: M) -> U64 {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 109},
 		{"impl-target-application", "trait Mark { }\nimpl Mark for Vec(U64) { }\nfn main() -> I32 { return 0 }\n", 110},
 		{"impl-target-unknown", "trait Mark { }\nimpl Mark for Missing { }\nfn main() -> I32 { return 0 }\n", 110},
-		{"unsatisfied-constraint", "type Box { v: U64 }\ntrait Mark { }\nfn f(M: type, b: M) -> U64\nwhere M: Mark {\n    return 0\n}\nfn main() -> I32 {\n    if f(Box, Box(v: 1)) != 0 { return 1 }\n    return 0\n}\n", 111},
-		{"constraint-unknown-param", "type Box { v: U64 }\ntrait Mark { }\nfn f(M: type, b: M) -> U64\nwhere X: Mark {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 112},
-		{"impl-where", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box\nwhere Box: Mark {\n}\nfn main() -> I32 { return 0 }\n", 113},
+		{"unsatisfied-constraint", "type Box { v: U64 }\ntrait Mark { }\nfn f(M: type(Mark), b: M) -> U64 {\n    return 0\n}\nfn main() -> I32 {\n    if f(Box, Box(v: 1)) != 0 { return 1 }\n    return 0\n}\n", 111},
 		{"trait-as-type", "trait Mark { }\nfn f(m: Mark) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 114},
 		{"self-outside-trait", "fn f(v: Self) -> U64 { return 0 }\nfn main() -> I32 { return 0 }\n", 117},
 		{"ambiguous-method", "type Box { v: U64 }\ntrait A { fn fetch(self) -> U64 }\ntrait B { fn fetch(self) -> U64 }\nimpl A for Box { fn fetch(self) -> U64 { return self.v } }\nimpl B for Box { fn fetch(self) -> U64 { return self.v } }\nfn main() -> I32 {\n    let box = Box(v: 1)\n    if box.fetch() != 1 { return 1 }\n    return 0\n}\n", 119},
@@ -563,7 +622,7 @@ fn main() -> I32 {
 		{"signature-mismatch", "type Box { v: U64 }\ntrait Getter {\n    fn fetch(self) -> U64\n}\nimpl Getter for Box {\n    fn fetch(self) -> Bool { return true }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"user-eq-impl", "type Box { v: U64 }\nimpl Eq for Box {\n}\nfn main() -> I32 { return 0 }\n", 125},
 		{"structural-method-call", "type Box { v: U64 }\nfn main() -> I32 {\n    let a = Box(v: 1)\n    let b = Box(v: 2)\n    if a.eq(b) { return 1 }\n    return 0\n}\n", 126},
-		{"float-key-unsupported", "type Bad {\n    ratio: F64\n}\nfn keyed(K: type, k: K) -> U64\nwhere K: Eq + Hash {\n    return 1\n}\nfn main() -> I32 {\n    if keyed(Bad, Bad(ratio: 1.0)) != 1 { return 1 }\n    return 0\n}\n", 111},
+		{"float-key-unsupported", "type Bad {\n    ratio: F64\n}\nfn keyed(K: type(Eq, Hash), k: K) -> U64 {\n    return 1\n}\nfn main() -> I32 {\n    if keyed(Bad, Bad(ratio: 1.0)) != 1 { return 1 }\n    return 0\n}\n", 111},
 		{"generic-method-arity-mismatch", "type Box { v: U64 }\ntrait Combine(Item: type) {\n    fn combine(A: type, self, other: A) -> A\n}\nimpl Combine(U64) for Box {\n    fn combine(self, other: U64) -> U64 { return other }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"generic-method-concrete-mismatch", "type Box { v: U64 }\ntrait Combine(Item: type) {\n    fn combine(A: type, self, other: A) -> A\n}\nimpl Combine(U64) for Box {\n    fn combine(A: type, self, other: U64) -> U64 { return other }\n}\nfn main() -> I32 { return 0 }\n", 123},
 		{"generic-method-builtin-trait", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(A: type, mut self) -> Option(U64) { return None }\n}\nfn main() -> I32 { return 0 }\n", 123},
@@ -788,16 +847,14 @@ impl Stepper(U64) for Count {
     }
 }
 
-fn drain(I: type, T: type, mut iterator: I, total: U64) -> U64
-where I: Iterator(T) {
+fn drain(I: type(Iterator(T)), T: type, mut iterator: I, total: U64) -> U64 {
     return match iterator.next() {
         Some(value) => drain(I, T, iterator, total + value)
         None => total
     }
 }
 
-fn take_step(S: type, X: type, mut s: S) -> U64
-where S: Stepper(X) {
+fn take_step(S: type(Stepper(X)), X: type, mut s: S) -> U64 {
     return s.step()
 }
 
@@ -825,10 +882,10 @@ fn main() -> I32 {
 		code         int
 	}{
 		{"mut-unconstrained-type-param", "fn bad(T: type, mut t: T) -> Unit {\n    return unit\n}\nfn main() -> I32 { return 0 }\n", 89},
-		{"mut-plain-trait-constraint", "type Box { v: U64 }\ntrait Plain(A: type) {\n    fn peek(self) -> A\n}\nimpl Plain(U64) for Box {\n    fn peek(self) -> U64 { return self.v }\n}\nfn f(P: type, mut p: P) -> U64\nwhere P: Plain(U64) {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 89},
+		{"mut-plain-trait-constraint", "type Box { v: U64 }\ntrait Plain(A: type) {\n    fn peek(self) -> A\n}\nimpl Plain(U64) for Box {\n    fn peek(self) -> U64 { return self.v }\n}\nfn f(P: type(Plain(U64)), mut p: P) -> U64 {\n    return 0\n}\nfn main() -> I32 { return 0 }\n", 89},
 		{"mut-concrete-copyable", "fn f(mut value: U64) -> Unit {\n    return unit\n}\nfn main() -> I32 { return 0 }\n", 89},
-		{"mut-cursor-let-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type, T: type, mut iterator: I) -> U64\nwhere I: Iterator(T) {\n    return 0\n}\nfn main() -> I32 {\n    let cursor = Cursor(at: 0)\n    if drain(Cursor, U64, cursor) != 0 { return 1 }\n    return 0\n}\n", 146},
-		{"mut-cursor-temporary-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type, T: type, mut iterator: I) -> U64\nwhere I: Iterator(T) {\n    return 0\n}\nfn main() -> I32 {\n    if drain(Cursor, U64, Cursor(at: 0)) != 0 { return 1 }\n    return 0\n}\n", 146},
+		{"mut-cursor-let-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type(Iterator(T)), T: type, mut iterator: I) -> U64 {\n    return 0\n}\nfn main() -> I32 {\n    let cursor = Cursor(at: 0)\n    if drain(Cursor, U64, cursor) != 0 { return 1 }\n    return 0\n}\n", 146},
+		{"mut-cursor-temporary-argument", "type Cursor { at: U64 }\nimpl Iterator(U64) for Cursor {\n    fn next(mut self) -> Option(U64) {\n        return None\n    }\n}\nfn drain(I: type(Iterator(T)), T: type, mut iterator: I) -> U64 {\n    return 0\n}\nfn main() -> I32 {\n    if drain(Cursor, U64, Cursor(at: 0)) != 0 { return 1 }\n    return 0\n}\n", 146},
 	}
 	for _, tc := range rejections {
 		t.Run("reject-"+tc.name, func(t *testing.T) {

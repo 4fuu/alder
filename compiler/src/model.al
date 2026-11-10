@@ -64,8 +64,9 @@ type LexDiagRec {
 // wildcard arms tokenize `_` and have no name span. Control nodes tokenize their
 // leading keyword; for/using names retain their binding spans. Match bindings
 // and cleanup identifiers tokenize and name their identifier.
-// Type-parameter nodes span the complete `Name: type` declaration and retain
-// the name as their semantic token.
+// Type-parameter nodes span the complete `Name: type` or `Name: type(...)`
+// declaration and retain the name as their semantic token; a constraint list
+// inside the parentheses links its trait application type nodes as children.
 // C binding blocks add kinds 61-65: 61 the block itself (it names the `as`
 // alias and links the header string first, then members in source order),
 // 62 a scalar/opaque/record type member (it names the Alder name, links the
@@ -105,11 +106,13 @@ type SyntaxLinkRec {
 // 4 expected punctuation or keyword, 5 expected type, 6 bad enum payload
 // label, 7 top-level separator, 8 struct-field separator, 9 enum-variant
 // separator, 10 parameter ordering, 11 block/statement separator,
-// 12 expected expression, 13 line continuation, and 14 invalid assignment
+// 12 expected expression, 13 line continuation, 14 invalid assignment
 // target, 15 expected match pattern, 16 match-arm separator, 17 expected `c`
-// after unsafe, and 18 unsafe-c requires exactly one root call and closing brace,
-// 20 a missing C spelling string, 21 a malformed C binding member,
-// 22 a public C binding block, and 23 a C binding record field separator.
+// after unsafe, 18 unsafe-c requires exactly one root call and closing brace,
+// 19 the expression nesting limit, 20 a missing C spelling string, 21 a
+// malformed C binding member, 22 a public C binding block, 23 a C binding
+// record field separator, and 24 a `where` clause after a signature
+// (constraints are written on the type parameter, D024).
 type ParseDiagRec {
     kind: U64
     source: U64
@@ -606,10 +609,12 @@ type DiagnosticTypeRec {
 // user-declared traits are symbols whose syntax kind is 50 and are referenced
 // by symbol ID. A trait reference stores trait_builtin or trait_symbol; the
 // other stays zero. Syntax kinds: 50 trait declaration, 51 trait method
-// requirement (optional default body), 52 where clause, 53 trait
-// implementation block, 55 single where constraint, and 56 the `Self` type
+// requirement (optional default body), 53 trait
+// implementation block, and 56 the `Self` type
 // reference. Trait-implementation methods are ordinary kind-12 function
 // symbols whose inherent_owner names the kind-53 impl node.
+// A constraint records the constrained parameter's kind-7 node; that node's
+// children are its trait applications in source order (D024).
 type TraitConstraintRec {
     owner: U64
     param: U64
