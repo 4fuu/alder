@@ -114,6 +114,62 @@ pub fn main() -> I32 {
 	}
 }
 
+func sysrootEnvMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.env { EnvError, PlatformInfo, Target, TargetArch, TargetOs }
+
+pub fn main() -> I32 {
+    return check_env_types()
+}
+
+fn text_same(left: String, right: String) -> Bool {
+    if left.len() != right.len() { return false }
+    var at: U64 = 0
+    while at < left.len() {
+        if left.byte(at) != right.byte(at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn check_env_types() -> I32 {
+    var code: I32 = 0
+    let info: PlatformInfo = PlatformInfo(code: 2, message: "no entry")
+    if info.code != 2 { code = 1 }
+    if info.message.len() != 8 { code = 2 }
+    if code == 0 {
+        let failure: EnvError = Platform(info)
+        match failure {
+            Platform(carried) => {
+                if carried.code != 2 { code = 3 }
+                if !text_same(carried.message, "no entry") { code = 4 }
+            }
+            InvalidEncoding => { code = 5 }
+            InvalidName => { code = 5 }
+            Unsupported => { code = 5 }
+        }
+    }
+    if code == 0 {
+        let target: Target = Target(os: Linux, arch: X64)
+        match target.os {
+            Linux => {}
+            MacOS => { code = 6 }
+            Windows => { code = 6 }
+        }
+        match target.arch {
+            X64 => {}
+            AArch64 => { code = 7 }
+        }
+    }
+    return code
+}
+`,
+	}
+}
+
 func sysrootSeedLength(t *testing.T, repoRoot string) string {
 	t.Helper()
 	info, err := os.Stat(filepath.Join(repoRoot, "sysroot", "core", "option.al"))
@@ -159,6 +215,53 @@ func TestProductionSysrootCoreResolves(t *testing.T) {
 	if run != (productionResult{}) {
 		t.Fatalf("sysroot project run failed: %+v", run)
 	}
+}
+
+func TestProductionSysrootEnvRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootEnvMain(), "test-plan")
+	envSeed := sysrootModuleSeed(t, repoRoot, "env.al")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("std.env plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, "\nsysroot v1:") {
+		t.Fatalf("plan lost the sysroot identity line: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/env.al bytes "+envSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.env\n") {
+		t.Fatalf("plan does not list the std.env source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "edge hello.main -> std.env\n") {
+		t.Fatalf("plan does not record the std.env edge: %q", plan.stdout)
+	}
+	repeat := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootEnvMain(), "test-plan")
+	if repeat != plan {
+		t.Fatalf("std.env plan changed across processes: first=%q repeat=%q", plan.stdout, repeat.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootEnvMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.env behavior run failed: %+v", run)
+	}
+}
+
+func sysrootModuleSeed(t *testing.T, repoRoot, name string) string {
+	t.Helper()
+	info, err := os.Stat(filepath.Join(repoRoot, "sysroot", "std", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strconv.FormatUint(uint64(info.Size()), 10)
 }
 
 func TestProductionSysrootPlanStableAcrossDiscovery(t *testing.T) {
