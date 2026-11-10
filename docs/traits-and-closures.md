@@ -19,8 +19,7 @@ trait Iterator(Item: type) {
     fn next(mut self) -> Option(Item)
 }
 
-fn drain(I: type, T: type, mut iterator: I)
-where I: Iterator(T) {
+fn drain(I: type(Iterator(T)), T: type, mut iterator: I) {
     while let Some(value) = iterator.next() {
         consume(value)
     }
@@ -35,7 +34,7 @@ body that uses only its declared requirements.
 `mut` remains an exclusive call borrow; it never mutates a copy. A non-self
 `mut` parameter is legal for affine owners and scoped capabilities, and for
 copyable values in exactly one shape: the parameter's type is a type parameter
-whose `where`-constraint names a trait with at least one `mut self`
+whose constraint names a trait with at least one `mut self`
 requirement, as `I` does above. At the call site the argument must be a
 mutable place — a `var` binding, an owner, or another `mut` parameter
 forwarding the cursor — so `iterator.next()` in the example advances the
@@ -47,8 +46,7 @@ until `while let` lands with the frontend that replaces S0.)
 Iteration keeps this model without associated types:
 
 ```alder
-trait IntoIterator(IteratorType: type, Item: type)
-where IteratorType: Iterator(Item) {
+trait IntoIterator(IteratorType: type(Iterator(Item)), Item: type) {
     fn into_iterator(self) -> IteratorType
 }
 ```
@@ -61,7 +59,9 @@ The 1.0 trait surface supports:
 
 - method and associated-function requirements;
 - compile-time type parameters on traits and methods;
-- `where` constraints on traits, impls, nominal types, and functions;
+- constraints written on the type parameters of traits, nominal types,
+  functions, and methods (`T: type(Order)`, D024), and on generic
+  implementations once their parameter list is settled;
 - default method bodies;
 - multiple independent trait constraints.
 
@@ -154,20 +154,28 @@ introducing data races.
 
 ## Constraint syntax
 
-Type parameters remain ordinary leading `type` parameters. Constraints follow
-the signature:
+Type parameters remain ordinary leading `type` parameters. A constraint is
+written on the parameter it constrains, as the list of traits inside
+`type(...)` (D024):
 
 ```alder
-fn sorted(T: type, values: [T]) -> Vec(T)
-where T: Order {
+fn sorted(T: type(Order), values: [T]) -> Vec(T) {
     // ...
 }
 
-type Index(K: type, V: type)
-where K: Eq + Hash {
+type Index(K: type(Eq, Hash), V: type) {
     entries: Map(K, V)
 }
 ```
+
+`T: type` is unconstrained; `type(A, B)` requires every listed trait. A trait
+with arguments is applied as usual: `I: type(Iterator(T))`. A constraint may
+name any type parameter of the same list, before or after it. There is no
+`where` clause and no `+` between traits.
+
+The spelling follows one rule: lowercase keywords form a kind of type and take
+their parts in parentheses (`fn(A) -> R`, `type(Order)`); capitalized names are
+nominal types and traits applied with `Name(...)`.
 
 Application remains `sorted(I64, values)` or inferred `sorted(values)`. Alder
 does not add `<>` generic syntax merely because a declaration has constraints.

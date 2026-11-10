@@ -103,8 +103,7 @@ source domain, allocator, lifetime, or move annotation is required.
 ```alder
 module report.collect
 
-fn labels(I: type, iterator: I) -> Vec(String)
-where I: Iterator(User) {
+fn labels(I: type(Iterator(User)), iterator: I) -> Vec(String) {
     return (
         iterator
             .filter(fn(user) => user.active)
@@ -160,8 +159,7 @@ import std.io { Io, IoError }
 /// # Errors
 ///
 /// An `IoError` from opening, reading, writing, or closing either file.
-pub fn copy(I: type, io: I, from: Path, to: Path) -> Result(Unit, IoError)
-where I: Io {
+pub fn copy(I: type(Io), io: I, from: Path, to: Path) -> Result(Unit, IoError) {
     using input = try File.open(io, from)
     using output = try File.create(io, to)
     try input.copy_to(output)
@@ -188,8 +186,7 @@ import std.task { TaskGroup }
 /// # Errors
 ///
 /// The first `HttpError` from either request or from decoding its body.
-pub fn load_profile(I: type, io: I, id: User.Id) -> Result(Profile, HttpError)
-where I: AsyncIo {
+pub fn load_profile(I: type(AsyncIo), io: I, id: User.Id) -> Result(Profile, HttpError) {
     using tasks = TaskGroup.new(io)
     let user = tasks.spawn(get(io, "/users/{id}"))
     let posts = tasks.spawn(get(io, "/users/{id}/posts"))
@@ -216,8 +213,7 @@ import std.io { AsyncIo, Evented }
 import std.net { TcpListener, TcpStream }
 import std.task { TaskGroup }
 
-fn serve(I: type, io: I, take socket: TcpStream(I))
-where I: AsyncIo {
+fn serve(I: type(AsyncIo), io: I, take socket: TcpStream(I)) {
     // ...
 }
 

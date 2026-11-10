@@ -1434,6 +1434,12 @@ reserved name until the hosted OS wrappers need it. Builtins stay builtins in
 this milestone: the prelude is the builtin names, and library helpers are
 imported explicitly.
 
+Constraint syntax (D024): trait constraints move from `where` clauses onto
+the type parameter, `T: type(Order)` and `K: type(Eq, Hash)`. The Alder
+parser and checker, the trait fixtures, and docs/s0-language.md migrate in one
+commit before the sysroot library uses `Order` or `Display`; `where` is then
+rejected with a diagnostic that names the new form.
+
 ## Milestone 9: Async Runtime and Structured Concurrency
 
 Status: **required before Alder 1.0**

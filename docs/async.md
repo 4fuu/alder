@@ -37,8 +37,7 @@ standard library provides `std.io.Blocking` (no executor) and
 that issued them outlives every program task.
 
 ```alder
-fn word_count(I: type, io: I, path: Path) -> Result(U64, IoError)
-where I: Io {
+fn word_count(I: type(Io), io: I, path: Path) -> Result(U64, IoError) {
     let text = try std.fs.read_text(io, path)
     return Ok(count_words(text))
 }
@@ -109,8 +108,7 @@ Concurrency is created through an affine `TaskGroup(I)` owner, which requires
 `I: AsyncIo`:
 
 ```alder
-fn load_pair(I: type, io: I, a: Url, b: Url) -> Result(Pair, HttpError)
-where I: AsyncIo {
+fn load_pair(I: type(AsyncIo), io: I, a: Url, b: Url) -> Result(Pair, HttpError) {
     using tasks = TaskGroup.new(io)
     let left = tasks.spawn(http.get(io, a))
     let right = tasks.spawn(http.get(io, b))

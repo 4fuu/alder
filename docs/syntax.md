@@ -104,7 +104,7 @@ test
 ```
 
 There are no mutable globals or executable top-level initializers. Trait
-declarations, `impl Trait(Arguments) for Type` blocks, `where` constraints,
+declarations, `impl Trait(Arguments) for Type` blocks, trait constraints,
 and static trait-method dispatch through generic monomorphization are
 implemented; closures and async contracts are not implemented in S0 and are
 defined in [Traits and Closures](traits-and-closures.md) and
@@ -223,16 +223,24 @@ Angle brackets and square brackets are never generic application syntax.
 Callers either omit the complete leading type-argument sequence or provide it
 completely. Partial explicit prefixes are rejected.
 
-Static trait constraints follow a declaration signature:
+A static trait constraint is written on the type parameter it constrains, as
+the traits listed inside `type(...)` (D024):
 
 ```alder
-fn sorted(T: type, values: [T]) -> Vec(T)
-where T: Order {
+fn sorted(T: type(Order), values: [T]) -> Vec(T) {
     // ...
+}
+
+type Index(K: type(Eq, Hash), V: type) {
+    entries: Map(K, V)
 }
 ```
 
-`where` does not introduce a second generic parameter syntax. See
+`T: type` is unconstrained. A constraint may name any type parameter of the
+same list. There is no `where` clause and no `+` between traits. One spelling
+rule covers the type surface: lowercase keywords form a kind of type and take
+their parts in parentheses (`fn(A) -> R`, `type(Order)`), and capitalized
+names are nominal types and traits applied with `Name(...)`. See
 [Traits and Closures](traits-and-closures.md).
 
 ## Functions and parameters
@@ -530,8 +538,7 @@ There is no `async fn`. Code that waits on the host takes an I/O capability
 through an ordinary compile-time type parameter:
 
 ```alder
-fn fetch(I: type, io: I, url: Url) -> Result(Bytes, HttpError)
-where I: AsyncIo {
+fn fetch(I: type(AsyncIo), io: I, url: Url) -> Result(Bytes, HttpError) {
     using tasks = TaskGroup.new(io)
     let response = tasks.spawn(http.get(io, url))
     let bytes = try await response

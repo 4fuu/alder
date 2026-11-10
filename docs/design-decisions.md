@@ -253,6 +253,34 @@ because a silently lost in-place update is a large, invisible regression (Roc
 hit a roughly thousandfold slowdown this way in 2026). Precedents: Koka
 Perceus/FBIP and Lean 4 reset/reuse.
 
+### D024 — Trait constraints are written on the type parameter
+
+Status: **Frozen 1.0**
+
+A trait constraint is part of the compile-time type parameter it constrains:
+`T: type` declares an unconstrained type parameter, and `T: type(Order)` or
+`K: type(Eq, Hash)` declares one that every instantiation must satisfy. There is
+no `where` clause and no `+` constraint operator.
+
+One spelling rule covers the whole type surface: lowercase keywords form a kind
+of type and take their parts in parentheses (`fn(I64) -> String` is a function
+type, `type(Eq, Hash)` is a constrained metatype), and capitalized names are
+nominal types and traits applied with `Name(...)` (`Vec(T)`,
+`Iterator(Item)`). `type` stays lowercase because a type parameter exists only
+at compile time; a capitalized `Type` would read as a runtime library value.
+
+A constraint may name any type parameter of the same parameter list, in either
+order, so `IteratorType: type(Iterator(Item))` may precede `Item: type`.
+Constraint arguments resolve in the declaration's scope. Method type
+parameters use the same form. The parameter list of a generic implementation is
+still open (see [Open Questions](open-questions.md)); its constraints, when it
+lands, use this form.
+
+Rationale: a constraint can only name one parameter (`Param: Trait`), so a
+separate clause adds a second place to read a signature without adding
+expressive power, and it is the one spelling in the language that is neither a
+keyword form nor a parenthesized application.
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.
