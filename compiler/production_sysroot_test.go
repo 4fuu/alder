@@ -439,6 +439,60 @@ func TestProductionSysrootImportedCallsCompose(t *testing.T) {
 	}
 }
 
+// The core.num snapshot runtime test pins the limits and the explicit
+// overflow-mode absolute value against the installed sysroot, including the
+// minimum-boundary None of the checked form and the wrapping identity at
+// every width.
+func TestProductionSysrootNumHelpers(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	main := `module hello.main
+
+import core.num
+
+pub fn main() -> I32 {
+    var total: I64 = 0
+    if num.i32_max() == 2147483647 { total = total + 1 }
+    if num.u32_max() == 4294967295 { total = total + 2 }
+    match num.i64_abs_checked(num.i64_min()) {
+        None => { total = total + 4 }
+        Some(v) => {
+            if v == 0 { total = total + 0 }
+        }
+    }
+    match num.i32_abs_checked(num.i32_min()) {
+        None => { total = total + 8 }
+        Some(v) => {
+            if v == 0 { total = total + 0 }
+        }
+    }
+    if num.i64_abs_wrapping(num.i64_min()) == num.i64_min() { total = total + 16 }
+    match num.i64_abs_checked(-42) {
+        Some(v) => {
+            if v == 42 { total = total + 32 }
+        }
+        None => { total = total + 0 }
+    }
+    if total == 63 { return 0 }
+    return 1
+}
+`
+	files := map[string]string{"alder.toml": manifest, "src/main.al": main}
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+	if run != (productionResult{}) {
+		t.Fatalf("core.num helpers run failed: %+v", run)
+	}
+}
+
 func TestProductionSysrootQualifiedNameDiagnostics(t *testing.T) {
 	cc, err := exec.LookPath("gcc")
 	if err != nil {

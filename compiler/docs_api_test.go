@@ -77,6 +77,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.num-v1.al": {
+			style:   "project",
+			srcName: "num_example.al",
+			mainText: `module hello.main
+
+import hello.num_example { num_example }
+
+pub fn main() -> I32 {
+    if num_example() == 67108863 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 

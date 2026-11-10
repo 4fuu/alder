@@ -22,7 +22,10 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`core.option` public snapshot v1](api/core.option-v1.md), covering the
   Milestone 8 `Option(T)` helper surface in the installed sysroot;
 - [`core.result` public snapshot v1](api/core.result-v1.md), covering the
-  Milestone 8 `Result(T, E)` helper surface in the installed sysroot.
+  Milestone 8 `Result(T, E)` helper surface in the installed sysroot;
+- [`core.num` public snapshot v1](api/core.num-v1.md), covering the
+  Milestone 8 integer limits and explicit-overflow absolute value in the
+  installed sysroot.
 
 ## Distribution layers
 
