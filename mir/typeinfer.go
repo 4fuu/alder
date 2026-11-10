@@ -192,6 +192,20 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return ta, true
 
+	case OpIntAddTry, OpIntSubTry, OpIntMulTry, OpIntAddSaturating, OpIntSubSaturating, OpIntMulSaturating,
+		OpIntAddWrapping, OpIntSubWrapping, OpIntMulWrapping:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !IsIntType(ta) {
+			return NoType, false
+		}
+		if tb, ok := f.ValueType(in.B); !ok || tb != ta {
+			return NoType, false
+		}
+		if in.Op <= OpIntMulTry {
+			return m.Option(ta), true
+		}
+		return ta, true
+
 	case OpSliceLen:
 		if _, ok := m.operandElemType(f, in.Slice); !ok {
 			return NoType, false

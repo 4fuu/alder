@@ -5966,6 +5966,53 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, receiver_place, site_kind, site_syntax)
 }
 
+// Integer overflow surface (M8): the checked/saturating/wrapping arithmetic
+// methods on the eight integer primitive receivers. add_checked, sub_checked,
+// and mul_checked report overflow as Option(T) (none on overflow) instead of
+// the panicking fail edge the +, -, and * operators use; the saturating and
+// wrapping methods always produce a T. The right operand must have exactly
+// the receiver's type: no implicit widening across widths or signs.
+fn check_int_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    if receiver.kind != 1 || receiver.target < 2 || receiver.target > 9 { return expr_token_fail(d, state, base, 61, callee) }
+    var builtin: U64 = 0
+    if node_word(state, callee, "add_checked") { builtin = 47 }
+    if node_word(state, callee, "sub_checked") { builtin = 48 }
+    if node_word(state, callee, "mul_checked") { builtin = 49 }
+    if node_word(state, callee, "add_saturating") { builtin = 50 }
+    if node_word(state, callee, "sub_saturating") { builtin = 51 }
+    if node_word(state, callee, "mul_saturating") { builtin = 52 }
+    if node_word(state, callee, "add_wrapping") { builtin = 53 }
+    if node_word(state, callee, "sub_wrapping") { builtin = 54 }
+    if node_word(state, callee, "mul_wrapping") { builtin = 55 }
+    // Method-call links include both the selected callee and its receiver.
+    if builtin == 0 || call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 41, call) }
+    let link = call_link_at(parse, call, 2)
+    let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, argument, link.node, receiver_type_id, 42, argument, 0, 0, in_loop)
+    var current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    var result = receiver_type_id
+    if builtin <= 49 {
+        let made = try canonical_application(d, current, owner, 9, receiver_type_id, 0, 1)
+        current = made.store
+        result = made.checked_type
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
+}
+
 // Ordered-collection key domain (M7.5): the domain the inline structural
 // compare lowers. Unsigned integers and Bool compare directly; String and
 // Bytes compare through str.eq; records and enums compare through place
@@ -6575,6 +6622,9 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+        }
+        if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "add_checked") || node_word(state, callee, "sub_checked") || node_word(state, callee, "mul_checked") || node_word(state, callee, "add_saturating") || node_word(state, callee, "sub_saturating") || node_word(state, callee, "mul_saturating") || node_word(state, callee, "add_wrapping") || node_word(state, callee, "sub_wrapping") || node_word(state, callee, "mul_wrapping")) {
+            return check_int_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)

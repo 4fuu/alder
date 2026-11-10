@@ -307,6 +307,9 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_cleanup_scope_begin() { return MirVTypeResult(valid: true, type_id: mir_v5_find_kind(indexes, mir_type_kind_cleanup_scope())) }
     if x.op == mir_op_cleanup_push() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_cleanup_scope()) && __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type == mir_type_unit() && mir_v5_args_match(store, indexes, x.function, id, x.target, false), type_id: mir_v5_find_kind(indexes, mir_type_kind_cleanup_id())) }
     if x.op >= mir_op_int_add_checked() && x.op <= mir_op_int_shr_checked() { return MirVTypeResult(valid: mir_v5_is_int(ta) && ta == tb, type_id: ta) }
+    if x.op >= mir_op_int_add_try() && x.op <= mir_op_int_mul_wrapping() { let pair = mir_v5_is_int(ta) && ta == tb
+    if x.op <= mir_op_int_mul_try() { return MirVTypeResult(valid: pair, type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), ta)) }
+    return MirVTypeResult(valid: pair, type_id: ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)
@@ -519,7 +522,7 @@ result = try mir_v5_check_args(d, store, indexes, result, x, id, x.target, false
 if __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type != mir_type_unit() { result = try mir_v5_bad(d, result, mir_vdiag_bad_result_type(), x.function, x.block, id, 0, 0, mir_type_unit(), __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type, x.target) } }
     if x.op == mir_op_cleanup_disarm() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_cleanup_id())) }
     if x.op == mir_op_cleanup_scope_run() || x.op == mir_op_cleanup_scope_end() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_cleanup_scope())) }
-    if (x.op >= mir_op_int_add_checked() && x.op <= mir_op_int_shr_checked()) || (x.op >= mir_op_int_eq() && x.op <= mir_op_int_ge()) { let ta = mir_v5_value_type(store, indexes, x.function, x.a)
+    if (x.op >= mir_op_int_add_checked() && x.op <= mir_op_int_shr_checked()) || (x.op >= mir_op_int_add_try() && x.op <= mir_op_int_mul_wrapping()) || (x.op >= mir_op_int_eq() && x.op <= mir_op_int_ge()) { let ta = mir_v5_value_type(store, indexes, x.function, x.a)
 let tb = mir_v5_value_type(store, indexes, x.function, x.b)
 if !mir_v5_is_int(ta) || ta != tb { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, ta, tb, x.b) } }
     if x.op >= mir_op_float_eq() && x.op <= mir_op_float_ge() { let ta = mir_v5_value_type(store, indexes, x.function, x.a)

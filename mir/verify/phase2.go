@@ -378,7 +378,10 @@ func intFits(t mir.TypeId, v int64) bool {
 	case mir.TypeU32:
 		return v >= 0 && v <= 4294967295
 	case mir.TypeU64:
-		return v >= 0
+		// The signed field holds the constant's 64-bit pattern; every
+		// int64 value is a valid u64 bit pattern. The printer renders the
+		// pattern as an unsigned decimal.
+		return true
 	}
 	return false
 }

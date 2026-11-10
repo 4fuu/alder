@@ -1,0 +1,13 @@
+mir 1
+
+const @max: u64 = 18446744073709551615
+const @min_pattern: u64 = 9223372036854775808
+
+fn @u64_edge(%step: u64) -> u64 {
+bb0:
+  %base = const.get @max
+  %bump = const.get @min_pattern
+  %moved = int.add.wrapping %base, %step
+  %shifted = int.add.wrapping %moved, %bump
+  return %shifted
+}

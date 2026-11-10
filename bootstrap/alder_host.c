@@ -542,6 +542,32 @@ uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand,
     return bits;
 }
 
+/* Reinterpret a U64 digit-string value as the I64 with the same 64-bit
+ * pattern. Mirrors alder_i64_from_twos_bits in runtime/c/alder.h and avoids
+ * the implementation-defined out-of-range unsigned-to-signed conversion. */
+int64_t alderhost_i64_from_u64_bits(uint64_t bits) {
+    if (bits <= (uint64_t)INT64_MAX) {
+        return (int64_t)bits;
+    }
+    uint64_t magnitude = (uint64_t)0 - bits;
+    if (magnitude == (uint64_t)INT64_MAX + 1u) {
+        return INT64_MIN;
+    }
+    return -(int64_t)magnitude;
+}
+
+/* Inverse of alderhost_i64_from_u64_bits: reinterpret an I64 value as the
+ * U64 with the same 64-bit pattern, avoiding the implementation-defined
+ * out-of-range signed-to-unsigned conversion. */
+uint64_t alderhost_u64_from_i64_bits(int64_t value) {
+    if (value >= 0) {
+        return (uint64_t)value;
+    }
+    /* -(value + 1) is in [0, INT64_MAX] for every negative value, so the
+     * negation cannot overflow; the pattern of value is 2^64 - (1 - value). */
+    return ((uint64_t)0 - (uint64_t)(-(value + 1))) - (uint64_t)1;
+}
+
 bool alderhost_stderr_byte(uint8_t byte) {
     bool wrote = alderhost_active_context != NULL &&
                  fputc((int)byte, stderr) != EOF;

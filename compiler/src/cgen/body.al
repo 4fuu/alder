@@ -225,7 +225,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_table_insert_try() { return false }
+        if item.op > mir_op_int_mul_wrapping() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -462,6 +462,156 @@ fn cgen_emit_int_checked(d: Domain, initial: CgenWriter, store: MirStore, indexe
     return cgen_put(d, out, ";\n")
 }
 
+// Non-terminating integer arithmetic (M8): the try forms build an option
+// (none on overflow), the saturating forms clamp at the type bounds, and the
+// wrapping forms wrap modulo 2^width. All of them compute in 64 bits with the
+// runtime helpers, so signed arithmetic stays defined; narrow widths then
+// clamp or truncate against their own bounds, which matches saturating or
+// wrapping at that width exactly: saturating at 64 bits keeps the value on
+// the same side of the narrow bound, and truncation keeps the low bits the
+// width-w wrap produces.
+fn cgen_emit_int_mode(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    let type_id = cgen_value_type(store, indexes, item.function, item.a)
+    let width = cgen_int_width(type_id)
+    let signed = cgen_int_signed(type_id)
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    if width < 64 {
+        if signed { out = try cgen_put(d, out, "int64_t ") } else { out = try cgen_put(d, out, "uint64_t ") }
+        out = try cgen_put_tmp(d, out, item.result, "")
+        out = try cgen_put(d, out, " = ")
+    } else {
+        out = try cgen_put_value(d, out, item.result)
+        if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_try() {
+            out = try cgen_put(d, out, ".alder_tag = ")
+        } else {
+            out = try cgen_put(d, out, " = ")
+        }
+    }
+    if width < 64 && item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_try() {
+        // Narrow try: the widened operands cannot overflow 64 bits, so
+        // plain 64-bit arithmetic needs no checked helper; the width check
+        // below alone decides none versus some.
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_type(d, out, store, type_id)
+        out = try cgen_put(d, out, ")")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        if item.op == mir_op_int_add_try() { out = try cgen_put(d, out, " + ") }
+        if item.op == mir_op_int_sub_try() { out = try cgen_put(d, out, " - ") }
+        if item.op == mir_op_int_mul_try() { out = try cgen_put(d, out, " * ") }
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_type(d, out, store, type_id)
+        out = try cgen_put(d, out, ")")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ";\n")
+    } else {
+    out = try cgen_put(d, out, "alder_")
+    if signed { out = try cgen_put(d, out, "i64_") } else { out = try cgen_put(d, out, "u64_") }
+    if item.op == mir_op_int_add_try() { out = try cgen_put(d, out, "add_checked(") }
+    if item.op == mir_op_int_sub_try() { out = try cgen_put(d, out, "sub_checked(") }
+    if item.op == mir_op_int_mul_try() { out = try cgen_put(d, out, "mul_checked(") }
+    if item.op == mir_op_int_add_saturating() { out = try cgen_put(d, out, "add_saturating(") }
+    if item.op == mir_op_int_sub_saturating() { out = try cgen_put(d, out, "sub_saturating(") }
+    if item.op == mir_op_int_mul_saturating() { out = try cgen_put(d, out, "mul_saturating(") }
+    if item.op == mir_op_int_add_wrapping() { out = try cgen_put(d, out, "add_wrapping(") }
+    if item.op == mir_op_int_sub_wrapping() { out = try cgen_put(d, out, "sub_wrapping(") }
+    if item.op == mir_op_int_mul_wrapping() { out = try cgen_put(d, out, "mul_wrapping(") }
+    if width == 64 {
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_try() {
+            // option(T): none is tag 0 with no payload, some is tag 1
+            // carrying the payload; the failed helper leaves the payload
+            // slot untouched, which none never reads.
+            out = try cgen_put(d, out, ", &")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, ".alder_u.alder_p1) ? 1u : 0u;\n")
+            return Ok(out)
+        }
+        return cgen_put(d, out, ");\n")
+    }
+    out = try cgen_put(d, out, "(")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, ")")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ", (")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, ")")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    out = try cgen_put(d, out, ");\n")
+    }
+    if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_try() {
+        out = try cgen_put(d, out, "  if (")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        if signed {
+            out = try cgen_put(d, out, " < (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, width, true)
+            out = try cgen_put(d, out, " || ")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " > (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, width, false)
+        } else {
+            out = try cgen_put(d, out, " > (uint64_t)")
+            out = try cgen_put_int_limit(d, out, false, width, false)
+        }
+        out = try cgen_put(d, out, ") {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)0;\n  } else {\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n    ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ".alder_u.alder_p1 = (")
+        out = try cgen_put_type(d, out, store, type_id)
+        out = try cgen_put(d, out, ")")
+        out = try cgen_put_tmp(d, out, item.result, "")
+        return cgen_put(d, out, ";\n  }\n")
+    }
+    if item.op >= mir_op_int_add_saturating() && item.op <= mir_op_int_mul_saturating() {
+        if signed {
+            out = try cgen_put(d, out, "  if (")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " > (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, width, false)
+            out = try cgen_put(d, out, ") ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, " = (")
+            out = try cgen_put_type(d, out, store, type_id)
+            out = try cgen_put(d, out, ")")
+            out = try cgen_put_int_limit(d, out, true, width, false)
+            out = try cgen_put(d, out, ";\n  else if (")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " < (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, width, true)
+            out = try cgen_put(d, out, ") ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, " = (")
+            out = try cgen_put_type(d, out, store, type_id)
+            out = try cgen_put(d, out, ")")
+            out = try cgen_put_int_limit(d, out, true, width, true)
+            out = try cgen_put(d, out, ";\n  else ")
+        } else {
+            out = try cgen_put(d, out, "  if (")
+            out = try cgen_put_tmp(d, out, item.result, "")
+            out = try cgen_put(d, out, " > (uint64_t)")
+            out = try cgen_put_int_limit(d, out, false, width, false)
+            out = try cgen_put(d, out, ") ")
+            out = try cgen_put_value(d, out, item.result)
+            out = try cgen_put(d, out, " = (")
+            out = try cgen_put_type(d, out, store, type_id)
+            out = try cgen_put(d, out, ")")
+            out = try cgen_put_int_limit(d, out, false, width, false)
+            out = try cgen_put(d, out, ";\n  else ")
+        }
+    }
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = (")
+    out = try cgen_put_type(d, out, store, type_id)
+    out = try cgen_put(d, out, ")")
+    out = try cgen_put_tmp(d, out, item.result, "")
+    return cgen_put(d, out, ";\n")
+}
+
 fn cgen_emit_call_args(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec, import_call: Bool) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     let count = cgen_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
@@ -666,6 +816,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         return Ok(out)
     }
     if item.op >= mir_op_int_add_checked() && item.op <= mir_op_int_shr_checked() { return cgen_emit_int_checked(d, out, store, indexes, instruction, item) }
+    if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_wrapping() { return cgen_emit_int_mode(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_slice_len() {
         out = try cgen_put(d, out, "  ")
         out = try cgen_put_value(d, out, item.result)

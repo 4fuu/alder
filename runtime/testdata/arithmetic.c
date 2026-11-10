@@ -44,6 +44,16 @@ static int failures = 0;
         CHECK(got == 12345);                                               \
     } while (0)
 
+#define CHECK_I64(op, a, b, want)                                          \
+    do {                                                                   \
+        CHECK(alder_i64_##op((a), (b)) == (want));                         \
+    } while (0)
+
+#define CHECK_U64(op, a, b, want)                                          \
+    do {                                                                   \
+        CHECK(alder_u64_##op((a), (b)) == (want));                         \
+    } while (0)
+
 static void test_i64_add(void) {
     CHECK_OK(add_checked, 1, 2, 3);
     CHECK_OK(add_checked, INT64_MAX, 0, INT64_MAX);
@@ -132,6 +142,63 @@ static void test_u64_ops(void) {
     CHECK_FAIL_U(shr_checked, 1, 64);
 }
 
+static void test_i64_saturating(void) {
+    CHECK_I64(add_saturating, 1, 2, 3);
+    CHECK_I64(add_saturating, INT64_MAX, 1, INT64_MAX);
+    CHECK_I64(add_saturating, INT64_MIN, -1, INT64_MIN);
+    CHECK_I64(add_saturating, INT64_MAX, INT64_MAX, INT64_MAX);
+    CHECK_I64(add_saturating, INT64_MIN, INT64_MIN, INT64_MIN);
+    CHECK_I64(sub_saturating, 5, 2, 3);
+    CHECK_I64(sub_saturating, INT64_MIN, 1, INT64_MIN);
+    CHECK_I64(sub_saturating, INT64_MAX, -1, INT64_MAX);
+    CHECK_I64(sub_saturating, 0, INT64_MIN, INT64_MAX);
+    CHECK_I64(mul_saturating, 3, 4, 12);
+    CHECK_I64(mul_saturating, -3, 4, -12);
+    CHECK_I64(mul_saturating, INT64_MIN, -1, INT64_MAX);
+    CHECK_I64(mul_saturating, -1, INT64_MIN, INT64_MAX);
+    CHECK_I64(mul_saturating, INT64_MIN, 2, INT64_MIN);
+    CHECK_I64(mul_saturating, INT64_MAX, 2, INT64_MAX);
+    CHECK_I64(mul_saturating, 3037000500LL, 3037000500LL, INT64_MAX);
+    CHECK_I64(mul_saturating, -3037000500LL, 3037000500LL, INT64_MIN);
+    CHECK_I64(mul_saturating, 0, INT64_MIN, 0);
+}
+
+static void test_u64_saturating(void) {
+    CHECK_U64(add_saturating, 1, 2, 3);
+    CHECK_U64(add_saturating, UINT64_MAX, 1, UINT64_MAX);
+    CHECK_U64(sub_saturating, 5, 2, 3);
+    CHECK_U64(sub_saturating, 0, 1, 0);
+    CHECK_U64(sub_saturating, UINT64_MAX, UINT64_MAX, 0);
+    CHECK_U64(mul_saturating, 3, 4, 12);
+    CHECK_U64(mul_saturating, UINT64_MAX, 2, UINT64_MAX);
+    CHECK_U64(mul_saturating, 4294967296ull, 4294967296ull, UINT64_MAX);
+    CHECK_U64(mul_saturating, 0, UINT64_MAX, 0);
+}
+
+static void test_i64_wrapping(void) {
+    CHECK_I64(add_wrapping, 1, 2, 3);
+    CHECK_I64(add_wrapping, INT64_MAX, 1, INT64_MIN);
+    CHECK_I64(add_wrapping, INT64_MIN, -1, INT64_MAX);
+    CHECK_I64(sub_wrapping, 5, 2, 3);
+    CHECK_I64(sub_wrapping, INT64_MIN, 1, INT64_MAX);
+    CHECK_I64(sub_wrapping, INT64_MAX, -1, INT64_MIN);
+    CHECK_I64(mul_wrapping, 3, 4, 12);
+    CHECK_I64(mul_wrapping, INT64_MIN, -1, INT64_MIN);
+    CHECK_I64(mul_wrapping, -1, 1, -1);
+    CHECK_I64(mul_wrapping, 4611686018427387904LL, 4, 0); /* 2^62 * 4 wraps */
+    CHECK_I64(mul_wrapping, 0, INT64_MIN, 0);
+}
+
+static void test_u64_wrapping(void) {
+    CHECK_U64(add_wrapping, 1, 2, 3);
+    CHECK_U64(add_wrapping, UINT64_MAX, 1, 0);
+    CHECK_U64(sub_wrapping, 5, 2, 3);
+    CHECK_U64(sub_wrapping, 0, 1, UINT64_MAX);
+    CHECK_U64(mul_wrapping, 3, 4, 12);
+    CHECK_U64(mul_wrapping, 4294967296ull, 4294967296ull, 0);
+    CHECK_U64(mul_wrapping, UINT64_MAX, UINT64_MAX, 1);
+}
+
 static void test_float_conversions(void) {
     int64_t i64 = 0;
     uint64_t u64 = 0;
@@ -184,6 +251,10 @@ int main(void) {
     test_i64_div();
     test_i64_shifts();
     test_u64_ops();
+    test_i64_saturating();
+    test_u64_saturating();
+    test_i64_wrapping();
+    test_u64_wrapping();
     test_float_conversions();
     test_null_outputs();
     if (failures != 0) {

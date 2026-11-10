@@ -78,7 +78,7 @@ fn mir_vint_fits(t: U64, value: I64) -> Bool {
     if t == mir_type_u8() { return value >= 0 && value <= 255 }
     if t == mir_type_u16() { return value >= 0 && value <= 65535 }
     if t == mir_type_u32() { return value >= 0 && value <= 4294967295 }
-    if t == mir_type_u64() { return value >= 0 }
+    if t == mir_type_u64() { return true }
     return false
 }
 fn mir_vfloat_finite(bits: U64) -> Bool { return (bits / 4503599627370496) % 2048 != 2047 }

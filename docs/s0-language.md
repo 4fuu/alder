@@ -316,6 +316,11 @@ Implemented expressions include:
 - unary `-` and `!`;
 - checked arithmetic, shifts, comparisons, equality for supported primitives,
   and short-circuit Boolean operators;
+- named builtin overflow methods on the eight integer types:
+  `add_checked`/`sub_checked`/`mul_checked` yield `Option(T)` (`none` on
+  overflow, `some` with the wrapped result otherwise), `*_saturating` clamp
+  at the type's boundary, and `*_wrapping` wrap on the two's-complement
+  pattern;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`

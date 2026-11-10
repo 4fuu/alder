@@ -312,6 +312,33 @@ Checked integer operations require both operands to have the same integer type. 
 
 A later MIR optimization may replace a checked operation only after proving the condition cannot fail.
 
+## Integer Overflow Methods
+
+MIR 6 also exposes the integer overflow modes as ordinary operations 71-79,
+produced only by named builtin method calls on integer receivers
+(`add_checked`, `sub_checked`, `mul_checked`, and their `saturating` and
+`wrapping` forms):
+
+```text
+int.add.try a, b -> option(T)
+int.sub.try a, b -> option(T)
+int.mul.try a, b -> option(T)
+int.add.sat a, b -> T
+int.sub.sat a, b -> T
+int.mul.sat a, b -> T
+int.add.wrap a, b -> T
+int.sub.wrap a, b -> T
+int.mul.wrap a, b -> T
+```
+
+All nine take two operands of the same integer type and none may fail: the
+`try` forms yield `none` on overflow and `some` with the wrapped result
+otherwise, the `sat` forms clamp at the type's boundary, and the `wrap`
+forms wrap on the two's-complement pattern. Unlike `int.add.checked`, these
+operations are total and carry no failure edge. The verifier rejects them on
+mismatched operand types, non-integer operand types, and `try` results not
+consumed as `option(T)` of the operand type.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -377,6 +404,12 @@ Constant types are `unit`, `bool`, integer and float primitives, `string`, and
 Integer literals are decimal `i64`-range values; floats print with
 shortest-round-trip formatting. Quoted `string` payloads must be valid UTF-8,
 while quoted `bytes` payloads preserve every decoded byte.
+
+`u64` constants carry the full unsigned range. Values that fit `i64` print
+and parse as ordinary decimals; values outside the `i64` range are stored as
+their 64-bit two's-complement pattern and print as the unsigned decimal
+reading of that pattern, and the parsers accept unsigned decimals up to
+2^64-1 for `u64` constants only.
 
 ## Calls and C FFI
 
@@ -664,8 +697,8 @@ Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
 format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
 `mir 4` adds `vec(T)` and the minimal Vec operations; `mir 5` adds
 function-type environments, `fn.value`, and `call.value`; and current `mir 6`
-adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`, and
-`c.is_null`.
+adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
+`c.is_null`, and the integer overflow method operations (71-79).
 Incompatible changes must use a new version and update:
 
 - this document;

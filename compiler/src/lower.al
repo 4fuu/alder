@@ -1701,21 +1701,11 @@ fn lower_add_switch_case(d: Domain, state: LowerState, term: U64, ordinal: U64, 
     return Ok(LowerStep(state: lower_with_mir(state, step.store), id: step.id))
 }
 
-fn lower_digits_equal(bytes: __s0_Buffer(U8), start: U64, end: U64, digits: __s0_String) -> Bool {
-    if end < start || end - start != len(digits) { return false }
-    var at: U64 = 0
-    while at < len(digits) {
-        if __s0_buffer_get(U8, bytes, start + at) != digits[at] { return false }
-        at = at + 1
-    }
-    return true
-}
-
 fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expression: CheckedExprRec) -> I64 {
     if expression.syntax == 0 || expression.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return 0 }
     let span = __s0_buffer_get(CheckedSpanRec, spans, expression.syntax - 1)
     let source = __s0_buffer_get(SourceRec, source_state.sources, span.source)
-    var value: I64 = 0
+    var value: U64 = 0
     var negative = false
     var at = source.text_start + span.start
     let end = source.text_start + span.end
@@ -1723,9 +1713,11 @@ fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expr
         negative = true
         at = at + 1
     }
-    // I64 minimum cannot be accumulated as a positive I64; the checker already
-    // accepted this exact digit string under a negative sign.
-    if negative && lower_digits_equal(source_state.texts, at, end, "9223372036854775808") { return -9223372036854775808 }
+    // Digits accumulate in U64 so a U64-range literal whose magnitude
+    // exceeds the positive I64 range parses without an intermediate
+    // overflow; the checker has already bounded the literal by its
+    // declared type. The accumulated value is then reinterpreted as the
+    // I64 with the same 64-bit pattern.
     while at < end {
         let byte = __s0_buffer_get(U8, source_state.texts, at)
         value = value * 10
@@ -1740,8 +1732,9 @@ fn lower_parse_i64(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expr
         if byte == 57 { value = value + 9 }
         at = at + 1
     }
-    if negative { return 0 - value }
-    return value
+    let bits = unsafe c { alderhost_i64_from_u64_bits(value) }
+    if negative && bits > 0 { return 0 - bits }
+    return bits
 }
 
 fn lower_float_bits(source_state: State, spans: __s0_Buffer(CheckedSpanRec), expression: CheckedExprRec) -> U64 {
@@ -3911,7 +3904,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 46 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 55 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin >= 47 { return lower_int_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 26 && annotation.builtin <= 29 || annotation.builtin == 45 || annotation.builtin == 46 {
             return lower_m75_table_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block)
         }
@@ -5960,9 +5954,52 @@ fn lower_source_range_valid(source_state: State, source: U64, start: U64, end: U
     return true
 }
 
+// M8 integer overflow surface: lower the checked/saturating/wrapping
+// arithmetic methods to their non-terminating MIR operations. The try forms
+// produce option(T) (none on overflow); the saturating and wrapping forms
+// produce T. None of them carries a failure edge.
+fn lower_int_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 2 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let argument_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_syntax, environment, panic_block)
+    let argument = try lower_expression(d, source_state, spans, store, receiver.state, owner, function, block, argument_syntax, environment, panic_block)
+    let receiver_type = lower_builtin_child_type(store, expression, 0)
+    let first = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+    var op: U64 = 0
+    if annotation.builtin == 47 { op = mir_op_int_add_try() }
+    if annotation.builtin == 48 { op = mir_op_int_sub_try() }
+    if annotation.builtin == 49 { op = mir_op_int_mul_try() }
+    if annotation.builtin == 50 { op = mir_op_int_add_saturating() }
+    if annotation.builtin == 51 { op = mir_op_int_sub_saturating() }
+    if annotation.builtin == 52 { op = mir_op_int_mul_saturating() }
+    if annotation.builtin == 53 { op = mir_op_int_add_wrapping() }
+    if annotation.builtin == 54 { op = mir_op_int_sub_wrapping() }
+    if annotation.builtin == 55 { op = mir_op_int_mul_wrapping() }
+    if op == 0 || first.kind != 1 || first.target < 2 || first.target > 9 { return Ok(LowerStep(state: lower_invalid(argument.state), id: 0)) }
+    let result_type = try lower_type(d, source_state, store, argument.state, expression.checked_type)
+    let result = try lower_add_result(d, result_type.state, function, block, expression.checked_type, source_state, store)
+    let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, receiver.id, argument.id, 0, "")
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 46 { return false }
-    if annotation.builtin >= 30 && annotation.builtin != 45 && annotation.builtin != 46 { return lower_ordered_model_valid(store, annotation, expression) }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 55 { return false }
+    if annotation.builtin >= 47 {
+        // M8 integer overflow surface: receiver and right operand share the
+        // exact integer primitive type; checked methods produce Option(T),
+        // saturating and wrapping methods produce T.
+        if expression.child_count != 2 || annotation.target != 0 { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        let argument_type = lower_builtin_child_type(store, expression, 1)
+        if receiver_type == 0 || argument_type != receiver_type { return false }
+        let first = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if first.kind != 1 || first.target < 2 || first.target > 9 { return false }
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        if annotation.builtin <= 49 { return result.kind == 9 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == receiver_type }
+        return annotation.checked_type == receiver_type
+    }
+    if annotation.builtin >= 30 && annotation.builtin <= 44 { return lower_ordered_model_valid(store, annotation, expression) }
     if annotation.target != 0 { return false }
     var expected_count: U64 = 1
     if annotation.builtin == 18 { expected_count = 0 }
@@ -6370,7 +6407,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 46 { return false } }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 55 { return false } }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }

@@ -93,7 +93,17 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
             out = try cgen_put(d, out, " = (")
             out = try cgen_put_type(d, out, store, item.const_type)
             out = try cgen_put(d, out, ")")
-            out = try cgen_put_i64(d, out, item.int_value)
+            if item.const_type == mir_type_u64() && item.int_value < 0 {
+                // The signed field holds the 64-bit pattern of a value
+                // above INT64_MAX; the emitted form is the pattern's
+                // unsigned decimal with a ULL suffix, because an
+                // unsuffixed decimal that large has no signed type.
+                let bits = unsafe c { alderhost_u64_from_i64_bits(item.int_value) }
+                out = try cgen_put_u64(d, out, bits)
+                out = try cgen_put(d, out, "ULL")
+            } else {
+                out = try cgen_put_i64(d, out, item.int_value)
+            }
             out = try cgen_put(d, out, ";\n")
         }
         if item.kind == mir_const_float() {

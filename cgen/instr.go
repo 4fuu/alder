@@ -204,6 +204,11 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked:
 		g.emitIntChecked(b, in)
 
+	case mir.OpIntAddTry, mir.OpIntSubTry, mir.OpIntMulTry,
+		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
+		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping:
+		g.emitIntMode(b, in)
+
 	case mir.OpSliceLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
 
@@ -669,6 +674,119 @@ func (g *gen) emitIntChecked(b *strings.Builder, in *mir.Instr) {
 	}
 }
 
+// emitIntMode lowers the non-terminating integer arithmetic: the try forms
+// build an option (none on overflow), the saturating forms clamp at the type
+// bounds, and the wrapping forms wrap modulo 2^width. All of them compute in
+// 64 bits with the runtime helpers, so signed arithmetic stays defined; narrow
+// widths then clamp or truncate against their own bounds, which matches
+// saturating or wrapping at that width exactly: saturating at 64 bits keeps
+// the value on the same side of the narrow bound, and truncation keeps the
+// low bits the width-w wrap produces.
+func (g *gen) emitIntMode(b *strings.Builder, in *mir.Instr) {
+	t, _ := g.f.ValueType(in.A)
+	width, signed := intInfo(t)
+	helper := "alder_u64_"
+	opName := ""
+	tryForm := false
+	switch in.Op {
+	case mir.OpIntAddTry:
+		opName, tryForm = "add_checked", true
+	case mir.OpIntSubTry:
+		opName, tryForm = "sub_checked", true
+	case mir.OpIntMulTry:
+		opName, tryForm = "mul_checked", true
+	case mir.OpIntAddSaturating:
+		opName = "add_saturating"
+	case mir.OpIntSubSaturating:
+		opName = "sub_saturating"
+	case mir.OpIntMulSaturating:
+		opName = "mul_saturating"
+	case mir.OpIntAddWrapping:
+		opName = "add_wrapping"
+	case mir.OpIntSubWrapping:
+		opName = "sub_wrapping"
+	case mir.OpIntMulWrapping:
+		opName = "mul_wrapping"
+	}
+	if signed {
+		helper = "alder_i64_"
+	}
+	srcCast := g.cType(t)
+	a := g.valueExpr(in.A)
+	bArg := g.valueExpr(in.B)
+	narrowA := "(" + srcCast + ")" + a
+	narrowB := "(" + srcCast + ")" + bArg
+	if width == 64 {
+		if tryForm {
+			// option(T): none is tag 0 with no payload, some is tag 1
+			// carrying the payload; the failed helper leaves the payload
+			// slot untouched, which none never reads.
+			b.WriteString("  " + g.val(in.Result) + ".alder_tag = (uint32_t)(" + helper + opName +
+				"(" + a + ", " + bArg + ", &" + g.val(in.Result) + ".alder_u.alder_p1) ? 1u : 0u);\n")
+			return
+		}
+		b.WriteString("  " + g.val(in.Result) + " = " + helper + opName + "(" + a + ", " + bArg + ");\n")
+		return
+	}
+	// Narrow: compute in 64 bits, then clamp or truncate at the width.
+	tmp := g.tmp(in, "")
+	if tryForm {
+		// Narrow try: the widened operands cannot overflow 64 bits, so
+		// plain 64-bit arithmetic needs no checked helper; the width
+		// check below alone decides none versus some.
+		op := "+"
+		switch in.Op {
+		case mir.OpIntSubTry:
+			op = "-"
+		case mir.OpIntMulTry:
+			op = "*"
+		}
+		b.WriteString("  " + signed64Name(signed) + " " + tmp + " = (" + srcCast + ")" + a + " " + op +
+			" (" + srcCast + ")" + bArg + ";\n")
+	} else {
+		b.WriteString("  " + signed64Name(signed) + " " + tmp + " = " + helper + opName +
+			"(" + narrowA + ", " + narrowB + ");\n")
+	}
+	if tryForm {
+		overflow := tmp + " > (uint64_t)" + uintLimit(width)
+		if signed {
+			lo, hi := intLimits(width)
+			overflow = tmp + " < (int64_t)" + lo + " || " + tmp + " > (int64_t)" + hi
+		}
+		b.WriteString("  if (" + overflow + ") {\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)0;\n")
+		b.WriteString("  } else {\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)1;\n")
+		b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p1 = (" + g.cType(t) + ")" + tmp + ";\n")
+		b.WriteString("  }\n")
+		return
+	}
+	if in.Op == mir.OpIntAddSaturating || in.Op == mir.OpIntSubSaturating || in.Op == mir.OpIntMulSaturating {
+		clamp := tmp + " > (uint64_t)" + uintLimit(width)
+		clampValue := uintLimit(width)
+		if signed {
+			lo, hi := intLimits(width)
+			b.WriteString("  if (" + tmp + " > (int64_t)" + hi + ") {\n")
+			b.WriteString("    " + g.val(in.Result) + " = (" + g.cType(t) + ")" + hi + ";\n")
+			b.WriteString("  } else if (" + tmp + " < (int64_t)" + lo + ") {\n")
+			b.WriteString("    " + g.val(in.Result) + " = (" + g.cType(t) + ")" + lo + ";\n")
+			b.WriteString("  } else {\n")
+			b.WriteString("    " + g.val(in.Result) + " = (" + g.cType(t) + ")" + tmp + ";\n")
+			b.WriteString("  }\n")
+			return
+		}
+		b.WriteString("  if (" + clamp + ") {\n")
+		b.WriteString("    " + g.val(in.Result) + " = (" + g.cType(t) + ")" + clampValue + ";\n")
+		b.WriteString("  } else {\n")
+		b.WriteString("    " + g.val(in.Result) + " = (" + g.cType(t) + ")" + tmp + ";\n")
+		b.WriteString("  }\n")
+		return
+	}
+	// Wrapping: truncating the 64-bit wrap result to the narrow type keeps
+	// exactly the low bits the width-w wrap produces.
+	b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(t) + ")" + tmp + ";\n")
+}
+
 // emitShiftChecked lowers int.shl.checked and int.shr.checked.
 func (g *gen) emitShiftChecked(b *strings.Builder, in *mir.Instr, width int, signed bool) {
 	fail := g.failBody(in)
@@ -890,6 +1008,14 @@ func (g *gen) emitConstGet(b *strings.Builder, in *mir.Instr) {
 			b.WriteString("  " + g.val(in.Result) + " = false;\n")
 		}
 	case mir.ConstInt:
+		if c.Type == mir.TypeU64 && c.Value.Int < 0 {
+			// The signed field holds the 64-bit pattern of a value above
+			// INT64_MAX; the unsigned decimal of the pattern renders it
+			// without relying on an out-of-range conversion.
+			b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(c.Type) + ")(" +
+				strconv.FormatUint(uint64(c.Value.Int), 10) + "ULL);\n")
+			return
+		}
 		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(c.Type) + ")(" +
 			intLiteral(c.Value.Int) + ");\n")
 	case mir.ConstFloat:

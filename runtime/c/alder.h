@@ -335,6 +335,123 @@ static inline bool alder_u64_shr_checked(uint64_t a, uint64_t b, uint64_t *out) 
 }
 
 /*
+ * Saturating helpers for the non-terminating integer arithmetic. Each returns
+ * the clamped result at 64-bit bounds; narrower widths clamp against their own
+ * bounds in generated code, which matches saturation at that width exactly
+ * because the 64-bit result stays on the same side of the narrow bound.
+ * Signed arithmetic stays defined: overflow is detected with the same
+ * predicates the checked helpers use, never via signed overflow.
+ */
+static inline int64_t alder_i64_add_saturating(int64_t a, int64_t b) {
+    if (b > 0 && a > INT64_MAX - b) {
+        return INT64_MAX;
+    }
+    if (b < 0 && a < INT64_MIN - b) {
+        return INT64_MIN;
+    }
+    return a + b;
+}
+
+static inline int64_t alder_i64_sub_saturating(int64_t a, int64_t b) {
+    if (b < 0 && a > INT64_MAX + b) {
+        return INT64_MAX;
+    }
+    if (b > 0 && a < INT64_MIN + b) {
+        return INT64_MIN;
+    }
+    return a - b;
+}
+
+static inline int64_t alder_i64_mul_saturating(int64_t a, int64_t b) {
+    if (a == 0 || b == 0) {
+        return 0;
+    }
+    if ((a == INT64_MIN && b == -1) || (a == -1 && b == INT64_MIN)) {
+        return INT64_MAX;
+    }
+    bool neg = (a < 0) != (b < 0);
+    uint64_t ua = a < 0 ? (uint64_t)0 - (uint64_t)a : (uint64_t)a;
+    uint64_t ub = b < 0 ? (uint64_t)0 - (uint64_t)b : (uint64_t)b;
+    uint64_t limit = neg ? ((uint64_t)INT64_MAX + (uint64_t)1)
+                         : (uint64_t)INT64_MAX;
+    if (ua > limit / ub) {
+        return neg ? INT64_MIN : INT64_MAX;
+    }
+    uint64_t prod = ua * ub;
+    if (neg) {
+        prod = (uint64_t)0 - prod; /* two's complement negation, defined in
+                                      unsigned arithmetic */
+    }
+    int64_t out = 0;
+    if (!alder_i64_from_twos_bits(prod, &out)) {
+        return neg ? INT64_MIN : INT64_MAX;
+    }
+    return out;
+}
+
+static inline uint64_t alder_u64_add_saturating(uint64_t a, uint64_t b) {
+    if (a > UINT64_MAX - b) {
+        return UINT64_MAX;
+    }
+    return a + b;
+}
+
+static inline uint64_t alder_u64_sub_saturating(uint64_t a, uint64_t b) {
+    if (a < b) {
+        return 0;
+    }
+    return a - b;
+}
+
+static inline uint64_t alder_u64_mul_saturating(uint64_t a, uint64_t b) {
+    if (a != 0 && b > UINT64_MAX / a) {
+        return UINT64_MAX;
+    }
+    return a * b;
+}
+
+/*
+ * Wrapping helpers: two's complement arithmetic modulo 2^64. Signed wrapping
+ * computes in unsigned arithmetic (defined for every operand pair) and reads
+ * the bit pattern back, so no signed operation overflows.
+ */
+static inline int64_t alder_i64_add_wrapping(int64_t a, int64_t b) {
+    int64_t out = 0;
+    if (!alder_i64_from_twos_bits((uint64_t)a + (uint64_t)b, &out)) {
+        return 0;
+    }
+    return out;
+}
+
+static inline int64_t alder_i64_sub_wrapping(int64_t a, int64_t b) {
+    int64_t out = 0;
+    if (!alder_i64_from_twos_bits((uint64_t)a - (uint64_t)b, &out)) {
+        return 0;
+    }
+    return out;
+}
+
+static inline int64_t alder_i64_mul_wrapping(int64_t a, int64_t b) {
+    int64_t out = 0;
+    if (!alder_i64_from_twos_bits((uint64_t)a * (uint64_t)b, &out)) {
+        return 0;
+    }
+    return out;
+}
+
+static inline uint64_t alder_u64_add_wrapping(uint64_t a, uint64_t b) {
+    return a + b;
+}
+
+static inline uint64_t alder_u64_sub_wrapping(uint64_t a, uint64_t b) {
+    return a - b;
+}
+
+static inline uint64_t alder_u64_mul_wrapping(uint64_t a, uint64_t b) {
+    return a * b;
+}
+
+/*
  * Defined float-to-integer conversion for int.from_float lowering. Returns
  * false for NaN and for values outside the destination range (truncation
  * toward zero inside the range). Narrow destinations range-check the

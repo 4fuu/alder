@@ -120,6 +120,37 @@ int32_t alder_program_entry(void *host_context) {
 }
 `
 
+const bitsStubEntry = `#include "alder_host.h"
+#include <limits.h>
+#include <stdint.h>
+
+static bool bits_ok(uint64_t bits, int64_t want) {
+    return alderhost_i64_from_u64_bits(bits) == want;
+}
+
+static bool ibits_ok(int64_t value, uint64_t want) {
+    return alderhost_u64_from_i64_bits(value) == want;
+}
+
+int32_t alder_program_entry(void *host_context) {
+    (void)host_context;
+    if (!bits_ok(UINT64_C(0), (int64_t)0)) { return (int32_t)1; }
+    if (!bits_ok(UINT64_C(1), (int64_t)1)) { return (int32_t)2; }
+    if (!bits_ok(UINT64_C(9223372036854775807), INT64_MAX)) { return (int32_t)3; }
+    if (!bits_ok(UINT64_C(9223372036854775808), INT64_MIN)) { return (int32_t)4; }
+    if (!bits_ok(UINT64_C(9223372036854775809), INT64_MIN + (int64_t)1)) { return (int32_t)5; }
+    if (!bits_ok(UINT64_C(18446744073709551615), (int64_t)-1)) { return (int32_t)6; }
+    if (!bits_ok(UINT64_C(18446744073709551614), (int64_t)-2)) { return (int32_t)7; }
+    if (!ibits_ok((int64_t)0, UINT64_C(0))) { return (int32_t)8; }
+    if (!ibits_ok((int64_t)1, UINT64_C(1))) { return (int32_t)9; }
+    if (!ibits_ok(INT64_MAX, UINT64_C(9223372036854775807))) { return (int32_t)10; }
+    if (!ibits_ok(INT64_MIN, UINT64_C(9223372036854775808))) { return (int32_t)11; }
+    if (!ibits_ok((int64_t)-1, UINT64_C(18446744073709551615))) { return (int32_t)12; }
+    if (!ibits_ok((int64_t)-2, UINT64_C(18446744073709551614))) { return (int32_t)13; }
+    return (int32_t)0;
+}
+`
+
 type result struct {
 	status int
 	stdout string
@@ -330,6 +361,15 @@ func TestEntryFailureResponsesAndNoDuplication(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestU64BitsReinterpretationBoundaries(t *testing.T) {
+	exe := compileHostWithStub(t, bitsStubEntry)
+	dir := t.TempDir()
+	source(t, dir, "a.al", "A")
+	if got := run(t, exe, dir, "compile", "--emit=mir", "-o", "out.mir", "a.al"); got.status != 0 {
+		t.Fatalf("u64 bits reinterpretation: %+v", got)
 	}
 }
 

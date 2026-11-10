@@ -279,12 +279,30 @@ func (p *parser) parseConstDecl() error {
 	if err := p.expectPunct("="); err != nil {
 		return err
 	}
-	val, err := p.parseConstValue()
+	val, err := p.parseConstValueFor(typ)
 	if err != nil {
 		return err
 	}
 	p.m.AddConst(nameTok.text, typ, val)
 	return nil
+}
+
+// parseConstValueFor parses a constant value with its declared type in
+// scope. A u64 constant is printed as the unsigned decimal of its 64-bit
+// pattern, which may exceed the signed int64 range, so such a token is read
+// as an unsigned integer and stored as the equivalent bit pattern.
+func (p *parser) parseConstValueFor(t TypeId) (ConstValue, error) {
+	if t == TypeU64 && p.peek().kind == tokInt {
+		if _, err := strconv.ParseInt(p.peek().text, 10, 64); err != nil {
+			tok := p.next()
+			u, uerr := strconv.ParseUint(tok.text, 10, 64)
+			if uerr != nil {
+				return ConstValue{}, p.errf(tok, "integer literal %q out of range", tok.text)
+			}
+			return ConstValue{Kind: ConstInt, Int: int64(u)}, nil
+		}
+	}
+	return p.parseConstValue()
 }
 
 func (p *parser) parseConstValue() (ConstValue, error) {
@@ -1196,6 +1214,32 @@ func (p *parser) parseOp() (Instr, error) {
 			op = OpIntShlChecked
 		default:
 			op = OpIntShrChecked
+		}
+		err = parseBinary(op)
+
+	case "int.add.try", "int.sub.try", "int.mul.try",
+		"int.add.saturating", "int.sub.saturating", "int.mul.saturating",
+		"int.add.wrapping", "int.sub.wrapping", "int.mul.wrapping":
+		var op OpKind
+		switch t.text {
+		case "int.add.try":
+			op = OpIntAddTry
+		case "int.sub.try":
+			op = OpIntSubTry
+		case "int.mul.try":
+			op = OpIntMulTry
+		case "int.add.saturating":
+			op = OpIntAddSaturating
+		case "int.sub.saturating":
+			op = OpIntSubSaturating
+		case "int.mul.saturating":
+			op = OpIntMulSaturating
+		case "int.add.wrapping":
+			op = OpIntAddWrapping
+		case "int.sub.wrapping":
+			op = OpIntSubWrapping
+		default:
+			op = OpIntMulWrapping
 		}
 		err = parseBinary(op)
 

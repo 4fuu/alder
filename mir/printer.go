@@ -38,7 +38,7 @@ func Print(m *Module) string {
 
 	for _, c := range m.Constants {
 		b.WriteString("\nconst @" + c.Name + ": " + m.TypeString(c.Type) + " = ")
-		printConstValue(&b, c.Value)
+		printConstValueFor(&b, c.Value, c.Type)
 		b.WriteString("\n")
 	}
 
@@ -156,7 +156,10 @@ func printSig(b *strings.Builder, m *Module, sig FuncSig) {
 	b.WriteString(m.TypeString(sig.Result))
 }
 
-func printConstValue(b *strings.Builder, v ConstValue) {
+// printConstValueFor renders a constant value. A u64 constant stores its
+// 64-bit pattern in the signed Int field; the printed form is the unsigned
+// decimal of that pattern so the text matches the source-level value.
+func printConstValueFor(b *strings.Builder, v ConstValue, t TypeId) {
 	switch v.Kind {
 	case ConstUnit:
 		b.WriteString("()")
@@ -167,7 +170,11 @@ func printConstValue(b *strings.Builder, v ConstValue) {
 			b.WriteString("false")
 		}
 	case ConstInt:
-		b.WriteString(strconv.FormatInt(v.Int, 10))
+		if t == TypeU64 {
+			b.WriteString(strconv.FormatUint(uint64(v.Int), 10))
+		} else {
+			b.WriteString(strconv.FormatInt(v.Int, 10))
+		}
 	case ConstFloat:
 		b.WriteString(strconv.FormatFloat(v.Float, 'g', -1, 64))
 	case ConstString:
@@ -334,6 +341,11 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpIntAddChecked, OpIntSubChecked, OpIntMulChecked, OpIntDivChecked, OpIntShlChecked, OpIntShrChecked:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 		printFailEdge(b, f, in)
+
+	case OpIntAddTry, OpIntSubTry, OpIntMulTry,
+		OpIntAddSaturating, OpIntSubSaturating, OpIntMulSaturating,
+		OpIntAddWrapping, OpIntSubWrapping, OpIntMulWrapping:
+		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 
 	case OpSliceLen:
 		b.WriteString(" " + valueName(f, in.Slice))

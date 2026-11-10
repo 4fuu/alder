@@ -162,6 +162,15 @@ fn mir_op_fn_value() -> U64 { return 67 }
 fn mir_op_table_insert_try() -> U64 { return 68 }
 fn mir_op_c_binding_call() -> U64 { return 69 }
 fn mir_op_c_is_null() -> U64 { return 70 }
+fn mir_op_int_add_try() -> U64 { return 71 }
+fn mir_op_int_sub_try() -> U64 { return 72 }
+fn mir_op_int_mul_try() -> U64 { return 73 }
+fn mir_op_int_add_saturating() -> U64 { return 74 }
+fn mir_op_int_sub_saturating() -> U64 { return 75 }
+fn mir_op_int_mul_saturating() -> U64 { return 76 }
+fn mir_op_int_add_wrapping() -> U64 { return 77 }
+fn mir_op_int_sub_wrapping() -> U64 { return 78 }
+fn mir_op_int_mul_wrapping() -> U64 { return 79 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

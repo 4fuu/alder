@@ -71,6 +71,34 @@ func TestGoldenRoundTrip(t *testing.T) {
 	}
 }
 
+// TestU64ConstPatternRoundTrip pins the u64 constant representation: the
+// signed field holds the 64-bit pattern and the printed form is the
+// pattern's unsigned decimal.
+func TestU64ConstPatternRoundTrip(t *testing.T) {
+	text := "mir 1\n\nconst @max: u64 = 18446744073709551615\nconst @small: u64 = 5\nfn @f() -> u64 {\nbb0:\n  %x = const.get @max\n  %s = const.get @small\n  %y = int.add.wrapping %x, %s\n  return %y\n}\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := m.Constants[0].Value.Int; got != -1 {
+		t.Fatalf("u64 max pattern: got %d, want -1", got)
+	}
+	out := Print(m)
+	if !strings.Contains(out, "const @max: u64 = 18446744073709551615") {
+		t.Fatalf("printed u64 max: %s", out)
+	}
+	if strings.Contains(out, "const @small: u64 = -") {
+		t.Fatalf("small u64 const printed signed: %s", out)
+	}
+	m2, err := Parse(out)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if Print(m2) != out {
+		t.Fatalf("parse-print-parse not stable:\n%s\n---\n%s", out, Print(m2))
+	}
+}
+
 // TestParsePrintParseIterated runs the parse-print cycle repeatedly and
 // requires stability from the first printed output onward.
 func TestParsePrintParseIterated(t *testing.T) {

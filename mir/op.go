@@ -101,6 +101,20 @@ const (
 	OpCBindingCall
 	// OpCIsNull is the one safe raw-pointer observation: null test.
 	OpCIsNull
+
+	// Non-terminating integer arithmetic: the try forms produce option(T)
+	// (none on overflow), the saturating forms clamp at the type bounds, and
+	// the wrapping forms wrap modulo 2^width. None of them carries a failure
+	// edge.
+	OpIntAddTry
+	OpIntSubTry
+	OpIntMulTry
+	OpIntAddSaturating
+	OpIntSubSaturating
+	OpIntMulSaturating
+	OpIntAddWrapping
+	OpIntSubWrapping
+	OpIntMulWrapping
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -253,6 +267,24 @@ func (k OpKind) String() string {
 		return "c.call.unsafe"
 	case OpCIsNull:
 		return "c.is_null"
+	case OpIntAddTry:
+		return "int.add.try"
+	case OpIntSubTry:
+		return "int.sub.try"
+	case OpIntMulTry:
+		return "int.mul.try"
+	case OpIntAddSaturating:
+		return "int.add.saturating"
+	case OpIntSubSaturating:
+		return "int.sub.saturating"
+	case OpIntMulSaturating:
+		return "int.mul.saturating"
+	case OpIntAddWrapping:
+		return "int.add.wrapping"
+	case OpIntSubWrapping:
+		return "int.sub.wrapping"
+	case OpIntMulWrapping:
+		return "int.mul.wrapping"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

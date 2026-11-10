@@ -223,6 +223,15 @@ func TestInferResultType(t *testing.T) {
 	want("int.add.checked", Instr{Op: OpIntAddChecked, A: x, B: x}, TypeI64)
 	want("int.shl.checked", Instr{Op: OpIntShlChecked, A: x, B: x}, TypeI64)
 	want("int.shr.checked", Instr{Op: OpIntShrChecked, A: x, B: x}, TypeI64)
+	want("int.add.try", Instr{Op: OpIntAddTry, A: x, B: x}, m.Option(TypeI64))
+	want("int.sub.try", Instr{Op: OpIntSubTry, A: x, B: x}, m.Option(TypeI64))
+	want("int.mul.try", Instr{Op: OpIntMulTry, A: x, B: x}, m.Option(TypeI64))
+	want("int.add.saturating", Instr{Op: OpIntAddSaturating, A: x, B: x}, TypeI64)
+	want("int.sub.saturating", Instr{Op: OpIntSubSaturating, A: x, B: x}, TypeI64)
+	want("int.mul.saturating", Instr{Op: OpIntMulSaturating, A: x, B: x}, TypeI64)
+	want("int.add.wrapping", Instr{Op: OpIntAddWrapping, A: x, B: x}, TypeI64)
+	want("int.sub.wrapping", Instr{Op: OpIntSubWrapping, A: x, B: x}, TypeI64)
+	want("int.mul.wrapping", Instr{Op: OpIntMulWrapping, A: x, B: x}, TypeI64)
 	want("slice.len", Instr{Op: OpSliceLen, Slice: s}, TypeU64)
 	want("slice.index.checked", Instr{Op: OpSliceIndexChecked, Slice: s, Index: cnt}, m.SafeMut(TypeU8))
 	want("slice.range.checked", Instr{Op: OpSliceRangeChecked, Slice: s, Lo: cnt, Hi: cnt}, m.Slice(TypeU8))
@@ -243,6 +252,9 @@ func TestInferResultType(t *testing.T) {
 	// Malformed operands must not infer.
 	bad := []Instr{
 		{Op: OpIntAddChecked, A: s, B: x},
+		{Op: OpIntAddTry, A: s, B: x},
+		{Op: OpIntAddTry, A: x, B: s},
+		{Op: OpIntAddWrapping, A: x, B: s},
 		{Op: OpSliceLen, Slice: x},
 		{Op: OpEnumPayloadChecked, EnumValue: e, Variant: "B"},
 		{Op: OpConstGet, Const: "missing"},

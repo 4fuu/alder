@@ -1,0 +1,8 @@
+mir 1
+
+const @x: u8 = -1
+
+fn @f() {
+bb0:
+  return
+}

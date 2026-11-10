@@ -148,6 +148,7 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
 - 64-bit checked operations call the runtime helper and branch to the MIR failure edge on false;
 - narrow non-shift operations promote operands to 64 bits, compute with the helper, range-check the result against the narrow limits, and cast; the narrow operation fails exactly when the promoted computation or the range check fails;
+- the total integer overflow method operations never branch to a failure edge. 64-bit `try` forms reuse the existing checked helpers (`alder_i64_add_checked` and siblings returning `Bool` through an out-parameter) to fill the option payload and pick the tag from the helper result. Narrow `try` forms run plain 64-bit arithmetic, which cannot overflow for widened operands, and the range check against the narrow type alone selects between `none` and `some`. 64-bit `sat`/`wrap` forms call the saturating or wrapping runtime helpers directly, and narrow `sat`/`wrap` forms call them on the widened operands before clamping or truncating to the source width;
 - narrow shifts check the count against the source width first (unsigned counts only against the width), then compute at that width: unsigned targets wrap by casting, signed left shifts transfer the width-bit two's-complement pattern with `memcpy`, and signed right shifts use unsigned shifting plus explicit sign-bit fill rather than C's implementation-defined signed `>>`;
 - failure edges use the same parallel-copy temporaries as ordinary edges before the `goto`;
 - a checked failure edge may reach `panic` after all current-function cleanup scopes on that path have been explicitly run and ended; the runtime call does not unwind caller frames;
@@ -268,6 +269,8 @@ Depending on the final language rule, checked operations lower to:
 - the runtime helpers above;
 - explicit range checks;
 - carefully specified unsigned arithmetic followed by conversion.
+
+The integer overflow method operations (71-79) need no new runtime surface beyond `runtime/c/alder.h`: 64-bit `try` forms reuse the `alder_i64_*_checked`/`alder_u64_*_checked` boolean helpers, 64-bit and narrow `sat`/`wrap` forms call the twelve `alder_i64_*_saturating`/`alder_i64_*_wrapping` and `alder_u64_*_saturating`/`alder_u64_*_wrapping` helpers, and narrow `try` forms compute with plain 64-bit arithmetic plus a range check. The wrapping helpers compute directly on `int64_t`/`uint64_t`, whose overflow behavior is defined, so no undefined signed arithmetic is introduced.
 
 The backend must also define lowering for:
 

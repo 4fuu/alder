@@ -49,7 +49,10 @@ bool alderhost_output_failed(void);
 bool alderhost_response_reset(void);
 bool alderhost_stdout_byte(uint8_t byte);
 bool alderhost_stdout_f64_bits(uint64_t bits);
-uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand, int64_t exponent);
+uint64_t alderhost_decimal_f64_bits(uint64_t negative, uint64_t significand,
+                                    int64_t exponent);
+int64_t alderhost_i64_from_u64_bits(uint64_t bits);
+uint64_t alderhost_u64_from_i64_bits(int64_t value);
 bool alderhost_stderr_byte(uint8_t byte);
 
 #endif /* ALDER_HOST_H */

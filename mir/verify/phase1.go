@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpCIsNull {
+	if in.Op > mir.OpIntMulWrapping {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -489,6 +489,9 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		require(in.Scope, "scope operand")
 	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked,
 		mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked,
+		mir.OpIntAddTry, mir.OpIntSubTry, mir.OpIntMulTry,
+		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
+		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
 		require(in.A, "left operand")
@@ -622,6 +625,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Scope)
 	case mir.OpIntAddChecked, mir.OpIntSubChecked, mir.OpIntMulChecked,
 		mir.OpIntDivChecked, mir.OpIntShlChecked, mir.OpIntShrChecked,
+		mir.OpIntAddTry, mir.OpIntSubTry, mir.OpIntMulTry,
+		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
+		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
 		add(in.A)
