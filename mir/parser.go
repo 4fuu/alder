@@ -1445,7 +1445,8 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = parseBinary(op)
 
-	case "int.trunc", "int.zext", "int.sext", "float.convert", "int.from_float", "float.from_int":
+	case "int.trunc", "int.zext", "int.sext", "float.convert", "int.from_float", "float.from_int",
+		"int.convert.checked", "int.convert.wrap":
 		op, ok := convOpByName[t.text]
 		if !ok {
 			return in, p.errf(t, "internal error: unknown conversion %q", t.text)
@@ -2184,6 +2185,7 @@ var cmpOpByName = map[string]OpKind{
 // convOpByName maps conversion names to operations.
 var convOpByName = map[string]OpKind{
 	"int.trunc": OpIntTrunc, "int.zext": OpIntZext, "int.sext": OpIntSext,
+	"int.convert.checked": OpIntConvertChecked, "int.convert.wrap": OpIntConvertWrap,
 	"float.convert": OpFloatConvert, "int.from_float": OpIntFromFloat,
 	"float.from_int": OpFloatFromInt,
 }

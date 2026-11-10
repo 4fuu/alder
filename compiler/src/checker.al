@@ -4410,12 +4410,15 @@ fn expr_draft(store: CheckStore, checked_type: U64, expression: U64) -> Result(E
 }
 
 fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: __s0_String) -> U64 {
+    // Exact primitive spellings only: every caller passes a fixed literal,
+    // and a loose prefix match would silently hand the wrong width to
+    // conversions and literal defaults.
     var target: U64 = 0
-    if len(name) == 4 && name[0] == 66 { target = 1 }
-    if len(name) == 3 && name[0] == 73 { target = 5 }
+    if len(name) == 4 && name[0] == 66 && name[1] == 111 && name[2] == 111 && name[3] == 108 { target = 1 }
+    if len(name) == 3 && name[0] == 73 && name[1] == 54 && name[2] == 52 { target = 5 }
     if len(name) == 2 && name[0] == 85 && name[1] == 56 { target = 6 }
-    if len(name) == 3 && name[0] == 85 { target = 9 }
-    if len(name) == 3 && name[0] == 70 && name[1] == 54 { target = 11 }
+    if len(name) == 3 && name[0] == 85 && name[1] == 54 && name[2] == 52 { target = 9 }
+    if len(name) == 3 && name[0] == 70 && name[1] == 54 && name[2] == 52 { target = 11 }
     var at: U64 = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let checked = __s0_buffer_get(CheckedTypeRec, store.types, at)
@@ -7219,6 +7222,101 @@ fn check_int_method(d: Domain, state: State, parse: ParseStore, base: CheckStore
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
 }
 
+// Integer conversion surface (M8): the to_T, to_T_checked, and
+// to_T_wrapping methods on the eight integer primitive receivers. The
+// target is carried by the method name. to_T exists only for the widening
+// pairs, where every receiver value fits the target, so it is total;
+// to_T_checked yields Option(target), none outside the target range, and
+// to_T_wrapping keeps the value's low bits at the target width. Identity
+// conversions and the wrong form for a pair are rejections.
+fn check_int_convert_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    if receiver.kind != 1 || receiver.target < 2 || receiver.target > 9 { return expr_token_fail(d, state, base, 61, callee) }
+    var builtin: U64 = 0
+    var target: U64 = 0
+    if node_word(state, callee, "to_i8") { builtin = 62
+        target = 2 }
+    if node_word(state, callee, "to_i16") { builtin = 62
+        target = 3 }
+    if node_word(state, callee, "to_i32") { builtin = 62
+        target = 4 }
+    if node_word(state, callee, "to_i64") { builtin = 62
+        target = 5 }
+    if node_word(state, callee, "to_u8") { builtin = 62
+        target = 6 }
+    if node_word(state, callee, "to_u16") { builtin = 62
+        target = 7 }
+    if node_word(state, callee, "to_u32") { builtin = 62
+        target = 8 }
+    if node_word(state, callee, "to_u64") { builtin = 62
+        target = 9 }
+    if node_word(state, callee, "to_i8_checked") { builtin = 63
+        target = 2 }
+    if node_word(state, callee, "to_i16_checked") { builtin = 63
+        target = 3 }
+    if node_word(state, callee, "to_i32_checked") { builtin = 63
+        target = 4 }
+    if node_word(state, callee, "to_i64_checked") { builtin = 63
+        target = 5 }
+    if node_word(state, callee, "to_u8_checked") { builtin = 63
+        target = 6 }
+    if node_word(state, callee, "to_u16_checked") { builtin = 63
+        target = 7 }
+    if node_word(state, callee, "to_u32_checked") { builtin = 63
+        target = 8 }
+    if node_word(state, callee, "to_u64_checked") { builtin = 63
+        target = 9 }
+    if node_word(state, callee, "to_i8_wrapping") { builtin = 64
+        target = 2 }
+    if node_word(state, callee, "to_i16_wrapping") { builtin = 64
+        target = 3 }
+    if node_word(state, callee, "to_i32_wrapping") { builtin = 64
+        target = 4 }
+    if node_word(state, callee, "to_i64_wrapping") { builtin = 64
+        target = 5 }
+    if node_word(state, callee, "to_u8_wrapping") { builtin = 64
+        target = 6 }
+    if node_word(state, callee, "to_u16_wrapping") { builtin = 64
+        target = 7 }
+    if node_word(state, callee, "to_u32_wrapping") { builtin = 64
+        target = 8 }
+    if node_word(state, callee, "to_u64_wrapping") { builtin = 64
+        target = 9 }
+    // Method-call links include both the selected callee and its receiver.
+    if builtin == 0 || call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 41, call) }
+    if target == receiver.target { return expr_token_fail(d, state, base, 252, callee) }
+    var receiver_width: U64 = 0
+    if receiver.target == 2 || receiver.target == 6 { receiver_width = 8 }
+    if receiver.target == 3 || receiver.target == 7 { receiver_width = 16 }
+    if receiver.target == 4 || receiver.target == 8 { receiver_width = 32 }
+    if receiver.target == 5 || receiver.target == 9 { receiver_width = 64 }
+    var target_width: U64 = 0
+    if target == 2 || target == 6 { target_width = 8 }
+    if target == 3 || target == 7 { target_width = 16 }
+    if target == 4 || target == 8 { target_width = 32 }
+    if target == 5 || target == 9 { target_width = 64 }
+    // Widening pairs only: any unsigned source into a strictly wider
+    // target, or a signed source into a strictly wider signed target.
+    let widening = target_width > receiver_width && (receiver.target >= 6 || target <= 5)
+    if builtin == 62 && !widening { return expr_token_fail(d, state, base, 251, callee) }
+    if builtin != 62 && widening { return expr_token_fail(d, state, base, 253, callee) }
+    var current = store
+    var target_id = canonical_type_id(current, 1, target, 0, 0)
+    if target_id == 0 {
+        let made = try append_checked_type(d, current, owner, 1, call_id, target, 0, 0)
+        current = made
+        target_id = canonical_type_id(current, 1, target, 0, 0)
+    }
+    var result = target_id
+    if builtin == 63 {
+        let applied = try canonical_application(d, current, owner, 9, target_id, 0, 1)
+        current = applied.store
+        result = applied.checked_type
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, 0, 0, 0, site_kind, site_syntax)
+}
+
 // Byte-sequence surface (M8): builtin methods on String and Bytes receivers.
 // len and byte read the byte backing store, with byte bounds-checked;
 // concat and slice build fresh domain-owned storage, with slice
@@ -7932,6 +8030,12 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "add_checked") || node_word(state, callee, "sub_checked") || node_word(state, callee, "mul_checked") || node_word(state, callee, "add_saturating") || node_word(state, callee, "sub_saturating") || node_word(state, callee, "mul_saturating") || node_word(state, callee, "add_wrapping") || node_word(state, callee, "sub_wrapping") || node_word(state, callee, "mul_wrapping")) {
             return check_int_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+        }
+        // Integer conversion surface (M8): routed before impl lookup, so a
+        // user impl cannot shadow the builtin names; unknown to_* names on
+        // integer receivers fall through to the unknown-method reject.
+        if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "to_i8") || node_word(state, callee, "to_i16") || node_word(state, callee, "to_i32") || node_word(state, callee, "to_i64") || node_word(state, callee, "to_u8") || node_word(state, callee, "to_u16") || node_word(state, callee, "to_u32") || node_word(state, callee, "to_u64") || node_word(state, callee, "to_i8_checked") || node_word(state, callee, "to_i16_checked") || node_word(state, callee, "to_i32_checked") || node_word(state, callee, "to_i64_checked") || node_word(state, callee, "to_u8_checked") || node_word(state, callee, "to_u16_checked") || node_word(state, callee, "to_u32_checked") || node_word(state, callee, "to_u64_checked") || node_word(state, callee, "to_i8_wrapping") || node_word(state, callee, "to_i16_wrapping") || node_word(state, callee, "to_i32_wrapping") || node_word(state, callee, "to_i64_wrapping") || node_word(state, callee, "to_u8_wrapping") || node_word(state, callee, "to_u16_wrapping") || node_word(state, callee, "to_u32_wrapping") || node_word(state, callee, "to_u64_wrapping")) {
+            return check_int_convert_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)

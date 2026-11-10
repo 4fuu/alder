@@ -177,6 +177,8 @@ fn mir_op_str_concat() -> U64 { return 82 }
 fn mir_op_str_slice_checked() -> U64 { return 83 }
 fn mir_op_str_to_bytes() -> U64 { return 84 }
 fn mir_op_str_from_bytes() -> U64 { return 85 }
+fn mir_op_int_convert_checked() -> U64 { return 86 }
+fn mir_op_int_convert_wrap() -> U64 { return 87 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

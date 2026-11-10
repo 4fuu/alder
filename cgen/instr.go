@@ -503,6 +503,12 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpStrToBytes:
 		b.WriteString("  " + g.val(in.Result) + " = (AlderBytes){ " + g.valueExpr(in.A) + ".data, " + g.valueExpr(in.A) + ".len };\n")
 
+	case mir.OpIntConvertChecked:
+		g.emitIntConvertChecked(b, in)
+
+	case mir.OpIntConvertWrap:
+		g.emitTrunc(b, in)
+
 	case mir.OpFFICallUnsafe:
 		imp := &g.m.Imports[in.FFIImport]
 		b.WriteString("  ")
@@ -1018,6 +1024,43 @@ func (g *gen) emitTrunc(b *strings.Builder, in *mir.Instr) {
 func intWidthOf(t mir.TypeId) int {
 	w, _ := intInfo(t)
 	return w
+}
+
+// emitIntConvertChecked lowers int.convert.checked. The value is widened to
+// 64 bits with its own signedness (always defined), range-checked against
+// the target bounds, and the option payload is filled only in range: the
+// payload cast then preserves the value. A signed target compares against
+// its signed limits; a signed source into an unsigned target also rejects
+// negatives, with the negative-to-unsigned comparison done after an explicit
+// uint64_t cast, whose conversion is defined modulo. For u64 into i64 the
+// limit comparison itself stays in uint64_t so no limit is narrowed.
+func (g *gen) emitIntConvertChecked(b *strings.Builder, in *mir.Instr) {
+	src, _ := g.f.ValueType(in.A)
+	_, srcSigned := intInfo(src)
+	tWidth, tSigned := intInfo(in.TypeOp)
+	tmp := g.tmp(in, "c")
+	b.WriteString("  " + signed64Name(srcSigned) + " " + tmp + " = (" + signed64Name(srcSigned) + ")" + g.valueExpr(in.A) + ";\n")
+	var cond string
+	if tSigned {
+		minName, maxName := intLimits(tWidth)
+		if srcSigned {
+			cond = tmp + " < (int64_t)" + minName + " || " + tmp + " > (int64_t)" + maxName
+		} else {
+			cond = tmp + " > (uint64_t)" + maxName
+		}
+	} else {
+		if srcSigned {
+			cond = tmp + " < 0 || (uint64_t)" + tmp + " > (uint64_t)" + uintLimit(tWidth)
+		} else {
+			cond = tmp + " > (uint64_t)" + uintLimit(tWidth)
+		}
+	}
+	b.WriteString("  if (" + cond + ") {\n")
+	b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)0;\n")
+	b.WriteString("  } else {\n")
+	b.WriteString("    " + g.val(in.Result) + ".alder_u.alder_p1 = (" + g.cType(in.TypeOp) + ")" + tmp + ";\n")
+	b.WriteString("    " + g.val(in.Result) + ".alder_tag = (uint32_t)1;\n")
+	b.WriteString("  }\n")
 }
 
 // emitFloatConvert avoids C11's undefined out-of-range real conversion. MIR

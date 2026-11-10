@@ -54,12 +54,34 @@ pub fn i64_abs_wrapping(value: I64) -> I64
 - These are plain leading-type-parameter-free functions; the integer types are
   concrete prelude names.
 
+## Integer conversion methods (builtin surface)
+
+Version 1 of this module ships together with the builtin integer conversion
+methods on every integer type receiver. They are prelude method names, not
+library functions, and are normative for `core.num` consumers:
+
+- `value.to_T()` exists exactly for widening pairs — every receiver value
+  fits `T` — and is total. Widening pairs are pairs where `T` is wider and
+  either the receiver is unsigned or both types are signed.
+- `value.to_T_checked()` and `value.to_T_wrapping()` exist for every other
+  pair. The checked form yields `Some` when the receiver value fits `T` and
+  `None` otherwise; the wrapping form truncates to the target width on the
+  two's-complement pattern.
+- A call whose pair is neither of these shapes is rejected at compile time:
+  the lossy bare form names the `_checked` form, identity conversions are
+  rejected as having no effect, and the checked or wrapping form on a
+  widening pair is rejected as unnecessary (checker diagnostics 251, 252,
+  and 253).
+
+The executable example pins representative boundaries: `255.to_i64()`, the
+`128.to_i8_checked()`/`to_i8_wrapping()` split at the `I8` edge, the `-1`
+wrapping round trips from signed to unsigned, `2^63` at the
+`U64`/`I64` edge, and the `I64`/`I32` boundary in both forms.
+
 ## Later snapshots
 
 - Checked division and remainder pairs, saturating division, and the
   min/max/clamp family arrive with the `Order`-constrained generic snapshot.
-- Explicit widening and narrowing conversions need a source-level conversion
-  primitive, which the implemented language does not expose yet.
 - The parse and format foundations need the `String` and `Bytes` byte
   surface; they land with the text modules.
 

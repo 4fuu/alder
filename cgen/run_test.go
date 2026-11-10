@@ -26,6 +26,7 @@ var runFixtures = []struct {
 	{"cfg", "cfg_driver.c"},
 	{"regressions", "regressions_driver.c"},
 	{"str", "str_driver.c"},
+	{"convert", "convert_driver.c"},
 }
 
 // buildRuntimeObject compiles the runtime once under the strict warning set

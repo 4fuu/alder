@@ -314,6 +314,13 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 				c.errs = append(c.errs, Error{Loc: c.loc, Msg: "int.sext result type must be wider"})
 			}
 		}
+	case mir.OpIntConvertChecked, mir.OpIntConvertWrap:
+		// Conversion methods accept any integer pair at the MIR level; the
+		// checker restricts which pairs each method name may produce.
+		c.expect(in.A, "integer operand", mir.IsIntType, "an integer")
+		if m.ValidType(in.TypeOp) && !mir.IsIntType(in.TypeOp) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "conversion method result type must be an integer"})
+		}
 	case mir.OpFloatConvert:
 		c.expect(in.A, "float operand", mir.IsFloatType, "a float")
 		if m.ValidType(in.TypeOp) && !mir.IsFloatType(in.TypeOp) {

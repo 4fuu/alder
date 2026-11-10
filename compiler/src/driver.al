@@ -377,6 +377,18 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("builtin method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" applies only to its builtin receiver types, and this type provides no such impl method") { return false }
         return out_string("")
     }
+    if kind == 251 {
+        if !out_string("integer conversion method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" is not total because some receiver values do not fit the target; use the checked form ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !out_string("_checked") || !driver_out_message_quote(json) { return false }
+        return out_string("")
+    }
+    if kind == 252 {
+        if !out_string("integer conversion method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" converts a type to itself and has no effect") { return false }
+        return out_string("")
+    }
+    if kind == 253 {
+        if !out_string("integer conversion method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" is not needed because every receiver value fits the target, so the total form exists and neither the checked nor the wrapping form can fail") { return false }
+        return out_string("")
+    }
     if kind == 125 { return out_string("structural Eq and Hash implementations are language-provided and cannot be declared") }
     if kind == 126 {
         if !out_string("structural ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" methods become callable with the ordered collections") { return false }

@@ -503,6 +503,19 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return NoType, false
 		}
 		return in.TypeOp, true
+	case OpIntConvertChecked, OpIntConvertWrap:
+		// Conversion methods: the value and the target type must both be
+		// integers. The pair legality (total, lossy, or identity) is a
+		// source-language contract the checker enforces; MIR accepts any
+		// integer pair and defines the semantics for each.
+		ta, ok := f.ValueType(in.A)
+		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) {
+			return NoType, false
+		}
+		if in.Op == OpIntConvertChecked {
+			return m.Option(in.TypeOp), true
+		}
+		return in.TypeOp, true
 	case OpFloatConvert:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsFloatType(ta) || !m.ValidType(in.TypeOp) || !IsFloatType(in.TypeOp) {

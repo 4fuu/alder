@@ -403,7 +403,8 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		OpFloatEq, OpFloatNe, OpFloatLt, OpFloatLe, OpFloatGt, OpFloatGe:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 
-	case OpIntTrunc, OpIntZext, OpIntSext, OpFloatConvert, OpIntFromFloat, OpFloatFromInt:
+	case OpIntTrunc, OpIntZext, OpIntSext, OpFloatConvert, OpIntFromFloat, OpFloatFromInt,
+		OpIntConvertChecked, OpIntConvertWrap:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
 
 	case OpConstGet:

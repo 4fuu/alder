@@ -1,0 +1,55 @@
+mir 6
+
+fn @to_i64_checked(%u: u32) -> option(i64) {
+entry:
+  %r = int.convert.checked %u, i64
+  return %r
+}
+
+fn @to_i64_checked_u64(%u: u64) -> option(i64) {
+entry:
+  %r = int.convert.checked %u, i64
+  return %r
+}
+
+fn @to_i8_checked(%u: u64) -> option(i8) {
+entry:
+  %r = int.convert.checked %u, i8
+  return %r
+}
+
+fn @to_u8_checked(%s: i32) -> option(u8) {
+entry:
+  %r = int.convert.checked %s, u8
+  return %r
+}
+
+fn @to_u64_checked(%s: i32) -> option(u64) {
+entry:
+  %r = int.convert.checked %s, u64
+  return %r
+}
+
+fn @wrap_u8(%u: u64) -> u8 {
+entry:
+  %r = int.convert.wrap %u, u8
+  return %r
+}
+
+fn @wrap_i8(%u: u64) -> i8 {
+entry:
+  %r = int.convert.wrap %u, i8
+  return %r
+}
+
+fn @wrap_u32(%s: i64) -> u32 {
+entry:
+  %r = int.convert.wrap %s, u32
+  return %r
+}
+
+fn @wrap_i32(%u: u32) -> i32 {
+entry:
+  %r = int.convert.wrap %u, i32
+  return %r
+}

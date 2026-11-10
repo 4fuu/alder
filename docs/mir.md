@@ -371,6 +371,30 @@ rejects these operations on non-sequence operand types, on mismatched
 sequence operand types within one operation, on non-`u64` indices, and on
 `str.from_bytes` results not consumed as `option(string)`.
 
+## Integer Conversion Methods
+
+MIR 6 also exposes the integer conversion surface as operations 86 and 87,
+produced only by named builtin method calls on integer receivers
+(`to_T_checked` and `to_T_wrapping`):
+
+```text
+int.convert.checked a else edge -> option(T)
+int.convert.wrap a -> T
+```
+
+Both take a value operand of any integer type and an explicit target type
+operand `T`, mirroring `int.trunc`/`int.zext`/`int.sext`; the checker only
+produces them for pairs where some receiver value does not fit `T`
+(the total widening pairs lower to the existing `int.zext`, `int.sext`,
+and `int.trunc` operations instead). `int.convert.checked` yields `some`
+when the receiver value fits `T` and `none` otherwise, filling the option
+payload through the same defined-cast shapes as the total forms;
+`int.convert.wrap` always produces the low bits of the receiver on the
+two's-complement pattern and cannot fail. The verifier rejects these
+operations on non-integer operands, on a non-`option` result type for
+`int.convert.checked`, and on `int.convert.wrap` results not equal to the
+target type.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -730,8 +754,9 @@ format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
 `mir 4` adds `vec(T)` and the minimal Vec operations; `mir 5` adds
 function-type environments, `fn.value`, and `call.value`; and current `mir 6`
 adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
-`c.is_null`, the integer overflow method operations (71-79), and the
-byte-sequence method operations (80-85).
+`c.is_null`, the integer overflow method operations (71-79), the
+byte-sequence method operations (80-85), and the integer conversion method
+operations (86-87).
 Incompatible changes must use a new version and update:
 
 - this document;

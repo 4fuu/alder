@@ -361,6 +361,8 @@ return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() 
     if x.op == mir_op_float_convert() { return MirVTypeResult(valid: mir_v5_is_float(ta) && mir_v5_is_float(x.type_op), type_id: x.type_op) }
     if x.op == mir_op_int_from_float() { return MirVTypeResult(valid: mir_v5_is_float(ta) && mir_v5_is_int(x.type_op), type_id: x.type_op) }
     if x.op == mir_op_float_from_int() { return MirVTypeResult(valid: mir_v5_is_int(ta) && mir_v5_is_float(x.type_op), type_id: x.type_op) }
+    if x.op == mir_op_int_convert_checked() { return MirVTypeResult(valid: mir_v5_is_int(ta) && mir_v5_is_int(x.type_op), type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), x.type_op)) }
+    if x.op == mir_op_int_convert_wrap() { return MirVTypeResult(valid: mir_v5_is_int(ta) && mir_v5_is_int(x.type_op), type_id: x.type_op) }
     if x.op == mir_op_const_get() { let ct = mir_v5_const_type(store, indexes, x.name_start, x.name_end)
 return MirVTypeResult(valid: ct != 0, type_id: ct) }
     if x.op == mir_op_call() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, false), type_id: __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type) }
@@ -582,6 +584,8 @@ if x.op == mir_op_float_convert() { valid = mir_v5_is_float(ta) && mir_v5_is_flo
 if x.op == mir_op_int_from_float() { valid = mir_v5_is_float(ta) && mir_v5_is_int(x.type_op) }
 if x.op == mir_op_float_from_int() { valid = mir_v5_is_int(ta) && mir_v5_is_float(x.type_op) }
 if !valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_conversion(), x.function, x.block, id, 0, 0, x.type_op, ta, x.a) } }
+    if x.op == mir_op_int_convert_checked() || x.op == mir_op_int_convert_wrap() { let ta = mir_v5_value_type(store, indexes, x.function, x.a)
+if !(mir_v5_is_int(ta) && mir_v5_is_int(x.type_op)) { result = try mir_v5_bad(d, result, mir_vdiag_bad_conversion(), x.function, x.block, id, 0, 0, x.type_op, ta, x.a) } }
     if x.op == mir_op_call() { result = try mir_v5_check_args(d, store, indexes, result, x, id, x.target, false) }
     if x.op == mir_op_ffi_call_unsafe() { result = try mir_v5_check_args(d, store, indexes, result, x, id, x.target, true) }
     if x.op == mir_op_c_binding_call() {

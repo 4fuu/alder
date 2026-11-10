@@ -353,6 +353,14 @@ Implemented expressions include:
   `len` or `to_bytes`, and a call with such a name on a type that provides
   neither a builtin receiver nor an impl method is rejected with a dedicated
   diagnostic naming the builtin method;
+- named builtin conversion methods on the eight integer types: `to_T()` for
+  widening pairs is total (widening means `T` is wider and the receiver is
+  unsigned or both types are signed), while `to_T_checked() -> Option(T)` and
+  `to_T_wrapping() -> T` exist for every other pair, the checked form
+  yielding `none` for a receiver value that does not fit `T` and the wrapping
+  form truncating to the target width on the two's-complement pattern. The
+  lossy bare form, identity conversions, and the checked or wrapping form on
+  a widening pair are rejected (kinds 251, 252, and 253);
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`

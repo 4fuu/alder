@@ -127,6 +127,15 @@ const (
 	OpStrSliceChecked
 	OpStrToBytes
 	OpStrFromBytes
+
+	// Integer conversion methods (M8): produced only by named builtin
+	// method calls on integer receivers (to_T_checked and to_T_wrapping;
+	// the total to_T lowers to zext/sext). Both carry the target type in
+	// the type slot; neither has a failure edge. checked yields none when
+	// the value is outside the target range and some otherwise; wrap keeps
+	// the value's low bits at the target width in two's complement.
+	OpIntConvertChecked
+	OpIntConvertWrap
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -309,6 +318,10 @@ func (k OpKind) String() string {
 		return "str.to_bytes"
 	case OpStrFromBytes:
 		return "str.from_bytes"
+	case OpIntConvertChecked:
+		return "int.convert.checked"
+	case OpIntConvertWrap:
+		return "int.convert.wrap"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

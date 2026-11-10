@@ -155,6 +155,8 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - `slice.index.checked` lowers to the runtime bounds check, a checked byte-offset multiply, a `SIZE_MAX` representability check, and a one-element `AlderSlice`; `slice.range.checked` lowers to the same checks and `hi - lo` length. `{NULL, 0}` accepts only `[0, 0)` and performs no pointer arithmetic; `{NULL, len>0}` is rejected as malformed;
 - the byte-sequence method operations follow the slice shape: `str.byte.checked` is a direct bounds comparison; `str.slice.checked` checks `lo > hi` and `hi > len` before a `memcpy` of the byte range; `str.concat` length-checks the sum with `alder_u64_add_checked` before copying both operands;
 - `int.trunc` to an unsigned target wraps by casting; to a signed target it transfers the two's-complement bit pattern with `memcpy`;
+- `int.convert.checked` widens the receiver to 64 bits with its own signedness (always a defined conversion), range-checks against the target bounds, and fills the option payload with a defined cast only in range. A signed source into an unsigned target rejects negatives through an explicit `uint64_t` comparison, and for `u64` into `i64` the limit comparison itself stays in `uint64_t` so no limit is narrowed;
+- `int.convert.wrap` casts to an unsigned target type; to a signed target it transfers the width-bit two's-complement pattern with `memcpy`;
 - `float.convert` from `f64` to `f32` checks NaN, infinity, and `FLT_MAX` bounds before casting; rejected values terminate rather than reaching C11 undefined behavior. `int.from_float` uses the defined runtime conversions; out-of-range or NaN values also terminate because both MIR operations are unchecked.
 
 ### Domains, cleanup, and tables

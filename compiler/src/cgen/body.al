@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_str_from_bytes() { return false }
+        if item.op > mir_op_int_convert_wrap() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -303,8 +303,10 @@ fn cgen_put_int_limit(d: Domain, writer: CgenWriter, signed: Bool, width: U64, m
         return cgen_put(d, writer, "INT8_MAX") }
         if width == 16 { if minimum { return cgen_put(d, writer, "INT16_MIN") }
         return cgen_put(d, writer, "INT16_MAX") }
-        if minimum { return cgen_put(d, writer, "INT32_MIN") }
-        return cgen_put(d, writer, "INT32_MAX")
+        if width == 32 { if minimum { return cgen_put(d, writer, "INT32_MIN") }
+        return cgen_put(d, writer, "INT32_MAX") }
+        if minimum { return cgen_put(d, writer, "INT64_MIN") }
+        return cgen_put(d, writer, "INT64_MAX")
     }
     if width == 8 { return cgen_put(d, writer, "UINT8_MAX") }
     if width == 16 { return cgen_put(d, writer, "UINT16_MAX") }
@@ -873,6 +875,99 @@ fn cgen_emit_c_is_null(d: Domain, out: CgenWriter, store: MirStore, indexes: Mir
     w = try cgen_put(d, w, " = (bool)((")
     w = try cgen_put_value_read(d, w, store, indexes, item.function, item.a)
     return cgen_put(d, w, ") == (void *)0);\n")
+}
+
+// int.convert.checked widens the value to 64 bits with its own signedness
+// (always defined), range-checks against the target bounds, and fills the
+// option payload only in range, so the payload cast preserves the value. A
+// signed target compares against its signed limits; a signed source into an
+// unsigned target also rejects negatives, with the negative-to-unsigned
+// comparison done after an explicit uint64_t cast, whose conversion is
+// defined modulo. The limit comparisons stay in the widened type so no
+// limit is narrowed.
+fn cgen_emit_int_convert_checked(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    let source_signed = cgen_int_signed(cgen_value_type(store, indexes, item.function, item.a))
+    let target_signed = cgen_int_signed(item.type_op)
+    let target_width = cgen_int_width(item.type_op)
+    out = try cgen_put(d, out, "  ")
+    if source_signed { out = try cgen_put(d, out, "int64_t ") } else { out = try cgen_put(d, out, "uint64_t ") }
+    out = try cgen_put_tmp(d, out, item.result, "c")
+    out = try cgen_put(d, out, " = (")
+    if source_signed { out = try cgen_put(d, out, "int64_t)") } else { out = try cgen_put(d, out, "uint64_t)") }
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ";\n  if (")
+    if target_signed {
+        if source_signed {
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " < (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, target_width, true)
+            out = try cgen_put(d, out, " || ")
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " > (int64_t)")
+            out = try cgen_put_int_limit(d, out, true, target_width, false)
+        } else {
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " > (uint64_t)")
+            out = try cgen_put_int_limit(d, out, true, target_width, false)
+        }
+    } else {
+        if source_signed {
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " < 0 || (uint64_t)")
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " > (uint64_t)")
+            out = try cgen_put_int_limit(d, out, false, target_width, false)
+        } else {
+            out = try cgen_put_tmp(d, out, item.result, "c")
+            out = try cgen_put(d, out, " > (uint64_t)")
+            out = try cgen_put_int_limit(d, out, false, target_width, false)
+        }
+    }
+    out = try cgen_put(d, out, ") {\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = (uint32_t)0;\n  } else {\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_u.alder_p1 = (")
+    out = try cgen_put_type(d, out, store, item.type_op)
+    out = try cgen_put(d, out, ")")
+    out = try cgen_put_tmp(d, out, item.result, "c")
+    out = try cgen_put(d, out, ";\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n  }\n")
+    return Ok(out)
+}
+
+// int.convert.wrap keeps the value's low bits at the target width in two's
+// complement. An unsigned target is the plain cast, which is defined
+// modulo; a signed target goes through the unsigned width and a memcpy, so
+// the out-of-range real conversion C11 leaves undefined never happens.
+fn cgen_emit_int_convert_wrap(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    if !cgen_int_signed(item.type_op) {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        out = try cgen_put(d, out, ")")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ";\n")
+    }
+    out = try cgen_put(d, out, "  uint")
+    out = try cgen_put_u64(d, out, cgen_int_width(item.type_op))
+    out = try cgen_put(d, out, "_t ")
+    out = try cgen_put_tmp(d, out, item.result, "")
+    out = try cgen_put(d, out, " = (uint")
+    out = try cgen_put_u64(d, out, cgen_int_width(item.type_op))
+    out = try cgen_put(d, out, "_t)")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ";\n  memcpy(&")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ", &")
+    out = try cgen_put_tmp(d, out, item.result, "")
+    out = try cgen_put(d, out, ", sizeof(")
+    out = try cgen_put_tmp(d, out, item.result, "")
+    return cgen_put(d, out, "));\n")
 }
 
 fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
@@ -1665,6 +1760,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_str_from_bytes() { return cgen_emit_str_from_bytes(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_binding_call() { return cgen_emit_binding_call(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_is_null() { return cgen_emit_c_is_null(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_int_convert_checked() { return cgen_emit_int_convert_checked(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_int_convert_wrap() { return cgen_emit_int_convert_wrap(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
 
