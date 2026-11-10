@@ -162,6 +162,17 @@ fn mir_print_operand_slot(store: MirStore, kind: U64, owner: U64) -> U64 {
         if owner >= 1 && owner <= ops { return types + imports + instrs * 3 + terms * 2 + owner }
         return 0
     }
+    let base = types + imports + instrs * 3 + terms * 2 + ops
+    if kind == mir_operand_binding_param() {
+        let bf = __s0_buffer_len(MirBindingFnRec, store.binding_funcs)
+        if owner >= 1 && owner <= bf { return base + owner }
+        return 0
+    }
+    if kind == mir_operand_binding_type() {
+        let bc = __s0_buffer_len(MirBindingRec, store.bindings)
+        if owner >= 1 && owner <= bc { return base + __s0_buffer_len(MirBindingFnRec, store.binding_funcs) + owner }
+        return 0
+    }
     return 0
 }
 
@@ -291,7 +302,7 @@ fn mir_print_index_build(d: Domain, store: MirStore) -> Result(MirPrintIndex, __
 }
 
 fn mir_print_operand_slot_total(store: MirStore) -> U64 {
-    return __s0_buffer_len(MirTypeRec, store.types) + __s0_buffer_len(MirImportRec, store.imports) + __s0_buffer_len(MirInstrRec, store.instructions) * 3 + __s0_buffer_len(MirTermRec, store.terminators) * 2 + __s0_buffer_len(MirOperandRec, store.operands)
+    return __s0_buffer_len(MirTypeRec, store.types) + __s0_buffer_len(MirImportRec, store.imports) + __s0_buffer_len(MirInstrRec, store.instructions) * 3 + __s0_buffer_len(MirTermRec, store.terminators) * 2 + __s0_buffer_len(MirOperandRec, store.operands) + __s0_buffer_len(MirBindingFnRec, store.binding_funcs) + __s0_buffer_len(MirBindingRec, store.bindings)
 }
 
 fn mir_id_valid(id: U64, length: U64) -> Bool { return id > 0 && id <= length }
@@ -740,6 +751,144 @@ fn mir_type_part_group_valid(idx: MirPrintIndex, store: MirStore, owner: U64, ki
     return true
 }
 
+// Structural rules for the raw C type vocabulary: c_raw carries a scalar id
+// in length, c_ptr/c_const_ptr carry one valid element, and c_named carries a
+// dotted Alder name, a non-empty C spelling, a class, and (for records) a
+// contiguous c_field group.
+fn mir_validate_c_type(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirTypeRec) -> Bool {
+    if rec.kind == mir_type_kind_c_raw() {
+        return rec.length < mir_c_scalar_count() && rec.elem == 0 && rec.ok_type == 0 && rec.err_type == 0 && rec.first_part == 0 && rec.part_count == 0 && rec.result_type == 0 && rec.name_start == 0 && rec.name_end == 0 && rec.c_name_start == 0 && rec.c_name_end == 0 && rec.c_class == mir_c_class_scalar()
+    }
+    if rec.kind == mir_type_kind_c_ptr() || rec.kind == mir_type_kind_c_const_ptr() {
+        return mir_type_valid(store, rec.elem) && rec.ok_type == 0 && rec.err_type == 0 && rec.first_part == 0 && rec.part_count == 0 && rec.result_type == 0 && rec.length == 0 && rec.name_start == 0 && rec.name_end == 0 && rec.c_name_start == 0 && rec.c_name_end == 0 && rec.c_class == mir_c_class_scalar()
+    }
+    if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_name_range_valid(store, rec.c_name_start, rec.c_name_end) || rec.c_name_start == rec.c_name_end || rec.c_class > mir_c_class_record() || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
+    if rec.c_class == mir_c_class_scalar() && mir_type_part_count_at(idx, store, id, mir_type_part_c_field()) != 0 { return false }
+    if rec.c_class == mir_c_class_record() && !mir_type_part_group_valid(idx, store, id, mir_type_part_c_field()) { return false }
+    return true
+}
+
+// Binding blocks: names and headers non-empty, member names unique per block,
+// member owners valid, and every c_named type claimed by exactly one block.
+fn mir_validate_bindings(idx: MirPrintIndex, store: MirStore) -> Bool {
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(MirBindingRec, store.bindings) {
+        let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+        let block_id = block_at + 1
+        if !mir_name_valid(store, block.name_start, block.name_end, false) || block.header_start >= block.header_end || block.header_end > __s0_buffer_len(U8, store.names) { return false }
+        var fn_at: U64 = 0
+        while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+            let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+            if fn_rec.block == block_id {
+                if !mir_name_valid(store, fn_rec.name_start, fn_rec.name_end, false) || !mir_name_range_valid(store, fn_rec.c_name_start, fn_rec.c_name_end) || fn_rec.c_name_start == fn_rec.c_name_end || !mir_type_valid(store, fn_rec.result_type) { return false }
+                let params = mir_print_operand_count(idx, store, mir_operand_binding_param(), fn_at + 1, 0)
+                if !mir_operand_group_valid(idx, store, mir_operand_binding_param(), fn_at + 1, 0) { return false }
+                var ordinal: U64 = 0
+                while ordinal < params {
+                    if !mir_binding_param_ordinal_ok(idx, store, fn_at + 1, ordinal) { return false }
+                    ordinal = ordinal + 1
+                }
+            }
+            fn_at = fn_at + 1
+        }
+        var const_at: U64 = 0
+        while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+            let const_rec = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+            if const_rec.block == block_id {
+                if !mir_name_valid(store, const_rec.name_start, const_rec.name_end, false) || !mir_name_range_valid(store, const_rec.c_name_start, const_rec.c_name_end) || const_rec.c_name_start == const_rec.c_name_end || !mir_type_valid(store, const_rec.const_type) { return false }
+            }
+            const_at = const_at + 1
+        }
+        block_at = block_at + 1
+    }
+    return mir_validate_binding_uniqueness(idx, store)
+}
+
+fn mir_binding_param_ordinal_ok(idx: MirPrintIndex, store: MirStore, fn_id: U64, ordinal: U64) -> Bool {
+    let slot = mir_print_operand_slot(store, mir_operand_binding_param(), fn_id)
+    if slot != 0 {
+        let group = __s0_buffer_get(MirPrintGroup, idx.operand, slot - 1)
+        var k: U64 = 0
+        while k < group.count {
+            let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_order, group.first - 1 + k) - 1)
+            if operand.kind == mir_operand_binding_param() && operand.owner == fn_id && operand.ordinal == ordinal { return mir_type_valid(store, operand.operand_type) }
+            k = k + 1
+        }
+        return false
+    }
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, idx.operand_extra) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_extra, at) - 1)
+        if operand.kind == mir_operand_binding_param() && operand.owner == fn_id && operand.ordinal == ordinal { return mir_type_valid(store, operand.operand_type) }
+        at = at + 1
+    }
+    return false
+}
+
+fn mir_validate_binding_uniqueness(idx: MirPrintIndex, store: MirStore) -> Bool {
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(MirBindingRec, store.bindings) {
+        let block_id = block_at + 1
+        var name_at: U64 = 0
+        while name_at < block_at {
+            let other = __s0_buffer_get(MirBindingRec, store.bindings, name_at)
+            let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+            if other.name_start == block.name_start && other.name_end == block.name_end { return false }
+            name_at = name_at + 1
+        }
+        var fn_at: U64 = 0
+        while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+            let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+            if fn_rec.block == block_id {
+                var other_at: U64 = fn_at + 1
+                while other_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+                    let other = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, other_at)
+                    if other.block == block_id && other.name_start == fn_rec.name_start && other.name_end == fn_rec.name_end { return false }
+                    other_at = other_at + 1
+                }
+                var const_at: U64 = 0
+                while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+                    let other = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+                    if other.block == block_id && other.name_start == fn_rec.name_start && other.name_end == fn_rec.name_end { return false }
+                    const_at = const_at + 1
+                }
+            }
+            fn_at = fn_at + 1
+        }
+        var const_at: U64 = 0
+        while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+            let const_rec = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+            if const_rec.block == block_id {
+                var other_at: U64 = const_at + 1
+                while other_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+                    let other = __s0_buffer_get(MirBindingConstRec, store.binding_consts, other_at)
+                    if other.block == block_id && other.name_start == const_rec.name_start && other.name_end == const_rec.name_end { return false }
+                    other_at = other_at + 1
+                }
+            }
+            const_at = const_at + 1
+        }
+        block_at = block_at + 1
+    }
+    // Each c_named type is claimed by exactly one binding_type operand.
+    var id: U64 = mir_primitive_type_count() + 1
+    while id <= __s0_buffer_len(MirTypeRec, store.types) {
+        let rec = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+        if rec.kind == mir_type_kind_c_named() {
+            var claims: U64 = 0
+            var at: U64 = 0
+            while at < __s0_buffer_len(MirOperandRec, store.operands) {
+                let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+                if operand.kind == mir_operand_binding_type() && operand.operand_type == id { claims = claims + 1 }
+                at = at + 1
+            }
+            if claims != 1 { return false }
+        }
+        id = id + 1
+    }
+    return true
+}
+
 fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
     let length = __s0_buffer_len(MirTypeRec, store.types)
     if length < mir_primitive_type_count() { return false }
@@ -750,14 +899,14 @@ fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
         if at < mir_primitive_type_count() {
             if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
         } else {
-            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_vec() { return false }
+            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_c_named() { return false }
             if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() {
                 if !mir_name_valid(store, rec.name_start, rec.name_end, true) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
                 var part_kind = mir_type_part_variant()
                 if rec.kind == mir_type_kind_aggregate() { part_kind = mir_type_part_field() }
                 if !mir_type_part_group_valid(idx, store, id, part_kind) { return false }
             } else {
-                if rec.name_start != 0 || rec.name_end != 0 { return false }
+                if rec.kind != mir_type_kind_c_raw() && rec.kind != mir_type_kind_c_ptr() && rec.kind != mir_type_kind_c_const_ptr() && rec.kind != mir_type_kind_c_named() && (rec.name_start != 0 || rec.name_end != 0) { return false }
                 if rec.kind == mir_type_kind_result() {
                     if !mir_type_valid(store, rec.ok_type) || !mir_type_valid(store, rec.err_type) || rec.elem != 0 { return false }
                 }
@@ -786,16 +935,17 @@ fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
                 if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() || rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() {
                     if rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
-                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() && rec.kind != mir_type_kind_string() && rec.kind != mir_type_kind_bytes() {
+                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() && rec.kind != mir_type_kind_string() && rec.kind != mir_type_kind_bytes() && rec.kind != mir_type_kind_c_raw() && rec.kind != mir_type_kind_c_ptr() && rec.kind != mir_type_kind_c_const_ptr() && rec.kind != mir_type_kind_c_named() {
                     if !mir_type_valid(store, rec.elem) || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
-                if rec.kind != mir_type_kind_array() && rec.length != 0 { return false }
+                if rec.kind != mir_type_kind_array() && rec.kind != mir_type_kind_c_raw() && rec.length != 0 { return false }
             }
         }
         at = at + 1
     }
     at = 0
-    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+    let part_total = __s0_buffer_len(MirTypePartRec, store.type_parts)
+    while at < part_total {
         let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
         if !mir_type_valid(store, part.owner) || !mir_type_valid(store, part.part_type) { return false }
         let owner = __s0_buffer_get(MirTypeRec, store.types, part.owner - 1)
@@ -811,7 +961,11 @@ fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
         if part.kind == mir_type_part_function_env() {
             if owner.kind != mir_type_kind_function() || part.name_start != 0 || part.name_end != 0 { return false }
         }
-        if part.kind < mir_type_part_field() || part.kind > mir_type_part_function_env() { return false }
+        if part.kind == mir_type_part_c_field() {
+            if !mir_name_valid(store, part.name_start, part.name_end, true) || !mir_name_range_valid(store, part.c_name_start, part.c_name_end) || part.c_name_start == part.c_name_end || !mir_id_valid(part.ordinal + 1, part_total) { return false }
+            if owner.kind != mir_type_kind_c_named() || owner.c_class != mir_c_class_record() { return false }
+        }
+        if part.kind < mir_type_part_field() || part.kind > mir_type_part_c_field() { return false }
         at = at + 1
     }
     return true
@@ -1038,15 +1192,17 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op) { return false }
     }
     if rec.op == mir_op_const_get() && !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
-    if (rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() || rec.op == mir_op_call_value()) && !mir_operand_group_valid(idx, store, mir_operand_instruction(), id, 0) { return false }
+    if (rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() || rec.op == mir_op_call_value() || rec.op == mir_op_c_binding_call()) && !mir_operand_group_valid(idx, store, mir_operand_instruction(), id, 0) { return false }
+    if rec.op == mir_op_c_is_null() && !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     return true
 }
 
 fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_table_insert_try() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
+    if rec.op > mir_op_c_is_null() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
+    if rec.op == mir_op_c_binding_call() && mir_binding_fn_valid(store, rec.target) && __s0_buffer_get(MirBindingFnRec, store.binding_funcs, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_fn_value() && mir_value_valid(idx, store, rec.function, rec.result) {
         let ft = __s0_buffer_get(MirValueRec, store.values, rec.result - 1).value_type
         if ft >= 1 && ft <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, ft - 1).kind == mir_type_kind_function() && __s0_buffer_get(MirTypeRec, store.types, ft - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -1077,6 +1233,8 @@ fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, r
     if rec.op == mir_op_ffi_call_unsafe() {
         if !mir_import_valid(store, rec.target) { return false }
     }
+    if rec.op == mir_op_c_binding_call() && !mir_binding_fn_valid(store, rec.target) { return false }
+    if rec.op == mir_op_c_is_null() && rec.target != 0 { return false }
     if rec.op == mir_op_const_get() || rec.op == mir_op_enum_payload_checked() || rec.op == mir_op_enum_construct() {
         if !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
     }
@@ -1250,7 +1408,15 @@ fn mir_validate_operands(idx: MirPrintIndex, store: MirStore) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirOperandRec, store.operands) {
         let rec = __s0_buffer_get(MirOperandRec, store.operands, at)
-        if rec.kind < mir_operand_type_part() || rec.kind > mir_operand_aggregate_field() { return false }
+        if rec.kind < mir_operand_type_part() || rec.kind > mir_operand_binding_type() { return false }
+        if rec.kind == mir_operand_binding_param() {
+            if !mir_binding_fn_valid(store, rec.owner) || !mir_type_valid(store, rec.operand_type) { return false }
+        }
+        if rec.kind == mir_operand_binding_type() {
+            if !mir_id_valid(rec.owner, __s0_buffer_len(MirBindingRec, store.bindings)) || !mir_type_valid(store, rec.operand_type) { return false }
+            let ty = __s0_buffer_get(MirTypeRec, store.types, rec.operand_type - 1)
+            if ty.kind != mir_type_kind_c_named() { return false }
+        }
         if rec.kind == mir_operand_type_part() {
             if !mir_type_valid(store, rec.owner) || !mir_type_valid(store, rec.operand_type) { return false }
         }
@@ -1320,14 +1486,14 @@ fn mir_validate_operands(idx: MirPrintIndex, store: MirStore) -> Bool {
 }
 
 fn mir_store_valid(idx: MirPrintIndex, store: MirStore) -> Bool {
-    if mir_format_version() != 5 || !mir_validate_types(idx, store) || !mir_validate_declarations(idx, store) || !mir_validate_functions(idx, store) || !mir_validate_places(idx, store) { return false }
+    if mir_format_version() != 6 || !mir_validate_types(idx, store) || !mir_validate_declarations(idx, store) || !mir_validate_functions(idx, store) || !mir_validate_places(idx, store) { return false }
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let rec = __s0_buffer_get(MirInstrRec, store.instructions, at)
         if !mir_validate_instruction_refs(idx, store, at + 1, rec) { return false }
         at = at + 1
     }
-    return mir_validate_terminators(idx, store) && mir_validate_operands(idx, store)
+    return mir_validate_terminators(idx, store) && mir_validate_operands(idx, store) && mir_validate_bindings(idx, store)
 }
 
 fn mir_out_name(store: MirStore, start: U64, end: U64) -> Bool { return out_bytes(store.names, start, end) }
@@ -1491,6 +1657,10 @@ fn mir_out_type(idx: MirPrintIndex, store: MirStore, id: U64, depth: U64) -> Boo
     if rec.kind == mir_type_kind_string() { return out_string("string") }
     if rec.kind == mir_type_kind_bytes() { return out_string("bytes") }
     if rec.kind == mir_type_kind_vec() { return out_string("vec(") && mir_out_type(idx, store, rec.elem, depth - 1) && out(41) }
+    if rec.kind == mir_type_kind_c_raw() { return mir_out_c_scalar(rec.length) }
+    if rec.kind == mir_type_kind_c_ptr() { return out_string("c_ptr(") && mir_out_type(idx, store, rec.elem, depth - 1) && out(41) }
+    if rec.kind == mir_type_kind_c_const_ptr() { return out_string("c_const_ptr(") && mir_out_type(idx, store, rec.elem, depth - 1) && out(41) }
+    if rec.kind == mir_type_kind_c_named() { return out(64) && mir_out_name(store, rec.name_start, rec.name_end) }
     if rec.kind == mir_type_kind_function() {
         if !out_string("function(fn(") { return false }
         let param_count = mir_type_part_count_at(idx, store, id, mir_type_part_function_param())
@@ -1684,6 +1854,8 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 66 { return out_string("str.eq") }
     if op == 67 { return out_string("fn.value") }
     if op == 68 { return out_string("table.insert.try") }
+    if op == 69 { return out_string("c.call.unsafe") }
+    if op == 70 { return out_string("c.is_null") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -1697,6 +1869,46 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 62 { return out_string("vec.as_slice") }
     if op == 63 { return out_string("vec.as_mut_slice") }
     return out_string("array.as_slice")
+}
+
+fn mir_out_c_scalar(id: U64) -> Bool {
+    if id == 0 { return out_string("c_char") }
+    if id == 1 { return out_string("c_schar") }
+    if id == 2 { return out_string("c_uchar") }
+    if id == 3 { return out_string("c_short") }
+    if id == 4 { return out_string("c_ushort") }
+    if id == 5 { return out_string("c_int") }
+    if id == 6 { return out_string("c_uint") }
+    if id == 7 { return out_string("c_long") }
+    if id == 8 { return out_string("c_ulong") }
+    if id == 9 { return out_string("c_llong") }
+    if id == 10 { return out_string("c_ullong") }
+    if id == 11 { return out_string("c_float") }
+    if id == 12 { return out_string("c_double") }
+    if id == 13 { return out_string("c_size") }
+    return out_string("c_ptrdiff")
+}
+
+fn mir_out_binding_name(store: MirStore, id: U64) -> Bool {
+    if !mir_id_valid(id, __s0_buffer_len(MirBindingRec, store.bindings)) { return false }
+    let rec = __s0_buffer_get(MirBindingRec, store.bindings, id - 1)
+    return mir_out_name(store, rec.name_start, rec.name_end)
+}
+
+// The external flat binding-function index resolves block-major: walk the
+// blocks subtracting each block's function count until the index lands.
+fn mir_out_binding_fn_name(store: MirStore, id: U64) -> Bool {
+    if !mir_id_valid(id, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) { return false }
+    let rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, id - 1)
+    if !mir_out_binding_name(store, rec.block) { return false }
+    if !out_string(".") { return false }
+    return mir_out_name(store, rec.name_start, rec.name_end)
+}
+
+fn mir_binding_fn_valid(store: MirStore, id: U64) -> Bool {
+    if !mir_id_valid(id, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) { return false }
+    let rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, id - 1)
+    return mir_id_valid(rec.block, __s0_buffer_len(MirBindingRec, store.bindings)) && mir_type_valid(store, rec.result_type)
 }
 
 fn mir_out_fail_edge(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
@@ -1800,12 +2012,13 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     if rec.op == mir_op_const_get() {
         if !out_string(" @") || !mir_out_name(store, rec.name_start, rec.name_end) { return false }
     }
-    if rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() {
+    if rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() || rec.op == mir_op_c_binding_call() {
         if !out_string(" @") { return false }
         if rec.op == mir_op_call() {
             if !mir_out_function_name(store, rec.target) { return false }
         }
         if rec.op == mir_op_ffi_call_unsafe() && !mir_out_import_name(store, rec.target) { return false }
+        if rec.op == mir_op_c_binding_call() && !mir_out_binding_fn_name(store, rec.target) { return false }
         if !out(40) || !mir_out_operand_values(idx, store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
     }
     if rec.op == mir_op_call_value() {
@@ -1813,6 +2026,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_str_eq() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
+    }
+    if rec.op == mir_op_c_is_null() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) { return false }
     }
     if rec.op == mir_op_fn_value() {
         if !out_string(" @") || !mir_out_function_name(store, rec.target) { return false }
@@ -2021,6 +2237,171 @@ fn mir_out_declarations(idx: MirPrintIndex, store: MirStore) -> Bool {
         if !out_string(") -> ") || !mir_out_type(idx, store, rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
         at = at + 1
     }
+    return mir_out_bindings(idx, store)
+}
+
+// One C binding-function signature's parameter list, in ordinal order.
+fn mir_out_binding_params(idx: MirPrintIndex, store: MirStore, fn_id: U64) -> Bool {
+    let count = mir_print_operand_count(idx, store, mir_operand_binding_param(), fn_id, 0)
+    let slot = mir_print_operand_slot(store, mir_operand_binding_param(), fn_id)
+    var ordinal: U64 = 0
+    while ordinal < count {
+        if slot != 0 {
+            let group = __s0_buffer_get(MirPrintGroup, idx.operand, slot - 1)
+            var k: U64 = 0
+            while k < group.count {
+                let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_order, group.first - 1 + k) - 1)
+                if operand.kind == mir_operand_binding_param() && operand.owner == fn_id && operand.ordinal == ordinal {
+                    if ordinal > 0 && !out_string(", ") { return false }
+                    if !mir_out_type(idx, store, operand.operand_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                }
+                k = k + 1
+            }
+        } else {
+            var operand_at: U64 = 0
+            while operand_at < __s0_buffer_len(U64, idx.operand_extra) {
+                let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_extra, operand_at) - 1)
+                if operand.kind == mir_operand_binding_param() && operand.owner == fn_id && operand.ordinal == ordinal {
+                    if ordinal > 0 && !out_string(", ") { return false }
+                    if !mir_out_type(idx, store, operand.operand_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                }
+                operand_at = operand_at + 1
+            }
+        }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+// The spelling after "= " is omitted when it duplicates the Alder member
+// name, matching the Go printer exactly.
+fn mir_out_binding_spelling(store: MirStore, name_start: U64, name_end: U64, c_name_start: U64, c_name_end: U64) -> Bool {
+    if name_start == c_name_start && name_end == c_name_end { return true }
+    if !out_string(" = ") { return false }
+    return mir_out_quoted(store, c_name_start, c_name_end)
+}
+
+fn mir_out_binding_types(idx: MirPrintIndex, store: MirStore, block_id: U64) -> Bool {
+    let count = mir_print_operand_count(idx, store, mir_operand_binding_type(), block_id, 0)
+    let slot = mir_print_operand_slot(store, mir_operand_binding_type(), block_id)
+    var ordinal: U64 = 0
+    while ordinal < count {
+        var found = false
+        if slot != 0 {
+            let group = __s0_buffer_get(MirPrintGroup, idx.operand, slot - 1)
+            var k: U64 = 0
+            while k < group.count {
+                let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_order, group.first - 1 + k) - 1)
+                if operand.kind == mir_operand_binding_type() && operand.owner == block_id && operand.ordinal == ordinal {
+                    found = true
+                    if !mir_out_binding_type_member(idx, store, operand.operand_type) { return false }
+                }
+                k = k + 1
+            }
+        }
+        if !found {
+            var operand_at: U64 = 0
+            while operand_at < __s0_buffer_len(U64, idx.operand_extra) {
+                let operand = __s0_buffer_get(MirOperandRec, store.operands, __s0_buffer_get(U64, idx.operand_extra, operand_at) - 1)
+                if operand.kind == mir_operand_binding_type() && operand.owner == block_id && operand.ordinal == ordinal {
+                    found = true
+                    if !mir_out_binding_type_member(idx, store, operand.operand_type) { return false }
+                }
+                operand_at = operand_at + 1
+            }
+        }
+        if !found { return false }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+fn mir_out_binding_type_member(idx: MirPrintIndex, store: MirStore, type_id: U64) -> Bool {
+    if !mir_type_valid(store, type_id) { return false }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if rec.kind != mir_type_kind_c_named() { return false }
+    if !out_string("  c_type ") { return false }
+    if rec.c_class == mir_c_class_scalar() && !out_string("scalar ") { return false }
+    if rec.c_class == mir_c_class_opaque() && !out_string("opaque ") { return false }
+    if rec.c_class == mir_c_class_record() && !out_string("record ") { return false }
+    if !out_string("@") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(" = ") || !mir_out_quoted(store, rec.c_name_start, rec.c_name_end) { return false }
+    if rec.c_class != mir_c_class_record() { return out(10) }
+    if !out_string(" {") { return false }
+    let field_count = mir_type_part_count_at(idx, store, type_id, mir_type_part_c_field())
+    var ordinal: U64 = 0
+    while ordinal < field_count {
+        if !mir_out_c_field(idx, store, type_id, ordinal) { return false }
+        ordinal = ordinal + 1
+    }
+    if field_count > 0 && !out_string(" ") { return false }
+    return out_string("}") && out(10)
+}
+
+fn mir_out_c_field(idx: MirPrintIndex, store: MirStore, type_id: U64, ordinal: U64) -> Bool {
+    let slot = type_id
+    var k: U64 = 0
+    if slot >= 1 && slot <= __s0_buffer_len(MirTypeRec, store.types) {
+        let group = __s0_buffer_get(MirPrintGroup, idx.parts, slot - 1)
+        while k < group.count {
+            let at = __s0_buffer_get(U64, idx.parts_order, group.first - 1 + k)
+            let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at - 1)
+            if part.owner == type_id && part.kind == mir_type_part_c_field() && part.ordinal == ordinal {
+                if ordinal > 0 && !out_string(",") { return false }
+                if !out_string(" ") || !mir_out_name(store, part.name_start, part.name_end) || !out_string(": ") || !mir_out_type(idx, store, part.part_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+                if part.name_start != part.c_name_start || part.name_end != part.c_name_end {
+                    if !out_string(" = ") || !mir_out_quoted(store, part.c_name_start, part.c_name_end) { return false }
+                }
+                return true
+            }
+            k = k + 1
+        }
+        return false
+    }
+    var at2: U64 = 0
+    while at2 < __s0_buffer_len(U64, idx.parts_extra) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, __s0_buffer_get(U64, idx.parts_extra, at2) - 1)
+        if part.owner == type_id && part.kind == mir_type_part_c_field() && part.ordinal == ordinal {
+            if ordinal > 0 && !out_string(",") { return false }
+            if !out_string(" ") || !mir_out_name(store, part.name_start, part.name_end) || !out_string(": ") || !mir_out_type(idx, store, part.part_type, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+            if part.name_start != part.c_name_start || part.name_end != part.c_name_end {
+                if !out_string(" = ") || !mir_out_quoted(store, part.c_name_start, part.c_name_end) { return false }
+            }
+            return true
+        }
+        at2 = at2 + 1
+    }
+    return false
+}
+
+fn mir_out_bindings(idx: MirPrintIndex, store: MirStore) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirBindingRec, store.bindings) {
+        let block_id = at + 1
+        let rec = __s0_buffer_get(MirBindingRec, store.bindings, at)
+        if !out_string("\nbinding @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(" ") || !mir_out_quoted(store, rec.header_start, rec.header_end) || !out_string(" {\n") { return false }
+        if !mir_out_binding_types(idx, store, block_id) { return false }
+        var fn_at: U64 = 0
+        while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+            let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+            if fn_rec.block == block_id {
+                if !out_string("  c_fn @") || !mir_out_name(store, fn_rec.name_start, fn_rec.name_end) || !mir_out_binding_spelling(store, fn_rec.name_start, fn_rec.name_end, fn_rec.c_name_start, fn_rec.c_name_end) || !out(40) { return false }
+                if !mir_out_binding_params(idx, store, fn_at + 1) { return false }
+                if !out_string(") -> ") || !mir_out_type(idx, store, fn_rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
+            }
+            fn_at = fn_at + 1
+        }
+        var const_at: U64 = 0
+        while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+            let const_rec = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+            if const_rec.block == block_id {
+                if !out_string("  c_const @") || !mir_out_name(store, const_rec.name_start, const_rec.name_end) || !mir_out_binding_spelling(store, const_rec.name_start, const_rec.name_end, const_rec.c_name_start, const_rec.c_name_end) || !out_string(": ") { return false }
+                if !mir_out_type(idx, store, const_rec.const_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
+            }
+            const_at = const_at + 1
+        }
+        if !out_string("}\n") { return false }
+        at = at + 1
+    }
     return true
 }
 
@@ -2115,5 +2496,5 @@ fn mir_print(d: Domain, store: MirStore) -> Bool {
 
 fn mir_print_indexed(idx: MirPrintIndex, store: MirStore) -> Bool {
     if !mir_store_valid(idx, store) { return false }
-    return out_string("mir 5\n") && mir_out_type_declarations(idx, store) && mir_out_declarations(idx, store) && mir_out_functions(idx, store)
+    return out_string("mir 6\n") && mir_out_type_declarations(idx, store) && mir_out_declarations(idx, store) && mir_out_bindings(idx, store) && mir_out_functions(idx, store)
 }

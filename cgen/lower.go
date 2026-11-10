@@ -53,6 +53,49 @@ func (g *gen) cType(t mir.TypeId) string {
 		return "AlderBytes"
 	case mir.TypeRawPtr:
 		return "void *"
+	case mir.TypeCRaw:
+		switch ty.Length {
+		case mir.CScalarChar:
+			return "char"
+		case mir.CScalarSChar:
+			return "signed char"
+		case mir.CScalarUChar:
+			return "unsigned char"
+		case mir.CScalarShort:
+			return "short"
+		case mir.CScalarUShort:
+			return "unsigned short"
+		case mir.CScalarInt:
+			return "int"
+		case mir.CScalarUInt:
+			return "unsigned int"
+		case mir.CScalarLong:
+			return "long"
+		case mir.CScalarULong:
+			return "unsigned long"
+		case mir.CScalarLongLong:
+			return "long long"
+		case mir.CScalarULongLong:
+			return "unsigned long long"
+		case mir.CScalarFloat:
+			return "float"
+		case mir.CScalarDouble:
+			return "double"
+		case mir.CScalarSize:
+			return "size_t"
+		case mir.CScalarPtrdiff:
+			return "ptrdiff_t"
+		}
+		return "void"
+	case mir.TypeCPtr:
+		return g.cType(ty.Elem) + " *"
+	case mir.TypeCConstPtr:
+		return "const " + g.cType(ty.Elem) + " *"
+	case mir.TypeCNamed:
+		if ty.CName != "" {
+			return ty.CName
+		}
+		return "void"
 	case mir.TypeFunction:
 		return "AlderFnTy" + strconv.Itoa(int(t))
 	case mir.TypeDomainHandle:

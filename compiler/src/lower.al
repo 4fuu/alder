@@ -219,15 +219,15 @@ fn mir_intern_function_type(d: Domain, store: MirStore, params: __s0_Buffer(U64)
     var part_at: U64 = 0
     while part_at < __s0_buffer_len(U64, params) {
         if first == 0 { first = __s0_buffer_len(MirTypePartRec, type_parts) + 1 }
-        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_param(), owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, params, part_at)))
+        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_param(), owner: type_id, ordinal: part_at, name_start: 0, name_end: 0, part_type: __s0_buffer_get(U64, params, part_at), c_name_start: 0, c_name_end: 0))
         part_at = part_at + 1
     }
     if env_type != 0 {
         if first == 0 { first = __s0_buffer_len(MirTypePartRec, type_parts) + 1 }
-        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_env(), owner: type_id, ordinal: 0, name_start: 0, name_end: 0, part_type: env_type))
+        type_parts = try __s0_buffer_append(MirTypePartRec, d, type_parts, MirTypePartRec(kind: mir_type_part_function_env(), owner: type_id, ordinal: 0, name_start: 0, name_end: 0, part_type: env_type, c_name_start: 0, c_name_end: 0))
         part_at = part_at + 1
     }
-    let rec = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: first, part_count: part_at, result_type: result_type, length: 0)
+    let rec = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: first, part_count: part_at, result_type: result_type, length: 0, c_name_start: 0, c_name_end: 0, c_class: mir_c_class_scalar())
     let types = try __s0_buffer_append(MirTypeRec, d, store.types, rec)
     return Ok(MirTypeStep(store: mir_with_types(mir_with_type_parts(store, type_parts), types), type_id: type_id))
 }

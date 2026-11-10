@@ -71,7 +71,7 @@ func TestM75ElseIfQualification(t *testing.T) {
 
 	files := map[string]string{"else-if-chains.al": elseIfChainProgram}
 	mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "else-if-chains.al")
-	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 		t.Fatalf("else-if MIR result: %+v stderr=%s", mirText, mirText.stderr)
 	}
 	repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "else-if-chains.al")

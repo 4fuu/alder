@@ -270,7 +270,7 @@ func TestM75UsingLoopQualification(t *testing.T) {
 			name := "using-loop-" + program.name + ".al"
 			files := map[string]string{name: m75UsingLoopPrelude + program.body}
 			mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", name)
-			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 				t.Fatalf("%s MIR result: %+v stderr=%s", name, mirText, mirText.stderr)
 			}
 			assertPublicMIR(t, name, mirText.stdout)

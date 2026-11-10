@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,16 +90,16 @@ fn emit_contract_range(first: U64, end: U64) -> Bool {
 
 fn emit_contract() -> Bool {
     if !mout(75) || !mfield(mir_format_version()) || !mout(10) { return false }
-    if !mout(84) || !mout(75) || !emit_contract_range(mir_type_kind_primitive(), mir_type_kind_vec() + 1) { return false }
+    if !mout(84) || !mout(75) || !emit_contract_range(mir_type_kind_primitive(), mir_type_kind_c_named() + 1) { return false }
     if !mout(80) || !mout(82) || !emit_contract_range(mir_type_unit(), mir_type_f64() + 1) { return false }
-    if !mout(80) || !mout(84) || !emit_contract_range(mir_type_part_field(), mir_type_part_function_env() + 1) { return false }
+    if !mout(80) || !mout(84) || !emit_contract_range(mir_type_part_field(), mir_type_part_c_field() + 1) { return false }
     if !mout(67) || !mout(75) || !emit_contract_range(mir_const_unit(), mir_const_string() + 1) { return false }
     if !mout(80) || !mout(75) || !emit_contract_range(mir_param_function(), mir_param_block() + 1) { return false }
     if !mout(86) || !mout(68) || !emit_contract_range(mir_value_def_function_param(), mir_value_def_switch_case() + 1) { return false }
     if !mout(80) || !mout(76) || !emit_contract_range(mir_place_local(), mir_place_deref() + 1) { return false }
-    if !mout(79) || !mout(80) || !emit_contract_range(mir_op_load(), mir_op_str_eq() + 1) { return false }
+    if !mout(79) || !mout(80) || !emit_contract_range(mir_op_load(), mir_op_c_is_null() + 1) { return false }
     if !mout(84) || !mout(77) || !emit_contract_range(mir_term_jump(), mir_term_panic() + 1) { return false }
-    return mout(79) && mout(75) && emit_contract_range(mir_operand_type_part(), mir_operand_aggregate_field() + 1)
+    return mout(79) && mout(75) && emit_contract_range(mir_operand_type_part(), mir_operand_binding_type() + 1)
 }
 
 fn emit_operand_record(id: U64, rec: MirOperandRec) -> Bool {
@@ -132,7 +133,7 @@ fn emit_malformed_records() -> Bool {
     let duplicate_edge_a = MirOperandRec(kind: mir_operand_terminator_arg(), owner: 1, ordinal: 0, edge: mir_edge_then(), value: 1, target: 2, operand_type: 0, name_start: 0, name_end: 0)
     let duplicate_edge_b = MirOperandRec(kind: mir_operand_terminator_arg(), owner: 1, ordinal: 0, edge: mir_edge_then(), value: 2, target: 2, operand_type: 0, name_start: 0, name_end: 0)
     let wrong_owner = MirOperandRec(kind: mir_operand_switch_case_arg(), owner: 999, ordinal: 0, edge: 0, value: 1, target: 2, operand_type: 0, name_start: 0, name_end: 0)
-    let bad_boundary = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 999, part_count: 2, result_type: mir_type_unit(), length: 0)
+    let bad_boundary = MirTypeRec(kind: mir_type_kind_function(), name_start: 0, name_end: 0, elem: 0, ok_type: 0, err_type: 0, first_part: 999, part_count: 2, result_type: mir_type_unit(), length: 0, c_name_start: 0, c_name_end: 0, c_class: mir_c_class_scalar())
     if !mout(88) || !mfield(1) || !mfield(duplicate_a.function) || !mfield(duplicate_a.ordinal) || !mout(10) { return false }
     if !mout(88) || !mfield(1) || !mfield(duplicate_b.function) || !mfield(duplicate_b.ordinal) || !mout(10) { return false }
     if !mout(88) || !mfield(1) || !mfield(gap.function) || !mfield(gap.ordinal) || !mout(10) { return false }
@@ -288,12 +289,12 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 		t.Fatalf("strict C11 compile: %v\n%s", compileErr, output)
 	}
 	want := "ALDER-MIR-CONTRACT 5\n" +
-		"K 5\n" +
-		"TK 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21\n" +
+		fmt.Sprintf("K %d\n", mir.BindingFormatVersion) +
+		"TK 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25\n" +
 		"PR 1 2 3 4 5 6 7 8 9 10 11 12\n" +
-		"PT 1 2 3 4\nCK 0 1 2 3 4\nPK 1 2\nVD 0 1 2 3\nPL 0 1 2\n" +
-		"OP 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66\n" +
-		"TM 0 1 2 3 4 5 6\nOK 1 2 3 4 5 6 7 8\n" +
+		"PT 1 2 3 4 5\nCK 0 1 2 3 4\nPK 1 2\nVD 0 1 2 3\nPL 0 1 2\n" +
+		"OP 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70\n" +
+		"TM 0 1 2 3 4 5 6\nOK 1 2 3 4 5 6 7 8 9 10\n" +
 		"T 1 0 0 0 0 0 0\nT 2 0 0 0 0 0 0\nT 3 0 0 0 0 0 0\nT 4 0 0 0 0 0 0\n" +
 		"T 5 0 0 0 0 0 0\nT 6 0 0 0 0 0 0\nT 7 0 0 0 0 0 0\nT 8 0 0 0 0 0 0\n" +
 		"T 9 0 0 0 0 0 0\nT 10 0 0 0 0 0 0\nT 11 0 0 0 0 0 0\nT 12 0 0 0 0 0 0\n" +
@@ -323,20 +324,21 @@ func validateMIRContractManifest(t *testing.T, text string) {
 		start int
 		count int
 	}{
-		"TK": {0, int(mir.TypeVec) + 1},
+		"TK": {0, int(mir.TypeCNamed) + 1},
 		"PR": {1, int(mir.NumPrimitiveTypes)},
-		"PT": {1, 4},
+		"PT": {1, 5},
 		"CK": {int(mir.ConstUnit), int(mir.ConstString) + 1},
 		"PK": {1, 2},
 		"VD": {int(mir.ValueDefFuncParam), int(mir.ValueDefSwitchCase) + 1},
 		"PL": {int(mir.PlaceLocal), int(mir.PlaceDeref) + 1},
-		"OP": {int(mir.OpLoad), int(mir.OpStrEq) + 1},
+		"OP": {int(mir.OpLoad), int(mir.OpCIsNull) + 1},
 		"TM": {int(mir.TermJump), int(mir.TermPanic) + 1},
-		"OK": {1, 8},
+		"OK": {1, 10},
 	}
 	seen := make(map[string]bool, len(want))
 	lines := strings.Split(text, "\n")
-	if len(lines) < 12 || lines[0] != "ALDER-MIR-CONTRACT 5" || lines[1] != "K 5" {
+	wantFormat := fmt.Sprintf("K %d", mir.BindingFormatVersion)
+	if len(lines) < 12 || lines[0] != "ALDER-MIR-CONTRACT 5" || lines[1] != wantFormat {
 		t.Fatalf("invalid MIR contract manifest envelope:\n%s", text)
 	}
 	for _, line := range lines[2:12] {

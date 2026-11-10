@@ -161,7 +161,7 @@ func TestM75LayeredDagProduction(t *testing.T) {
 		t.Parallel()
 		files := map[string]string{"layered.al": text}
 		mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "layered.al")
-		if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+		if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 			t.Fatalf("layered DAG MIR result: %+v", mirText)
 		}
 		repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "layered.al")

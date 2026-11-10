@@ -238,7 +238,7 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 		b.WriteString("    if r + z == 0 {\n        return 1\n    }\n    return 0\n}\n")
 		files := map[string]string{"scale.al": b.String()}
 		got := runAlder1(t, exe, noGo, files, "compile", "--emit=mir", "scale.al")
-		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 5\n") || len(got.stdout) < 1_000_000 {
+		if got.status != 0 || got.stderr != "" || !strings.HasPrefix(got.stdout, "mir 6\n") || len(got.stdout) < 1_000_000 {
 			t.Fatalf("scale emit=mir failed or truncated: status=%d stderr=%q stdoutBytes=%d", got.status, got.stderr, len(got.stdout))
 		}
 		if _, err := mir.Parse(got.stdout); err != nil {
@@ -290,7 +290,7 @@ func assertAlder1VerifiedArtifact(t *testing.T, exe, cc, root, object string, no
 	}
 	first := runAlder1(t, exe, noGo, files, alderArgs("--emit=mir")...)
 	second := runAlder1(t, exe, noGo, files, alderArgs("--emit=mir")...)
-	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 5\n") || first != second {
+	if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 6\n") || first != second {
 		t.Fatalf("MIR failed or was nondeterministic: first=%+v second=%+v", first, second)
 	}
 	module, err := mir.Parse(first.stdout)
@@ -578,7 +578,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "77699139812a4b32a92c7374c78405d3591ad3a552c4e8849b18b852685a2d35"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "ccf9936fda84d2c640fb29a5365a6bb481d11ff1165aedbdfd00b13d27bfbca6"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

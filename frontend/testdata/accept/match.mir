@@ -1,4 +1,4 @@
-mir 5
+mir 6
 
 enum @Shape.c0 {
   Circle(i64)

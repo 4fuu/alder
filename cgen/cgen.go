@@ -458,10 +458,12 @@ func (g *gen) emitModule(b *strings.Builder) {
 	b.WriteString("#include <float.h>\n")
 	b.WriteString("#include <string.h>\n\n")
 
+	g.emitBindings(b)
 	g.emitTypes(b)
 	g.emitStringConsts(b)
 	g.emitFunctionDecls(b)
 	g.emitImportDecls(b)
+	g.emitBindingDecls(b)
 	g.emitCtxSites(b)
 	g.emitCopyHelpers(b)
 	g.emitEnvRetainHelpers(b)
@@ -519,6 +521,113 @@ func (g *gen) emitImportDecls(b *strings.Builder) {
 		b.WriteString(ret + " (" + imp.Name + ")(" + strings.Join(params, ", ") + ");\n")
 	}
 	if len(g.m.Imports) > 0 {
+		b.WriteString("\n")
+	}
+}
+
+// emitBindings writes one include per binding block, each followed by the
+// C11 compile-time binding checks. The checks live in the generated program
+// translation unit, so no build can compile a binding whose header disagrees
+// with the declared spelling, record field, function signature, or constant.
+// Assertion messages name the Alder binding member.
+func (g *gen) emitBindings(b *strings.Builder) {
+	if len(g.m.Bindings) == 0 {
+		return
+	}
+	b.WriteString("#include <stddef.h>\n")
+	for i := range g.m.Bindings {
+		bind := &g.m.Bindings[i]
+		b.WriteString("#include <" + bind.Header + ">\n")
+		g.emitBindingChecks(b, i, bind)
+	}
+	b.WriteString("\n")
+}
+
+func (g *gen) emitBindingChecks(b *strings.Builder, block int, bind *mir.BindingBlock) {
+	for ti, id := range bind.Types {
+		ty := &g.m.Types[id]
+		probe := "alder_bind_" + strconv.Itoa(block) + "_t" + strconv.Itoa(ti)
+		what := "binding " + bind.Name + "." + ty.Name + " (" + ty.CName + ")"
+		b.WriteString("typedef " + ty.CName + " " + probe + ";\n")
+		switch ty.CClass {
+		case mir.CClassOpaque:
+			b.WriteString("_Static_assert(sizeof(" + probe + " *) == sizeof(void *), \"" + what +
+				": opaque binding spelling must resolve to a pointer-representable type\");\n")
+		case mir.CClassScalar:
+			b.WriteString("_Static_assert(sizeof(" + probe + ") >= 1, \"" + what +
+				": scalar binding spelling must resolve to a complete type\");\n")
+		case mir.CClassRecord:
+			b.WriteString("_Static_assert(_Alignof(" + probe + ") >= 1, \"" + what +
+				": record binding spelling must resolve to a complete type\");\n")
+			for _, fld := range ty.Fields {
+				fldWhat := what + "." + fld.Name + " (" + fld.CName + ")"
+				declared := g.cType(fld.Type)
+				b.WriteString("_Static_assert(offsetof(" + probe + ", " + fld.CName + ") % _Alignof(" + declared + ") == 0, \"" +
+					fldWhat + ": field offset must respect the declared field alignment\");\n")
+				b.WriteString("_Static_assert(offsetof(" + probe + ", " + fld.CName + ") + sizeof(" + declared + ") <= sizeof(" + probe + "), \"" +
+					fldWhat + ": field does not fit inside the record\");\n")
+				b.WriteString("_Static_assert(_Generic(((" + probe + " *)0)->" + fld.CName + ", " + declared + ": 1, default: 0), \"" +
+					fldWhat + ": field type does not match the declared binding type " + declared + "\");\n")
+			}
+		}
+	}
+	for fi := range bind.Funcs {
+		fn := &bind.Funcs[fi]
+		what := "binding " + bind.Name + "." + fn.Name + " (" + fn.CName + ")"
+		var params []string
+		for _, p := range fn.Sig.Params {
+			if p == mir.TypeUnit {
+				continue
+			}
+			params = append(params, g.cType(p))
+		}
+		if len(params) == 0 {
+			params = append(params, "void")
+		}
+		ret := "void"
+		if fn.Sig.Result != mir.TypeUnit {
+			ret = g.cType(fn.Sig.Result)
+		}
+		b.WriteString("_Static_assert(_Generic(&" + fn.CName + ", " + ret + " (*)(" + strings.Join(params, ", ") +
+			"): 1, default: 0), \"" + what + ": function type does not match the declared binding signature\");\n")
+	}
+	for ci := range bind.Consts {
+		c := &bind.Consts[ci]
+		what := "binding " + bind.Name + "." + c.Name + " (" + c.CName + ")"
+		declared := g.cType(c.Type)
+		b.WriteString("_Static_assert(_Generic(" + c.CName + " + 0, int: 1, unsigned int: 1, long: 1, unsigned long: 1, " +
+			"long long: 1, unsigned long long: 1, short: 1, unsigned short: 1, char: 1, signed char: 1, unsigned char: 1, " +
+			"_Bool: 1, default: 0), \"" + what + ": constant must have an integral type\");\n")
+		b.WriteString("_Static_assert((" + c.CName + ") == (" + declared + ")(" + c.CName + "), \"" + what +
+			": value must be representable as " + declared + "\");\n")
+	}
+}
+
+// emitBindingDecls writes forward declarations for every binding-block C
+// function, so generated unsafe calls are always prototyped.
+func (g *gen) emitBindingDecls(b *strings.Builder) {
+	for i := range g.m.Bindings {
+		bind := &g.m.Bindings[i]
+		for j := range bind.Funcs {
+			fn := &bind.Funcs[j]
+			ret := "void"
+			if fn.Sig.Result != mir.TypeUnit {
+				ret = g.cType(fn.Sig.Result)
+			}
+			var params []string
+			for _, p := range fn.Sig.Params {
+				if p == mir.TypeUnit {
+					continue
+				}
+				params = append(params, g.cType(p))
+			}
+			if len(params) == 0 {
+				params = append(params, "void")
+			}
+			b.WriteString(ret + " " + fn.CName + "(" + strings.Join(params, ", ") + ");\n")
+		}
+	}
+	if len(g.m.Bindings) > 0 {
 		b.WriteString("\n")
 	}
 }

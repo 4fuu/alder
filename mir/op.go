@@ -96,6 +96,11 @@ const (
 	// Fallible table insertion carries no failure edge: exhaustion and the
 	// slot-limit policy surface as the Err payload of the result value.
 	OpTableInsertTry
+	// OpCBindingCall is one unsafe root call to a binding-block C function.
+	// CBinding is the flattened block-major index into Module.Bindings.
+	OpCBindingCall
+	// OpCIsNull is the one safe raw-pointer observation: null test.
+	OpCIsNull
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -244,6 +249,10 @@ func (k OpKind) String() string {
 		return "fn.value"
 	case OpTableInsertTry:
 		return "table.insert.try"
+	case OpCBindingCall:
+		return "c.call.unsafe"
+	case OpCIsNull:
+		return "c.is_null"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

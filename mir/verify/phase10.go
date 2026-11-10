@@ -22,6 +22,28 @@ func phase10Backend(m *mir.Module) []Error {
 			})
 		}
 	}
+	for bi := range m.Bindings {
+		block := &m.Bindings[bi]
+		for i := range block.Funcs {
+			if !validCBindingName(block.Funcs[i].CName) {
+				errs = append(errs, Error{
+					Loc: fmt.Sprintf("binding @%s function @%s", block.Name, block.Funcs[i].Name),
+					Msg: "C spelling must be a non-reserved C identifier",
+				})
+			}
+		}
+		for i := range block.Consts {
+			if !validCBindingName(block.Consts[i].CName) {
+				errs = append(errs, Error{
+					Loc: fmt.Sprintf("binding @%s constant @%s", block.Name, block.Consts[i].Name),
+					Msg: "C spelling must be a non-reserved C identifier",
+				})
+			}
+		}
+		for _, id := range block.Types {
+			errs = append(errs, checkCSpelling(m, block.Name, id)...)
+		}
+	}
 	for _, f := range m.Functions {
 		if f == nil || len(f.Blocks) == 0 {
 			continue
@@ -33,7 +55,8 @@ func phase10Backend(m *mir.Module) []Error {
 				switch in.Op {
 				case mir.OpAlloc, mir.OpAllocChecked:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
-						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr} {
+						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
+						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
 						// A closure environment record records the domain
 						// that owns it; the retain hook rewrites that field
 						// when the record moves domains.
@@ -47,7 +70,8 @@ func phase10Backend(m *mir.Module) []Error {
 					}
 				case mir.OpTableCreate:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
-						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView, mir.TypeRawPtr} {
+						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
+						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
 						if containsKind(m, in.TypeOp, k) {
 							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("table element type may not contain %s", kindName(m, k))})
 							break
@@ -60,7 +84,7 @@ func phase10Backend(m *mir.Module) []Error {
 					}
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTable, mir.TypeTableView,
-						mir.TypeTableMutView, mir.TypeRawPtr} {
+						mir.TypeTableMutView, mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
 						if containsKind(m, t, k) {
 							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("copy_to_domain source type may not contain %s", kindName(m, k))})
 							break
@@ -89,6 +113,31 @@ func validCExternalName(name string) bool {
 		}
 	}
 	return !cKeywords[name] && !cHeaderIdentifier(name)
+}
+
+// validCBindingName validates a C spelling that appears in a binding block.
+// Unlike emitted declarations, binding spellings only reference C names, so
+// header-owned names such as time_t or FILE and macro-style constants such as
+// CLOCKS_PER_SEC are legal; a wrong spelling is caught by the generated
+// probes rather than a name policy. Still rejected: the empty name, a leading
+// underscore (implementation namespace), non-identifier characters, C
+// keywords, and the alder_-prefixed runtime namespace.
+func validCBindingName(name string) bool {
+	if name == "" || name[0] == '_' {
+		return false
+	}
+	if len(name) >= 6 && (name[:6] == "alder_" || name[:6] == "ALDER_") ||
+		len(name) >= 5 && name[:5] == "Alder" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		letter := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+		if (i == 0 && !letter) || (i > 0 && !letter && !(c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return !cKeywords[name]
 }
 
 // cHeaderIdentifier rejects names which occupy the ordinary identifier or
@@ -161,4 +210,35 @@ func kindName(m *mir.Module, k mir.TypeKind) string {
 		return "table"
 	}
 	return fmt.Sprintf("kind %d", k)
+}
+
+// checkCSpelling validates a C binding type spelling: an identifier, or a
+// struct/union/enum tag form.
+func checkCSpelling(m *mir.Module, blockName string, id mir.TypeId) []Error {
+	if !m.ValidType(id) || m.Types[id].Kind != mir.TypeCNamed {
+		return nil
+	}
+	ty := &m.Types[id]
+	loc := fmt.Sprintf("binding @%s type @%s", blockName, ty.Name)
+	spelling := ty.CName
+	keyword := ""
+	for _, k := range []string{"struct", "union", "enum"} {
+		if strings.HasPrefix(spelling, k+" ") {
+			keyword = k
+			spelling = spelling[len(k)+1:]
+			break
+		}
+	}
+	if keyword != "" && ty.CClass == mir.CClassScalar {
+		return []Error{{Loc: loc, Msg: "scalar binding spelling may not use a " + keyword + " tag form"}}
+	}
+	if !validCBindingName(spelling) {
+		return []Error{{Loc: loc, Msg: "C spelling must be a non-reserved C identifier"}}
+	}
+	for i, fld := range ty.Fields {
+		if !validCBindingName(fld.CName) {
+			return []Error{{Loc: fmt.Sprintf("%s field %d", loc, i), Msg: "C field spelling must be a non-reserved C identifier"}}
+		}
+	}
+	return nil
 }

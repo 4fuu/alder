@@ -109,7 +109,7 @@ func TestPrintDeterministic(t *testing.T) {
 
 func TestPrintModuleSections(t *testing.T) {
 	m := NewModule()
-	if got := Print(m); got != "mir 5\n" {
+	if got := Print(m); got != "mir 6\n" {
 		t.Errorf("empty module printed %q", got)
 	}
 	m.AddConst("k", TypeI64, ConstValue{Kind: ConstInt, Int: -5})
@@ -118,7 +118,7 @@ func TestPrintModuleSections(t *testing.T) {
 	m.AddConst("s", m.String(), ConstValue{Kind: ConstString, String: "he\"llo"})
 	m.AddConst("u", TypeUnit, ConstValue{Kind: ConstUnit})
 	got := Print(m)
-	want := "mir 5\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: string = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
+	want := "mir 6\n\nconst @k: i64 = -5\n\nconst @f: f64 = 1.5\n\nconst @b: bool = true\n\nconst @s: string = \"he\\\"llo\"\n\nconst @u: unit = ()\n"
 	if got != want {
 		t.Errorf("const printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -144,7 +144,7 @@ func TestPrintTerminators(t *testing.T) {
 	bb2.SetTerm(Terminator{Kind: TermUnreachable})
 
 	got := Print(m)
-	want := "mir 5\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
+	want := "mir 6\n\nfn @t(%c: bool, %o: option(i64)) {\nbb0:\n  switch %o {\n    some(%p) -> bb1(%p)\n    default -> bb2\n  }\n\nbb1(%p: i64):\n  return\n\nbb2:\n  unreachable\n}\n"
 	if got != want {
 		t.Errorf("terminator printing mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
@@ -263,5 +263,106 @@ bb0:
 	}
 	if m.Functions[id].Blocks[0].Instrs[0].TypeOp != FnValueDomainMarker {
 		t.Fatalf("fn.value domain marker did not parse as the sentinel")
+	}
+}
+
+func TestPrintBindingBlocks(t *testing.T) {
+	m := NewModule()
+	timeT := m.AddCNamed("Time", "time_t", CClassScalar, nil)
+	file := m.AddCNamed("File", "FILE", CClassOpaque, nil)
+	rec := m.AddCNamed("Timespec", "struct timespec", CClassRecord, []Field{
+		{Name: "seconds", Type: timeT, CName: "tv_sec"},
+		{Name: "nanos", Type: m.CRaw(CScalarLong), CName: "tv_nsec"},
+	})
+	block := m.AddBinding("ctime", "time.h")
+	b := &m.Bindings[block]
+	b.Types = append(b.Types, timeT, file, rec)
+	b.Funcs = append(b.Funcs,
+		BindingFunc{Name: "get", CName: "timespec_get", Sig: FuncSig{Params: []TypeId{m.CPtr(rec), m.CRaw(CScalarInt)}, Result: m.CRaw(CScalarInt), Env: NoType}},
+		BindingFunc{Name: "close", CName: "close", Sig: FuncSig{Params: []TypeId{m.CPtr(file)}, Result: m.CRaw(CScalarInt), Env: NoType}},
+	)
+	b.Consts = append(b.Consts, BindingConst{Name: "BUFSIZ", CName: "BUFSIZ", Type: m.CRaw(CScalarInt)})
+
+	f := m.AddFunction("main", nil, TypeUnit)
+	bb := f.AddBlock("bb0", nil)
+	bb.SetTerm(Terminator{Kind: TermReturn, Result: NoValue})
+
+	want := `mir 6
+
+binding @ctime "time.h" {
+  c_type scalar @Time = "time_t"
+  c_type opaque @File = "FILE"
+  c_type record @Timespec = "struct timespec" { seconds: @Time = "tv_sec", nanos: c_long = "tv_nsec" }
+  c_fn @get = "timespec_get"(c_ptr(@Timespec), c_int) -> c_int
+  c_fn @close(c_ptr(@File)) -> c_int
+  c_const @BUFSIZ: c_int
+}
+
+fn @main() {
+bb0:
+  return
+}
+`
+	if got := Print(m); got != want {
+		t.Fatalf("binding block printing:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	parsed, err := Parse(want)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if again := Print(parsed); again != want {
+		t.Fatalf("binding block round trip:\n%s", again)
+	}
+}
+
+func TestPrintBindingUnsafeOps(t *testing.T) {
+	m := NewModule()
+	file := m.AddCNamed("File", "FILE", CClassOpaque, nil)
+	block := m.AddBinding("stdio", "stdio.h")
+	b := &m.Bindings[block]
+	b.Types = append(b.Types, file)
+	b.Funcs = append(b.Funcs, BindingFunc{Name: "open", CName: "fopen", Sig: FuncSig{
+		Params: []TypeId{m.CConstPtr(m.CRaw(CScalarChar)), m.CConstPtr(m.CRaw(CScalarChar))},
+		Result: m.CPtr(file), Env: NoType,
+	}})
+	f := m.AddFunction("main", []Param{{Name: "path", Type: m.CConstPtr(m.CRaw(CScalarChar))}}, TypeUnit)
+	bb := f.AddBlock("bb0", nil)
+	handle := addResultNamed(t, m, f, bb, "v0", Instr{Op: OpCBindingCall, CBinding: 0, Args: []ValueId{0, 0}})
+	flag := addResultNamed(t, m, f, bb, "v1", Instr{Op: OpCIsNull, A: handle})
+	_ = flag
+	bb.SetTerm(Terminator{Kind: TermReturn, Result: NoValue})
+
+	want := `mir 6
+
+binding @stdio "stdio.h" {
+  c_type opaque @File = "FILE"
+  c_fn @open = "fopen"(c_const_ptr(c_char), c_const_ptr(c_char)) -> c_ptr(@File)
+}
+
+fn @main(%path: c_const_ptr(c_char)) {
+bb0:
+  %v0 = c.call.unsafe @stdio.open(%path, %path)
+  %v1 = c.is_null %v0
+  return
+}
+`
+	if got := Print(m); got != want {
+		t.Fatalf("binding op printing:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	parsed, err := Parse(want)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if again := Print(parsed); again != want {
+		t.Fatalf("binding op round trip:\n%s", again)
+	}
+}
+
+func TestRejectVersion5BindingSyntax(t *testing.T) {
+	if _, err := Parse("mir 5\n\nbinding @c \"t.h\" {\n}\n"); err == nil {
+		t.Fatal("version 5 must reject binding blocks")
+	}
+	if _, err := Parse("mir 5\n\nfn @f() -> c_int {\nbb0:\n  return\n}\n"); err == nil {
+		t.Fatal("version 5 must reject c_* types")
 	}
 }

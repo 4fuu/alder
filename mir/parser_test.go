@@ -231,7 +231,7 @@ var invalidParseTests = []struct {
 }{
 	{"missing version", "type @T {}", "expected 'mir <version>'"},
 	{"bad version", "mir x\n", "expected a format version number"},
-	{"unsupported version", "mir 6\n", "unsupported format version 6"},
+	{"unsupported version", "mir 99\n", "unsupported format version 99"},
 	{"panic in legacy version", "mir 1\nfn @f() {\nbb0:\n  panic\n}\n", "panic requires MIR format version 2"},
 	{"alloc.checked in format 2", "mir 2\nfn @f(%d: domain_handle, %n: u64) {\nbb0:\n  %p = alloc.checked %d, u8, %n else bb1\n  return\nbb1:\n  return\n}\n", "alloc.checked requires MIR format version 3"},
 	{"vec in format 3", "mir 3\nfn @f(%v: vec(u8)) {\nbb0:\n  return\n}\n", "vec requires MIR format version 4"},

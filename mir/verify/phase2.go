@@ -26,6 +26,12 @@ func phase2Types(m *mir.Module) []Error {
 	for i := range m.Imports {
 		errs = append(errs, checkSigDecl(m, fmt.Sprintf("import @%s", m.Imports[i].Name), m.Imports[i].Sig)...)
 	}
+	for bi := range m.Bindings {
+		for i := range m.Bindings[bi].Funcs {
+			fn := &m.Bindings[bi].Funcs[i]
+			errs = append(errs, checkSigDecl(m, fmt.Sprintf("binding @%s function @%s", m.Bindings[bi].Name, fn.Name), fn.Sig)...)
+		}
+	}
 	for _, f := range m.Functions {
 		if f == nil {
 			continue
@@ -120,6 +126,38 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		checkChild(t.Elem, "element")
+	case mir.TypeCPtr, mir.TypeCConstPtr:
+		checkChild(t.Elem, "element")
+	case mir.TypeCRaw:
+		if t.Length >= mir.NumCScalars {
+			errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("unknown C scalar id %d", t.Length)})
+		}
+	case mir.TypeCNamed:
+		if t.CName == "" {
+			errs = append(errs, Error{Loc: loc, Msg: "C binding type has an empty spelling"})
+		}
+		if t.CClass > mir.CClassRecord {
+			errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("unknown C binding class %d", t.CClass)})
+		}
+		if t.CClass != mir.CClassRecord && len(t.Fields) != 0 {
+			errs = append(errs, Error{Loc: loc, Msg: "non-record C binding type carries fields"})
+		}
+		seen := make(map[string]bool, len(t.Fields))
+		for _, fld := range t.Fields {
+			errs = append(errs, checkDeclType(m, loc, "record field "+fmt.Sprintf("%q", fld.Name), fld.Type)...)
+			if fld.Name == "" {
+				errs = append(errs, Error{Loc: loc, Msg: "record field has an empty name"})
+				continue
+			}
+			if !validMIRName(fld.Name, true) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid field name %q", fld.Name)})
+			}
+			if seen[fld.Name] {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate field name %q", fld.Name)})
+			}
+			seen[fld.Name] = true
+			checkChild(fld.Type, fmt.Sprintf("field %q", fld.Name))
+		}
 	case mir.TypeResult:
 		checkChild(t.OK, "ok payload")
 		checkChild(t.Err, "err payload")
@@ -261,6 +299,12 @@ func typeChildren(t *mir.Type) []mir.TypeId {
 	case mir.TypeOption, mir.TypeSlice, mir.TypeVec, mir.TypeSafeRef, mir.TypeSafeMut, mir.TypeArray,
 		mir.TypeRawPtr, mir.TypeTable, mir.TypeID, mir.TypeTableView, mir.TypeTableMutView:
 		children = append(children, t.Elem)
+	case mir.TypeCPtr, mir.TypeCConstPtr:
+		children = append(children, t.Elem)
+	case mir.TypeCNamed:
+		for _, fld := range t.Fields {
+			children = append(children, fld.Type)
+		}
 	case mir.TypeResult:
 		children = append(children, t.OK, t.Err)
 	case mir.TypeFunction:

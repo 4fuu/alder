@@ -722,7 +722,7 @@ func TestM75ClosureProductionQualification(t *testing.T) {
 			t.Parallel()
 			files := map[string]string{program.name + ".al": program.source}
 			mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", program.name+".al")
-			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 				t.Fatalf("%s MIR result: %+v stderr=%s", program.name, mirText, mirText.stderr)
 			}
 			repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", program.name+".al")

@@ -586,11 +586,86 @@ Initial conservative rules:
 
 Diagnostics must be stable and must identify the relevant function, block, operation, and source span when one exists. The current verifier reports function, block, and operation; spans arrive with the frontend.
 
+## Binding Blocks and C Types
+
+MIR 6 records C binding declarations as module-level binding blocks, printed
+after imports and constants and before functions. One block names one logical
+header and carries three flat declaration lists:
+
+```text
+binding @ctime "time.h" {
+  c_type scalar @Time = "time_t"
+  c_type opaque @File = "FILE"
+  c_type record @Timespec = "struct timespec" { seconds: @Time = "tv_sec", nanos: c_long = "tv_nsec" }
+  c_fn @get = "timespec_get"(c_ptr(@Timespec), c_int) -> c_int
+  c_fn @close(c_ptr(@File)) -> c_int
+  c_const @BUFSIZ: c_int
+}
+```
+
+- `c_type` declares one named C binding type. The class is `scalar` (a C
+  typedef or enum used as a value), `opaque` (used behind pointers only), or
+  `record` (a complete non-bitfield struct or union used by value). A record's
+  braced member list maps each Alder field name to its MIR type and, after
+  `=`, the C field spelling; a missing spelling requires the names to match.
+- `c_fn` declares one C function: an Alder name, an explicit C spelling after
+  `=` (omitted when the names match), the parameter types, and the result
+  type. Signatures carry no environment: binding calls never capture.
+- `c_const` declares one object-like integer constant with an optional C
+  spelling after `=` and its representable type.
+
+The `c_*` type vocabulary is disjoint from Alder numerics: `c_raw` with a
+`c_scalar` payload ids 0..14 (`c_char`, `c_schar`, `c_uchar`, `c_short`,
+`c_ushort`, `c_int`, `c_uint`, `c_long`, `c_ulong`, `c_llong`, `c_ullong`,
+`c_float`, `c_double`, `c_size`, `c_ptrdiff`), `c_ptr(T)` and
+`c_const_ptr(T)` raw pointers, and `c_named` for `c_type` members. Binding
+types appear only inside binding declarations and on the unsafe boundary;
+ordinary typed code may not name them (phase 9), and they cannot be element
+types of Alder aggregates or copied through Alder aggregate rules
+(phase 10).
+
+Two operations consume bindings:
+
+- `c.call.unsafe` (op 69) performs one root call to a `c_fn`. Its `target`
+  holds the flat binding-function index (block-major, in declaration order
+  across the module's binding blocks); its arguments must match the declared
+  signature exactly, except that `c_ptr(E)` widens to `c_const_ptr(E)`. A
+  unit-result binding call may drop its result; any other dropped result is
+  rejected. The call requires `unsafe` and is rejected in verifiable
+  (non-unsafe) context by phase 5.
+- `c.is_null` (op 70) observes a raw pointer for nullity and yields `bool`.
+  It is the only operation besides explicit boundaries allowed to consume a
+  `raw_ptr` value (phase 9).
+
+Binding operand kinds: a `c.call.unsafe` argument is `binding_param` (9)
+whose `operand_type` is the declared parameter type and whose owner is the
+flat binding-function index, or `binding_type` (10) whose owner is the
+binding block and whose `operand_type` must be a `c_named` member of that
+block. A record's C field mapping is a `c_field` type part (part kind 5)
+whose name is the Alder field name and whose own C name is the spelling.
+
+The verifier's structural rules for bindings:
+
+- binding, member, and function names are Alder identifiers without leading
+  underscores, without reserved words, and without the runtime-reserved
+  `alder_` prefixes; C spellings are free header identifiers and may carry
+  `struct `/`union `/`enum ` tags for records and `TIME_`-style macro spellings
+  for constants;
+- names and C spellings are unique within their block; blocks have unique
+  names and headers within a module;
+- record fields are leaf types only (scalars, pointers, named members), and
+  an opaque member may not be used by value;
+- the printed form round-trips, and every binding list is printed in
+  declaration order, deterministic across processes.
+
 ## Versioning
 
 Textual MIR carries an explicit format version. `mir 1` remains a stable legacy
-format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`; and
-current `mir 4` adds `vec(T)` and the minimal Vec operations.
+format; `mir 2` adds only valueless `panic`; `mir 3` adds `alloc.checked`;
+`mir 4` adds `vec(T)` and the minimal Vec operations; `mir 5` adds
+function-type environments, `fn.value`, and `call.value`; and current `mir 6`
+adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`, and
+`c.is_null`.
 Incompatible changes must use a new version and update:
 
 - this document;

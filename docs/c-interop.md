@@ -267,9 +267,26 @@ completes. See [Async and Structured Concurrency](async.md).
 ## Native linking and tooling
 
 Headers, defines, libraries, C shims, target, and toolchain come from the
-versioned Alder build plan. `alder bind check` validates every binding against
-that plan. The compiler never searches ambient include/library directories on
-its own.
+versioned Alder build plan. The include roots for a binding are exactly the
+build plan's explicit `-I` roots (fixture roots in tests, locked native or
+sysroot roots in production) plus the target toolchain's own C11 and libc
+headers, such as `stddef.h`, `time.h`, and `stdio.h` from the target sysroot.
+The compiler never adds a search path of its own and never reads an ambient
+include or library directory.
+
+Binding verification is not a separate step that a build could skip: the
+generated program translation unit itself carries the binding evidence.
+Every binding block emits its header `#include` inside the program TU,
+followed by C11 `_Static_assert` checks that pin each declared member to the
+header's real declaration: record size with `_Static_assert(sizeof(...) == ...,
+"binding member: ...")`, alignment with `_Alignof`, field offsets with
+`offsetof`, field and function types with `_Generic` selection on the field
+or function-pointer type, and constant values with `_Static_assert(NAME ==
+...)`. Every assertion message names the Alder binding member, so a mismatch
+against the real header is a compile error of the generated program, never a
+warning and never a silently generated alternate declaration. `alder bind
+check` may later expose the same probes as a standalone emit=bind translation
+unit, but it is tooling around the same evidence, not the gate itself.
 
 xmake/xrepo may supply a locked native package but does not alter the binding
 semantics. A system native dependency is explicitly nonreproducible unless its

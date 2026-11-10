@@ -36,6 +36,12 @@ out = try __s0_buffer_append(U64, d, out, t.result_type) }
 var p: U64 = 0
 while p < count { out = try __s0_buffer_append(U64, d, out, __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, p) - 1).part_type)
 p = p + 1 } }
+    if t.kind == mir_type_kind_c_ptr() || t.kind == mir_type_kind_c_const_ptr() { out = try __s0_buffer_append(U64, d, out, t.elem) }
+    if t.kind == mir_type_kind_c_named() && t.c_class == mir_c_class_record() { let count = mir_vindex_type_part_count(indexes, id)
+var p: U64 = 0
+while p < count { let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, id, p) - 1)
+if part.kind == mir_type_part_c_field() { out = try __s0_buffer_append(U64, d, out, part.part_type) }
+p = p + 1 } }
     return Ok(out)
 }
 fn mir_vtype_has_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(U64, __s0_Error) {

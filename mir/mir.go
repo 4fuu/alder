@@ -15,13 +15,16 @@ const (
 	// ClosureFormatVersion introduced function-type environments, call.value,
 	// and str.eq.
 	ClosureFormatVersion = 5
+	// BindingFormatVersion introduced C binding blocks, the c_* raw type
+	// vocabulary, c.call.unsafe, and c.is_null.
+	BindingFormatVersion = 6
 	// CurrentFormatVersion is the format emitted by newly constructed modules.
-	CurrentFormatVersion = ClosureFormatVersion
+	CurrentFormatVersion = BindingFormatVersion
 )
 
 // Module is a complete MIR unit: type declarations, imported C declarations,
-// constants, and functions. Optional source-span tables are reserved for the
-// future frontend and do not yet appear in the textual format.
+// C binding blocks, constants, and functions. Optional source-span tables are
+// reserved for the future frontend and do not yet appear in the textual format.
 type Module struct {
 	// FormatVersion is the textual MIR format version.
 	FormatVersion int
@@ -29,6 +32,9 @@ type Module struct {
 	Types []Type
 	// Imports lists imported C declarations; ImportId values index it.
 	Imports []ImportDecl
+	// Bindings lists C binding blocks in declaration order. BindingFunc
+	// references use flattened block-major indices across all blocks.
+	Bindings []BindingBlock
 	// Constants lists named module constants.
 	Constants []ConstDecl
 	// Functions lists functions in declaration order; FunctionId values index it.
@@ -41,6 +47,33 @@ type Module struct {
 type ImportDecl struct {
 	Name string
 	Sig  FuncSig
+}
+
+// BindingFunc is one raw C function member of a binding block. CName is the
+// explicit C spelling; it duplicates Name when the source omitted the
+// `= "spelling"` form.
+type BindingFunc struct {
+	Name  string
+	CName string
+	Sig   FuncSig
+}
+
+// BindingConst is one object-like constant member of a binding block.
+type BindingConst struct {
+	Name  string
+	CName string
+	Type  TypeId
+}
+
+// BindingBlock is one module-level `import c "header" as name` binding
+// declaration. Types lists the block's TypeCNamed members in declaration
+// order; their spellings and classes live on the type entries.
+type BindingBlock struct {
+	Name   string
+	Header string
+	Types  []TypeId
+	Funcs  []BindingFunc
+	Consts []BindingConst
 }
 
 // ConstKind classifies a constant value.
@@ -214,10 +247,11 @@ type Instr struct {
 	TableVal ValueId
 	View     ValueId
 
-	// const.get / call / ffi.call.unsafe
+	// const.get / call / ffi.call.unsafe / c.call.unsafe
 	Const     string
 	Callee    FunctionId
 	FFIImport ImportId
+	CBinding  int // flattened block-major index into Module.Bindings functions
 	Args      []ValueId
 
 	// Checked operations: the explicit failure edge. Required for checked
@@ -306,6 +340,36 @@ type Terminator struct {
 func (m *Module) AddImport(name string, sig FuncSig) ImportId {
 	m.Imports = append(m.Imports, ImportDecl{Name: name, Sig: sig})
 	return ImportId(len(m.Imports) - 1)
+}
+
+// AddBinding appends an empty C binding block and returns its index.
+func (m *Module) AddBinding(name, header string) int {
+	m.Bindings = append(m.Bindings, BindingBlock{Name: name, Header: header})
+	return len(m.Bindings) - 1
+}
+
+// BindingFuncCount returns the flattened block-major count of binding
+// functions across every block.
+func (m *Module) BindingFuncCount() int {
+	n := 0
+	for i := range m.Bindings {
+		n += len(m.Bindings[i].Funcs)
+	}
+	return n
+}
+
+// BindingFuncAt resolves a flattened block-major binding-function index.
+func (m *Module) BindingFuncAt(index int) (block int, fn *BindingFunc, ok bool) {
+	if index < 0 {
+		return 0, nil, false
+	}
+	for i := range m.Bindings {
+		if index < len(m.Bindings[i].Funcs) {
+			return i, &m.Bindings[i].Funcs[index], true
+		}
+		index -= len(m.Bindings[i].Funcs)
+	}
+	return 0, nil, false
 }
 
 // AddConst appends a named constant declaration.

@@ -504,6 +504,33 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 			b.WriteString(g.valueExpr(a))
 		}
 		b.WriteString(");\n")
+
+	case mir.OpCBindingCall:
+		_, fn, ok := g.m.BindingFuncAt(in.CBinding)
+		if !ok {
+			b.WriteString("  /* unreachable binding call */\n")
+			break
+		}
+		b.WriteString("  ")
+		if fn.Sig.Result != mir.TypeUnit {
+			b.WriteString(g.val(in.Result) + " = ")
+		}
+		b.WriteString("(" + fn.CName + ")(")
+		first := true
+		for i, a := range in.Args {
+			if fn.Sig.Params[i] == mir.TypeUnit {
+				continue
+			}
+			if !first {
+				b.WriteString(", ")
+			}
+			first = false
+			b.WriteString(g.valueExpr(a))
+		}
+		b.WriteString(");\n")
+
+	case mir.OpCIsNull:
+		b.WriteString("  " + g.val(in.Result) + " = (bool)((" + g.valueExpr(in.A) + ") == (void *)0);\n")
 	}
 }
 

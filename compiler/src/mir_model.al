@@ -7,7 +7,7 @@
 // Builders append but do not validate or normalize records, so rejection tests
 // may construct malformed raw stores.
 
-fn mir_format_version() -> U64 { return 5 }
+fn mir_format_version() -> U64 { return 6 }
 
 // TypeKind values match mir/types.go exactly. Primitive Type IDs are external
 // IDs 1..12 in the fixed Go order unit, bool, i8, i16, i32, i64, u8, u16,
@@ -34,6 +34,10 @@ fn mir_type_kind_array() -> U64 { return 18 }
 fn mir_type_kind_string() -> U64 { return 19 }
 fn mir_type_kind_bytes() -> U64 { return 20 }
 fn mir_type_kind_vec() -> U64 { return 21 }
+fn mir_type_kind_c_raw() -> U64 { return 22 }
+fn mir_type_kind_c_ptr() -> U64 { return 23 }
+fn mir_type_kind_c_const_ptr() -> U64 { return 24 }
+fn mir_type_kind_c_named() -> U64 { return 25 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }
@@ -58,6 +62,15 @@ fn mir_type_part_field() -> U64 { return 1 }
 fn mir_type_part_variant() -> U64 { return 2 }
 fn mir_type_part_function_param() -> U64 { return 3 }
 fn mir_type_part_function_env() -> U64 { return 4 }
+fn mir_type_part_c_field() -> U64 { return 5 }
+
+// CClass values match mir/types.go: scalar, opaque, record.
+fn mir_c_class_scalar() -> U64 { return 0 }
+fn mir_c_class_opaque() -> U64 { return 1 }
+fn mir_c_class_record() -> U64 { return 2 }
+
+// C scalar ids for TypeCRaw payloads, matching mir/types.go order.
+fn mir_c_scalar_count() -> U64 { return 15 }
 
 fn mir_const_unit() -> U64 { return 0 }
 fn mir_const_bool() -> U64 { return 1 }
@@ -147,6 +160,8 @@ fn mir_op_call_value() -> U64 { return 65 }
 fn mir_op_str_eq() -> U64 { return 66 }
 fn mir_op_fn_value() -> U64 { return 67 }
 fn mir_op_table_insert_try() -> U64 { return 68 }
+fn mir_op_c_binding_call() -> U64 { return 69 }
+fn mir_op_c_is_null() -> U64 { return 70 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }
@@ -164,6 +179,8 @@ fn mir_operand_terminator_arg() -> U64 { return 5 }
 fn mir_operand_switch_case() -> U64 { return 6 }
 fn mir_operand_switch_case_arg() -> U64 { return 7 }
 fn mir_operand_aggregate_field() -> U64 { return 8 }
+fn mir_operand_binding_param() -> U64 { return 9 }
+fn mir_operand_binding_type() -> U64 { return 10 }
 
 fn mir_edge_jump() -> U64 { return 0 }
 fn mir_edge_then() -> U64 { return 1 }
@@ -172,7 +189,9 @@ fn mir_edge_else() -> U64 { return 2 }
 // Type kinds mirror mir/types.go: primitive, aggregate, enum, option, result,
 // slice, safe_ref, safe_mut, raw_ptr, function, domain_handle, domain_mark,
 // cleanup_scope, cleanup_id, table, id, table_view, table_mut_view, array,
-// string, bytes, and vec.
+// string, bytes, vec, c_raw, c_ptr, c_const_ptr, and c_named. c_name carries
+// the C spelling of a c_named member (empty elsewhere), c_class its binding
+// class, and length the c_raw C-scalar id.
 type MirTypeRec {
     kind: U64
     name_start: U64
@@ -184,6 +203,9 @@ type MirTypeRec {
     part_count: U64
     result_type: U64
     length: U64
+    c_name_start: U64
+    c_name_end: U64
+    c_class: U64
 }
 
 // owner is an external Type ID and ordinal is contiguous and zero-based within
@@ -191,6 +213,7 @@ type MirTypeRec {
 // reciprocal owner scan. first_part/part_count is used only by anonymous
 // function types and must describe the same contiguous function-parameter
 // records; named types deliberately remain append-only while parts are added.
+// c_name carries the C field spelling of a c_field part (empty elsewhere).
 type MirTypePartRec {
     kind: U64
     owner: U64
@@ -198,6 +221,8 @@ type MirTypePartRec {
     name_start: U64
     name_end: U64
     part_type: U64
+    c_name_start: U64
+    c_name_end: U64
 }
 
 type MirImportRec {
@@ -319,6 +344,37 @@ type MirTermRec {
     else_block: U64
 }
 
+// One C binding block: the Alder-visible name, the quoted header, and the
+// members. Types are ordered operand records (kind binding_type, owner =
+// external block ID) whose operand_type is the c_named Type ID. Functions and
+// constants are dedicated records below; a function's parameters are ordered
+// operand records (kind binding_param, owner = external flat function ID).
+// Buffer order is block-major and matches the Go flat BindingFunc indices.
+type MirBindingRec {
+    name_start: U64
+    name_end: U64
+    header_start: U64
+    header_end: U64
+}
+
+type MirBindingFnRec {
+    block: U64
+    name_start: U64
+    name_end: U64
+    c_name_start: U64
+    c_name_end: U64
+    result_type: U64
+}
+
+type MirBindingConstRec {
+    block: U64
+    name_start: U64
+    name_end: U64
+    c_name_start: U64
+    c_name_end: U64
+    const_type: U64
+}
+
 // Every owner is an external ID: type ID for type parts, import ID for import
 // parameters, global instruction ID for instruction operands/checked arguments
 // and aggregate fields, global terminator ID for terminator arguments/switch
@@ -354,6 +410,9 @@ type MirStore {
     instructions: __s0_Buffer(MirInstrRec)
     terminators: __s0_Buffer(MirTermRec)
     operands: __s0_Buffer(MirOperandRec)
+    bindings: __s0_Buffer(MirBindingRec)
+    binding_funcs: __s0_Buffer(MirBindingFnRec)
+    binding_consts: __s0_Buffer(MirBindingConstRec)
 }
 
 type MirTypeStep {

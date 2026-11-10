@@ -47,5 +47,9 @@ func rawUseAllowed(m *mir.Module, f *mir.Function, u useSite) bool {
 			}
 		}
 	}
+	if in.Op == mir.OpCIsNull && in.A == u.value {
+		// A null test reads the pointer without exposing its target.
+		return true
+	}
 	return false
 }

@@ -356,7 +356,7 @@ func TestM75LoopVecProductionQualification(t *testing.T) {
 			t.Parallel()
 			files := map[string]string{program.name: program.text}
 			mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", program.name)
-			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+			if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 				t.Fatalf("%s MIR result: %+v stderr=%s", program.name, mirText, mirText.stderr)
 			}
 			cResult := runProductionCompiler(t, exe, files, "compile", "--emit=c", program.name)

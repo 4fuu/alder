@@ -48,6 +48,63 @@ func Print(m *Module) string {
 		b.WriteString("\n")
 	}
 
+	for bi := range m.Bindings {
+		bind := &m.Bindings[bi]
+		b.WriteString("\nbinding @" + bind.Name + " " + strconv.Quote(bind.Header) + " {\n")
+		for _, id := range bind.Types {
+			ty := &m.Types[id]
+			b.WriteString("  c_type ")
+			switch ty.CClass {
+			case CClassScalar:
+				b.WriteString("scalar ")
+			case CClassOpaque:
+				b.WriteString("opaque ")
+			case CClassRecord:
+				b.WriteString("record ")
+			}
+			b.WriteString("@" + ty.Name + " = " + strconv.Quote(ty.CName))
+			if ty.CClass == CClassRecord {
+				b.WriteString(" {")
+				for i, fld := range ty.Fields {
+					if i > 0 {
+						b.WriteString(",")
+					}
+					b.WriteString(" " + fld.Name + ": " + m.TypeString(fld.Type))
+					if fld.CName != fld.Name {
+						b.WriteString(" = " + strconv.Quote(fld.CName))
+					}
+				}
+				if len(ty.Fields) > 0 {
+					b.WriteString(" ")
+				}
+				b.WriteString("}")
+			}
+			b.WriteString("\n")
+		}
+		for _, fn := range bind.Funcs {
+			b.WriteString("  c_fn @" + fn.Name)
+			if fn.CName != fn.Name {
+				b.WriteString(" = " + strconv.Quote(fn.CName))
+			}
+			b.WriteString("(")
+			for i, p := range fn.Sig.Params {
+				if i > 0 {
+					b.WriteString(", ")
+				}
+				b.WriteString(m.TypeString(p))
+			}
+			b.WriteString(") -> " + m.TypeString(fn.Sig.Result) + "\n")
+		}
+		for _, c := range bind.Consts {
+			b.WriteString("  c_const @" + c.Name)
+			if c.CName != c.Name {
+				b.WriteString(" = " + strconv.Quote(c.CName))
+			}
+			b.WriteString(": " + m.TypeString(c.Type) + "\n")
+		}
+		b.WriteString("}\n")
+	}
+
 	for _, f := range m.Functions {
 		if f == nil {
 			continue
@@ -151,6 +208,16 @@ func importName(m *Module, id ImportId) string {
 		return "<invalid import>"
 	}
 	return m.Imports[id].Name
+}
+
+// bindingFuncName renders a flattened block-major binding-function index as
+// its "@block.function" reference.
+func bindingFuncName(m *Module, index int) string {
+	block, fn, ok := m.BindingFuncAt(index)
+	if !ok {
+		return "<invalid binding function>"
+	}
+	return m.Bindings[block].Name + "." + fn.Name
 }
 
 func blockName(f *Function, id BlockId) string {
@@ -339,6 +406,12 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(" @" + importName(m, in.FFIImport) + "(")
 		printArgs(b, f, in.Args)
 		b.WriteString(")")
+	case OpCBindingCall:
+		b.WriteString(" @" + bindingFuncName(m, in.CBinding) + "(")
+		printArgs(b, f, in.Args)
+		b.WriteString(")")
+	case OpCIsNull:
+		b.WriteString(" " + valueName(f, in.A))
 	case OpCallValue:
 		b.WriteString(" " + valueName(f, in.A) + "(")
 		printArgs(b, f, in.Args)

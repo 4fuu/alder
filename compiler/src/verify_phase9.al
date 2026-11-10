@@ -1,12 +1,15 @@
 // Phase 9 permits values whose type recursively contains raw_ptr only at the
-// two explicit unsafe MIR boundaries: unsafe FFI arguments and a
-// function return/fail operand. The complete V4 use inventory keeps places,
-// edge arguments, aggregates, safe calls, and nested raw values on one stable
-// declaration-ordered path.
+// explicit unsafe MIR boundaries: unsafe FFI arguments, c.is_null operands,
+// and a function return/fail operand. The complete V4 use inventory keeps
+// places, edge arguments, aggregates, safe calls, and nested raw values on
+// one stable declaration-ordered path.
 fn mir_v9_use_allowed(store: MirStore, function: U64, use: MirVP4Use) -> Bool {
     if use.instruction != 0 {
         let instruction = __s0_buffer_get(MirInstrRec, store.instructions, use.instruction - 1)
-        return instruction.function == function && instruction.op == mir_op_ffi_call_unsafe() && use.operand != 0
+        if instruction.function != function || use.operand == 0 { return false }
+        if instruction.op == mir_op_ffi_call_unsafe() { return true }
+        // A null test reads the pointer without exposing its target.
+        return instruction.op == mir_op_c_is_null() && use.value == instruction.a
     }
     if use.terminator != 0 {
         let term = __s0_buffer_get(MirTermRec, store.terminators, use.terminator - 1)

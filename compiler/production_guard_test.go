@@ -69,7 +69,7 @@ func TestM75GuardProductionQualification(t *testing.T) {
 
 	files := map[string]string{"m75-guards.al": m75GuardProgram}
 	mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "m75-guards.al")
-	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 		t.Fatalf("guard MIR result: %+v stderr=%s", mirText, mirText.stderr)
 	}
 	repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "m75-guards.al")

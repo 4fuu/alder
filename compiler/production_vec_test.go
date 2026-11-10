@@ -88,7 +88,7 @@ func TestM75VecProductionQualification(t *testing.T) {
 
 	files := map[string]string{"m75-vec-drain.al": m75VecDrainProgram}
 	mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "m75-vec-drain.al")
-	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 		t.Fatalf("vec drain MIR result: %+v stderr=%s", mirText, mirText.stderr)
 	}
 	repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "m75-vec-drain.al")

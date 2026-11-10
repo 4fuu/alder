@@ -227,6 +227,37 @@ fn mir_v5_args_match(store: MirStore, indexes: MirVIndexes, function: U64, instr
     return true
 }
 
+// C binding-call arguments match declared parameter types exactly, with the
+// one mutable-to-const widening c_ptr(E) -> c_const_ptr(E).
+fn mir_v5_binding_arg_ok(store: MirStore, got: U64, want: U64) -> Bool {
+    if got == want { return true }
+    if !mir_vtype_exists(store, got) || !mir_vtype_exists(store, want) { return false }
+    let g = __s0_buffer_get(MirTypeRec, store.types, got - 1)
+    let w = __s0_buffer_get(MirTypeRec, store.types, want - 1)
+    if g.kind != mir_type_kind_c_ptr() || w.kind != mir_type_kind_c_const_ptr() { return false }
+    return g.elem == w.elem
+}
+
+fn mir_v5_binding_args_match(store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, target: U64) -> Bool {
+    let got = mir_v5_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
+    let want = mir_v5_operand_count(store, indexes, mir_operand_binding_param(), target, 0)
+    if got != want { return false }
+    var ordinal: U64 = 0
+    while ordinal < got {
+        let argument = __s0_buffer_get(MirOperandRec, store.operands, mir_v5_operand(store, indexes, mir_operand_instruction(), instruction, 0, ordinal) - 1)
+        let expected = __s0_buffer_get(MirOperandRec, store.operands, mir_v5_operand(store, indexes, mir_operand_binding_param(), target, 0, ordinal) - 1).operand_type
+        if !mir_v5_binding_arg_ok(store, mir_v5_value_type(store, indexes, function, argument.value), expected) { return false }
+        ordinal = ordinal + 1
+    }
+    return true
+}
+
+fn mir_v5_is_raw_pointer(store: MirStore, t: U64) -> Bool {
+    if !mir_vtype_exists(store, t) { return false }
+    let kind = mir_vtype_kind(store, t)
+    return kind == mir_type_kind_raw_ptr() || kind == mir_type_kind_c_ptr() || kind == mir_type_kind_c_const_ptr()
+}
+
 fn mir_v5_aggregate_matches(store: MirStore, indexes: MirVIndexes, function: U64, instruction: U64, type_id: U64) -> Bool {
     let kind = mir_vtype_kind(store, type_id)
     if kind != mir_type_kind_aggregate() && kind != mir_type_kind_array() { return false }
@@ -348,6 +379,11 @@ if x.type_op == mir_fn_value_domain_marker() {
 let found = mir_v5_find_function_type_based(store, indexes, x.target, param_base, param_total, callee.result_type, 0)
 return MirVTypeResult(valid: found != 0, type_id: found) }
     if x.op == mir_op_ffi_call_unsafe() { return MirVTypeResult(valid: mir_v5_args_match(store, indexes, x.function, id, x.target, true), type_id: __s0_buffer_get(MirImportRec, store.imports, x.target - 1).result_type) }
+    if x.op == mir_op_c_binding_call() {
+        if x.target == 0 || x.target > __s0_buffer_len(MirBindingFnRec, store.binding_funcs) { return MirVTypeResult(valid: false, type_id: 0) }
+        return MirVTypeResult(valid: mir_v5_binding_args_match(store, indexes, x.function, id, x.target), type_id: __s0_buffer_get(MirBindingFnRec, store.binding_funcs, x.target - 1).result_type)
+    }
+    if x.op == mir_op_c_is_null() { return MirVTypeResult(valid: x.a != 0 && mir_v5_is_raw_pointer(store, mir_v5_value_type(store, indexes, x.function, x.a)), type_id: mir_type_bool()) }
     return MirVTypeResult(valid: false, type_id: 0)
 }
 
@@ -363,7 +399,7 @@ fn mir_v5_type_part(store: MirStore, owner: U64, kind: U64, ordinal: U64) -> Mir
         }
         at = at + 1
     }
-    return MirTypePartRec(kind: 0, owner: 0, ordinal: 0, name_start: 0, name_end: 0, part_type: 0)
+    return MirTypePartRec(kind: 0, owner: 0, ordinal: 0, name_start: 0, name_end: 0, part_type: 0, c_name_start: 0, c_name_end: 0)
 }
 
 // fn.value's result type is the interned function type whose parameters,
@@ -432,6 +468,19 @@ var expected: U64 = 0
 if import_call { let pi = mir_v5_operand(store, indexes, mir_operand_import_param(), target, 0, n)
 expected = __s0_buffer_get(MirOperandRec, store.operands, pi - 1).operand_type } else { expected = mir_v5_param_type(store, indexes, target, 0, mir_param_function(), n) }
 result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, oi, o.value, expected)
+n = n + 1 }
+return Ok(result) }
+
+fn mir_v5_check_binding_args(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), x: MirInstrRec, id: U64, target: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var result = out
+let got = mir_v5_operand_count(store, indexes, mir_operand_instruction(), id, 0)
+let want = mir_v5_operand_count(store, indexes, mir_operand_binding_param(), target, 0)
+if got != want { return mir_v5_bad(d, result, mir_vdiag_bad_argument_count(), x.function, x.block, id, 0, 0, want, got, target) }
+var n: U64 = 0
+while n < got { let oi = mir_v5_operand(store, indexes, mir_operand_instruction(), id, 0, n)
+let o = __s0_buffer_get(MirOperandRec, store.operands, oi - 1)
+let pi = mir_v5_operand(store, indexes, mir_operand_binding_param(), target, 0, n)
+let expected = __s0_buffer_get(MirOperandRec, store.operands, pi - 1).operand_type
+if !mir_v5_binding_arg_ok(store, mir_v5_value_type(store, indexes, x.function, o.value), expected) { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, oi, expected, mir_v5_value_type(store, indexes, x.function, o.value), o.value) }
 n = n + 1 }
 return Ok(result) }
 
@@ -514,6 +563,11 @@ if x.op == mir_op_float_from_int() { valid = mir_v5_is_int(ta) && mir_v5_is_floa
 if !valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_conversion(), x.function, x.block, id, 0, 0, x.type_op, ta, x.a) } }
     if x.op == mir_op_call() { result = try mir_v5_check_args(d, store, indexes, result, x, id, x.target, false) }
     if x.op == mir_op_ffi_call_unsafe() { result = try mir_v5_check_args(d, store, indexes, result, x, id, x.target, true) }
+    if x.op == mir_op_c_binding_call() {
+        if x.target == 0 || x.target > __s0_buffer_len(MirBindingFnRec, store.binding_funcs) { result = try mir_v5_bad(d, result, mir_vdiag_bad_owner(), x.function, x.block, id, 0, 0, 0, x.target, x.target) }
+        else { result = try mir_v5_check_binding_args(d, store, indexes, result, x, id, x.target) }
+    }
+    if x.op == mir_op_c_is_null() && !mir_v5_is_raw_pointer(store, mir_v5_value_type(store, indexes, x.function, x.a)) { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_c_ptr(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
     if mir_vop_checked(x.op) { result = try mir_v5_edge(d, store, indexes, result, x.function, x.block, id, 0, mir_operand_checked_edge_arg(), id, 0, x.target) }
     if x.result != 0 { let inferred = mir_v5_infer(store, indexes, id, x)
 let stored = mir_v5_value_type(store, indexes, x.function, x.result)

@@ -56,7 +56,68 @@ const (
 	TypeBytes
 	// TypeVec is an owned growable vector value.
 	TypeVec
+	// TypeCRaw is a target-ABI C scalar from the c_* vocabulary. Length
+	// carries the CScalar id. Raw C scalars appear only in binding
+	// declarations and unsafe boundaries.
+	TypeCRaw
+	// TypeCPtr is c_ptr(T), a nullable raw C pointer to T.
+	TypeCPtr
+	// TypeCConstPtr is c_const_ptr(T), a nullable read-only raw C pointer.
+	TypeCConstPtr
+	// TypeCNamed is one named C binding type member: scalar, opaque, or
+	// record. CName carries the C spelling and CClass the binding class.
+	TypeCNamed
 )
+
+// CClass classifies a TypeCNamed binding type.
+type CClass uint8
+
+const (
+	// CClassScalar is a C scalar typedef or enum spelled by the binding.
+	CClassScalar CClass = iota
+	// CClassOpaque is a C typedef, struct, or union name used behind
+	// pointers only.
+	CClassOpaque
+	// CClassRecord is a complete non-bitfield record used by value and by
+	// field access.
+	CClassRecord
+)
+
+// C scalar ids for TypeCRaw payloads, in textual and declaration order.
+const (
+	CScalarChar = iota
+	CScalarSChar
+	CScalarUChar
+	CScalarShort
+	CScalarUShort
+	CScalarInt
+	CScalarUInt
+	CScalarLong
+	CScalarULong
+	CScalarLongLong
+	CScalarULongLong
+	CScalarFloat
+	CScalarDouble
+	CScalarSize
+	CScalarPtrdiff
+	// NumCScalars counts the raw C scalar vocabulary.
+	NumCScalars
+)
+
+// cScalarNames mirrors the C scalar ids in order.
+var cScalarNames = [NumCScalars]string{
+	"c_char", "c_schar", "c_uchar", "c_short", "c_ushort", "c_int", "c_uint",
+	"c_long", "c_ulong", "c_llong", "c_ullong", "c_float", "c_double",
+	"c_size", "c_ptrdiff",
+}
+
+// CScalarName returns the textual name of a raw C scalar id.
+func CScalarName(id uint64) (string, bool) {
+	if id < NumCScalars {
+		return cScalarNames[id], true
+	}
+	return "", false
+}
 
 // Canonical primitive TypeIds occupy the first slots of every module type
 // table. Their kinds are TypePrimitive and their meaning is implied by the
@@ -91,10 +152,12 @@ func PrimitiveName(t TypeId) (string, bool) {
 	return "", false
 }
 
-// Field is a named aggregate field.
+// Field is a named aggregate field. CName carries the C field spelling of a
+// record binding member and is empty for ordinary aggregates.
 type Field struct {
-	Name string
-	Type TypeId
+	Name  string
+	Type  TypeId
+	CName string
 }
 
 // Variant is an enum variant. Payload is TypeUnit when the variant carries no
@@ -116,14 +179,16 @@ type FuncSig struct {
 // Type is one entry of a Module type table.
 type Type struct {
 	Kind     TypeKind
-	Name     string    // non-empty for named aggregate and enum declarations
-	Fields   []Field   // TypeAggregate
+	Name     string    // non-empty for named aggregate, enum, and C binding declarations
+	Fields   []Field   // TypeAggregate; record fields of a TypeCNamed with CClassRecord
 	Variants []Variant // TypeEnum
-	Elem     TypeId    // option, slice, safe_ref, safe_mut, raw_ptr, table, id, table_view, table_mut_view, array
-	Length   uint64    // TypeArray
+	Elem     TypeId    // option, slice, safe_ref, safe_mut, raw_ptr, table, id, table_view, table_mut_view, array, c_ptr, c_const_ptr
+	Length   uint64    // TypeArray; the CScalar id of TypeCRaw
 	OK       TypeId    // TypeResult
 	Err      TypeId    // TypeResult
 	Sig      FuncSig   // TypeFunction
+	CName    string    // TypeCNamed: the C spelling
+	CClass   CClass    // TypeCNamed: scalar, opaque, or record
 }
 
 // ValidType reports whether t is a defined type of the module.
@@ -190,6 +255,17 @@ func (m *Module) TypeString(t TypeId) string {
 		return "table_mut_view(" + m.TypeString(ty.Elem) + ")"
 	case TypeArray:
 		return "array(" + m.TypeString(ty.Elem) + ", " + strconv.FormatUint(ty.Length, 10) + ")"
+	case TypeCRaw:
+		if name, ok := CScalarName(ty.Length); ok {
+			return name
+		}
+		return "<invalid c scalar " + strconv.FormatUint(ty.Length, 10) + ">"
+	case TypeCPtr:
+		return "c_ptr(" + m.TypeString(ty.Elem) + ")"
+	case TypeCConstPtr:
+		return "c_const_ptr(" + m.TypeString(ty.Elem) + ")"
+	case TypeCNamed:
+		return "@" + ty.Name
 	case TypeString:
 		return "string"
 	case TypeBytes:
@@ -260,11 +336,11 @@ func (m *Module) ElemType(t TypeId) (TypeId, bool) {
 	return NoType, false
 }
 
-// NamedType resolves a named aggregate or enum declaration by name.
+// NamedType resolves a named aggregate, enum, or C binding declaration by name.
 func (m *Module) NamedType(name string) (TypeId, bool) {
 	for i := NumPrimitiveTypes; i < TypeId(len(m.Types)); i++ {
 		t := &m.Types[i]
-		if (t.Kind == TypeAggregate || t.Kind == TypeEnum) && t.Name == name {
+		if (t.Kind == TypeAggregate || t.Kind == TypeEnum || t.Kind == TypeCNamed) && t.Name == name {
 			return i, true
 		}
 	}
@@ -354,6 +430,13 @@ func (m *Module) AddEnum(name string, variants []Variant) TypeId {
 	return TypeId(len(m.Types) - 1)
 }
 
+// AddCNamed appends a named C binding type member and returns its TypeId.
+// C binding types are declared once by a binding block and never interned.
+func (m *Module) AddCNamed(name, cName string, class CClass, fields []Field) TypeId {
+	m.Types = append(m.Types, Type{Kind: TypeCNamed, Name: name, CName: cName, CClass: class, Fields: fields})
+	return TypeId(len(m.Types) - 1)
+}
+
 // Option interns and returns option(elem).
 func (m *Module) Option(elem TypeId) TypeId {
 	return m.intern(TypeOption, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
@@ -402,6 +485,21 @@ func (m *Module) SafeMut(elem TypeId) TypeId {
 // RawPtr interns and returns raw_ptr(elem).
 func (m *Module) RawPtr(elem TypeId) TypeId {
 	return m.intern(TypeRawPtr, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
+}
+
+// CRaw interns and returns the raw C scalar with the given CScalar id.
+func (m *Module) CRaw(id uint64) TypeId {
+	return m.intern(TypeCRaw, func(t *Type) bool { return t.Length == id }, func(t *Type) { t.Length = id })
+}
+
+// CPtr interns and returns c_ptr(elem).
+func (m *Module) CPtr(elem TypeId) TypeId {
+	return m.intern(TypeCPtr, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
+}
+
+// CConstPtr interns and returns c_const_ptr(elem).
+func (m *Module) CConstPtr(elem TypeId) TypeId {
+	return m.intern(TypeCConstPtr, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })
 }
 
 // FunctionType interns and returns function(sig).

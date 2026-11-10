@@ -42,6 +42,47 @@ fn mir_v10_external_name(store: MirStore, start: U64, end: U64) -> Bool {
     if mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while") { return false }
     return !mir_v10_header_name(store, start, end)
 }
+// Binding spellings reference C names rather than declare them, so header
+// families like time_t and macro-style constants such as CLOCKS_PER_SEC are
+// legal; a wrong spelling is caught by the generated probes. Still rejected:
+// leading underscores, C keywords, and the runtime namespace.
+fn mir_v10_binding_name(store: MirStore, start: U64, end: U64) -> Bool {
+    if !mir_vname_valid(store, start, end, false) || __s0_buffer_get(U8, store.names, start) == 95 { return false }
+    if mir_v10_name_prefix(store, start, end, "alder_") || mir_v10_name_prefix(store, start, end, "ALDER_") || mir_v10_name_prefix(store, start, end, "Alder") { return false }
+    return !mir_v10_name_list(store, start, end, "_Alignas,_Alignof,_Atomic,_Bool,_Complex,_Generic,_Imaginary,_Noreturn,_Static_assert,_Thread_local,auto,break,case,char,const,continue,default,do,double,else,enum,extern,float,for,goto,if,inline,int,long,register,restrict,return,short,signed,sizeof,static,struct,switch,typedef,union,unsigned,void,volatile,while")
+}
+
+fn mir_v10_bindings(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    var fn_at: U64 = 0
+    while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+        let item = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+        if !mir_v10_binding_name(store, item.c_name_start, item.c_name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, item.block, fn_at + 1, 0, 0, fn_at + 1)) }
+        fn_at = fn_at + 1
+    }
+    var const_at: U64 = 0
+    while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+        let item = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+        if !mir_v10_binding_name(store, item.c_name_start, item.c_name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, item.block, const_at + 1, 0, 0, const_at + 1)) }
+        const_at = const_at + 1
+    }
+    var at: U64 = mir_primitive_type_count()
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let t = __s0_buffer_get(MirTypeRec, store.types, at)
+        if t.kind == mir_type_kind_c_named() {
+            if !mir_v10_binding_name(store, t.c_name_start, t.c_name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, at + 1, at + 1, 0, 0, at + 1)) }
+            var field_at: U64 = 0
+            while field_at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+                let part = __s0_buffer_get(MirTypePartRec, store.type_parts, field_at)
+                if part.owner == at + 1 && part.kind == mir_type_part_c_field() && !mir_v10_binding_name(store, part.c_name_start, part.c_name_end) { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_c_external_name(), 0, 0, 0, 0, 0, at + 1, field_at + 1, 0, 0, field_at + 1)) }
+                field_at = field_at + 1
+            }
+        }
+        at = at + 1
+    }
+    return Ok(out)
+}
+
 fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
     // A closure environment record records the domain that owns it; the
     // retain hook rewrites that field when the record moves domains.
@@ -52,6 +93,10 @@ fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, t
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_view()) { return Ok(mir_type_kind_table_view()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_mut_view()) { return Ok(mir_type_kind_table_mut_view()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_raw()) { return Ok(mir_type_kind_c_raw()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_ptr()) { return Ok(mir_type_kind_c_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_const_ptr()) { return Ok(mir_type_kind_c_const_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_named()) { return Ok(mir_type_kind_c_named()) }
     return Ok(0)
 }
 fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
@@ -63,6 +108,10 @@ fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_view()) { return Ok(mir_type_kind_table_view()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_table_mut_view()) { return Ok(mir_type_kind_table_mut_view()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_raw_ptr()) { return Ok(mir_type_kind_raw_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_raw()) { return Ok(mir_type_kind_c_raw()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_ptr()) { return Ok(mir_type_kind_c_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_const_ptr()) { return Ok(mir_type_kind_c_const_ptr()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_named()) { return Ok(mir_type_kind_c_named()) }
     return Ok(0)
 }
 fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
@@ -79,7 +128,7 @@ if x.op == mir_op_copy_to_domain() { let copied_type = mir_v5_value_type(store, 
 let forbidden = try mir_v10_forbidden_copy(d, store, indexes, copied_type)
 if forbidden != 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_copy_source_type(), x.function, x.block, iid, 0, 0, copied_type, 0, 0, forbidden, copied_type)) } }
 iid = iid + 1 }
-    return Ok(out)
+    return mir_v10_bindings(d, store, out)
 }
 
 fn mir_v10_param_count(store: MirStore, function: U64) -> U64 {

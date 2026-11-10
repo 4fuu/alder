@@ -31,6 +31,8 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op >= mir_op_vec_len() && op <= mir_op_vec_as_mut_slice() { return 1 }
     if op == mir_op_array_as_slice() || op == mir_op_call_value() || op == mir_op_str_eq() { return 1 }
     if op == mir_op_fn_value() { return 32 }
+    if op == mir_op_c_binding_call() { return 32 }
+    if op == mir_op_c_is_null() { return 1 }
     return 0
 }
 // Flat (kind, owner) key for operand ordinal counting. Zero means the
@@ -73,6 +75,16 @@ fn mir_v1q_operand_key(store: MirStore, o: MirOperandRec) -> U64 {
         if o.owner >= 1 && o.owner <= operand_total { return type_total + import_total + instr_total * 3 + term_total * 2 + o.owner }
         return 0
     }
+    let bf_total = __s0_buffer_len(MirBindingFnRec, store.binding_funcs)
+    let block_total = __s0_buffer_len(MirBindingRec, store.bindings)
+    if o.kind == mir_operand_binding_param() {
+        if o.owner >= 1 && o.owner <= bf_total { return type_total + import_total + instr_total * 3 + term_total * 2 + operand_total + o.owner }
+        return 0
+    }
+    if o.kind == mir_operand_binding_type() {
+        if o.owner >= 1 && o.owner <= block_total { return type_total + import_total + instr_total * 3 + term_total * 2 + operand_total + bf_total + o.owner }
+        return 0
+    }
     return 0
 }
 fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
@@ -88,15 +100,18 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
         } else {
-            if t.kind > mir_type_kind_vec() || t.kind == mir_type_kind_primitive() {
-                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_vec(), t.kind, 0))
+            if t.kind > mir_type_kind_c_named() || t.kind == mir_type_kind_primitive() {
+                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_c_named(), t.kind, 0))
             } else {
                 if t.kind == mir_type_kind_vec() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 4, version, 0)) }
+                if t.kind == mir_type_kind_c_raw() && version < 6 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 6, version, 0)) }
                 let named = t.name_start != t.name_end
-                let named_kind = t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum()
+                let named_kind = t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_c_named()
                 if (named_kind && !named) || (!named_kind && named) || (named && !mir_vname_valid(store, t.name_start, t.name_end, true)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, id, id, 0, 0, 0)) }
                 let leaf = t.kind == mir_type_kind_string() || t.kind == mir_type_kind_bytes()
-                if (t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) || (leaf && (t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
+                let c_kind = t.kind == mir_type_kind_c_raw() || t.kind == mir_type_kind_c_ptr() || t.kind == mir_type_kind_c_const_ptr() || t.kind == mir_type_kind_c_named()
+                if (!c_kind && t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) || (leaf && (t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
+                if c_kind && !mir_vc_type_shape_ok(store, t) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
                 var prior: U64 = mir_primitive_type_count()
                 while named && prior < at {
                     let p = __s0_buffer_get(MirTypeRec, store.types, prior)
@@ -1023,12 +1038,13 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_table_insert_try() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_table_insert_try(), i.op, 0)) } else {
+        if i.op > mir_op_c_is_null() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_c_is_null(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false
             if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).result_type == mir_type_unit() { droppable = true }
             if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) && __s0_buffer_get(MirImportRec, store.imports, i.target - 1).result_type == mir_type_unit() { droppable = true }
+            if i.op == mir_op_c_binding_call() && mir_vid_valid(i.target, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) && __s0_buffer_get(MirBindingFnRec, store.binding_funcs, i.target - 1).result_type == mir_type_unit() { droppable = true }
             if (produces && !has_result && !droppable) || (!produces && has_result) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_result(), i.function, i.block, id, 0, 0, 0, id, 0, i.result, 0)) }
             let fail_count = fail_counts[id]
             let checked = mir_vop_checked(i.op)
@@ -1382,9 +1398,14 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
         let o = __s0_buffer_get(MirOperandRec, store.operands, at)
         let id = at + 1
         var owner_ok = true
-        if o.kind < mir_operand_type_part() || o.kind > mir_operand_aggregate_field() { owner_ok = false }
+        if o.kind < mir_operand_type_part() || o.kind > mir_operand_binding_type() { owner_ok = false }
         if o.kind == mir_operand_type_part() { owner_ok = mir_vtype_exists(store, o.owner) }
         if o.kind == mir_operand_import_param() { owner_ok = mir_vid_valid(o.owner, import_total) }
+        if o.kind == mir_operand_binding_param() { owner_ok = mir_vid_valid(o.owner, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) && mir_vtype_exists(store, o.operand_type) }
+        if o.kind == mir_operand_binding_type() {
+            owner_ok = mir_vid_valid(o.owner, __s0_buffer_len(MirBindingRec, store.bindings)) && mir_vtype_exists(store, o.operand_type)
+            if owner_ok && __s0_buffer_get(MirTypeRec, store.types, o.operand_type - 1).kind != mir_type_kind_c_named() { owner_ok = false }
+        }
         if o.kind == mir_operand_instruction() || o.kind == mir_operand_checked_edge_arg() || o.kind == mir_operand_aggregate_field() { owner_ok = mir_vid_valid(o.owner, instr_total) }
         if o.kind == mir_operand_terminator_arg() || o.kind == mir_operand_switch_case() { owner_ok = mir_vid_valid(o.owner, term_total) }
         if o.kind == mir_operand_switch_case_arg() { owner_ok = mir_vid_valid(o.owner, operand_total) && __s0_buffer_get(MirOperandRec, store.operands, o.owner - 1).kind == mir_operand_switch_case() }
@@ -1437,6 +1458,94 @@ if o.target != c.target { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_
     }
     return Ok(out)
 }
+// Raw C type shape: which payload fields each c kind may carry.
+fn mir_vc_type_shape_ok(store: MirStore, t: MirTypeRec) -> Bool {
+    if t.kind == mir_type_kind_c_raw() {
+        return t.length < mir_c_scalar_count() && t.elem == 0 && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.name_start == 0 && t.name_end == 0 && t.c_name_start == 0 && t.c_name_end == 0 && t.c_class == mir_c_class_scalar()
+    }
+    if t.kind == mir_type_kind_c_ptr() || t.kind == mir_type_kind_c_const_ptr() {
+        return t.elem != 0 && t.elem <= __s0_buffer_len(MirTypeRec, store.types) && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.length == 0 && t.name_start == 0 && t.name_end == 0 && t.c_name_start == 0 && t.c_name_end == 0 && t.c_class == mir_c_class_scalar()
+    }
+    let c_name_ok = t.c_name_start < t.c_name_end && t.c_name_end <= __s0_buffer_len(U8, store.names)
+    let shape = t.elem == 0 && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.length == 0 && c_name_ok && t.c_class <= mir_c_class_record()
+    return shape
+}
+
+// Binding block structural checks mirroring Go checkBindings.
+fn mir_vphase1_bindings(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var out = initial
+    let phase = mir_verify_phase_integrity()
+    let block_total = __s0_buffer_len(MirBindingRec, store.bindings)
+    if block_total == 0 {
+        var at: U64 = mir_primitive_type_count()
+        while at < __s0_buffer_len(MirTypeRec, store.types) {
+            let t = __s0_buffer_get(MirTypeRec, store.types, at)
+            if t.kind == mir_type_kind_c_named() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), 0, 0, 0, 0, 0, at + 1, at + 1, 0, 0, 0)) }
+            at = at + 1
+        }
+        return Ok(out)
+    }
+    if version < 6 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, 0, 0, 6, version, 0)) }
+    var block_at: U64 = 0
+    while block_at < block_total {
+        let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+        let block_id = block_at + 1
+        if !mir_vname_valid(store, block.name_start, block.name_end, true) || block.header_start >= block.header_end || block.header_end > __s0_buffer_len(U8, store.names) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, block_id, 0, 0, 0, 0)) }
+        var other_at: U64 = 0
+        while other_at < block_at {
+            let other = __s0_buffer_get(MirBindingRec, store.bindings, other_at)
+            if other.name_start == block.name_start && other.name_end == block.name_end { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, block_id, other_at + 1, 0, 0, 0)) }
+            other_at = other_at + 1
+        }
+        var fn_at: U64 = 0
+        while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+            let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+            if fn_rec.block == block_id {
+                if !mir_vname_valid(store, fn_rec.name_start, fn_rec.name_end, true) || fn_rec.c_name_start >= fn_rec.c_name_end || fn_rec.c_name_end > __s0_buffer_len(U8, store.names) || !mir_vtype_exists(store, fn_rec.result_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, block_id, fn_at + 1, 0, 0, 0)) }
+                var dup_at: U64 = 0
+                while dup_at < fn_at {
+                    let dup = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, dup_at)
+                    if dup.block == block_id && dup.name_start == fn_rec.name_start && dup.name_end == fn_rec.name_end { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, block_id, fn_at + 1, 0, 0, 0)) }
+                    dup_at = dup_at + 1
+                }
+            }
+            fn_at = fn_at + 1
+        }
+        var const_at: U64 = 0
+        while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+            let const_rec = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+            if const_rec.block == block_id {
+                if !mir_vname_valid(store, const_rec.name_start, const_rec.name_end, true) || const_rec.c_name_start >= const_rec.c_name_end || const_rec.c_name_end > __s0_buffer_len(U8, store.names) || !mir_vtype_exists(store, const_rec.const_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, block_id, const_at + 1, 0, 0, 0)) }
+                var dup_at: U64 = 0
+                while dup_at < const_at {
+                    let dup = __s0_buffer_get(MirBindingConstRec, store.binding_consts, dup_at)
+                    if dup.block == block_id && dup.name_start == const_rec.name_start && dup.name_end == const_rec.name_end { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_name(), 0, 0, 0, 0, 0, block_id, const_at + 1, 0, 0, 0)) }
+                    dup_at = dup_at + 1
+                }
+            }
+            const_at = const_at + 1
+        }
+        block_at = block_at + 1
+    }
+    // Every c_named type must be claimed by exactly one binding_type operand.
+    var id: U64 = mir_primitive_type_count() + 1
+    while id <= __s0_buffer_len(MirTypeRec, store.types) {
+        let t = __s0_buffer_get(MirTypeRec, store.types, id - 1)
+        if t.kind == mir_type_kind_c_named() {
+            var claims: U64 = 0
+            var at: U64 = 0
+            while at < __s0_buffer_len(MirOperandRec, store.operands) {
+                let o = __s0_buffer_get(MirOperandRec, store.operands, at)
+                if o.kind == mir_operand_binding_type() && o.operand_type == id { claims = claims + 1 }
+                at = at + 1
+            }
+            if claims != 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), 0, 0, 0, 0, 0, id, id, 1, claims, 0)) }
+        }
+        id = id + 1
+    }
+    return Ok(out)
+}
+
 fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = try mir_vphase1_types(d, store, version, initial)
     out = try mir_vphase1_declarations(d, store, out)
@@ -1449,5 +1558,6 @@ fn mir_vphase1(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(Mi
     out = try mir_vphase1_terminators(d, store, version, out)
     out = try mir_vphase1_block_terminators(d, store, out)
     out = try mir_vphase1_operands(d, store, out)
+    out = try mir_vphase1_bindings(d, store, version, out)
     return Ok(out)
 }

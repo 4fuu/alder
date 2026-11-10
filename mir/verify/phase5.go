@@ -382,6 +382,32 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 				}
 			}
 		}
+
+	case mir.OpCBindingCall:
+		_, fn, ok := m.BindingFuncAt(in.CBinding)
+		if ok {
+			if len(in.Args) != len(fn.Sig.Params) {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("c.call.unsafe @%s: expected %d arguments, got %d", fn.Name, len(fn.Sig.Params), len(in.Args))})
+			} else {
+				for j, a := range in.Args {
+					if t, ok := f.ValueType(a); !ok || !m.BindingArgCompatible(t, fn.Sig.Params[j]) {
+						want := m.TypeString(fn.Sig.Params[j])
+						got := "unknown"
+						if t, ok := f.ValueType(a); ok {
+							got = m.TypeString(t)
+						}
+						c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("c argument %d: expected %s, got %s", j, want, got)})
+					}
+				}
+			}
+		}
+
+	case mir.OpCIsNull:
+		if in.A != mir.NoValue {
+			if t, ok := f.ValueType(in.A); !ok || !m.IsRawPointerType(t) {
+				c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.is_null operand must be a raw C pointer"})
+			}
+		}
 	}
 
 	// Checked failure edge arguments must match the failure target parameters.

@@ -157,6 +157,11 @@ func (p *parser) parseModule() error {
 			if err := p.parseImportDecl(); err != nil {
 				return err
 			}
+		case "binding":
+			p.next()
+			if err := p.parseBindingDecl(); err != nil {
+				return err
+			}
 		case "fn":
 			p.next()
 			body, err := p.parseFunctionHeader()
@@ -331,6 +336,231 @@ func (p *parser) parseImportDecl() error {
 		return err
 	}
 	p.m.AddImport(nameTok.text, sig)
+	return nil
+}
+
+func (p *parser) expectString(what string) (*token, error) {
+	t := p.next()
+	if t.kind != tokString {
+		return nil, p.errf(t, "expected %s, got %s", what, t.describe())
+	}
+	return t, nil
+}
+
+// parseBindingDecl parses one C binding block:
+//
+//	binding @name "header" {
+//	    c_type opaque @File = "FILE"
+//	    c_type scalar @Time = "time_t"
+//	    c_type record @Timespec = "struct timespec" { seconds: @Time = "tv_sec" }
+//	    c_fn @open = "fopen"(c_const_ptr(c_char)) -> c_ptr(@File)
+//	    c_const @X = "X": c_int
+//	}
+//
+// The `= "spelling"` form is optional for functions and constants; the
+// spelling then duplicates the Alder name. Type members always spell it.
+func (p *parser) parseBindingDecl() error {
+	if p.m.FormatVersion < BindingFormatVersion {
+		return p.errf(p.peek(), "binding blocks require MIR format version 6")
+	}
+	nameTok, err := p.expectAtName("a binding name")
+	if err != nil {
+		return err
+	}
+	for i := range p.m.Bindings {
+		if p.m.Bindings[i].Name == nameTok.text {
+			return p.errf(nameTok, "duplicate binding @%s", nameTok.text)
+		}
+	}
+	headerTok, err := p.expectString("a quoted header path")
+	if err != nil {
+		return err
+	}
+	if err := p.expectPunct("{"); err != nil {
+		return err
+	}
+	blockIdx := p.m.AddBinding(nameTok.text, headerTok.text)
+	block := &p.m.Bindings[blockIdx]
+	for {
+		t := p.peek()
+		if t.kind == tokPunct && t.text == "}" {
+			p.next()
+			return nil
+		}
+		if t.kind != tokIdent {
+			return p.errf(t, "expected a binding member or '}', got %s", t.describe())
+		}
+		switch t.text {
+		case "c_type":
+			p.next()
+			if err := p.parseBindingType(block); err != nil {
+				return err
+			}
+		case "c_fn":
+			p.next()
+			if err := p.parseBindingFunc(block); err != nil {
+				return err
+			}
+		case "c_const":
+			p.next()
+			if err := p.parseBindingConst(block); err != nil {
+				return err
+			}
+		default:
+			return p.errf(t, "expected a binding member, got %q", t.text)
+		}
+	}
+}
+
+// spelledName returns the C spelling for a member: the explicit string when
+// the `= "..."` form is present, or the member name when omitted. The second
+// result reports whether the spelling was spelled explicitly.
+func (p *parser) spelledName(nameTok *token) (string, bool, error) {
+	if p.peek().kind == tokPunct && p.peek().text == "=" {
+		p.next()
+		tok, err := p.expectString("a quoted C spelling")
+		if err != nil {
+			return "", false, err
+		}
+		return tok.text, true, nil
+	}
+	return nameTok.text, false, nil
+}
+
+func (p *parser) parseBindingType(block *BindingBlock) error {
+	classTok := p.peek()
+	if classTok.kind != tokIdent {
+		return p.errf(classTok, "expected a binding type class, got %s", classTok.describe())
+	}
+	var class CClass
+	switch classTok.text {
+	case "scalar":
+		class = CClassScalar
+	case "opaque":
+		class = CClassOpaque
+	case "record":
+		class = CClassRecord
+	default:
+		return p.errf(classTok, "unknown binding type class %q", classTok.text)
+	}
+	p.next()
+	nameTok, err := p.expectAtName("a binding type name")
+	if err != nil {
+		return err
+	}
+	if _, ok := p.m.NamedType(nameTok.text); ok {
+		return p.errf(nameTok, "duplicate type @%s", nameTok.text)
+	}
+	spelling, _, err := p.spelledName(nameTok)
+	if err != nil {
+		return err
+	}
+	var fields []Field
+	if class == CClassRecord {
+		if err := p.expectPunct("{"); err != nil {
+			return err
+		}
+		for {
+			if p.peek().kind == tokPunct && p.peek().text == "}" {
+				p.next()
+				break
+			}
+			fieldTok, err := p.expectIdent("a record field name")
+			if err != nil {
+				return err
+			}
+			if err := p.expectPunct(":"); err != nil {
+				return err
+			}
+			typ, err := p.parseType()
+			if err != nil {
+				return err
+			}
+			fieldSpelling, _, err := p.spelledName(fieldTok)
+			if err != nil {
+				return err
+			}
+			for _, f := range fields {
+				if f.Name == fieldTok.text {
+					return p.errf(fieldTok, "duplicate record field %q", fieldTok.text)
+				}
+			}
+			fields = append(fields, Field{Name: fieldTok.text, Type: typ, CName: fieldSpelling})
+			if p.peek().kind == tokPunct && p.peek().text == "," {
+				p.next()
+			}
+		}
+	}
+	id := p.m.AddCNamed(nameTok.text, spelling, class, fields)
+	block.Types = append(block.Types, id)
+	return nil
+}
+
+func (p *parser) parseBindingFunc(block *BindingBlock) error {
+	nameTok, err := p.expectAtName("a binding function name")
+	if err != nil {
+		return err
+	}
+	for _, f := range block.Funcs {
+		if f.Name == nameTok.text {
+			return p.errf(nameTok, "duplicate binding function @%s", nameTok.text)
+		}
+	}
+	spelling, _, err := p.spelledName(nameTok)
+	if err != nil {
+		return err
+	}
+	if err := p.expectPunct("("); err != nil {
+		return err
+	}
+	var params []TypeId
+	for {
+		if p.peek().kind == tokPunct && p.peek().text == ")" {
+			p.next()
+			break
+		}
+		typ, err := p.parseType()
+		if err != nil {
+			return err
+		}
+		params = append(params, typ)
+		if p.peek().kind == tokPunct && p.peek().text == "," {
+			p.next()
+		}
+	}
+	if err := p.expectPunct("->"); err != nil {
+		return err
+	}
+	result, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	block.Funcs = append(block.Funcs, BindingFunc{Name: nameTok.text, CName: spelling, Sig: FuncSig{Params: params, Result: result, Env: NoType}})
+	return nil
+}
+
+func (p *parser) parseBindingConst(block *BindingBlock) error {
+	nameTok, err := p.expectAtName("a binding constant name")
+	if err != nil {
+		return err
+	}
+	for _, c := range block.Consts {
+		if c.Name == nameTok.text {
+			return p.errf(nameTok, "duplicate binding constant @%s", nameTok.text)
+		}
+	}
+	spelling, _, err := p.spelledName(nameTok)
+	if err != nil {
+		return err
+	}
+	if err := p.expectPunct(":"); err != nil {
+		return err
+	}
+	typ, err := p.parseType()
+	if err != nil {
+		return err
+	}
+	block.Consts = append(block.Consts, BindingConst{Name: nameTok.text, CName: spelling, Type: typ})
 	return nil
 }
 
@@ -729,6 +959,11 @@ func (p *parser) mayDropResult(in *Instr) bool {
 	case OpFFICallUnsafe:
 		if int(in.FFIImport) < len(p.m.Imports) {
 			return p.m.Imports[in.FFIImport].Sig.Result == TypeUnit
+		}
+	case OpCBindingCall:
+		_, fn, ok := p.m.BindingFuncAt(in.CBinding)
+		if ok {
+			return fn.Sig.Result == TypeUnit
 		}
 	}
 	return false
@@ -1291,10 +1526,72 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = p.expectPunct(")")
 
+	case "c.call.unsafe":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "c.call.unsafe requires MIR format version %d", BindingFormatVersion)
+		}
+		refTok, err := p.expectAtName("a binding function reference")
+		if err != nil {
+			return in, err
+		}
+		idx, ok := p.bindingFuncRef(refTok.text)
+		if !ok {
+			return in, p.errf(refTok, "unknown binding function @%s", refTok.text)
+		}
+		in.Op = OpCBindingCall
+		in.CBinding = idx
+		if err = p.expectPunct("("); err != nil {
+			return in, err
+		}
+		if in.Args, err = p.parseArgs(); err != nil {
+			return in, err
+		}
+		err = p.expectPunct(")")
+
+	case "c.is_null":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "c.is_null requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpCIsNull
+		in.A, err = p.parseValueRef()
+
 	default:
 		return in, p.errf(t, "unknown operation %q", t.text)
 	}
 	return in, err
+}
+
+// bindingFuncRef resolves a "@block.function" name to the flattened
+// block-major index of a binding function member.
+func (p *parser) bindingFuncRef(text string) (int, bool) {
+	dot := -1
+	for i := 0; i < len(text); i++ {
+		if text[i] == '.' {
+			if dot != -1 {
+				return 0, false
+			}
+			dot = i
+		}
+	}
+	if dot <= 0 || dot == len(text)-1 {
+		return 0, false
+	}
+	block, fn := text[:dot], text[dot+1:]
+	index := 0
+	for i := range p.m.Bindings {
+		b := &p.m.Bindings[i]
+		if b.Name != block {
+			index += len(b.Funcs)
+			continue
+		}
+		for j := range b.Funcs {
+			if b.Funcs[j].Name == fn {
+				return index + j, true
+			}
+		}
+		return 0, false
+	}
+	return 0, false
 }
 
 // parseOptionalElse parses the mandatory 'else' failure edge of a checked
@@ -1619,9 +1916,45 @@ func (p *parser) parseType() (TypeId, error) {
 				return NoType, err
 			}
 			return p.m.FunctionType(sig), nil
+		default:
+			if id, ok := cScalarID(t.text); ok {
+				if p.m.FormatVersion < BindingFormatVersion {
+					return NoType, p.errf(t, "%s requires MIR format version 6", t.text)
+				}
+				return p.m.CRaw(uint64(id)), nil
+			}
+			if t.text == "c_ptr" || t.text == "c_const_ptr" {
+				if p.m.FormatVersion < BindingFormatVersion {
+					return NoType, p.errf(t, "%s requires MIR format version 6", t.text)
+				}
+				if err := p.expectPunct("("); err != nil {
+					return NoType, err
+				}
+				elem, err := p.parseType()
+				if err != nil {
+					return NoType, err
+				}
+				if err := p.expectPunct(")"); err != nil {
+					return NoType, err
+				}
+				if t.text == "c_ptr" {
+					return p.m.CPtr(elem), nil
+				}
+				return p.m.CConstPtr(elem), nil
+			}
 		}
 	}
 	return NoType, p.errf(t, "expected a type, got %s", t.describe())
+}
+
+// cScalarID maps a textual raw C scalar name to its CScalar id.
+func cScalarID(name string) (int, bool) {
+	for id := 0; id < NumCScalars; id++ {
+		if cScalarNames[id] == name {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 func (p *parser) constVisible(decl *ConstDecl) bool {

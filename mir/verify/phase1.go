@@ -29,13 +29,16 @@ func phase1Integrity(m *mir.Module) []Error {
 			}
 			continue
 		}
-		if t.Kind > mir.TypeVec {
+		if t.Kind > mir.TypeCNamed {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("unknown type kind %d", t.Kind)})
 			continue
 		}
 		if t.Kind == mir.TypePrimitive {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "primitive type appears outside the canonical primitive slots"})
 			continue
+		}
+		if t.Kind >= mir.TypeCRaw && m.FormatVersion < mir.BindingFormatVersion {
+			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "C binding types require MIR format version 6"})
 		}
 		if t.Kind == mir.TypeVec && m.FormatVersion < mir.VecFormatVersion {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "vec type requires MIR format version 4"})
@@ -46,8 +49,10 @@ func phase1Integrity(m *mir.Module) []Error {
 		if t.Name == "" {
 			if t.Kind == mir.TypeAggregate || t.Kind == mir.TypeEnum {
 				errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "aggregate and enum types must be named"})
+			} else if t.Kind == mir.TypeCNamed {
+				errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: "C binding types must be named"})
 			}
-		} else if t.Kind != mir.TypeAggregate && t.Kind != mir.TypeEnum {
+		} else if t.Kind != mir.TypeAggregate && t.Kind != mir.TypeEnum && t.Kind != mir.TypeCNamed {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type @%s", t.Name), Msg: fmt.Sprintf("named type holds kind %v", t.Kind)})
 		} else if !validMIRName(t.Name, true) {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("invalid type name %q", t.Name)})
@@ -77,6 +82,7 @@ func phase1Integrity(m *mir.Module) []Error {
 			errs = append(errs, Error{Loc: fmt.Sprintf("import slot %d", i), Msg: fmt.Sprintf("invalid import name %q", m.Imports[i].Name)})
 		}
 	}
+	errs = append(errs, checkBindings(m)...)
 	for i := 1; i < len(m.Constants); i++ {
 		for j := 0; j < i; j++ {
 			if m.Constants[j].Name == m.Constants[i].Name {
@@ -340,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpTableInsertTry {
+	if in.Op > mir.OpCIsNull {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -392,6 +398,15 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	}
 	if in.Op == mir.OpFFICallUnsafe && int(in.FFIImport) >= len(m.Imports) {
 		errs = append(errs, Error{Loc: loc, Msg: "import out of range"})
+	}
+	if in.Op == mir.OpCBindingCall && (in.CBinding < 0 || in.CBinding >= m.BindingFuncCount()) {
+		errs = append(errs, Error{Loc: loc, Msg: "binding function out of range"})
+	}
+	if in.Op == mir.OpCBindingCall && m.FormatVersion < mir.BindingFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: "c.call.unsafe requires MIR format version 6"})
+	}
+	if in.Op == mir.OpCIsNull && m.FormatVersion < mir.BindingFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: "c.is_null requires MIR format version 6"})
 	}
 	if in.Op == mir.OpCleanupPush && (int(in.CleanupFn) >= len(m.Functions) || m.Functions[in.CleanupFn] == nil) {
 		errs = append(errs, Error{Loc: loc, Msg: "cleanup function is nil or out of range"})
@@ -518,8 +533,10 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
 		mir.OpIntFromFloat, mir.OpFloatFromInt:
 		require(in.A, "conversion operand")
-	case mir.OpCall, mir.OpFFICallUnsafe:
+	case mir.OpCall, mir.OpFFICallUnsafe, mir.OpCBindingCall:
 		requireAll(in.Args, "call argument")
+	case mir.OpCIsNull:
+		require(in.A, "c.is_null operand")
 	}
 	return errs
 }
@@ -679,6 +696,9 @@ func droppableResult(m *mir.Module, in *mir.Instr) bool {
 		return int(in.Callee) < len(m.Functions) && m.Functions[in.Callee] != nil && m.Functions[in.Callee].Result == mir.TypeUnit
 	case mir.OpFFICallUnsafe:
 		return int(in.FFIImport) < len(m.Imports) && m.Imports[in.FFIImport].Sig.Result == mir.TypeUnit
+	case mir.OpCBindingCall:
+		_, fn, ok := m.BindingFuncAt(in.CBinding)
+		return ok && fn.Sig.Result == mir.TypeUnit
 	}
 	return false
 }
@@ -750,6 +770,78 @@ func checkTerm(m *mir.Module, f *mir.Function, b *mir.Block, bi int) []Error {
 		}
 		if b.Term.Result != mir.NoValue {
 			errs = append(errs, Error{Loc: loc, Msg: "panic may not have an operand"})
+		}
+	}
+	return errs
+}
+
+// checkBindings validates C binding blocks structurally: unique block and
+// member names, valid names, well-formed member signatures, and every C
+// binding type owned by exactly one block.
+func checkBindings(m *mir.Module) []Error {
+	var errs []Error
+	if len(m.Bindings) == 0 {
+		for i := range m.Types {
+			if m.Types[i].Kind == mir.TypeCNamed {
+				errs = append(errs, Error{Loc: fmt.Sprintf("type @%s", m.Types[i].Name), Msg: "C binding type has no binding block"})
+			}
+		}
+		return errs
+	}
+	if m.FormatVersion < mir.BindingFormatVersion {
+		errs = append(errs, Error{Loc: fmt.Sprintf("binding @%s", m.Bindings[0].Name), Msg: "binding blocks require MIR format version 6"})
+	}
+	owned := make(map[mir.TypeId]int)
+	for bi := range m.Bindings {
+		block := &m.Bindings[bi]
+		loc := fmt.Sprintf("binding @%s", block.Name)
+		if !validMIRName(block.Name, true) {
+			errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid binding name %q", block.Name)})
+		}
+		if block.Header == "" {
+			errs = append(errs, Error{Loc: loc, Msg: "binding header is empty"})
+		}
+		for bj := 0; bj < bi; bj++ {
+			if m.Bindings[bj].Name == block.Name {
+				errs = append(errs, Error{Loc: loc, Msg: "duplicate binding name"})
+				break
+			}
+		}
+		for _, id := range block.Types {
+			if !m.ValidType(id) || m.Types[id].Kind != mir.TypeCNamed {
+				errs = append(errs, Error{Loc: loc, Msg: "binding type member is not a C binding type"})
+				continue
+			}
+			if other, seen := owned[id]; seen {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("type @%s is also a member of binding @%s", m.Types[id].Name, m.Bindings[other].Name)})
+				continue
+			}
+			owned[id] = bi
+		}
+		funcNames := make(map[string]bool, len(block.Funcs))
+		for i := range block.Funcs {
+			fn := &block.Funcs[i]
+			if !validMIRName(fn.Name, true) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid binding function name %q", fn.Name)})
+			}
+			if funcNames[fn.Name] {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate binding function @%s", fn.Name)})
+			}
+			funcNames[fn.Name] = true
+			if fn.Sig.Env != mir.NoType {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("binding function @%s carries an environment", fn.Name)})
+			}
+		}
+		constNames := make(map[string]bool, len(block.Consts))
+		for i := range block.Consts {
+			c := &block.Consts[i]
+			if !validMIRName(c.Name, true) {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("invalid binding constant name %q", c.Name)})
+			}
+			if constNames[c.Name] {
+				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("duplicate binding constant @%s", c.Name)})
+			}
+			constNames[c.Name] = true
 		}
 	}
 	return errs

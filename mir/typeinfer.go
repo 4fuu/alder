@@ -501,8 +501,63 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			}
 		}
 		return imp.Sig.Result, true
+
+	case OpCBindingCall:
+		_, fn, ok := m.BindingFuncAt(in.CBinding)
+		if !ok {
+			return NoType, false
+		}
+		if len(in.Args) != len(fn.Sig.Params) {
+			return NoType, false
+		}
+		for i, a := range in.Args {
+			if vt, ok := f.ValueType(a); !ok || !m.BindingArgCompatible(vt, fn.Sig.Params[i]) {
+				return NoType, false
+			}
+		}
+		return fn.Sig.Result, true
+
+	case OpCIsNull:
+		if in.A == NoValue {
+			return NoType, false
+		}
+		if vt, ok := f.ValueType(in.A); ok && m.IsRawPointerType(vt) {
+			return TypeBool, true
+		}
+		return NoType, false
 	}
 	return NoType, false
+}
+
+// isRawPointerType reports whether t is a raw C pointer token or the legacy
+// bootstrap raw_ptr type.
+func (m *Module) IsRawPointerType(t TypeId) bool {
+	if !m.ValidType(t) {
+		return false
+	}
+	switch m.Types[t].Kind {
+	case TypeRawPtr, TypeCPtr, TypeCConstPtr:
+		return true
+	}
+	return false
+}
+
+// BindingArgCompatible reports whether a value of type arg may be passed to a
+// binding declaration parameter of type want. Types must match exactly, with
+// one widening: c_ptr(E) passes where c_const_ptr(E) is declared, mirroring
+// C's mutable-to-const pointer conversion.
+func (m *Module) BindingArgCompatible(arg, want TypeId) bool {
+	if arg == want {
+		return true
+	}
+	if !m.ValidType(arg) || !m.ValidType(want) {
+		return false
+	}
+	at, wt := m.Types[arg], m.Types[want]
+	if at.Kind != TypeCPtr || wt.Kind != TypeCConstPtr {
+		return false
+	}
+	return at.Elem == wt.Elem
 }
 
 func declField(t *Type, name string) (TypeId, bool) {

@@ -201,7 +201,7 @@ func runM73ProductionProgram(t *testing.T, exe, object, root, name, text string)
 	t.Helper()
 	files := map[string]string{name: text}
 	mirText := runProductionCompiler(t, exe, files, "compile", "--emit=mir", name)
-	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 5\n") {
+	if mirText.status != 0 || mirText.stderr != "" || !strings.HasPrefix(mirText.stdout, "mir 6\n") {
 		t.Fatalf("%s MIR result: %+v", name, mirText)
 	}
 	repeat := runProductionCompiler(t, exe, files, "compile", "--emit=mir", name)
@@ -282,7 +282,7 @@ func TestM73StorageProductionQualification(t *testing.T) {
 		files := map[string]string{"a_heads.al": heads.String(), "z_tail.al": tails.String()}
 		first := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "z_tail.al", "a_heads.al")
 		second := runProductionCompiler(t, exe, files, "compile", "--emit=mir", "a_heads.al", "z_tail.al")
-		if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 5\n") {
+		if first.status != 0 || first.stderr != "" || !strings.HasPrefix(first.stdout, "mir 6\n") {
 			t.Fatalf("layered permutation MIR: %+v", first)
 		}
 		if first != second {
