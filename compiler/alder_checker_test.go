@@ -1852,7 +1852,11 @@ func validateCheckerManifest(m checkerManifest) error {
 	nodeKind12 := make(map[int]bool)
 	for i, symbol := range m.symbols {
 		instance := symbol.declaration != 0
-		validInstance := symbol.kind == 12 && symbol.arity == 0 && symbol.declaration == symbol.id && symbol.instanceArgCount == 0 || symbol.kind == 13 && symbol.arity == 0 && symbol.declaration >= 1 && symbol.declaration < symbol.id && m.symbols[symbol.declaration-1].kind == 12 && m.symbols[symbol.declaration-1].arity == symbol.instanceArgCount
+		// A generic instance binds exactly the declaration's type
+		// parameters. An implementation-method instance (D024 generic
+		// implementation parameter lists) has an arity-0 declaration and
+		// binds only the implementation's parameters.
+		validInstance := symbol.kind == 12 && symbol.arity == 0 && symbol.declaration == symbol.id && symbol.instanceArgCount == 0 || symbol.kind == 13 && symbol.arity == 0 && symbol.declaration >= 1 && symbol.declaration < symbol.id && m.symbols[symbol.declaration-1].kind == 12 && (m.symbols[symbol.declaration-1].arity == symbol.instanceArgCount || m.symbols[symbol.declaration-1].arity == 0)
 		if symbol.id != i+1 || (symbol.kind != 1 && symbol.kind != 2 && symbol.kind != 3 && symbol.kind != 12 && symbol.kind != 13 && symbol.kind != 50) || symbol.node < 1 || symbol.kind != 13 && nodes[symbol.node] && !(symbol.kind == 12 && nodeKind12[symbol.node]) || symbol.arity < 0 || !validSourceRange(symbol.source, symbol.start, symbol.end, true) || instance != validInstance || !instance && (symbol.firstInstanceArg != 0 || symbol.instanceArgCount != 0 || symbol.discoveryParent != 0) {
 			return fmt.Errorf("invalid symbol %+v", symbol)
 		}
@@ -1870,17 +1874,35 @@ func validateCheckerManifest(m checkerManifest) error {
 	// trait's scope (requirement matching) and once in the method's scope
 	// (the method or its synthesized default), so parameter nodes are unique
 	// per owner rather than globally. The Self parameter reuses the trait's
-	// own node.
+	// own node. Implementation parameters (D024 generic implementation
+	// parameter lists) all record the implementation root as their node; that
+	// root never backs a symbol, so a repeated claim on a symbol-less node is
+	// the implementation-parameter shape.
 	paramNodes := make(map[int]bool)
+	symbolNodes := make(map[int]bool)
+	for _, symbol := range m.symbols {
+		symbolNodes[symbol.node] = true
+	}
 	traitSelfParams := make(map[int]bool)
+	implHeadOwners := make(map[int]bool)
 	for i, param := range m.params {
 		ownerSelf := traitSelfNodes[param.owner] && param.node == m.symbols[param.owner-1].node
 		if ownerSelf {
 			traitSelfParams[param.owner] = true
 		}
 		claim := param.owner<<32 | param.node
-		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || paramNodes[claim] && !ownerSelf || !validSourceRange(param.source, param.start, param.end, true) {
+		if param.id != i+1 || param.owner < 1 || param.owner > len(m.symbols) || param.node < 1 || paramNodes[claim] && !ownerSelf && symbolNodes[param.node] || !validSourceRange(param.source, param.start, param.end, true) {
 			return fmt.Errorf("invalid type parameter %+v", param)
+		}
+		// Implementation parameters (D024) record the implementation root as
+		// their node; that root is symbol-less and its span contains the
+		// head method's own span, which no ordinary parameter node does.
+		if !ownerSelf && !symbolNodes[param.node] && param.node <= len(m.spans) {
+			span := m.spans[param.node-1]
+			symbol := m.symbols[param.owner-1]
+			if span.start <= symbol.start && span.end >= symbol.end {
+				implHeadOwners[param.owner] = true
+			}
 		}
 		paramNodes[claim] = true
 	}
@@ -2005,7 +2027,11 @@ func validateCheckerManifest(m checkerManifest) error {
 				}
 				continue
 			}
-			if symbol.kind != 13 && paramCounts[i] != symbol.arity || symbol.kind == 13 && paramCounts[i] != 0 {
+			// An implementation head (D024) owns one record per generic
+			// implementation parameter beyond its own arity; the shared
+			// impl-root claim check above keeps those records well-formed,
+			// so the count only has a lower bound here too.
+			if symbol.kind == 12 && paramCounts[i] < symbol.arity || symbol.kind != 12 && symbol.kind != 13 && paramCounts[i] != symbol.arity || symbol.kind == 13 && paramCounts[i] != 0 {
 				return fmt.Errorf("symbol %+v has %d type parameter records", symbol, paramCounts[i])
 			}
 		}
@@ -2408,7 +2434,9 @@ func validateCheckerManifest(m checkerManifest) error {
 	}
 	if len(m.diagnostics) == 0 {
 		for _, symbol := range m.symbols {
-			if checkerConcreteOwner(m, symbol.id) && rootBlocks[symbol.id] != 1 {
+			// A generic implementation head (D024) defers its body to the
+			// instances that need it, exactly like a generic function.
+			if checkerConcreteOwner(m, symbol.id) && !implHeadOwners[symbol.id] && rootBlocks[symbol.id] != 1 {
 				return fmt.Errorf("complete concrete owner %d has %d root blocks", symbol.id, rootBlocks[symbol.id])
 			}
 		}
@@ -2836,7 +2864,9 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		if diagnostic.kind < 1 || diagnostic.kind > 154 || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		// Kinds 300-349 are the checker's generic-implementation block
+		// (D024); they never carry notes or related spans.
+		if diagnostic.kind < 1 || diagnostic.kind > 154 && (diagnostic.kind < 300 || diagnostic.kind > 349) || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

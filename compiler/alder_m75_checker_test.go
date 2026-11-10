@@ -588,6 +588,182 @@ fn main() -> I32 {
     return 0
 }
 `,
+		"generic-impl.al": `trait Io {
+}
+
+trait Reader {
+    fn read(self) -> U64
+}
+
+trait Preview {
+    fn preview(self) -> U64
+}
+
+type Token {
+}
+
+type File(I: type(Io)) {
+    id: I
+}
+
+impl Io for Token {
+}
+
+impl(I: type(Io)) Reader for File(I) {
+    fn read(self) -> U64 {
+        return 42
+    }
+}
+
+impl(I: type(Io)) Preview for File(I) {
+    fn preview(self) -> U64 {
+        let direct = self.read()
+        return direct + 1
+    }
+}
+
+fn main() -> I32 {
+    let file = File(id: Token())
+    if file.read() != 42 { return 1 }
+    if file.preview() != 43 { return 2 }
+    return 0
+}
+`,
+		"generic-impl-multi-constraint.al": `trait Eq2 {
+}
+
+trait Hash2 {
+}
+
+type Token {
+}
+
+impl Eq2 for Token {
+}
+
+impl Hash2 for Token {
+}
+
+type Registry(K: type(Eq2, Hash2), V: type) {
+    key: K
+    value: V
+}
+
+trait Store {
+    fn count(self) -> U64
+}
+
+impl(K: type(Eq2, Hash2), V: type) Store for Registry(K, V) {
+    fn count(self) -> U64 {
+        return 3
+    }
+}
+
+fn main() -> I32 {
+    let table = Registry(key: Token(), value: 3)
+    if table.count() != 3 { return 1 }
+    return 0
+}
+`,
+		"generic-impl-trait-args.al": `trait Io {
+}
+
+trait Source(Item: type) {
+    fn load(self) -> Option(Item)
+}
+
+type Token {
+}
+
+impl Io for Token {
+}
+
+type File(I: type(Io)) {
+    id: I
+}
+
+impl(I: type(Io)) Source(U64) for File(I) {
+    fn load(self) -> Option(U64) {
+        return None
+    }
+}
+
+fn main() -> I32 {
+    let file = File(id: Token())
+    let value = file.load()
+    return match value {
+        Some(n) => 1
+        None => 0
+    }
+}
+`,
+		"generic-impl-forward-ref.al": `trait Uses(T: type) {
+}
+
+trait Combo {
+    fn tag(self) -> U64
+}
+
+type Marker {
+}
+
+impl Uses(Marker) for Marker {
+}
+
+type Box(A: type, B: type) {
+    n: U64
+}
+
+impl(I: type(Uses(J)), J: type) Combo for Box(J, I) {
+    fn tag(self) -> U64 {
+        return self.n
+    }
+}
+
+fn main() -> I32 {
+    let boxed = Box(Marker, Marker)(n: 7)
+    if boxed.tag() != 7 { return 1 }
+    return 0
+}
+`,
+		"generic-impl-enum.al": `trait Io {
+    fn io_tag(self) -> U64
+}
+
+trait Show {
+    fn show(self) -> U64
+}
+
+type Token {
+    id: U64
+}
+
+impl Io for Token {
+    fn io_tag(self) -> U64 {
+        return self.id
+    }
+}
+
+enum Wrap(T: type(Io)) {
+    Held(value: T)
+    Empty
+}
+
+impl(I: type(Io)) Show for Wrap(I) {
+    fn show(self) -> U64 {
+        return match self {
+            Held(value) => value.io_tag()
+            Empty => 0
+        }
+    }
+}
+
+fn main() -> I32 {
+    var wrapped: Wrap(Token) = Held(Token(id: 5))
+    if wrapped.show() != 5 { return 1 }
+    return 0
+}
+`,
 	}
 	for name, source := range accept {
 		t.Run("accept-"+name, func(t *testing.T) {
@@ -638,6 +814,10 @@ fn main() -> I32 {
 		{"closure-slice-in-loop", "fn one(seed: U64) -> Vec(U64) {\n    var v = Vec.new(U64)\n    v.push(seed)\n    return v\n}\nfn main() -> I32 {\n    let v = one(1)\n    let s = v.slice(0, 1)\n    var i: U64 = 0\n    while i < 2 {\n        let g = fn() -> U64 { return s.len() }\n        let n = g()\n        i = i + 1\n    }\n    return 0\n}\n", 153},
 		{"closure-affine-capture", "type Res {\n    n: U64\n}\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn capture(r: Res) -> fn() -> U64 {\n    let g = fn() -> U64 { return r.n }\n    return g\n}\nfn main() -> I32 { return 0 }\n", 145},
 		{"closure-write-capture", "fn main() -> I32 {\n    let total = 0\n    let bump = fn() -> I64 {\n        total = total + 1\n        return total\n    }\n    return 0\n}\n", 28},
+		{"generic-impl-param-unused", "trait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\nimpl Io for Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Io), J: type(Io)) Reader for File(I) {\n    fn read(self) -> U64 {\n        return 1\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 300},
+		{"generic-impl-bare-target", "trait Io {\n}\n\ntrait Writer {\n    fn write(self) -> U64\n}\n\nimpl(I: type(Io)) Writer for I {\n    fn write(self) -> U64 {\n        return 1\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 301},
+		{"generic-impl-restatement", "trait Tag {\n}\n\ntrait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\nimpl Io for Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Tag)) Reader for File(I) {\n    fn read(self) -> U64 {\n        return 1\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 302},
+		{"generic-impl-overlap", "trait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\nimpl Io for Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Io)) Reader for File(I) {\n    fn read(self) -> U64 {\n        return 1\n    }\n}\n\nimpl(J: type(Io)) Reader for File(J) {\n    fn read(self) -> U64 {\n        return 2\n    }\n}\n\nfn main() -> I32 { return 0 }\n", 107},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

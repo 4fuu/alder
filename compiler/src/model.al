@@ -111,8 +111,10 @@ type SyntaxLinkRec {
 // after unsafe, 18 unsafe-c requires exactly one root call and closing brace,
 // 19 the expression nesting limit, 20 a missing C spelling string, 21 a
 // malformed C binding member, 22 a public C binding block, 23 a C binding
-// record field separator, and 24 a `where` clause after a signature
-// (constraints are written on the type parameter, D024).
+// record field separator, 24 a `where` clause after a signature
+// (constraints are written on the type parameter, D024), and 50 an
+// `impl(...)` parameter list with no trait application after it (D024
+// generic implementations).
 type ParseDiagRec {
     kind: U64
     source: U64
@@ -614,7 +616,10 @@ type DiagnosticTypeRec {
 // requirement (optional default body), 53 trait
 // implementation block, and 56 the `Self` type
 // reference. Trait-implementation methods are ordinary kind-12 function
-// symbols whose inherent_owner names the kind-53 impl node.
+// symbols whose inherent_owner names the kind-53 impl node. A generic
+// implementation writes its parameter list on `impl(...)`; its kind-7
+// parameter nodes chain after the trait application in the impl node's
+// child chain (D024).
 // A constraint records the constrained parameter's kind-7 node; that node's
 // children are its trait applications in source order (D024).
 type TraitConstraintRec {

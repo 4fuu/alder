@@ -190,6 +190,7 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 22 { return out_string("public C binding blocks are not supported; bind through a private binding block") }
     if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
     if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
+    if kind == 50 { return out_string("a generic implementation is a trait implementation: write `impl(Param: type(Trait)) Trait for Type`") }
     return out_string("invalid source syntax")
 }
 
@@ -234,7 +235,8 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
 // Checker diagnostic kinds 107 through 129 are reserved for the Milestone
 // 7.5 static-abstraction half (traits, constraints, closures, function
 // values, Map/Set); 130 and above are reserved for the resource half;
-// 155 and above also carry C binding block diagnostics (156-167).
+// 155 and above also carry C binding block diagnostics (156-167);
+// 300 through 349 are the generic-implementation block.
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 156 { return out_string("a module binds the same C header twice") }
     if kind == 157 { return out_string("C spelling must be a non-reserved C identifier") }
@@ -349,7 +351,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string("") }
     if kind == 109 { if !out_string("trait ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" expects a different number of type arguments") }
-    if kind == 110 { return out_string("trait implementations target a non-generic declared record or enum type") }
+    if kind == 110 { return out_string("trait implementations target a declared record or enum type") }
     if kind == 111 {
         if !out_string("type does not implement a trait required here") { return false }
         return out_string("")
@@ -388,6 +390,13 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("ordered collection operation cannot move values with storage-backed parts yet: ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
         return out_string("")
     }
+    // Diagnostic kinds 300 through 349 belong to this thread's work block.
+    if kind == 300 {
+        if !out_string("implementation parameter ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
+        return out_string(" does not appear in the implementing type")
+    }
+    if kind == 301 { return out_string("an implementation cannot target a bare type parameter; write a parameterized implementing type instead") }
+    if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" is used with the wrong argument shape") }
     if kind == 145 { if !out_string("closure capture ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }

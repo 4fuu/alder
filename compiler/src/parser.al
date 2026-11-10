@@ -1265,16 +1265,48 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
 
 fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
-    let owner = try parse_type(d, state, ParseCursor(token: initial.token + 1, store: initial.store))
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    // `impl(Param: type(Constraint), ...) Trait for Type` declares a generic
+    // implementation. The parameter list parses exactly like a trait's list;
+    // its links chain ahead of the trait application, so the parameter nodes
+    // sit at the end of the impl node's child chain (the walkers skip them).
+    var chained: U64 = 0
+    var generic_list = false
+    if token_punct(state, cursor, "(") {
+        generic_list = true
+        cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+        var more = true
+        while more {
+            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            let param = parse_token(state, cursor)
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            let typed = try parse_type_param(d, state, param, cursor)
+            if parse_step_bad(typed) { return Ok(typed) }
+            let pnode = parse_step_value(typed)
+            cursor = try add_link(d, pnode.cursor, pnode.node, chained)
+            chained = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, ")") { more = false }
+            } else { more = false }
+        }
+        let param_close = try expect_punct(d, state, cursor, ")")
+        if parse_step_bad(param_close) { return Ok(param_close) }
+        cursor = parse_step_cursor(param_close)
+    }
+    let owner = try parse_type(d, state, cursor)
     if parse_step_bad(owner) { return Ok(owner) }
     let owner_value = parse_step_value(owner)
-    var cursor = owner_value.cursor
+    cursor = owner_value.cursor
+    // A generic implementation is always a trait implementation: without
+    // the `for` application the parameter list has no meaning.
+    if generic_list && parse_token(state, cursor).keyword != 10 { return reject_parse(d, state, cursor, 50) }
     // `impl Trait(Arguments) for Type { ... }` declares a trait
     // implementation; the trait application is linked first and the
     // implemented type second, so both stay reachable from the impl node.
     if parse_token(state, cursor).keyword == 10 {
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-        cursor = try add_link(d, cursor, owner_value.node, 0)
+        cursor = try add_link(d, cursor, owner_value.node, chained)
         var trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         let impl_type = try parse_type(d, state, cursor)
         if parse_step_bad(impl_type) { return Ok(impl_type) }

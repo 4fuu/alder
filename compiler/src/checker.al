@@ -1403,7 +1403,17 @@ fn resolve_self_type(d: Domain, state: State, parse: ParseStore, store: CheckSto
                 var at: U64 = 0
                 while at < __s0_buffer_len(TraitImplRec, store.traits.impls) {
                     let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, at)
-                    if rec.owner_node == symbol.inherent_owner && rec.self_type != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, rec.self_type))) }
+                    if rec.owner_node == symbol.inherent_owner && rec.self_type != 0 {
+                        // An instance re-walks its declaration's syntax with
+                        // concrete substitutions, so the method's self type
+                        // is rewritten with the instance's own and
+                        // implementation arguments.
+                        if symbol.kind == 13 {
+                            let substituted = try instance_substitute_type(d, store, owner, rec.self_type, 0)
+                            return Ok(CheckGood(try annotate_checked_type(d, substituted.store, owner, node_id, substituted.checked_type)))
+                        }
+                        return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, rec.self_type)))
+                    }
                     at = at + 1
                 }
                 // The trait implementation records are not built yet while
@@ -1774,6 +1784,92 @@ fn find_type_param(state: State, store: CheckStore, owner: U64, node: SyntaxRec)
         if p.owner == owner && same_name(state, node.source, node.name_start, node.name_end, p.source, p.name_start, p.name_end) { return at + 1 }
         at = at + 1
     }
+    // A method of a generic implementation resolves the implementation's
+    // parameters through the first method's records (the first method owns
+    // them directly, so only other methods take this branch).
+    if owner != 0 && owner <= __s0_buffer_len(SymbolRec, store.symbols) {
+        let owner_symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+        if owner_symbol.kind == 12 && owner_symbol.inherent_owner != 0 {
+            let head = first_impl_method_symbol(store, owner_symbol.inherent_owner)
+            if head != 0 && head != owner { return find_type_param(state, store, head, node) }
+        }
+    }
+    return 0
+}
+
+// The first method symbol collected under one implementation root. An
+// implementation's methods are consecutive kind-12 symbols whose
+// inherent_owner is the root; instances (kind 13) copy the field but are
+// appended after every declared method, so the first match is the first
+// written method.
+fn first_impl_method_symbol(store: CheckStore, root_id: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.kind == 12 && symbol.inherent_owner == root_id { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+// For a method of a generic implementation, the first method that owns the
+// implementation's parameters; 0 when the method owns them itself (it is
+// the first method) or is not a method of a generic implementation.
+fn generic_impl_param_owner(store: CheckStore, method: U64) -> U64 {
+    if method == 0 || method > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
+    if symbol.kind != 12 || symbol.inherent_owner == 0 { return 0 }
+    let head = first_impl_method_symbol(store, symbol.inherent_owner)
+    if head == method { return 0 }
+    return head
+}
+
+// Implementation parameters are recorded under the first method with the
+// implementation root as their recorded node, which distinguishes them from
+// the method's own parameters (whose node is their own syntax node).
+fn impl_param_count_for(store: CheckStore, method: U64) -> U64 {
+    if method == 0 || method > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let root_id = __s0_buffer_get(SymbolRec, store.symbols, method - 1).inherent_owner
+    var count: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if param.owner == method && param.node == root_id { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+// The ordinal of one implementation parameter among the first method's
+// implementation parameters.
+fn impl_param_ordinal_for(store: CheckStore, method: U64, param: U64) -> U64 {
+    if method == 0 || method > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let root_id = __s0_buffer_get(SymbolRec, store.symbols, method - 1).inherent_owner
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let record = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if record.owner == method && record.node == root_id {
+            if at + 1 == param { return ordinal }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return ordinal
+}
+
+// The syntax node of one implementation parameter, found among the
+// implementation root's kind-7 children by name span. The recorded node of
+// an implementation parameter is the root, so diagnostics and mut-cursor
+// shape checks need this to reach the parameter's own constraint children.
+fn impl_param_syntax_node(parse: ParseStore, root_id: U64, record: TypeParamRec) -> U64 {
+    var link_at = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1).children
+    while link_at != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+        if child.kind == 7 && child.source == record.source && child.name_start == record.name_start && child.name_end == record.name_end { return item.node }
+        link_at = item.next
+    }
     return 0
 }
 
@@ -1788,7 +1884,14 @@ fn mut_cursor_param_ok(state: State, parse: ParseStore, store: CheckStore, owner
     let param = find_type_param(state, store, owner, type_node)
     if param == 0 { return false }
     let recorded = __s0_buffer_get(TypeParamRec, store.type_params, param - 1)
-    let annotation = __s0_buffer_get(SyntaxRec, parse.nodes, recorded.node - 1)
+    // An implementation parameter records the implementation root, so its
+    // constraint children live on the parameter's own syntax node.
+    var annotation = __s0_buffer_get(SyntaxRec, parse.nodes, recorded.node - 1)
+    if annotation.kind != 7 {
+        let param_node = impl_param_syntax_node(parse, recorded.node, recorded)
+        if param_node == 0 { return false }
+        annotation = __s0_buffer_get(SyntaxRec, parse.nodes, param_node - 1)
+    }
     return mut_cursor_trait_named(state, parse, store, annotation.children)
 }
 
@@ -2950,8 +3053,44 @@ fn instance_type_arg(store: CheckStore, instance: U64, param: U64) -> U64 {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, instance - 1)
     if symbol.kind != 13 { return 0 }
     let ordinal = type_param_ordinal(store, symbol.declaration, param)
-    if ordinal >= symbol.instance_arg_count { return 0 }
-    return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + ordinal)
+    // The declaration's own parameters occupy the leading range. The
+    // ordinal alone cannot prove membership (an unowned parameter walks out
+    // with the owned count), so check ownership first.
+    if param == 0 || param > __s0_buffer_len(TypeParamRec, store.type_params) { return 0 }
+    if __s0_buffer_get(TypeParamRec, store.type_params, param - 1).owner == symbol.declaration {
+        if ordinal >= symbol.instance_arg_count { return 0 }
+        return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + ordinal)
+    }
+    // Implementation parameters of a generic implementation follow the
+    // declaration's own arguments in the instance's range.
+    let impl_owner = generic_impl_param_owner(store, symbol.declaration)
+    if impl_owner == 0 { return 0 }
+    let position = owned_param_count(store, symbol.declaration) + impl_param_ordinal_for(store, impl_owner, param)
+    if position >= symbol.instance_arg_count { return 0 }
+    return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + position)
+}
+
+// How many parameter records a declaration owns. The head method of a
+// generic implementation owns its implementation parameters too, so its
+// count already includes them.
+fn owned_param_count(store: CheckStore, declaration: U64) -> U64 {
+    var count: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+// The full instance-argument count for a declaration: its own parameters
+// plus, for methods other than the first method of a generic
+// implementation, the implementation parameters recorded on the first
+// method.
+fn instance_arg_total(store: CheckStore, declaration: U64) -> U64 {
+    let impl_owner = generic_impl_param_owner(store, declaration)
+    if impl_owner == 0 { return owned_param_count(store, declaration) }
+    return owned_param_count(store, declaration) + impl_param_count_for(store, impl_owner)
 }
 
 fn inference_lookup(bindings: __s0_Buffer(InferenceBindingRec), param: U64) -> U64 {
@@ -3007,6 +3146,36 @@ fn substitute_type(d: Domain, store: CheckStore, bindings: __s0_Buffer(Inference
     return Ok(TypeValueRec(store: current, checked_type: canonical_type_id(current, checked.kind, checked.target, first, checked.arg_count)))
 }
 
+// Instance counterpart of substitute_type: rewrites a checked type with the
+// instance's own and implementation arguments, reading instance_type_arg.
+// An unbound abstract parameter reference is kept as written.
+fn instance_substitute_type(d: Domain, store: CheckStore, instance: U64, checked_type: U64, depth: U64) -> Result(TypeValueRec, __s0_Error) {
+    if depth > 16 { return Ok(TypeValueRec(store: store, checked_type: checked_type)) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 6 {
+        let bound = instance_type_arg(store, instance, checked.target)
+        if bound == 0 { return Ok(TypeValueRec(store: store, checked_type: checked_type)) }
+        return Ok(TypeValueRec(store: store, checked_type: bound))
+    }
+    if checked.arg_count == 0 { return Ok(TypeValueRec(store: store, checked_type: checked_type)) }
+    let empty_children = try __s0_buffer_new(U64, d)
+    let substituted = try instance_substitute_children(d, store, instance, store, checked, 0, empty_children, depth)
+    let prior = canonical_type_for_children(substituted.store, checked.kind, checked.target, substituted.children)
+    if prior != 0 { return Ok(TypeValueRec(store: substituted.store, checked_type: prior)) }
+    let first = __s0_buffer_len(U64, substituted.store.type_args) + 1
+    var current = substituted.store
+    current = try append_substituted_children(d, current, substituted.children, 0)
+    current = try append_checked_type(d, current, 0, checked.kind, 0, checked.target, first, checked.arg_count)
+    return Ok(TypeValueRec(store: current, checked_type: canonical_type_id(current, checked.kind, checked.target, first, checked.arg_count)))
+}
+
+fn instance_substitute_children(d: Domain, store: CheckStore, instance: U64, original: CheckStore, checked: CheckedTypeRec, ordinal: U64, children: __s0_Buffer(U64), depth: U64) -> Result(SubstitutedChildrenRec, __s0_Error) {
+    if ordinal == checked.arg_count { return Ok(SubstitutedChildrenRec(store: store, children: children)) }
+    let child = try instance_substitute_type(d, store, instance, __s0_buffer_get(U64, original.type_args, checked.first_arg - 1 + ordinal), depth + 1)
+    let next = try __s0_buffer_append(U64, d, children, child.checked_type)
+    return instance_substitute_children(d, child.store, instance, original, checked, ordinal + 1, next, depth)
+}
+
 fn unify_type_children(d: Domain, store: CheckStore, expected: CheckedTypeRec, actual: CheckedTypeRec, ordinal: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(UnifyOutcome, __s0_Error) {
     if ordinal == expected.arg_count { return Ok(UnifyGood(bindings)) }
     let step = try unify_types(d, store, __s0_buffer_get(U64, store.type_args, expected.first_arg - 1 + ordinal), __s0_buffer_get(U64, store.type_args, actual.first_arg - 1 + ordinal), bindings)
@@ -3039,7 +3208,7 @@ fn unify_types(d: Domain, store: CheckStore, pattern: U64, concrete: U64, bindin
 }
 
 fn instance_matches(store: CheckStore, symbol: SymbolRec, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
-    if symbol.kind != 13 || symbol.declaration != declaration || symbol.instance_arg_count != __s0_buffer_get(SymbolRec, store.symbols, declaration - 1).type_arity { return false }
+    if symbol.kind != 13 || symbol.declaration != declaration || symbol.instance_arg_count != instance_arg_total(store, declaration) { return false }
     var ordinal: U64 = 0
     var at: U64 = 0
     while at < __s0_buffer_len(TypeParamRec, store.type_params) {
@@ -3050,12 +3219,32 @@ fn instance_matches(store: CheckStore, symbol: SymbolRec, declaration: U64, bind
         }
         at = at + 1
     }
+    // A method other than the first method of a generic implementation
+    // carries the implementation's parameters after its own arguments.
+    let impl_owner = generic_impl_param_owner(store, declaration)
+    if impl_owner != 0 {
+        let root_id = __s0_buffer_get(SymbolRec, store.symbols, impl_owner - 1).inherent_owner
+        let own_count = owned_param_count(store, declaration)
+        var impl_ordinal: U64 = 0
+        at = 0
+        while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+            let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+            if param.owner == impl_owner && param.node == root_id {
+                if __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + own_count + impl_ordinal) != inference_lookup(bindings, at + 1) { return false }
+                impl_ordinal = impl_ordinal + 1
+            }
+            at = at + 1
+        }
+    }
     return true
 }
 
 fn existing_instance(store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> U64 {
     let declared = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
-    if declared.type_arity == 0 { return declaration }
+    // A declaration with no parameters at all needs no instance record;
+    // methods of generic implementations do (their parameters live on the
+    // implementation's first method).
+    if declared.type_arity == 0 && instance_arg_total(store, declaration) == 0 { return declaration }
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
@@ -3084,6 +3273,26 @@ fn append_instance_args(d: Domain, store: CheckStore, declaration: U64, bindings
         next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
     }
     return append_instance_args(d, next, declaration, bindings, param_at + 1)
+}
+
+// After a declaration's own arguments, a method other than the first method
+// of a generic implementation carries the implementation's parameter
+// bindings. The first method's own parameters already include them.
+fn append_impl_instance_args(d: Domain, store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CheckStore, __s0_Error) {
+    let impl_owner = generic_impl_param_owner(store, declaration)
+    if impl_owner == 0 { return Ok(store) }
+    let root_id = __s0_buffer_get(SymbolRec, store.symbols, impl_owner - 1).inherent_owner
+    var next = store
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if param.owner == impl_owner && param.node == root_id {
+            let args = try __s0_buffer_append(U64, d, next.type_args, inference_lookup(bindings, at + 1))
+            next = CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: args, type_annotations: next.type_annotations, uses: next.uses, indexes: next.indexes, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics, traits: next.traits, closures: next.closures, interp: next.interp, bindings: next.bindings)
+        }
+        at = at + 1
+    }
+    return Ok(next)
 }
 
 fn append_instance_role_uses(d: Domain, store: CheckStore, declaration: U64, instance: U64, bindings: __s0_Buffer(InferenceBindingRec), declaration_role: U64, instance_role: U64, ordinal: U64, indexed: Bool) -> Result(CheckStore, __s0_Error) {
@@ -3155,12 +3364,16 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
         param_at = param_at + 1
     }
     // Every declared constraint must hold for the concrete arguments. The
-    // lookup only reads the once-built impl index.
+    // lookup only reads the once-built impl index. A method of a generic
+    // implementation also checks the constraints recorded on the
+    // implementation's first method, which own the implementation's
+    // parameters.
     if __s0_buffer_len(TraitConstraintRec, store.traits.constraints) != 0 {
+        let constraint_owner = generic_impl_param_owner(store, declaration)
         var constraint_at: U64 = 0
         while constraint_at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
             let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, constraint_at)
-            if constraint.owner == declaration && !trait_constraint_satisfied(store, constraint, bindings) {
+            if (constraint.owner == declaration || (constraint_owner != 0 && constraint.owner == constraint_owner)) && !trait_constraint_satisfied(store, constraint, bindings) {
                 let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, constraint.syntax - 1)
                 let failed = try check_token_related_fail(d, state, store, 111, site, syntax)
                 return Ok(InstanceBad(match failed {
@@ -3172,9 +3385,10 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
         }
     }
     let first = __s0_buffer_len(U64, store.type_args) + 1
-    let with_args = try append_instance_args(d, store, declaration, bindings, 0)
+    let own_args = try append_instance_args(d, store, declaration, bindings, 0)
+    let with_args = try append_impl_instance_args(d, own_args, declaration, bindings)
     let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
-    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: declared.type_arity, discovery_parent: parent, inherent_owner: declared.inherent_owner, module_source: declared.module_source, public: declared.public))
+    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: instance_arg_total(with_args, declaration), discovery_parent: parent, inherent_owner: declared.inherent_owner, module_source: declared.module_source, public: declared.public))
     let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, indexes: with_args.indexes, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics, traits: with_args.traits, closures: with_args.closures, interp: with_args.interp, bindings: with_args.bindings)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
@@ -3182,6 +3396,10 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
 
 // Type children are reverse linked. Resolve every child (including its nested
 // children) before recording this node's direct arguments.
+// A child already annotated in this scope is reused, not resolved again: the
+// parser copies an implementation's receiver type onto each method's `self`
+// parameter, and the copies share their argument links, so re-resolution
+// would append a duplicate annotation for the same (owner, syntax) pair.
 fn resolve_arg_links(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, link_id: U64) -> Result(CheckResult, __s0_Error) {
     if link_id == 0 { return Ok(CheckGood(store)) }
     let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
@@ -3194,6 +3412,7 @@ fn resolve_arg_links(d: Domain, state: State, parse: ParseStore, store: CheckSto
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(before) }
+    if checked_type_for_syntax(current, owner, link.node) != 0 { return Ok(CheckGood(current)) }
     let resolved = try resolve_type(d, state, parse, current, owner, link.node)
     if match resolved {
         CheckGood(value) => false
@@ -5589,15 +5808,17 @@ fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store:
     return explicit_function_bindings(d, state, parse, current, owner, declaration, application, ordinal + 1, at + 1, first_link, next)
 }
 
-fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, supplied: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, supplied: U64, seed: __s0_Buffer(InferenceBindingRec), expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
     if supplied != symbol.type_arity { return expr_token_fail(d, state, base, 56, call) }
     let receivers = call_receiver_links(state, parse, store, call)
     let argument_count = call_link_count(parse, call) - 1 - supplied - receivers
     let parameter_count = use_count(store, target, 5)
     if argument_count + receivers != parameter_count { return expr_token_fail(d, state, base, 41, call) }
-    let empty = try __s0_buffer_new(InferenceBindingRec, d)
-    let explicit = try explicit_function_bindings(d, state, parse, store, owner, target, call, 0, 0, receivers, empty)
+    // The seed carries bindings inferred before the call (a generic
+    // implementation's parameters bound from the receiver); explicit
+    // bindings append to it.
+    let explicit = try explicit_function_bindings(d, state, parse, store, owner, target, call, 0, 0, receivers, seed)
     let with_types = match explicit {
         CallInferenceGood(value) => value.store
         CallInferenceBad(value) => value
@@ -5610,8 +5831,8 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
     } { return Ok(ExprBad(with_types)) }
     let bindings = match explicit {
         CallInferenceGood(value) => value.bindings
-        CallInferenceBad(value) => empty
-        CallInferenceDefer => empty
+        CallInferenceBad(value) => seed
+        CallInferenceDefer => seed
     }
     let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied + receivers, receivers, 0, argument_count + receivers, bindings, in_loop)
     let current = match arguments {
@@ -6385,7 +6606,8 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     let explicit_count = leading_type_arg_count(state, parse, store, owner, call)
     if explicit_count != 0 {
         if symbol.type_arity == 0 { return expr_token_fail(d, state, base, 56, call) }
-        return check_explicit_function_call(d, state, parse, base, store, owner, call, call_id, target, explicit_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+        let empty = try __s0_buffer_new(InferenceBindingRec, d)
+        return check_explicit_function_call(d, state, parse, base, store, owner, call, call_id, target, explicit_count, empty, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
     }
     let argument_count = call_link_count(parse, call) - 1
     let parameter_count = use_count(store, target, 5)
@@ -7718,7 +7940,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             // trait implementation providing this method name resolves.
             let trait_method = trait_receiver_method(state, parse, current, receiver_type, callee)
             if trait_method.ambiguous { return expr_token_fail(d, state, base, 119, callee) }
-            if trait_method.target != 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+            if trait_method.target != 0 { return check_trait_method_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
             if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
                 if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
             }
@@ -9544,7 +9766,21 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
     // body has run and the site check that materializes each thunk signature
     // has completed.
     if symbol.kind == 12 && __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1).kind == 58 { return Ok(CheckGood(store)) }
+    // A method of a generic implementation resolves the implementation's
+    // parameters, which have no declaration-time binding: like a generic
+    // function, only its concrete instances are body-checked.
+    if symbol.kind == 12 && impl_method_has_impl_params(store, owner) { return Ok(CheckGood(store)) }
     return check_owner_body(d, state, parse, store, owner)
+}
+
+// Whether the method belongs to a generic implementation (the implementation
+// head owns parameters). Both the head and later methods are instance-only.
+fn impl_method_has_impl_params(store: CheckStore, method: U64) -> Bool {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
+    if symbol.kind != 12 || symbol.inherent_owner == 0 { return false }
+    let head = first_impl_method_symbol(store, symbol.inherent_owner)
+    if head == 0 { return false }
+    return impl_param_count_for(store, head) != 0
 }
 
 fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
@@ -10241,7 +10477,15 @@ fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore)
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(symbols) }
-    let impls = try resolve_trait_impls(d, state, parse, store)
+    let heads = try record_generic_impl_heads_from(d, state, parse, store, 0)
+    if match heads {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(heads) }
+    let impls = try resolve_trait_impls(d, state, parse, match heads {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    })
     let with_impls = match impls {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -10581,21 +10825,40 @@ fn check_trait_method_decls(d: Domain, state: State, parse: ParseStore, store: C
 // second, so the application is the chain tail and the type is the link
 // that points at it.
 fn trait_impl_self_node(parse: ParseStore, root: SyntaxRec) -> U64 {
+    let trait_node = trait_impl_trait_node(parse, root)
+    if trait_node == 0 { return 0 }
     var link_at = root.children
-    var tail: U64 = 0
-    var tail_link: U64 = 0
+    var previous: U64 = 0
     while link_at != 0 {
         let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        if item.next == 0 { tail = item.node
-        tail_link = link_at }
+        if item.node == trait_node { return previous }
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind != 7 { previous = item.node }
         link_at = item.next
     }
-    if tail == 0 { return 0 }
-    link_at = root.children
+    return 0
+}
+
+// The trait application of an impl head: the last non-parameter child in
+// chain order. A generic impl's parameter nodes (kind 7) chain after it, so
+// they sit between the trait application and the end of the chain.
+fn trait_impl_trait_node(parse: ParseStore, root: SyntaxRec) -> U64 {
+    var link_at = root.children
+    var trait_node: U64 = 0
     while link_at != 0 {
         let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        if item.next == tail_link { return item.node }
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind != 7 { trait_node = item.node }
         link_at = item.next
+    }
+    return trait_node
+}
+
+// Iterate an impl head's parameter nodes (kind 7 children), tail first.
+fn impl_param_links(parse: ParseStore, root: SyntaxRec, link_at: U64) -> U64 {
+    var at = link_at
+    while at != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, at - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 7 { return at }
+        at = item.next
     }
     return 0
 }
@@ -10658,6 +10921,106 @@ fn trait_impl_method_symbol(state: State, parse: ParseStore, store: CheckStore, 
         at = at + 1
     }
     return 0
+}
+
+// The implementation record owning one method's implementation, found by
+// the method's inherent owner (the impl root node).
+fn generic_impl_for_method(store: CheckStore, root_id: U64) -> TraitImplRec {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitImplRec, store.traits.impls) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, at)
+        if rec.synthesized == 0 && rec.owner_node == root_id { return rec }
+        at = at + 1
+    }
+    return TraitImplRec(trait_builtin: 0, trait_symbol: 0, first_arg: 0, arg_count: 0, self_type: 0, owner_node: 0, first_method: 0, method_count: 0, synthesized: 0)
+}
+
+// A trait method provided by a generic implementation: the implementation's
+// parameters bind from the receiver type before ordinary inference runs,
+// and the call then proceeds exactly like a generic function call
+// (inference, instance creation, mode checks). Methods of non-generic
+// implementations keep the plain path.
+fn check_trait_method_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, receiver_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let method = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    let found = generic_impl_for_method(store, method.inherent_owner)
+    if found.first_method == 0 || impl_param_count_for(store, found.first_method) == 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    var seeded = try __s0_buffer_new(InferenceBindingRec, d)
+    let unified = try unify_types(d, store, found.self_type, receiver_type, seeded)
+    var bindings = match unified {
+        UnifyGood(value) => value
+        UnifyConflict => seeded
+    }
+    if match unified {
+        UnifyGood(value) => false
+        UnifyConflict => true
+    } { return expr_token_fail(d, state, base, 111, call) }
+    let explicit_count = leading_type_arg_count(state, parse, store, owner, call)
+    if explicit_count != 0 {
+        if method.type_arity == 0 { return expr_token_fail(d, state, base, 56, call) }
+        return check_explicit_function_call(d, state, parse, base, store, owner, call, call_id, target, explicit_count, bindings, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    }
+    let argument_count = call_link_count(parse, call) - 1
+    let parameter_count = use_count(store, target, 5)
+    if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
+    if expected != 0 {
+        let result_id = use_by_ordinal(store, target, 6, 0)
+        let result_pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, result_id - 1).checked_type
+        let from_result = try unify_types(d, store, result_pattern, expected, bindings)
+        bindings = match from_result {
+            UnifyGood(value) => value
+            UnifyConflict => bindings
+        }
+        if match from_result {
+            UnifyGood(value) => false
+            UnifyConflict => true
+        } { return expr_token_fail(d, state, base, 58, call) }
+    }
+    let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, bindings, in_loop)
+    let current = match inferred {
+        CallInferenceGood(value) => value.store
+        CallInferenceBad(value) => value
+        CallInferenceDefer => base
+    }
+    if match inferred {
+        CallInferenceGood(value) => false
+        CallInferenceBad(value) => true
+        CallInferenceDefer => false
+    } { return Ok(ExprBad(current)) }
+    if match inferred {
+        CallInferenceGood(value) => false
+        CallInferenceBad(value) => false
+        CallInferenceDefer => true
+    } { return expr_deferred(base) }
+    bindings = match inferred {
+        CallInferenceGood(value) => value.bindings
+        CallInferenceBad(value) => bindings
+        CallInferenceDefer => bindings
+    }
+    let instance = try instantiate_function(d, state, parse, current, target, bindings, owner, call)
+    let with_instance = match instance {
+        InstanceGood(value) => value.store
+        InstanceBad(value) => value
+    }
+    if match instance {
+        InstanceGood(value) => false
+        InstanceBad(value) => true
+    } { return Ok(ExprBad(with_instance)) }
+    let instance_id = match instance {
+        InstanceGood(value) => value.instance
+        InstanceBad(value) => 0
+    }
+    let modes = try check_existing_call_modes(d, state, parse, base, with_instance, owner, call, instance_id, 0, 0, 0, argument_count)
+    let checked_instance = match modes {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match modes {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(checked_instance)) }
+    let concrete_result_id = use_by_ordinal(checked_instance, instance_id, 8, 0)
+    let concrete_result = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, concrete_result_id - 1).checked_type
+    return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax)
 }
 
 fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, receiver: CheckedTypeRec, name: SyntaxRec) -> TraitMethodRec {
@@ -10752,6 +11115,27 @@ fn trait_requirement_node(state: State, parse: ParseStore, requirement_node: U64
 fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: CheckStore, rec: TraitImplRec) -> Result(CheckResult, __s0_Error) {
     var store = initial
     let impl_node = __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1)
+    // Generic implementations restate the implementing type's constraints
+    // on their parameters. The check runs here, after declarations were
+    // checked, because the type's constraint records do not exist while
+    // impl heads resolve.
+    if impl_param_links(parse, impl_node, impl_node.children) != 0 && rec.self_type != 0 {
+        let self_type = __s0_buffer_get(CheckedTypeRec, store.types, rec.self_type - 1)
+        if self_type.kind == 7 {
+            let head = first_impl_method_symbol(store, rec.owner_node)
+            if head != 0 {
+                let restated = try impl_restates_constraints(d, state, parse, store, head, rec.self_type, self_type.target)
+                if match restated {
+                    CheckGood(value) => false
+                    CheckBad(value) => true
+                } { return Ok(restated) }
+                store = match restated {
+                    CheckGood(value) => value
+                    CheckBad(value) => value
+                }
+            }
+        }
+    }
     // Builtin traits have exactly one fixed requirement each.
     if rec.trait_builtin != 0 {
         var word: __s0_String = "cleanup"
@@ -11009,32 +11393,107 @@ fn validate_trait_impls(d: Domain, state: State, parse: ParseStore, store: Check
     return validate_trait_impls_at(d, state, parse, store, 0)
 }
 
-// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing// Resolve one trait-implementation head and record it. The implementing
-// type must be a non-generic declared nominal type; its symbol gives trait
-// arguments a parameter-free resolution scope.
+// Generic implementation heads: record the parameter list under the
+// implementation's first method before any resolution can name the
+// parameters, and restate the parameter constraints in the first method's
+// scope. Runs after symbol collection (the first method exists) and before
+// the implementations themselves resolve.
+fn record_generic_impl_heads_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, search_at: U64) -> Result(CheckResult, __s0_Error) {
+    var found: U64 = 0
+    var scan = search_at
+    var scanning = true
+    while scanning {
+        if scan >= __s0_buffer_len(U64, parse.roots) { scanning = false } else {
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, scan) - 1)
+            if root.kind == 53 && impl_param_links(parse, root, root.children) != 0 { found = scan + 1
+            scanning = false } else { scan = scan + 1 }
+        }
+    }
+    if found == 0 { return Ok(CheckGood(store)) }
+    let recorded = try record_generic_impl_head(d, state, parse, store, __s0_buffer_get(U64, parse.roots, found - 1))
+    if match recorded {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(recorded) }
+    let current = match recorded {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return record_generic_impl_heads_from(d, state, parse, current, found)
+}
+
+fn record_generic_impl_head(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_id: U64) -> Result(CheckResult, __s0_Error) {
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+    let head = first_impl_method_symbol(store, root_id)
+    if head == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    let params = impl_param_links(parse, root, root.children)
+    let named = try record_impl_params(d, state, parse, store, head, root_id, params)
+    if match named {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(named) }
+    let current = match named {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return check_constraint_children(d, state, parse, current, head, params)
+}
+
+// Record the implementation's parameters as the first method's records with
+// the implementation root as the recorded node, so they are distinguishable
+// from the method's own parameters.
+fn record_impl_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, head: U64, root_id: U64, link_at: U64) -> Result(CheckResult, __s0_Error) {
+    if link_at == 0 { return Ok(CheckGood(store)) }
+    let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
+    let param_node = __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1)
+    var before = store
+    if param_node.kind == 7 {
+        var at: U64 = 0
+        while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+            let first = __s0_buffer_get(TypeParamRec, store.type_params, at)
+            if first.owner == head && same_name(state, param_node.source, param_node.name_start, param_node.name_end, first.source, first.name_start, first.name_end) {
+                return check_fail(d, store, 3, param_node, first.source, first.name_start, first.name_end)
+            }
+            at = at + 1
+        }
+        let params = try __s0_buffer_append(TypeParamRec, d, store.type_params, TypeParamRec(owner: head, node: root_id, source: param_node.source, name_start: param_node.name_start, name_end: param_node.name_end))
+        before = CheckStore(symbols: store.symbols, type_params: params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    }
+    return record_impl_params(d, state, parse, before, head, root_id, item.next)
+}
+
+// Resolve one trait-implementation head and record it. The implementing
+// type must be a declared nominal type: non-generic without a parameter
+// list, generic applied to the impl's own parameters with one. Constraint
+// restatement (D024) and per-instance method checking follow from the
+// recorded parameter list.
 fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_at: U64) -> Result(CheckResult, __s0_Error) {
     let root_id = __s0_buffer_get(U64, parse.roots, root_at)
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
-    // The trait application is the chain tail.
-    var tail: U64 = 0
-    var link_at = root.children
-    while link_at != 0 {
-        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
-        if item.next == 0 { tail = item.node }
-        link_at = item.next
-    }
-    if tail == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
-    let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, tail - 1)
+    let trait_id = trait_impl_trait_node(parse, root)
+    if trait_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, trait_id - 1)
     // Structural equality and hashing are language-provided; a user
     // implementation cannot override them.
     if builtin_trait_id(state, trait_node) == 1 || builtin_trait_id(state, trait_node) == 2 { return check_token_fail(d, state, store, 125, trait_node) }
     let self_node_id = trait_impl_self_node(parse, root)
     if self_node_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let self_node = __s0_buffer_get(SyntaxRec, parse.nodes, self_node_id - 1)
-    if self_node.kind != 4 { return check_token_fail(d, state, store, 110, self_node) }
+    let param_at = impl_param_links(parse, root, root.children)
     let self_symbol = find_declared_type(state, parse, store, self_node)
-    if self_symbol == 0 { return check_token_fail(d, state, store, 110, self_node) }
+    if self_symbol == 0 {
+        // A bare parameter of the implementation's own list is rejected
+        // specifically (301); any other unknown name stays a generic
+        // target-type failure.
+        if param_at != 0 {
+            let head_probe = first_impl_method_symbol(store, root_id)
+            if head_probe != 0 && find_type_param(state, store, head_probe, self_node) != 0 { return check_token_fail(d, state, store, 301, self_node) }
+        }
+        return check_token_fail(d, state, store, 110, self_node)
+    }
     let self_declared = __s0_buffer_get(SymbolRec, store.symbols, self_symbol - 1)
+    if param_at != 0 { return resolve_generic_trait_impl_at(d, state, parse, store, root_id, root, trait_node, self_node, self_node_id, self_symbol, self_declared) }
+    if self_node.kind != 4 { return check_token_fail(d, state, store, 110, self_node) }
     if self_declared.type_arity != 0 { return check_token_fail(d, state, store, 110, self_node) }
     let appended = try append_checked_type(d, store, self_symbol, 7, self_node_id, self_symbol, 0, 0)
     let self_checked = checked_type_for_syntax(appended, self_symbol, self_node_id)
@@ -11073,6 +11532,207 @@ fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: Chec
     }
     let impls = try __s0_buffer_append(TraitImplRec, d, current.traits.impls, TraitImplRec(trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, self_type: self_checked, owner_node: root_id, first_method: first_method, method_count: method_count, synthesized: 0))
     return Ok(CheckGood(trait_store_with(current, impls, current.traits.impl_index)))
+}
+
+// A generic implementation head: the parameter list under `impl(...)`. The
+// implementing type must be a declared record or enum applied to arguments
+// that may name the implementation's parameters. Every parameter must
+// appear in the implementing type, the type's own parameter constraints
+// must be restated on the matching implementation parameters, and the trait
+// application resolves in the first method's scope with abstract arguments
+// allowed.
+fn resolve_generic_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_id: U64, root: SyntaxRec, trait_node: SyntaxRec, self_node: SyntaxRec, self_node_id: U64, self_symbol: U64, self_declared: SymbolRec) -> Result(CheckResult, __s0_Error) {
+    if self_declared.kind != 2 && self_declared.kind != 3 { return check_token_fail(d, state, store, 110, self_node) }
+    let head = first_impl_method_symbol(store, root_id)
+    if head == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    // An implementation cannot target a bare parameter of its own list.
+    if find_type_param(state, store, head, self_node) != 0 { return check_token_fail(d, state, store, 301, self_node) }
+    // The implementing type's arguments resolve in the first method's
+    // scope, so the parameters may appear anywhere in the application.
+    let args_resolved = try resolve_arg_links(d, state, parse, store, head, self_node.children)
+    if match args_resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(args_resolved) }
+    let current_args = match args_resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    let arg_count = type_arg_count(parse, self_node.children)
+    if arg_count != self_declared.type_arity {
+        return check_fail(d, current_args, 5, self_node, self_declared.source, self_declared.name_start, self_declared.name_end)
+    }
+    let base_len = __s0_buffer_len(U64, current_args.type_args) + 1
+    let recorded = try record_arg_links(d, parse, current_args, head, self_node.children)
+    let applied = try append_checked_type(d, recorded, head, 7, self_node_id, self_symbol, base_len, arg_count)
+    let self_checked = checked_type_for_syntax(applied, head, self_node_id)
+    let appeared = try impl_params_all_appear(d, state, parse, applied, head, root_id, self_checked)
+    if match appeared {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(appeared) }
+    let appeared_store = match appeared {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    // The restatement check (302) runs in validate_trait_impls, the late
+    // pass: the implementing type's constraint records do not exist until
+    // declarations are checked, which happens after impl resolution.
+    // The trait application resolves in the first method's scope; its
+    // arguments may stay abstract when they name the parameters, so the
+    // concreteness gate the concrete heads run does not apply here.
+    let reference = try resolve_trait_reference(d, state, parse, appeared_store, head, trait_node)
+    let current = match reference {
+        TraitRefGood(value) => value.store
+        TraitRefBad(value) => value
+    }
+    if match reference {
+        TraitRefGood(value) => false
+        TraitRefBad(value) => true
+    } { return Ok(CheckBad(current)) }
+    let resolved = match reference {
+        TraitRefGood(value) => value.reference
+        TraitRefBad(value) => TraitRefRec(builtin: 0, symbol: 0, first_arg: 0, arg_count: 0)
+    }
+    // Impl methods are consecutive symbols collected under this impl node;
+    // record their range for trait-method resolution.
+    var first_method: U64 = 0
+    var method_count: U64 = 0
+    var symbol_at: U64 = 0
+    while symbol_at < __s0_buffer_len(SymbolRec, current.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, current.symbols, symbol_at)
+        if symbol.inherent_owner == root_id {
+            if first_method == 0 { first_method = symbol_at + 1 }
+            method_count = method_count + 1
+        }
+        symbol_at = symbol_at + 1
+    }
+    let impls = try __s0_buffer_append(TraitImplRec, d, current.traits.impls, TraitImplRec(trait_builtin: resolved.builtin, trait_symbol: resolved.symbol, first_arg: resolved.first_arg, arg_count: resolved.arg_count, self_type: self_checked, owner_node: root_id, first_method: first_method, method_count: method_count, synthesized: 0))
+    return Ok(CheckGood(trait_store_with(current, impls, current.traits.impl_index)))
+}
+
+// Every implementation parameter must appear somewhere in the
+// implementing type's application.
+fn impl_params_all_appear(d: Domain, state: State, parse: ParseStore, store: CheckStore, head: U64, root_id: U64, self_checked: U64) -> Result(CheckResult, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let record = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if record.owner == head && record.node == root_id && !impl_param_appears(store, self_checked, at + 1, 0) {
+            let param_node = impl_param_syntax_node(parse, root_id, record)
+            if param_node == 0 { return check_fail(d, store, 300, __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1), 0, 0, 0) }
+            return check_token_fail(d, state, store, 300, __s0_buffer_get(SyntaxRec, parse.nodes, param_node - 1))
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
+fn impl_param_appears(store: CheckStore, checked_type: U64, param: U64, depth: U64) -> Bool {
+    if checked_type == 0 || depth > 16 { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 6 { return checked.target == param }
+    var at: U64 = 0
+    while at < checked.arg_count {
+        if impl_param_appears(store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at), param, depth + 1) { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// For the ordinal of each constrained parameter of the implementing type,
+// the application argument in the same position must be an implementation
+// parameter whose recorded constraints cover the type's constraints.
+// Additional implementation constraints are allowed.
+fn impl_restates_constraints(d: Domain, state: State, parse: ParseStore, store: CheckStore, head: U64, self_checked: U64, self_symbol: U64) -> Result(CheckResult, __s0_Error) {
+    let application = __s0_buffer_get(CheckedTypeRec, store.types, self_checked - 1)
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let record = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if record.owner == self_symbol {
+            if ordinal < application.arg_count {
+                let argument = __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + ordinal)
+                let argument_type = __s0_buffer_get(CheckedTypeRec, store.types, argument - 1)
+                if argument_type.kind == 6 {
+                    let covered = try impl_param_covers_constraints(d, state, parse, store, head, argument_type.target, self_symbol, at + 1, self_checked)
+                    if match covered {
+                        CheckGood(value) => false
+                        CheckBad(value) => true
+                    } { return Ok(covered) }
+                }
+            }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
+fn impl_param_covers_constraints(d: Domain, state: State, parse: ParseStore, store: CheckStore, head: U64, impl_param: U64, self_symbol: U64, type_param: U64, self_checked: U64) -> Result(CheckResult, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
+        let want = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+        if want.owner == self_symbol && want.param == type_param && !impl_constraint_covered(store, head, impl_param, want, self_symbol, self_checked) {
+            let root_id = __s0_buffer_get(SymbolRec, store.symbols, head - 1).inherent_owner
+            let record = __s0_buffer_get(TypeParamRec, store.type_params, impl_param - 1)
+            let param_node = impl_param_syntax_node(parse, root_id, record)
+            if param_node == 0 { return check_fail(d, store, 302, __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1), 0, 0, 0) }
+            return check_token_fail(d, state, store, 302, __s0_buffer_get(SyntaxRec, parse.nodes, param_node - 1))
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
+fn impl_constraint_covered(store: CheckStore, head: U64, impl_param: U64, want: TraitConstraintRec, self_symbol: U64, self_checked: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
+        let got = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+        if got.owner == head && got.param == impl_param && got.trait_builtin == want.trait_builtin && got.trait_symbol == want.trait_symbol && got.arg_count == want.arg_count {
+            var matched = true
+            var ordinal: U64 = 0
+            while ordinal < want.arg_count {
+                let want_arg = __s0_buffer_get(U64, store.traits.args, want.first_arg - 1 + ordinal)
+                let got_arg = __s0_buffer_get(U64, store.traits.args, got.first_arg - 1 + ordinal)
+                if !impl_constraint_args_match(store, want_arg, got_arg, self_symbol, self_checked, 0) { matched = false }
+                ordinal = ordinal + 1
+            }
+            if matched { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// One constraint argument comparison: a parameter of the implementing type
+// maps to the implementation parameter occupying its application position.
+fn impl_constraint_args_match(store: CheckStore, want: U64, got: U64, self_symbol: U64, self_checked: U64, depth: U64) -> Bool {
+    if depth > 8 { return false }
+    let w = __s0_buffer_get(CheckedTypeRec, store.types, want - 1)
+    let g = __s0_buffer_get(CheckedTypeRec, store.types, got - 1)
+    if w.kind == 6 {
+        let self_type = __s0_buffer_get(CheckedTypeRec, store.types, self_checked - 1)
+        let ordinal = type_param_ordinal(store, self_symbol, w.target)
+        if ordinal >= self_type.arg_count { return false }
+        let mapped = __s0_buffer_get(U64, store.type_args, self_type.first_arg - 1 + ordinal)
+        if g.kind == 6 { return g.target == mapped }
+        return impl_constraint_args_same(store, mapped, got, depth + 1)
+    }
+    if g.kind == 6 { return false }
+    return impl_constraint_args_same(store, want, got, depth + 1)
+}
+
+fn impl_constraint_args_same(store: CheckStore, left: U64, right: U64, depth: U64) -> Bool {
+    if depth > 8 { return false }
+    let l = __s0_buffer_get(CheckedTypeRec, store.types, left - 1)
+    let r = __s0_buffer_get(CheckedTypeRec, store.types, right - 1)
+    if l.kind != r.kind || l.target != r.target || l.arg_count != r.arg_count { return false }
+    var at: U64 = 0
+    while at < l.arg_count {
+        if !impl_constraint_args_same(store, __s0_buffer_get(U64, store.type_args, l.first_arg - 1 + at), __s0_buffer_get(U64, store.type_args, r.first_arg - 1 + at), depth + 1) { return false }
+        at = at + 1
+    }
+    return true
 }
 
 // Resolve trait implementations with bounded recursion: scanning roots is a
@@ -11187,7 +11847,62 @@ fn build_trait_indexes(d: Domain, state: State, parse: ParseStore, current: Chec
         }
         order = order + 1
     }
+    // Overlapping generic implementations: two implementing types that
+    // unify for the same trait application collide even when their
+    // canonical IDs differ, and a parameter unifies with any argument. The
+    // sorted adjacent scan cannot catch every pair (a generic self type can
+    // sort between two colliding concretes), so check every pair once.
+    var left_at: U64 = 0
+    while left_at < __s0_buffer_len(TraitImplRec, impls) {
+        let left = __s0_buffer_get(TraitImplRec, impls, left_at)
+        var right_at = left_at + 1
+        while right_at < __s0_buffer_len(TraitImplRec, impls) {
+            let right = __s0_buffer_get(TraitImplRec, impls, right_at)
+            if left.synthesized == 0 && right.synthesized == 0 && !trait_impl_key_equal(with_receiver, left, right) && impl_heads_unify(with_receiver, left, right, 0) {
+                let related = __s0_buffer_get(SyntaxRec, parse.nodes, right.owner_node - 1)
+                return check_token_related_fail(d, state, with_receiver, 107, __s0_buffer_get(SyntaxRec, parse.nodes, left.owner_node - 1), related)
+            }
+            right_at = right_at + 1
+        }
+        left_at = left_at + 1
+    }
     return Ok(CheckGood(with_receiver))
+}
+
+// Whether two implementation heads overlap: the same trait applied and
+// implementing types that unify.
+fn impl_heads_unify(store: CheckStore, left: TraitImplRec, right: TraitImplRec, depth: U64) -> Bool {
+    if depth > 8 { return false }
+    if left.trait_builtin != right.trait_builtin || left.trait_symbol != right.trait_symbol { return false }
+    if !impl_types_unify(store, left.self_type, right.self_type, depth + 1) { return false }
+    if left.arg_count != right.arg_count { return false }
+    var at: U64 = 0
+    while at < left.arg_count {
+        let l = __s0_buffer_get(U64, store.traits.args, left.first_arg - 1 + at)
+        let r = __s0_buffer_get(U64, store.traits.args, right.first_arg - 1 + at)
+        if !impl_types_unify(store, l, r, depth + 1) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn impl_types_unify(store: CheckStore, left: U64, right: U64, depth: U64) -> Bool {
+    if depth > 8 { return false }
+    if left == 0 || right == 0 { return false }
+    let l = __s0_buffer_get(CheckedTypeRec, store.types, left - 1)
+    let r = __s0_buffer_get(CheckedTypeRec, store.types, right - 1)
+    // A parameter unifies with any argument; two distinct parameters also
+    // unify, which makes two generic implementations overlap.
+    if l.kind == 6 || r.kind == 6 { return true }
+    if l.kind != r.kind || l.target != r.target || l.arg_count != r.arg_count { return false }
+    var at: U64 = 0
+    while at < l.arg_count {
+        let l_child = __s0_buffer_get(U64, store.type_args, l.first_arg - 1 + at)
+        let r_child = __s0_buffer_get(U64, store.type_args, r.first_arg - 1 + at)
+        if !impl_types_unify(store, l_child, r_child, depth + 1) { return false }
+        at = at + 1
+    }
+    return true
 }
 
 // Concrete trait-argument lookup for one constraint whose parameterized

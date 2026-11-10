@@ -1563,7 +1563,7 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
     owner = 1
     while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-        let concrete = (symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13
+        let concrete = lower_owner_concrete(store, owner)
         if concrete {
             var result_role: U64 = 8
             if symbol.kind == 12 { result_role = 6 }
@@ -5423,7 +5423,7 @@ fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpa
     var owner: U64 = 1
     while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
-        if (symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13 {
+        if lower_owner_concrete(store, owner) {
             current = try lower_function(d, source_state, spans, store, locals, current, owner)
             if !current.valid { return Ok(current) }
         }
@@ -6525,6 +6525,36 @@ fn lower_builtin_child_type(store: CheckStore, expression: CheckedExprRec, ordin
     return __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).checked_type
 }
 
+// A method of a generic implementation owns no declaration body: only its
+// concrete instances are checked and lowered. The implementation's
+// parameters are the records its first method owns with the implementation
+// root as their recorded node.
+fn lower_impl_method_generic(store: CheckStore, method: U64) -> Bool {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
+    if symbol.kind != 12 || symbol.inherent_owner == 0 { return false }
+    var head: U64 = 0
+    var at: U64 = 0
+    var scanning = true
+    while scanning {
+        if at >= __s0_buffer_len(SymbolRec, store.symbols) { scanning = false } else {
+            let candidate = __s0_buffer_get(SymbolRec, store.symbols, at)
+            if candidate.kind == 12 && candidate.inherent_owner == symbol.inherent_owner { head = at + 1
+            scanning = false } else { at = at + 1 }
+        }
+    }
+    if head == 0 { return false }
+    return impl_param_count_for(store, head) != 0
+}
+
+// A lowered body owner: a non-generic function or method that is not a
+// method of a generic implementation, or an instance.
+fn lower_owner_concrete(store: CheckStore, owner: U64) -> Bool {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.kind == 13 { return true }
+    if symbol.kind != 12 || symbol.type_arity != 0 { return false }
+    return !lower_impl_method_generic(store, owner)
+}
+
 fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     // Ownership is validated below in stable record order. Build dense counts
     // once instead of rediscovering each owner with nested whole-table scans.
@@ -6681,7 +6711,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 13 {
             if item.declaration == 0 || item.declaration > __s0_buffer_len(SymbolRec, store.symbols) || item.declaration > at || __s0_buffer_get(SymbolRec, store.symbols, item.declaration - 1).kind != 12 { return false }
             if item.instance_arg_count == 0 || item.first_instance_arg == 0 || item.first_instance_arg - 1 + item.instance_arg_count > __s0_buffer_len(U64, store.type_args) { return false }
-            if item.instance_arg_count != __s0_buffer_get(SymbolRec, store.symbols, item.declaration - 1).type_arity { return false }
+            if item.instance_arg_count != instance_arg_total(store, item.declaration) { return false }
             if item.discovery_parent != 0 && (item.discovery_parent > at || __s0_buffer_get(SymbolRec, store.symbols, item.discovery_parent - 1).declaration == 0) { return false }
         } else {
             if item.kind == 12 && item.type_arity == 0 {
@@ -6750,7 +6780,19 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if trait_self_param(store, at + 1) != 0 { trait_params = trait_params - 1 }
             if trait_params < symbol.type_arity { return false }
         } else {
-            if symbol.kind != 13 && type_param_counts[at + 1] != symbol.type_arity { return false }
+            if symbol.kind != 13 {
+                // The first method of a generic implementation owns the
+                // implementation's parameters in addition to its own; no
+                // other symbol may own more parameters than its arity.
+                let owned = type_param_counts[at + 1]
+                if owned < symbol.type_arity { return false }
+                if owned != symbol.type_arity {
+                    if symbol.inherent_owner == 0 { return false }
+                    let head = first_impl_method_symbol(store, symbol.inherent_owner)
+                    if head != at + 1 { return false }
+                    if owned != symbol.type_arity + impl_param_count_for(store, head) { return false }
+                }
+            }
             if symbol.kind == 13 && type_param_counts[at + 1] != 0 { return false }
         }
         at = at + 1
@@ -6776,7 +6818,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if item.checked_type != 0 { return false }
         } else {
             if item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
-            if (item.role == 3 || item.role == 4 || item.role == 7 || item.role == 8 || ((item.role == 1 || item.role == 2 || item.role == 5 || item.role == 6) && symbol.type_arity == 0)) && !lower_type_concrete(store, item.checked_type) { return false }
+            if (item.role == 3 || item.role == 4 || item.role == 7 || item.role == 8 || ((item.role == 1 || item.role == 2 || item.role == 5 || item.role == 6) && symbol.type_arity == 0 && !lower_impl_method_generic(store, item.owner))) && !lower_type_concrete(store, item.checked_type) { return false }
         }
         at = at + 1
     }
@@ -6791,7 +6833,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(LocalRec, store.locals, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 2 || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.mutable > 2 || (item.kind == 2 && item.mutable > 1) || !lower_type_concrete(store, item.checked_type) || !lower_source_range_valid(source_state, item.source, item.name_start, item.name_end, true) { return false }
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((symbol.kind == 12 && symbol.type_arity == 0) || symbol.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         if binding_environment_counts[at + 1] != 1 { return false }
         at = at + 1
     }
@@ -6800,7 +6842,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(EnvironmentRec, store.environments, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.parent > at { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         if item.parent != 0 && __s0_buffer_get(EnvironmentRec, store.environments, item.parent - 1).owner != item.owner { return false }
         if item.binding != 0 && (item.binding > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.binding - 1).owner != item.owner) { return false }
         at = at + 1
@@ -6816,7 +6858,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 7 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         if item.kind == 6 {
             if item.target != 0 || item.variant_use != 0 || (item.builtin != 5 && item.builtin != 6) { return false }
             let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
@@ -6838,7 +6880,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }
         let target = __s0_buffer_get(SymbolRec, store.symbols, item.target - 1)
         if item.kind == 1 {
-            if !((target.kind == 12 && target.type_arity == 0) || target.kind == 13) { return false }
+            if !lower_owner_concrete(store, item.target) { return false }
             var result_role: U64 = 6
             if target.kind == 13 { result_role = 8 }
             let result_use = lower_use_by_role(store, item.target, result_role, 0)
@@ -6872,7 +6914,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
         if item.kind == 0 || item.kind == 25 || item.kind > 26 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
         if (item.child_count == 0 && item.first_child != 0) || (item.child_count != 0 && item.first_child == 0) { return false }
         if item.child_count != 0 && item.first_child - 1 + item.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
@@ -7186,7 +7228,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.kind == 0 || item.kind > 12 || !lower_environment_valid(store, item.owner, item.environment) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         if statement_owners[at + 1] != 1 { return false }
         var expression_site: U64 = 0
         var needs_expression = false
@@ -7293,7 +7335,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(CheckedBlockRec, store.control.blocks, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_environment_valid(store, item.owner, item.environment) || item.statements > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) || item.guaranteed_return > 1 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         let parent_count = block_parents[at + 1]
         if parent_count > 1 { return false }
         if parent_count == 0 && owner_roots[item.owner] != 1 { return false }
@@ -7308,7 +7350,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let owner = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if (owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13 {
+        if lower_owner_concrete(store, at + 1) {
             if owner_roots[at + 1] != 1 { return false }
         }
         at = at + 1
@@ -7318,7 +7360,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let item = __s0_buffer_get(CheckedMatchRec, store.control.matches, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.scrutinee == 0 || item.scrutinee > __s0_buffer_len(CheckedExprRec, store.expressions) || !lower_type_concrete(store, item.scrutinee_type) || !lower_type_concrete(store, item.checked_type) || item.arm_count == 0 || item.first_arm == 0 || item.first_arm - 1 + item.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
-        if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
+        if !lower_owner_concrete(store, item.owner) { return false }
         let scrutinee = __s0_buffer_get(CheckedExprRec, store.expressions, item.scrutinee - 1)
         if scrutinee.owner != item.owner || !lower_checked_abi_equal(store, scrutinee.checked_type, item.scrutinee_type) { return false }
         if match_owners[at + 1] != 1 { return false }

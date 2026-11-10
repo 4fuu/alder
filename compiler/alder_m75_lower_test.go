@@ -123,6 +123,101 @@ fn main() -> I32 {
 	t.Logf("trait dispatch program exited cleanly under strict C11")
 }
 
+// M7.5 generic implementation parameter lists (D024 second part): one trait
+// implemented for a generic record through an `impl(I: type(Io))` head, and
+// a second implementation whose method dispatches to the first through the
+// instance. The program must lower, verify, compile under the strict C11
+// set, and run with the expected dispatch results. Alder-only: the Go
+// oracle frontend does not implement the trait surface.
+func runAlderGenericImplLowerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"generic-impl.al": `trait Io {
+}
+
+trait Reader {
+    fn read(self) -> U64
+}
+
+trait Preview {
+    fn preview(self) -> U64
+}
+
+type Token {
+}
+
+type File(I: type(Io)) {
+    id: I
+}
+
+impl Io for Token {
+}
+
+impl(I: type(Io)) Reader for File(I) {
+    fn read(self) -> U64 {
+        return 42
+    }
+}
+
+impl(I: type(Io)) Preview for File(I) {
+    fn preview(self) -> U64 {
+        let direct = self.read()
+        return direct + 1
+    }
+}
+
+fn main() -> I32 {
+    let file = File(id: Token())
+    if file.read() != 42 { return 1 }
+    if file.preview() != 43 { return 2 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"generic-impl.al"})
+	second := runLowerCompiler(t, exe, files, []string{"generic-impl.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered generic impl MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered generic impl MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("generic impl MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"generic-impl.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"generic-impl.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written generic impl C changed across processes")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "generic-impl.c")
+	program := filepath.Join(dir, "generic-impl.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of generic impl dispatch: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run generic impl dispatch behavior: %v\n%s", err, output)
+	}
+	t.Logf("generic impl dispatch program exited cleanly under strict C11")
+}
+
 // runLowerCompilerPublic runs the lower conformance entry without the
 // private bootstrap profile: ordered Map/Set fixtures use the public types,
 // so the Map( heuristic in runLowerCompiler must not fire for them.

@@ -113,6 +113,17 @@ Milestone 7.5 adds the static trait surface of
   non-generic declared record or enum type with concrete trait arguments.
   Methods are ordinary functions; their bodies are checked and lowered even
   before trait-method dispatch exists.
+- `impl(Param: type(Constraints), ...) Trait for Type(Arguments) { ... }`
+  declares a generic implementation (D024): the parameter list reuses the
+  declaration parameter form, every listed parameter must appear in the
+  implementing type's arguments, an implementing type that is a bare
+  parameter of its own list is rejected, and the implementing type's own
+  parameter constraints must be restated on the matching parameters
+  (`impl(I: type(Io)) Reader for File(I)`); additional constraints are
+  allowed. Constraint arguments and the trait application resolve in the
+  implementation's scope, so parameters may appear in any order. Methods of
+  a generic implementation are checked per concrete instance and their
+  bodies never resolve the parameters abstractly.
 - Constraints are written on the type parameter itself (D024):
   `T: type` is unconstrained, and `T: type(Order)`, `K: type(Eq, Hash)`, and
   `I: type(Iterator(T))` attach the listed traits to the parameter in

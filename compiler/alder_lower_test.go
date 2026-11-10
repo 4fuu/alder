@@ -22,6 +22,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m71-collections", func(t *testing.T) { runM71LowerConformance(t, exe) })
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73LowerBehavior(t, exe) })
 	t.Run("m75-trait-dispatch", func(t *testing.T) { runAlderM75LowerBehavior(t, exe) })
+	t.Run("m75-generic-impl", func(t *testing.T) { runAlderGenericImplLowerBehavior(t, exe) })
 	t.Run("m75-ordered-collections", func(t *testing.T) { runAlderM75OrderedLowerBehavior(t, exe) })
 	t.Run("m75-fn-values", func(t *testing.T) { runAlderFnValueLowerBehavior(t, exe) })
 	t.Run("m75-closures", func(t *testing.T) { runAlderClosureLowerBehavior(t, exe) })
