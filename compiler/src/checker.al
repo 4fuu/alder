@@ -1474,7 +1474,11 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
             }
             previous = previous + 1
         }
-        if reserved_symbol(state, node) { return check_fail(d, store, 2, node, 0, 0, 0) }
+        // Builtin method names stay reserved for ordinary declarations, but
+        // an impl block may declare a method named len: the impl's own type
+        // owns that name for dot-calls, and the builtin len methods keep
+        // winning on the builtin receiver kinds.
+        if reserved_symbol(state, node) && !(inherent_owner != 0 && node_word(state, node, "len")) { return check_fail(d, store, 2, node, 0, 0, 0) }
         let symbol_id = __s0_buffer_len(SymbolRec, store.symbols) + 1
         var declaration: U64 = 0
         if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
@@ -7320,7 +7324,10 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // the sequence-method names, which otherwise capture len and slice and
         // reject these receivers at the sequence guard.
         if receiver_type.kind == 2 || receiver_type.kind == 14 { return check_str_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
-        if node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") {
+        // Sequence methods capture their names only on the receiver kinds
+        // that own the builtins; every other receiver falls through to impl
+        // lookup, so a user type may provide its own len or slice method.
+        if (receiver_type.kind == 8 || receiver_type.kind == 15 || receiver_type.kind == 17 || receiver_type.kind == 18) && (node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview")) {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "add_checked") || node_word(state, callee, "sub_checked") || node_word(state, callee, "mul_checked") || node_word(state, callee, "add_saturating") || node_word(state, callee, "sub_saturating") || node_word(state, callee, "mul_saturating") || node_word(state, callee, "add_wrapping") || node_word(state, callee, "sub_wrapping") || node_word(state, callee, "mul_wrapping")) {
@@ -7337,6 +7344,11 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
                 if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
             }
+            // A builtin byte-sequence or sequence method name on a nominal
+            // type that provides no such method gets its own diagnostic: the
+            // generic unknown-method reject reads as if the name never
+            // existed, which misdirects a user who meant the builtin form.
+            if node_word(state, callee, "len") || node_word(state, callee, "byte") || node_word(state, callee, "concat") || node_word(state, callee, "slice") || node_word(state, callee, "to_bytes") || node_word(state, callee, "to_string_checked") { return expr_token_fail(d, state, base, 250, callee) }
             return expr_token_fail(d, state, base, 61, callee)
         }
         return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)

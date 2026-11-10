@@ -336,7 +336,12 @@ Implemented expressions include:
   out-of-range range through the panic path, `String.to_bytes()` reinterprets
   the string's bytes without copying, and
   `Bytes.to_string_checked() -> Option(String)` validates UTF-8 and yields
-  `none` on invalid input;
+  `none` on invalid input. These names apply only when the receiver type is
+  `String` or `Bytes` (a literal included); on every other type the name is
+  resolved like an ordinary method, so user impls may declare methods named
+  `len` or `to_bytes`, and a call with such a name on a type that provides
+  neither a builtin receiver nor an impl method is rejected with a dedicated
+  diagnostic naming the builtin method;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`

@@ -360,6 +360,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string(" matches no trait requirement")
     }
     if kind == 123 { return out_string("trait implementation method does not match the trait requirement signature") }
+    if kind == 250 {
+        if !out_string("builtin method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" applies only to its builtin receiver types, and this type provides no such impl method") { return false }
+        return out_string("")
+    }
     if kind == 125 { return out_string("structural Eq and Hash implementations are language-provided and cannot be declared") }
     if kind == 126 {
         if !out_string("structural ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" methods become callable with the ordered collections") { return false }
