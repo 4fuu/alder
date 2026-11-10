@@ -55,17 +55,6 @@ Choose the portable combination of `_Static_assert`, typed assignments,
 `offsetof`, generated access shims, and compile/run probes. Do not introduce a
 second C parser unless measured bindings require it.
 
-### Generic implementation parameter list
-
-Required result: implement the blanket and generic implementations that
-[Traits and Closures](traits-and-closures.md) allows, such as one `Display`
-implementation for every `Vec(T)` whose element is `Display`.
-
-Choose where an implementation declares its own type parameters (for example
-`impl(T: type(Display)) Display for Vec(T)`). Constraints use the D024
-`type(...)` form; only the position of the parameter list is open. Implementations
-for non-generic types need no parameter list.
-
 ### Standard-library final API snapshots
 
 Required result: implement every module family in

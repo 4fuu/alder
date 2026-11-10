@@ -287,8 +287,9 @@ context. There is no hidden exception chain.
 
 Each module declares the precise error enum its operations can return; it does
 not re-export a dependency's error or fall back to a catch-all. A wrapped
-lower-level error is a variant payload reachable through `Error.cause`, and
-`program error:` output prints the chain one cause per line. `core.result`
+lower-level error is a typed variant payload reached by `match`; `Error.cause`
+returns its `ErrorReport` (D025), and `program error:` output prints the chain
+one cause per line. `core.result`
 provides `map_error` for adaptation; no implicit conversion exists.
 
 ## Portability and unsupported capabilities

@@ -272,14 +272,50 @@ at compile time; a capitalized `Type` would read as a runtime library value.
 A constraint may name any type parameter of the same parameter list, in either
 order, so `IteratorType: type(Iterator(Item))` may precede `Item: type`.
 Constraint arguments resolve in the declaration's scope. Method type
-parameters use the same form. The parameter list of a generic implementation is
-still open (see [Open Questions](open-questions.md)); its constraints, when it
-lands, use this form.
+parameters use the same form.
+
+A generic implementation declares its parameters right after `impl`, in the
+same form: `impl(I: type(Io)) Reader for File(I)` and
+`impl(Source: type(Reader)) BufReader(Source) { ... }`. An implementation for
+a non-generic type has no list. Every listed parameter must appear in the
+implementing type, and the implementing type must be a nominal type applied
+to parameters or concrete types; an implementation for a bare parameter
+(`impl(T: type(X)) Y for T`) is not part of Alder 1.0. An implementation
+restates the constraints its type declares and may add more; a missing one is
+rejected rather than implied. Coherence is unchanged: two implementations whose
+implementing types can unify for the same trait application are rejected.
 
 Rationale: a constraint can only name one parameter (`Param: Trait`), so a
 separate clause adds a second place to read a signature without adding
 expressive power, and it is the one spelling in the language that is neither a
 keyword form nor a parenthesized application.
+
+### D025 — `Error.cause` returns a report, payloads stay typed
+
+Status: **Frozen 1.0**
+
+`Error` is a builtin prelude trait like `Cleanup`:
+
+```alder
+trait Error {
+    fn cause(self) -> Option(ErrorReport) {
+        return None
+    }
+}
+```
+
+`ErrorReport` is a prelude value holding the displayed text of one error and
+of every cause below it, built by `ErrorReport.of(E: type(Error, Display),
+error: E)`, which recurses through `cause`. A module error keeps each wrapped
+lower-level error as a typed variant payload that callers reach by `match`;
+`cause` returns the report of whichever payload the current variant wraps, so
+an error that can wrap several different lower-level error types still reports
+its whole chain. `program error:` output prints the report one cause per line.
+
+Rationale: Alder 1.0 has no trait objects and no trait inheritance, so a typed
+`cause` result can name only one cause type and breaks for errors that wrap
+several; a report needs neither feature, and typed access stays with the
+variant payload where the error-taxonomy rules already put it.
 
 ## Bootstrap decisions
 

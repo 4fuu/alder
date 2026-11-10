@@ -235,8 +235,8 @@ cleanup and function-domain destruction.
 Error adaptation uses an explicit `map_error` call or another ordinary
 conversion; it is never implicit. The standard convention is that each module
 defines its own precise error enum, wraps a lower-level error as a variant
-payload instead of re-exporting it, and exposes that payload through the
-`Error` trait's `cause` method, so diagnostics can print the whole chain. `try` does not catch bounds, overflow,
+payload instead of re-exporting it, and reports that payload through the
+`Error` trait's `cause` method (an `ErrorReport`, D025), so diagnostics can print the whole chain. `try` does not catch bounds, overflow,
 infallible allocation, or C contract violations. If `T` is affine, `try`
 consumes the `Result(T, E)` and transfers the `Ok` owner into its result binding.
 
