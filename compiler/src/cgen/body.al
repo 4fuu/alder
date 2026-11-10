@@ -828,6 +828,48 @@ fn cgen_emit_str_from_bytes(d: Domain, initial: CgenWriter, store: MirStore, ind
     return Ok(out)
 }
 
+// A c_binding_call invokes the member's C spelling with the instruction's
+// operands in order; a unit result assigns nothing.
+fn cgen_emit_binding_call(d: Domain, out: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var w = out
+    if item.target == 0 || item.target > __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+        return cgen_put(d, w, "  /* unreachable binding call */\n")
+    }
+    let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, item.target - 1)
+    w = try cgen_put(d, w, "  ")
+    if fn_rec.result_type != mir_type_unit() {
+        w = try cgen_put_value(d, w, item.result)
+        w = try cgen_put(d, w, " = ")
+    }
+    w = try cgen_put(d, w, "(")
+    w = try cgen_put_name(d, w, store, fn_rec.c_name_start, fn_rec.c_name_end)
+    w = try cgen_put(d, w, ")(")
+    let count = cgen_operand_count(store, indexes, mir_operand_instruction(), instruction, 0)
+    var ordinal: U64 = 0
+    var wrote = false
+    while ordinal < count {
+        let argument = cgen_operand(store, indexes, mir_operand_instruction(), instruction, 0, ordinal)
+        if argument.operand_type != mir_type_unit() {
+            if wrote { w = try cgen_put(d, w, ", ") }
+            w = try cgen_put_value_read(d, w, store, indexes, item.function, argument.value)
+            wrote = true
+        }
+        ordinal = ordinal + 1
+    }
+    return cgen_put(d, w, ");\n")
+}
+
+// c_is_null reads its pointer operand and writes a Bool comparing it with
+// the C null pointer.
+fn cgen_emit_c_is_null(d: Domain, out: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var w = out
+    w = try cgen_put(d, w, "  ")
+    w = try cgen_put_value(d, w, item.result)
+    w = try cgen_put(d, w, " = (bool)((")
+    w = try cgen_put_value_read(d, w, store, indexes, item.function, item.a)
+    return cgen_put(d, w, ") == (void *)0);\n")
+}
+
 fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     if item.op == mir_op_load() {
@@ -1616,6 +1658,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_str_concat() { return cgen_emit_str_concat(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_slice_checked() { return cgen_emit_str_slice_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_from_bytes() { return cgen_emit_str_from_bytes(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_binding_call() { return cgen_emit_binding_call(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_is_null() { return cgen_emit_c_is_null(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
 

@@ -25,6 +25,41 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     if t.kind == mir_type_kind_vec() { return cgen_put(d, writer, "AlderVec") }
     if t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() { return cgen_put(d, writer, "AlderSlice") }
     if t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() { return cgen_put(d, writer, "void *") }
+    // Raw C scalar spellings, mirroring the CScalar id order (0 char,
+    // 1 signed char, 2 unsigned char, 3 short, 4 unsigned short, 5 int,
+    // 6 unsigned int, 7 long, 8 unsigned long, 9 long long, 10 unsigned
+    // long long, 11 float, 12 double, 13 size_t, 14 ptrdiff_t).
+    if t.kind == mir_type_kind_c_raw() {
+        if t.length == 0 { return cgen_put(d, writer, "char") }
+        if t.length == 1 { return cgen_put(d, writer, "signed char") }
+        if t.length == 2 { return cgen_put(d, writer, "unsigned char") }
+        if t.length == 3 { return cgen_put(d, writer, "short") }
+        if t.length == 4 { return cgen_put(d, writer, "unsigned short") }
+        if t.length == 5 { return cgen_put(d, writer, "int") }
+        if t.length == 6 { return cgen_put(d, writer, "unsigned int") }
+        if t.length == 7 { return cgen_put(d, writer, "long") }
+        if t.length == 8 { return cgen_put(d, writer, "unsigned long") }
+        if t.length == 9 { return cgen_put(d, writer, "long long") }
+        if t.length == 10 { return cgen_put(d, writer, "unsigned long long") }
+        if t.length == 11 { return cgen_put(d, writer, "float") }
+        if t.length == 12 { return cgen_put(d, writer, "double") }
+        if t.length == 13 { return cgen_put(d, writer, "size_t") }
+        if t.length == 14 { return cgen_put(d, writer, "ptrdiff_t") }
+        return cgen_put(d, writer, "void")
+    }
+    if t.kind == mir_type_kind_c_ptr() {
+        let out = try cgen_put_type(d, writer, store, t.elem)
+        return cgen_put(d, out, " *")
+    }
+    if t.kind == mir_type_kind_c_const_ptr() {
+        let out = try cgen_put(d, writer, "const ")
+        let spelled = try cgen_put_type(d, out, store, t.elem)
+        return cgen_put(d, spelled, " *")
+    }
+    if t.kind == mir_type_kind_c_named() {
+        if t.c_name_start < t.c_name_end { return cgen_put_name(d, writer, store, t.c_name_start, t.c_name_end) }
+        return cgen_put(d, writer, "void")
+    }
     if t.kind == mir_type_kind_function() { let out = try cgen_put(d, writer, "AlderFnTy")
     return cgen_put_u64(d, out, id - 1) }
     if t.kind == mir_type_kind_domain_handle() { return cgen_put(d, writer, "AlderDomain *") }

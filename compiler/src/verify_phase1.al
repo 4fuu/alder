@@ -1301,7 +1301,12 @@ fn mir_vphase1_operands(d: Domain, store: MirStore, initial: __s0_Buffer(MirVeri
     let import_total = __s0_buffer_len(MirImportRec, store.imports)
     let instr_total = __s0_buffer_len(MirInstrRec, store.instructions)
     let term_total = __s0_buffer_len(MirTermRec, store.terminators)
-    let key_total = type_total + import_total + instr_total * 3 + term_total * 2 + operand_total
+    // The binding parameter and binding type segments extend the flat key
+    // space past the ordinary operand table, so the group tables must cover
+    // them or the operand-group fill indexes past its allocation.
+    let binding_fn_total = __s0_buffer_len(MirBindingFnRec, store.binding_funcs)
+    let binding_block_total = __s0_buffer_len(MirBindingRec, store.bindings)
+    let key_total = type_total + import_total + instr_total * 3 + term_total * 2 + operand_total + binding_fn_total + binding_block_total
     // (kind, owner) segments for expected-ordinal counting. Every group keeps
     // store order, so counting ids below the current one with a matching edge
     // replicates the legacy prior scan exactly.

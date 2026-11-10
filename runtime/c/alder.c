@@ -18,6 +18,7 @@
  */
 #include "alder.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -604,4 +605,15 @@ bool alder_table_remove(AlderTable *table, AlderTableId id) {
     slot->elem = NULL;
     table->count -= 1;
     return true;
+}
+/* Toolchain-owned C binding shims (declared in alder_errno.h). A raw fn
+ * binding cannot reach errno because C renders it as a thread-local
+ * modifiable lvalue or a macro, not an ordinary function; these helpers
+ * read it in C so hosted wrappers can report failures. */
+int c_errno(void) {
+    return errno;
+}
+
+const char *c_strerror(int number) {
+    return strerror(number);
 }

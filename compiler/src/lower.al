@@ -856,6 +856,129 @@ fn lower_storage_domain_value(state: LowerState, store: CheckStore, owner: U64, 
     return lower_domain_value(state, store, owner)
 }
 
+// A binding spelling byte range to a string: explicit "..." spellings live
+// in state.values (source zero), name spellings in a source file.
+fn lower_binding_word(d: Domain, source_state: State, source: U64, start: U64, end: U64) -> Result(__s0_String, __s0_Error) {
+    if source == 0 { return lower_word(d, source_state.values, start, end) }
+    return lower_source_word(d, source_state, source, start, end)
+}
+
+// One binding type entry to its MIR shape. Records come from the binding
+// store's member and field records, so lowering stays parse-store free.
+// The Unit result marker lowers to the MIR unit type; every other shape
+// mirrors the checked-side interning so equal shapes share one MIR type.
+fn lower_binding_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, binding_index: U64) -> Result(LowerStep, __s0_Error) {
+    if binding_index == 0 || binding_index > __s0_buffer_len(BindingTypeRec, store.bindings.types) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let rec = __s0_buffer_get(BindingTypeRec, store.bindings.types, binding_index - 1)
+    if rec.kind == 30 { return Ok(LowerStep(state: state, id: mir_type_unit())) }
+    if rec.kind == 26 {
+        let built = try mir_intern_c_raw(d, state.mir, rec.target)
+        return Ok(LowerStep(state: lower_with_mir(state, built.store), id: built.type_id))
+    }
+    if rec.kind == 27 || rec.kind == 28 {
+        let elem = try lower_binding_type(d, source_state, store, state, rec.first_arg)
+        if !elem.state.valid { return Ok(elem) }
+        if rec.kind == 27 {
+            let built = try mir_intern_c_ptr(d, elem.state.mir, elem.id)
+            return Ok(LowerStep(state: lower_with_mir(elem.state, built.store), id: built.type_id))
+        }
+        let built = try mir_intern_c_const_ptr(d, elem.state.mir, elem.id)
+        return Ok(LowerStep(state: lower_with_mir(elem.state, built.store), id: built.type_id))
+    }
+    if rec.kind == 29 { return lower_binding_type_member(d, source_state, store, state, rec.target) }
+    return Ok(LowerStep(state: lower_invalid(state), id: 0))
+}
+
+// The binding store member (1-based) of a named binding type node, or zero.
+fn lower_binding_member_for_node(store: CheckStore, member_node: U64) -> U64 {
+    var member_at: U64 = 0
+    while member_at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+        let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
+        if item.member_kind == 1 && item.member_node == member_node { return member_at + 1 }
+        member_at = member_at + 1
+    }
+    return 0
+}
+
+// The MIR type id claimed for a named binding type member by its
+// binding_type operand, or zero before that claim exists. The member's
+// block and per-block type ordinal select the operand. References reuse
+// the claimed type instead of adding a second c_named, because every
+// c_named type must stay claimed by exactly one operand.
+fn lower_binding_claimed_type(store: CheckStore, mir: MirStore, member_index: U64) -> U64 {
+    if member_index == 0 || member_index > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return 0 }
+    let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_index - 1)
+    var block_at: U64 = 0
+    var block_id: U64 = 0
+    while block_at < __s0_buffer_len(BindingBlockRec, store.bindings.blocks) {
+        let block = __s0_buffer_get(BindingBlockRec, store.bindings.blocks, block_at)
+        if block.node == member.block_node { block_id = block_at + 1 }
+        block_at = block_at + 1
+    }
+    if block_id == 0 { return 0 }
+    var at: U64 = 0
+    var ordinal: U64 = 0
+    while at + 1 < member_index {
+        let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+        if item.block_node == member.block_node && item.member_kind == 1 { ordinal = ordinal + 1 }
+        at = at + 1
+    }
+    var scan: U64 = 0
+    while scan < __s0_buffer_len(MirOperandRec, mir.operands) {
+        let o = __s0_buffer_get(MirOperandRec, mir.operands, scan)
+        if o.kind == mir_operand_binding_type() && o.owner == block_id && o.ordinal == ordinal { return o.operand_type }
+        scan = scan + 1
+    }
+    return 0
+}
+
+// One reference to a named binding type member: the MIR type its claim
+// operand already created. A zero claim is an internal failure, because
+// the claim pass runs before any reference can lower.
+fn lower_binding_type_member(d: Domain, source_state: State, store: CheckStore, state: LowerState, member_node: U64) -> Result(LowerStep, __s0_Error) {
+    let found = lower_binding_member_for_node(store, member_node)
+    if found == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let type_id = lower_binding_claimed_type(store, state.mir, found)
+    if type_id == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    return Ok(LowerStep(state: state, id: type_id))
+}
+
+// One named C binding type member to its fresh MIR c_named shape, without
+// record fields. Claims run in a pass before fields, raw fns, constants,
+// and function signatures, so every reference resolves to this type
+// through its claim operand instead of adding a second unclaimed type.
+fn lower_binding_named(d: Domain, source_state: State, store: CheckStore, state: LowerState, member_node: U64) -> Result(LowerStep, __s0_Error) {
+    let found = lower_binding_member_for_node(store, member_node)
+    if found == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, found - 1)
+    let name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
+    let c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+    let built = try mir_add_c_named_type(d, state.mir, name, c_name, member.class)
+    return Ok(LowerStep(state: lower_with_mir(state, built.store), id: built.type_id))
+}
+
+// Record fields of one claimed c_named type member. The type was created
+// and claimed in the claim pass, so field types lower against the same
+// table and every nested c_named reference resolves to its claim.
+fn lower_binding_fields(d: Domain, source_state: State, store: CheckStore, state: LowerState, member_index: U64, type_id: U64) -> Result(LowerState, __s0_Error) {
+    var current = state
+    var field_at: U64 = 0
+    var ordinal: U64 = 0
+    while field_at < __s0_buffer_len(BindingFieldRec, store.bindings.fields) {
+        let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, field_at)
+        if field.owner == member_index {
+            let field_name = try lower_source_word(d, source_state, field.name_source, field.name_start, field.name_end)
+            let field_c_name = try lower_binding_word(d, source_state, field.spelling_source, field.spelling_start, field.spelling_end)
+            let field_type = try lower_binding_type(d, source_state, store, current, field.type_index)
+            if !field_type.state.valid { return Ok(field_type.state) }
+            current = lower_with_mir(field_type.state, try mir_add_c_field_part(d, field_type.state.mir, type_id, ordinal, field_name, field_c_name, field_type.id))
+            ordinal = ordinal + 1
+        }
+        field_at = field_at + 1
+    }
+    return Ok(current)
+}
+
 fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
     let prior = lower_type_lookup(state, checked_type)
     if prior != 0 { return Ok(LowerStep(state: state, id: prior)) }
@@ -921,6 +1044,30 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         let built = try mir_intern_type(d, elem.state.mir, kind, elem.id, 0, 0, empty, 0)
         let mapped = try __s0_buffer_append(LowerTypeMapRec, d, elem.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
         return Ok(LowerStep(state: lower_with_types(lower_with_mir(elem.state, built.store), mapped), id: built.type_id))
+    }
+    if checked.kind == 26 {
+        let built = try mir_intern_c_raw(d, state.mir, checked.target)
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
+        return Ok(LowerStep(state: lower_with_types(lower_with_mir(state, built.store), mapped), id: built.type_id))
+    }
+    if checked.kind == 27 || checked.kind == 28 {
+        if checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let elem = try lower_type(d, source_state, store, state, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1))
+        if !elem.state.valid { return Ok(elem) }
+        if checked.kind == 27 {
+            let built = try mir_intern_c_ptr(d, elem.state.mir, elem.id)
+            let mapped = try __s0_buffer_append(LowerTypeMapRec, d, elem.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
+            return Ok(LowerStep(state: lower_with_types(lower_with_mir(elem.state, built.store), mapped), id: built.type_id))
+        }
+        let built = try mir_intern_c_const_ptr(d, elem.state.mir, elem.id)
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, elem.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
+        return Ok(LowerStep(state: lower_with_types(lower_with_mir(elem.state, built.store), mapped), id: built.type_id))
+    }
+    if checked.kind == 29 {
+        let named = try lower_binding_type_member(d, source_state, store, state, checked.target)
+        if !named.state.valid { return Ok(named) }
+        let mapped = try __s0_buffer_append(LowerTypeMapRec, d, named.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: named.id))
+        return Ok(LowerStep(state: lower_with_types(named.state, mapped), id: named.id))
     }
     if checked.kind == 19 || checked.kind == 20 || checked.kind == 21 || checked.kind == 22 {
         // M7.5 identity types: Table owners, T.Id handles, and the scoped
@@ -1406,6 +1553,12 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
         }
         owner = owner + 1
     }
+    // Binding block claims emit before the function skeletons: a signature
+    // may name a binding type member, and every c_named type must exist and
+    // carry its one claim before any reference lowers. Blocks emit in store
+    // order, so the mir block id equals the check-store block position.
+    let claimed = try lower_binding_claims(d, source_state, store, current)
+    current = claimed
     // Function skeletons are fixed before any call body is emitted.
     owner = 1
     while owner <= __s0_buffer_len(SymbolRec, store.symbols) {
@@ -1451,7 +1604,151 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
         }
         owner = owner + 1
     }
-    return lower_bridge_declarations(d, source_state, store, current)
+    // Binding fields, raw fns, and constants emit before the S0 import
+    // bridge; the block claims themselves emitted before the function
+    // skeletons, so unsafe calls in function bodies resolve against the
+    // same flat binding-function sequence.
+    let bound = try lower_binding_declarations(d, source_state, store, current)
+    return lower_bridge_declarations(d, source_state, store, bound)
+}
+
+// The flat binding-function index (1-based) of a binding fn member: the
+// count of raw fn members before it in the binding store plus one, matching
+// the declaration emission order.
+fn lower_binding_fn_flat_index(store: CheckStore, member_index: U64) -> U64 {
+    if member_index == 0 || member_index > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return 0 }
+    var at: U64 = 0
+    var count: U64 = 0
+    while at + 1 < member_index {
+        if __s0_buffer_get(BindingMemberRec, store.bindings.members, at).member_kind == 2 { count = count + 1 }
+        at = at + 1
+    }
+    return count + 1
+}
+
+// An unsafe binding call expression is valid when the call carries no extra
+// flags and its argument count equals the member's parameter field count;
+// per-argument types ride on the checker and the MIR verifier's signature
+// check.
+fn lower_model_binding_call_ok(store: CheckStore, annotation: CallAnnotationRec, item: CheckedExprRec) -> Bool {
+    if item.parameter_use != 0 || item.bool_value != 0 || item.operator != 0 { return false }
+    var binding_params: U64 = 0
+    var binding_field_at: U64 = 0
+    while binding_field_at < __s0_buffer_len(BindingFieldRec, store.bindings.fields) {
+        if __s0_buffer_get(BindingFieldRec, store.bindings.fields, binding_field_at).owner == annotation.target { binding_params = binding_params + 1 }
+        binding_field_at = binding_field_at + 1
+    }
+    return item.child_count == binding_params
+}
+
+// Lowers an unsafe binding call: the target is the flat binding-function
+// index (1-based); the result carries the declared C result type, unit for
+// void functions.
+fn lower_binding_call_step(d: Domain, store: CheckStore, state: LowerState, function: U64, block: U64, result: U64, annotation: CallAnnotationRec, args: __s0_Buffer(U64)) -> Result(LowerStep, __s0_Error) {
+    let flat = lower_binding_fn_flat_index(store, annotation.target)
+    if flat == 0 || flat > __s0_buffer_len(MirBindingFnRec, state.mir.binding_funcs) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let instr = try lower_add_instr(d, state, function, block, mir_op_c_binding_call(), result, 0, 0, 0, 0, flat, "")
+    var current = instr.state
+    var ordinal: U64 = 0
+    while ordinal < __s0_buffer_len(U64, args) {
+        current = try lower_add_instr_operand(d, current, instr.id, ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+        ordinal = ordinal + 1
+    }
+    return Ok(LowerStep(state: current, id: result))
+}
+
+// The claim pass of the binding blocks: one block and one claimed c_named
+// type per declared type member. Claims run before function signatures,
+// fields, raw fns, and constants, so every reference resolves to its claim
+// operand and each c_named type stays claimed by exactly one operand.
+fn lower_binding_claims(d: Domain, source_state: State, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
+    var current = state
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(BindingBlockRec, store.bindings.blocks) {
+        let block = __s0_buffer_get(BindingBlockRec, store.bindings.blocks, block_at)
+        let name = try lower_source_word(d, source_state, block.name_source, block.name_start, block.name_end)
+        let header = try lower_binding_word(d, source_state, block.header_source, block.header_start, block.header_end)
+        let made = try mir_add_binding(d, current.mir, name, header)
+        current = lower_with_mir(current, made.store)
+        var member_at: U64 = 0
+        var type_ordinal: U64 = 0
+        while member_at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
+            if member.block_node == block.node && member.member_kind == 1 {
+                let named = try lower_binding_named(d, source_state, store, current, member.member_node)
+                if !named.state.valid { return Ok(named.state) }
+                current = named.state
+                current = lower_with_mir(current, try mir_add_binding_type(d, current.mir, made.id, type_ordinal, named.id))
+                type_ordinal = type_ordinal + 1
+            }
+            member_at = member_at + 1
+        }
+        block_at = block_at + 1
+    }
+    return Ok(current)
+}
+
+// After the claim pass: record fields attach to their claimed types, then
+// raw fn signatures, then constants, per block in store order. The flat
+// binding-function index follows the binding store order, so unsafe calls
+// in function bodies resolve against the same sequence.
+fn lower_binding_declarations(d: Domain, source_state: State, store: CheckStore, state: LowerState) -> Result(LowerState, __s0_Error) {
+    var current = state
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(BindingBlockRec, store.bindings.blocks) {
+        let block = __s0_buffer_get(BindingBlockRec, store.bindings.blocks, block_at)
+        var member_at: U64 = 0
+        while member_at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
+            if member.block_node == block.node && member.member_kind == 1 && member.class == 2 {
+                let type_id = lower_binding_claimed_type(store, current.mir, member_at + 1)
+                if type_id == 0 { return Ok(lower_invalid(current)) }
+                current = try lower_binding_fields(d, source_state, store, current, member_at + 1, type_id)
+            }
+            member_at = member_at + 1
+        }
+        member_at = 0
+        while member_at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
+            if member.block_node == block.node && member.member_kind == 2 {
+                let fn_name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
+                let fn_c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+                let result_type = try lower_binding_type(d, source_state, store, current, member.checked_type)
+                if !result_type.state.valid { return Ok(result_type.state) }
+                let made_fn = try mir_add_binding_fn(d, result_type.state.mir, block_at + 1, fn_name, fn_c_name, result_type.id)
+                current = lower_with_mir(current, made_fn.store)
+                var param_at: U64 = 0
+                var param_ordinal: U64 = 0
+                while param_at < __s0_buffer_len(BindingFieldRec, store.bindings.fields) {
+                    let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, param_at)
+                    if field.owner == member_at + 1 {
+                        let param_type = try lower_binding_type(d, source_state, store, current, field.type_index)
+                        if !param_type.state.valid { return Ok(param_type.state) }
+                        current = param_type.state
+                        current = lower_with_mir(current, try mir_add_binding_fn_param(d, current.mir, made_fn.id, param_ordinal, param_type.id))
+                        param_ordinal = param_ordinal + 1
+                    }
+                    param_at = param_at + 1
+                }
+            }
+            member_at = member_at + 1
+        }
+        member_at = 0
+        while member_at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
+            if member.block_node == block.node && member.member_kind == 3 {
+                let const_name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
+                let const_c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+                let const_type = try lower_binding_type(d, source_state, store, current, member.checked_type)
+                if !const_type.state.valid { return Ok(const_type.state) }
+                current = const_type.state
+                current = lower_with_mir(current, (try mir_add_binding_const(d, current.mir, block_at + 1, const_name, const_c_name, const_type.id)).store)
+            }
+            member_at = member_at + 1
+        }
+        block_at = block_at + 1
+    }
+    return Ok(current)
 }
 
 fn lower_instruction_ordinal(mir: MirStore, function: U64, block: U64) -> U64 {
@@ -3482,6 +3779,18 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_const_get(), result.id, 0, 0, 0, 0, 0, name)
         return Ok(LowerStep(state: instr.state, id: result.id))
     }
+    if expression.kind == 26 {
+        // The safe binding observation c.is_null: one raw-pointer child,
+        // Bool result.
+        if expression.child_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let child = try lower_expression(d, source_state, spans, store, state, owner, function, block, child_id, environment, panic_block)
+        if !child.state.valid { return Ok(child) }
+        let typ = try lower_type(d, source_state, store, child.state, expression.checked_type)
+        let result = try lower_add_result(d, typ.state, function, block, expression.checked_type, source_state, store)
+        let instr = try lower_add_instr(d, result.state, function, block, mir_op_c_is_null(), result.id, 0, 0, child.id, 0, 0, "")
+        return Ok(LowerStep(state: instr.state, id: result.id))
+    }
     if expression.kind == 23 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
         var current = typ.state
@@ -3880,6 +4189,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             }
             return Ok(LowerStep(state: current, id: result))
         }
+        if annotation.kind == 7 { return lower_binding_call_step(d, store, current, function, block, result, annotation, args) }
         if annotation.kind == 3 {
             let instr = try lower_add_instr(d, current, function, block, mir_op_aggregate_construct(), result, 0, result_type.id, 0, 0, 0, "")
             current = instr.state
@@ -6384,9 +6694,12 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 19 && item.kind != 20 && item.kind != 21 && item.kind != 22 && item.kind != 23 && item.kind != 24 && item.kind != 25 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 19 && item.kind != 20 && item.kind != 21 && item.kind != 22 && item.kind != 23 && item.kind != 24 && item.kind != 25 && item.kind != 26 && item.kind != 27 && item.kind != 28 && item.kind != 29 { return false }
         if item.syntax != 0 { return false }
         if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
+        if item.kind == 26 && (item.target > 14 || item.arg_count != 0) { return false }
+        if (item.kind == 27 || item.kind == 28) && (item.target != 0 || item.arg_count != 1) { return false }
+        if item.kind == 29 && (item.target == 0 || item.arg_count != 0) { return false }
         if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14 || item.kind == 16) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
@@ -6501,7 +6814,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 6 || !lower_type_concrete(store, item.checked_type) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 7 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         if item.kind == 6 {
@@ -6513,6 +6826,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
             else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 61 { return false } }
+            at = at + 1
+        } else {
+        if item.kind == 7 {
+            // Unsafe binding call: the target is the 1-based binding
+            // member index, not a symbol; the member's parameter fields own
+            // the signature the checker and the MIR verifier enforce.
+            if item.target == 0 || item.target > __s0_buffer_len(BindingMemberRec, store.bindings.members) || item.builtin != 0 || item.variant_use != 0 || item.place != 0 { return false }
             at = at + 1
         } else {
         if item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || item.builtin != 0 { return false }
@@ -6544,12 +6864,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         at = at + 1
         }
         }
+        }
     }
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind > 24 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 26 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !((owner.kind == 12 && owner.type_arity == 0) || owner.kind == 13) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -6631,7 +6952,11 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if item.kind == 10 && annotation.kind == 6 {
                 annotation_kind = 6
             }
+            if item.kind == 11 && annotation.kind == 7 {
+                annotation_kind = 7
+            }
             if annotation.owner != item.owner || annotation.checked_type != item.checked_type || annotation.kind != annotation_kind { return false }
+            if annotation.kind == 7 { return lower_model_binding_call_ok(store, annotation, item) } else {
             if annotation.kind == 6 {
                 if item.child_count != 0 || (annotation.builtin != 5 && annotation.builtin != 6) { return false }
                 let error_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
@@ -6668,6 +6993,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 argument_at = argument_at + 1
             }
             }
+            }
         } else {
             if item.kind == 18 {
                 if item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
@@ -6700,6 +7026,16 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
                 if !lower_checked_abi_equal(store, child.checked_type, expected_type) { return false }
             }
+        }
+        if item.kind == 26 {
+            // The safe binding observation c.is_null: one raw-pointer
+            // child, a Bool result, and no annotation of any kind.
+            if item.child_count != 1 || item.annotation != 0 || item.parameter_use != 0 || item.bool_value != 0 || item.operator != 0 { return false }
+            let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if checked_type.kind != 1 || checked_type.target != 1 { return false }
+            let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            let child_type = __s0_buffer_get(CheckedTypeRec, store.types, child.checked_type - 1)
+            if child_type.kind != 27 && child_type.kind != 28 { return false }
         }
         if item.kind == 19 {
             if item.child_count != 2 { return false }

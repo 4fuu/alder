@@ -561,10 +561,14 @@ let raw = unsafe c {
 }
 ```
 
-The block contains one root C operation. Arguments are evaluated before that
-operation in source order. `unsafe c` does not disable Alder type checking and
-does not make the result safe; validation and encapsulation happen in the
-surrounding wrapper. See [C Interoperability](c-interop.md).
+The block contains one root C operation. The callee names a `raw fn` member
+bare, when exactly one binding block declares that member name, or qualified
+as `alias.member`. Arguments are evaluated before that operation in source
+order. A `Unit`-result call may stand alone as a statement; any other binding
+call result must be used. `c.is_null(pointer)` is the one safe observation and
+is checked outside `unsafe c` too. `unsafe c` does not disable Alder type
+checking and does not make the result safe; validation and encapsulation
+happen in the surrounding wrapper. See [C Interoperability](c-interop.md).
 
 ## Syntax intentionally absent
 

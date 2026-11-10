@@ -302,6 +302,8 @@ type CheckedExprChildRec {
 // place is the receiver place a mutating collection operation writes its
 // grown header back through; it is zero when the operation does not write
 // back (len, get, lookups, and table handle operations).
+// Kind 7 is a C binding call: target is the one-based BindingMemberRec index
+// of the raw fn member, and the annotation names no symbol.
 type CallAnnotationRec {
     owner: U64
     kind: U64

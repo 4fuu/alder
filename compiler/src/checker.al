@@ -52,19 +52,43 @@ type CheckStore {
 // C binding blocks keep their validated members here instead of the ordinary
 // checked-type store: binding types never participate in value cycles, use
 // indexes, or substitution, and lowering reads the same shape to build the
-// MIR binding declarations. `members` holds one record per block member in
-// source order; `types` holds resolved binding type shapes in first-use
-// order; `uses` maps each resolved type-expression node to its entry.
+// MIR binding declarations. `blocks` holds one record per checked block in
+// check order; `members` holds one record per block member in source order;
+// `types` holds resolved binding type shapes in first-use order; `uses` maps
+// each resolved type-expression node to its entry; `fields` holds record
+// fields with their owning type member. Name and spelling spans keep the
+// lowering and C emission parse-store free: spelling_source zero means the
+// bytes live in state.values (an explicit "..." spelling), any other value
+// indexes state.sources.
 type BindingStoreRec {
+    blocks: __s0_Buffer(BindingBlockRec)
     members: __s0_Buffer(BindingMemberRec)
     types: __s0_Buffer(BindingTypeRec)
     uses: __s0_Buffer(BindingTypeUseRec)
+    fields: __s0_Buffer(BindingFieldRec)
+}
+
+// The block alias is the name span; the header spelling is the decoded
+// header string (header_source zero) ready for the C include line.
+type BindingBlockRec {
+    node: U64
+    name_source: U64
+    name_start: U64
+    name_end: U64
+    header_source: U64
+    header_start: U64
+    header_end: U64
 }
 
 // member_kind: 1 type member, 2 raw fn, 3 c const. class: 0 scalar,
 // 1 opaque, 2 record (type members only). ordinal counts type members within
 // the block in source order; checked_type indexes store.bindings.types for
-// the member's own type (type members and constants), and 0 for raw fns.
+// the member's own type (type members and constants) and for a raw fn's
+// result (kind 30 Unit allowed), and is 0 only when unusable.
+// BindingTypeRec kinds: 26 c_raw (target is the CScalar id), 27 c.Ptr and
+// 28 c.ConstPtr (first_arg is the element entry), 29 a named member ref
+// (target is the member syntax node), and 30 the Unit result marker of a
+// void C function (results only).
 type BindingMemberRec {
     block_node: U64
     member_node: U64
@@ -72,6 +96,53 @@ type BindingMemberRec {
     class: U64
     ordinal: U64
     checked_type: U64
+    name_source: U64
+    name_start: U64
+    name_end: U64
+    spelling_source: U64
+    spelling_start: U64
+    spelling_end: U64
+}
+
+// C binding types appear in the checked-type world as kinds 26..29 with the
+// BindingTypeRec semantics: 26 is a raw C scalar (target is the CScalar id),
+// 27 and 28 are c.Ptr and c.ConstPtr over one interned element argument, and
+// 29 is a named member (target is its member syntax node). Void C function
+// results surface as the ordinary Unit primitive. These kinds are concrete,
+// copyable, never nameable in source, and produced only at the unsafe
+// boundary: binding calls, their argument positions, and c.is_null.
+type BindingCheckedTypeRec {
+    store: CheckStore
+    id: U64
+}
+
+// One interned binding type plus the store holding it.
+type BindingSlotRec {
+    store: CheckStore
+    index: U64
+}
+
+// The tail word byte range of a dotted callee name.
+type BindingTailRec {
+    source: U64
+    start: U64
+    end: U64
+}
+
+// One record field or raw fn parameter: owner is the one-based
+// BindingMemberRec index, ordinal counts fields or parameters in source
+// order, and type_index indexes store.bindings.types. Fields carry name and
+// spelling spans; parameters leave them empty (name_source zero).
+type BindingFieldRec {
+    owner: U64
+    ordinal: U64
+    name_source: U64
+    name_start: U64
+    name_end: U64
+    spelling_source: U64
+    spelling_start: U64
+    spelling_end: U64
+    type_index: U64
 }
 
 // kind: 26 c raw scalar (target is the CScalar id), 27 c.Ptr (first_arg is
@@ -90,13 +161,19 @@ type BindingTypeUseRec {
 }
 
 fn empty_binding_store(d: Domain) -> Result(BindingStoreRec, __s0_Error) {
-    return match __s0_buffer_new(BindingMemberRec, d) {
+    return match __s0_buffer_new(BindingBlockRec, d) {
         Err(error) => Err(error)
-        Ok(members) => match __s0_buffer_new(BindingTypeRec, d) {
+        Ok(blocks) => match __s0_buffer_new(BindingMemberRec, d) {
             Err(error) => Err(error)
-            Ok(types) => match __s0_buffer_new(BindingTypeUseRec, d) {
+            Ok(members) => match __s0_buffer_new(BindingTypeRec, d) {
                 Err(error) => Err(error)
-                Ok(uses) => Ok(BindingStoreRec(members: members, types: types, uses: uses))
+                Ok(types) => match __s0_buffer_new(BindingTypeUseRec, d) {
+                    Err(error) => Err(error)
+                    Ok(uses) => match __s0_buffer_new(BindingFieldRec, d) {
+                        Err(error) => Err(error)
+                        Ok(fields) => Ok(BindingStoreRec(blocks: blocks, members: members, types: types, uses: uses, fields: fields))
+                    }
+                }
             }
         }
     }
@@ -1957,6 +2034,14 @@ fn binding_member_spelling(state: State, parse: ParseStore, member: SyntaxRec) -
     return binding_name_spelling(state, member)
 }
 
+// One validated binding member record with its Alder name span and C
+// spelling byte range filled from the member node.
+fn binding_new_member(state: State, parse: ParseStore, block_node: U64, member_id: U64, member_kind: U64, class: U64, ordinal: U64, checked_type: U64) -> BindingMemberRec {
+    let member = __s0_buffer_get(SyntaxRec, parse.nodes, member_id - 1)
+    let spelling = binding_member_spelling(state, parse, member)
+    return BindingMemberRec(block_node: block_node, member_node: member_id, member_kind: member_kind, class: class, ordinal: ordinal, checked_type: checked_type, name_source: member.source, name_start: member.name_start, name_end: member.name_end, spelling_source: spelling.source, spelling_start: spelling.start, spelling_end: spelling.end)
+}
+
 // 0 none, 1 struct, 2 union, 3 enum: the tag keyword a type spelling starts
 // with. A bare spelling strips the tag and its separating space.
 fn binding_spelling_tag(state: State, spelling: BindingSpellingRec) -> U64 {
@@ -2113,17 +2198,22 @@ fn binding_type_index(store: CheckStore, node_id: U64) -> U64 {
 
 fn binding_append_member(d: Domain, store: CheckStore, rec: BindingMemberRec) -> Result(CheckStore, __s0_Error) {
     let members = try __s0_buffer_append(BindingMemberRec, d, store.bindings.members, rec)
-    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(members: members, types: store.bindings.types, uses: store.bindings.uses)))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(blocks: store.bindings.blocks, members: members, types: store.bindings.types, uses: store.bindings.uses, fields: store.bindings.fields)))
 }
 
 fn binding_append_type(d: Domain, store: CheckStore, rec: BindingTypeRec) -> Result(CheckStore, __s0_Error) {
     let types = try __s0_buffer_append(BindingTypeRec, d, store.bindings.types, rec)
-    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(members: store.bindings.members, types: types, uses: store.bindings.uses)))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(blocks: store.bindings.blocks, members: store.bindings.members, types: types, uses: store.bindings.uses, fields: store.bindings.fields)))
 }
 
 fn binding_append_use(d: Domain, store: CheckStore, node_id: U64, index: U64) -> Result(CheckStore, __s0_Error) {
     let uses = try __s0_buffer_append(BindingTypeUseRec, d, store.bindings.uses, BindingTypeUseRec(node: node_id, index: index))
-    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(members: store.bindings.members, types: store.bindings.types, uses: uses)))
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(blocks: store.bindings.blocks, members: store.bindings.members, types: store.bindings.types, uses: uses, fields: store.bindings.fields)))
+}
+
+fn binding_append_field(d: Domain, store: CheckStore, rec: BindingFieldRec) -> Result(CheckStore, __s0_Error) {
+    let fields = try __s0_buffer_append(BindingFieldRec, d, store.bindings.fields, rec)
+    return Ok(CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(blocks: store.bindings.blocks, members: store.bindings.members, types: store.bindings.types, uses: store.bindings.uses, fields: fields)))
 }
 
 // By-value positions accept raw scalars, pointers, and scalar class named
@@ -2140,6 +2230,254 @@ fn binding_type_by_value_ok(store: CheckStore, index: U64) -> Bool {
     }
     return false
 }
+
+// The type_args slot holding one element id, reused when an earlier entry
+// already stores it, so structurally equal binding pointer shapes intern to
+// one entry and ordinary type_args consumers treat them like any other.
+fn binding_type_args_slot(d: Domain, store: CheckStore, value: U64) -> Result(BindingSlotRec, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, store.type_args) {
+        if __s0_buffer_get(U64, store.type_args, at) == value { return Ok(BindingSlotRec(store: store, index: at + 1)) }
+        at = at + 1
+    }
+    let type_args = try __s0_buffer_append(U64, d, store.type_args, value)
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return Ok(BindingSlotRec(store: next, index: __s0_buffer_len(U64, type_args)))
+}
+
+// Intern one binding checked type. Equal shapes intern to one entry, so
+// widening and equality compare by identity. Only kinds 26..29 intern here;
+// the Unit result marker surfaces as the ordinary Unit primitive instead.
+fn binding_type_intern(d: Domain, store: CheckStore, kind: U64, target: U64, first_arg: U64, arg_count: U64) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedTypeRec, store.types) {
+        let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
+        if item.kind == kind && item.target == target && item.first_arg == first_arg && item.arg_count == arg_count && item.syntax == 0 { return Ok(BindingCheckedTypeRec(store: store, id: at + 1)) }
+        at = at + 1
+    }
+    let types = try __s0_buffer_append(CheckedTypeRec, d, store.types, CheckedTypeRec(kind: kind, syntax: 0, target: target, first_arg: first_arg, arg_count: arg_count))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return Ok(BindingCheckedTypeRec(store: next, id: __s0_buffer_len(CheckedTypeRec, types)))
+}
+
+// The checked-type world's entry for one binding type entry. Pointer shapes
+// intern their element first, so a c.Ptr(F) and the parameter c.Ptr(F) share
+// one identity wherever they appear.
+fn binding_type_checked(d: Domain, state: State, parse: ParseStore, store: CheckStore, index: U64) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    if index == 0 || index > __s0_buffer_len(BindingTypeRec, store.bindings.types) { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let rec = __s0_buffer_get(BindingTypeRec, store.bindings.types, index - 1)
+    if rec.kind == 26 { return binding_type_intern(d, store, 26, rec.target, 0, 0) }
+    if rec.kind == 29 { return binding_type_intern(d, store, 29, rec.target, 0, 0) }
+    if rec.kind == 30 { return binding_type_intern(d, store, 1, 12, 0, 0) }
+    if rec.kind == 27 || rec.kind == 28 {
+        let element = try binding_type_checked(d, state, parse, store, rec.first_arg)
+        let slot = try binding_type_args_slot(d, element.store, element.id)
+        return binding_type_intern(d, slot.store, rec.kind, 0, slot.index, 1)
+    }
+    return Ok(BindingCheckedTypeRec(store: store, id: 0))
+}
+
+// The one declared-widening rule: a c.Ptr(E) argument passes where the
+// parameter declares c.ConstPtr(E). Interned element identity makes the
+// comparison exact.
+fn binding_arg_compatible(store: CheckStore, want: U64, got: U64) -> Bool {
+    if want == got { return true }
+    if want == 0 || got == 0 || want > __s0_buffer_len(CheckedTypeRec, store.types) || got > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let declared = __s0_buffer_get(CheckedTypeRec, store.types, want - 1)
+    let actual = __s0_buffer_get(CheckedTypeRec, store.types, got - 1)
+    if declared.kind != 28 || actual.kind != 27 { return false }
+    return declared.first_arg == actual.first_arg && declared.arg_count == 1 && actual.arg_count == 1
+}
+
+// The callee word after the last dot of a dotted name span, as a half-open
+// byte range stored through tail_start and tail_end.
+fn binding_dotted_tail(state: State, callee: SyntaxRec) -> BindingTailRec {
+    let split = dotted_name_split(state, callee)
+    if split == 0 {
+        // A dotted callee node's own name span is already the member tail
+        // (the parser stores only the last segment); no dot means the whole
+        // span is the tail.
+        if callee.name_start < callee.name_end { return BindingTailRec(source: callee.source, start: callee.name_start, end: callee.name_end) }
+        return BindingTailRec(source: 0, start: 0, end: 0)
+    }
+    let source = __s0_buffer_get(SourceRec, state.sources, callee.source)
+    var start = split + 1
+    var at = split + 1
+    while at < callee.name_end {
+        if text_byte(state, source, at) == 46 { start = at + 1 }
+        at = at + 1
+    }
+    return BindingTailRec(source: callee.source, start: start, end: callee.name_end)
+}
+
+// Resolve the callee of an unsafe c expression against the checked binding
+// store: a bare word matching exactly one raw fn member, or alias.member
+// naming one block's raw fn. Returns the BindingMemberRec index, or zero
+// when the callee is not a binding call.
+fn binding_call_member(state: State, parse: ParseStore, store: CheckStore, callee: SyntaxRec) -> U64 {
+    if callee.kind == 24 {
+        if dotted_name_split(state, callee) != 0 { return 0 }
+        var found: U64 = 0
+        var count: U64 = 0
+        var at: U64 = 0
+        while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+            if item.member_kind == 2 {
+                let declared = __s0_buffer_get(SyntaxRec, parse.nodes, item.member_node - 1)
+                if same_name(state, callee.source, callee.name_start, callee.name_end, declared.source, declared.name_start, declared.name_end) {
+                    found = at + 1
+                    count = count + 1
+                }
+            }
+            at = at + 1
+        }
+        if count == 1 { return found }
+        return 0
+    }
+    if callee.kind == 29 && callee.children != 0 {
+        let receiver_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
+        let receiver = __s0_buffer_get(SyntaxRec, parse.nodes, receiver_link.node - 1)
+        if receiver.kind != 24 { return 0 }
+        let tail = binding_dotted_tail(state, callee)
+        if tail.end <= tail.start { return 0 }
+        var root_at: U64 = 0
+        while root_at < __s0_buffer_len(U64, parse.roots) {
+            let root_id = __s0_buffer_get(U64, parse.roots, root_at)
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+            if root.kind == 61 && root.source == callee.source && same_name(state, receiver.source, receiver.name_start, receiver.name_end, root.source, root.name_start, root.name_end) {
+                var at: U64 = 0
+                while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+                    let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+                    if item.member_kind == 2 && item.block_node == root_id {
+                        let declared = __s0_buffer_get(SyntaxRec, parse.nodes, item.member_node - 1)
+                        if same_name(state, tail.source, tail.start, tail.end, declared.source, declared.name_start, declared.name_end) { return at + 1 }
+                    }
+                    at = at + 1
+                }
+                return 0
+            }
+            root_at = root_at + 1
+        }
+    }
+    return 0
+}
+
+// The unsafe binding-call path. Arguments check as ordinary value
+// expressions, then compare against the declared C parameter types with the
+// one widening rule; the result carries the declared binding result type,
+// ordinary Unit for void C functions.
+fn check_unsafe_binding_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_id: U64, call: SyntaxRec, member_index: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_index - 1)
+    let fn_node = __s0_buffer_get(SyntaxRec, parse.nodes, member.member_node - 1)
+    let children = try binding_children(d, parse, fn_node)
+    let child_count = __s0_buffer_len(U64, children)
+    var param_count: U64 = 0
+    var at: U64 = 0
+    while at < child_count {
+        let child_id = __s0_buffer_get(U64, children, at)
+        let child = __s0_buffer_get(SyntaxRec, parse.nodes, child_id - 1)
+        if child.kind == 13 { param_count = param_count + 1 }
+        at = at + 1
+    }
+    // A dotted qualified callee links its receiver as ordinal 1, so the
+    // argument window starts one link later than a bare callee's.
+    let receivers = call_receiver_links(state, parse, store, call)
+    let argument_count = call_link_count(parse, call) - 1 - receivers
+    if argument_count != param_count {
+        let failed = try check_token_detail_fail(d, state, base, 201, call, argument_count, param_count, 0, 0)
+        return match failed {
+            CheckGood(value) => Ok(ExprBad(value))
+            CheckBad(value) => Ok(ExprBad(value))
+        }
+    }
+    // Arguments recurse instead of looping: a loop body would thread the
+    // growing CheckStore through a join inside the loop cycle, which the MIR
+    // storage model rejects as loop-carried storage (verify_phase6). The
+    // shape mirrors infer_call_arguments. The member's checked_type is the
+    // result's binding type index recorded when the block was checked.
+    return check_unsafe_binding_arguments(d, state, parse, base, store, owner, unsafe_id, call, receivers, member_index, member.checked_type, 0, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+}
+
+fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_id: U64, call: SyntaxRec, receivers: U64, member_index: U64, result_index: U64, ordinal: U64, argument_count: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if ordinal == argument_count {
+        let result_checked = try binding_type_checked(d, state, parse, store, result_index)
+        if result_checked.id == 0 { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, result_checked.store, result_checked.id, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        return append_call_expression(d, state, parse, result_checked.store, owner, unsafe_id, 11, result_checked.id, 7, member_index, 0, call, 1, site_kind, site_syntax)
+    }
+    let arg_link = call_link_at(parse, call, receivers + ordinal + 1)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    if arg.kind == 28 { return expr_token_fail(d, state, base, 200, arg) }
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 200, arg, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    // The declared parameter type comes from the field record the block
+    // check appended for this ordinal.
+    let declared_index = try binding_param_type_index(d, current, member_index, ordinal, 0)
+    let declared = try binding_type_checked(d, state, parse, current, declared_index)
+    if declared.id == 0 || !binding_arg_compatible(declared.store, declared.id, draft.checked_type) { return expr_token_fail(d, state, base, 200, arg) }
+    return check_unsafe_binding_arguments(d, state, parse, base, declared.store, owner, unsafe_id, call, receivers, member_index, result_index, ordinal + 1, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+}
+
+// Recursive scan so no join carries the found index through a loop cycle.
+fn binding_param_type_index(d: Domain, store: CheckStore, owner: U64, ordinal: U64, at: U64) -> Result(U64, __s0_Error) {
+    let total = __s0_buffer_len(BindingFieldRec, store.bindings.fields)
+    if at == total { return Ok(0) }
+    let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, at)
+    if field.owner == owner && field.ordinal == ordinal { return Ok(field.type_index) }
+    return binding_param_type_index(d, store, owner, ordinal, at + 1)
+}
+
+// c.is_null(pointer) is the one safe raw-pointer observation: the callee is
+// exactly the dotted name c.is_null with one value argument whose checked
+// type is c.Ptr or c.ConstPtr, and the result is Bool.
+fn check_c_is_null(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    // The dotted callee carries its receiver link: callee + receiver + one
+    // argument = three links.
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 202, call) }
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    if arg.kind == 28 { return expr_token_fail(d, state, base, 202, arg) }
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 202, arg, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    let arg_type = __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1)
+    if arg_type.kind != 27 && arg_type.kind != 28 { return expr_token_fail(d, state, base, 202, arg) }
+    let bool_type = primitive_type_id(state, parse, current, "Bool")
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, bool_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    return append_expression(d, current, owner, call_id, 26, bool_type, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
+}
+
+// True when a dotted callee spells head.tail exactly, as in c.is_null.
+fn binding_dotted_words(state: State, callee: SyntaxRec, receiver: SyntaxRec, head: __s0_String, tail: __s0_String) -> Bool {
+    if !node_word(state, receiver, head) { return false }
+    let tail_range = binding_dotted_tail(state, callee)
+    if tail_range.end <= tail_range.start { return false }
+    return source_word(state, __s0_buffer_get(SourceRec, state.sources, tail_range.source), tail_range.start, tail_range.end, tail)
+}
+
 
 // Resolve one binding type expression node and record its shape plus a use
 // entry. Plain names resolve to type members of the same block; dotted c.X
@@ -2223,6 +2561,11 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
     }
     let member_count = __s0_buffer_len(U64, members)
     var store = initial
+    // The block record carries the alias word and the decoded header string
+    // so lowering emits the include line without the parse store.
+    let block_header = binding_explicit_spelling(state, binding_header_node(parse, root))
+    let blocks = try __s0_buffer_append(BindingBlockRec, d, store.bindings.blocks, BindingBlockRec(node: root_id, name_source: root.source, name_start: root.name_start, name_end: root.name_end, header_source: block_header.source, header_start: block_header.start, header_end: block_header.end))
+    store = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: BindingStoreRec(blocks: blocks, members: store.bindings.members, types: store.bindings.types, uses: store.bindings.uses, fields: store.bindings.fields))
     var outer: U64 = 0
     while outer < member_count {
         let first = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, members, outer) - 1)
@@ -2264,7 +2607,7 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
             if !binding_spelling_valid(state, binding_spelling_bare(state, spelling, tag)) { return check_token_fail(d, state, store, 157, member) }
             let type_index = __s0_buffer_len(BindingTypeRec, store.bindings.types) + 1
             let appended = try binding_append_type(d, store, BindingTypeRec(kind: 29, target: member_id, first_arg: 0))
-            store = try binding_append_member(d, appended, BindingMemberRec(block_node: root_id, member_node: member_id, member_kind: 1, class: class, ordinal: ordinal, checked_type: type_index))
+            store = try binding_append_member(d, appended, binding_new_member(state, parse, root_id, member_id, 1, class, ordinal, type_index))
             ordinal = ordinal + 1
         }
         index = index + 1
@@ -2316,6 +2659,17 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
                 if !binding_type_by_value_ok(store, type_index) {
                     return check_token_fail(d, state, store, 166, __s0_buffer_get(SyntaxRec, parse.nodes, type_id - 1))
                 }
+                // The field joins the emission record: its C spelling and
+                // resolved type feed the record layout probes.
+                var field_owner: U64 = 0
+                var member_scan: U64 = 0
+                while member_scan < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+                    let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_scan)
+                    if item.member_kind == 1 && item.member_node == member_id { field_owner = member_scan + 1 }
+                    member_scan = member_scan + 1
+                }
+                let field_spelling = binding_member_spelling(state, parse, field)
+                store = try binding_append_field(d, store, BindingFieldRec(owner: field_owner, ordinal: field_at, name_source: field.source, name_start: field.name_start, name_end: field.name_end, spelling_source: field_spelling.source, spelling_start: field_spelling.start, spelling_end: field_spelling.end, type_index: type_index))
                 field_at = field_at + 1
             }
         }
@@ -2331,6 +2685,11 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
             if !binding_spelling_valid(state, binding_member_spelling(state, parse, member)) { return check_token_fail(d, state, store, 157, member) }
             let children = try binding_children(d, parse, member)
             let child_count = __s0_buffer_len(U64, children)
+            // Parameters land in the field records; the owner index is the
+            // member record this branch appends after the child walk.
+            let fn_owner = __s0_buffer_len(BindingMemberRec, store.bindings.members) + 1
+            var result_index: U64 = 0
+            var param_ordinal: U64 = 0
             var child_at: U64 = 0
             while child_at < child_count {
                 let child_id = __s0_buffer_get(U64, children, child_at)
@@ -2341,21 +2700,34 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
                     let resolved = try resolve_binding_type(d, state, parse, store, root_id, type_id)
                     store = check_result_store(resolved)
                     if check_result_bad(resolved) { return Ok(resolved) }
-                    if !binding_type_by_value_ok(store, binding_type_index(store, type_id)) {
+                    let param_index = binding_type_index(store, type_id)
+                    if !binding_type_by_value_ok(store, param_index) {
                         return check_token_fail(d, state, store, 166, __s0_buffer_get(SyntaxRec, parse.nodes, type_id - 1))
                     }
+                    store = try binding_append_field(d, store, BindingFieldRec(owner: fn_owner, ordinal: param_ordinal, name_source: 0, name_start: 0, name_end: 0, spelling_source: 0, spelling_start: 0, spelling_end: 0, type_index: param_index))
+                    param_ordinal = param_ordinal + 1
                 }
                 if child.kind == 4 || child.kind == 6 {
-                    let resolved = try resolve_binding_type(d, state, parse, store, root_id, child_id)
-                    store = check_result_store(resolved)
-                    if check_result_bad(resolved) { return Ok(resolved) }
-                    if !binding_type_by_value_ok(store, binding_type_index(store, child_id)) {
-                        return check_token_fail(d, state, store, 166, child)
+                    if child.kind == 4 && node_word(state, child, "Unit") {
+                        // A `-> Unit` result marks a void C function; the
+                        // record is a marker, never a by-value position.
+                        let type_index = __s0_buffer_len(BindingTypeRec, store.bindings.types) + 1
+                        let appended = try binding_append_type(d, store, BindingTypeRec(kind: 30, target: 0, first_arg: 0))
+                        store = try binding_append_use(d, appended, child_id, type_index)
+                        result_index = type_index
+                    } else {
+                        let resolved = try resolve_binding_type(d, state, parse, store, root_id, child_id)
+                        store = check_result_store(resolved)
+                        if check_result_bad(resolved) { return Ok(resolved) }
+                        result_index = binding_type_index(store, child_id)
+                        if !binding_type_by_value_ok(store, result_index) {
+                            return check_token_fail(d, state, store, 166, child)
+                        }
                     }
                 }
                 child_at = child_at + 1
             }
-            store = try binding_append_member(d, store, BindingMemberRec(block_node: root_id, member_node: member_id, member_kind: 2, class: 0, ordinal: 0, checked_type: 0))
+            store = try binding_append_member(d, store, binding_new_member(state, parse, root_id, member_id, 2, 0, 0, result_index))
         }
         index = index + 1
     }
@@ -2375,7 +2747,7 @@ fn check_binding_block(d: Domain, state: State, parse: ParseStore, initial: Chec
             let type_index = binding_type_index(store, type_id)
             let rec = __s0_buffer_get(BindingTypeRec, store.bindings.types, type_index - 1)
             if rec.kind != 26 || rec.target == 11 || rec.target == 12 { return check_token_fail(d, state, store, 167, member) }
-            store = try binding_append_member(d, store, BindingMemberRec(block_node: root_id, member_node: member_id, member_kind: 3, class: 0, ordinal: 0, checked_type: type_index))
+            store = try binding_append_member(d, store, binding_new_member(state, parse, root_id, member_id, 3, 0, 0, type_index))
         }
         index = index + 1
     }
@@ -7248,6 +7620,12 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             if binding_type.kind == 25 { return check_indirect_call(d, state, parse, base, store, owner, call, call_id, callee, binding.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         }
     }
+    // Safe binding observation: c.is_null(pointer) dispatches before the
+    // ordinary symbol and imported-name paths.
+    if callee.kind == 29 && callee.children != 0 {
+        let is_null_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+        if binding_dotted_words(state, callee, is_null_receiver, "c", "is_null") { return check_c_is_null(d, state, parse, base, store, owner, call, call_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    }
     if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {
             let applied_callee_link = call_link_at(parse, callee, 0)
@@ -7427,9 +7805,20 @@ fn check_unsafe_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     let call = __s0_buffer_get(SyntaxRec, parse.nodes, root_link.node - 1)
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
-    if callee.kind != 24 { return expr_token_fail(d, state, base, 52, unsafe_node) }
+    // Unsafe binding calls dispatch first: a bare word naming exactly one
+    // raw fn member, or alias.member naming one block's raw fn, is a C
+    // call, not an S0 foreign call.
+    let binding_member_index = binding_call_member(state, parse, store, callee)
+    if binding_member_index != 0 { return check_unsafe_binding_call(d, state, parse, base, store, owner, unsafe_id, call, binding_member_index, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    if callee.kind != 24 {
+        if __s0_buffer_len(BindingBlockRec, store.bindings.blocks) != 0 { return expr_token_fail(d, state, base, 204, unsafe_node) }
+        return expr_token_fail(d, state, base, 52, unsafe_node)
+    }
     let target = symbol_named(state, parse, store, callee)
-    if target == 0 || __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind != 1 { return expr_token_fail(d, state, base, 52, unsafe_node) }
+    if target == 0 || __s0_buffer_get(SymbolRec, store.symbols, target - 1).kind != 1 {
+        if __s0_buffer_len(BindingBlockRec, store.bindings.blocks) != 0 { return expr_token_fail(d, state, base, 204, unsafe_node) }
+        return expr_token_fail(d, state, base, 52, unsafe_node)
+    }
     let argument_count = call_link_count(parse, call) - 1
     var ordinal: U64 = 0
     while ordinal < argument_count {
@@ -8561,6 +8950,15 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
     if outcome_type.kind == 9 {
         let payload = __s0_buffer_get(CheckedTypeRec, current.types, __s0_buffer_get(U64, current.type_args, outcome_type.first_arg - 1) - 1)
         if payload.kind == 21 || payload.kind == 22 { return body_token_fail(d, state, current, 132, expression) }
+    }
+    // A dropped C binding result is a silent ABI discard: statement
+    // position must consume or bind the c.* value the call returned.
+    if outcome_type.kind >= 26 && outcome_type.kind <= 29 {
+        let dropped = __s0_buffer_get(CheckedExprRec, current.expressions, draft.expression - 1)
+        if dropped.kind == 11 && dropped.annotation != 0 {
+            let dropped_annotation = __s0_buffer_get(CallAnnotationRec, current.call_annotations, dropped.annotation - 1)
+            if dropped_annotation.kind == 7 { return body_token_fail(d, state, current, 203, expression) }
+        }
     }
     return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, false)
 }

@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, and their checker rejections are checked end to end, while probe emission, records by value, unsafe field access, conversions, shims, exports, and callbacks are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, and the errno/strerror shims are checked end to end, while records by value, unsafe field access, conversions, exports, and callbacks are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -145,6 +145,16 @@ order. Complex wrappers use several small unsafe expressions rather than one
 unbounded unsafe region. Alder still checks syntax, ordinary types, control
 flow, and the declared ABI.
 
+The callee names a `raw fn` member either bare, when exactly one block in the
+module declares that member name, or qualified as `alias.member`, when the
+block alias disambiguates. Arguments must have exactly the declared raw C
+type; ordinary Alder values and literals are rejected until the explicit
+checked conversions exist. A call whose result type is `Unit` may appear in
+statement position; any other binding call result must be used, because
+dropping it would silently discard the C value. `c.is_null(pointer)` is
+checked outside `unsafe c` as well: it is a pure observation, not a raw
+operation.
+
 Raw pointers may be stored only in binding/wrapper records whose fields remain
 module-private and whose construction from a raw pointer is itself an unsafe
 root operation, as above. Implementing `Cleanup` makes an owned wrapper affine.
@@ -263,6 +273,28 @@ wrapper decides whether it:
 Arbitrary executing C cannot be safely interrupted. Cancellation keeps wrapper
 state alive until C returns or the documented C cancellation/join protocol
 completes. See [Async and Structured Concurrency](async.md).
+
+## Toolchain-owned shims
+
+A few hosted operations cannot be spelled as a `raw fn` binding against real
+headers. `errno` is a thread-local modifiable lvalue (usually a macro), so no
+binding block can read it; `strerror` belongs to the same hosted-OS surface.
+The runtime ships an audited shim header for exactly these operations:
+
+```c
+/* runtime/c/alder_errno.h */
+int c_errno(void);
+const char *c_strerror(int number);
+```
+
+Wrapper modules bind the shim like any other header, e.g.
+`import c "alder_errno.h" as cerrno { raw fn last = "c_errno"() -> c.Int }`,
+and the generated probe unit pins the shim signatures through the same
+`_Static_assert` evidence as user bindings. The shims are the whole surface of
+that header. Their C names stay outside the `alder_` runtime prefix because
+the binding spelling policy reserves that prefix, and the policy has no
+exceptions. Reading the errno value's integer into Alder requires the explicit
+checked conversions and is therefore available only once those land.
 
 ## Native linking and tooling
 

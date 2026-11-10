@@ -2294,7 +2294,7 @@ fn mir_out_declarations(idx: MirPrintIndex, store: MirStore) -> Bool {
         if !out_string(") -> ") || !mir_out_type(idx, store, rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1) || !out(10) { return false }
         at = at + 1
     }
-    return mir_out_bindings(idx, store)
+    return true
 }
 
 // One C binding-function signature's parameter list, in ordinal order.

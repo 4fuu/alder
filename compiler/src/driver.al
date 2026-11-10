@@ -247,6 +247,17 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 165 { return out_string("invalid type in a C binding block") }
     if kind == 166 { return out_string("non-scalar C binding types are only valid behind c.Ptr or c.ConstPtr") }
     if kind == 167 { return out_string("a C binding constant must have an integral c.* type") }
+    if kind == 200 { return out_string("a C binding call argument does not match its declared C parameter") }
+    if kind == 201 {
+        if detail_b != 0 && detail_a != detail_b {
+            if !out_string("a C binding call takes ") || !out_u64(detail_b) || !out_string(" argument(s), got ") || !out_u64(detail_a) { return false }
+            return true
+        }
+        return out_string("a C binding call takes a different number of arguments")
+    }
+    if kind == 202 { return out_string("c.is_null takes one raw C pointer") }
+    if kind == 203 { return out_string("a C binding call's non-unit result must be used") }
+    if kind == 204 { return out_string("unsafe c does not name a raw fn of a C binding block") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

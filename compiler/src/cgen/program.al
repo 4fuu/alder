@@ -138,6 +138,313 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
     return Ok(out)
 }
 
+// One include per binding block followed by the C11 compile-time binding
+// checks. The checks live in the generated program translation unit, so no
+// build can compile a binding whose header disagrees with the declared
+// spelling, record field, function signature, or constant. Assertion
+// messages name the Alder binding member.
+fn cgen_emit_bindings(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    if __s0_buffer_len(MirBindingRec, store.bindings) == 0 { return Ok(initial) }
+    var out = try cgen_put(d, initial, "#include <stddef.h>\n")
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(MirBindingRec, store.bindings) {
+        let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+        out = try cgen_put(d, out, "#include <")
+        out = try cgen_put_name(d, out, store, block.header_start, block.header_end)
+        out = try cgen_put(d, out, ">\n")
+        out = try cgen_emit_binding_checks(d, out, store, block_at)
+        block_at = block_at + 1
+    }
+    return cgen_put(d, out, "\n")
+}
+
+// The message prefix naming the Alder binding member: binding <block>.<member>
+// (<spelling>).
+fn cgen_binding_what(d: Domain, initial: CgenWriter, store: MirStore, block: MirBindingRec, name_start: U64, name_end: U64, c_start: U64, c_end: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "binding ")
+    out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+    out = try cgen_put(d, out, ".")
+    out = try cgen_put_name(d, out, store, name_start, name_end)
+    out = try cgen_put(d, out, " (")
+    out = try cgen_put_name(d, out, store, c_start, c_end)
+    return cgen_put(d, out, ")")
+}
+
+fn cgen_binding_type_count(store: MirStore, block: U64) -> U64 {
+    var at: U64 = 0
+    var count: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, store.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+        if operand.kind == mir_operand_binding_type() && operand.owner == block { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+fn cgen_binding_type_operand(store: MirStore, block: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, store.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+        if operand.kind == mir_operand_binding_type() && operand.owner == block && operand.ordinal == ordinal { return operand.operand_type }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_binding_param_count(store: MirStore, fn_id: U64) -> U64 {
+    var at: U64 = 0
+    var count: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, store.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+        if operand.kind == mir_operand_binding_param() && operand.owner == fn_id { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+fn cgen_binding_param_type(store: MirStore, fn_id: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirOperandRec, store.operands) {
+        let operand = __s0_buffer_get(MirOperandRec, store.operands, at)
+        if operand.kind == mir_operand_binding_param() && operand.owner == fn_id && operand.ordinal == ordinal { return operand.operand_type }
+        at = at + 1
+    }
+    return 0
+}
+
+fn cgen_binding_field_count(store: MirStore, owner: U64) -> U64 {
+    var at: U64 = 0
+    var count: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+        if part.kind == mir_type_part_c_field() && part.owner == owner { count = count + 1 }
+        at = at + 1
+    }
+    return count
+}
+
+fn cgen_binding_field(store: MirStore, owner: U64, ordinal: U64) -> MirTypePartRec {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+        if part.kind == mir_type_part_c_field() && part.owner == owner && part.ordinal == ordinal { return part }
+        at = at + 1
+    }
+    return __s0_buffer_get(MirTypePartRec, store.type_parts, 0)
+}
+
+fn cgen_emit_binding_checks(d: Domain, initial: CgenWriter, store: MirStore, block_at: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    let block = __s0_buffer_get(MirBindingRec, store.bindings, block_at)
+    let block_id = block_at + 1
+    let type_total = cgen_binding_type_count(store, block_id)
+    var ti: U64 = 0
+    while ti < type_total {
+        let type_id = cgen_binding_type_operand(store, block_id, ti)
+        if type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return cgen_put(d, out, "  /* unreachable binding type probe */\n") }
+        let t = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+        out = try cgen_put(d, out, "typedef ")
+        out = try cgen_put_name(d, out, store, t.c_name_start, t.c_name_end)
+        out = try cgen_put(d, out, " alder_bind_")
+        out = try cgen_put_u64(d, out, block_at)
+        out = try cgen_put(d, out, "_t")
+        out = try cgen_put_u64(d, out, ti)
+        out = try cgen_put(d, out, ";\n")
+        if t.c_class == mir_c_class_opaque() {
+            out = try cgen_put(d, out, "_Static_assert(sizeof(alder_bind_")
+            out = try cgen_put_u64(d, out, block_at)
+            out = try cgen_put(d, out, "_t")
+            out = try cgen_put_u64(d, out, ti)
+            out = try cgen_put(d, out, " *) == sizeof(void *), \"")
+            out = try cgen_binding_what(d, out, store, block, t.name_start, t.name_end, t.c_name_start, t.c_name_end)
+            out = try cgen_put(d, out, ": opaque binding spelling must resolve to a pointer-representable type\");\n")
+        }
+        if t.c_class == mir_c_class_scalar() {
+            out = try cgen_put(d, out, "_Static_assert(sizeof(alder_bind_")
+            out = try cgen_put_u64(d, out, block_at)
+            out = try cgen_put(d, out, "_t")
+            out = try cgen_put_u64(d, out, ti)
+            out = try cgen_put(d, out, ") >= 1, \"")
+            out = try cgen_binding_what(d, out, store, block, t.name_start, t.name_end, t.c_name_start, t.c_name_end)
+            out = try cgen_put(d, out, ": scalar binding spelling must resolve to a complete type\");\n")
+        }
+        if t.c_class == mir_c_class_record() {
+            out = try cgen_put(d, out, "_Static_assert(_Alignof(alder_bind_")
+            out = try cgen_put_u64(d, out, block_at)
+            out = try cgen_put(d, out, "_t")
+            out = try cgen_put_u64(d, out, ti)
+            out = try cgen_put(d, out, ") >= 1, \"")
+            out = try cgen_binding_what(d, out, store, block, t.name_start, t.name_end, t.c_name_start, t.c_name_end)
+            out = try cgen_put(d, out, ": record binding spelling must resolve to a complete type\");\n")
+            let field_total = cgen_binding_field_count(store, type_id)
+            var fi: U64 = 0
+            while fi < field_total {
+                let field = cgen_binding_field(store, type_id, fi)
+                out = try cgen_put(d, out, "_Static_assert(offsetof(alder_bind_")
+                out = try cgen_put_u64(d, out, block_at)
+                out = try cgen_put(d, out, "_t")
+                out = try cgen_put_u64(d, out, ti)
+                out = try cgen_put(d, out, ", ")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, ") % _Alignof(")
+                out = try cgen_put_type(d, out, store, field.part_type)
+                out = try cgen_put(d, out, ") == 0, \"binding ")
+                out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+                out = try cgen_put(d, out, ".")
+                out = try cgen_put_name(d, out, store, t.name_start, t.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, t.c_name_start, t.c_name_end)
+                out = try cgen_put(d, out, ").")
+                out = try cgen_put_name(d, out, store, field.name_start, field.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, "): field offset must respect the declared field alignment\");\n")
+                out = try cgen_put(d, out, "_Static_assert(offsetof(alder_bind_")
+                out = try cgen_put_u64(d, out, block_at)
+                out = try cgen_put(d, out, "_t")
+                out = try cgen_put_u64(d, out, ti)
+                out = try cgen_put(d, out, ", ")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, ") + sizeof(")
+                out = try cgen_put_type(d, out, store, field.part_type)
+                out = try cgen_put(d, out, ") <= sizeof(alder_bind_")
+                out = try cgen_put_u64(d, out, block_at)
+                out = try cgen_put(d, out, "_t")
+                out = try cgen_put_u64(d, out, ti)
+                out = try cgen_put(d, out, "), \"binding ")
+                out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+                out = try cgen_put(d, out, ".")
+                out = try cgen_put_name(d, out, store, t.name_start, t.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, t.c_name_start, t.c_name_end)
+                out = try cgen_put(d, out, ").")
+                out = try cgen_put_name(d, out, store, field.name_start, field.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, "): field does not fit inside the record\");\n")
+                out = try cgen_put(d, out, "_Static_assert(_Generic(((alder_bind_")
+                out = try cgen_put_u64(d, out, block_at)
+                out = try cgen_put(d, out, "_t")
+                out = try cgen_put_u64(d, out, ti)
+                out = try cgen_put(d, out, " *)0)->")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, ", ")
+                out = try cgen_put_type(d, out, store, field.part_type)
+                out = try cgen_put(d, out, ": 1, default: 0), \"binding ")
+                out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+                out = try cgen_put(d, out, ".")
+                out = try cgen_put_name(d, out, store, t.name_start, t.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, t.c_name_start, t.c_name_end)
+                out = try cgen_put(d, out, ").")
+                out = try cgen_put_name(d, out, store, field.name_start, field.name_end)
+                out = try cgen_put(d, out, " (")
+                out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+                out = try cgen_put(d, out, "): field type does not match the declared binding type ")
+                out = try cgen_put_type(d, out, store, field.part_type)
+                out = try cgen_put(d, out, "\");\n")
+                fi = fi + 1
+            }
+        }
+        ti = ti + 1
+    }
+    var fn_at: U64 = 0
+    while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+        let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+        if fn_rec.block == block_id {
+            out = try cgen_put(d, out, "_Static_assert(_Generic(&")
+            out = try cgen_put_name(d, out, store, fn_rec.c_name_start, fn_rec.c_name_end)
+            out = try cgen_put(d, out, ", ")
+            if fn_rec.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, fn_rec.result_type) }
+            out = try cgen_put(d, out, " (*)(")
+            let param_total = cgen_binding_param_count(store, fn_at + 1)
+            var pi: U64 = 0
+            var wrote = false
+            while pi < param_total {
+                let param_type = cgen_binding_param_type(store, fn_at + 1, pi)
+                if param_type != mir_type_unit() {
+                    if wrote { out = try cgen_put(d, out, ", ") }
+                    out = try cgen_put_type(d, out, store, param_type)
+                    wrote = true
+                }
+                pi = pi + 1
+            }
+            if !wrote { out = try cgen_put(d, out, "void") }
+            out = try cgen_put(d, out, "): 1, default: 0), \"binding ")
+            out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+            out = try cgen_put(d, out, ".")
+            out = try cgen_put_name(d, out, store, fn_rec.name_start, fn_rec.name_end)
+            out = try cgen_put(d, out, " (")
+            out = try cgen_put_name(d, out, store, fn_rec.c_name_start, fn_rec.c_name_end)
+            out = try cgen_put(d, out, "): function type does not match the declared binding signature\");\n")
+        }
+        fn_at = fn_at + 1
+    }
+    var const_at: U64 = 0
+    while const_at < __s0_buffer_len(MirBindingConstRec, store.binding_consts) {
+        let const_rec = __s0_buffer_get(MirBindingConstRec, store.binding_consts, const_at)
+        if const_rec.block == block_id {
+            out = try cgen_put(d, out, "_Static_assert(_Generic(")
+            out = try cgen_put_name(d, out, store, const_rec.c_name_start, const_rec.c_name_end)
+            out = try cgen_put(d, out, " + 0, int: 1, unsigned int: 1, long: 1, unsigned long: 1, long long: 1, unsigned long long: 1, short: 1, unsigned short: 1, char: 1, signed char: 1, unsigned char: 1, _Bool: 1, default: 0), \"binding ")
+            out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+            out = try cgen_put(d, out, ".")
+            out = try cgen_put_name(d, out, store, const_rec.name_start, const_rec.name_end)
+            out = try cgen_put(d, out, " (")
+            out = try cgen_put_name(d, out, store, const_rec.c_name_start, const_rec.c_name_end)
+            out = try cgen_put(d, out, "): constant must have an integral type\");\n")
+            out = try cgen_put(d, out, "_Static_assert((")
+            out = try cgen_put_name(d, out, store, const_rec.c_name_start, const_rec.c_name_end)
+            out = try cgen_put(d, out, ") == (")
+            out = try cgen_put_type(d, out, store, const_rec.const_type)
+            out = try cgen_put(d, out, ")(")
+            out = try cgen_put_name(d, out, store, const_rec.c_name_start, const_rec.c_name_end)
+            out = try cgen_put(d, out, "), \"binding ")
+            out = try cgen_put_name(d, out, store, block.name_start, block.name_end)
+            out = try cgen_put(d, out, ".")
+            out = try cgen_put_name(d, out, store, const_rec.name_start, const_rec.name_end)
+            out = try cgen_put(d, out, " (")
+            out = try cgen_put_name(d, out, store, const_rec.c_name_start, const_rec.c_name_end)
+            out = try cgen_put(d, out, "): value must be representable as ")
+            out = try cgen_put_type(d, out, store, const_rec.const_type)
+            out = try cgen_put(d, out, "\");\n")
+        }
+        const_at = const_at + 1
+    }
+    return Ok(out)
+}
+
+// Forward declarations for every binding-block C function, so generated
+// unsafe calls are always prototyped.
+fn cgen_emit_binding_decls(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var fn_at: U64 = 0
+    while fn_at < __s0_buffer_len(MirBindingFnRec, store.binding_funcs) {
+        let fn_rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, fn_at)
+        if fn_rec.result_type == mir_type_unit() { out = try cgen_put(d, out, "void") } else { out = try cgen_put_type(d, out, store, fn_rec.result_type) }
+        out = try cgen_put(d, out, " ")
+        out = try cgen_put_name(d, out, store, fn_rec.c_name_start, fn_rec.c_name_end)
+        out = try cgen_put(d, out, "(")
+        let param_total = cgen_binding_param_count(store, fn_at + 1)
+        var pi: U64 = 0
+        var wrote = false
+        while pi < param_total {
+            let param_type = cgen_binding_param_type(store, fn_at + 1, pi)
+            if param_type != mir_type_unit() {
+                if wrote { out = try cgen_put(d, out, ", ") }
+                out = try cgen_put_type(d, out, store, param_type)
+                wrote = true
+            }
+            pi = pi + 1
+        }
+        if !wrote { out = try cgen_put(d, out, "void") }
+        out = try cgen_put(d, out, ");\n")
+        fn_at = fn_at + 1
+    }
+    if __s0_buffer_len(MirBindingFnRec, store.binding_funcs) > 0 { out = try cgen_put(d, out, "\n") }
+    return Ok(out)
+}
+
 fn cgen_emit_imports(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
@@ -550,10 +857,12 @@ fn cgen_build_declaration_skeleton(d: Domain, store: MirStore, verified: MirVeri
     if verified.hosted { out = try cgen_put(d, out, "#include \"alder_host.h\"\n") }
     out = try cgen_put(d, out, "#include <float.h>\n#include <string.h>\n\n")
     let indexes = try mir_vindex_build(d, store)
+    out = try cgen_emit_bindings(d, out, store)
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
     out = try cgen_emit_functions(d, out, store, indexes)
     out = try cgen_emit_imports(d, out, store)
+    out = try cgen_emit_binding_decls(d, out, store)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }
     return Ok(out)
 }
@@ -688,13 +997,15 @@ fn cgen_fn_wrapper_name(d: Domain, initial: CgenWriter, target: U64, fn_type: U6
 
 fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVerifyCompleteOutput) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_writer_new(d)
-    out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n/* Source: complete-verifier-gated Alder MIR 5. */\n#include \"alder.h\"\n")
+    out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n/* Source: complete-verifier-gated Alder MIR 6. */\n#include \"alder.h\"\n")
     if verified.hosted { out = try cgen_put(d, out, "#include \"alder_host.h\"\n") }
     out = try cgen_put(d, out, "#include <float.h>\n#include <string.h>\n\n")
+    out = try cgen_emit_bindings(d, out, store)
     out = try cgen_emit_types(d, out, store)
     out = try cgen_emit_constants(d, out, store)
     out = try cgen_emit_functions(d, out, store, indexes)
     out = try cgen_emit_imports(d, out, store)
+    out = try cgen_emit_binding_decls(d, out, store)
     out = try cgen_emit_cleanup_sites(d, out, store, indexes)
     out = try cgen_emit_copy_helpers(d, out, store, indexes)
     out = try cgen_emit_env_retain_helpers(d, out, store, indexes)

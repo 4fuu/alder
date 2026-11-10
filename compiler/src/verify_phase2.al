@@ -50,6 +50,13 @@ fn mir_vtype_has_forbidden(d: Domain, store: MirStore, indexes: MirVIndexes, roo
     // unchanged while repeat walks disappear.
     return mir_vmemo_forbidden(d, store, indexes, root)
 }
+// A c_field part is valid only on a c_named type with the record class;
+// opaque and other classes carry no record fields.
+fn mir_vpart_c_field_owner_ok(store: MirStore, owner: U64) -> Bool {
+    let rec = __s0_buffer_get(MirTypeRec, store.types, owner - 1)
+    return rec.kind == mir_type_kind_c_named() && rec.c_class == mir_c_class_record()
+}
+
 fn mir_vtype_cycles(d: Domain, store: MirStore, indexes: MirVIndexes, root: U64) -> Result(Bool, __s0_Error) {
     var work = try __s0_buffer_new(U64, d)
     work = try mir_vappend_type_children(d, store, indexes, work, root)
@@ -132,7 +139,12 @@ var scan: U64 = 0
         while scan < at { let q = __s0_buffer_get(MirTypePartRec, store.type_parts, scan)
 if q.owner == p.owner && q.kind == p.kind { expected = expected + 1 }
 scan = scan + 1 }
-        if !mir_vtype_exists(store, p.owner) || !mir_vtype_exists(store, p.part_type) || p.kind < mir_type_part_field() || p.kind > mir_type_part_function_env() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, p.kind, p.part_type)) }
+        if !mir_vtype_exists(store, p.owner) || !mir_vtype_exists(store, p.part_type) || p.kind < mir_type_part_field() || (p.kind > mir_type_part_function_env() && p.kind != mir_type_part_c_field()) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, p.kind, p.part_type)) }
+        else {
+            if p.kind == mir_type_part_c_field() {
+                if !mir_vpart_c_field_owner_ok(store, p.owner) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, p.kind, p.part_type)) }
+            }
+        }
         if p.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), 0, 0, 0, 0, 0, p.owner, at + 1, expected, p.ordinal, 0)) }
         if p.kind != mir_type_part_function_param() && p.kind != mir_type_part_function_env() {
             if !mir_vname_valid(store, p.name_start, p.name_end, true) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, p.owner, at + 1, 0, 0, 0)) }
