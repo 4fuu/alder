@@ -88,6 +88,12 @@ applicable implementation for a concrete trait/type combination in a complete
 package graph. Overlapping blanket implementations and specialization are
 rejected.
 
+A generic implementation is conditional: it satisfies a constraint when its
+head unifies with the concrete implementing type and the implementation's own
+constraints hold for the arguments that unification binds. A type parameter
+satisfies the constraints its own declaration lists, so a generic body may
+forward a conditional value to another constrained call.
+
 Implementation lookup uses no import order or source order. The compiler emits
 a deterministic conflict diagnostic naming both package identities. Private
 impls do not exist; an impl's availability follows the visibility of its trait

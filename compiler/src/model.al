@@ -659,7 +659,8 @@ type TraitImplRec {
 // receiver_index holds the same IDs sorted by (implementing type symbol,
 // trait reference) so method resolution finds candidate impls for a receiver
 // without scanning the impl table. Both are built once after impl collection
-// and never rescanned per expression site.
+// and never rescanned per expression site. Constraint lookup reuses
+// receiver_index for its conditional-implementation fallback.
 type TraitStoreRec {
     constraints: __s0_Buffer(TraitConstraintRec)
     impls: __s0_Buffer(TraitImplRec)

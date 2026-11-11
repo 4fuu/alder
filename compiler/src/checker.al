@@ -1132,7 +1132,7 @@ fn validate_concrete_type(d: Domain, state: State, parse: ParseStore, store: Che
                     var constraint_at: U64 = 0
                     while constraint_at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
                         let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, constraint_at)
-                        if constraint.owner == checked.target && !trait_constraint_application_satisfied(store, constraint, checked.target, checked) {
+                        if constraint.owner == checked.target && !(try trait_constraint_application_satisfied(d, store, constraint, checked.target, checked)) {
                             return check_fail(d, store, 111, root_node, 0, 0, 0)
                         }
                         constraint_at = constraint_at + 1
@@ -3406,7 +3406,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
         var constraint_at: U64 = 0
         while constraint_at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
             let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, constraint_at)
-            if (constraint.owner == declaration || (constraint_owner != 0 && constraint.owner == constraint_owner)) && !trait_constraint_satisfied(store, constraint, bindings) {
+            if (constraint.owner == declaration || (constraint_owner != 0 && constraint.owner == constraint_owner)) && !(try trait_constraint_satisfied(d, store, constraint, bindings, 0)) {
                 let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, constraint.syntax - 1)
                 let failed = try check_token_related_fail(d, state, store, 111, site, syntax)
                 return Ok(InstanceBad(match failed {
@@ -12886,8 +12886,141 @@ fn trait_key_equal_application(store: CheckStore, rec: TraitImplRec, constraint:
     return true
 }
 
-// Binary-search the once-built impl index; zero means no implementation.
-fn trait_constraint_satisfied(store: CheckStore, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
+// The accumulated inference bindings of one conditional match, and whether
+// every trait argument of the implementation unified.
+type TraitMatchRec {
+    bindings: __s0_Buffer(InferenceBindingRec)
+    matched: Bool
+}
+
+// The implementation's trait arguments are patterns too, so each one unifies
+// against the constraint's concrete argument in order. Recursive so the
+// accumulated inference bindings never cross a loop backedge.
+fn trait_impl_trait_args(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), ordinal: U64) -> Result(TraitMatchRec, __s0_Error) {
+    if ordinal == rec.arg_count { return Ok(TraitMatchRec(bindings: bindings, matched: true)) }
+    let pattern = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + ordinal)
+    let concrete = trait_constraint_binding_arg(store, constraint, ordinal, bindings)
+    if concrete == 0 { return Ok(TraitMatchRec(bindings: bindings, matched: false)) }
+    let next = try unify_types(d, store, pattern, concrete, bindings)
+    let seeded = match next {
+        UnifyGood(value) => value
+        UnifyConflict => bindings
+    }
+    if match next {
+        UnifyGood(value) => false
+        UnifyConflict => true
+    } { return Ok(TraitMatchRec(bindings: seeded, matched: false)) }
+    return trait_impl_trait_args(d, store, rec, constraint, seeded, ordinal + 1)
+}
+
+// An implementation for a generic type is conditional: its head unifies with
+// the receiver and its own constraints then have to hold for the parameters
+// that unification binds. False when the head, trait application, or any of
+// those constraints does not match.
+fn trait_impl_applies(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
+    if rec.trait_builtin != constraint.trait_builtin || rec.trait_symbol != constraint.trait_symbol || rec.arg_count != constraint.arg_count { return Ok(false) }
+    let receiver = inference_lookup(bindings, constraint.param)
+    if receiver == 0 { return Ok(false) }
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    let unified = try unify_types(d, store, rec.self_type, receiver, empty)
+    let seeded = match unified {
+        UnifyGood(value) => value
+        UnifyConflict => empty
+    }
+    if match unified {
+        UnifyGood(value) => false
+        UnifyConflict => true
+    } { return Ok(false) }
+    let args = try trait_impl_trait_args(d, store, rec, constraint, seeded, 0)
+    if !args.matched { return Ok(false) }
+    if rec.synthesized != 0 { return Ok(true) }
+    return trait_impl_constraints_hold(d, store, rec.first_method, args.bindings, depth)
+}
+
+fn trait_impl_constraints_hold(d: Domain, store: CheckStore, head: U64, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
+        let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+        if constraint.owner == head && !(try trait_constraint_satisfied(d, store, constraint, bindings, depth + 1)) { return Ok(false) }
+        at = at + 1
+    }
+    return Ok(true)
+}
+
+// A type parameter satisfies the traits its own declaration requires, which
+// is what an enclosing generic body still owes when a conditional
+// implementation's constraint lands on one of its parameters.
+fn trait_constraint_declared(store: CheckStore, param: U64, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
+        let declared = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+        if declared.param == param && declared.trait_builtin == constraint.trait_builtin && declared.trait_symbol == constraint.trait_symbol && declared.arg_count == constraint.arg_count {
+            var matched = true
+            var ordinal: U64 = 0
+            while ordinal < declared.arg_count {
+                if __s0_buffer_get(U64, store.traits.args, declared.first_arg - 1 + ordinal) != trait_constraint_binding_arg(store, constraint, ordinal, bindings) { matched = false }
+                ordinal = ordinal + 1
+            }
+            if matched { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// The conditional fallback for constraint lookup: a parameter answers from
+// its declared constraints, and a nominal receiver scans the adjacent window
+// of implementations for that type symbol. Bounded so a cyclic constraint
+// cannot recurse forever.
+fn trait_constraint_conditional(d: Domain, store: CheckStore, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
+    if depth > 8 { return Ok(false) }
+    let receiver = inference_lookup(bindings, constraint.param)
+    if receiver == 0 || receiver > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver - 1)
+    if checked.kind == 6 { return Ok(trait_constraint_declared(store, checked.target, constraint, bindings)) }
+    if checked.kind != 7 { return Ok(false) }
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    var low: U64 = 0
+    var high = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < checked.target { low = mid + 1 } else { high = mid }
+    }
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > checked.target { return Ok(false) }
+        if symbol == checked.target && (try trait_impl_applies(d, store, rec, constraint, bindings, depth)) { return Ok(true) }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+// Every parameter of a declaration bound from one concrete application of it,
+// so the application form of a constraint reuses the binding-form lookup.
+fn trait_application_bindings_at(d: Domain, store: CheckStore, declaration: U64, application: CheckedTypeRec, at: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(__s0_Buffer(InferenceBindingRec), __s0_Error) {
+    if at == __s0_buffer_len(TypeParamRec, store.type_params) { return Ok(bindings) }
+    let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+    var next = bindings
+    if param.owner == declaration {
+        let ordinal = type_param_ordinal(store, declaration, at + 1)
+        if ordinal < application.arg_count {
+            next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: at + 1, checked_type: __s0_buffer_get(U64, store.type_args, application.first_arg - 1 + ordinal)))
+        }
+    }
+    return trait_application_bindings_at(d, store, declaration, application, at + 1, next)
+}
+
+fn trait_application_bindings(d: Domain, store: CheckStore, declaration: U64, application: CheckedTypeRec) -> Result(__s0_Buffer(InferenceBindingRec), __s0_Error) {
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    return trait_application_bindings_at(d, store, declaration, application, 0, empty)
+}
+
+// Binary-search the once-built impl index; a miss falls back to conditional
+// implementations for the receiver's type symbol.
+fn trait_constraint_satisfied(d: Domain, store: CheckStore, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
     var low: U64 = 0
     var high = __s0_buffer_len(U64, store.traits.impl_index)
     while low < high {
@@ -12897,12 +13030,12 @@ fn trait_constraint_satisfied(store: CheckStore, constraint: TraitConstraintRec,
     }
     if low < __s0_buffer_len(U64, store.traits.impl_index) {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.impl_index, low) - 1)
-        if trait_key_equal_binding(store, rec, constraint, bindings) { return true }
+        if trait_key_equal_binding(store, rec, constraint, bindings) { return Ok(true) }
     }
-    return false
+    return trait_constraint_conditional(d, store, constraint, bindings, depth)
 }
 
-fn trait_constraint_application_satisfied(store: CheckStore, constraint: TraitConstraintRec, declaration: U64, application: CheckedTypeRec) -> Bool {
+fn trait_constraint_application_satisfied(d: Domain, store: CheckStore, constraint: TraitConstraintRec, declaration: U64, application: CheckedTypeRec) -> Result(Bool, __s0_Error) {
     var low: U64 = 0
     var high = __s0_buffer_len(U64, store.traits.impl_index)
     while low < high {
@@ -12912,9 +13045,10 @@ fn trait_constraint_application_satisfied(store: CheckStore, constraint: TraitCo
     }
     if low < __s0_buffer_len(U64, store.traits.impl_index) {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.impl_index, low) - 1)
-        if trait_key_equal_application(store, rec, constraint, declaration, application) { return true }
+        if trait_key_equal_application(store, rec, constraint, declaration, application) { return Ok(true) }
     }
-    return false
+    let bindings = try trait_application_bindings(d, store, declaration, application)
+    return trait_constraint_conditional(d, store, constraint, bindings, 0)
 }
 
 // Sibling-facing lookup helpers (stable interface): find the impl record

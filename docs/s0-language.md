@@ -143,7 +143,11 @@ Milestone 7.5 adds the static trait surface of
 - Instantiating a constrained generic function requires an implementation for
   every constraint; the lookup uses one impl index built after collection.
   The coherence key is the concrete (trait, implementing type, trait
-  arguments) combination.
+  arguments) combination. A generic implementation is conditional: it
+  satisfies the constraint when its head unifies with the concrete
+  implementing type and its own constraints hold for the arguments that
+  unification binds, and a type parameter satisfies the constraints its own
+  declaration lists.
 - Every implementation is validated: required methods must be present with
   exactly the trait's receiver mode, runtime arity, and substituted
   parameter/result types, and impl methods that match no requirement are
