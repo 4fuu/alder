@@ -125,8 +125,8 @@ in API names.
 Implemented core.panic progress: `sysroot/core/panic.al` provides `panic`,
 `assert`, `assert_eq`, and `assert_ne`. A failure flushes C output, writes the
 documented `panic:` or `panic: assertion failed:` diagnostic to standard error,
-and terminates the process with status 101 without running Alder cleanup. `assert_eq` and
-`assert_ne` require `T: type(Eq, Display)` and display both operands;
+and terminates the process with status 101 without running Alder cleanup.
+`assert_eq` and `assert_ne` require `T: type(Eq, Display)` and display both operands;
 source-expression capture remains deferred to the test runner. The runtime
 boundary is the toolchain-owned `runtime/c/alder_panic.h` shim.
 
@@ -137,7 +137,9 @@ for D025. It defines the `Error` trait with a defaulted `cause` method returning
 `ErrorReport.of(E: type(Error, Display), error: E)` builds the flattened chain,
 nearest cause first, by recursively calling `cause`. The compiler loads this
 prelude source for a project that names `Error` or `ErrorReport`, even when the
-project does not import it explicitly.
+project does not import it explicitly. The generated hosted entry adapter uses
+`program_error_display`/`program_error_chain` for an unhandled `Err`, writes
+`program error:` to standard error, and returns status 1 without exit cleanup.
 
 ## Text and bytes
 

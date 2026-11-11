@@ -24,6 +24,10 @@ import c alderhost_sysroot_available: fn() -> Bool
 import c alderhost_sysroot_request_reset: fn() -> Bool
 import c alderhost_sysroot_request_byte: fn(U8) -> Bool
 import c alderhost_sysroot_request_finish: fn() -> U64
+import c alderhost_generated_source_reset: fn() -> Bool
+import c alderhost_generated_source_path_byte: fn(U8) -> Bool
+import c alderhost_generated_source_text_byte: fn(U8) -> Bool
+import c alderhost_generated_source_finish: fn() -> U64
 
 type ProjectTargetRec {
     name_start: U64
@@ -647,6 +651,219 @@ fn project_prepare_error_prelude() -> Bool {
     return project_request_sysroot_literal("core/error.al") != 0
 }
 
+type ProjectEntryShapeRec {
+    kind: U64
+    error_start: U64
+    error_end: U64
+}
+
+fn project_entry_ident_start(byte: U8) -> Bool {
+    return byte == 95 || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+}
+
+fn project_entry_type_end(source: U64, initial: U64, end: U64) -> U64 {
+    if initial >= end || !project_entry_ident_start(project_source_byte(source, initial)) { return initial }
+    var at = initial + 1
+    while at < end && (project_entry_ident_start(project_source_byte(source, at)) || digit(project_source_byte(source, at)) || project_source_byte(source, at) == 46) { at = at + 1 }
+    if at < end && project_source_byte(source, at) == 40 {
+        var depth: U64 = 0
+        while at < end {
+            let byte = project_source_byte(source, at)
+            if byte == 40 { depth = depth + 1 }
+            if byte == 41 { if depth == 0 { return at } else { depth = depth - 1 } }
+            at = at + 1
+        }
+    }
+    return at
+}
+
+fn project_entry_result_type(source: U64, initial: U64, end: U64) -> ProjectEntryShapeRec {
+    let start = project_skip_source_trivia(source, initial, end)
+    if !start.valid || start.at >= end { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+    var kind: U64 = 0
+    if project_source_token(source, start.at, start.at + 4, "Unit") { kind = 1 }
+    if project_source_token(source, start.at, start.at + 3, "I32") { kind = 0 }
+    if project_source_token(source, start.at, start.at + 6, "Result") {
+            let open = project_skip_source_trivia(source, start.at + 6, end)
+        if !open.valid || open.at >= end || project_source_byte(source, open.at) != 40 { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+        let first = project_skip_source_trivia(source, open.at + 1, end)
+        if !first.valid { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+            if project_source_token(source, first.at, first.at + 4, "Unit") { kind = 2 }
+        if project_source_token(source, first.at, first.at + 3, "I32") { kind = 3 }
+        if kind == 0 { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+        var at = project_entry_type_end(source, first.at, end)
+        at = project_skip_source_trivia(source, at, end).at
+            if at >= end || project_source_byte(source, at) != 44 { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+        let error_start_scan = project_skip_source_trivia(source, at + 1, end)
+            if !error_start_scan.valid || error_start_scan.at >= end { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+        var error_end = project_entry_type_end(source, error_start_scan.at, end)
+            var trim = error_end
+        while trim > error_start_scan.at && project_source_space(project_source_byte(source, trim - 1)) { trim = trim - 1 }
+        if trim == error_start_scan.at { return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0) }
+            return ProjectEntryShapeRec(kind: kind, error_start: error_start_scan.at, error_end: trim)
+    }
+    return ProjectEntryShapeRec(kind: kind, error_start: 0, error_end: 0)
+}
+
+fn project_entry_shape(source: U64) -> ProjectEntryShapeRec {
+    let end = unsafe c { alderhost_source_text_len(source - 1) }
+    var at: U64 = 0
+    while at + 4 <= end {
+        if project_source_token(source, at, at + 4, "main") {
+            var previous = at
+            while previous > 0 && project_source_space(project_source_byte(source, previous - 1)) { previous = previous - 1 }
+            if previous >= 2 && project_source_token(source, previous - 2, previous, "fn") {
+                let open = project_skip_source_trivia(source, at + 4, end)
+                if open.valid && open.at < end && project_source_byte(source, open.at) == 40 {
+                    var depth: U64 = 1
+                    var after = open.at + 1
+                    while after < end && depth > 0 {
+                        let byte = project_source_byte(source, after)
+                        if byte == 40 { depth = depth + 1 }
+                        if byte == 41 { depth = depth - 1 }
+                        after = after + 1
+                    }
+                    let arrow = project_skip_source_trivia(source, after, end)
+                    if arrow.valid && arrow.at + 1 < end && project_source_byte(source, arrow.at) == 45 && project_source_byte(source, arrow.at + 1) == 62 {
+                        return project_entry_result_type(source, arrow.at + 2, end)
+                    }
+                }
+            }
+        }
+        at = at + 1
+    }
+    return ProjectEntryShapeRec(kind: 0, error_start: 0, error_end: 0)
+}
+
+fn project_source_entry_error_impl(source: U64, start: U64, end: U64) -> Bool {
+    let text_end = unsafe c { alderhost_source_text_len(source - 1) }
+    var at: U64 = 0
+    while at + 4 <= text_end {
+        if project_source_token(source, at, at + 4, "impl") {
+            var scan = project_skip_source_trivia(source, at + 4, text_end)
+            if scan.valid && scan.at < text_end && project_source_byte(source, scan.at) == 40 {
+                var depth: U64 = 1
+                var close = scan.at + 1
+                while close < text_end && depth > 0 {
+                    let byte = project_source_byte(source, close)
+                    if byte == 40 { depth = depth + 1 }
+                    if byte == 41 { depth = depth - 1 }
+                    close = close + 1
+                }
+                scan = project_skip_source_trivia(source, close, text_end)
+            }
+            if scan.valid && project_source_token(source, scan.at, scan.at + 5, "Error") {
+                let after_error = project_skip_source_trivia(source, scan.at + 5, text_end)
+                if after_error.valid && project_source_token(source, after_error.at, after_error.at + 3, "for") {
+                    let type_at = project_skip_source_trivia(source, after_error.at + 3, text_end)
+                    if type_at.valid && type_at.at < text_end {
+                        let type_end = project_entry_type_end(source, type_at.at, text_end)
+                        if type_end == end && type_at.at == start { return true }
+                        if type_end - type_at.at == end - start {
+                            var same = true
+                            var offset: U64 = 0
+                            while offset < end - start {
+                                if project_source_byte(source, type_at.at + offset) != project_source_byte(source, start + offset) { same = false }
+                                offset = offset + 1
+                            }
+                            if same { return true }
+                        }
+                    }
+                }
+            }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+fn project_entry_has_error_impl(start: U64, end: U64) -> Bool {
+    let count = unsafe c { alderhost_source_count() }
+    var source: U64 = 1
+    while source <= count {
+        if project_source_entry_error_impl(source, start, end) { return true }
+        source = source + 1
+    }
+    return false
+}
+
+fn project_generated_path_byte(byte: U8) -> Bool {
+    return unsafe c { alderhost_generated_source_path_byte(byte) }
+}
+
+fn project_generated_text_byte(byte: U8) -> Bool {
+    return unsafe c { alderhost_generated_source_text_byte(byte) }
+}
+
+fn project_generated_write_literal(word: __s0_String) -> Bool {
+    var at: U64 = 0
+    while at < len(word) {
+        if !project_generated_text_byte(word[at]) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn project_generated_write_source_range(source: U64, start: U64, end: U64) -> Bool {
+    var at = start
+    while at < end {
+        if !project_generated_text_byte(project_source_byte(source, at)) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+fn project_request_core_error() -> Bool {
+    if !unsafe c { alderhost_sysroot_available() } { return false }
+    let count = unsafe c { alderhost_source_count() }
+    var source: U64 = 1
+    while source <= count {
+        if project_source_path_is(source, "core/error.al") { return true }
+        source = source + 1
+    }
+    return project_request_sysroot_literal("core/error.al") != 0
+}
+
+fn project_prepare_entry_wrapper(plan: ProjectPlanRec) -> Bool {
+    let entry = unsafe c { alderhost_project_entry_source() }
+    if entry == 0 { return true }
+    let shape = project_entry_shape(entry)
+    if shape.kind == 0 { return true }
+    if shape.kind != 1 && !project_request_core_error() { return false }
+    let module_rec = project_module_for_source(plan, entry)
+    if module_rec.source == 0 { return false }
+    let path: __s0_String = "src/__alder_entry.al"
+    if !unsafe c { alderhost_generated_source_reset() } { return false }
+    var at: U64 = 0
+    while at < len(path) {
+        if !project_generated_path_byte(path[at]) { return false }
+        at = at + 1
+    }
+    if !project_generated_write_literal("module alder_entry\n\n") { return false }
+    if !project_generated_write_literal("import ") || !project_generated_write_source_range(module_rec.source, module_rec.name_start, module_rec.name_end) || !project_generated_write_literal(" as entry\n") { return false }
+    if shape.kind != 1 {
+        if !project_generated_write_literal("import core.error as cerror\n") { return false }
+    }
+    if !project_generated_write_literal("\npub fn main() -> I32 {\n") { return false }
+    if shape.kind == 1 {
+        if !project_generated_write_literal("    entry.main()\n    return 0\n") { return false }
+    } else {
+        if !project_generated_write_literal("    match entry.main() {\n") { return false }
+        if shape.kind == 3 { if !project_generated_write_literal("        Ok(value) => { return value }\n") { return false } }
+        else { if !project_generated_write_literal("        Ok(_) => { return 0 }\n") { return false } }
+        if project_entry_has_error_impl(shape.error_start, shape.error_end) {
+            if !project_generated_write_literal("        Err(error) => {\n            cerror.program_error_chain(error)\n            return 1\n        }\n") { return false }
+        } else {
+            if !project_generated_write_literal("        Err(error) => {\n            cerror.program_error_display(error)\n            return 1\n        }\n") { return false }
+        }
+        if !project_generated_write_literal("    }\n    return 1\n") { return false }
+    }
+    if !project_generated_write_literal("}\n") { return false }
+    let generated = unsafe c { alderhost_generated_source_finish() }
+    if generated == 0 { return false }
+    return unsafe c { alderhost_project_entry_source_set(generated) }
+}
+
 fn project_source_path_prefix_is(source: U64, word: __s0_String) -> Bool {
     let end = unsafe c { alderhost_source_path_len(source - 1) }
     if end < len(word) { return false }
@@ -1162,6 +1379,7 @@ fn project_compile_closed(d: Domain, plan: ProjectPlanRec) -> I32 {
     }
     if (plan.action == 2 || plan.action == 3) && !project_configure_outputs(plan) { return project_fail(12) }
     if plan.action != 4 && !project_prepare_error_prelude() { return project_fail(12) }
+    if plan.action != 4 && !project_prepare_entry_wrapper(plan) { return project_fail(12) }
     return project_compile_prepared(d)
 }
 

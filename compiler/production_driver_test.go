@@ -895,6 +895,7 @@ uint64_t alderhost_source_text_len(uint64_t source) { (void)source; return (uint
 uint8_t alderhost_source_text_byte(uint64_t source, uint64_t offset) { (void)source; return text[offset]; }
 uint64_t alderhost_command(void) { return %d; }
 bool alderhost_project_mode(void) { return false; }
+uint64_t alderhost_checker_entry_source(void) { return 0; }
 bool alderhost_bootstrap_private(void) { return false; }
 bool alderhost_report_copies(void) { return false; }
 uint64_t alderhost_project_action(void) { return 0; }
@@ -913,6 +914,10 @@ bool alderhost_sysroot_available(void) { return false; }
 bool alderhost_sysroot_request_reset(void) { return false; }
 bool alderhost_sysroot_request_byte(uint8_t byte) { (void)byte; return false; }
 uint64_t alderhost_sysroot_request_finish(void) { return 0; }
+bool alderhost_generated_source_reset(void) { return false; }
+bool alderhost_generated_source_path_byte(uint8_t byte) { (void)byte; return false; }
+bool alderhost_generated_source_text_byte(uint8_t byte) { (void)byte; return false; }
+uint64_t alderhost_generated_source_finish(void) { return 0; }
 bool alderhost_sources_sort(void) { return false; }
 bool alderhost_project_output_reset(uint64_t kind) { (void)kind; return false; }
 bool alderhost_project_output_byte(uint8_t byte) { (void)byte; return false; }

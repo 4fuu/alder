@@ -27,6 +27,9 @@ pub trait Error {
 impl ErrorReport {
     fn of(E: type(Error, Display), error: E) -> ErrorReport
 }
+
+pub fn program_error_display(E: type(Display), error: E) -> Unit
+pub fn program_error_chain(E: type(Error, Display), error: E) -> Unit
 ```
 
 `message` is the `Display` rendering of the error itself. `causes` holds the
@@ -48,7 +51,11 @@ in `causes`.
 - The prelude surface is explicit in source: `Error` remains a reserved name
   for user declarations outside `core.error`, while the prelude source is the
   one permitted declaration site.
-- `program error:` rendering is not implemented by the compiler yet. This
-  snapshot covers the report construction and typed `cause` chain; the
-  unhandled-`Err` entry-point rendering remains a separate driver contract
-  (D025, [Language Semantics](../language-semantics.md#recoverable-errors)).
+- The generated hosted entry adapter uses these helpers for an unhandled
+  `Err`: `program_error_display` prints `program error: <display(error)>` for
+  a `Display`-only error, while `program_error_chain` prints the report
+  message followed by each cause on its own line. Both write to standard
+  error and return normally; the adapter then returns status 1. The entry
+  adapter is generated only for the documented source result forms and does
+  not perform exit cleanup
+  ([Modules and Builds](../modules-and-builds.md#entry-points-and-tests)).

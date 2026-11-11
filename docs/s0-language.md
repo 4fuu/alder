@@ -272,12 +272,12 @@ work in progress:
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.
 
-The hosted entry forms are temporarily `fn main() -> I32` and
-`fn main(root: Domain) -> I32`. They adapt to the fixed generated C host shim
-and are not the 1.0 entry contract. The `root: Domain` parameter form is
-available only under the private bootstrap profile (see below); ordinary
-programs always use the parameterless form and receive the hidden root
-domain through inferred storage.
+The hosted entry results are `Unit`, `I32`, `Result(Unit, E)`, and
+`Result(I32, E)` where `E` implements `Display`; a generated adapter maps them
+to the fixed C host shim. The `root: Domain` parameter form remains available
+only under the private bootstrap profile (see below); ordinary programs use
+the parameterless form and receive the hidden root domain through inferred
+storage. Entry argument-slice forms remain outside this adapter.
 
 ## Lexical and layout rules
 

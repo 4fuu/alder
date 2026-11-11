@@ -1529,13 +1529,13 @@ signed-key rejection remains.
 Landed standard-library progress: `core.panic` is installed at
 `sysroot/core/panic.al` with `panic`, `assert`, `assert_eq`, and `assert_ne`.
 Failures flush C output, write the documented `panic:`/`panic: assertion
-failed:` diagnostic to stderr, and abort without running Alder cleanup;
-`assert_eq`/`assert_ne` require `T: type(Eq, Display)` and display both
-operands, while source-expression capture waits for the test runner. Evidence:
-`compiler/production_panic_test.go` checks the SIGABRT-shaped status and exact
-stderr for every function, passing assertions, stdout flushing, the interior-NUL
-fallback, and an unsatisfied Eq constraint; the `core.panic` snapshot example
-runs under the docs API example gate. The runtime boundary is
+failed:` diagnostic to stderr, and terminate with status 101 without running
+Alder cleanup; `assert_eq`/`assert_ne` require `T: type(Eq, Display)` and
+display both operands, while source-expression capture waits for the test
+runner. Evidence: `compiler/production_panic_test.go` checks status 101 and
+exact stderr for every function, passing assertions, stdout flushing, the
+interior-NUL fallback, and an unsatisfied Eq constraint; the `core.panic`
+snapshot example runs under the docs API example gate. The runtime boundary is
 `runtime/c/alder_panic.h`.
 
 Landed standard-library progress: `core.error` is the prelude source for
@@ -1568,6 +1568,16 @@ and the buffered types work through `flush` plus `using`/`Cleanup` meanwhile.
 The capability types, host files, and standard streams remain slice 2. Docs:
 [Standard Library](docs/standard-library.md) and the frozen
 [`std.io` snapshot](docs/api/std.io-v1.md).
+Landed language and runtime progress: hosted binaries accept `Unit`, `I32`,
+`Result(Unit, E)`, and `Result(I32, E)` source entry results with `E: Display`.
+The compiler generates an internal source adapter and keeps the generated MIR
+entry `I32`. `Unit`/`Ok(())` maps to status 0, `I32`/`Ok(I32)` to the low eight
+bits, and unhandled `Err` writes `program error:` plus the displayed error (and
+the `ErrorReport` cause chain when available) before returning status 1. Entry
+arguments remain unchanged. Evidence: `compiler/production_entry_test.go`
+runs Unit, both Result success forms, a display-only Err, a wrapper Error cause
+chain, and rejects unsupported results and non-Display errors; the compiler's
+own bootstrap `main` still uses the untouched I32 path.
 
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`

@@ -94,6 +94,12 @@ struct AlderHostContext {
     char *sysroot_request;
     size_t sysroot_request_len;
     size_t sysroot_request_capacity;
+    uint8_t *generated_path;
+    size_t generated_path_len;
+    size_t generated_path_capacity;
+    uint8_t *generated_text;
+    size_t generated_text_len;
+    size_t generated_text_capacity;
     char *project_paths[2];
     char *project_path_request;
     size_t project_path_request_len;
@@ -198,6 +204,10 @@ uint64_t alderhost_command(void) {
         alderhost_contract_failure();
     }
     return alderhost_active_context->command;
+}
+
+uint64_t alderhost_checker_entry_source(void) {
+    return alderhost_active_context == NULL ? UINT64_C(0) : alderhost_active_context->project_entry_source;
 }
 
 bool alderhost_project_mode(void) {
@@ -611,6 +621,8 @@ static void alderhost_cleanup(struct AlderHostContext *context) {
     free(context->source_request);
     free(context->sysroot_root);
     free(context->sysroot_request);
+    free(context->generated_path);
+    free(context->generated_text);
     free(context->project_paths[0]);
     free(context->project_paths[1]);
     free(context->project_path_request);
@@ -1199,6 +1211,97 @@ static bool alderhost_load(struct AlderHostSource *source) {
     }
     source->text = data;
     return true;
+}
+
+/* Generated-source staging: a compiler-created entry adapter or prelude can
+ * be appended without touching the project directory. The path and text are
+ * copied into the host source list on finish. */
+bool alderhost_generated_source_reset(void) {
+    struct AlderHostContext *context = alderhost_active_context;
+    if (context == NULL || !context->project_mode) { return false; }
+    context->generated_path_len = 0;
+    context->generated_text_len = 0;
+    return true;
+}
+
+static bool alderhost_generated_append(uint8_t **buffer, size_t *length,
+                                       size_t *capacity, uint8_t byte) {
+    uint8_t *grown;
+    size_t next;
+    if (*length == *capacity) {
+        next = *capacity == 0 ? (size_t)128 : *capacity * (size_t)2;
+        if (next < *capacity) { return false; }
+        grown = (uint8_t *)realloc(*buffer, next);
+        if (grown == NULL) { return false; }
+        *buffer = grown;
+        *capacity = next;
+    }
+    (*buffer)[(*length)++] = byte;
+    return true;
+}
+
+bool alderhost_generated_source_path_byte(uint8_t byte) {
+    struct AlderHostContext *context = alderhost_active_context;
+    if (context == NULL || !context->project_mode || byte == UINT8_C(0)) { return false; }
+    return alderhost_generated_append(&context->generated_path,
+                                      &context->generated_path_len,
+                                      &context->generated_path_capacity, byte);
+}
+
+bool alderhost_generated_source_text_byte(uint8_t byte) {
+    struct AlderHostContext *context = alderhost_active_context;
+    if (context == NULL || !context->project_mode || byte == UINT8_C(0)) { return false; }
+    return alderhost_generated_append(&context->generated_text,
+                                      &context->generated_text_len,
+                                      &context->generated_text_capacity, byte);
+}
+
+uint64_t alderhost_generated_source_finish(void) {
+    struct AlderHostContext *context = alderhost_active_context;
+    char *path;
+    uint8_t *text;
+    struct AlderHostSource *source;
+    size_t next;
+    if (context == NULL || !context->project_mode || context->generated_path_len == 0 ||
+        context->generated_text_len == 0) { return UINT64_C(0); }
+    path = (char *)malloc(context->generated_path_len + (size_t)1);
+    text = (uint8_t *)malloc(context->generated_text_len);
+    if (path == NULL || text == NULL) { free(path); free(text); return UINT64_C(0); }
+    (void)memcpy(path, context->generated_path, context->generated_path_len);
+    path[context->generated_path_len] = '\0';
+    (void)memcpy(text, context->generated_text, context->generated_text_len);
+    if (!alderhost_valid_logical_path(path) || !alderhost_al_extension(path)) {
+        free(path);
+        free(text);
+        return UINT64_C(0);
+    }
+    for (size_t i = 0; i < (size_t)context->source_count; i++) {
+        if (strcmp(context->sources[i].path, path) == 0) {
+            free(path);
+            free(text);
+            return i + UINT64_C(1);
+        }
+    }
+    if ((size_t)context->source_count == context->source_capacity) {
+        next = context->source_capacity == 0 ? (size_t)4 : context->source_capacity * (size_t)2;
+        if (next < context->source_capacity) { free(path); free(text); return UINT64_C(0); }
+        source = (struct AlderHostSource *)realloc(context->sources, next * sizeof(*source));
+        if (source == NULL) { free(path); free(text); return UINT64_C(0); }
+        context->sources = source;
+        context->source_capacity = next;
+    }
+    source = &context->sources[(size_t)context->source_count];
+    (void)memset(source, 0, sizeof(*source));
+    source->path = path;
+    source->owned_path = true;
+    source->text = text;
+    if (!alderhost_size_to_u64(context->generated_text_len, &source->text_len) ||
+        !alderhost_size_to_u64(strlen(path), &source->path_len)) {
+        free(path); free(text); (void)memset(source, 0, sizeof(*source));
+        return UINT64_C(0);
+    }
+    context->source_count++;
+    return context->source_count;
 }
 
 /* One shared insert path for project sources and sysroot sources.  `path` is

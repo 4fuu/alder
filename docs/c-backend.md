@@ -75,8 +75,14 @@ verified-only gate for untrusted MIR. `cgen.GenerateProgramTrusted` is the
 same lowering for a module the caller already verified. Generic
 `cgen.Generate` remains a translation-unit generator and requires no `main`.
 For Stage 0 only, a program has exactly one MIR function named `main`, returning
-`i32`, with either no parameters or one `domain_handle` parameter. These are
-temporary source entry forms, not a frozen source ABI.
+`i32`, with either no parameters or one `domain_handle` parameter. Hosted
+projects may write the documented source entry results `Unit`, `I32`,
+`Result(Unit, E)`, and `Result(I32, E)` where `E` implements `Display`; the
+compiler lowers the source entry under an internal name and synthesizes an
+`I32` adapter. The adapter maps `Unit`/`Ok(())` to status 0, `I32`/`Ok(I32)` to
+the low eight bits, and `Err(E)` to status 1 after writing the `program error:`
+diagnostic. Entry parameters remain the existing forms; argument-slice support
+is outside this adapter. The generated MIR entry contract stays `I32`.
 
 Program output exports exactly `int32_t alder_program_entry(void
 *host_context)`; all Alder functions remain static and ID-named. The opaque,

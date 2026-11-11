@@ -4,6 +4,7 @@
 // request compiled the compiler's own bootstrap sources (the host reports the
 // --bootstrap-private request flag).
 import c alderhost_bootstrap_private: fn() -> Bool
+import c alderhost_checker_entry_source: fn() -> U64
 
 fn check_bootstrap_private() -> Bool { return unsafe c { alderhost_bootstrap_private() } }
 
@@ -5444,6 +5445,15 @@ fn import_namespace_range_matches(state: State, parse: ParseStore, imp: SyntaxRe
     return same_name(state, source_id, start, end, imp.source, last, imp.name_end)
 }
 
+// A dotted callee or field node has a base syntax child before the member
+// name. Local bare-name lookup must not win over that qualified resolution.
+fn symbol_node_is_qualified(parse: ParseStore, node: SyntaxRec) -> Bool {
+    if node.kind != 29 || node.children == 0 { return false }
+    let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+    let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+    return base.name_end <= node.name_start
+}
+
 fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
     var module_source: U64 = 0
     var root_at: U64 = 0
@@ -5455,7 +5465,7 @@ fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: Syntax
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if symbol.inherent_owner == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source || prelude_error_source(state, symbol.source)) { return at + 1 }
+        if !symbol_node_is_qualified(parse, node) && symbol.inherent_owner == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source || prelude_error_source(state, symbol.source)) { return at + 1 }
         at = at + 1
     }
     if module_source == 0 { return 0 }
@@ -11485,6 +11495,41 @@ fn private_signature_type(store: CheckStore, checked_type: U64) -> U64 {
     return 0
 }
 
+fn entry_display_supported(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return checked.target >= 1 && checked.target <= 9 }
+    if checked.kind == 2 { return true }
+    if checked.kind == 7 { return trait_impl_for_builtin_type(store, 8, checked_type) != 0 }
+    return false
+}
+
+fn check_entry_signature(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    let source = unsafe c { alderhost_checker_entry_source() }
+    if source == 0 { return Ok(CheckGood(store)) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if (symbol.kind == 12 || symbol.kind == 13) && symbol_name_matches_word(state, symbol, "main") {
+            var result_role: U64 = 8
+            if symbol.kind == 12 { result_role = 6 }
+            let result_use = use_by_ordinal(store, at + 1, result_role, 0)
+            if result_use == 0 { return check_token_fail(d, state, store, 332, __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)) }
+            let result = __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1)
+            let checked = __s0_buffer_get(CheckedTypeRec, store.types, result.checked_type - 1)
+            if checked.kind == 1 && (checked.target == 12 || checked.target == 4) { return Ok(CheckGood(store)) }
+            if checked.kind == 10 && checked.arg_count == 2 {
+                let ok = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1) - 1)
+                let error_type = __s0_buffer_get(U64, store.type_args, checked.first_arg)
+                if ok.kind == 1 && (ok.target == 12 || ok.target == 4) && entry_display_supported(store, error_type) { return Ok(CheckGood(store)) }
+            }
+            return check_token_fail(d, state, store, 332, __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1))
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
 fn check_public_signatures(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
     var at: U64 = 0
     while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
@@ -11604,6 +11649,15 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(public_signatures) }
+    let entry_signature = try check_entry_signature(d, state, parse, after_public_signatures)
+    let after_entry_signature = match entry_signature {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match entry_signature {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(entry_signature) }
     // The use index covers every symbol that exists now; symbols appended
     // later (instances and closure thunks) resolve through the scan
     // fallbacks.
