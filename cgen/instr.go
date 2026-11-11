@@ -783,7 +783,10 @@ func (g *gen) emitIntBitwise(b *strings.Builder, in *mir.Instr) {
 	}
 	if signed {
 		tmp := g.tmp(in, "u")
-		b.WriteString("  " + u + " " + tmp + " = " + expr + ";\n")
+		// The narrow C operators promote to int; cast the promoted result back
+		// to the width type so the initializer is not an implicit narrowing
+		// conversion under clang's -Wimplicit-int-conversion.
+		b.WriteString("  " + u + " " + tmp + " = (" + u + ")(" + expr + ");\n")
 		b.WriteString("  memcpy(&" + g.val(in.Result) + ", &" + tmp + ", sizeof(" + tmp + "));\n")
 		return
 	}

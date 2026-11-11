@@ -516,7 +516,9 @@ fn cgen_emit_int_bitwise(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_u64(d, out, width)
         out = try cgen_put(d, out, "_t ")
         out = try cgen_put_tmp(d, out, item.result, "u")
-        out = try cgen_put(d, out, " = ")
+        out = try cgen_put(d, out, " = (uint")
+        out = try cgen_put_u64(d, out, width)
+        out = try cgen_put(d, out, "_t)(")
     } else {
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = (")
@@ -542,7 +544,7 @@ fn cgen_emit_int_bitwise(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
     }
     if signed {
-        out = try cgen_put(d, out, ";\n  memcpy(&")
+        out = try cgen_put(d, out, ");\n  memcpy(&")
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, ", &")
         out = try cgen_put_tmp(d, out, item.result, "u")
