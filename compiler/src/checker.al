@@ -5723,23 +5723,32 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { place_fail = 146 }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if parameter_node.kind == 47 && expression.kind == 21 { return check_mut_argument_field(d, state, parse, store, owner, arg, expression_id, place_fail) }
-    if expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, base, place_fail, arg) }
-    let binding = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
-    var access = false
-    if binding.kind == 2 {
-        // Ordinary let bindings own affine values outright, so they satisfy
-        // mut and take parameters. A copyable cursor argument is different:
-        // only a var binding (or a forwarding mut parameter) lets the callee
-        // advance the caller's cursor instead of a discarded copy.
-        if place_fail != 146 { access = true } else {
-            if binding.mutable == 1 { access = true }
-        }
-    } else {
-        let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
-        if parameter_node.kind == 47 && (declaration.kind == 47 || declaration.kind == 48) { access = true }
-        if parameter_node.kind == 48 && declaration.kind == 48 { access = true }
+    // A newly formed exclusive view is itself the capability a mut
+    // parameter borrows; the ordering rule keeps it last so no temporary
+    // descriptor is invalidated before call entry.
+    var formed_view = false
+    if expression.kind == 18 && expression.annotation != 0 {
+        let call = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+        if call.builtin == 24 || call.builtin == 25 { formed_view = true }
     }
-    if !access { return expr_token_fail(d, state, base, place_fail, arg) }
+    if !formed_view && expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, store, place_fail, arg) }
+    var access = formed_view
+    if !formed_view {
+        let binding = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
+        if binding.kind == 2 {
+            // Ordinary let bindings own affine values outright, so they satisfy
+            // mut and take parameters. A copyable cursor argument is different:
+            // only a var binding (or a forwarding mut parameter) lets the callee
+            // advance the caller's cursor instead of a discarded copy.
+            if place_fail != 146 { access = true } else {
+                if binding.mutable == 1 { access = true }
+            }
+        } else {
+            let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
+            if declaration.kind == 47 || declaration.kind == 48 { access = true }
+        }
+    }
+    if !access { return expr_token_fail(d, state, store, place_fail, arg) }
     if parameter_node.kind == 48 {
         __s0_buffer_set(CheckedExprRec, store.expressions, expression_id - 1, CheckedExprRec(owner: expression.owner, owner_previous: expression.owner_previous, syntax: expression.syntax, kind: 22, checked_type: expression.checked_type, parameter_use: expression.parameter_use, bool_value: expression.bool_value, left: expression.left, right: expression.right, annotation: expression.annotation, first_child: expression.first_child, child_count: expression.child_count, operator: expression.operator, site_kind: expression.site_kind, site_syntax: expression.site_syntax))
     }
@@ -9853,7 +9862,6 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
     let empty_bindings = try __s0_buffer_new(TypeBindingRec, d)
     let empty_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, ostore, empty_bindings, empty_ancestry, annotated, 0, 0)
-    if annotation.kind == 18 && statement.kind == 15 { return body_token_fail(d, state, ostore, 102, statement) }
     if annotation.kind == 18 {
         let initializer = __s0_buffer_get(CheckedExprRec, ostore.expressions, draft.expression - 1)
         if initializer.kind != 18 || initializer.annotation == 0 { return body_token_fail(d, state, ostore, 104, statement) }
@@ -10511,6 +10519,10 @@ fn append_parameter_bindings(d: Domain, parse: ParseStore, store: CheckStore, ow
             var mutable: U64 = 0
             if parameter.kind == 47 { mutable = 1 }
             if parameter.kind == 48 { mutable = 2 }
+            // A MutSlice parameter is the capability itself: the binding is
+            // mutable through the view even when the parameter has no `mut`
+            // keyword, mirroring the Stage 0 oracle's parameter mode.
+            if mutable == 0 && __s0_buffer_get(CheckedTypeRec, next.types, use.checked_type - 1).kind == 18 { mutable = 1 }
             let locals = try __s0_buffer_append(LocalRec, d, next.locals, LocalRec(owner: owner, kind: 1, syntax: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, mutable: mutable, checked_type: use.checked_type))
             let binding = __s0_buffer_len(LocalRec, locals)
             var parent: U64 = 0

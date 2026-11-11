@@ -1496,6 +1496,16 @@ strict-and-sanitizer cgen run fixture `cgen/testdata/run/bitwise.mir`, the
 `compiler/production_bitwise_test.go`, which compiles and runs the production
 driver output and pins the non-integer and mixed-width rejections.
 
+Landed language progress also aligns exclusive-view arguments between the
+inherent and trait method paths. A `MutSlice(T)` parameter is mutable through
+its view without repeating `mut`, `let` may bind a directly formed mutable
+view for the block without allowing descriptor reassignment, a `let`-bound or
+newly formed view satisfies an exclusive-view parameter, and a newly formed
+view must be the final runtime argument. Taking `slice_mut`/`subview` still
+requires a mutable owner. Evidence: `compiler/production_mutable_view_args_test.go`
+runs inherent and trait methods, temporary views, forwarding, and the three
+kept rejections (101, 104, and immutable reassignment).
+
 Landed C-interop progress continues with by-value verified records. The
 checker accepts raw fn signatures with complete record parameters and
 results, and inside `unsafe c` the field read `rec.field` (yielding the

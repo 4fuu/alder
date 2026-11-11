@@ -2781,8 +2781,13 @@ fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(Check
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if borrow_kind == 2 && expression.kind == 21 { return lower_mut_argument_place(d, source_state, store, state, function, expression_id) }
     let mapped = lower_binding_lookup(state, expression.parameter_use)
-    let plain = (expression.kind == 1 || expression.kind == 5) && mapped.binding != 0 && mapped.parameter != 1
-    if borrow_kind == 1 && !plain {
+    let named = expression.kind == 1 || expression.kind == 5
+    let plain = named && mapped.binding != 0 && mapped.parameter != 1
+    // A mut parameter may borrow a whole local, a field place (handled
+    // above), or a forwarded mut parameter's deref; a newly formed view is
+    // staged into a local first. An immutable parameter only stages.
+    let stage = (borrow_kind == 1 && !plain) || (borrow_kind == 2 && !named)
+    if stage {
         let staged = try lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
         let ordinary = try lower_type(d, source_state, store, staged.state, expression.checked_type)
         let slot_name = try lower_decimal_name(d, "__alder_borrow_temp_", lower_local_count(ordinary.state.mir, function))
@@ -2791,7 +2796,8 @@ fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(Check
         let stored = try lower_add_instr(d, lower_with_mir(ordinary.state, place.store), function, block, mir_op_store(), 0, place.id, 0, staged.id, 0, 0, "")
         return Ok(LowerArgumentPlaceRec(state: stored.state, place: place.id))
     }
-    if !plain { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    if !named || mapped.binding == 0 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    if borrow_kind == 1 && mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
     var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
     if mapped.parameter == 0 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
         place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))

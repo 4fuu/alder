@@ -615,7 +615,16 @@ direct C-import root in `unsafe c`; record fields are checked and stored in
 declaration order. Inherent methods support ordinary, mutable, and taking
 receivers; associated functions and same-named methods on distinct owner types
 resolve to distinct concrete symbols. Explicit type arguments are all-or-none
-and use the same postfix call tree as runtime arguments. Checked places are chains over one root local:
+and use the same postfix call tree as runtime arguments. A `MutSlice(T)` binding may be introduced by `let` or `var`: `let` prevents
+reassignment of the descriptor but not mutation through the view, and the
+binding must still be formed directly by `slice_mut` or `subview`. A
+`MutSlice(T)` parameter is mutable through the view whether or not its
+declaration repeats `mut`. A `let`-bound view or a newly formed
+`slice_mut`/`subview` result satisfies an exclusive-view parameter; a newly
+formed view must be the final runtime argument, and taking `slice_mut` or
+`subview` still requires a mutable owner binding.
+
+Checked places are chains over one root local:
 a name, a field of any place, and a slice index of any place, so `a`, `a.b`,
 `a[i]`, `a.b.c`, `a.b[i]`, and `a[i].b` are all assignable. Roots and fields
 retain stable semantic IDs, and concrete generic field types are substituted
