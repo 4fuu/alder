@@ -1787,6 +1787,44 @@ fn lower_c_buffer_argument(d: Domain, source_state: State, spans: __s0_Buffer(Ch
     return Ok(LowerCBufferRec(matched: true, state: instr.state, id: value.id))
 }
 
+// ---- Zero-initialized C values and local addresses ----------------------
+// c.Zero(T) emits one c.zero over the boundary type. c.addr lowers its place
+// and emits one c.addr through the declared pointer type; the pointer never
+// becomes an Alder value.
+fn lower_c_zero(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec) -> Result(LowerStep, __s0_Error) {
+    let built = try lower_type(d, source_state, store, state, expression.checked_type)
+    if !built.state.valid { return Ok(LowerStep(state: built.state, id: 0)) }
+    let name = try lower_result_name(d, built.state.mir, function, "")
+    let value = try mir_add_value(d, built.state.mir, function, name, built.id, mir_value_def_instruction(), block, lower_instruction_ordinal(built.state.mir, function, block) + 1)
+    let instr = try lower_add_instr(d, lower_with_mir(built.state, value.store), function, block, mir_op_c_zero(), value.id, 0, built.id, 0, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: value.id))
+}
+
+type LowerCAddrRec {
+    matched: Bool
+    state: LowerState
+    id: U64
+}
+
+fn lower_c_addr_argument(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, child_id: U64, environment: U64, panic_block: U64) -> Result(LowerCAddrRec, __s0_Error) {
+    if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerCAddrRec(matched: false, state: state, id: 0)) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+    if expression.kind != 33 || expression.child_count != 1 { return Ok(LowerCAddrRec(matched: false, state: state, id: 0)) }
+    var borrow_kind: U64 = 1
+    if expression.checked_type != 0 && expression.checked_type <= __s0_buffer_len(CheckedTypeRec, store.types) {
+        if __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1).kind == 27 { borrow_kind = 2 }
+    }
+    let place_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let place = try lower_argument_place(d, source_state, spans, store, state, owner, function, block, place_id, environment, panic_block, borrow_kind)
+    if !place.state.valid { return Ok(LowerCAddrRec(matched: true, state: place.state, id: 0)) }
+    let pointer = try lower_type(d, source_state, store, place.state, expression.checked_type)
+    if !pointer.state.valid { return Ok(LowerCAddrRec(matched: true, state: pointer.state, id: 0)) }
+    let name = try lower_result_name(d, pointer.state.mir, function, "")
+    let value = try mir_add_value(d, pointer.state.mir, function, name, pointer.id, mir_value_def_instruction(), block, lower_instruction_ordinal(pointer.state.mir, function, block) + 1)
+    let instr = try lower_add_instr(d, lower_with_mir(pointer.state, value.store), function, block, mir_op_c_addr(), value.id, place.place, pointer.id, 0, 0, 0, "")
+    return Ok(LowerCAddrRec(matched: true, state: instr.state, id: value.id))
+}
+
 // An unsafe binding call expression is valid when the call carries no extra
 // flags and its argument count equals the member's parameter field count;
 // per-argument types ride on the checker and the MIR verifier's signature
@@ -4592,9 +4630,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     }
                 }
             }
+            var addr_argument = LowerCAddrRec(matched: false, state: current, id: 0)
+            if annotation.kind == 7 && child_id != 0 { addr_argument = try lower_c_addr_argument(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
             var buffer_argument = LowerCBufferRec(matched: false, state: current, id: 0)
-            if annotation.kind == 7 && child_id != 0 { buffer_argument = try lower_c_buffer_argument(d, source_state, spans, store, current, owner, function, block, annotation, ordinal, child_id, checked_child.checked_type, environment, panic_block) }
-            if buffer_argument.matched {
+            if !addr_argument.matched && annotation.kind == 7 && child_id != 0 { buffer_argument = try lower_c_buffer_argument(d, source_state, spans, store, current, owner, function, block, annotation, ordinal, child_id, checked_child.checked_type, environment, panic_block) }
+            if addr_argument.matched {
+                child = LowerStep(state: addr_argument.state, id: addr_argument.id)
+            } else { if buffer_argument.matched {
                 child = LowerStep(state: buffer_argument.state, id: buffer_argument.id)
             } else { if sequence_borrow {
                 let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_child.checked_type - 1)
@@ -4624,7 +4666,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
                 let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, borrowed_place.place, 0, 0, 0, 0, "")
                 child = LowerStep(state: borrowed.state, id: value.id)
-            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } }
+            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } } }
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1
@@ -5013,6 +5055,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 29 { return lower_c_string_make_lit(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 30 { return lower_c_string_make(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 31 { return lower_c_string_ptr(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
+    if expression.kind == 32 { return lower_c_zero(d, source_state, spans, store, state, owner, function, block, expression) }
     if expression.kind == 13 {
         if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(CheckedTryRec, store.control.tries) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1)
@@ -7381,6 +7424,28 @@ fn lower_cleanup_callback_valid(store: CheckStore, item: CheckedCleanupRec, bind
     return callback_result_type.kind == 1 && callback_result_type.target == 12
 }
 
+// The c.Zero and c.addr expression shapes: a zero value carries no child and
+// an address carries exactly the place expression its pointee types.
+fn lower_model_c_zero_addr_ok(store: CheckStore, item: CheckedExprRec, annotation: CallAnnotationRec) -> Bool {
+    if item.operator != 0 || item.parameter_use != 0 || item.left != 0 || item.right != 0 || item.bool_value != 0 { return false }
+    if item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let result_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+    if item.kind == 32 {
+        if annotation.builtin != 903 || item.child_count != 0 || item.first_child != 0 { return false }
+        if result_type.kind == 26 { return true }
+        return result_type.kind == 29
+    }
+    if annotation.builtin != 904 || item.child_count != 1 || item.first_child == 0 || item.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
+    if result_type.kind != 27 && result_type.kind != 28 { return false }
+    if result_type.arg_count != 1 || result_type.first_arg == 0 { return false }
+    let pointee = __s0_buffer_get(U64, store.type_args, result_type.first_arg - 1)
+    let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+    if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+    if child.checked_type != pointee { return false }
+    return child.kind == 1 || child.kind == 5 || child.kind == 21
+}
+
 fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     // Ownership is validated below in stable record order. Build dense counts
     // once instead of rediscovering each owner with nested whole-table scans.
@@ -7740,7 +7805,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 31 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 33 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -7829,14 +7894,14 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             }
             if item.operator >= 16 && left.checked_type != item.checked_type { return false }
         }
-        if item.kind >= 8 && item.kind <= 11 || item.kind >= 29 && item.kind <= 31 {
+        if item.kind >= 8 && item.kind <= 11 || item.kind >= 29 && item.kind <= 33 {
             if item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
             let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
             var annotation_kind: U64 = 1
             if item.kind == 9 { annotation_kind = 3 }
             if item.kind == 10 { annotation_kind = 4 }
             if item.kind == 11 { annotation_kind = 2 }
-            if item.kind >= 29 && item.kind <= 31 { annotation_kind = 5 }
+            if item.kind >= 29 && item.kind <= 33 { annotation_kind = 5 }
             if item.kind == 10 && annotation.kind == 6 {
                 annotation_kind = 6
             }
@@ -7846,6 +7911,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if annotation.owner != item.owner || annotation.checked_type != item.checked_type || annotation.kind != annotation_kind { return false }
             if annotation.kind == 7 { return lower_model_binding_call_ok(store, annotation, item) } else {
             if annotation.kind == 5 {
+                if item.kind == 32 || item.kind == 33 { return lower_model_c_zero_addr_ok(store, item, annotation) }
                 // The c_string construction and borrow vocabulary: one
                 // child plus the call annotation. The constructors take a
                 // String argument and produce the bare owner (kind 29) or

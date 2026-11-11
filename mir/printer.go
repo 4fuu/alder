@@ -355,6 +355,12 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCBufferPtr:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
 
+	case OpCZero:
+		b.WriteString(" " + m.TypeString(in.TypeOp))
+
+	case OpCAddr:
+		b.WriteString(" " + printPlace(m, f, &in.Place) + ", " + m.TypeString(in.TypeOp))
+
 	case OpSliceLen:
 		b.WriteString(" " + valueName(f, in.Slice))
 

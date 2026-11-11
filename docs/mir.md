@@ -555,6 +555,31 @@ non-null buffer like every other empty owning sequence. The verifier rejects a
 view of any other element type, a domain operand that is not a
 `domain_handle`, and a result that is not `bytes`.
 
+## Zero-Initialized C Values and Local Addresses
+
+MIR 6 exposes `c.Zero` and `c.addr` as operations 109 and 110:
+
+```text
+c.zero T
+c.addr place, P
+```
+
+`c.zero` takes only its type operand `T`, which must be a `c_raw` scalar or a
+by-value `c_named` scalar or record, and produces that type. The C backend
+emits a compound literal `(T){0}` for a record and the literal `0` for a
+scalar, so every record member is zeroed by C semantics. The verifier rejects
+any other type operand.
+
+`c.addr` forms the address of a place under the declared C pointer type `P`.
+`P` is `c_ptr(T)` or `c_const_ptr(T)`, the place's own type must be exactly
+`T`, and the place must walk back through fields to a local; a `c_ptr(T)`
+target additionally requires a mutable place. The result is `P`. The pointer
+is a raw call argument for one call and never an ordinary value. The
+verifier rejects a pointee mismatch, a type operand that is not a C pointer, a
+place that is not rooted at a local, and a read-only place for `c_ptr`.
+Nullity, alignment, and lifetime are the unsafe caller's obligation: the
+operation emits no null check.
+
 ## Text Display
 
 MIR 6 exposes the Display domain's formatting as operation 102, produced

@@ -151,6 +151,50 @@ fn mir_v5_c_byte_pointee(store: MirStore, t: U64) -> Bool {
     return false
 }
 
+// c.zero yields its type operand when that names a raw C scalar or a
+// by-value c_named scalar or record.
+fn mir_v5_c_zero_result(store: MirStore, x: MirInstrRec) -> MirVTypeResult {
+    if x.type_op == 0 || x.type_op > __s0_buffer_len(MirTypeRec, store.types) { return MirVTypeResult(valid: false, type_id: 0) }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1)
+    var valid = rec.kind == mir_type_kind_c_raw()
+    if rec.kind == mir_type_kind_c_named() { valid = rec.c_class == mir_c_class_scalar() || rec.c_class == mir_c_class_record() }
+    return MirVTypeResult(valid: valid, type_id: x.type_op)
+}
+
+// c.addr yields its C pointer type operand when it names c_ptr or c_const_ptr
+// over the place's own type.
+fn mir_v5_c_addr_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec) -> MirVTypeResult {
+    if x.type_op == 0 || x.type_op > __s0_buffer_len(MirTypeRec, store.types) { return MirVTypeResult(valid: false, type_id: 0) }
+    let pointer = __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1)
+    if pointer.kind != mir_type_kind_c_ptr() && pointer.kind != mir_type_kind_c_const_ptr() { return MirVTypeResult(valid: false, type_id: 0) }
+    let place = mir_v5_place_type(store, indexes, x.function, x.place)
+    return MirVTypeResult(valid: place.valid && place.type_id == pointer.elem, type_id: x.type_op)
+}
+
+// True when the place walks back through fields to a local place.
+fn mir_v5_place_root_local(store: MirStore, place: U64) -> Bool {
+    var current = place
+    var steps: U64 = 0
+    while current != 0 && steps <= __s0_buffer_len(MirPlaceRec, store.places) {
+        let p = __s0_buffer_get(MirPlaceRec, store.places, current - 1)
+        if p.kind == mir_place_local() { return true }
+        if p.kind == mir_place_field() { current = p.base } else { return false }
+        steps = steps + 1
+    }
+    return false
+}
+
+// c.addr places must be rooted at a local, and a c_ptr target requires a
+// mutable place.
+fn mir_v5_c_addr_place(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), id: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var result = out
+    if !mir_v5_place_root_local(store, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_bad_place_type(), x.function, x.block, id, 0, x.place, 0, 0, x.place) }
+    if mir_vtype_kind(store, x.type_op) == mir_type_kind_c_ptr() {
+        if !mir_v5_place_mutable(store, indexes, x.function, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_readonly_place(), x.function, x.block, id, 0, x.place, 0, 0, x.place) }
+    }
+    return Ok(result)
+}
+
 fn mir_v5_c_buffer_result(store: MirStore, x: MirInstrRec, ta: U64) -> MirVTypeResult {
     let operand = mir_v5_c_buffer_operand_kind(store, ta)
     if operand == 0 { return MirVTypeResult(valid: false, type_id: 0) }
@@ -504,6 +548,8 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_field_get() { return mir_v5_c_field_result(store, indexes, x, ta) }
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() { return mir_v5_c_string_result(store, indexes, x, ta) }
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
+    if x.op == mir_op_c_zero() { return mir_v5_c_zero_result(store, x) }
+    if x.op == mir_op_c_addr() { return mir_v5_c_addr_result(store, indexes, x) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_to_bytes() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && mir_v5_elem(store, tb) == mir_type_u8(), type_id: mir_v5_find_kind(indexes, mir_type_kind_bytes())) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
@@ -703,6 +749,7 @@ return Ok(result) }
 fn mir_v5_instruction(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), id: U64, x: MirInstrRec) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
 let baseline = __s0_buffer_len(MirVerifyDiagRec, out)
+    if x.op == mir_op_c_addr() { result = try mir_v5_c_addr_place(d, store, indexes, result, id, x) }
     if x.op == mir_op_load() || x.op == mir_op_store() || x.op == mir_op_borrow() || x.op == mir_op_borrow_mut() { let p = mir_v5_place_type(store, indexes, x.function, x.place)
 if !p.valid { result = try mir_v5_bad(d, result, mir_vdiag_bad_place_type(), x.function, x.block, id, 0, x.place, 0, 0, x.place) } else { if x.op == mir_op_store() || x.op == mir_op_borrow_mut() { if !mir_v5_place_mutable(store, indexes, x.function, x.place) { result = try mir_v5_bad(d, result, mir_vdiag_readonly_place(), x.function, x.block, id, 0, x.place, 0, p.type_id, x.place) }
 if x.op == mir_op_store() {

@@ -1498,6 +1498,26 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = parseConv(OpCBufferPtr)
 
+	case "c.zero":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		in.Op = OpCZero
+		in.TypeOp, err = p.parseType()
+
+	case "c.addr":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		in.Op = OpCAddr
+		if in.Place, err = p.parsePlace(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.TypeOp, err = p.parseType()
+
 	case "const.get":
 		in.Op = OpConstGet
 		nameTok, err := p.expectAtName("a constant name")

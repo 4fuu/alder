@@ -196,7 +196,7 @@ fn mir_op_c_string_ptr() -> U64 { return 100 }
 fn mir_op_c_string_release() -> U64 { return 101 }
 fn mir_op_str_display() -> U64 { return 102 }
 // Total bitwise operations over the fixed-width two's-complement
-// representation. 107 and up stay unassigned.
+// representation. 111 and up stay unassigned.
 fn mir_op_int_and() -> U64 { return 103 }
 fn mir_op_int_or() -> U64 { return 104 }
 fn mir_op_int_xor() -> U64 { return 105 }
@@ -207,6 +207,12 @@ fn mir_op_c_buffer_ptr() -> U64 { return 107 }
 // [U8].to_bytes copies a byte view into fresh bytes storage in the domain
 // operand a; operand b is the slice. Allocation failure takes the edge.
 fn mir_op_slice_to_bytes() -> U64 { return 108 }
+// A zero-initialized by-value C boundary value; type_op names a c_raw or a
+// by-value c_named scalar or record.
+fn mir_op_c_zero() -> U64 { return 109 }
+// The address of a local place as a declared C pointer type for one raw call
+// argument; type_op names c_ptr or c_const_ptr over the place's own type.
+fn mir_op_c_addr() -> U64 { return 110 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

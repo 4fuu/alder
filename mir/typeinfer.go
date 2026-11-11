@@ -622,6 +622,29 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return in.TypeOp, true
 
+	case OpCZero:
+		if !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		rec := m.Types[in.TypeOp]
+		if rec.Kind == TypeCRaw {
+			return in.TypeOp, true
+		}
+		if rec.Kind == TypeCNamed && (rec.CClass == CClassScalar || rec.CClass == CClassRecord) {
+			return in.TypeOp, true
+		}
+		return NoType, false
+
+	case OpCAddr:
+		if !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		pointer := m.Types[in.TypeOp]
+		if pointer.Kind != TypeCPtr && pointer.Kind != TypeCConstPtr {
+			return NoType, false
+		}
+		return in.TypeOp, true
+
 	case OpIntTrunc:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) ||

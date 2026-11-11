@@ -464,6 +464,19 @@ Implemented expressions include:
   is kind 214. An empty buffer still passes a valid address through the
   runtime dummy. The length is the caller's responsibility inside the unsafe
   block;
+- zero-initialized C boundary values: `c.Zero(T)` takes a `c.*` scalar or a
+  bound scalar or record type member (bare when exactly one binding block
+  declares it, or `alias.Name`) and yields a zero-initialized copyable value
+  in ordinary code. Record fields still require `unsafe c`; an opaque member,
+  a pointer type, an unknown or ambiguous name, and a wrong argument count are
+  kind 216;
+- out-parameter addresses: `c.addr(place)` is admitted only as a direct raw
+  call argument inside `unsafe c` and names a local variable or field path of
+  one whose type is the declared pointee. `c.Ptr` requires a `var` binding
+  with no live view of its root, `c.ConstPtr` any local place without a
+  mutable view, and the pointer never becomes an Alder value. Every other
+  use, type mismatch, immutable or non-local place, and conflicting live view
+  are kind 217;
 - `c.CString`: a string literal builds the bare owner infallibly and an
   interior NUL in that literal is rejected at compile time (kind 210), while
   any other `String` or `Bytes` value yields `Option(c.CString)` with `none`

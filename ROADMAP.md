@@ -1686,6 +1686,28 @@ it on `c_string`. Documentation is in
 `bootstrap/regenerate.sh` measured 135.8 s wall and 2.06 GB peak RSS against
 133.6 s and 2.06 GB for the parent tree on the same host.
 
+Landed C-interop progress: `c.Zero(T)` and `c.addr(place)` make C
+out-parameters usable without exposing a raw pointer value. `c.Zero` accepts a
+raw `c.*` scalar or a bound scalar or record type member (bare when exactly
+one block declares it, or `alias.Name`) and yields a zero-initialized copyable
+value in ordinary code; record fields stay confined to `unsafe c`, and an
+opaque member, pointer type, unknown or ambiguous name, or wrong argument
+count is kind 216. `c.addr` is admitted only as a direct raw-call argument
+inside `unsafe c`; the place is a local variable or field path of one whose
+type is the declared pointee, `c.Ptr` requires a `var` binding with no live
+view, `c.ConstPtr` any local place without a mutable view, and the pointer
+never becomes an Alder value (kind 217 otherwise). MIR 109 `c.zero` and 110
+`c.addr` carry the forms beside 108 `slice.to_bytes`; cgen emits a C compound
+literal for records and the address of the local, and no earlier MIR op
+changed. Evidence: the production qualification writes a record member
+through a `c.Ptr` out-parameter and observes the untouched member stays zero,
+round-trips a `c.Zero(c.Long)` scalar through `c.Ptr` and `c.ConstPtr`,
+addresses a `let` record const, and covers ten rejection shapes; the MIR
+verifier test pins the textual format, the pointee and local-root rules, and
+the printer round trip. A cold `bootstrap/regenerate.sh` measured 129.0 s
+wall and 2.08 GB peak RSS against 128.3 s and 2.07 GB for the parent tree on
+the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

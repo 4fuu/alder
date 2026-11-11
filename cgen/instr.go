@@ -598,7 +598,30 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 
 	case mir.OpCFieldGet, mir.OpCFieldSet:
 		g.emitCFieldAccess(b, in)
+
+	case mir.OpCZero:
+		g.emitCZero(b, in)
+
+	case mir.OpCAddr:
+		g.emitCAddr(b, in)
 	}
+}
+
+// emitCZero materializes a zero-initialized C boundary value: a compound
+// literal for a record, and the literal 0 for every scalar.
+func (g *gen) emitCZero(b *strings.Builder, in *mir.Instr) {
+	rec := g.m.Types[in.TypeOp]
+	if rec.Kind == mir.TypeCNamed && rec.CClass == mir.CClassRecord {
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + "){0};\n")
+		return
+	}
+	b.WriteString("  " + g.val(in.Result) + " = 0;\n")
+}
+
+// emitCAddr forms the address of a local place under the declared C pointer
+// type; the pointer is a raw call argument and never an Alder value.
+func (g *gen) emitCAddr(b *strings.Builder, in *mir.Instr) {
+	b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")&" + g.place(&in.Place) + ";\n")
 }
 
 func lookupSuffix(op mir.OpKind) string {

@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, and call-scoped buffer borrows are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, and zero-initialized values with local out-parameter addresses are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -336,6 +336,40 @@ packing algorithms independently.
   ordinary Alder record;
 - C complex, vector extensions, compiler attributes, and target-specific
   calling conventions require explicit target support or a shim.
+
+### Zero-initialized values and local addresses
+
+Two boundary forms make C out-parameters usable without materializing a raw
+pointer as an Alder value.
+
+`c.Zero(T)` builds a zero-initialized value of a raw C scalar (`c.Char`,
+`c.Int`, `c.Long`, and the other `c.*` scalars) or of a bound scalar or record
+type member, named bare when exactly one binding block declares it or as
+`alias.Name` (`posix.Stamp`). A record value zeroes every member through a C
+compound literal, and the result is an ordinary copyable value, so
+`var status = c.Zero(c.Int)` and `var stamp = c.Zero(Stamp)` are ordinary
+bindings. Fields of a zeroed record are still read and written only through
+`unsafe c` field access. An opaque member, a pointer type, an unknown or
+ambiguous name, and a wrong argument count are diagnostic 216.
+
+`c.addr(place)` is admitted only as a direct argument of a raw call inside
+`unsafe c`. The place is a local variable, or a field path of one, whose type
+is exactly the declared pointee type: `c.Ptr(T)` requires a `var` binding and
+no live view of its root, while `c.ConstPtr(T)` accepts any local place that
+has no mutable view. The pointer addresses a real local, so it is non-null and
+correctly aligned, and it is valid only for that call. It never becomes an
+Alder value: it cannot be stored, returned, or passed to a later call. A
+callee that retains the pointer is therefore never safe with this form, the
+same rule as call-scoped buffer borrows under Ownership and retention. Any
+other use of `c.addr`, a mismatched place type, a mutable target that is not a
+`var` binding, and a conflicting live view are diagnostic 217.
+
+```alder
+var stamp = c.Zero(Stamp)
+let rc = unsafe c { ctime.get_stamp(c.addr(stamp)) }
+if rc.to_i64() != 0 { return 1 }
+let seconds = unsafe c { stamp.seconds }
+```
 
 Variadic C calls are not directly expressible as safe Alder calls. A fixed C
 shim is required, except for toolchain-owned audited wrappers of a closed set

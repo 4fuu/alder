@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_slice_to_bytes() { return false }
+        if item.op > mir_op_c_addr() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2318,6 +2318,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_string_make_lit() && item.op <= mir_op_c_string_release() { return cgen_emit_c_string_op(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_addr() { return cgen_emit_c_addr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
@@ -2344,6 +2346,37 @@ fn cgen_emit_c_buffer_ptr(d: Domain, initial: CgenWriter, store: MirStore, index
     out = try cgen_put_type(d, out, store, item.type_op)
     out = try cgen_put(d, out, ")alder_c_buffer_dummy; }\n")
     return Ok(out)
+}
+
+// One zero-initialized C boundary value: records use a C compound literal
+// so every member is zeroed, and scalars use the literal 0.
+fn cgen_emit_c_zero(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = ")
+    let rec = __s0_buffer_get(MirTypeRec, store.types, item.type_op - 1)
+    if rec.kind == mir_type_kind_c_named() && rec.c_class == mir_c_class_record() {
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_type(d, out, store, item.type_op)
+        out = try cgen_put(d, out, "){0}")
+    } else {
+        out = try cgen_put(d, out, "0")
+    }
+    return cgen_put(d, out, ";\n")
+}
+
+// One local address under the declared C pointer type; the result is a raw
+// call argument and never an Alder value.
+fn cgen_emit_c_addr(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = (")
+    out = try cgen_put_type(d, out, store, item.type_op)
+    out = try cgen_put(d, out, ")&")
+    out = try cgen_put_place(d, out, store, indexes, item.function, item.place)
+    return cgen_put(d, out, ";\n")
 }
 
 fn cgen_emit_terminator(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, terminator: U64, item: MirTermRec) -> Result(CgenWriter, __s0_Error) {

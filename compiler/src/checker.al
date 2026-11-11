@@ -2581,6 +2581,23 @@ fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, ba
     let arg_link = call_link_at(parse, call, receivers + ordinal + 1)
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
     if arg.kind == 28 { return expr_token_fail(d, state, base, 200, arg) }
+    // A direct c.addr argument forms the declared pointer without becoming
+    // a value, so it bypasses the ordinary argument check.
+    if c_addr_call_ok(state, parse, arg) {
+        let declared_index = try binding_param_type_index(d, store, member_index, ordinal, 0)
+        let declared = try binding_type_checked(d, state, parse, store, declared_index)
+        if declared.id == 0 { return expr_token_fail(d, state, base, 200, arg) }
+        let addr = try check_c_addr_argument(d, state, parse, declared.store, owner, arg, arg_link.node, declared.id, in_loop)
+        let addr_current = match addr {
+            ExprGood(item) => item.store
+            ExprBad(item) => item
+        }
+        if match addr {
+            ExprGood(item) => false
+            ExprBad(item) => true
+        } { return Ok(ExprBad(addr_current)) }
+        return check_unsafe_binding_arguments(d, state, parse, base, addr_current, owner, unsafe_id, call, receivers, member_index, result_index, ordinal + 1, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop, mut_roots)
+    }
     let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 200, arg, 0, 0, in_loop)
     let current = match checked {
         ExprGood(item) => item.store
@@ -8854,6 +8871,204 @@ fn check_c_string_ctor(d: Domain, state: State, parse: ParseStore, base: CheckSt
     return append_call_expression(d, state, parse, current, owner, call_id, 30, option_type.checked_type, 5, 0, 0, call, 4, site_kind, site_syntax, 901)
 }
 
+// ---- Zero-initialized C values and local addresses ----------------------
+// c.Zero(T) builds a zero-initialized by-value C boundary value. T is a raw
+// c.X scalar or a type member of a binding block, named bare when exactly one
+// block declares it or as alias.Name. c.addr(place) is only a direct argument
+// of an unsafe raw call: it names a local place of the declared pointee type
+// and never becomes an Alder value.
+
+// The one binding-block type member named by a c.Zero argument, or zero when
+// the bare name is absent or ambiguous.
+fn c_zero_member_named(state: State, parse: ParseStore, store: CheckStore, source: U64, start: U64, end: U64) -> U64 {
+    var found: U64 = 0
+    var count: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+        let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+        if item.member_kind == 1 {
+            let declared = __s0_buffer_get(SyntaxRec, parse.nodes, item.member_node - 1)
+            if same_name(state, source, start, end, declared.source, declared.name_start, declared.name_end) {
+                found = at + 1
+                count = count + 1
+            }
+        }
+        at = at + 1
+    }
+    if count == 1 { return found }
+    return 0
+}
+
+// The type member of the one block whose alias matches, or zero.
+fn c_zero_member_aliased(state: State, parse: ParseStore, store: CheckStore, alias_source: U64, alias_start: U64, alias_end: U64, name_source: U64, name_start: U64, name_end: U64) -> U64 {
+    var found: U64 = 0
+    var count: U64 = 0
+    var block_at: U64 = 0
+    while block_at < __s0_buffer_len(BindingBlockRec, store.bindings.blocks) {
+        let block = __s0_buffer_get(BindingBlockRec, store.bindings.blocks, block_at)
+        if same_name(state, alias_source, alias_start, alias_end, block.name_source, block.name_start, block.name_end) {
+            var at: U64 = 0
+            while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+                let item = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+                if item.member_kind == 1 && item.block_node == block.node {
+                    let declared = __s0_buffer_get(SyntaxRec, parse.nodes, item.member_node - 1)
+                    if same_name(state, name_source, name_start, name_end, declared.source, declared.name_start, declared.name_end) {
+                        found = at + 1
+                        count = count + 1
+                    }
+                }
+                at = at + 1
+            }
+        }
+        block_at = block_at + 1
+    }
+    if count == 1 { return found }
+    return 0
+}
+
+// The member index a c.Zero argument names. A bare identifier names one type
+// member across every block; the field form alias.Name (and a dotted
+// identifier) names one block's member through its alias.
+fn c_zero_member_index(state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> U64 {
+    if node.kind == 24 {
+        let dot = binding_name_dot(state, node)
+        if dot == 0 { return c_zero_member_named(state, parse, store, node.source, node.name_start, node.name_end) }
+        return c_zero_member_aliased(state, parse, store, node.source, node.name_start, dot, node.source, dot + 1, node.name_end)
+    }
+    if node.kind == 29 && node.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        if base.kind != 24 { return 0 }
+        return c_zero_member_aliased(state, parse, store, base.source, base.name_start, base.name_end, node.source, node.name_start, node.name_end)
+    }
+    return 0
+}
+
+// The raw C scalar a c.Zero argument names through the c namespace, or 15.
+fn c_zero_scalar_id(state: State, parse: ParseStore, node: SyntaxRec) -> U64 {
+    var source = node.source
+    var start: U64 = 0
+    var end: U64 = 0
+    if node.kind == 24 {
+        let dot = binding_name_dot(state, node)
+        if dot == 0 { return 15 }
+        let text = __s0_buffer_get(SourceRec, state.sources, node.source)
+        if !source_word(state, text, node.name_start, dot, "c") { return 15 }
+        start = dot + 1
+        end = node.name_end
+    } else { if node.kind == 29 && node.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        if base.kind != 24 || !node_word(state, base, "c") { return 15 }
+        source = node.source
+        start = node.name_start
+        end = node.name_end
+    } else {
+        return 15
+    } }
+    return binding_scalar_id(state, __s0_buffer_get(SourceRec, state.sources, source), start, end)
+}
+
+// The checked type a c.Zero argument names, or id zero when it names no
+// by-value C scalar or record.
+fn c_zero_binding_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, node: SyntaxRec) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    let scalar = c_zero_scalar_id(state, parse, node)
+    if scalar != 15 {
+        let appended = try binding_append_type(d, store, BindingTypeRec(kind: 26, target: scalar, first_arg: 0))
+        let index = __s0_buffer_len(BindingTypeRec, appended.bindings.types)
+        return binding_type_checked(d, state, parse, appended, index)
+    }
+    let member_index = c_zero_member_index(state, parse, store, node)
+    if member_index == 0 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_index - 1)
+    if !binding_type_by_value_ok(store, member.checked_type) { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    return binding_type_checked(d, state, parse, store, member.checked_type)
+}
+
+// check_c_zero_ctor checks `c.Zero(T)`: exactly one type name, and the result
+// is a zero-initialized value of that C scalar or record type.
+fn check_c_zero_ctor(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    // The dotted callee carries its receiver link: callee + receiver + one
+    // argument = three links.
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 216, call) }
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    if arg.kind != 24 && arg.kind != 29 { return expr_token_fail(d, state, base, 216, arg) }
+    let built = try c_zero_binding_type(d, state, parse, store, arg)
+    if built.id == 0 { return expr_token_fail(d, state, base, 216, arg) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, built.store, built.id, expected)) { return expr_token_type_fail(d, state, built.store, mismatch_kind, mismatch_node, expected, built.id) }
+    return append_call_expression(d, state, parse, built.store, owner, call_id, 32, built.id, 5, 0, 0, call, 4, site_kind, site_syntax, 903)
+}
+
+// True when the syntax node is a call whose dotted callee spells c.addr.
+fn c_addr_call_ok(state: State, parse: ParseStore, node: SyntaxRec) -> Bool {
+    if node.kind != 27 || call_link_count(parse, node) == 0 { return false }
+    let callee_link = call_link_at(parse, node, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 29 || callee.children == 0 { return false }
+    let receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+    return binding_dotted_words(state, callee, receiver, "c", "addr")
+}
+
+// The root local of a c.addr argument that names a local or a chain of field
+// projections over one; index projections are not the address of one object.
+fn c_addr_place_root(store: CheckStore, expression: U64) -> U64 {
+    var current = expression
+    var depth: U64 = 0
+    while depth < 32 && current != 0 && current <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let item = __s0_buffer_get(CheckedExprRec, store.expressions, current - 1)
+        if item.kind == 1 || item.kind == 5 { return item.parameter_use }
+        if item.kind == 21 && item.child_count == 1 {
+            current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        } else {
+            return 0
+        }
+        depth = depth + 1
+    }
+    return 0
+}
+
+// check_c_addr_argument checks one c.addr argument against the declared C
+// pointer parameter: the place's type must be the pointee, a c_ptr target
+// requires a mutable local, a c_const_ptr target only a local, and no live
+// view of the root may conflict with the new pointer.
+fn check_c_addr_argument(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, declared: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, store, 217, call) }
+    if declared == 0 || declared > __s0_buffer_len(CheckedTypeRec, store.types) { return expr_token_fail(d, state, store, 217, call) }
+    let pointer = __s0_buffer_get(CheckedTypeRec, store.types, declared - 1)
+    if (pointer.kind != 27 && pointer.kind != 28) || pointer.arg_count != 1 { return expr_token_fail(d, state, store, 217, call) }
+    let pointee = __s0_buffer_get(U64, store.type_args, pointer.first_arg - 1)
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    if arg.kind == 28 { return expr_token_fail(d, state, store, 217, arg) }
+    let checked = try check_value_expression_inner(d, state, parse, store, store, owner, arg, arg_link.node, 0, 217, arg, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(store) }
+    if draft.checked_type != pointee { return expr_token_fail(d, state, current, 217, arg) }
+    let root = c_addr_place_root(current, draft.expression)
+    if root == 0 { return expr_token_fail(d, state, current, 217, arg) }
+    let binding = __s0_buffer_get(LocalRec, current.locals, root - 1)
+    if binding.kind != 2 { return expr_token_fail(d, state, current, 217, arg) }
+    if pointer.kind == 27 {
+        if binding.mutable != 1 { return expr_token_fail(d, state, current, 217, arg) }
+        if lexical_access_conflict(current, owner, root, 2) { return expr_token_fail(d, state, current, 217, arg) }
+    } else {
+        if lexical_access_conflict(current, owner, root, 1) { return expr_token_fail(d, state, current, 217, arg) }
+    }
+    return append_call_expression(d, state, parse, current, owner, call_id, 33, declared, 5, 0, 0, call, 4, 0, 0, 904)
+}
+
 // check_c_string_ptr borrows the owner's buffer: `owner.ptr()` yields
 // c.ConstPtr(c.Char) without consuming the owner, so reads compose freely
 // while the single release stays at the using scope boundary. The pointer
@@ -8943,6 +9158,17 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     if callee.kind == 29 && callee.children != 0 {
         let cstring_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
         if binding_dotted_words(state, callee, cstring_receiver, "c", "CString") { return check_c_string_ctor(d, state, parse, base, store, owner, call, call_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    }
+    // c.Zero(T) dispatches before the symbol and imported-name paths: the
+    // builtin takes one type name and builds a zero-initialized C value.
+    if callee.kind == 29 && callee.children != 0 {
+        let zero_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+        if binding_dotted_words(state, callee, zero_receiver, "c", "Zero") { return check_c_zero_ctor(d, state, parse, base, store, owner, call, call_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    }
+    // c.addr is admitted only while checking a direct raw-call argument.
+    if callee.kind == 29 && callee.children != 0 {
+        let addr_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+        if binding_dotted_words(state, callee, addr_receiver, "c", "addr") { return expr_token_fail(d, state, base, 217, call) }
     }
     if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {

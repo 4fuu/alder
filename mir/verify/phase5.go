@@ -213,6 +213,12 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr pointee is not byte-addressable"})
 		}
 
+	case mir.OpCZero:
+		c.errs = append(c.errs, checkCZeroType(m, in, c.loc)...)
+
+	case mir.OpCAddr:
+		c.errs = append(c.errs, checkCAddrType(m, f, in, c.loc)...)
+
 	case mir.OpSliceLen:
 		c.expect(in.Slice, "slice operand", func(t mir.TypeId) bool {
 			_, ok := m.ElemType(t)
@@ -759,6 +765,51 @@ func checkCStringOpTypes(m *mir.Module, f *mir.Function, in *mir.Instr, loc stri
 		if hasResult {
 			errs = append(errs, Error{Loc: loc, Msg: "c.string.release produces no result"})
 		}
+	}
+	return errs
+}
+
+// checkCZeroType validates one c.zero: the type operand names a raw C scalar
+// or a by-value c_named scalar or record.
+func checkCZeroType(m *mir.Module, in *mir.Instr, loc string) []Error {
+	if !m.ValidType(in.TypeOp) {
+		return []Error{{Loc: loc, Msg: "c.zero type operand is out of range"}}
+	}
+	rec := m.Types[in.TypeOp]
+	if rec.Kind == mir.TypeCRaw {
+		return nil
+	}
+	if rec.Kind == mir.TypeCNamed && (rec.CClass == mir.CClassScalar || rec.CClass == mir.CClassRecord) {
+		return nil
+	}
+	return []Error{{Loc: loc, Msg: "c.zero type is not a by-value C scalar or record"}}
+}
+
+// checkCAddrType validates one c.addr: the pointer type operand is a C
+// pointer whose pointee is the place's own type, a c_ptr target requires a
+// mutable place, and the place is rooted at a local so the pointer can only
+// name caller-owned storage.
+func checkCAddrType(m *mir.Module, f *mir.Function, in *mir.Instr, loc string) []Error {
+	var errs []Error
+	if !m.ValidType(in.TypeOp) {
+		return []Error{{Loc: loc, Msg: "c.addr pointer type operand is out of range"}}
+	}
+	pointer := m.Types[in.TypeOp]
+	if pointer.Kind != mir.TypeCPtr && pointer.Kind != mir.TypeCConstPtr {
+		return []Error{{Loc: loc, Msg: "c.addr type is not a C pointer"}}
+	}
+	pt, ok := m.PlaceType(f, &in.Place)
+	if !ok {
+		return []Error{{Loc: loc, Msg: "c.addr place is not well-formed"}}
+	}
+	if pt != pointer.Elem {
+		errs = append(errs, Error{Loc: loc, Msg: "c.addr place type does not match the C pointer pointee"})
+	}
+	if pointer.Kind == mir.TypeCPtr && !placeMutable(m, f, &in.Place) {
+		errs = append(errs, Error{Loc: loc, Msg: "c.addr requires a mutable place for c_ptr"})
+	}
+	if _, ok := placeRootLocal(&in.Place); !ok {
+		errs = append(errs, Error{Loc: loc, Msg: "c.addr place must be rooted at a local"})
 	}
 	return errs
 }

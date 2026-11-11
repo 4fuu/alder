@@ -350,7 +350,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpSliceToBytes {
+	if in.Op > mir.OpCAddr {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -394,7 +394,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 			}
 		}
 	}
-	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut || in.Op == mir.OpCFieldSet {
+	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut || in.Op == mir.OpCFieldSet || in.Op == mir.OpCAddr {
 		errs = append(errs, checkPlaceIntegrity(f, &in.Place, loc)...)
 	}
 	if in.Op == mir.OpCall && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
@@ -411,6 +411,9 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	}
 	if in.Op == mir.OpCIsNull && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: "c.is_null requires MIR format version 6"})
+	}
+	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr) && m.FormatVersion < mir.BindingFormatVersion {
+		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 6"})
 	}
 	if in.Op == mir.OpCleanupPush && (int(in.CleanupFn) >= len(m.Functions) || m.Functions[in.CleanupFn] == nil) {
 		errs = append(errs, Error{Loc: loc, Msg: "cleanup function is nil or out of range"})
@@ -690,6 +693,10 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.A)
 	case mir.OpCBufferPtr:
 		add(in.A)
+	case mir.OpCAddr:
+		if in.Place.Kind == mir.PlaceDeref {
+			add(in.Place.Deref)
+		}
 	case mir.OpSliceLen:
 		add(in.Slice)
 	case mir.OpSliceIndexChecked:

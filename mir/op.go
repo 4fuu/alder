@@ -203,6 +203,16 @@ const (
 	// OpSliceToBytes copies a byte view into fresh bytes storage in the
 	// domain operand. Allocation failure takes the failure edge.
 	OpSliceToBytes OpKind = 108
+
+	// OpCZero builds a zero-initialized C boundary value: TypeOp names a
+	// raw C scalar or a by-value c_named scalar or record, and the result
+	// carries that type. Records zero every member through a C compound
+	// literal; scalars use the literal 0.
+	OpCZero OpKind = 109
+	// OpCAddr forms the address of a local place as a declared C pointer
+	// type for one raw call argument. TypeOp names c_ptr or c_const_ptr
+	// over the place's own type; the pointer never becomes an Alder value.
+	OpCAddr OpKind = 110
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -431,6 +441,10 @@ func (k OpKind) String() string {
 		return "c.buffer.ptr"
 	case OpSliceToBytes:
 		return "slice.to_bytes"
+	case OpCZero:
+		return "c.zero"
+	case OpCAddr:
+		return "c.addr"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

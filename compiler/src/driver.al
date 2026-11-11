@@ -282,6 +282,8 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 213 { return out_string("a buffer argument requires a byte-addressable C pointee (c.Char, c.SChar, c.UChar, or an opaque bound type)") }
     if kind == 214 { return out_string("a mutable C pointer parameter requires a MutSlice(U8) argument") }
     if kind == 215 { return out_string("the same buffer is borrowed more than once in one unsafe C call") }
+    if kind == 216 { return out_string("c.Zero argument must name a by-value C scalar or record type") }
+    if kind == 217 { return out_string("c.addr requires a local place of the parameter's pointee type, mutable for c.Ptr, with no live view") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }
