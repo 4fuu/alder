@@ -206,7 +206,7 @@ fn mir_op_int_not() -> U64 { return 106 }
 fn mir_op_c_buffer_ptr() -> U64 { return 107 }
 // [U8].to_bytes copies a byte view into fresh bytes storage in the domain
 // operand a; operand b is the slice. Allocation failure takes the edge.
-fn mir_op_slice_to_bytes() -> U64 { return 108 }
+fn mir_op_slice_to_bytes() -> U64 { return 120 }
 // A zero-initialized by-value C boundary value; type_op names a c_raw or a
 // by-value c_named scalar or record.
 fn mir_op_c_zero() -> U64 { return 109 }

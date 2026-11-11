@@ -30267,7 +30267,7 @@ static ALDER_MAYBE_UNUSED const uint64_t alder_const_26066 = (uint64_t)104;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26067 = (uint64_t)105;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26068 = (uint64_t)106;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26069 = (uint64_t)107;
-static ALDER_MAYBE_UNUSED const uint64_t alder_const_26070 = (uint64_t)108;
+static ALDER_MAYBE_UNUSED const uint64_t alder_const_26070 = (uint64_t)120;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26071 = (uint64_t)109;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26072 = (uint64_t)110;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_26073 = (uint64_t)0;
@@ -50909,7 +50909,7 @@ alder_b3: ALDER_MAYBE_UNUSED ;
   alder_v10 = alder_l1;
   alder_l4 = alder_v10;
   alder_v11 = alder_l4.alder_f3;
-  alder_v12 = alder_fn_mir_op_c_addr_1198();
+  alder_v12 = alder_fn_mir_op_slice_to_bytes_1196();
   alder_v13 = (bool)(alder_v11 > alder_v12);
   if (alder_v13) { goto alder_b5; } else { goto alder_b6; }
 alder_b4: ALDER_MAYBE_UNUSED ;
@@ -508722,7 +508722,7 @@ static ALDER_MAYBE_UNUSED bool alder_fn_mir_validate_instruction_refs_1264(Alder
 
   alder_l3 = alder_v3;
   alder_v4 = alder_l3.alder_f3;
-  alder_v5 = alder_fn_mir_op_c_addr_1198();
+  alder_v5 = alder_fn_mir_op_slice_to_bytes_1196();
   alder_v6 = (bool)(alder_v4 > alder_v5);
   if (alder_v6) { goto alder_b3; } else { goto alder_b2; }
 alder_b1: ALDER_MAYBE_UNUSED ;
@@ -628044,7 +628044,7 @@ alder_b147: ALDER_MAYBE_UNUSED ;
   alder_v549 = alder_l36;
   alder_l108 = alder_v549;
   alder_v550 = alder_l108.alder_f3;
-  alder_v551 = alder_fn_mir_op_c_addr_1198();
+  alder_v551 = alder_fn_mir_op_slice_to_bytes_1196();
   alder_v552 = (bool)(alder_v550 > alder_v551);
   if (alder_v552) { goto alder_b150; } else { goto alder_b151; }
 alder_b148: ALDER_MAYBE_UNUSED ;
@@ -628069,7 +628069,7 @@ alder_b150: ALDER_MAYBE_UNUSED ;
   alder_v562 = alder_const_36027;
   alder_v563 = alder_const_36028;
   alder_v564 = alder_l37;
-  alder_v565 = alder_fn_mir_op_c_addr_1198();
+  alder_v565 = alder_fn_mir_op_slice_to_bytes_1196();
   alder_v566 = alder_l36;
   alder_l111 = alder_v566;
   alder_v567 = alder_l111.alder_f3;

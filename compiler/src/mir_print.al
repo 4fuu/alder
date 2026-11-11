@@ -1225,7 +1225,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
 }
 
 fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_c_addr() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
+    if rec.op > mir_op_slice_to_bytes() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }

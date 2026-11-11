@@ -541,7 +541,7 @@ store it as an ordinary value.
 
 ## Byte-View Conversion
 
-MIR 6 exposes the byte-view conversion as operation 108:
+MIR 6 exposes the byte-view conversion as operation 120:
 
 ```text
 slice.to_bytes domain, view else edge -> bytes

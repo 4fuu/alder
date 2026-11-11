@@ -202,7 +202,7 @@ const (
 	OpCBufferPtr OpKind = 107
 	// OpSliceToBytes copies a byte view into fresh bytes storage in the
 	// domain operand. Allocation failure takes the failure edge.
-	OpSliceToBytes OpKind = 108
+	OpSliceToBytes OpKind = 120
 
 	// OpCZero builds a zero-initialized C boundary value: TypeOp names a
 	// raw C scalar or a by-value c_named scalar or record, and the result
