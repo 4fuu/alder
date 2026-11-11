@@ -684,6 +684,18 @@ _Noreturn void alder_runtime_panic(const char *message);
 #define ALDER_MAYBE_UNUSED
 #endif
 
+/*
+ * c.CString construction and release: a malloc-owned NUL-terminated copy of
+ * Alder text. alder_cstring_make scans for an interior NUL and reports 1
+ * without touching *out; 0 means *out holds the fresh buffer; negative
+ * means allocation failure. alder_cstring_make_lit skips the scan (the
+ * checker proves the bytes interior-NUL free) and returns NULL only on
+ * allocation failure. alder_cstring_release frees the buffer once.
+ */
+int alder_cstring_make(const uint8_t *data, uint64_t len, char **out);
+char *alder_cstring_make_lit(const uint8_t *data, uint64_t len);
+void alder_cstring_release(char *buffer);
+
 #ifdef __cplusplus
 }
 #endif

@@ -105,6 +105,54 @@ fn mir_v5_c_field_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, 
     return MirVTypeResult(valid: ft != 0, type_id: ft)
 }
 
+// Result typing for the c_string constructors and borrow: make_lit yields
+// the c_string singleton from a String operand, make yields option(c_string)
+// from a String operand, and ptr borrows the c_string owner and yields
+// c_const_ptr(c_char).
+fn mir_v5_c_string_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, ta: U64) -> MirVTypeResult {
+    let cstring = mir_v5_find_kind(indexes, mir_type_kind_c_string())
+    if x.op == mir_op_c_string_make_lit() {
+        if mir_vtype_kind(store, ta) != mir_type_kind_string() { return MirVTypeResult(valid: false, type_id: 0) }
+        return MirVTypeResult(valid: cstring != 0, type_id: cstring)
+    }
+    if x.op == mir_op_c_string_make() {
+        if mir_vtype_kind(store, ta) != mir_type_kind_string() { return MirVTypeResult(valid: false, type_id: 0) }
+        return MirVTypeResult(valid: cstring != 0, type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), cstring))
+    }
+    if mir_vtype_kind(store, ta) != mir_type_kind_c_string() { return MirVTypeResult(valid: false, type_id: 0) }
+    let cchar = mir_v5_find_c_raw(store, 0)
+    let result = mir_v5_find_unary(indexes, mir_type_kind_c_const_ptr(), cchar)
+    return MirVTypeResult(valid: cchar != 0 && result != 0, type_id: result)
+}
+
+// Find the c_raw type carrying one C scalar id; 0 when absent. The verifier
+// keeps no length-keyed type index, and the vocabulary has at most a handful
+// of raw types per module.
+fn mir_v5_find_c_raw(store: MirStore, scalar: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypeRec, store.types) {
+        let rec = __s0_buffer_get(MirTypeRec, store.types, at)
+        if rec.kind == mir_type_kind_c_raw() && rec.length == scalar { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+// Operand grammar for the c_string vocabulary: the constructors consume a
+// String value; the borrow and the release consume the c_string owner.
+// Release is validated here because it produces no result for the inference
+// check to reject.
+fn mir_v5_c_string_operands(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), x: MirInstrRec, id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
+    var result = out
+    var want: U64 = mir_type_kind_c_string()
+    if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() { want = mir_type_kind_string() }
+    let at = mir_v5_value_type(store, indexes, x.function, x.a)
+    if mir_vtype_kind(store, at) != want {
+        result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, want, mir_vtype_kind(store, at), x.a)
+    }
+    return Ok(result)
+}
+
 fn mir_v5_is_enum(store: MirStore, t: U64) -> Bool { let k = mir_vtype_kind(store, t)
 return k == mir_type_kind_enum() || k == mir_type_kind_option() || k == mir_type_kind_result() }
 fn mir_v5_width(t: U64) -> U64 { if t == mir_type_i8() || t == mir_type_u8() { return 8 }
@@ -414,6 +462,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     return MirVTypeResult(valid: pair, type_id: ta) }
     if x.op >= mir_op_c_num_try() && x.op <= mir_op_c_num_cast() { return mir_v5_c_num_result(store, indexes, x, ta) }
     if x.op == mir_op_c_field_get() { return mir_v5_c_field_result(store, indexes, x, ta) }
+    if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() { return mir_v5_c_string_result(store, indexes, x, ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)
@@ -697,6 +746,7 @@ if !(mir_v5_is_int(ta) && mir_v5_is_int(x.type_op)) { result = try mir_v5_bad(d,
     }
     if x.op == mir_op_c_is_null() && !mir_v5_is_raw_pointer(store, mir_v5_value_type(store, indexes, x.function, x.a)) { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_c_ptr(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
     if x.op == mir_op_c_field_get() || x.op == mir_op_c_field_set() { result = try mir_v5_c_field_operands(d, store, indexes, result, x, id) }
+    if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() || x.op == mir_op_c_string_release() { result = try mir_v5_c_string_operands(d, store, indexes, result, x, id) }
     if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() || x.op == mir_op_str_byte_checked() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a))
 if k != mir_type_kind_string() && k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), k, x.a) }
 if x.op == mir_op_str_byte_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) } }

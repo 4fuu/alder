@@ -586,6 +586,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpCIsNull:
 		b.WriteString("  " + g.val(in.Result) + " = (bool)((" + g.valueExpr(in.A) + ") == (void *)0);\n")
 
+	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
+		g.emitCStringOp(b, in)
+
 	case mir.OpCFieldGet, mir.OpCFieldSet:
 		g.emitCFieldAccess(b, in)
 	}
@@ -1585,5 +1588,41 @@ func (g *gen) emitTerm(b *strings.Builder, blk *mir.Block) {
 
 	case mir.TermUnreachable:
 		b.WriteString("  alder_runtime_panic(\"unreachable\");\n")
+	}
+}
+
+// emitCStringOp emits the c_string construction and release vocabulary.
+// make_lit and make call runtime helpers that scan and copy the Alder bytes
+// into a fresh malloc buffer: make_lit bytes are checker-proven interior-NUL
+// free, so its only failure is allocation (the checked edge); make reports
+// interior NUL as a none option through the status convention (0 copied, 1
+// interior NUL, -1 allocation failure). ptr borrows the buffer pointer, and
+// release frees it exactly once.
+func (g *gen) emitCStringOp(b *strings.Builder, in *mir.Instr) {
+	fail := g.failBody(in)
+	str := g.valueExpr(in.A)
+	res := g.val(in.Result)
+	switch in.Op {
+	case mir.OpCStringMakeLit:
+		p := g.tmp(in, "cs")
+		b.WriteString("  char *" + p + " = alder_cstring_make_lit(" + str + ".data, " + str + ".len);\n")
+		b.WriteString("  if (" + p + " == NULL) " + fail + "\n")
+		b.WriteString("  " + res + " = " + p + ";\n")
+	case mir.OpCStringMake:
+		p := g.tmp(in, "cs")
+		st := g.tmp(in, "st")
+		b.WriteString("  char *" + p + ";\n")
+		b.WriteString("  int " + st + " = alder_cstring_make(" + str + ".data, " + str + ".len, &" + p + ");\n")
+		b.WriteString("  if (" + st + " < 0) " + fail + "\n")
+		b.WriteString("  if (" + st + " == 0) {\n")
+		b.WriteString("    " + res + ".alder_u.alder_p1 = " + p + ";\n")
+		b.WriteString("    " + res + ".alder_tag = (uint32_t)1;\n")
+		b.WriteString("  } else {\n")
+		b.WriteString("    " + res + ".alder_tag = (uint32_t)0;\n")
+		b.WriteString("  }\n")
+	case mir.OpCStringPtr:
+		b.WriteString("  " + res + " = " + str + ";\n")
+	default: // mir.OpCStringRelease
+		b.WriteString("  alder_cstring_release(" + str + ");\n")
 	}
 }

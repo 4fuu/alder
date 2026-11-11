@@ -1786,6 +1786,22 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		in.A, err = p.parseValueRef()
 
+	case "c.string.make_lit", "c.string.make", "c.string.ptr", "c.string.release":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		switch t.text {
+		case "c.string.make_lit":
+			in.Op = OpCStringMakeLit
+		case "c.string.make":
+			in.Op = OpCStringMake
+		case "c.string.ptr":
+			in.Op = OpCStringPtr
+		default:
+			in.Op = OpCStringRelease
+		}
+		in.A, err = p.parseValueRef()
+
 	default:
 		return in, p.errf(t, "unknown operation %q", t.text)
 	}
@@ -2129,6 +2145,11 @@ func (p *parser) parseType() (TypeId, error) {
 			return p.m.CleanupScope(), nil
 		case "cleanup_id":
 			return p.m.CleanupID(), nil
+		case "c_string":
+			if p.m.FormatVersion < BindingFormatVersion {
+				return NoType, p.errf(t, "c_string requires MIR format version %d", BindingFormatVersion)
+			}
+			return p.m.CString(), nil
 		case "option", "result", "slice", "vec", "array", "safe_ref", "safe_mut", "raw_ptr",
 			"table", "id", "table_view", "table_mut_view":
 			if t.text == "vec" && p.m.FormatVersion < VecFormatVersion {

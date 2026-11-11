@@ -56,7 +56,8 @@ func phase10Backend(m *mir.Module) []Error {
 				case mir.OpAlloc, mir.OpAllocChecked:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
-						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
+						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed,
+						mir.TypeCString} {
 						// A closure environment record records the domain
 						// that owns it; the retain hook rewrites that field
 						// when the record moves domains.
@@ -71,7 +72,8 @@ func phase10Backend(m *mir.Module) []Error {
 				case mir.OpTableCreate:
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTableView, mir.TypeTableMutView,
-						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
+						mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed,
+						mir.TypeCString} {
 						if containsKind(m, in.TypeOp, k) {
 							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("table element type may not contain %s", kindName(m, k))})
 							break
@@ -84,7 +86,8 @@ func phase10Backend(m *mir.Module) []Error {
 					}
 					for _, k := range []mir.TypeKind{mir.TypeDomainHandle, mir.TypeDomainMark,
 						mir.TypeCleanupScope, mir.TypeCleanupID, mir.TypeTable, mir.TypeTableView,
-						mir.TypeTableMutView, mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr, mir.TypeCConstPtr, mir.TypeCNamed} {
+						mir.TypeTableMutView, mir.TypeRawPtr, mir.TypeCRaw, mir.TypeCPtr,
+						mir.TypeCConstPtr, mir.TypeCNamed, mir.TypeCString} {
 						if containsKind(m, t, k) {
 							errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("copy_to_domain source type may not contain %s", kindName(m, k))})
 							break

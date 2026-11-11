@@ -483,6 +483,60 @@ bool alder_cleanup_end(AlderCleanupScope *scope) {
 }
 
 /* ------------------------------------------------------------------ */
+/* C strings                                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * c.CString buffers are plain malloc blocks holding the Alder bytes plus a
+ * terminating NUL, freed by exactly one release. The make helper scans for
+ * an interior NUL and reports it separately from allocation failure so the
+ * generated code can distinguish a none option from the checked edge.
+ * Status convention: 0 copied (buffer stored through out), 1 interior NUL
+ * (out untouched), negative allocation failure.
+ */
+int alder_cstring_make(const uint8_t *data, uint64_t len, char **out) {
+    if (out == NULL) {
+        return -1;
+    }
+    *out = NULL;
+    for (uint64_t i = 0; i < len; i++) {
+        if (data[i] == 0) {
+            return 1;
+        }
+    }
+    char *buffer = (char *)rt_malloc((size_t)len + 1);
+    if (buffer == NULL) {
+        return -1;
+    }
+    if (len != 0) {
+        memcpy(buffer, data, (size_t)len);
+    }
+    buffer[len] = '\0';
+    *out = buffer;
+    return 0;
+}
+
+/*
+ * Build a c.CString from bytes the checker proved interior-NUL free, so the
+ * only failure is allocation (NULL).
+ */
+char *alder_cstring_make_lit(const uint8_t *data, uint64_t len) {
+    char *buffer = (char *)rt_malloc((size_t)len + 1);
+    if (buffer != NULL) {
+        if (len != 0) {
+            memcpy(buffer, data, (size_t)len);
+        }
+        buffer[len] = '\0';
+    }
+    return buffer;
+}
+
+/* Free one c.CString buffer. Passing NULL is allowed and does nothing. */
+void alder_cstring_release(char *buffer) {
+    rt_free(buffer);
+}
+
+/* ------------------------------------------------------------------ */
 /* Generational tables                                                 */
 /* ------------------------------------------------------------------ */
 

@@ -38,6 +38,7 @@ fn mir_type_kind_c_raw() -> U64 { return 22 }
 fn mir_type_kind_c_ptr() -> U64 { return 23 }
 fn mir_type_kind_c_const_ptr() -> U64 { return 24 }
 fn mir_type_kind_c_named() -> U64 { return 25 }
+fn mir_type_kind_c_string() -> U64 { return 26 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }
@@ -189,7 +190,11 @@ fn mir_op_float_div() -> U64 { return 94 }
 fn mir_op_str_order_lt() -> U64 { return 95 }
 fn mir_op_c_field_get() -> U64 { return 96 }
 fn mir_op_c_field_set() -> U64 { return 97 }
-fn mir_op_str_display() -> U64 { return 98 }
+fn mir_op_c_string_make_lit() -> U64 { return 98 }
+fn mir_op_c_string_make() -> U64 { return 99 }
+fn mir_op_c_string_ptr() -> U64 { return 100 }
+fn mir_op_c_string_release() -> U64 { return 101 }
+fn mir_op_str_display() -> U64 { return 102 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

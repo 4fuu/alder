@@ -417,6 +417,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCFieldSet:
 		b.WriteString(" " + in.CField + " " + printPlace(m, f, &in.Place) + ", " + valueName(f, in.A))
 
+	case OpCStringMakeLit, OpCStringMake, OpCStringPtr, OpCStringRelease:
+		b.WriteString(" " + valueName(f, in.A))
+
 	case OpConstGet:
 		b.WriteString(" @" + in.Const)
 

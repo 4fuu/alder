@@ -29,7 +29,7 @@ func phase1Integrity(m *mir.Module) []Error {
 			}
 			continue
 		}
-		if t.Kind > mir.TypeCNamed {
+		if t.Kind > mir.TypeCString {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("unknown type kind %d", t.Kind)})
 			continue
 		}
@@ -56,6 +56,10 @@ func phase1Integrity(m *mir.Module) []Error {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type @%s", t.Name), Msg: fmt.Sprintf("named type holds kind %v", t.Kind)})
 		} else if !validMIRName(t.Name, true) {
 			errs = append(errs, Error{Loc: fmt.Sprintf("type slot %d", i), Msg: fmt.Sprintf("invalid type name %q", t.Name)})
+		}
+		if t.Kind == mir.TypeCString && (t.Name != "" || len(t.Fields) != 0 || len(t.Variants) != 0 || t.Elem != mir.TypeUnit || t.Length != 0 ||
+			t.OK != mir.TypeUnit || t.Err != mir.TypeUnit || len(t.Sig.Params) != 0 || t.Sig.Result != mir.TypeUnit) {
+			errs = append(errs, Error{Loc: typeLoc(m, id), Msg: "c_string type holds non-canonical type data"})
 		}
 	}
 	for i, t := range m.Types {
@@ -573,6 +577,8 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		require(in.A, "c.field.get record operand")
 	case mir.OpCFieldSet:
 		require(in.A, "c.field.set value operand")
+	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
+		require(in.A, "c.string operand")
 	}
 	return errs
 }
@@ -750,6 +756,8 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast:
 		add(in.A)
 	case mir.OpCFieldGet:
+		add(in.A)
+	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
 		add(in.A)
 	case mir.OpCall, mir.OpFFICallUnsafe:
 		for _, v := range in.Args {
