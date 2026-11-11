@@ -49,6 +49,7 @@ var bootstrapRejectFixtures = []string{
 	"unknown-name",
 	"unknown-type",
 	"type-mismatch",
+	"type-mismatch-declared",
 	"immutable-assign",
 	"map-key-signed",
 	"map-value-string",
@@ -332,11 +333,6 @@ func assertAlder1RejectsLikeGo(t *testing.T, exe string, noGo []string, files ma
 		t.Fatalf("Go diagnostic oracle: module=%v diagnostics=%+v error=%v", oracle, diagnostics, err)
 	}
 	want := diagnostics[0]
-	// The bootstrap diagnostic payload retains a nominal type's symbol ID but
-	// does not carry its spelling into the production driver yet.
-	if source == "map-value-string.al" {
-		want.Message = strings.ReplaceAll(want.Message, "Wrapped", "<unknown>")
-	}
 	src := frontend.Source{ID: 1, Path: source, Text: text}
 	startLine, startColumn := src.LineColumn(want.Primary.Start)
 	wantHuman := fmt.Sprintf("%s:%d:%d: %s[%s]: %s\n", source, startLine, startColumn, want.Severity, want.Code, want.Message)
@@ -586,7 +582,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "90e6b51ccbd00934a312e14c6f81f305993f9df2a779aea3029de77dd5d7e174"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "b8214450c5f6a41cc4df07efd51212e51d768b51aefc22ef022a0d753fae7b5e"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

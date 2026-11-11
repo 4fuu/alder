@@ -607,6 +607,10 @@ type CheckDiagRec {
     detail_d: U64
 }
 
+// One rendered type of a checker diagnostic. Kind 1 carries the primitive
+// target id; kind 7 (a declared type) carries its declaration syntax node id
+// because the driver renders the name span and has no symbol table; every
+// other kind renders from the kind alone.
 type DiagnosticTypeRec {
     kind: U64
     target: U64

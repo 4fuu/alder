@@ -218,7 +218,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// float-arithmetic moved out for the same reason: the Alder checker
 	// accepts F32/F64 + - * / since the IEEE-754 float commit, while the Go
 	// oracle keeps rejecting in its own corpus.
-	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "index-not-u64", "shadowing", "unreachable-statement"} {
+	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "type-mismatch-declared", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "index-not-u64", "shadowing", "unreachable-statement"} {
 		t.Run("shared-reject-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "reject", fixture+".al"))
 			if err != nil {

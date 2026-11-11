@@ -195,11 +195,12 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     return out_string("invalid source syntax")
 }
 
-fn driver_out_diagnostic_type(kind: U64, target: U64) -> Bool {
+fn driver_out_diagnostic_type(state: State, parse: ParseStore, kind: U64, target: U64, json: Bool) -> Bool {
     if kind == 2 { return out_string("String") }
     if kind == 14 { return out_string("Bytes") }
+    if kind == 7 { return driver_out_declared_type_name(state, parse, target, json) }
     if kind == 8 {
-        if !out(91) || !driver_out_diagnostic_type(1, target) { return false }
+        if !out(91) || !driver_out_diagnostic_type(state, parse, 1, target, json) { return false }
         return out(93)
     }
     if kind != 1 { return out_string("<unknown>") }
@@ -215,6 +216,14 @@ fn driver_out_diagnostic_type(kind: U64, target: U64) -> Bool {
     if target == 10 { return out_string("F32") }
     if target == 11 { return out_string("F64") }
     return out_string("Unit")
+}
+
+// A declared type renders as its declaration node's name span; the checker
+// records that node id in the diagnostic payload because the driver has no
+// symbol table.
+fn driver_out_declared_type_name(state: State, parse: ParseStore, node: U64, json: Bool) -> Bool {
+    let rec = __s0_buffer_get(SyntaxRec, parse.nodes, node - 1)
+    return driver_out_source_text(state, rec.source, rec.name_start, rec.name_end, json)
 }
 
 fn driver_out_message_quote(json: Bool) -> Bool {
@@ -286,25 +295,25 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return driver_out_message_quote(json) }
     if kind == 9 { if !out_string("type ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" participates in a value-type cycle") }
-    if kind == 10 { if !out_string("slice element type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 10 { if !out_string("slice element type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string(" contains a slice or reference (M4 restriction)") }
-    if kind == 12 { if !out_string("Map key type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 12 { if !out_string("Map key type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string(" is not supported (unsigned integers, Bool, and structs/enums of those only)") }
-    if kind == 13 { if !out_string("Map value type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 13 { if !out_string("Map value type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string(" must be copy-trivial (no slices, references, maps, or domain handles)") }
     if kind == 15 { if !out_string("import ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(": parameter type must be a primitive or Ptr(primitive)") }
     if kind == 18 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }
         return driver_out_message_quote(json) }
-    if kind == 19 { if !out_string("return: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 19 { if !out_string("return: type mismatch: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_c, detail_d, json) }
     if kind == 21 { if !out_string("literal ") || !driver_out_source_text(state, source, start, end, json) { return false }
         if !out_string(" is out of range for ") { return false }
-        return driver_out_diagnostic_type(detail_a, detail_b) }
+        return driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) }
     if kind == 22 { if !out_string("binding name ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" is reserved") }
-    if kind == 23 { if !out_string("binding: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 23 { if !out_string("binding: type mismatch: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_c, detail_d, json) }
     if kind == 25 { if !driver_out_message_quote(json) || !out_string("Unit") || !driver_out_message_quote(json) { return false }
         return out_string(" is a type, not a value") }
     if kind == 26 { return out_string("domain marks cannot be bound; use them directly (the current MIR profile requires the reset mark to be the direct domain.mark result)") }
@@ -328,12 +337,12 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 79 { if !out_string("match is not exhaustive: variant ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, detail_a, detail_b, json) || !driver_out_message_quote(json) || !out_string(" of ") || !driver_out_source_text(state, source, detail_c, detail_d, json) { return false }
         return out_string(" is not covered") }
     if kind == 80 { return out_string("try requires a function returning Result") }
-    if kind == 82 { if !out_string("try error type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not match function error type ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
-    if kind == 84 { if !out_string("index: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
-    if kind == 85 { if !out_string("cleanup function parameter: type mismatch: expected ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(", got ") { return false }
-        return driver_out_diagnostic_type(detail_c, detail_d) }
+    if kind == 82 { if !out_string("try error type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(" does not match function error type ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_c, detail_d, json) }
+    if kind == 84 { if !out_string("index: type mismatch: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_c, detail_d, json) }
+    if kind == 85 { if !out_string("cleanup function parameter: type mismatch: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_c, detail_d, json) }
     if kind == 87 { return out_string("source form is outside the supported S0 contract") }
     if kind == 88 { return out_string("public declaration signature exposes a private type") }
     if kind == 89 { return out_string("mut parameter requires an affine owner, scoped capability, or a type parameter constrained by a mut-self trait") }
@@ -400,11 +409,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string("")
     }
     if kind == 254 {
-        if !out_string("type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not implement Order; the Order domain is Bool, unsigned integers, String, and Bytes") { return false }
+        if !out_string("type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(" does not implement Order; the Order domain is Bool, unsigned integers, String, and Bytes") { return false }
         return out_string("")
     }
     if kind == 257 {
-        if !out_string("type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not implement Display; the builtin Display domain is Bool, signed and unsigned integers, and String, and a declared type can implement Display itself") { return false }
+        if !out_string("type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(" does not implement Display; the builtin Display domain is Bool, signed and unsigned integers, and String, and a declared type can implement Display itself") { return false }
         return out_string("")
     }
     if kind == 255 { return out_string("float literal is out of range for F32") }
@@ -414,12 +423,12 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("structural ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" methods become callable with the ordered collections") { return false }
         return out_string("")
     }
-    if kind == 127 { if !out_string("ordered collection key type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 127 { if !out_string("ordered collection key type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string(" does not support structural Eq and Hash (unsigned integers, Bool, String, Bytes, and structs/enums of those)") }
-    if kind == 128 { if !out_string("ordered collection element type ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+    if kind == 128 { if !out_string("ordered collection element type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string(" must be a copyable value") }
     if kind == 129 {
-        if !out_string("ordered collection operation cannot move values with storage-backed parts yet: ") || !driver_out_diagnostic_type(detail_a, detail_b) { return false }
+        if !out_string("ordered collection operation cannot move values with storage-backed parts yet: ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) { return false }
         return out_string("")
     }
     // Diagnostic kinds 300 through 349 belong to this thread's work block.

@@ -2531,7 +2531,7 @@ fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, ba
     if ordinal == argument_count {
         let result_checked = try binding_type_checked(d, state, parse, store, result_index)
         if result_checked.id == 0 { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
-        if expected != 0 && !(try expression_type_equal(d, state, parse, result_checked.store, result_checked.id, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, result_checked.store, result_checked.id, expected)) { return expr_token_type_fail(d, state, result_checked.store, mismatch_kind, mismatch_node, expected, result_checked.id) }
         return append_call_expression(d, state, parse, result_checked.store, owner, unsafe_id, 11, result_checked.id, 7, member_index, 0, call, 1, site_kind, site_syntax)
     }
     let arg_link = call_link_at(parse, call, receivers + ordinal + 1)
@@ -2595,7 +2595,7 @@ fn check_c_is_null(d: Domain, state: State, parse: ParseStore, base: CheckStore,
     let arg_type = __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1)
     if arg_type.kind != 27 && arg_type.kind != 28 { return expr_token_fail(d, state, base, 202, arg) }
     let bool_type = primitive_type_id(state, parse, current, "Bool")
-    if expected != 0 && !(try expression_type_equal(d, state, parse, current, bool_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, bool_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, bool_type) }
     return append_expression(d, current, owner, call_id, 26, bool_type, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
 }
 
@@ -4398,8 +4398,16 @@ fn diagnostic_type(store: CheckStore, checked_type: U64) -> DiagnosticTypeRec {
         let child = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, rec.first_arg - 1) - 1)
         if child.kind == 1 { return DiagnosticTypeRec(kind: rec.kind, target: child.target) }
     }
-    if rec.kind == 7 { return DiagnosticTypeRec(kind: 7, target: rec.target) }
+    if rec.kind == 7 { return DiagnosticTypeRec(kind: 7, target: diagnostic_declared_node(store, rec.target)) }
     return DiagnosticTypeRec(kind: rec.kind, target: 0)
+}
+
+// The driver renders a declared type from its declaration node's name span
+// and has no symbol table, so the diagnostic payload carries the declaration
+// node id instead of the symbol id.
+fn diagnostic_declared_node(store: CheckStore, symbol: U64) -> U64 {
+    let rec = __s0_buffer_get(SymbolRec, store.symbols, symbol - 1)
+    return rec.node
 }
 
 fn sequence_element_type(state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> U64 {
@@ -6058,7 +6066,7 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
     } { return Ok(ExprBad(checked_instance)) }
     let result_id = use_by_ordinal(checked_instance, instance_id, 8, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, result_id - 1).checked_type
-    if expected != 0 && !(try expression_type_equal(d, state, parse, checked_instance, result_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, checked_instance, result_type, expected)) { return expr_token_type_fail(d, state, checked_instance, mismatch_kind, mismatch_node, expected, result_type) }
     return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, result_type, 1, instance_id, 0, call, 1, site_kind, site_syntax)
 }
 
@@ -6214,7 +6222,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
         }
         let applied = try concrete_decl_application(d, current, target, bindings)
         if !(try checked_type_views_materializable(d, state, parse, applied.store, applied.checked_type)) { return expr_token_fail(d, state, base, 104, call) }
-        if expected != 0 && !(try expression_type_equal(d, state, parse, applied.store, applied.checked_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, applied.store, applied.checked_type, expected)) { return expr_token_type_fail(d, state, applied.store, mismatch_kind, mismatch_node, expected, applied.checked_type) }
         return append_call_expression(d, state, parse, applied.store, owner, call_id, 9, applied.checked_type, 3, target, 0, call, 2, site_kind, site_syntax)
     }
     let values = try check_record_values(d, state, parse, base, store, owner, call, target, 0, field_count, in_loop)
@@ -6236,7 +6244,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
         constructed = canonical_type_id(current, 7, target, 0, 0)
     }
     if !(try checked_type_views_materializable(d, state, parse, current, constructed)) { return expr_token_fail(d, state, base, 104, call) }
-    if expected != 0 && !(try expression_type_equal(d, state, parse, current, constructed, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, constructed, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, constructed) }
     return append_call_expression(d, state, parse, current, owner, call_id, 9, constructed, 3, target, 0, call, 2, site_kind, site_syntax)
 }
 
@@ -6874,7 +6882,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     } { return expr_deferred(base) }
     let result_id = use_by_ordinal(current, target, 6, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type
-    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result_type) }
     return append_call_expression(d, state, parse, current, owner, call_id, 8, result_type, 1, target, 0, call, 1, site_kind, site_syntax)
 }
 
@@ -8182,7 +8190,7 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
 
 fn check_map_runtime_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, identity: U64, ordinal: U64, first_runtime: U64, runtime_count: U64, map_type: U64, key: U64, value: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     if ordinal == runtime_count {
-        if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, result) }
         return append_builtin_expression(d, parse, store, owner, call_id, result, identity, call, first_runtime, site_kind, site_syntax)
     }
     let link = call_link_at(parse, call, first_runtime + ordinal + 1)
@@ -8287,7 +8295,7 @@ fn check_map_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStor
 
 fn check_s0_runtime_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, identity: U64, ordinal: U64, arity: U64, type_operands: U64, domain_type: U64, mark_type: U64, buffer_type: U64, element: U64, u64_type: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     if ordinal == arity {
-        if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, store, result, expected)) { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, result) }
         return append_builtin_expression(d, parse, store, owner, call_id, result, identity, call, type_operands, site_kind, site_syntax)
     }
     let link = call_link_at(parse, call, ordinal + 1)
@@ -8483,7 +8491,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
                     CheckBad(value) => true
                 } { return Ok(ExprBad(current)) }
                 let applied_type = checked_type_for_syntax(current, owner, callee_link.node)
-                if expected != 0 && !(try expression_type_equal(d, state, parse, current, applied_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+                if expected != 0 && !(try expression_type_equal(d, state, parse, current, applied_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, applied_type) }
                 return check_record_call(d, state, parse, base, current, owner, call, call_id, applied_target, applied_type, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
             }
             return expr_token_fail(d, state, base, 56, callee)
@@ -8718,7 +8726,7 @@ fn check_unsafe_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     } { return expr_deferred(base) }
     let result_id = use_by_ordinal(current, target, 4, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type
-    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result_type) }
     return append_call_expression(d, state, parse, current, owner, unsafe_id, 11, result_type, 2, target, 0, call, 1, site_kind, site_syntax)
 }
 
@@ -8811,7 +8819,7 @@ fn check_unsafe_field_access(d: Domain, state: State, parse: ParseStore, base: C
         }
         return append_expression(d, base_store, owner, unsafe_id, 28, unit.id, field, 0, base_id, value_id, 0, site_kind, site_syntax)
     }
-    if expected != 0 && !(try expression_type_equal(d, state, parse, field_type.store, field_type.id, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, field_type.store, field_type.id, expected)) { return expr_token_type_fail(d, state, field_type.store, mismatch_kind, mismatch_node, expected, field_type.id) }
     let base_read = try append_expression(d, field_type.store, owner, base_link.node, base_kind, local.checked_type, binding, 0, 0, 0, 0, site_kind, site_syntax)
     let base_store = match base_read {
         ExprGood(item) => item.store
@@ -8964,7 +8972,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         let field = field_use_named(state, current, aggregate.target, expression)
         if field == 0 { return expr_fail(d, base, 61, expression) }
         let concrete = try concrete_field_type(d, current, aggregate_root, field)
-        if expected != 0 && !(try expression_type_equal(d, state, parse, concrete.store, concrete.checked_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, concrete.store, concrete.checked_type, expected)) { return expr_token_type_fail(d, state, concrete.store, mismatch_kind, mismatch_node, expected, concrete.checked_type) }
         return append_expression(d, concrete.store, owner, expression_id, 21, concrete.checked_type, field, 0, base_draft.expression, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 30 {
@@ -9003,7 +9011,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
         }
         if index_draft.deferred { return expr_deferred(base) }
-        if expected != 0 && !(try expression_type_equal(d, state, parse, next, element, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, next, element, expected)) { return expr_token_type_fail(d, state, next, mismatch_kind, mismatch_node, expected, element) }
         return append_expression(d, next, owner, expression_id, 19, element, 0, 0, base_draft.expression, index_draft.expression, 0, site_kind, site_syntax)
     }
     if expression.kind == 20 {
@@ -9011,7 +9019,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         if literal_type == 0 { literal_type = primitive_type_id(state, parse, store, "I64") }
         if literal_type == 0 { return expr_deferred(base) }
         let limits = int_result_range(state, parse, __s0_buffer_get(CheckedTypeRec, store.types, literal_type - 1))
-        if !limits.integer { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if !limits.integer { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, literal_type, primitive_type_id(state, parse, store, "I64")) }
         let token = __s0_buffer_get(TokenRec, state.tokens, expression.token - 1)
         var negative = false
         var magnitude = token.value_start
@@ -9048,7 +9056,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         var literal_type = expected
         if literal_type == 0 { literal_type = primitive_type_id(state, parse, store, "F64") }
         if literal_type == 0 { return expr_deferred(base) }
-        if !float_type(state, parse, store, literal_type) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if !float_type(state, parse, store, literal_type) { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, literal_type, primitive_type_id(state, parse, store, "F64")) }
         var f32_rejection: U64 = 0
         if primitive_type_named(state, parse, store, literal_type, "F32") { f32_rejection = check_float_literal_f32(state, expression) }
         if f32_rejection != 0 {
@@ -9087,7 +9095,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     }
     if expression.kind == 23 {
         var bool_type = expected
-        if expected != 0 && !primitive_type_named(state, parse, store, expected, "Bool") { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !primitive_type_named(state, parse, store, expected, "Bool") { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, primitive_type_id(state, parse, store, "Bool")) }
         if bool_type == 0 { bool_type = primitive_type_id(state, parse, store, "Bool") }
         if bool_type == 0 { return expr_deferred(base) }
         let token = __s0_buffer_get(TokenRec, state.tokens, expression.token - 1)
@@ -9186,7 +9194,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             if limits.integer && !limits.signed { return expr_token_fail(d, state, base, 30, expression) }
             if !limits.integer { return expr_token_fail(d, state, base, 31, expression) }
         }
-        if expected != 0 && !(try expression_type_equal(d, state, parse, child_store, child_draft.checked_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, child_store, child_draft.checked_type, expected)) { return expr_token_type_fail(d, state, child_store, mismatch_kind, mismatch_node, expected, child_draft.checked_type) }
         return append_expression(d, child_store, owner, expression_id, 6, child_draft.checked_type, 0, 0, child_draft.expression, 0, operator, site_kind, site_syntax)
     }
     if expression.kind == 37 {
@@ -9348,7 +9356,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         let function_error = __s0_buffer_get(U64, current.type_args, function_result.first_arg)
         if !(try expression_type_equal(d, state, parse, current, operand_error, function_error)) { return expr_token_type_fail(d, state, current, 82, expression, operand_error, function_error) }
         let ok_type = __s0_buffer_get(U64, current.type_args, operand.first_arg - 1)
-        if expected != 0 && !(try expression_type_equal(d, state, parse, current, ok_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, current, ok_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, ok_type) }
         let tries = try __s0_buffer_append(CheckedTryRec, d, current.control.tries, CheckedTryRec(owner: owner, syntax: expression_id, expression: draft.expression, result_type: draft.checked_type, ok_type: ok_type, error_type: operand_error))
         let control = CheckedControlStore(blocks: current.control.blocks, statement_links: current.control.statement_links, statements: current.control.statements, places: current.control.places, matches: current.control.matches, match_arms: current.control.match_arms, tries: tries, cleanups: current.control.cleanups, table_views: current.control.table_views)
         return append_expression(d, with_control(current, control), owner, expression_id, 13, ok_type, __s0_buffer_len(CheckedTryRec, tries), 0, draft.expression, 0, 0, site_kind, site_syntax)
@@ -9393,7 +9401,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         }
         if right_draft.deferred { return expr_deferred(base) }
         if !primitive_type_named(state, parse, right_store, left_draft.checked_type, "Bool") || !primitive_type_named(state, parse, right_store, right_draft.checked_type, "Bool") { return expr_token_fail(d, state, base, 32, expression) }
-        if expected != 0 && !(try expression_type_equal(d, state, parse, right_store, bool_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        if expected != 0 && !(try expression_type_equal(d, state, parse, right_store, bool_type, expected)) { return expr_token_type_fail(d, state, right_store, mismatch_kind, mismatch_node, expected, bool_type) }
         return append_expression(d, right_store, owner, expression_id, 7, bool_type, 0, 0, left_draft.expression, right_draft.expression, operator, site_kind, site_syntax)
     }
     let checked_left = try check_value_expression_inner(d, state, parse, base, store, owner, left, left_link.node, 0, mismatch_kind, mismatch_node, 0, 0, in_loop)
@@ -9460,7 +9468,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         if !primitive_type_named(state, parse, right_store, result_type, "Bool") { result_type = primitive_type_id(state, parse, right_store, "Bool") }
         if result_type == 0 { return expr_deferred(base) }
     }
-    if expected != 0 && !(try expression_type_equal(d, state, parse, right_store, result_type, expected)) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, right_store, result_type, expected)) { return expr_token_type_fail(d, state, right_store, mismatch_kind, mismatch_node, expected, result_type) }
     return append_expression(d, right_store, owner, expression_id, 7, result_type, 0, 0, left_draft.expression, right_draft.expression, operator, site_kind, site_syntax)
 }
 
