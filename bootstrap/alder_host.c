@@ -107,6 +107,8 @@ struct AlderHostContext {
     uint64_t project_path_kind;
     uint64_t project_target_kind;
     uint64_t project_entry_source;
+    uint64_t project_entry_source_original;
+    bool project_entry_source_original_set;
     char **run_args;
     size_t run_arg_count;
     bool json;
@@ -207,7 +209,11 @@ uint64_t alderhost_command(void) {
 }
 
 uint64_t alderhost_checker_entry_source(void) {
-    return alderhost_active_context == NULL ? UINT64_C(0) : alderhost_active_context->project_entry_source;
+    struct AlderHostContext *context = alderhost_active_context;
+    if (context == NULL) { return UINT64_C(0); }
+    return context->project_entry_source_original_set
+        ? context->project_entry_source_original
+        : context->project_entry_source;
 }
 
 bool alderhost_project_mode(void) {
@@ -783,6 +789,10 @@ bool alderhost_project_entry_source_set(uint64_t source) {
     if (context == NULL || !context->project_mode || source == UINT64_C(0) ||
         source > context->source_count) {
         return false;
+    }
+    if (!context->project_entry_source_original_set) {
+        context->project_entry_source_original = source;
+        context->project_entry_source_original_set = true;
     }
     context->project_entry_source = source;
     return true;

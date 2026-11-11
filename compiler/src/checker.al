@@ -11510,7 +11510,7 @@ fn check_entry_signature(d: Domain, state: State, parse: ParseStore, store: Chec
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if (symbol.kind == 12 || symbol.kind == 13) && symbol_name_matches_word(state, symbol, "main") {
+        if symbol.source + 1 == source && (symbol.kind == 12 || symbol.kind == 13) && symbol_name_matches_word(state, symbol, "main") {
             var result_role: U64 = 8
             if symbol.kind == 12 { result_role = 6 }
             let result_use = use_by_ordinal(store, at + 1, result_role, 0)
