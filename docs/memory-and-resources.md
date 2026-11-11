@@ -287,6 +287,12 @@ without a value copy.
 special `Cleanup` trait. Registrations run at most once in reverse lexical
 order.
 
+A conditional implementation — one whose `impl` declares type parameters, such
+as `impl(T: type) Cleanup for Boxed(T)` — registers the concrete instance of
+its `cleanup` hook for the registered owner's type, and that instance must
+satisfy the implementation's own constraints. The hook itself is a nongeneric
+method that takes the owner by value and returns `Unit`.
+
 Cleanup is guaranteed on:
 
 - normal block fallthrough;

@@ -10014,12 +10014,15 @@ fn cleanup_binding_registered(store: CheckStore, owner: U64, binding: U64) -> Bo
 // its receiver by value as the disposal itself, so its take-self parameter
 // is exempt from the must-transfer exit rule, exactly like a using binding.
 fn symbol_is_cleanup_hook(state: State, store: CheckStore, owner: U64) -> Bool {
+    // A generic Cleanup implementation registers the concrete instance of its
+    // hook; the implementation's method range names the declaration.
+    let hook = instance_declaration(store, owner)
     var at: U64 = 0
     while at < __s0_buffer_len(U64, store.traits.receiver_index) {
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
         if rec.trait_builtin == 5 {
-            if owner >= rec.first_method && owner < rec.first_method + rec.method_count {
-                let method = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+            if hook >= rec.first_method && hook < rec.first_method + rec.method_count {
+                let method = __s0_buffer_get(SymbolRec, store.symbols, hook - 1)
                 return symbol_name_matches_word(state, method, "cleanup")
             }
         }
@@ -10083,6 +10086,35 @@ fn type_cleanup_method_symbol(state: State, store: CheckStore, type_symbol: U64)
         at = at + 1
     }
     return 0
+}
+
+// A Cleanup implementation for a generic type is conditional: its own
+// parameters bind from the registered owner's type. The registration must
+// record the concrete instance of the hook, because the generic declaration
+// has no MIR body and its parameter type still names the implementation
+// parameters. A method of a non-generic implementation is already concrete
+// and is returned unchanged.
+fn cleanup_registration_hook(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, site: SyntaxRec, method: U64, owner_type: U64) -> Result(InstanceOutcome, __s0_Error) {
+    let declaration = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
+    let found = generic_impl_for_method(store, declaration.inherent_owner)
+    if found.first_method == 0 || impl_param_count_for(store, found.first_method) == 0 { return Ok(InstanceGood(InstanceValueRec(store: store, instance: method))) }
+    let seeded = try __s0_buffer_new(InferenceBindingRec, d)
+    let unified = try unify_types(d, store, found.self_type, owner_type, seeded)
+    let bindings = match unified {
+        UnifyGood(value) => value
+        UnifyConflict => seeded
+    }
+    if match unified {
+        UnifyGood(value) => false
+        UnifyConflict => true
+    } {
+        let failed = try check_token_fail(d, state, store, 136, site)
+        return Ok(InstanceBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    return instantiate_function(d, state, parse, store, method, bindings, owner, site)
 }
 
 // Cleanup checking intentionally follows frontend/check.go precedence: name,
@@ -10188,7 +10220,19 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
             if result_id == 0 { return body_token_fail(d, state, current, 140, statement) }
             let result_type = __s0_buffer_get(CheckedTypeRec, current.types, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type - 1)
             if result_type.kind != 1 || result_type.target != 12 { return body_token_fail(d, state, current, 140, statement) }
-            callback = method
+            let resolved = try cleanup_registration_hook(d, state, parse, current, owner, statement, method, initializer.checked_type)
+            current = match resolved {
+                InstanceGood(value) => value.store
+                InstanceBad(value) => value
+            }
+            if match resolved {
+                InstanceGood(value) => false
+                InstanceBad(value) => true
+            } { return Ok(BodyBad(current)) }
+            callback = match resolved {
+                InstanceGood(value) => value.instance
+                InstanceBad(value) => 0
+            }
         }
     }
     if local_lookup(current, owner, statement, state) != 0 || function_use(current, owner, 5, statement, state) != 0 { return body_token_fail(d, state, current, 27, statement) }

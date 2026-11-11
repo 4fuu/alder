@@ -344,9 +344,9 @@ a chain obeys the ordinary block and statement rules at every level.
 
 The second `using` form is the M7.5 public surface: it accepts a `Table(T)`
 owner (registering the builtin release), any affine nominal type implementing
-`Cleanup` (registering its trait method), or a `Vec(T)` of `Cleanup` owners
-(registering a per-element drain). The `with cleanup_function` clause stays
-the bootstrap-private bridge.
+`Cleanup` (registering the concrete instance of its trait method), or a
+`Vec(T)` of `Cleanup` owners (registering a per-element drain). The
+`with cleanup_function` clause stays the bootstrap-private bridge.
 
 `break` and `continue` jump to the exit and the next iteration of the
 innermost enclosing loop; `continue` in a `for` still runs the index step, and

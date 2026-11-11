@@ -7060,6 +7060,25 @@ fn lower_owner_concrete(store: CheckStore, owner: U64) -> Bool {
     return !lower_impl_method_generic(store, owner)
 }
 
+// A cleanup hook is either a nongeneric function that declares itself or the
+// concrete instance of a generic Cleanup implementation's method. Both are
+// called through their lowered owner, so the hook must be a concrete owner;
+// an instance carries its substituted signature in the instance use roles.
+fn lower_cleanup_callback_valid(store: CheckStore, item: CheckedCleanupRec, binding: LocalRec) -> Bool {
+    if !lower_owner_concrete(store, item.callback) { return false }
+    let callback = __s0_buffer_get(SymbolRec, store.symbols, item.callback - 1)
+    var parameter_role: U64 = 5
+    var result_role: U64 = 6
+    if callback.kind == 13 { parameter_role = 7
+        result_role = 8 }
+    let callback_parameter = lower_use_by_role(store, item.callback, parameter_role, 0)
+    let callback_result = lower_use_by_role(store, item.callback, result_role, 0)
+    if callback_parameter == 0 || callback_result == 0 || !lower_checked_abi_equal(store, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_parameter - 1).checked_type, binding.checked_type) { return false }
+    if lower_use_by_role(store, item.callback, parameter_role, 1) != 0 { return false }
+    let callback_result_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_result - 1).checked_type - 1)
+    return callback_result_type.kind == 1 && callback_result_type.target == 12
+}
+
 fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     // Ownership is validated below in stable record order. Build dense counts
     // once instead of rediscovering each owner with nested whole-table scans.
@@ -8023,14 +8042,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 if item.drain == 0 || item.drain > __s0_buffer_len(SymbolRec, store.symbols) || __s0_buffer_get(SymbolRec, store.symbols, item.drain - 1).kind != 12 { return false }
             }
         } else {
-        let callback = __s0_buffer_get(SymbolRec, store.symbols, item.callback - 1)
-        if callback.kind != 12 || callback.type_arity != 0 || callback.declaration != item.callback { return false }
-        let callback_parameter = lower_use_by_role(store, item.callback, 5, 0)
-        let callback_result = lower_use_by_role(store, item.callback, 6, 0)
-        if callback_parameter == 0 || callback_result == 0 || !lower_checked_abi_equal(store, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_parameter - 1).checked_type, binding.checked_type) { return false }
-        if lower_use_by_role(store, item.callback, 5, 1) != 0 { return false }
-        let callback_result_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_result - 1).checked_type - 1)
-        if callback_result_type.kind != 1 || callback_result_type.target != 12 { return false }
+        if !lower_cleanup_callback_valid(store, item, binding) { return false }
         }
         var environment_at: U64 = 0
         var activation_count: U64 = 0
