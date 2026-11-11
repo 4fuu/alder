@@ -395,7 +395,11 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("integer conversion method ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) || !driver_out_message_quote(json) || !out_string(" is not needed because every receiver value fits the target, so the total form exists and neither the checked nor the wrapping form can fail") { return false }
         return out_string("")
     }
-    if kind == 125 { return out_string("structural Eq and Hash implementations are language-provided and cannot be declared") }
+    if kind == 254 {
+        if !out_string("type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not implement Order; the Order domain is Bool, unsigned integers, String, and Bytes") { return false }
+        return out_string("")
+    }
+    if kind == 125 { return out_string("structural Eq, Hash, and Order implementations are language-provided and cannot be declared") }
     if kind == 126 {
         if !out_string("structural ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" methods become callable with the ordered collections") { return false }
         return out_string("")

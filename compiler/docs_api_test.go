@@ -104,6 +104,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.collection-v1.al": {
+			style:   "project",
+			srcName: "std_collection_example.al",
+			mainText: `module hello.main
+
+import hello.std_collection_example { std_collection_example }
+
+pub fn main() -> I32 {
+    if std_collection_example() == 63 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.bytes-v1.al": {
 			style:   "project",
 			srcName: "std_bytes_example.al",

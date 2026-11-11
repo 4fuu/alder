@@ -1000,6 +1000,80 @@ fn main() -> I32 {
 	}
 }
 
+// M8 Order: the builtin `less` ordering method over the scalar Order domain
+// and the constraint-gated generic calls. These fixtures are Alder-only: the
+// Go oracle frontend does not implement the builtin traits, so they stay out
+// of the shared comparison corpora. The domain is closed (Bool, unsigned
+// integers, String, Bytes); signed integers, floats, and composites reject
+// with 254 at the call, user-declared Order implementations reject with 125,
+// and sort-style instantiations over an out-of-domain type reject with 111.
+func runAlderM8OrderCheckerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	accept := map[string]string{
+		"order-less.al": `fn smaller(A: type(Order), a: A, b: A) -> A {
+    if a.less(b) { return a }
+    return b
+}
+
+fn main() -> I32 {
+    let small: U8 = 3
+    let large: U8 = 9
+    if !small.less(large) { return 1 }
+    if large.less(small) { return 2 }
+    let left: U64 = 7
+    let right: U64 = 7
+    if left.less(right) { return 3 }
+    if right.less(left) { return 4 }
+    if !("app".less("apple")) { return 5 }
+    if !("app".less("b")) { return 6 }
+    if !("abc".to_bytes().less("abd".to_bytes())) { return 7 }
+    if !false.less(true) { return 8 }
+    if true.less(false) { return 9 }
+    let picked = smaller(U64, 5, 9)
+    if picked != 5 { return 10 }
+    let word = smaller(String, "pear", "apple")
+    if word != "apple" { return 11 }
+    return 0
+}
+`,
+	}
+	for name, source := range accept {
+		t.Run("accept-"+name, func(t *testing.T) {
+			files := map[string]string{name: source}
+			manifest := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{name}, false), files)
+			if len(manifest.diagnostics) != 0 {
+				t.Fatalf("Order acceptance diagnostics: %+v", manifest.diagnostics)
+			}
+		})
+	}
+
+	rejections := []struct {
+		name, source string
+		code         int
+	}{
+		{"order-i64-receiver", "fn main() -> I32 {\n    let a: I64 = -1\n    let b: I64 = 1\n    if a.less(b) { return 1 }\n    return 0\n}\n", 254},
+		{"order-f64-receiver", "fn main() -> I32 {\n    let a: F64 = 1.5\n    let b: F64 = 2.5\n    if a.less(b) { return 1 }\n    return 0\n}\n", 254},
+		{"order-record-receiver", "type Box {\n    v: U64\n}\nfn main() -> I32 {\n    let a = Box(v: 1)\n    let b = Box(v: 2)\n    if a.less(b) { return 1 }\n    return 0\n}\n", 254},
+		{"order-arg-type", "fn main() -> I32 {\n    let x: U64 = 1\n    let flag: Bool = true\n    if x.less(flag) { return 1 }\n    return 0\n}\n", 42},
+		{"order-arity", "fn main() -> I32 {\n    let x: U64 = 1\n    if x.less() { return 1 }\n    return 0\n}\n", 41},
+		{"order-user-impl", "type Box {\n    v: U64\n}\nimpl Order for Box {\n    fn less(self, other: Self) -> Bool { return self.v < other.v }\n}\nfn main() -> I32 {\n    return 0\n}\n", 125},
+		{"order-generic-i64-instantiation", "fn first(A: type(Order), a: A, b: A) -> A {\n    if a.less(b) { return a }\n    return b\n}\nfn main() -> I32 {\n    let a: I64 = 1\n    if first(I64, a, a) != a { return 1 }\n    return 0\n}\n", 111},
+	}
+	for _, tc := range rejections {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name + ".al": tc.source}
+			text := runAlderChecker(t, exe, files, []string{tc.name + ".al"}, true)
+			manifest := parseCheckerManifest(t, text, files)
+			if len(manifest.diagnostics) != 1 {
+				t.Fatalf("expected exactly one rejection diagnostic, got %+v", manifest.diagnostics)
+			}
+			if manifest.diagnostics[0].kind != tc.code {
+				t.Fatalf("expected diagnostic kind %d, got %d", tc.code, manifest.diagnostics[0].kind)
+			}
+		})
+	}
+}
+
 // Rule 89 stays narrow: `mut` on a non-self parameter is an exclusive call
 // borrow, legal for affine values, scoped capabilities, and — the one
 // copyable exception — a type parameter constrained by a trait with at least

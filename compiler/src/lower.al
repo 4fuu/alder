@@ -4407,7 +4407,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 999 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1000 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin == 1000 { return lower_order_less_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -6590,6 +6591,50 @@ fn lower_str_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     return Ok(LowerStep(state: instr.state, id: result.id))
 }
 
+// Order surface (M8): the builtin less method. Unsigned integers compare
+// through int.lt; String and Bytes compare through str.order_lt; Bool
+// orders through branches because int.lt does not accept Bool operands.
+fn lower_order_less_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 2 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_syntax, environment, panic_block)
+    let receiver_type = lower_builtin_child_type(store, expression, 0)
+    if receiver_type == 0 { return Ok(LowerStep(state: lower_invalid(receiver.state), id: 0)) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+    if checked.kind == 1 && checked.target == 1 { return lower_order_bool_less(d, source_state, spans, store, receiver.state, owner, function, block, expression_id, expression, receiver.id, environment, panic_block) }
+    let argument_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let argument = try lower_expression(d, source_state, spans, store, receiver.state, owner, function, block, argument_syntax, environment, panic_block)
+    var op: U64 = 0
+    if checked.kind == 1 { op = mir_op_int_lt() }
+    if checked.kind == 2 || checked.kind == 14 { op = mir_op_str_order_lt() }
+    if op == 0 { return Ok(LowerStep(state: lower_invalid(argument.state), id: 0)) }
+    let result = try lower_add_result(d, argument.state, function, block, expression.checked_type, source_state, store)
+    let added = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, receiver.id, argument.id, panic_block, "")
+    return Ok(LowerStep(state: added.state, id: result.id))
+}
+
+fn lower_order_bool_less(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, receiver: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    // Bool ordering lowers through branches: false orders before true, so
+    // a.less(b) holds exactly when a is false and b is true. The shape
+    // mirrors the short-circuit Boolean operators.
+    if expression.child_count != 2 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let source_block = lower_open_block(state.mir, function, block)
+    let truthy_block = try lower_add_block(d, state, function, "bb_order_true")
+    let falsy_block = try lower_add_block(d, truthy_block.state, function, "bb_order_false")
+    let join = try lower_add_block(d, falsy_block.state, function, "bb_order_join")
+    let result_type = try lower_type(d, source_state, store, join.state, expression.checked_type)
+    let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__alder_order_", join.id), result_type.id)
+    var current = lower_with_mir(result_type.state, param.store)
+    current = try lower_branch(d, current, function, source_block, receiver, truthy_block.id, falsy_block.id)
+    let argument_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let argument = try lower_expression(d, source_state, spans, store, current, owner, function, falsy_block.id, argument_syntax, environment, panic_block)
+    current = try lower_jump_value(d, argument.state, function, lower_open_block(argument.state.mir, function, falsy_block.id), join.id, argument.id)
+    let bool_suffix = __s0_buffer_len(MirConstRec, current.mir.constants) + 1
+    let falsity = try lower_bool_value(d, source_state, store, current, function, truthy_block.id, expression.checked_type, 0, "__alder_order_false_", bool_suffix)
+    current = try lower_jump_value(d, falsity.state, function, truthy_block.id, join.id, falsity.id)
+    return Ok(LowerStep(state: current, id: param.id))
+}
+
 // M8 C-boundary conversions: lower to c.num.try, c.num.wrap, or c.num.cast
 // with the receiver value in slot a and the target type in type_op (the
 // option(E) type for the try form, where E is the target scalar). The
@@ -6653,7 +6698,21 @@ fn lower_model_c_convert_ok(store: CheckStore, annotation: CallAnnotationRec, ex
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 999 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1000 { return false }
+    if annotation.builtin == 1000 {
+        // M8 Order surface: a scalar Order receiver, a same-type argument,
+        // and a Bool result.
+        if expression.child_count != 2 || annotation.target != 0 { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 || lower_builtin_child_type(store, expression, 1) != receiver_type { return false }
+        let first = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if first.kind == 1 { return first.target == 1 || (first.target >= 6 && first.target <= 9) }
+        if first.kind == 2 || first.kind == 14 {
+            let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+            return result.kind == 1 && result.target == 1
+        }
+        return false
+    }
     if annotation.builtin >= 65 { return lower_model_c_convert_ok(store, annotation, expression) }
     if annotation.builtin >= 62 {
         // M8 integer conversion surface: an integer receiver and a target
@@ -7170,7 +7229,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 999 { return false } }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1000 { return false } }
             at = at + 1
         } else {
         if item.kind == 7 {

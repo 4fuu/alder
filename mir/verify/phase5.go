@@ -482,6 +482,17 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 				c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.is_null operand must be a raw C pointer"})
 			}
 		}
+	case mir.OpStrOrderLt:
+		ta, _ := f.ValueType(in.A)
+		tb, _ := f.ValueType(in.B)
+		stringLike := func(t mir.TypeId) bool {
+			return m.ValidType(t) && (m.Types[t].Kind == mir.TypeString || m.Types[t].Kind == mir.TypeBytes)
+		}
+		if !stringLike(ta) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.order_lt operands must be string or bytes"})
+		} else if tb != ta {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.order_lt operands must have the same type"})
+		}
 	}
 
 	// Checked failure edge arguments must match the failure target parameters.

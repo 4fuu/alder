@@ -1398,3 +1398,96 @@ fn main() -> I32 {
 	}
 	t.Logf("Eq operator program exited cleanly under strict C11")
 }
+
+// M8 Order dispatch: the builtin `less` method over the scalar Order
+// domain, including the generic instantiations. Unsigned integers compare
+// with the integer less-than, String and Bytes compare byte-lexicographically
+// with shorter prefixes first, and Bool orders false below true. Alder-only:
+// the Go oracle frontend has no builtin-trait mirror.
+func runAlderOrderLessBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"order-less.al": `fn smaller(A: type(Order), a: A, b: A) -> A {
+    if a.less(b) { return a }
+    return b
+}
+
+fn main() -> I32 {
+    let small: U8 = 3
+    let large: U8 = 9
+    if !small.less(large) { return 1 }
+    if large.less(small) { return 2 }
+    let left: U64 = 7
+    let right: U64 = 7
+    if left.less(right) { return 3 }
+    if right.less(left) { return 4 }
+    let wide: U32 = 4000000000
+    let wider: U32 = 4000000001
+    if !wide.less(wider) { return 5 }
+    if wider.less(wide) { return 6 }
+    if !("app".less("apple")) { return 7 }
+    if !("app".less("b")) { return 8 }
+    if "apple".less("app") { return 9 }
+    if "app".less("app") { return 10 }
+    if !("abc".to_bytes().less("abd".to_bytes())) { return 11 }
+    if "abd".to_bytes().less("abc".to_bytes()) { return 12 }
+    let empty: Bytes = ""
+    let one: Bytes = "a".to_bytes()
+    if !empty.less(one) { return 13 }
+    if one.less(empty) { return 14 }
+    if !false.less(true) { return 15 }
+    if true.less(false) { return 16 }
+    if true.less(true) { return 17 }
+    let picked = smaller(U64, 5, 9)
+    if picked != 5 { return 18 }
+    let word = smaller(String, "pear", "apple")
+    if word != "apple" { return 19 }
+    let flags = smaller(Bool, true, false)
+    if flags { return 20 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"order-less.al"})
+	second := runLowerCompiler(t, exe, files, []string{"order-less.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered Order less MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered Order less MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered Order less MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("Order less MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"order-less.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"order-less.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written Order less C changed across processes")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "order-less.c")
+	program := filepath.Join(dir, "order-less.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of Order less dispatch: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run Order less behavior: %v\n%s", err, output)
+	}
+	t.Logf("Order less program exited cleanly under strict C11")
+}

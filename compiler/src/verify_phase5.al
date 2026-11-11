@@ -439,6 +439,7 @@ return MirVTypeResult(valid: ct != 0, type_id: ct) }
     if x.op == mir_op_call_value() { if ta == 0 || mir_vtype_kind(store, ta) != mir_type_kind_function() { return MirVTypeResult(valid: false, type_id: 0) }
 return MirVTypeResult(valid: mir_v5_call_value_args_match(store, indexes, x.function, id, ta), type_id: __s0_buffer_get(MirTypeRec, store.types, ta - 1).result_type) }
     if x.op == mir_op_str_eq() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
+    if x.op == mir_op_str_order_lt() { return MirVTypeResult(valid: (mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()) && tb == ta, type_id: mir_type_bool()) }
     if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() { let seq = mir_vtype_kind(store, ta) == mir_type_kind_string() || mir_vtype_kind(store, ta) == mir_type_kind_bytes()
     if x.op == mir_op_str_len() { return MirVTypeResult(valid: seq, type_id: mir_type_u64()) }
     return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_string(), type_id: mir_v5_find_kind(indexes, mir_type_kind_bytes())) }

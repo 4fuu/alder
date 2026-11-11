@@ -1333,15 +1333,17 @@ fn validate_inherent_owners(d: Domain, state: State, parse: ParseStore, store: C
     return Ok(CheckGood(store))
 }
 
-// Builtin standard trait IDs. Order, Display, and Error are reserved names
-// without declarations until their APIs are designed with the standard
-// library; implementations of them are rejected as unknown traits.
+// Builtin standard trait IDs. Order is language-provided with synthesized
+// scalar implementations; Display and Error are reserved names without
+// declarations until their APIs are designed with the standard library;
+// implementations of reserved traits are rejected as unknown traits.
 fn builtin_trait_id(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, "Eq") { return 1 }
     if node_word(state, node, "Hash") { return 2 }
     if node_word(state, node, "Iterator") { return 3 }
     if node_word(state, node, "IntoIterator") { return 4 }
     if node_word(state, node, "Cleanup") { return 5 }
+    if node_word(state, node, "Order") { return 7 }
     return 0
 }
 
@@ -7702,6 +7704,41 @@ fn check_str_method(d: Domain, state: State, parse: ParseStore, base: CheckStore
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, 0, site_kind, site_syntax)
 }
 
+// Order surface (M8): the builtin less method on the scalar Order domain
+// (Bool, unsigned integers, String, Bytes). The argument must have the
+// receiver's own type. Signed integers, floats, and composites are outside
+// the synthesized Order impl surface and reject with their own diagnostic.
+fn check_order_less_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if !order_scalar_supported(store, receiver_type_id) { return expr_token_single_type_fail(d, state, base, 254, callee, receiver_type_id) }
+    // Method-call links include both the selected callee and its receiver.
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 41, call) }
+    var current = store
+    let link = call_link_at(parse, call, 2)
+    let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, current, owner, argument, link.node, receiver_type_id, 42, argument, 0, 0, in_loop)
+    current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    var result = primitive_type_id(state, parse, store, "Bool")
+    if result == 0 {
+        let made = try append_checked_type(d, current, owner, 1, call_id, 1, 0, 0)
+        current = made
+        result = canonical_type_id(current, 1, 1, 0, 0)
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, 1000, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
+}
+
 // Ordered-collection key domain (M7.5): the domain the inline structural
 // compare lowers. Unsigned integers and Bool compare directly; String and
 // Bytes compare through str.eq; records and enums compare through place
@@ -8315,6 +8352,13 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
         if receiver_type.kind == 19 { return check_table_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+        // Order surface (M8): the builtin less method on scalar receivers.
+        // Routed before the byte-sequence methods, which otherwise capture
+        // less on String and Bytes receivers as an unknown method, and
+        // before impl lookup, so a record receiver gets the Order-domain
+        // reject instead of a generic unknown-method one; the helper
+        // rejects receivers outside the scalar Order domain.
+        if node_word(state, callee, "less") { return check_order_less_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         // Byte-sequence surface (M8): String and Bytes methods. Routed before
         // the sequence-method names, which otherwise capture len and slice and
         // reject these receivers at the sequence guard.
@@ -11901,9 +11945,9 @@ fn resolve_trait_impl_at(d: Domain, state: State, parse: ParseStore, store: Chec
     let trait_id = trait_impl_trait_node(parse, root)
     if trait_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let trait_node = __s0_buffer_get(SyntaxRec, parse.nodes, trait_id - 1)
-    // Structural equality and hashing are language-provided; a user
-    // implementation cannot override them.
-    if builtin_trait_id(state, trait_node) == 1 || builtin_trait_id(state, trait_node) == 2 { return check_token_fail(d, state, store, 125, trait_node) }
+    // Structural equality, hashing, and ordering are language-provided; a
+    // user implementation cannot override them.
+    if builtin_trait_id(state, trait_node) == 1 || builtin_trait_id(state, trait_node) == 2 || builtin_trait_id(state, trait_node) == 7 { return check_token_fail(d, state, store, 125, trait_node) }
     let self_node_id = trait_impl_self_node(parse, root)
     if self_node_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let self_node = __s0_buffer_get(SyntaxRec, parse.nodes, self_node_id - 1)
@@ -12528,6 +12572,23 @@ fn append_structural_impls_for(d: Domain, store: CheckStore, checked_type: U64) 
     return Ok(trait_store_with(store, impls, store.traits.impl_index))
 }
 
+// Order domain (M8): the scalar subset only. Composites and builtin Option
+// and Result fail closed, so sort instantiates only for scalars until a
+// compare-based surface is designed.
+fn order_scalar_supported(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return checked.target == 1 || (checked.target >= 6 && checked.target <= 9) }
+    return checked.kind == 2 || checked.kind == 14
+}
+
+// One synthesized Order impl record for a scalar type.
+fn append_order_impls_for(d: Domain, store: CheckStore, checked_type: U64) -> Result(CheckStore, __s0_Error) {
+    var impls = store.traits.impls
+    impls = try __s0_buffer_append(TraitImplRec, d, impls, TraitImplRec(trait_builtin: 7, trait_symbol: 0, first_arg: 0, arg_count: 0, self_type: checked_type, owner_node: 0, first_method: 0, method_count: 0, synthesized: 1))
+    return Ok(trait_store_with(store, impls, store.traits.impl_index))
+}
+
 // Synthesize structural Eq/Hash implementations once, after aggregate
 // fields are resolved and before any constraint gate or body runs. The
 // synthesis itself is a per-symbol loop over a worklist of checked types
@@ -12572,6 +12633,28 @@ fn synthesize_structural_impls(d: Domain, state: State, parse: ParseStore, store
             }
         }
         symbol_at = symbol_at + 1
+    }
+    // Scalar Order impls: the same seeded and interned scans as the
+    // structural Eq pass, gated to the scalar Order domain. Composites
+    // fail closed, so no symbol scan runs for Order.
+    var order_seeded: U64 = 1
+    while order_seeded <= 12 {
+        if order_scalar_supported(current, order_seeded) {
+            let with_impls = try append_order_impls_for(d, current, order_seeded)
+            current = with_impls
+        }
+        order_seeded = order_seeded + 1
+    }
+    var order_kind: U64 = 2
+    while order_kind <= 14 {
+        if order_kind == 2 || order_kind == 14 {
+            let existing = canonical_type_id(current, order_kind, 0, 0, 0)
+            if existing != 0 {
+                let with_impls = try append_order_impls_for(d, current, existing)
+                current = with_impls
+            }
+        }
+        order_kind = order_kind + 1
     }
     return build_trait_indexes(d, state, parse, current)
 }

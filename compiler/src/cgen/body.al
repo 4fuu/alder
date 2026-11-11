@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_c_num_cast() { return false }
+        if item.op > mir_op_str_order_lt() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2020,6 +2020,20 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         let operand_type = cgen_value_type(store, indexes, item.function, item.a)
         var helper: __s0_String = "alder_string_eq"
         if operand_type >= 1 && operand_type <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, operand_type - 1).kind == mir_type_kind_bytes() { helper = "alder_bytes_eq" }
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put(d, out, helper)
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_str_order_lt() {
+        let operand_type = cgen_value_type(store, indexes, item.function, item.a)
+        var helper: __s0_String = "alder_string_lt"
+        if operand_type >= 1 && operand_type <= __s0_buffer_len(MirTypeRec, store.types) && __s0_buffer_get(MirTypeRec, store.types, operand_type - 1).kind == mir_type_kind_bytes() { helper = "alder_bytes_lt" }
         out = try cgen_put(d, out, "  ")
         out = try cgen_put_value(d, out, item.result)
         out = try cgen_put(d, out, " = ")

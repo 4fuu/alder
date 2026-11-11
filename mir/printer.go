@@ -434,6 +434,8 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(")")
 	case OpStrEq:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
+	case OpStrOrderLt:
+		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 	case OpStrLen, OpStrToBytes:
 		b.WriteString(" " + valueName(f, in.A))
 	case OpStrByteChecked:

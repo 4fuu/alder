@@ -187,6 +187,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m73-storage-views", func(t *testing.T) { runAlderM73CheckerBehavior(t, exe) })
 	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
 	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
+	t.Run("m8-order", func(t *testing.T) { runAlderM8OrderCheckerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorCheckerBehavior(t, exe) })
 	t.Run("m75-tables", func(t *testing.T) { runAlderM75TableCheckerBehavior(t, exe) })
 	t.Run("m75-guards", func(t *testing.T) { runAlderM75GuardCheckerBehavior(t, exe) })
@@ -2472,7 +2473,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && (annotation.builtin >= 1 && annotation.builtin <= 29 || annotation.builtin >= 30 && annotation.builtin <= 46) || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 1000 || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {
@@ -2511,6 +2512,14 @@ func validateCheckerManifest(m checkerManifest) error {
 	matchOwners := make([]int, len(m.matches))
 	tryOwners := make([]int, len(m.tries))
 	expressionSites := make(map[[3]int]int)
+	// The checker anchors an operand's checked type at its own node when a
+	// call or operator argument is checked against an expected type, so an
+	// expression node can legitimately carry a type annotation. Everything
+	// else in typeSyntax stays declaration-side type syntax.
+	anchoredSyntax := make(map[[2]int]bool)
+	for _, annotation := range m.annotations {
+		anchoredSyntax[[2]int{annotation.owner, annotation.syntax}] = true
+	}
 	for i, expression := range m.expressions {
 		if expression.left != 0 || expression.right != 0 || (expression.childCount == 0) != (expression.firstChild == 0) || expression.firstChild < 0 || expression.childCount < 0 || expression.childCount > 0 && (expression.firstChild < 1 || expression.firstChild-1+expression.childCount > len(m.children)) {
 			return fmt.Errorf("invalid checked expression child range %+v", expression)
@@ -2725,7 +2734,7 @@ func validateCheckerManifest(m checkerManifest) error {
 				symbolBacked = true
 			}
 		}
-		if expression.id != i+1 || !validOwner || expression.syntax < 1 || nodes[expression.syntax] && !(expression.kind == 24 && symbolBacked) || typeSyntax[expression.syntax] || bodySyntax[[2]int{expression.owner, expression.syntax}] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
+		if expression.id != i+1 || !validOwner || expression.syntax < 1 || nodes[expression.syntax] && !(expression.kind == 24 && symbolBacked) || typeSyntax[expression.syntax] && !anchoredSyntax[[2]int{expression.owner, expression.syntax}] || bodySyntax[[2]int{expression.owner, expression.syntax}] || expression.checkedType < 1 || expression.checkedType > len(m.types) || !validPayload || !validSite {
 			return fmt.Errorf("invalid checked expression %+v", expression)
 		}
 		bodySyntax[[2]int{expression.owner, expression.syntax}] = true
@@ -2865,9 +2874,11 @@ func validateCheckerManifest(m checkerManifest) error {
 		if diagnostic.kind == 3 {
 			wantNote = 2
 		}
-		// Kinds 300-349 are the checker's generic-implementation block
-		// (D024); they never carry notes or related spans.
-		if diagnostic.kind < 1 || diagnostic.kind > 154 && (diagnostic.kind < 300 || diagnostic.kind > 349) || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
+		// Kinds 250-299 are the builtin-method block (byte-sequence methods,
+		// integer conversions, Order), and kinds 300-349 are the checker's
+		// generic-implementation block (D024); they never carry notes or
+		// related spans.
+		if diagnostic.kind < 1 || diagnostic.kind > 154 && (diagnostic.kind < 250 || diagnostic.kind > 299) && (diagnostic.kind < 300 || diagnostic.kind > 349) || !validSourceRange(diagnostic.source, diagnostic.start, diagnostic.end, true) || diagnostic.hasRelated != (diagnostic.kind == 1 || diagnostic.kind == 3 || diagnostic.kind == 107 || diagnostic.kind == 111) || diagnostic.note != wantNote {
 			return fmt.Errorf("invalid checker diagnostic %+v", diagnostic)
 		}
 		if diagnostic.hasRelated && !validSourceRange(diagnostic.relatedSource, diagnostic.relatedStart, diagnostic.relatedEnd, true) {

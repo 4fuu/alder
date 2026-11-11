@@ -651,12 +651,26 @@ func (g *gen) emitTypes(b *strings.Builder) {
 		b.WriteString("  if (alder_a.len != alder_b.len) { return false; }\n")
 		b.WriteString("  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
 		b.WriteString("}\n")
+		b.WriteString("static bool ALDER_MAYBE_UNUSED alder_string_lt(AlderString alder_a, AlderString alder_b) {\n")
+		b.WriteString("  uint64_t alder_n = alder_a.len < alder_b.len ? alder_a.len : alder_b.len;\n")
+		b.WriteString("  for (uint64_t alder_i = 0; alder_i < alder_n; alder_i++) {\n")
+		b.WriteString("    if (alder_a.data[alder_i] != alder_b.data[alder_i]) { return alder_a.data[alder_i] < alder_b.data[alder_i]; }\n")
+		b.WriteString("  }\n")
+		b.WriteString("  return alder_a.len < alder_b.len;\n")
+		b.WriteString("}\n")
 	}
 	if hasBytes {
 		b.WriteString("typedef struct { const uint8_t *data; uint64_t len; } AlderBytes;\n")
 		b.WriteString("static bool ALDER_MAYBE_UNUSED alder_bytes_eq(AlderBytes alder_a, AlderBytes alder_b) {\n")
 		b.WriteString("  if (alder_a.len != alder_b.len) { return false; }\n")
 		b.WriteString("  return alder_a.len == UINT64_C(0) || memcmp(alder_a.data, alder_b.data, (size_t)alder_a.len) == 0;\n")
+		b.WriteString("}\n")
+		b.WriteString("static bool ALDER_MAYBE_UNUSED alder_bytes_lt(AlderBytes alder_a, AlderBytes alder_b) {\n")
+		b.WriteString("  uint64_t alder_n = alder_a.len < alder_b.len ? alder_a.len : alder_b.len;\n")
+		b.WriteString("  for (uint64_t alder_i = 0; alder_i < alder_n; alder_i++) {\n")
+		b.WriteString("    if (alder_a.data[alder_i] != alder_b.data[alder_i]) { return alder_a.data[alder_i] < alder_b.data[alder_i]; }\n")
+		b.WriteString("  }\n")
+		b.WriteString("  return alder_a.len < alder_b.len;\n")
 		b.WriteString("}\n")
 	}
 	if hasString || hasBytes {

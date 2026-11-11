@@ -507,6 +507,154 @@ pub fn builders_check() -> I32 {
 	}
 }
 
+func sysrootCollectionMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.collection { sort }
+
+pub fn main() -> I32 {
+    let first = check_number_sort()
+    if first != 0 { return first }
+    let second = check_word_sort()
+    if second != 0 { return second }
+    let third = check_flag_sort()
+    if third != 0 { return third }
+    let fourth = check_small_sorts()
+    if fourth != 0 { return fourth }
+    return 0
+}
+
+fn check_number_sort() -> I32 {
+    let numbers: Array(U64, 7) = [5, 1, 4, 1, 3, 1, 9]
+    let sorted = sort(U64, numbers.slice(0, 7))
+    if sorted.len() != 7 { return 1 }
+    let expect: Array(U64, 7) = [1, 1, 1, 3, 4, 5, 9]
+    var values_bad: Bool = false
+    var at: U64 = 0
+    while at < 7 {
+        match sorted.get(at) {
+            Some(value) => {
+                match expect.get(at) {
+                    Some(wanted) => {
+                        if value != wanted { values_bad = true }
+                    }
+                    None => { return 2 }
+                }
+            }
+            None => { return 3 }
+        }
+        at = at + 1
+    }
+    if values_bad { return 10 }
+    // The input slice stays untouched.
+    match numbers.get(0) {
+        Some(head) => { if head != 5 { return 4 } }
+        None => { return 5 }
+    }
+    return 0
+}
+
+fn check_word_sort() -> I32 {
+    let words: Array(String, 5) = ["pear", "apple", "banana", "app", "apple"]
+    let sorted = sort(String, words.slice(0, 5))
+    if sorted.len() != 5 { return 1 }
+    let expect: Array(String, 5) = ["app", "apple", "apple", "banana", "pear"]
+    var values_bad: Bool = false
+    var at: U64 = 0
+    while at < 5 {
+        match sorted.get(at) {
+            Some(value) => {
+                match expect.get(at) {
+                    Some(wanted) => {
+                        if value != wanted { values_bad = true }
+                    }
+                    None => { return 2 }
+                }
+            }
+            None => { return 3 }
+        }
+        at = at + 1
+    }
+    if values_bad { return 10 }
+    return 0
+}
+
+fn check_flag_sort() -> I32 {
+    let flags: Array(Bool, 3) = [true, false, true]
+    let sorted = sort(Bool, flags.slice(0, 3))
+    if sorted.len() != 3 { return 1 }
+    match sorted.get(0) {
+        Some(value) => { if value { return 2 } }
+        None => { return 3 }
+    }
+    match sorted.get(1) {
+        Some(value) => { if !value { return 4 } }
+        None => { return 5 }
+    }
+    match sorted.get(2) {
+        Some(value) => { if !value { return 6 } }
+        None => { return 7 }
+    }
+    return 0
+}
+
+fn check_small_sorts() -> I32 {
+    let none: Array(U64, 0) = []
+    let sorted_none = sort(U64, none.slice(0, 0))
+    if sorted_none.len() != 0 { return 1 }
+    let one: Array(U64, 1) = [42]
+    let sorted_one = sort(U64, one.slice(0, 1))
+    if sorted_one.len() != 1 { return 2 }
+    match sorted_one.get(0) {
+        Some(value) => { if value != 42 { return 3 } }
+        None => { return 4 }
+    }
+    return 0
+}
+`,
+	}
+}
+
+func TestProductionSysrootCollectionRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootCollectionMain(), "test-plan")
+	collectionSeed := sysrootModuleSeed(t, repoRoot, "collection.al")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("std.collection plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, "\nsysroot v1:") {
+		t.Fatalf("plan lost the sysroot identity line: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/collection.al bytes "+collectionSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.collection\n") {
+		t.Fatalf("plan does not list the std.collection source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "edge hello.main -> std.collection\n") {
+		t.Fatalf("plan does not record the std.collection edge: %q", plan.stdout)
+	}
+	repeat := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootCollectionMain(), "test-plan")
+	if repeat != plan {
+		t.Fatalf("std.collection plan changed across processes: first=%q repeat=%q", plan.stdout, repeat.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootCollectionMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.collection behavior run failed: %+v", run)
+	}
+}
+
 func sysrootPathEnvMain() map[string]string {
 	return map[string]string{
 		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",

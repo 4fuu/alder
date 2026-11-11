@@ -490,6 +490,14 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		}
 		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
 
+	case mir.OpStrOrderLt:
+		ta, _ := g.f.ValueType(in.A)
+		helper := "alder_string_lt"
+		if g.m.ValidType(ta) && g.m.Types[ta].Kind == mir.TypeBytes {
+			helper = "alder_bytes_lt"
+		}
+		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
+
 	case mir.OpStrLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + ".len;\n")
 

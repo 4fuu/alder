@@ -51,7 +51,10 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   conversion, and text builder surface;
 - [`std.bytes` public snapshot v1](api/std.bytes-v1.md), covering the
   Milestone 8 byte construction, search, sorted search, endian integer
-  coding, and hex and Base64 codec surface.
+  coding, and hex and Base64 codec surface;
+- [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
+  the Milestone 8 stable sorting entry point over the Order domain in the
+  installed sysroot.
 
 ## Distribution layers
 

@@ -279,6 +279,8 @@ The integer overflow method operations (71-79) need no new runtime surface beyon
 
 The byte-sequence method operations (80-85) need one new runtime helper, the strict `alder_string_utf8_valid` validator in `runtime/c/alder.h`; everything else reuses the existing surface: `str.len`, `str.byte.checked`, and `str.to_bytes` read the sequence record directly with no runtime call; `str.concat` length-checks with `alder_u64_add_checked`; `str.concat`, `str.slice.checked`, and `str.from_bytes` allocate the fresh bytes with `alder_domain_alloc` and fail only when that returns `NULL`; and `str.from_bytes` validates UTF-8 with the new helper, reporting invalid input as a `none` value instead of taking the failure edge. The owning forms produce `AlderString`/`AlderBytes` records whose data pointer is non-NULL even for an empty result, because a zero-size request allocates one byte.
 
+The ordering comparison operation (91, `str.order_lt`) needs no runtime surface: the generator emits `alder_string_lt`/`alder_bytes_lt` as static helpers next to the existing `alder_string_eq`/`alder_bytes_eq` when a program uses them, walking the common prefix bytewise and breaking ties by length, so the shorter prefix orders first and an empty operand orders before every non-empty one.
+
 The backend must also define lowering for:
 
 - division by zero;

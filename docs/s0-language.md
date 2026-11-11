@@ -133,9 +133,9 @@ Milestone 7.5 adds the static trait surface of
   in the declaration's scope across the whole parameter list, so a
   constraint may name a parameter declared before or after it
   (`IntoIterator(IteratorType, Item)` keeps that order).
-- The builtin standard traits `Eq`, `Hash`, `Iterator(Item)`,
+- The builtin standard traits `Eq`, `Hash`, `Order`, `Iterator(Item)`,
   `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
-  without source declarations; `Order`, `Display`, and `Error` are reserved
+  without source declarations; `Display` and `Error` are reserved
   names without implementations until their APIs are designed with the
   standard library.
 - Coherence holds per compilation unit: exactly one implementation may exist
@@ -165,6 +165,16 @@ Milestone 7.5 adds the static trait surface of
   structural `==` with a surprising user implementation": user `impl Eq`
   and `impl Hash` blocks are rejected. The synthesized methods are not
   directly callable yet; they become callable with the ordered collections.
+- Structural `Order` implementations are synthesized by the language for
+  the closed scalar domain: unsigned integers `U8`, `U16`, `U32`, and
+  `U64`, `Bool` (false orders below true), `String`, and `Bytes`
+  (both byte-lexicographic, shorter prefixes first). The trait has the
+  single requirement `fn less(self, other: Self) -> Bool`, and the
+  synthesized method is directly callable as `x.less(y)`; `T: type(Order)`
+  accepts exactly the domain types, and any other receiver or instantiation
+  is rejected with a diagnostic. Signed integers, floats, and composites
+  join only if a later decision widens the domain; user `impl Order`
+  blocks are rejected like `Eq` and `Hash`.
 - Trait-method dispatch is static: a dot-call resolves inherent methods
   first, then the unique trait implementation providing that method name for
   the receiver's concrete type. Because generic bodies are checked per

@@ -95,7 +95,10 @@ Primitive and structural implementations are supplied by the language or
 `core`. Records, enums, arrays, vectors, maps, and sets receive structural
 equality and hashing when all required components support them. A type cannot
 override structural `==` with a surprising user implementation. User-defined
-operators are not trait sugar in 1.0.
+operators are not trait sugar in 1.0. The builtin `Order` trait is likewise
+language-provided over the closed scalar domain (unsigned integers, `Bool`,
+`String`, `Bytes`) with the callable `less` method, and `std.collection`
+builds stable sorting on it; see [S0 language](s0-language.md).
 
 ## Standard traits
 

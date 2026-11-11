@@ -421,6 +421,26 @@ not match the class rule above. The checker never emits a total-bare pair
 that is lossy on some target: those calls become `c.num.try` or are rejected
 at the source level.
 
+## Ordering Comparison
+
+MIR 6 also exposes the Order domain's sequence comparison as operation 91,
+produced only by the builtin `less` method call on `string` or `bytes`
+receivers:
+
+```text
+str.order_lt a, b -> bool
+```
+
+Both operands must have the same sequence type: `string` compares UTF-8
+bytes and `bytes` compares raw bytes, both in unsigned byte-lexicographic
+order with the shorter prefix ordering first, so an empty operand orders
+before every non-empty operand of its type. The operation cannot fail and
+produces `bool`. Integer and `bool` receivers of the builtin `less` call
+lower to the existing `int.lt` and branch shapes instead; the verifier
+rejects `str.order_lt` on non-sequence operand types, on mismatched
+sequence operand types within one operation, and on results not of type
+`bool`.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -782,7 +802,8 @@ function-type environments, `fn.value`, and `call.value`; and current `mir 6`
 adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 `c.is_null`, the integer overflow method operations (71-79), the
 byte-sequence method operations (80-85), the integer conversion method
-operations (86-87), and the C scalar conversion method operations (88-90).
+operations (86-87), the C scalar conversion method operations (88-90), and
+the ordering comparison operation (91).
 Incompatible changes must use a new version and update:
 
 - this document;

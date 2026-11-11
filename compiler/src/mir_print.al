@@ -1207,7 +1207,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
 }
 
 fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_c_num_cast() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
+    if rec.op > mir_op_str_order_lt() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -1880,6 +1880,7 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 51 { return out_string("call") }
     if op == 65 { return out_string("call.value") }
     if op == 66 { return out_string("str.eq") }
+    if op == 91 { return out_string("str.order_lt") }
     if op == 67 { return out_string("fn.value") }
     if op == 68 { return out_string("table.insert.try") }
     if op == 69 { return out_string("c.call.unsafe") }
@@ -2085,6 +2086,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out(40) || !mir_out_operand_values(idx, store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
     }
     if rec.op == mir_op_str_eq() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
+    }
+    if rec.op == mir_op_str_order_lt() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_c_is_null() {
