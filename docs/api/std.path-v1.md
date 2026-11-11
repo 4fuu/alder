@@ -159,15 +159,8 @@ import std.path
 // returned checksum.
 
 // Byte equality between a host string and a literal.
-// uses == once Eq equality lands
 fn os_is(left: OsString, right: String) -> Bool {
-    if left.len() != right.len() { return false }
-    var at: U64 = 0
-    while at < left.len() {
-        if left.byte(at) != right.byte(at) { return false }
-        at = at + 1
-    }
-    return true
+    return left.to_bytes() == right.to_bytes()
 }
 
 // Option equality against a literal.
@@ -224,7 +217,6 @@ pub fn std_path_example() -> U64 {
             match path.Path.parse("d/../../e") {
                 Ok(suffix) => {
                     let norm = base.join(suffix).normalize()
-                    // uses == once Eq equality lands
                     if os_is(norm.to_os(), "a/b/e") { total = total + 10000 }
                 }
                 Err(_) => { total = total - 10000000 }
@@ -235,7 +227,6 @@ pub fn std_path_example() -> U64 {
     match path.Path.parse("a/../../..") {
         Ok(base) => {
             let up = base.normalize()
-            // uses == once Eq equality lands
             if os_is(up.to_os(), "../../..") { total = total + 100000 }
         }
         Err(_) => { total = total - 10000000 }
@@ -261,6 +252,7 @@ pub fn std_path_example() -> U64 {
 - No C bindings: the module is pure computation and can land as soon as the
   sysroot string byte operations are on main.
 - The example avoids string building, interpolation, and `while let`; its
-  `os_is`/`os_option_is` helpers compare host strings against fixed `String`
-  literals byte by byte so the checksum reads as ordinary comparisons, and
-  return to `==` once Eq equality lands.
+  `os_is` helper compares a host string against a fixed `String` literal
+  through `==` on the exact bytes now that Eq dispatch landed, and its
+  `os_option_is` helper keeps the manual Option walk until builtin
+  `Option` comparisons join the Eq domain (diagnostic 303).

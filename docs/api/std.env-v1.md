@@ -138,18 +138,6 @@ import std.path
 // The executable std.env v1 snapshot example. Only self-set values are
 // observed; every stage contributes a deterministic share of the checksum.
 
-// Byte equality between two host strings.
-// uses == once Eq equality lands
-fn os_eq(left: OsString, right: OsString) -> Bool {
-    if left.len() != right.len() { return false }
-    var at: U64 = 0
-    while at < left.len() {
-        if left.byte(at) != right.byte(at) { return false }
-        at = at + 1
-    }
-    return true
-}
-
 // The example inputs are fixed valid values, so failed constructions
 // contribute nothing; `try` is reserved for functions returning `Result`.
 pub fn std_env_example() -> U64 {
@@ -169,8 +157,7 @@ pub fn std_env_example() -> U64 {
                         Ok(_) => {
                             match env.var(key) {
                                 Some(found) => {
-                                    // uses == once Eq equality lands
-                                    if os_eq(found, value) { total = total + 10 }
+                                    if found == value { total = total + 10 }
                                 }
                                 None => { total = total - 1000 }
                             }
@@ -193,8 +180,7 @@ pub fn std_env_example() -> U64 {
                     let raw = "ready"
                     match path.OsString.from_bytes(raw.to_bytes()) {
                         Ok(rebuilt) => {
-                            // uses == once Eq equality lands
-                            if os_eq(rebuilt, value) && rebuilt.len() == 5 {
+                            if rebuilt == value && rebuilt.len() == 5 {
                                 total = total + 1
                             }
                         }

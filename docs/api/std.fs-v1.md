@@ -293,33 +293,13 @@ import std.path
 // The executable std.fs v1 snapshot example. Everything happens inside one
 // temporary directory that cleanup removes; the checksum is deterministic.
 
-// Byte equality between text and a literal.
-// uses == once Eq equality lands
-fn text_is(left: String, right: String) -> Bool {
-    if left.len() != right.len() { return false }
-    var at: U64 = 0
-    while at < left.len() {
-        if left.byte(at) != right.byte(at) { return false }
-        at = at + 1
-    }
-    return true
-}
-
 // Option equality between two host strings.
 // uses == once Eq equality lands
 fn name_opt_eq(left: Option(OsString), right: Option(OsString)) -> Bool {
     match left {
         Some(one) => {
             match right {
-                Some(two) => {
-                    if one.len() != two.len() { return false }
-                    var at: U64 = 0
-                    while at < one.len() {
-                        if one.byte(at) != two.byte(at) { return false }
-                        at = at + 1
-                    }
-                    return true
-                }
+                Some(two) => { return one == two }
                 None => { return false }
             }
         }
@@ -354,8 +334,7 @@ pub fn std_fs_example(io: io.Blocking) -> U64 {
         Ok(value) => { value }
         Err(_) => { return 0 }
     }
-    // uses == once Eq equality lands
-    if text_is(text, "alder") { total = total + 1 }
+    if text == "alder" { total = total + 1 }
 
     // The frozen files.copy shape: open, copy_to, finish.
     let source = match path.Path.parse("source.bin") {

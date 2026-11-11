@@ -247,15 +247,8 @@ import std.process
 // fixed arguments and piped capture; the checksum is deterministic.
 
 // Byte equality between a byte vector and a literal.
-// uses == once Eq equality lands
 fn bytes_are(left: Bytes, right: String) -> Bool {
-    if left.len() != right.len() { return false }
-    var at: U64 = 0
-    while at < left.len() {
-        if left.byte(at) != right.byte(at) { return false }
-        at = at + 1
-    }
-    return true
+    return left == right.to_bytes()
 }
 
 // The example inputs are fixed, so any early failure aborts with a
@@ -279,7 +272,6 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
         Err(_) => { return -1000000 }
     }
     if result.status.success() { total = total + 1 }
-    // uses == once Eq equality lands
     if bytes_are(result.stdout, "alder\n") { total = total + 10 }
 
     // Explicit environment override path, same fixed program.
