@@ -7571,6 +7571,10 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if builtin == 24 && sequence.kind != 15 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 25 && sequence.kind != 18 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 968 && sequence.kind != 8 { return expr_token_fail(d, state, base, 61, callee) }
+    // A mutable view must be formed from a binding. A field or element
+    // receiver is loaded as a value copy, so a view of it would write into
+    // the copy; the copy-store form makes the write explicit.
+    if (builtin == 24 || builtin == 25) && receiver_node.kind != 24 { return expr_token_fail(d, state, base, 307, receiver_node) }
     let element = sequence_element_type(state, parse, store, receiver_type_id)
     // Affine-element vectors transfer elements in and drain them at scope
     // exit: per-element reads and views would duplicate an owner, so only

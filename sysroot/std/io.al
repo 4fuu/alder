@@ -300,9 +300,8 @@ impl(Source: type(Reader)) BufReader(Source) {
 
     fn refill(mut self) -> Result(U64, IoError) {
         let size = self.buffer.len()
-        // A mutable view taken from a field loses its writes when passed as
-        // a call argument (view-by-root-local limitation), so read into a
-        // local copy of the window and store it back.
+        // A mutable view must be formed from a binding, so the window is
+        // copied to a local, read into, and stored back.
         var scratch = self.buffer
         let count = try self.source.read(scratch.slice_mut(0, size))
         self.buffer = scratch
@@ -372,14 +371,18 @@ impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
         }
         let base = self.length
         let total = base + size
+        // A mutable view must be formed from a binding, so the window is
+        // copied to a local, written, and stored back.
+        var window = self.buffer
         if true {
-            var view: MutSlice(U8) = self.buffer.slice_mut(0, total)
+            var view: MutSlice(U8) = window.slice_mut(0, total)
             var at: U64 = 0
             while at < size {
                 view[base + at] = data[at]
                 at = at + 1
             }
         }
+        self.buffer = window
         self.length = total
         return Ok(size)
     }

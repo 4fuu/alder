@@ -146,6 +146,16 @@ var m75FieldReceiverRejections = []struct {
 		"argument does not provide the parameter's required exclusive or owning access",
 	},
 	{
+		"mutable-field-view",
+		"type Bag {\n    items: Vec(U8)\n}\nimpl Bag {\n    fn view(mut self) -> MutSlice(U8) {\n        return self.items.slice_mut(0, 1)\n    }\n}\nfn main() -> I32 { return 0 }\n",
+		"a mutable view must be formed from a binding",
+	},
+	{
+		"mutable-field-view-argument",
+		"fn fill(value: U8, mut view: MutSlice(U8)) -> U64 {\n    var at: U64 = 0\n    while at < view.len() {\n        view[at] = value\n        at = at + 1\n    }\n    return at\n}\ntype Bag {\n    items: Vec(U8)\n}\nfn main() -> I32 {\n    var bag = Bag(items: Vec.new(U8))\n    let n = fill(7, bag.items.slice_mut(0, 1))\n    return 0\n}\n",
+		"a mutable view must be formed from a binding",
+	},
+	{
 		"live-table-view-of-field-blocks-insert",
 		"type Player {\n    age: U64\n}\ntype Db {\n    t: Table(Player)\n}\nimpl Cleanup for Db {\n    fn cleanup(take self) -> Unit { return }\n}\nfn build() -> Db {\n    using fresh = Table.new(Player)\n    return Db(t: fresh)\n}\nfn main() -> I32 {\n    using db = build()\n    let id = db.t.insert(Player(age: 7))\n    match db.t.get(id) {\n        Some(p) => { let other = db.t.insert(Player(age: 8)) }\n        None => {}\n    }\n    return 0\n}\n",
 		"overlapping table access",
