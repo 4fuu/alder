@@ -363,7 +363,11 @@ explicitly.
 
 Implemented expressions include:
 
-- integer, float, Boolean, string/bytes, and fixed-array literals;
+- integer, float, Boolean, string/bytes, fixed-array, and `()` literals; the
+  `()` literal has type `Unit` and may appear as a return operand, a `Unit`
+  argument, or an absent variant payload such as `Ok(())`. It cannot be bound
+  and a standalone `()` statement is rejected with diagnostic 331; only a
+  `Unit`-result call may stand alone;
 - unary `-`, `!`, and `~`;
 - checked arithmetic, shifts, bitwise `&`/`|`/`^`, comparisons, equality for
   supported primitives, and short-circuit Boolean operators;

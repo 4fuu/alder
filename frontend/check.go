@@ -1391,6 +1391,14 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		}
 		return nil, diag(x.P, "unknown name %q", x.Name)
 
+	case *UnitLit:
+		unit := prim(pUnit)
+		if expected != nil && !typeEqual(expected, unit) {
+			return nil, k.mismatch(x.P, "unit value", expected, unit)
+		}
+		k.note(e, unit)
+		return unit, nil
+
 	case *Unary:
 		var exp *Type
 		if x.Op == "-" && expected != nil && expected.isInt() {

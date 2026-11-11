@@ -292,7 +292,8 @@ outside 1.0.
 Functions evaluate statements in source order. `return` exits explicitly.
 Every reachable path in a non-`Unit` function returns a value. A `Unit`
 function may fall through. `()` is the sole `Unit` value and a bare `return`
-returns it.
+returns it. The literal is accepted as a return operand, a `Unit` argument, and
+the absent payload of `Ok(())`/`Some(())`; it is not a statement by itself.
 
 `if`, `while`, and `for` are statements. Loops have `break` and `continue`, but
 do not produce values in the core. `match` is an expression and may be used as

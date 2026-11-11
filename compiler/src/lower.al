@@ -475,6 +475,12 @@ fn lower_type_concrete(store: CheckStore, checked_type: U64) -> Bool {
     return true
 }
 
+fn lower_checked_unit(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    return checked.kind == 1 && checked.target == 12
+}
+
 fn lower_slice_u8(store: CheckStore, checked_type: U64) -> Bool {
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind != 8 || checked.arg_count != 1 { return false }
@@ -4110,6 +4116,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
         var kind = mir_const_bool()
         var bool_value = expression.bool_value
+        if lower_checked_unit(store, expression.checked_type) { kind = mir_const_unit() }
         var int_value: I64 = 0
         var text: __s0_String = ""
         if expression.kind == 3 {
@@ -4590,7 +4597,12 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, annotation.variant_use - 1)
             let name = try lower_source_word(d, source_state, variant.source, variant.name_start, variant.name_end)
             var payload: U64 = 0
-            if expression.child_count == 1 { payload = __s0_buffer_get(U64, args, 0) }
+            if expression.child_count == 1 {
+                // A unit payload carries no MIR operand; the variant tag
+                // alone identifies it, matching the verifier's rule.
+                let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+                if !lower_checked_unit(store, __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1).checked_type) { payload = __s0_buffer_get(U64, args, 0) }
+            }
             let instr = try lower_add_instr(d, current, function, block, mir_op_enum_construct(), result, 0, result_type.id, payload, 0, 0, name)
             return Ok(LowerStep(state: instr.state, id: result))
         }
@@ -4738,7 +4750,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
             let child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
             current = child.state
-            payload = child.id
+            if !lower_checked_unit(store, __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1).checked_type) { payload = child.id }
         }
         let typ = try lower_type(d, source_state, store, current, expression.checked_type)
         let result = try lower_add_result(d, typ.state, function, block, expression.checked_type, source_state, store)
@@ -4798,12 +4810,16 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 var binding_value: U64 = 0
                 if arm.binding != 0 {
                     let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
-                    let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
-                    let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__alder_match_payload", checked.first_arm + case_ordinal), payload_type.id, mir_value_def_switch_case(), source_block, case_ordinal + 1)
-                    current = lower_with_mir(payload_type.state, value.store)
-                    binding_value = value.id
-                    let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
-                    current = lower_with_bindings(current, bindings)
+                    // A unit payload has no MIR switch-case binding; the
+                    // variant tag alone identifies it.
+                    if !lower_checked_unit(store, local.checked_type) {
+                        let payload_type = try lower_type(d, source_state, store, current, local.checked_type)
+                        let value = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "__alder_match_payload", checked.first_arm + case_ordinal), payload_type.id, mir_value_def_switch_case(), source_block, case_ordinal + 1)
+                        current = lower_with_mir(payload_type.state, value.store)
+                        binding_value = value.id
+                        let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: value.id, parameter: 1, initial: 0))
+                        current = lower_with_bindings(current, bindings)
+                    }
                 }
                 let case = try lower_add_switch_case(d, current, term.id, case_ordinal, name, binding_value, __s0_buffer_get(U64, arm_entries, ordinal))
                 current = case.state
@@ -4812,9 +4828,12 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             } else {
                 // A later arm of the same run binds the run's case payload.
                 if arm.binding != 0 {
-                    if run_binding_value == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-                    let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: run_binding_value, parameter: 1, initial: 0))
-                    current = lower_with_bindings(current, bindings)
+                    let local = __s0_buffer_get(LocalRec, store.locals, arm.binding - 1)
+                    if !lower_checked_unit(store, local.checked_type) {
+                        if run_binding_value == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                        let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: arm.binding, mir_id: run_binding_value, parameter: 1, initial: 0))
+                        current = lower_with_bindings(current, bindings)
+                    }
                 }
             }
             ordinal = ordinal + 1
@@ -7664,7 +7683,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind != 2 && item.bool_value != 0 { return false }
         if item.kind == 2 {
             let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
-            if literal_type.kind != 1 || literal_type.target != 1 { return false }
+            if literal_type.kind != 1 || (literal_type.target != 1 && literal_type.target != 12) { return false }
         }
         if item.kind == 3 {
             let literal_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)

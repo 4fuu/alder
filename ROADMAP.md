@@ -1506,6 +1506,17 @@ requires a mutable owner. Evidence: `compiler/production_mutable_view_args_test.
 runs inherent and trait methods, temporary views, forwarding, and the three
 kept rejections (101, 104, and immutable reassignment).
 
+Landed language progress adds the `()` Unit literal. `()` has type `Unit` and
+is accepted as a return operand, a `Unit` argument, and the absent payload of
+`Ok(())`/`Some(())`; lowering emits the unit constant and omits the variant
+payload operand. It is not a standalone statement: diagnostic 331 rejects a
+bare `()` where only a `Unit`-result call may stand alone, and Unit bindings
+stay rejected. The Go Stage 0 frontend carries the same rules. Evidence: the
+`frontend` end-to-end `unit` program and rejection tests, and
+`compiler/production_unit_test.go`, which compiles and runs the production
+driver output and pins the standalone, non-`Unit` argument, and unit-payload
+mismatch rejections.
+
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
 state with value semantics and unbiased rejection ranges; `seeded`,

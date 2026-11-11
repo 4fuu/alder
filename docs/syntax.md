@@ -320,7 +320,9 @@ false
 ```
 
 `()` is the sole value of type `Unit`. It does not introduce general tuple
-syntax; records provide named products. A bare `return` returns `()`.
+syntax; records provide named products. A bare `return` returns `()`. The
+literal is a value, not a statement: only a `Unit`-result call may stand alone,
+so a bare `()` statement is rejected.
 
 Integer literals are arbitrary-precision during checking, adapt to an expected
 integer type when representable, and otherwise default to `I64`. The

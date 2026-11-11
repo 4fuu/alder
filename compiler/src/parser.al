@@ -651,6 +651,13 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
         return Ok(Parsed(node))
     }
     if token_punct(state, initial, "(") {
+        let unit_cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+        if token_punct(state, unit_cursor, ")") {
+            let close = parse_token(state, unit_cursor)
+            let cursor = ParseCursor(token: unit_cursor.token + 1, store: initial.store)
+            let node = try add_syntax(d, cursor, 66, initial.token + 1, token.source, token.start, close.end, 0, 0, 0)
+            return Ok(Parsed(node))
+        }
         let inside = try parse_expression(d, state, ParseCursor(token: initial.token + 1, store: initial.store), depth + 1)
         if parse_step_bad(inside) { return Ok(inside) }
         let value = parse_step_value(inside)

@@ -1634,6 +1634,9 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 		}
 		return 0, diag(x.P, "internal: unbound name %q at lowering", x.Name)
 
+	case *UnitLit:
+		return b.constGet(prim(pUnit), mir.ConstValue{Kind: mir.ConstUnit}), nil
+
 	case *Unary:
 		if x.Op == "!" {
 			v, err := b.expr(x.X)
@@ -2017,7 +2020,11 @@ func (b *fb) call(x *Call) (mir.ValueId, error) {
 			if err != nil {
 				return 0, err
 			}
-			in.Payload = pv
+			// A unit payload carries no MIR operand; the variant tag alone
+			// identifies it, matching the verifier's unit-payload rule.
+			if pt := b.ann[x.Args[0]].typ; pt == nil || pt.kind != tPrim || pt.prim != pUnit {
+				in.Payload = pv
+			}
 		}
 		id := b.res(enumTy)
 		in.Result = id
@@ -2338,8 +2345,11 @@ func (b *fb) match(x *Match) (mir.ValueId, error) {
 		if arm.Variant != "" {
 			c.Variant = mirVariantName(arm.Variant, enumTy)
 			if pv := enumTy.variantByName(arm.Variant); pv != nil && pv.payload != nil {
-				bid := b.f.AddValue(b.valueName(arm.Bind), b.l.ty(substType(pv.payload, structBindings(enumTy))), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: len(cases)})
-				c.Binding = bid
+				pt := substType(pv.payload, structBindings(enumTy))
+				if pt.kind != tPrim || pt.prim != pUnit {
+					bid := b.f.AddValue(b.valueName(arm.Bind), b.l.ty(pt), mir.ValueDef{Kind: mir.ValueDefSwitchCase, Block: switchID, Case: len(cases)})
+					c.Binding = bid
+				}
 			}
 		}
 		cases = append(cases, c)
@@ -2352,7 +2362,10 @@ func (b *fb) match(x *Match) (mir.ValueId, error) {
 		b.values = cloneValueIDs(savedValues)
 		if arm.Variant != "" {
 			if pv := enumTy.variantByName(arm.Variant); pv != nil && pv.payload != nil {
-				b.values[arm.Bind] = cases[i].Binding
+				pt := substType(pv.payload, structBindings(enumTy))
+				if pt.kind != tPrim || pt.prim != pUnit {
+					b.values[arm.Bind] = cases[i].Binding
+				}
 			}
 		}
 		av, err := b.expr(arm.Body)

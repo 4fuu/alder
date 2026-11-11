@@ -4553,6 +4553,7 @@ fn primitive_type_id(state: State, parse: ParseStore, store: CheckStore, name: _
     // conversions and literal defaults.
     var target: U64 = 0
     if len(name) == 4 && name[0] == 66 && name[1] == 111 && name[2] == 111 && name[3] == 108 { target = 1 }
+    if len(name) == 4 && name[0] == 85 && name[1] == 110 && name[2] == 105 && name[3] == 116 { target = 12 }
     if len(name) == 3 && name[0] == 73 && name[1] == 54 && name[2] == 52 { target = 5 }
     if len(name) == 2 && name[0] == 85 && name[1] == 56 { target = 6 }
     if len(name) == 3 && name[0] == 85 && name[1] == 54 && name[2] == 52 { target = 9 }
@@ -9170,6 +9171,13 @@ fn append_array_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64
 // Shared recursive value-expression slice for returns, binding initializers,
 // and assignment values. The base store is retained across the whole traversal
 // so a deferred shape or semantic failure cannot expose a partial graph.
+fn check_unit_value_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let unit_type = primitive_type_id(state, parse, store, "Unit")
+    if unit_type == 0 { return expr_deferred(store) }
+    if expected != 0 && expected != unit_type { return expr_token_type_fail(d, state, store, mismatch_kind, mismatch_node, expected, unit_type) }
+    return append_expression(d, store, owner, expression_id, 2, unit_type, 0, 0, 0, 0, 0, site_kind, site_syntax)
+}
+
 fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, expression: SyntaxRec, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     if expression.kind == 58 { return check_closure_expression(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 27 { return check_ordinary_call(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
@@ -9389,6 +9397,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         else { if token.keyword != 18 { return expr_deferred(base) } }
         return append_expression(d, store, owner, expression_id, 2, bool_type, 0, bool_value, 0, 0, 0, site_kind, site_syntax)
     }
+    if expression.kind == 66 { return check_unit_value_expression(d, state, parse, store, owner, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
     if expression.kind == 24 {
         let local_id = local_lookup(store, owner, expression, state)
         if local_id == 0 && expected != 0 && node_word(state, expression, "None") {
@@ -10225,6 +10234,10 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
     return append_checked_statement(d, recorded, owner, statement_id, 4, environment, expression, 0, 0, 0, 0, true)
 }
 
+fn reject_unit_expression_statement(d: Domain, state: State, store: CheckStore, statement: SyntaxRec) -> Result(BodyStep, __s0_Error) {
+    return body_token_fail(d, state, store, 331, statement)
+}
+
 fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64, in_loop: Bool) -> Result(BodyStep, __s0_Error) {
     var expression_id = statement_id
     var expression = statement
@@ -10233,6 +10246,7 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
         expression_id = expression_link.node
         expression = __s0_buffer_get(SyntaxRec, parse.nodes, expression_id - 1)
     }
+    if expression.kind == 66 { return reject_unit_expression_statement(d, state, store, statement) }
     let outcome = try check_value_expression(d, state, parse, store, owner, expression, expression_id, 0, 23, statement, 4, statement_id, in_loop)
     let current = match outcome {
         ExprGood(item) => item.store

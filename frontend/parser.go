@@ -858,6 +858,10 @@ func (p *parser) parsePrimary() (Expr, error) {
 		return nil, p.errf(t, "expected an expression, got %q", t.text)
 	case t.kind == tokPunct && t.text == "(":
 		p.advance()
+		if p.cur().kind == tokPunct && p.cur().text == ")" {
+			p.advance()
+			return &UnitLit{P: tokenPos(t)}, nil
+		}
 		p.exprDepth++
 		x, err := p.parseExpr()
 		if err != nil {

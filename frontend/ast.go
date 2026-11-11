@@ -208,6 +208,11 @@ type MatchArm struct {
 	Body    Expr
 }
 
+// UnitLit is the sole Unit value, written ().
+type UnitLit struct {
+	P pos
+}
+
 // Try is try expr (error propagation).
 type Try struct {
 	P pos
@@ -215,6 +220,7 @@ type Try struct {
 }
 
 func (e *IntLit) exprPos() pos   { return e.P }
+func (e *UnitLit) exprPos() pos  { return e.P }
 func (e *FloatLit) exprPos() pos { return e.P }
 func (e *StrLit) exprPos() pos   { return e.P }
 func (e *BoolLit) exprPos() pos  { return e.P }
