@@ -320,11 +320,15 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     }
     let arrow = try expect_punct(d, state, cursor, "=>")
     if parse_step_bad(arrow) { return Ok(arrow) }
-    // An arm body is one expression, or a `{ ... }` statement block for the
-    // statement form of match used by table-view arms.
+    // An arm body is one expression, a `{ ... }` statement block for the
+    // statement form of match used by table-view arms, or a diverging
+    // `return` statement that produces no value.
     var body: ParseStep = Rejected(parse_step_cursor(arrow))
+    let body_token = parse_token(state, parse_step_cursor(arrow))
     if token_punct(state, parse_step_cursor(arrow), "{") {
         body = try parse_block(d, state, parse_step_cursor(arrow))
+    } else if body_token.kind == 1 && body_token.keyword == 12 {
+        body = try parse_return_statement(d, state, parse_step_cursor(arrow), depth)
     } else {
         body = try parse_expression(d, state, parse_step_cursor(arrow), depth)
     }
@@ -367,6 +371,27 @@ fn parse_match(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Res
     let close = parse_token(state, cursor)
     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
     let node = try add_syntax(d, cursor, 37, initial.token + 1, start.source, start.start, close.end, 0, 0, children)
+    return Ok(Parsed(node))
+}
+
+// parse_return_statement parses one `return` statement node, with the
+// optional value expression on the same line. The match-arm body shares this
+// node so a diverging arm (`=> return ...`) carries the same shape as the
+// statement form and the checker sees one return-statement kind.
+fn parse_return_statement(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
+    let start = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    var children: U64 = 0
+    var end = start.end
+    if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) {
+        let expr = try parse_expression(d, state, cursor, depth)
+        if parse_step_bad(expr) { return Ok(expr) }
+        let ev = parse_step_value(expr)
+        cursor = try add_link(d, ev.cursor, ev.node, 0)
+        children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+        end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1).end
+    }
+    let node = try add_syntax(d, cursor, 18, initial.token + 1, start.source, start.start, end, 0, 0, children)
     return Ok(Parsed(node))
 }
 
@@ -924,19 +949,7 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         return Ok(Parsed(node))
     }
     if start.keyword == 12 {
-        var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
-        var children: U64 = 0
-        var end = start.end
-        if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) {
-            let expr = try parse_expression(d, state, cursor, 0)
-            if parse_step_bad(expr) { return Ok(expr) }
-            let ev = parse_step_value(expr)
-            cursor = try add_link(d, ev.cursor, ev.node, 0)
-            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-            end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1).end
-        }
-        let node = try add_syntax(d, cursor, 18, initial.token + 1, start.source, start.start, end, 0, 0, children)
-        return Ok(Parsed(node))
+        return parse_return_statement(d, state, initial, 0)
     }
     if start.keyword == 30 || start.keyword == 31 {
         // break and continue carry no value and take no argument; a following

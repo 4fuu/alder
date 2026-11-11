@@ -222,7 +222,10 @@ tests such as `if let` cannot let an affine payload escape their access scope.
 A `match` arm may carry an `if` guard evaluated after its pattern matches; a
 false guard continues with the next arm, a guarded arm does not count toward
 exhaustiveness, and a guard cannot consume a binding.
-The type, not a general `move` expression, exposes this rare consumption.
+An arm body may instead diverge with `return`, which is checked against the
+function's result type and leaves the match without producing a value; the
+match's type comes only from its value-producing arms, so at least one arm
+must produce a value. The type, not a general `move` expression, exposes this rare consumption.
 The `let payload = option else ...` extraction form consumes an affine option
 and transfers its payload, while it copies a copyable payload.
 

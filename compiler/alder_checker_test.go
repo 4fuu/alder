@@ -141,7 +141,7 @@ type checkerBlock struct {
 }
 
 type checkerMatch struct{ id, owner, syntax, scrutinee, scrutineeType, checkedType, firstArm, armCount int }
-type checkerMatchArm struct{ id, owner, syntax, checkedMatch, variantUse, variantKind, binding, environment, body, block, guard int }
+type checkerMatchArm struct{ id, owner, syntax, checkedMatch, variantUse, variantKind, binding, environment, body, block, guard, statement int }
 type checkerTry struct{ id, owner, syntax, expression, resultType, okType, errorType int }
 type checkerCleanup struct {
 	id, owner, syntax, environment, binding, initializer, callback, drain int
@@ -1747,10 +1747,10 @@ func decodeCheckerManifest(text string, inputs map[string]string) (checkerManife
 			}
 			m.matches = append(m.matches, checkerMatch{id: numbers[0], owner: numbers[1], syntax: numbers[2], scrutinee: numbers[3], scrutineeType: numbers[4], checkedType: numbers[5], firstArm: numbers[6], armCount: numbers[7]})
 		case "W":
-			if err != nil || len(numbers) != 11 {
+			if err != nil || len(numbers) != 12 {
 				return m, fmt.Errorf("line %d has invalid W record", lineNumber+2)
 			}
-			m.matchArms = append(m.matchArms, checkerMatchArm{id: numbers[0], owner: numbers[1], syntax: numbers[2], checkedMatch: numbers[3], variantUse: numbers[4], variantKind: numbers[5], binding: numbers[6], environment: numbers[7], body: numbers[8], block: numbers[9], guard: numbers[10]})
+			m.matchArms = append(m.matchArms, checkerMatchArm{id: numbers[0], owner: numbers[1], syntax: numbers[2], checkedMatch: numbers[3], variantUse: numbers[4], variantKind: numbers[5], binding: numbers[6], environment: numbers[7], body: numbers[8], block: numbers[9], guard: numbers[10], statement: numbers[11]})
 		case "X":
 			if err != nil || len(numbers) != 7 {
 				return m, fmt.Errorf("line %d has invalid X record", lineNumber+2)

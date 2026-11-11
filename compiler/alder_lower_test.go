@@ -34,6 +34,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m8-eq-operators", func(t *testing.T) { runAlderEqOperatorBehavior(t, exe) })
 	t.Run("m8-float-binary", func(t *testing.T) { runAlderFloatBinaryBehavior(t, exe) })
 	t.Run("m8-order-less", func(t *testing.T) { runAlderOrderLessBehavior(t, exe) })
+	t.Run("m8-match-diverging-arm", func(t *testing.T) { runAlderMatchDivergingArmBehavior(t, exe) })
 	t.Run("m75-fn-value-domain", func(t *testing.T) { runAlderFnValueDomainLowerBehavior(t, exe) })
 	t.Run("m75-vec-loop-scalars", func(t *testing.T) { runAlderVecLoopLowerBehavior(t, exe) })
 	files := map[string]string{

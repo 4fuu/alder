@@ -827,6 +827,12 @@ fn main() -> I32 {
 		// Float remainder stays integer-only: no float semantics were
 		// decided for %, so it keeps the integer-operand diagnostic.
 		{"mod-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    let r = w % 2.0\n    if r > 0.0 { return 1 }\n    return 0\n}\n", 37},
+		// Diverging `=> return ...` arms (docs/syntax.md match expression):
+		// a match needs a value-producing arm, one body form per match, and
+		// the straight-line table-view region rejects divergence outright.
+		{"match-all-diverging", "enum Res {\n    Hit(value: I32)\n    Miss\n}\nfn f(r: Res) -> I32 {\n    let v = match r {\n        Hit(_) => return 1\n        Miss => return 2\n    }\n    return v\n}\nfn main() -> I32 { return 0 }\n", 305},
+		{"match-diverging-block-mix", "enum Res {\n    Hit(value: I32)\n    Miss\n}\nfn f(r: Res) -> I32 {\n    let v = match r {\n        Hit(value) => { return value }\n        Miss => return 2\n    }\n    return v\n}\nfn main() -> I32 { return 0 }\n", 135},
+		{"table-view-diverging-arm", "fn f(t: Table(U64), id: U64.Id) -> Unit {\n    match t.get(id) {\n        Some(value) => { let doubled = 1 + 1 }\n        None => return\n    }\n}\n", 133},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

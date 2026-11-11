@@ -2422,6 +2422,7 @@ fn lower_move_walk_expression(d: Domain, store: CheckStore, walk: LowerMoveWalkR
             let arm_rec = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + arm)
             if arm_rec.body != 0 { inner = try lower_move_walk_expression(d, store, inner, loop_at, arm_rec.body) }
             if arm_rec.block != 0 { inner = try lower_move_walk_block(d, store, inner, loop_at, arm_rec.block) }
+            if arm_rec.statement != 0 { inner = try lower_move_walk_one(d, store, inner, loop_at, arm_rec.statement) }
             arm = arm + 1
         }
     }
@@ -4707,6 +4708,12 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     let unit_instr = try lower_add_instr(d, unit_result.state, function, flow.block, mir_op_const_get(), unit_result.id, 0, 0, 0, 0, 0, unit_name)
                     current = try lower_jump_value(d, unit_instr.state, function, lower_open_block(unit_instr.state.mir, function, flow.block), join.id, unit_result.id)
                 }
+            } else if arm.statement != 0 {
+                // Diverging arm: the return statement lowers inside the arm
+                // region and terminates every path, so nothing jumps to the
+                // match join and the join parameter receives no value here.
+                current = try lower_diverging_match_arm(d, source_state, spans, store, current, owner, function, arm_block, arm, environment, panic_block)
+                if !current.valid { return Ok(LowerStep(state: current, id: 0)) }
             } else {
                 let value = try lower_expression(d, source_state, spans, store, current, owner, function, arm_block, arm.body, arm.environment, panic_block)
                 current = value.state
@@ -5256,6 +5263,21 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true))
+}
+
+// lower_diverging_match_arm lowers one `=> return ...` arm of a match: the
+// checked return statement executes inside the arm region, running every
+// cleanup registration it crosses, and terminates the arm block. Nothing
+// reaches the match join from here, so the join parameter is fed only by the
+// match's value-producing arms.
+fn lower_diverging_match_arm(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, arm: CheckedMatchArmRec, environment: U64, panic_block: U64) -> Result(LowerState, __s0_Error) {
+    if arm.statement == 0 || arm.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return Ok(lower_invalid(state)) }
+    let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, arm.statement - 1)
+    if statement.owner != owner { return Ok(lower_invalid(state)) }
+    let link = CheckedStatementLinkRec(statement: 0, next: 0)
+    let flow = try lower_one_statement(d, source_state, spans, store, state, owner, function, block, statement, link, panic_block, environment)
+    if !flow.state.valid || !flow.terminated { return Ok(lower_invalid(flow.state)) }
+    return Ok(flow.state)
 }
 
 fn lower_statement_chain(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, link_id: U64, panic_block: U64, panic_environment: U64) -> Result(LowerFlowStep, __s0_Error) {
@@ -7050,6 +7072,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, count_at)
         if arm.body >= 1 && arm.body <= expression_count { expression_owners[arm.body] = expression_owners[arm.body] + 1 }
         if arm.guard >= 1 && arm.guard <= expression_count { expression_owners[arm.guard] = expression_owners[arm.guard] + 1 }
+        if arm.statement >= 1 && arm.statement <= statement_count { statement_owners[arm.statement] = statement_owners[arm.statement] + 1 }
         count_at = count_at + 1
     }
     count_at = 0
@@ -7788,7 +7811,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     var active_arm_owners: U64 = 0
     while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
         let item = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || (item.body == 0 && item.block == 0) || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) || (item.block != 0 && item.block > __s0_buffer_len(CheckedBlockRec, store.control.blocks)) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || item.checked_match == 0 || item.checked_match > __s0_buffer_len(CheckedMatchRec, store.control.matches) || item.variant_kind > 7 || !lower_environment_valid(store, item.owner, item.environment) || (item.body == 0 && item.block == 0 && item.statement == 0) || item.body > __s0_buffer_len(CheckedExprRec, store.expressions) || (item.block != 0 && item.block > __s0_buffer_len(CheckedBlockRec, store.control.blocks)) || (item.statement != 0 && (item.statement > statement_count || __s0_buffer_get(CheckedStatementRec, store.control.statements, item.statement - 1).kind != 4)) { return false }
         let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, item.checked_match - 1)
         if item.guard != 0 {
             if item.guard > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
@@ -7799,13 +7822,19 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.body != 0 {
             let body = __s0_buffer_get(CheckedExprRec, store.expressions, item.body - 1)
             if checked_match.owner != item.owner || body.owner != item.owner || !lower_checked_abi_equal(store, body.checked_type, checked_match.checked_type) { return false }
+        } else { if item.statement != 0 {
+            // A diverging arm's return belongs to the same concrete
+            // instance; it produces no value and never constrains the
+            // match's type.
+            let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, item.statement - 1)
+            if checked_match.owner != item.owner || statement.owner != item.owner { return false }
         } else {
             // A block arm produces Unit, and its statement block belongs to
             // the same concrete instance as the match.
             let arm_block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, item.block - 1)
             let unit_checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_match.checked_type - 1)
             if checked_match.owner != item.owner || arm_block.owner != item.owner || unit_checked.kind != 1 || unit_checked.target != 12 { return false }
-        }
+        } }
         active_arm_owners = active_arm_owners + arm_starts[at]
         active_arm_owners = active_arm_owners - arm_ends[at]
         if active_arm_owners != 1 { return false }

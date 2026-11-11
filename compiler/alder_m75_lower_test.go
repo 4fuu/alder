@@ -1675,6 +1675,108 @@ func runAlderFloatBinaryBehavior(t *testing.T, exe string) {
 	t.Logf("float behavior exited cleanly under strict C11 and ASan/UBSan/float-divide-by-zero")
 }
 
+// M8 diverging match arms: `=> return ...` arms are legal in the
+// expression-position match of docs/syntax.md's canonical example. A
+// diverging arm produces no value, so it never constrains the match's arm
+// type; lowering returns straight out of the arm region without feeding the
+// match join. Every fixture path exercises both sides: a value arm that
+// joins and a return arm that leaves, so a mis-lowered join shows up as a
+// wrong result rather than an unused edge.
+func runAlderMatchDivergingArmBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"match-diverging-arm.al": `enum Outcome {
+    Hit(value: I32)
+    Miss(code: I32)
+}
+
+fn resolve(r: Outcome) -> I32 {
+    let v = match r {
+        Hit(value) => value
+        Miss(code) => return code
+    }
+    return v + 1
+}
+
+fn leading(r: Outcome) -> I32 {
+    let v = match r {
+        Miss(code) => return code - 1
+        Hit(value) => value
+    }
+    return v
+}
+
+fn direct(r: Outcome) -> I32 {
+    return match r {
+        Hit(value) => value * 2
+        Miss(_) => return 9
+    }
+}
+
+fn wild(r: Outcome) -> I32 {
+    return match r {
+        Hit(value) => value
+        _ => return 6
+    }
+}
+
+fn main() -> I32 {
+    if resolve(Hit(4)) != 5 { return 1 }
+    if resolve(Miss(7)) != 7 { return 2 }
+    if leading(Hit(3)) != 3 { return 3 }
+    if leading(Miss(5)) != 4 { return 4 }
+    if direct(Hit(3)) != 6 { return 5 }
+    if direct(Miss(0)) != 9 { return 6 }
+    if wild(Hit(2)) != 2 { return 7 }
+    if wild(Miss(1)) != 6 { return 8 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"match-diverging-arm.al"})
+	second := runLowerCompiler(t, exe, files, []string{"match-diverging-arm.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered diverging-arm MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered diverging-arm MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered diverging-arm MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("diverging-arm MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"match-diverging-arm.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"match-diverging-arm.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written diverging-arm C changed across processes")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "match-diverging-arm.c")
+	program := filepath.Join(dir, "match-diverging-arm.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of diverging-arm behavior: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run diverging-arm behavior: %v\n%s", err, output)
+	}
+	t.Logf("diverging-arm program exited cleanly under strict C11")
+}
+
 // floatDivSanitizersSupported probes whether the host toolchain can build
 // and run binaries with ASan, UBSan, and the float-divide-by-zero UBSan
 // check enabled together.

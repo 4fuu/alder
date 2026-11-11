@@ -311,6 +311,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string(" requires integer operands") }
     if kind == 303 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" requires a type that implements Eq (integers, Bool, String, Bytes, or records and enums of Eq components)") }
+    if kind == 305 { return out_string("match needs a value-producing arm: every arm returns, so the match has no value") }
     if kind == 39 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" must be called") }
     if kind == 40 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }

@@ -330,6 +330,7 @@ type MatchArmDraftRec {
     body: U64
     block: U64
     guard: U64
+    statement: U64
 }
 
 enum MatchArmOutcome {
@@ -4585,6 +4586,41 @@ fn match_arms_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     }))
 }
 
+type MatchArmStatementRec {
+    store: CheckStore
+    statement: U64
+}
+
+enum MatchArmStatementOutcome {
+    MatchArmStatementGood(value: MatchArmStatementRec)
+    MatchArmStatementBad(value: CheckStore)
+}
+
+// check_diverging_match_arm checks one `=> return ...` arm body through the
+// statement machinery: the return joins the function's return records with
+// its expression checked against the function result type, and the checked
+// statement lowers inside the arm region without reaching the match join.
+// The arm produces no value, so it never constrains the match's arm type. A
+// table-view arm cannot diverge because the view region is one straight-line
+// fail-free block.
+fn check_diverging_match_arm(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, body_node: U64, view_root: U64, in_loop: Bool) -> Result(MatchArmStatementOutcome, __s0_Error) {
+    let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, body_node - 1)
+    if view_root != 0 {
+        let failed = try match_arms_fail(d, state, store, 133, syntax)
+        return Ok(MatchArmStatementBad(match failed {
+            MatchArmsGood(value) => value.store
+            MatchArmsBad(value) => value
+            MatchArmsDefer => store
+        }))
+    }
+    let first_events = try __s0_buffer_new(BodyEventRec, d)
+    let built = try build_body_event(d, parse, first_events, 3, body_node)
+    let stepped = try check_body_event(d, state, parse, built.events, store, owner, built.event, in_loop, false)
+    if body_event_stopped(stepped) { return Ok(MatchArmStatementBad(body_event_store(stepped, store))) }
+    let value = body_event_value(stepped, store)
+    return Ok(MatchArmStatementGood(MatchArmStatementRec(store: value.store, statement: value.semantic)))
+}
+
 // view_block_statement_ok validates one statement syntax node of a table-view
 // arm block. The MIR access region of a view is one basic block, so a view
 // block admits only straight-line copy statements: let bindings, including
@@ -4776,9 +4812,26 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
     let body_node = __s0_buffer_get(SyntaxRec, parse.nodes, body_link.node - 1)
     var arm_body: U64 = 0
     var arm_block: U64 = 0
+    var arm_statement: U64 = 0
     var arm_value_type: U64 = 0
     var block_arm = false
-    if body_node.kind == 14 {
+    if body_node.kind == 18 {
+        // A diverging `return` arm: its statement is checked against the
+        // function result, it produces no value, and it never joins.
+        let diverged = try check_diverging_match_arm(d, state, parse, current, owner, body_link.node, view_root, in_loop)
+        current = match diverged {
+            MatchArmStatementGood(value) => value.store
+            MatchArmStatementBad(value) => value
+        }
+        if match diverged {
+            MatchArmStatementGood(value) => false
+            MatchArmStatementBad(value) => true
+        } { return Ok(MatchArmsBad(current)) }
+        arm_statement = match diverged {
+            MatchArmStatementGood(value) => value.statement
+            MatchArmStatementBad(value) => 0
+        }
+    } else if body_node.kind == 14 {
         // A block arm is the statement form: every arm of one match must use
         // it, the arm produces Unit, and a table-view arm restricts its
         // statements to the straight-line fail-free region rules.
@@ -4822,9 +4875,9 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
     }
     if block_arm && prior.expression_arms { return match_arms_fail(d, state, current, 135, body_node) }
     if !block_arm && prior.block_arms { return match_arms_fail(d, state, current, 135, body_node) }
-    if prior.arm_type != 0 && !(try expression_type_equal(d, state, parse, current, prior.arm_type, arm_value_type)) { return match_arms_fail(d, state, current, 77, body_node) }
+    if prior.arm_type != 0 && arm_value_type != 0 && !(try expression_type_equal(d, state, parse, current, prior.arm_type, arm_value_type)) { return match_arms_fail(d, state, current, 77, body_node) }
     let arm_environment = current_environment(current, owner)
-    let next_drafts = try __s0_buffer_append(MatchArmDraftRec, d, prior.arms, MatchArmDraftRec(owner: owner, syntax: link.node, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: arm_body, block: arm_block, guard: arm_guard))
+    let next_drafts = try __s0_buffer_append(MatchArmDraftRec, d, prior.arms, MatchArmDraftRec(owner: owner, syntax: link.node, variant_use: variant_use, variant_kind: variant_kind, binding: binding, environment: arm_environment, body: arm_body, block: arm_block, guard: arm_guard, statement: arm_statement))
     if binding != 0 { current = try restore_environment(d, current, owner, entry) }
     var arm_type = prior.arm_type
     if arm_type == 0 { arm_type = arm_value_type }
@@ -8965,6 +9018,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             MatchArmsDefer => true
         } { return expr_deferred(base) }
         if arms.arm_count == 0 { return expr_token_fail(d, state, base, 78, expression) }
+        if arms.arm_type == 0 { return expr_token_fail(d, state, base, 305, expression) }
         if !arms.wildcard {
             var variant_count: U64 = 2
             if scrutinee_type.kind == 7 {
@@ -9007,7 +9061,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         var arm_at: U64 = 0
         while arm_at < arms.arm_count {
             let arm = __s0_buffer_get(MatchArmDraftRec, arms.arms, arms.first_arm - 1 + arm_at)
-            persisted_arms = try __s0_buffer_append(CheckedMatchArmRec, d, persisted_arms, CheckedMatchArmRec(owner: arm.owner, syntax: arm.syntax, checked_match: match_id, variant_use: arm.variant_use, variant_kind: arm.variant_kind, binding: arm.binding, environment: arm.environment, body: arm.body, block: arm.block, guard: arm.guard))
+            persisted_arms = try __s0_buffer_append(CheckedMatchArmRec, d, persisted_arms, CheckedMatchArmRec(owner: arm.owner, syntax: arm.syntax, checked_match: match_id, variant_use: arm.variant_use, variant_kind: arm.variant_kind, binding: arm.binding, environment: arm.environment, body: arm.body, block: arm.block, guard: arm.guard, statement: arm.statement))
             arm_at = arm_at + 1
         }
         let matches = try __s0_buffer_append(CheckedMatchRec, d, arms.store.control.matches, CheckedMatchRec(owner: owner, syntax: expression_id, scrutinee: scrutinee.expression, scrutinee_type: scrutinee.checked_type, checked_type: arms.arm_type, first_arm: first_arm, arm_count: arms.arm_count))
@@ -11034,7 +11088,7 @@ fn emit_checked_control(store: CheckStore) -> Bool {
     at = 0
     while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
         let rec = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
-        if !out_string("W ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_match) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.variant_kind) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.body) || !out(32) || !out_u64(rec.block) || !out(32) || !out_u64(rec.guard) || !out(10) { return false }
+        if !out_string("W ") || !out_u64(at + 1) || !out(32) || !out_u64(rec.owner) || !out(32) || !out_u64(rec.syntax) || !out(32) || !out_u64(rec.checked_match) || !out(32) || !out_u64(rec.variant_use) || !out(32) || !out_u64(rec.variant_kind) || !out(32) || !out_u64(rec.binding) || !out(32) || !out_u64(rec.environment) || !out(32) || !out_u64(rec.body) || !out(32) || !out_u64(rec.block) || !out(32) || !out_u64(rec.guard) || !out(32) || !out_u64(rec.statement) || !out(10) { return false }
         at = at + 1
     }
     at = 0

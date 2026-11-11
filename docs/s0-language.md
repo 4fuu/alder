@@ -390,10 +390,15 @@ Implemented expressions include:
   with kind 205. See [C Interoperability](c-interop.md);
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
-  arms (`=> { ... }`) whose bodies may hold ordinary statements, and `if`
+  arms (`=> { ... }`) whose bodies may hold ordinary statements, diverging
+  expression arms (`=> return ...`, where the return is checked against the
+  function result type and control never reaches the match join), and `if`
   guards: the guard runs after the pattern matches, a false guard continues
   with the next arm, a guarded arm never counts toward exhaustiveness, and a
-  guard only borrows its bindings (kinds 148 and 149);
+  guard only borrows its bindings (kinds 148 and 149). The arms of one match
+  share one body form: diverging arms do not mix with `=> { ... }` block
+  arms (kind 135), a table-view match rejects them (kind 133), and a match
+  whose every arm diverges has no value and is rejected (kind 305);
 - prefix `try` with the exact same error type;
 - a single direct imported call in `unsafe c { ... }`;
 - M7.5 table identity: `Table(T)` over concrete ordinary values (including

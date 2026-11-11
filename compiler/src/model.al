@@ -380,7 +380,10 @@ type CheckedPlaceRec {
 // not. Arm bodies are checked expressions, including statement-form matches.
 // block is zero for an expression body; a nonzero block names the arm's
 // CheckedBlockRec statement body, whose statements were checked under the
-// table-view or Unit block-arm rules.
+// table-view or Unit block-arm rules. statement is zero except for a
+// diverging arm (`=> return ...`): it names the arm's CheckedStatementRec
+// return, which lowers inside the arm region and jumps nowhere; a match with
+// only diverging arms is rejected before records persist.
 // Expression kinds 14..17 are concrete None, Some, Ok, and Err constructors;
 // payload constructors own exactly one ordered expression child.
 type CheckedMatchRec {
@@ -404,6 +407,7 @@ type CheckedMatchArmRec {
     body: U64
     block: U64
     guard: U64
+    statement: U64
 }
 
 // A D023 copy-site report record: one per value-semantics copy the lowerer
