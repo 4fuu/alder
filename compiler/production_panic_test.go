@@ -73,6 +73,20 @@ pub fn main() -> I32 {
 			wantStderr: "panic: assertion failed: a == b\n  a: 1\n  b: 2\n",
 		},
 		{
+			name: "assert-eq-signed",
+			source: `module hello.main
+
+import core.panic { assert_eq }
+
+pub fn main() -> I32 {
+    assert_eq(I32, -1, 1)
+    return 0
+}
+`,
+			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStderr: "panic: assertion failed: a == b\n  a: -1\n  b: 1\n",
+		},
+		{
 			name: "assert-ne",
 			source: `module hello.main
 
@@ -96,6 +110,8 @@ pub fn main() -> I32 {
     assert(true, "never printed")
     assert_eq(U64, 42, 42)
     assert_ne(U64, 42, 7)
+    assert_eq(I32, -42, -42)
+    assert_ne(I64, -42, 7)
     return 0
 }
 `,
@@ -268,15 +284,15 @@ func TestProductionCorePanicRejectsUnsatisfiedEq(t *testing.T) {
 import core.panic { assert_eq }
 
 pub fn main() -> I32 {
-    assert_eq(I32, 1, 2)
+    assert_eq(F32, 1.0, 2.0)
     return 0
 }
 `,
 	}, "run")
 	if result.status == 0 {
-		t.Fatalf("unsatisfied Eq constraint was accepted: %+v", result)
+		t.Fatalf("floating Eq constraint was accepted: %+v", result)
 	}
 	if result.stderr == "" {
-		t.Fatalf("unsatisfied Eq constraint produced no diagnostic")
+		t.Fatalf("floating Eq constraint produced no diagnostic")
 	}
 }

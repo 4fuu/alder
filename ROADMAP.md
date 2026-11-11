@@ -956,9 +956,9 @@ Exit-criteria evidence (complete):
   signature, and lowers resolved methods as ordinary monomorphized functions
   (`take_first8`-style names), pinned through generated strict-C11 programs
   that dispatch a constrained generic at two receiver types;
-- structural `Eq`/`Hash` implementations are synthesized for unsigned
-  integers, `Bool`, `String`, `Bytes`, and non-generic records/enums over
-  that domain, satisfying `Eq + Hash` constraints while user `impl Eq`/
+- structural `Eq`/`Hash` implementations are synthesized for signed and
+  unsigned integers, `Bool`, `String`, `Bytes`, and non-generic records/enums
+  over that domain, satisfying `Eq + Hash` constraints while user `impl Eq`/
   `impl Hash` blocks are rejected; the synthesized methods remain
   non-callable until default-method dispatch lands;
 - the ordered public `Map(K, V)`/`Set(T)` (checked kinds 23/24, builtin
@@ -1516,6 +1516,14 @@ stay rejected. The Go Stage 0 frontend carries the same rules. Evidence: the
 `compiler/production_unit_test.go`, which compiles and runs the production
 driver output and pins the standalone, non-`Unit` argument, and unit-payload
 mismatch rejections.
+
+Landed language progress: signed integers `I8` through `I64` now participate
+in structural `Eq`/`Hash`, so `assert_eq`/`assert_ne` over `Eq, Display` accept
+them. Float `==`/`!=` remain operator-only IEEE comparisons; floats stay out
+of `Eq`/`Hash` because NaN is not reflexive. Map/Set keys remain unsigned as a
+deliberate M8 restriction. Evidence: the M7.5 checker/operator fixtures cover
+signed Result payloads and a signed `Eq, Hash` constraint, while the existing
+signed-key rejection remains.
 
 Landed standard-library progress: `core.panic` is installed at
 `sysroot/core/panic.al` with `panic`, `assert`, `assert_eq`, and `assert_ne`.

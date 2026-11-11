@@ -237,6 +237,7 @@ fn main() -> I32 {
     if keyed(Mode, mode) != 1 { return 2 }
     if keyed(U64, 5) != 1 { return 3 }
     if keyed(String, "x") != 1 { return 4 }
+    if keyed(I32, -5) != 1 { return 5 }
     return 0
 }
 `,
@@ -823,7 +824,6 @@ fn main() -> I32 {
 		// Option and Result compare by tag plus payload, but a component
 		// outside the structural Eq domain still rejects the operators.
 		{"eq-option-float-component", "fn main() -> I32 {\n    let a: Option(F64) = Some(1.0)\n    let b: Option(F64) = Some(2.0)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
-		{"eq-result-signed-component", "fn main() -> I32 {\n    let a: Result(U64, I64) = Ok(1)\n    let b: Result(U64, I64) = Ok(2)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
 		// Float remainder stays integer-only: no float semantics were
 		// decided for %, so it keeps the integer-operand diagnostic.
 		{"mod-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    let r = w % 2.0\n    if r > 0.0 { return 1 }\n    return 0\n}\n", 37},

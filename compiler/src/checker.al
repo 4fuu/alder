@@ -13431,19 +13431,19 @@ fn type_implements_cleanup(store: CheckStore, checked_type: U64) -> Bool {
     return trait_impl_for_builtin_type(store, 6, checked_type) != 0
 }
 
-// Structural Eq support: Bool, unsigned integers, String, Bytes, builtin
-// Option and Result whose every component supports them, and records or
-// enums whose every component supports them. Generic applications
+// Structural Eq support: Bool, signed and unsigned integers, String, Bytes,
+// builtin Option and Result whose every component supports them, and records
+// or enums whose every component supports them. Generic applications
 // participate: each component substitutes through the application's own
 // arguments before the recursion, so a generic record supports structural
 // equality exactly when its components do. Builtin Option and Result walk
-// their type arguments the same way. Signed integers and floats stay
-// outside the structural domain, so the synthesized Eq/Hash impl surface
-// and the map-key domain are unchanged.
+// their type arguments the same way. Floats stay outside the structural
+// domain because IEEE NaN is not reflexive; the map-key domain stays
+// unsigned as a deliberate M8 restriction.
 fn structural_eq_supported(d: Domain, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
     if checked_type == 0 || depth > 16 { return Ok(false) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 1 { return Ok(checked.target == 1 || checked.target == 6 || checked.target == 7 || checked.target == 8 || checked.target == 9) }
+    if checked.kind == 1 { return Ok(checked.target >= 1 && checked.target <= 9) }
     if checked.kind == 2 || checked.kind == 14 { return Ok(true) }
     if checked.kind == 9 || checked.kind == 10 { return structural_eq_builtin_supported(d, store, checked, depth) }
     if checked.kind != 7 { return Ok(false) }

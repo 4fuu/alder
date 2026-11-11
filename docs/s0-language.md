@@ -154,14 +154,18 @@ Milestone 7.5 adds the static trait surface of
   rejected. Generic impl methods are not supported yet; defaulted methods
   are materialized as ordinary impl methods and dispatch statically.
 - Structural `Eq` and `Hash` implementations are synthesized by the
-  language for unsigned integers, `Bool`, `String`, `Bytes`, and
+  language for `Bool`, signed and unsigned integers, `String`, `Bytes`, and
   non-generic records and enums whose every component supports them, so
   `K: type(Eq, Hash)` accepts those types. `==` and `!=` dispatch to that
   synthesized implementation: integers and `Bool` compare as primitives,
   `String` and `Bytes` compare byte-wise, and records and enums decompose
   into their components; a type outside the synthesized domain is rejected
-  with a diagnostic. Builtin `Option` and `Result` decompose the same way:
-  they compare by implicit tag first (none/some, ok/err) and then by
+  with a diagnostic. Floating `==`/`!=` remain operator-only IEEE-754
+  comparisons (D026): NaN is not reflexive, so floats are not in structural
+  `Eq`/`Hash`. Map and Set keys remain unsigned in M8 even though signed
+  integers now participate in `Eq`/`Hash`. Builtin `Option` and `Result`
+  decompose the same way: they compare by implicit tag first (none/some,
+  ok/err) and then by
   payload, accepted exactly when every component type supports the
   structural domain. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override

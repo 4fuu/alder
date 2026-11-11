@@ -209,7 +209,9 @@ accepted for M7.5; hashing indices arrive with the standard-library hash
 containers. The M7.5 key domain is the structural-comparison domain that the
 inline compare lowers: unsigned integers, `Bool`, `String`, `Bytes`, and
 non-generic records and enums over that domain whose enum variant payloads
-are primitives, `String`, or `Bytes`. Values must be recursively copyable
+are primitives, `String`, or `Bytes`. Signed integers participate in
+structural `Eq`/`Hash` but remain outside Map/Set keys in M8 as a deliberate
+key-domain restriction. Values must be recursively copyable
 ordinary values; slices, mutable views, and the ordered collections
 themselves are excluded until affine composition lands. `remove`, `keys`,
 `values`, and `items` move stored values through a lowering loop, so they

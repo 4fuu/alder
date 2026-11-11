@@ -1270,10 +1270,9 @@ fn main() -> I32 {
 // M8 Eq dispatch: `==` and `!=` beyond the primitive integer comparison.
 // The operators compare Bool, String, and Bytes byte-wise, records
 // field-wise, enums by tag and payload, and generic applications over Eq
-// components, reusing the Map-key structural walk. Option and Result are
-// not Eq yet: the checker rejects them with the Eq diagnostic instead of
-// lowering them. Alder-only: the Go oracle frontend has no operator mirror
-// for the structural families.
+// components, reusing the Map-key structural walk. Option and Result,
+// including signed payloads, decompose by tag and payload. Alder-only: the Go
+// oracle frontend has no operator mirror for the structural families.
 func runAlderEqOperatorBehavior(t *testing.T, exe string) {
 	t.Helper()
 	files := map[string]string{"eq-operators.al": `type Point {
@@ -1351,6 +1350,11 @@ fn main() -> I32 {
     let nested3: Result(Option(U64), U64) = Ok(None)
     if nested1 != nested2 { return 30 }
     if nested1 == nested3 { return 31 }
+    let signed1: Result(U64, I32) = Err(-1)
+    let signed2: Result(U64, I32) = Err(-1)
+    let signed3: Result(U64, I32) = Err(2)
+    if signed1 != signed2 { return 32 }
+    if signed1 == signed3 { return 33 }
     return 0
 }
 `}

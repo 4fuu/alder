@@ -120,8 +120,10 @@ snapshot.
 
 `K` for `Map` and `T` for `Set` must be in the structural equality and hashing
 domain: unsigned integers, `Bool`, `String`, `Bytes`, and non-generic records
-and enums whose every component supports them. Types outside that domain are
-rejected with diagnostic 127. `V` and `T` must be recursively copyable
+and enums whose every component supports them. Signed integers participate in
+structural `Eq`/`Hash` but remain outside the M8 Map/Set key domain as a
+deliberate restriction. Types outside that domain are rejected with diagnostic
+127. `V` and `T` must be recursively copyable
 (diagnostic 128); a collection value with storage-backed parts is copied
 independently on every read.
 

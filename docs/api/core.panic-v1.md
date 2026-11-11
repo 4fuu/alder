@@ -84,10 +84,11 @@ path.
   on the terminating path. Cleanup before a possible assertion failure must be
   explicit in the caller when it is required.
 - `assert_eq` and `assert_ne` require `T: type(Eq, Display)`. The builtin `Eq`
-  domain currently covers unsigned integers, `Bool`, `String`, `Bytes`, and
-  eligible records/enums; the builtin `Display` domain covers `Bool`, signed
-  and unsigned integers, and `String`, with user implementations for eligible
-  declared types.
+  domain covers `Bool`, signed and unsigned integers, `String`, `Bytes`, and
+  eligible records/enums; floats are excluded because IEEE NaN is not
+  reflexive. The builtin `Display` domain covers `Bool`, signed and unsigned
+  integers, and `String`, with user implementations for eligible declared
+  types.
 - Operands are evaluated once at the call boundary. A passing assertion has no
   output and no observable side effect beyond operand evaluation.
 - A `String` containing an interior NUL cannot be represented by the current

@@ -172,8 +172,12 @@ Equality is defined for:
   when every component has equality.
 
 Floating equality follows IEEE-754 comparison behavior, including NaN.
-Resources, tables, views, function values, and raw pointers do not receive
-ordinary structural equality. `c.is_null(pointer)` is the one safe raw-pointer
+The operator domain and the builtin `Eq` trait domain are deliberately
+different: `==`/`!=` include floats, but structural `Eq`/`Hash` include
+`Bool`, signed and unsigned integers, `String`, `Bytes`, and eligible
+records/enums, and exclude floats because NaN is not reflexive. Map and Set
+keys remain unsigned in M8. Resources, tables, views, function values, and raw
+pointers do not receive ordinary structural equality. `c.is_null(pointer)` is the one safe raw-pointer
 observation; pointer-to-pointer equality, ordering, arithmetic, and dereference
 remain explicit unsafe C operations.
 
