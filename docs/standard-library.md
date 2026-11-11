@@ -189,6 +189,17 @@ Required modules:
 - `std.fs`: affine `File`, directory iteration, metadata, permissions,
   canonicalization, copy/rename/remove, and temporary files/directories.
 
+Implemented std.io progress (slice 1): `sysroot/std/io.al` provides the
+`Reader`, `Writer`, and `Seek` traits with the `copy_to` default body,
+`SeekFrom`, `IoError` with `from_errno`, `Display`, and `Error`, the
+`read_exact`, `write_all`, and `read_to_end` helpers, and the host-free
+`ByteCursor` and `ByteSink` streams. Evidence:
+`compiler/production_io_test.go` runs the installed module through the
+production driver and checks cursor advancement, end-of-stream, the `copy_to`
+default body, the error category report, and the mutable-place rejection.
+The capability types, host files, and standard streams arrive with the
+C-binding buffer surface as slice 2.
+
 The hosted `std` module graph is acyclic and fixed by the snapshots:
 `std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports
 `std.path` and `std.env`; `std.fs` and `std.process` additionally build on

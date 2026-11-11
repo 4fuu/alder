@@ -1550,6 +1550,19 @@ the default cause, and an explicit `core.error` import through the production
 driver; it rejects a mismatched `cause` result and a report operand that lacks
 `Error`. Docs: the frozen [`core.error` snapshot](docs/api/core.error-v1.md).
 
+Landed standard-library progress: `std.io` v1 slice 1 ships the stream
+foundation at `sysroot/std/io.al`: the `Reader`, `Writer`, and `Seek` traits
+(including the `copy_to` default body), `SeekFrom`, `IoError` with
+`from_errno`, `Display`, and the prelude `Error` implementation, the
+`read_exact`, `write_all`, and `read_to_end` helpers, and the host-free
+`ByteCursor` and `ByteSink` streams. Evidence:
+`compiler/production_io_test.go` runs the installed sysroot module through the
+production driver and checks cursor advancement, short reads, end of stream,
+the default `copy_to`, the error report, and the mutable-place rejection for a
+`let`-bound reader. The capability types, host files, and standard streams
+remain slice 2. Docs: [Standard Library](docs/standard-library.md) and the
+frozen [`std.io` snapshot](docs/api/std.io-v1.md).
+
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
 state with value semantics and unbiased rejection ranges; `seeded`,

@@ -339,7 +339,7 @@ pub type ByteSink {
 impl ByteSink {
     fn new() -> ByteSink
     fn len(self) -> U64
-    fn into_bytes(take self) -> Bytes
+    fn into_bytes(self) -> Bytes
 }
 
 impl Writer for ByteSink {
@@ -450,6 +450,9 @@ implementations resolve without an explicit import.
   through exclusively borrowed method calls and the compiler updates a
   uniquely owned buffer in place. `BufWriter.cleanup` flushes best-effort and
   cannot report an error; `into_sink` is the observing release.
+- `ByteSink.into_bytes` takes `self` by value, not `take self`: `take` is
+  reserved for affine owners, and a `ByteSink` is an ordinary copyable value
+  that the caller may keep using.
 - `BufWriter` requires `Sink: type(Writer, Cleanup)`, so it cannot wrap
   `ByteSink`, which is a plain value, not an owner. It wraps owners such as
   `File(I)` and the `std.process` pipe ends; `ByteSink` is written through

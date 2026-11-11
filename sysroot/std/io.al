@@ -1,0 +1,232 @@
+module std.io
+
+import std.env
+
+// The Milestone 8 std.io v1 stream foundation, slice 1: the `Reader`,
+// `Writer`, and `Seek` traits, the portable error category, the exact
+// transfer helpers, and two host-free in-memory streams. Everything here is
+// pure Alder over values; the capability types, host files, and standard
+// streams arrive with the C-binding buffer surface they need in slice 2.
+//
+// Readers and writers are copyable values whose methods take `mut self`; a
+// call exclusively borrows the caller's place, so a stateful stream advances
+// exactly once and no descriptor or buffer is copied behind the callee's
+// back. A callee that writes through a `MutSlice(U8)` says `mut` on that
+// parameter as well.
+
+/// Where a seek starts from. A `Start` offset is absolute; `Current` and
+/// `End` offsets are signed.
+pub enum SeekFrom {
+    Start(offset: U64)
+    Current(offset: I64)
+    End(offset: I64)
+}
+
+/// Portable I/O failure categories plus optional platform detail.
+pub enum IoError {
+    /// The file or directory does not exist.
+    NotFound
+    /// Access was denied by permissions or policy.
+    PermissionDenied
+    /// A create request found an existing target.
+    AlreadyExists
+    /// An argument was invalid for the operation, including invalid path
+    /// encoding and reads past end of stream for `read_exact`.
+    InvalidInput
+    /// A directory removal found the directory not empty.
+    DirectoryNotEmpty
+    /// The operation has no implementation on this target.
+    Unsupported
+    /// A failure with no portable category carries the host error number
+    /// and its formatted message.
+    Other(info: env.PlatformInfo)
+}
+
+impl IoError {
+    /// Maps one host error number to a category. The values below agree on
+    /// the tier-1 POSIX targets; slice 2 replaces the literal table with the
+    /// target's C errno constants and the host's formatted message.
+    fn from_errno(code: I32) -> IoError {
+        if code == 2 { return NotFound }
+        if code == 13 { return PermissionDenied }
+        if code == 17 { return AlreadyExists }
+        if code == 22 { return InvalidInput }
+        return Other(env.PlatformInfo(code: code, message: code.display()))
+    }
+}
+
+impl Display for IoError {
+    fn display(self) -> String {
+        return match self {
+            NotFound => "not found"
+            PermissionDenied => "permission denied"
+            AlreadyExists => "already exists"
+            InvalidInput => "invalid input"
+            DirectoryNotEmpty => "directory not empty"
+            Unsupported => "unsupported"
+            Other(info) => info.message
+        }
+    }
+}
+
+impl Error for IoError {
+}
+
+/// A byte source. `Ok(0)` means end of stream for stream readers. The
+/// `copy_to` requirement's default body copies through a bounded internal
+/// buffer and does not flush buffered writers.
+pub trait Reader {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
+    fn copy_to(W: type(Writer), mut self, mut output: W) -> Result(U64, IoError) {
+        var storage: Vec(U8) = Vec.new(U8)
+        var filled: U64 = 0
+        while filled < 4096 {
+            storage.push(0)
+            filled = filled + 1
+        }
+        var total: U64 = 0
+        var reading = true
+        while reading {
+            let count = try self.read(storage.slice_mut(0, 4096))
+            if count == 0 {
+                reading = false
+            } else {
+                let written = try write_all(output, storage.slice(0, count))
+                total = total + written
+            }
+        }
+        return Ok(total)
+    }
+}
+
+/// A byte sink. `write` may accept fewer bytes than requested; callers that
+/// need complete writes use `write_all`. `flush` makes buffered writes
+/// observable; an unbuffered writer returns `Ok(())`.
+pub trait Writer {
+    fn write(mut self, data: [U8]) -> Result(U64, IoError)
+    fn flush(mut self) -> Result(Unit, IoError)
+}
+
+/// A repositionable byte stream. Returns the new absolute position.
+pub trait Seek {
+    fn seek(mut self, from: SeekFrom) -> Result(U64, IoError)
+}
+
+/// Reads until `buffer` is full or fails with `InvalidInput` at end of
+/// stream. The reader's position after a failed call is unspecified.
+pub fn read_exact(R: type(Reader), mut reader: R, mut buffer: MutSlice(U8)) -> Result(Unit, IoError) {
+    var filled: U64 = 0
+    let size = buffer.len()
+    while filled < size {
+        let count = try reader.read(buffer.subview(filled, size))
+        if count == 0 {
+            return Err(InvalidInput)
+        }
+        filled = filled + count
+    }
+    return Ok(())
+}
+
+/// Writes all of `data` or fails; returns `data.len()` on success.
+pub fn write_all(W: type(Writer), mut writer: W, data: [U8]) -> Result(U64, IoError) {
+    var written: U64 = 0
+    let size = data.len()
+    while written < size {
+        let count = try writer.write(data.slice(written, size))
+        if count == 0 {
+            return Err(InvalidInput)
+        }
+        written = written + count
+    }
+    return Ok(written)
+}
+
+/// Reads to end of stream. Growth uses ordinary checked vector growth and
+/// terminates on exhaustion; there is no size limit in v1.
+pub fn read_to_end(R: type(Reader), mut reader: R) -> Result(Vec(U8), IoError) {
+    var collected: Vec(U8) = Vec.new(U8)
+    var storage: Vec(U8) = Vec.new(U8)
+    var filled: U64 = 0
+    while filled < 4096 {
+        storage.push(0)
+        filled = filled + 1
+    }
+    var reading = true
+    while reading {
+        let count = try reader.read(storage.slice_mut(0, 4096))
+        if count == 0 {
+            reading = false
+        } else {
+            var copied: U64 = 0
+            while copied < count {
+                collected.push(storage[copied])
+                copied = copied + 1
+            }
+        }
+    }
+    return Ok(collected)
+}
+
+/// Reader over an owned `Bytes` value. Pure and host-free, so buffered
+/// behavior tests never touch the OS.
+pub type ByteCursor {
+    data: Bytes
+    position: U64
+}
+
+impl ByteCursor {
+    fn new(data: Bytes) -> ByteCursor {
+        return ByteCursor(data: data, position: 0)
+    }
+}
+
+impl Reader for ByteCursor {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError) {
+        let remaining = self.data.len() - self.position
+        var count = buffer.len()
+        if count > remaining {
+            count = remaining
+        }
+        var at: U64 = 0
+        while at < count {
+            buffer[at] = self.data.byte(self.position + at)
+            at = at + 1
+        }
+        self.position = self.position + count
+        return Ok(count)
+    }
+}
+
+/// Grows an owned byte vector from writes. Pure and host-free.
+pub type ByteSink {
+    data: Vec(U8)
+}
+
+impl ByteSink {
+    fn new() -> ByteSink {
+        return ByteSink(data: Vec.new(U8))
+    }
+
+    fn len(self) -> U64 {
+        return self.data.len()
+    }
+
+    fn into_bytes(self) -> Bytes {
+        return self.data.slice(0, self.data.len()).to_bytes()
+    }
+}
+
+impl Writer for ByteSink {
+    fn write(mut self, data: [U8]) -> Result(U64, IoError) {
+        var at: U64 = 0
+        while at < data.len() {
+            self.data.push(data[at])
+            at = at + 1
+        }
+        return Ok(data.len())
+    }
+
+    fn flush(mut self) -> Result(Unit, IoError) {
+        return Ok(())
+    }
+}
