@@ -96,6 +96,8 @@ func (g *gen) cType(t mir.TypeId) string {
 			return ty.CName
 		}
 		return "void"
+	case mir.TypeCString:
+		return "char *"
 	case mir.TypeFunction:
 		return "AlderFnTy" + strconv.Itoa(int(t))
 	case mir.TypeDomainHandle:

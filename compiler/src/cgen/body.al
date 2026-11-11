@@ -1200,6 +1200,71 @@ fn cgen_emit_c_convert(d: Domain, initial: CgenWriter, store: MirStore, indexes:
     return cgen_put(d, out, "; }\n")
 }
 
+// M8 c.CString emission. make_lit and make copy through the runtime
+// helpers; a NULL or negative status takes the instruction's checked edge,
+// and make maps status 1 to the none tag with status 0 the some payload.
+// ptr is the identity read, and release consumes the owner through the
+// runtime free.
+fn cgen_emit_c_string_op(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    if item.op == mir_op_c_string_release() {
+        out = try cgen_put(d, out, "  alder_cstring_release(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_c_string_ptr() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ";\n")
+    }
+    out = try cgen_put(d, out, "  char *")
+    out = try cgen_put_tmp(d, out, item.result, "cs")
+    out = try cgen_put(d, out, ";\n")
+    if item.op == mir_op_c_string_make_lit() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_tmp(d, out, item.result, "cs")
+        out = try cgen_put(d, out, " = alder_cstring_make_lit(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".data, ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ".len);\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "cs")
+        out = try cgen_put(d, out, " == NULL) ")
+        out = try cgen_emit_checked_edge(d, out, store, indexes, instruction, item)
+        out = try cgen_put(d, out, "\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put_tmp(d, out, item.result, "cs")
+        return cgen_put(d, out, ";\n")
+    }
+    out = try cgen_put(d, out, "  int ")
+    out = try cgen_put_tmp(d, out, item.result, "st")
+    out = try cgen_put(d, out, " = alder_cstring_make(")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ".data, ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ".len, &")
+    out = try cgen_put_tmp(d, out, item.result, "cs")
+    out = try cgen_put(d, out, ");\n  if (")
+    out = try cgen_put_tmp(d, out, item.result, "st")
+    out = try cgen_put(d, out, " < 0) ")
+    out = try cgen_emit_checked_edge(d, out, store, indexes, instruction, item)
+    out = try cgen_put(d, out, "\n  if (")
+    out = try cgen_put_tmp(d, out, item.result, "st")
+    out = try cgen_put(d, out, " == 0) {\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_u.alder_p1 = ")
+    out = try cgen_put_tmp(d, out, item.result, "cs")
+    out = try cgen_put(d, out, ";\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = (uint32_t)1;\n  } else {\n    ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = (uint32_t)0;\n  }\n")
+    return Ok(out)
+}
+
 // The range comparison for a checked integer conversion whose widened tmp is
 // named after the result value. Unsigned 64-bit sources compare in uint64_t
 // against the target maximum; everything else widens to int64_t, checks the
@@ -2213,6 +2278,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_int_convert_checked() { return cgen_emit_int_convert_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_int_convert_wrap() { return cgen_emit_int_convert_wrap(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
+    if item.op >= mir_op_c_string_make_lit() && item.op <= mir_op_c_string_release() { return cgen_emit_c_string_op(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }

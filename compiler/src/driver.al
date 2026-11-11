@@ -276,6 +276,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 207 { return out_string("no such field on the bound C record") }
     if kind == 208 { return out_string("a C field assignment value does not match the field's declared binding type") }
     if kind == 209 { return out_string("a C field assignment requires a var binding") }
+    if kind == 210 { return out_string("a c.CString literal may not contain an interior NUL byte") }
+    if kind == 211 { return out_string("c.CString takes exactly one string argument") }
+    if kind == 212 { return out_string("c.CString argument must be a String value") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

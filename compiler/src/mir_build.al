@@ -398,3 +398,8 @@ fn mir_intern_c_const_ptr(d: Domain, store: MirStore, elem: U64) -> Result(MirTy
     let empty = try __s0_buffer_new(U64, d)
     return mir_intern_type(d, store, mir_type_kind_c_const_ptr(), elem, 0, 0, empty, 0)
 }
+
+fn mir_intern_c_string(d: Domain, store: MirStore) -> Result(MirTypeStep, __s0_Error) {
+    let empty = try __s0_buffer_new(U64, d)
+    return mir_intern_type(d, store, mir_type_kind_c_string(), 0, 0, 0, empty, 0)
+}

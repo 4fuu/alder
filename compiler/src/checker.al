@@ -881,7 +881,7 @@ fn interpreted_type_category(d: Domain, state: State, parse: ParseStore, store: 
             if inspect { seen = try interp_state_push(d, seen, InterpStateRec(owner: 0, checked_type: norm.checked_type, env: norm.env, ancestry: norm.ancestry)) }
         }
         if inspect {
-            if checked.kind == 3 || checked.kind == 19 { affine = true }
+            if checked.kind == 3 || checked.kind == 19 || checked.kind == 31 { affine = true }
             // A nominal type that implements Cleanup is an
             // affine owner: cleanup selection consumes it on every exit. The
             // receiver index answers this in logarithmic time.
@@ -2532,7 +2532,7 @@ fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, ba
         let result_checked = try binding_type_checked(d, state, parse, store, result_index)
         if result_checked.id == 0 { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
         if expected != 0 && !(try expression_type_equal(d, state, parse, result_checked.store, result_checked.id, expected)) { return expr_token_type_fail(d, state, result_checked.store, mismatch_kind, mismatch_node, expected, result_checked.id) }
-        return append_call_expression(d, state, parse, result_checked.store, owner, unsafe_id, 11, result_checked.id, 7, member_index, 0, call, 1, site_kind, site_syntax)
+        return append_call_expression(d, state, parse, result_checked.store, owner, unsafe_id, 11, result_checked.id, 7, member_index, 0, call, 1, site_kind, site_syntax, 0)
     }
     let arg_link = call_link_at(parse, call, receivers + ordinal + 1)
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
@@ -3712,6 +3712,9 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         // resolves as a type is intercepted; module-qualified names such as
         // alias.Type keep their original resolution.
         let dot_at = dotted_name_split(state, node)
+        if dot_at == node.name_start + 1 && text_byte(state, __s0_buffer_get(SourceRec, state.sources, node.source), node.name_start) == 99 && node_word_between(state, node, dot_at + 1, node.name_end, "CString") {
+            return resolve_c_string_type(d, state, parse, store, owner, node, node_id)
+        }
         if dot_at != 0 && node_word_between(state, node, dot_at + 1, node.name_end, "Id") {
             let prefix = SyntaxRec(kind: node.kind, token: node.token, source: node.source, start: node.start, end: node.end, name_start: node.name_start, name_end: dot_at, children: 0)
             let prefix_declaration = instance_declaration(store, owner)
@@ -5640,16 +5643,17 @@ fn expression_for_syntax(store: CheckStore, owner: U64, syntax: U64) -> U64 {
     return found
 }
 
-fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, expression_kind: U64, checked_type: U64, annotation_kind: U64, target: U64, variant_use: U64, child_call: SyntaxRec, child_mode: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: 0, place: 0))
+fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, expression_kind: U64, checked_type: U64, annotation_kind: U64, target: U64, variant_use: U64, child_call: SyntaxRec, child_mode: U64, site_kind: U64, site_syntax: U64, builtin: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: builtin, place: 0))
     let annotation = __s0_buffer_len(CallAnnotationRec, annotations)
     var children = store.expression_children
     var first_child: U64 = 0
     var child_count: U64 = 0
-    if child_mode == 1 || child_mode == 3 {
+    if child_mode == 1 || child_mode == 3 || child_mode == 4 {
         var ordinal: U64 = 1
         var limit = call_link_count(parse, child_call)
         if child_mode == 3 { limit = 2 }
+        if child_mode == 4 { limit = 3 }
         while ordinal < limit {
             let link = call_link_at(parse, child_call, ordinal)
             let expression = expression_for_syntax(store, owner, link.node)
@@ -6013,7 +6017,7 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
     }
     if !pattern_bound(current, pattern, inferred) { return Ok(CallInferenceDefer) }
     let concrete = try substitute_type(d, current, inferred, pattern)
-    let appended = try append_call_expression(d, state, parse, concrete.store, owner, arg_id, 10, concrete.checked_type, 4, expected.target, variant_id, arg, 3, 0, 0)
+    let appended = try append_call_expression(d, state, parse, concrete.store, owner, arg_id, 10, concrete.checked_type, 4, expected.target, variant_id, arg, 3, 0, 0, 0)
     let final_store = match appended {
         ExprGood(value) => value.store
         ExprBad(value) => value
@@ -6202,7 +6206,7 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
     let result_id = use_by_ordinal(checked_instance, instance_id, 8, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, result_id - 1).checked_type
     if expected != 0 && !(try expression_type_equal(d, state, parse, checked_instance, result_type, expected)) { return expr_token_type_fail(d, state, checked_instance, mismatch_kind, mismatch_node, expected, result_type) }
-    return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, result_type, 1, instance_id, 0, call, 1, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, result_type, 1, instance_id, 0, call, 1, site_kind, site_syntax, 0)
 }
 
 fn infer_record_values(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec), in_loop: Bool) -> Result(CallInferenceOutcome, __s0_Error) {
@@ -6358,7 +6362,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
         let applied = try concrete_decl_application(d, current, target, bindings)
         if !(try checked_type_views_materializable(d, state, parse, applied.store, applied.checked_type)) { return expr_token_fail(d, state, base, 104, call) }
         if expected != 0 && !(try expression_type_equal(d, state, parse, applied.store, applied.checked_type, expected)) { return expr_token_type_fail(d, state, applied.store, mismatch_kind, mismatch_node, expected, applied.checked_type) }
-        return append_call_expression(d, state, parse, applied.store, owner, call_id, 9, applied.checked_type, 3, target, 0, call, 2, site_kind, site_syntax)
+        return append_call_expression(d, state, parse, applied.store, owner, call_id, 9, applied.checked_type, 3, target, 0, call, 2, site_kind, site_syntax, 0)
     }
     let values = try check_record_values(d, state, parse, base, store, owner, call, target, 0, field_count, in_loop)
     var current = match values {
@@ -6380,7 +6384,7 @@ fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     }
     if !(try checked_type_views_materializable(d, state, parse, current, constructed)) { return expr_token_fail(d, state, base, 104, call) }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, constructed, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, constructed) }
-    return append_call_expression(d, state, parse, current, owner, call_id, 9, constructed, 3, target, 0, call, 2, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, current, owner, call_id, 9, constructed, 3, target, 0, call, 2, site_kind, site_syntax, 0)
 }
 
 // Build the checked function-value type fn(params) -> result, env unit for a
@@ -6481,7 +6485,7 @@ fn callee_link_id(parse: ParseStore, call: SyntaxRec) -> U64 { return call_link_
 fn closure_capture_copyable(store: CheckStore, checked_type: U64, depth: U64) -> Bool {
     if checked_type == 0 || depth > 16 { return false }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 3 || checked.kind == 19 { return false }
+    if checked.kind == 3 || checked.kind == 19 || checked.kind == 31 { return false }
     // A slice or mut slice is a scoped capability: it may be captured only by
     // a closure that does not escape, which the escape pass enforces. Table
     // views, domain marks, and raw pointers stay rejected outright.
@@ -7000,7 +7004,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         } { return Ok(ExprBad(checked_instance)) }
         let concrete_result_id = use_by_ordinal(checked_instance, instance_id, 8, 0)
         let concrete_result = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, concrete_result_id - 1).checked_type
-        return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax)
+        return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax, 0)
     }
     let arguments = try check_positional_call_args(d, state, parse, base, store, owner, call, target, 5, 0, argument_count, 42, in_loop)
     let current = match arguments {
@@ -7018,7 +7022,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     let result_id = use_by_ordinal(current, target, 6, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result_type) }
-    return append_call_expression(d, state, parse, current, owner, call_id, 8, result_type, 1, target, 0, call, 1, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, current, owner, call_id, 8, result_type, 1, target, 0, call, 1, site_kind, site_syntax, 0)
 }
 
 fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -7066,7 +7070,7 @@ fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckSto
     }
     if draft.deferred { return expr_deferred(base) }
     let transferred = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
-    return append_call_expression(d, state, parse, transferred, owner, call_id, 10, expected, 4, checked.target, variant_id, call, 3, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, transferred, owner, call_id, 10, expected, 4, checked.target, variant_id, call, 3, site_kind, site_syntax, 0)
 }
 
 fn check_slice_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -8587,6 +8591,139 @@ fn check_s0_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore
     return check_s0_runtime_args(d, state, parse, base, current, owner, call, call_id, identity, type_operands, arity, type_operands, domain_type, mark_type, buffer_type, element, u64_type, result, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
 }
 
+// c.CString resolves as an ordinary type annotation naming the builtin
+// affine owner. No binding block participates: the owner is a singleton
+// checked kind beside the c.* vocabulary.
+fn resolve_c_string_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec, node_id: U64) -> Result(CheckResult, __s0_Error) {
+    return Ok(CheckGood(try append_checked_type(d, store, owner, 31, node_id, 0, 0, 0)))
+}
+
+// check_c_string_ctor checks `c.CString(expr)`. A string-literal argument
+// builds the owner infallibly and its decoded bytes must be interior-NUL
+// free at compile time; any other argument must check as a String value and
+// produces Option(c_string) for try or match to consume.
+fn check_c_string_ctor(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    // The dotted callee carries its receiver link: callee + receiver + one
+    // argument = three links.
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 211, call) }
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    let owner_type = try canonical_leaf(d, store, 31, 0)
+    let string_type = canonical_type_id(owner_type.store, 2, 0, 0, 0)
+    if string_type == 0 { return expr_deferred(base) }
+    if arg.kind == 22 {
+        if arg.token == 0 || arg.token > __s0_buffer_len(TokenRec, state.tokens) { return expr_token_fail(d, state, base, 212, call) }
+        let token = __s0_buffer_get(TokenRec, state.tokens, arg.token - 1)
+        var at = token.value_start
+        while at < token.value_end {
+            if __s0_buffer_get(U8, state.values, at) == 0 { return expr_token_fail(d, state, base, 210, arg) }
+            at = at + 1
+        }
+        // The lowering reads the literal through its String value, so the
+        // literal is checked like any argument and arrives as the call's
+        // one child; a literal can only fail this by not being a String.
+        let literal = try check_value_expression_inner(d, state, parse, base, owner_type.store, owner, arg, arg_link.node, string_type, 212, arg, 0, 0, in_loop)
+        let current = match literal {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match literal {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(ExprBad(current)) }
+        let draft = match literal {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return expr_deferred(base) }
+        if expected != 0 && expected != owner_type.checked_type { return expr_token_type_fail(d, state, owner_type.store, mismatch_kind, mismatch_node, expected, owner_type.checked_type) }
+        // Builtin 900 marks the literal construction; the literal's bytes
+        // are checker-proven interior-NUL free so the only failure edge is
+        // allocation.
+        return append_call_expression(d, state, parse, current, owner, call_id, 29, owner_type.checked_type, 5, 0, 0, call, 4, site_kind, site_syntax, 900)
+    }
+    let option_type = try canonical_application(d, owner_type.store, owner, 9, owner_type.checked_type, 0, 1)
+    if expected != 0 && expected != option_type.checked_type { return expr_token_type_fail(d, state, option_type.store, mismatch_kind, mismatch_node, expected, option_type.checked_type) }
+    let payload = try check_value_expression_inner(d, state, parse, base, option_type.store, owner, arg, arg_link.node, string_type, 212, arg, 0, 0, in_loop)
+    let current = match payload {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match payload {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match payload {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    return append_call_expression(d, state, parse, current, owner, call_id, 30, option_type.checked_type, 5, 0, 0, call, 4, site_kind, site_syntax, 901)
+}
+
+// check_c_string_ptr borrows the owner's buffer: `owner.ptr()` yields
+// c.ConstPtr(c.Char) without consuming the owner, so reads compose freely
+// while the single release stays at the using scope boundary. The pointer
+// type interns through the binding vocabulary so it flows into raw fn
+// arguments unchanged.
+fn check_c_string_ptr(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, receiver_draft: ExprDraftRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    // A method call on a dotted callee carries callee + receiver links, so
+    // the arity guard rejects any argument as a wrong link count.
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 164, call) }
+    let interned = try binding_intern_const_ptr_char(d, store)
+    if expected != 0 && expected != interned.id { return expr_token_type_fail(d, state, interned.store, mismatch_kind, mismatch_node, expected, interned.id) }
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, interned.store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: interned.id, variant_use: 0, builtin: 902, place: 0))
+    var children = interned.store.expression_children
+    let first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1
+    let children_appended = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: receiver_draft.expression))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, interned.store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(interned.store, owner), syntax: call_id, kind: 31, checked_type: interned.id, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax))
+    let next = CheckStore(symbols: interned.store.symbols, type_params: interned.store.type_params, types: interned.store.types, type_args: interned.store.type_args, type_annotations: interned.store.type_annotations, uses: interned.store.uses, indexes: interned.store.indexes, locals: interned.store.locals, environments: interned.store.environments, expressions: expressions, call_annotations: annotations, expression_children: children_appended, returns: interned.store.returns, control: interned.store.control, diagnostics: interned.store.diagnostics, traits: interned.store.traits, closures: interned.store.closures, interp: interned.store.interp, bindings: interned.store.bindings)
+    return expr_draft(next, interned.id, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+// binding_intern_const_ptr_char interns c.ConstPtr(c.Char) through the
+// binding intern table so the borrow's result type is the same checked
+// identity a raw fn parameter declares. The c_char scalar internes as
+// binding kind 26 with target 0 (the "Char" scalar id) and the pointer
+// wraps its element through the shared type_args slot.
+fn binding_intern_const_ptr_char(d: Domain, store: CheckStore) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    let char_interned = try binding_type_intern(d, store, 26, 0, 0, 0)
+    let slot = try binding_type_args_slot(d, char_interned.store, char_interned.id)
+    return binding_type_intern(d, slot.store, 28, 0, slot.index, 1)
+}
+
+// check_try_option extends try propagation to Option: `try opt` in a
+// function returning Option(S) yields the payload when the operand holds
+// some(payload) and early-returns None otherwise. The CheckedTryRec carries
+// error_type zero as the none-propagation sentinel; the payload must equal
+// the function's payload exactly.
+fn check_try_option(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, expression: SyntaxRec, expression_id: U64, function_result: CheckedTypeRec, function_result_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let child_link = __s0_buffer_get(SyntaxLinkRec, parse.links, expression.children - 1)
+    let child = __s0_buffer_get(SyntaxRec, parse.nodes, child_link.node - 1)
+    let checked_child = try check_value_expression_inner(d, state, parse, base, store, owner, child, child_link.node, 0, mismatch_kind, mismatch_node, 0, 0, in_loop)
+    let current = match checked_child {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked_child {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked_child {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    let operand = __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1)
+    if operand.kind != 9 { return expr_token_fail(d, state, base, 81, expression) }
+    if operand.first_arg != function_result.first_arg { return expr_token_type_fail(d, state, current, 82, expression, operand.first_arg, function_result.first_arg) }
+    let ok_type = __s0_buffer_get(U64, current.type_args, operand.first_arg - 1)
+    if expected != 0 && expected != ok_type { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, ok_type) }
+    let tries = try __s0_buffer_append(CheckedTryRec, d, current.control.tries, CheckedTryRec(owner: owner, syntax: expression_id, expression: draft.expression, result_type: draft.checked_type, ok_type: ok_type, error_type: 0))
+    let control = CheckedControlStore(blocks: current.control.blocks, statement_links: current.control.statement_links, statements: current.control.statements, places: current.control.places, matches: current.control.matches, match_arms: current.control.match_arms, tries: tries, cleanups: current.control.cleanups, table_views: current.control.table_views)
+    return append_expression(d, with_control(current, control), owner, expression_id, 13, ok_type, __s0_buffer_len(CheckedTryRec, tries), 0, draft.expression, 0, 0, site_kind, site_syntax)
+}
+
 fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
@@ -8606,6 +8743,13 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     if callee.kind == 29 && callee.children != 0 {
         let is_null_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
         if binding_dotted_words(state, callee, is_null_receiver, "c", "is_null") { return check_c_is_null(d, state, parse, base, store, owner, call, call_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    }
+    // c.CString(expr) dispatches before the symbol and imported-name paths:
+    // the builtin owner constructor takes one String argument (infallible
+    // for literals) and never resolves as a value lookup.
+    if callee.kind == 29 && callee.children != 0 {
+        let cstring_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+        if binding_dotted_words(state, callee, cstring_receiver, "c", "CString") { return check_c_string_ctor(d, state, parse, base, store, owner, call, call_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     }
     if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {
@@ -8718,6 +8862,12 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // receivers.
         if c_convert_route(state, callee, receiver_type) {
             return check_c_convert_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+        }
+        // c_string borrow surface (M8): the owner's ptr method yields
+        // c.ConstPtr(c.Char) without consuming the owner; every other
+        // method name on a c_string receiver falls through to the rejects.
+        if receiver_type.kind == 31 && node_word(state, callee, "ptr") {
+            return check_c_string_ptr(d, state, parse, base, current, owner, call, call_id, receiver_draft, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)
@@ -8862,7 +9012,7 @@ fn check_unsafe_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     let result_id = use_by_ordinal(current, target, 4, 0)
     let result_type = __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, result_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result_type) }
-    return append_call_expression(d, state, parse, current, owner, unsafe_id, 11, result_type, 2, target, 0, call, 1, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, current, owner, unsafe_id, 11, result_type, 2, target, 0, call, 1, site_kind, site_syntax, 0)
 }
 
 // The c_type record member whose declared type node is the checked record's
@@ -9255,7 +9405,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                     if variant_id == 0 { return expr_fail(d, base, 40, expression) }
                     let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, variant_id - 1)
                     if variant.checked_type != 0 { return expr_fail(d, base, 47, expression) }
-                    return append_call_expression(d, state, parse, store, owner, expression_id, 10, expected, 4, expected_type.target, variant_id, expression, 0, site_kind, site_syntax)
+                    return append_call_expression(d, state, parse, store, owner, expression_id, 10, expected, 4, expected_type.target, variant_id, expression, 0, site_kind, site_syntax, 0)
                 }
             }
         }
@@ -9472,6 +9622,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         let result_use = function_use(store, owner, 6, expression, state)
         let function_result_id = __s0_buffer_get(DeclTypeUseRec, store.uses, result_use - 1).checked_type
         let function_result = __s0_buffer_get(CheckedTypeRec, store.types, function_result_id - 1)
+        if function_result.kind == 9 { return check_try_option(d, state, parse, base, store, owner, expression, expression_id, function_result, function_result_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if function_result.kind != 10 { return expr_token_fail(d, state, base, 80, expression) }
         let child_link = __s0_buffer_get(SyntaxLinkRec, parse.links, expression.children - 1)
         let child = __s0_buffer_get(SyntaxRec, parse.nodes, child_link.node - 1)
@@ -10348,31 +10499,36 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
             }
         }
         if !builtin_table && vec_drain == 0 {
-            if using_kind != 7 { return body_token_fail(d, state, current, 136, statement) }
-            if type_cleanup_impls(current, using_checked.target) != 1 { return body_token_fail(d, state, current, 136, statement) }
-            let method = type_cleanup_method_symbol(state, current, using_checked.target)
-            if method == 0 { return body_token_fail(d, state, current, 140, statement) }
-            let method_symbol = __s0_buffer_get(SymbolRec, current.symbols, method - 1)
-            if method_symbol.type_arity != 0 { return body_token_fail(d, state, current, 140, statement) }
-            // The cleanup hook takes exactly the owner by value and returns
-            // Unit.
-            if use_count(current, method, 5) != 1 { return body_token_fail(d, state, current, 140, statement) }
-            let result_id = use_by_ordinal(current, method, 6, 0)
-            if result_id == 0 { return body_token_fail(d, state, current, 140, statement) }
-            let result_type = __s0_buffer_get(CheckedTypeRec, current.types, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type - 1)
-            if result_type.kind != 1 || result_type.target != 12 { return body_token_fail(d, state, current, 140, statement) }
-            let resolved = try cleanup_registration_hook(d, state, parse, current, owner, statement, method, initializer.checked_type)
-            current = match resolved {
-                InstanceGood(value) => value.store
-                InstanceBad(value) => value
-            }
-            if match resolved {
-                InstanceGood(value) => false
-                InstanceBad(value) => true
-            } { return Ok(BodyBad(current)) }
-            callback = match resolved {
-                InstanceGood(value) => value.instance
-                InstanceBad(value) => 0
+            // A c_string owner registers the builtin release the same way a
+            // Table registers its release: no callback and no drain; the
+            // lowering synthesizes the exactly-once free shell.
+            if using_kind != 7 && using_kind != 31 { return body_token_fail(d, state, current, 136, statement) }
+            if using_kind == 7 {
+                if type_cleanup_impls(current, using_checked.target) != 1 { return body_token_fail(d, state, current, 136, statement) }
+                let method = type_cleanup_method_symbol(state, current, using_checked.target)
+                if method == 0 { return body_token_fail(d, state, current, 140, statement) }
+                let method_symbol = __s0_buffer_get(SymbolRec, current.symbols, method - 1)
+                if method_symbol.type_arity != 0 { return body_token_fail(d, state, current, 140, statement) }
+                // The cleanup hook takes exactly the owner by value and returns
+                // Unit.
+                if use_count(current, method, 5) != 1 { return body_token_fail(d, state, current, 140, statement) }
+                let result_id = use_by_ordinal(current, method, 6, 0)
+                if result_id == 0 { return body_token_fail(d, state, current, 140, statement) }
+                let result_type = __s0_buffer_get(CheckedTypeRec, current.types, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type - 1)
+                if result_type.kind != 1 || result_type.target != 12 { return body_token_fail(d, state, current, 140, statement) }
+                let resolved = try cleanup_registration_hook(d, state, parse, current, owner, statement, method, initializer.checked_type)
+                current = match resolved {
+                    InstanceGood(value) => value.store
+                    InstanceBad(value) => value
+                }
+                if match resolved {
+                    InstanceGood(value) => false
+                    InstanceBad(value) => true
+                } { return Ok(BodyBad(current)) }
+                callback = match resolved {
+                    InstanceGood(value) => value.instance
+                    InstanceBad(value) => 0
+                }
             }
         }
     }
@@ -11998,7 +12154,7 @@ fn check_trait_method_call(d: Domain, state: State, parse: ParseStore, base: Che
     } { return Ok(ExprBad(checked_instance)) }
     let concrete_result_id = use_by_ordinal(checked_instance, instance_id, 8, 0)
     let concrete_result = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, concrete_result_id - 1).checked_type
-    return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax)
+    return append_call_expression(d, state, parse, checked_instance, owner, call_id, 8, concrete_result, 1, instance_id, 0, call, 1, site_kind, site_syntax, 0)
 }
 
 fn trait_receiver_method(state: State, parse: ParseStore, store: CheckStore, receiver: CheckedTypeRec, name: SyntaxRec) -> TraitMethodRec {

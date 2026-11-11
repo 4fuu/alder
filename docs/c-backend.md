@@ -162,6 +162,24 @@ generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 - float `c.num` pairs cast directly, except `c.num.try` narrowing `f64` to `c_float`: the value is first held in a `double` temporary and compared against `-(double)FLT_MAX` and `(double)FLT_MAX`, so NaN and out-of-range magnitudes yield `none` before any value conversion, and in-range values convert with C11 `double`-to-`float` rounding;
 - `c.field.get` and `c.field.set` lower to ordinary C member access through the field's declared C spelling: a read is `value.spelling` and a write is `place.spelling = value;`. The record's C spelling is used unchanged for locals, parameters, results, and members, so a by-value record moves in and out of C calls as the declared `struct S`/`union U` type with no Alder-side copy of the layout;
 
+The C-string ownership operations (98-101) add three runtime helpers in
+`runtime/c/alder.h`. `c.string.make_lit` calls `alder_cstring_make_lit`, which
+allocates `len + 1` bytes, copies the checker-verified NUL-free text, and
+terminates it; `NULL` takes the checked edge. `c.string.make` calls
+`alder_cstring_make`, whose status distinguishes an interior NUL (`1`, a
+`none` result that is not a failure) from allocation failure (negative, the
+checked edge). `c.string.ptr` emits the owner pointer directly and performs no
+runtime call, so the borrow adds no allocation or lifetime. `c.string.release`
+calls `alder_cstring_release`, which frees the buffer and accepts `NULL`.
+
+A callback-free `using` registration of a `c_string` owner pushes a
+compiler-synthesized per-module shell, `__alder_cstring_release_<N>(cstring)`,
+whose body is one `c.string.release`; the registration context stores the owner
+value and the scope's `run` invokes the shell once. A transfer emits
+`cleanup.disarm` on the moved owner's cleanup id before the owner leaves, so the
+scope's later `run` skips that single entry while still running the others in
+reverse registration order.
+
 ### Domains, cleanup, and tables
 
 - `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because the current MIR profile forbids carrying local-domain handles across backedges. Loop-carried local descriptors may name allocations in an external parameter domain only when the function cannot reset or destroy any parameter domain through verified MIR effects; those allocations remain live for the call and do not reuse a hidden domain slot. Unsafe foreign code remains responsible for honoring its wrapper's domain-lifetime contract;

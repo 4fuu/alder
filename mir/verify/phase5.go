@@ -507,6 +507,9 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.order_lt operands must have the same type"})
 		}
 
+	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
+		c.errs = append(c.errs, checkCStringOpTypes(m, f, in, c.loc)...)
+
 	case mir.OpCFieldGet, mir.OpCFieldSet:
 		if in.Op == mir.OpCFieldGet {
 			_, _, ok := m.CNamedRecordField(f, in.A, in.CField)
@@ -681,4 +684,41 @@ func targetBlock(f *mir.Function, id mir.BlockId) *mir.Block {
 		return nil
 	}
 	return f.Blocks[id]
+}
+
+// checkCStringOpTypes validates the c_string vocabulary typing: both
+// constructors consume a String operand, ptr borrows a c_string as
+// c_const_ptr(c_char), and release consumes a c_string without producing a
+// result. make_lit yields the bare c_string; make yields option(c_string).
+func checkCStringOpTypes(m *mir.Module, f *mir.Function, in *mir.Instr, loc string) []Error {
+	var errs []Error
+	at, ok := f.ValueType(in.A)
+	want := mir.TypeCString
+	if in.Op == mir.OpCStringMakeLit || in.Op == mir.OpCStringMake {
+		want = mir.TypeString
+	}
+	if !ok || !m.ValidType(at) || m.Types[at].Kind != want {
+		errs = append(errs, Error{Loc: loc, Msg: "c.string operand has the wrong type"})
+		return errs
+	}
+	rt, hasResult := f.ValueType(in.Result)
+	switch in.Op {
+	case mir.OpCStringMakeLit:
+		if !hasResult || rt != m.CString() {
+			errs = append(errs, Error{Loc: loc, Msg: "c.string.make_lit must produce c_string"})
+		}
+	case mir.OpCStringMake:
+		if !hasResult || !m.ValidType(rt) || m.Types[rt].Kind != mir.TypeOption || m.Types[rt].Elem != m.CString() {
+			errs = append(errs, Error{Loc: loc, Msg: "c.string.make must produce option(c_string)"})
+		}
+	case mir.OpCStringPtr:
+		if !hasResult || rt != m.CConstPtr(m.CRaw(mir.CScalarChar)) {
+			errs = append(errs, Error{Loc: loc, Msg: "c.string.ptr must produce c_const_ptr(c_char)"})
+		}
+	case mir.OpCStringRelease:
+		if hasResult {
+			errs = append(errs, Error{Loc: loc, Msg: "c.string.release produces no result"})
+		}
+	}
+	return errs
 }

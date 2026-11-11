@@ -67,6 +67,10 @@ const (
 	// TypeCNamed is one named C binding type member: scalar, opaque, or
 	// record. CName carries the C spelling and CClass the binding class.
 	TypeCNamed
+	// TypeCString is c.CString, a malloc-owned NUL-terminated char buffer
+	// built from Alder text. It is an affine owner: exactly one release,
+	// which using-bound cleanups perform at scope exit.
+	TypeCString
 )
 
 // CClass classifies a TypeCNamed binding type.
@@ -266,6 +270,8 @@ func (m *Module) TypeString(t TypeId) string {
 		return "c_const_ptr(" + m.TypeString(ty.Elem) + ")"
 	case TypeCNamed:
 		return "@" + ty.Name
+	case TypeCString:
+		return "c_string"
 	case TypeString:
 		return "string"
 	case TypeBytes:
@@ -568,4 +574,9 @@ func (m *Module) CleanupScope() TypeId {
 // CleanupID returns the singleton cleanup_id type.
 func (m *Module) CleanupID() TypeId {
 	return m.intern(TypeCleanupID, func(*Type) bool { return true }, func(*Type) {})
+}
+
+// CString returns the singleton c_string type.
+func (m *Module) CString() TypeId {
+	return m.intern(TypeCString, func(*Type) bool { return true }, func(*Type) {})
 }

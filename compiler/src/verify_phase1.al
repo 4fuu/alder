@@ -1,8 +1,8 @@
 fn mir_vop_produces(op: U64) -> Bool {
-    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end() || op == mir_op_c_field_set())
+    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end() || op == mir_op_c_field_set() || op == mir_op_c_string_release())
 }
 fn mir_vop_checked(op: U64) -> Bool {
-    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked() || op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() || op == mir_op_str_byte_checked() || op == mir_op_str_concat() || op == mir_op_str_slice_checked() || op == mir_op_str_from_bytes() || op == mir_op_str_display()
+    return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked() || op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() || op == mir_op_str_byte_checked() || op == mir_op_str_concat() || op == mir_op_str_slice_checked() || op == mir_op_str_from_bytes() || op == mir_op_str_display() || op == mir_op_c_string_make_lit() || op == mir_op_c_string_make()
 }
 fn mir_vop_required_mask(op: U64) -> U64 {
     // bits: a=1, b=2, c=4, place=8, type=16, target=32, name=64.
@@ -43,6 +43,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_fn_value() { return 32 }
     if op == mir_op_c_binding_call() { return 32 }
     if op == mir_op_c_is_null() { return 1 }
+    if op >= mir_op_c_string_make_lit() && op <= mir_op_c_string_release() { return 1 }
     return 0
 }
 // Flat (kind, owner) key for operand ordinal counting. Zero means the
@@ -110,15 +111,15 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
         } else {
-            if t.kind > mir_type_kind_c_named() || t.kind == mir_type_kind_primitive() {
-                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_c_named(), t.kind, 0))
+            if t.kind > mir_type_kind_c_string() || t.kind == mir_type_kind_primitive() {
+                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_c_string(), t.kind, 0))
             } else {
                 if t.kind == mir_type_kind_vec() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 4, version, 0)) }
                 if t.kind == mir_type_kind_c_raw() && version < 6 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 6, version, 0)) }
                 let named = t.name_start != t.name_end
                 let named_kind = t.kind == mir_type_kind_aggregate() || t.kind == mir_type_kind_enum() || t.kind == mir_type_kind_c_named()
                 if (named_kind && !named) || (!named_kind && named) || (named && !mir_vname_valid(store, t.name_start, t.name_end, true)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_name(), 0, 0, 0, 0, 0, id, id, 0, 0, 0)) }
-                let leaf = t.kind == mir_type_kind_string() || t.kind == mir_type_kind_bytes()
+                let leaf = t.kind == mir_type_kind_string() || t.kind == mir_type_kind_bytes() || t.kind == mir_type_kind_c_string()
                 let c_kind = t.kind == mir_type_kind_c_raw() || t.kind == mir_type_kind_c_ptr() || t.kind == mir_type_kind_c_const_ptr() || t.kind == mir_type_kind_c_named()
                 if (!c_kind && t.kind != mir_type_kind_array() && t.length != 0) || (t.kind == mir_type_kind_array() && (t.elem == 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) || (leaf && (t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
                 if c_kind && !mir_vc_type_shape_ok(store, t) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }

@@ -475,9 +475,47 @@ rejects `str.order_lt` on non-sequence operand types, on mismatched
 sequence operand types within one operation, and on results not of type
 `bool`.
 
+## C-String Ownership
+
+MIR 6 exposes the `c.CString` surface as operations 98-101, produced only by
+the `c.CString` constructor and the owner's `ptr` borrow:
+
+```text
+c.string.make_lit a else edge -> c_string
+c.string.make a else edge -> option(c_string)
+c.string.ptr a -> c_const_ptr(c_char)
+c.string.release a
+```
+
+Slot `a` is a `string` value for the two constructors and a `c_string` value
+for `ptr` and `release`. `make_lit` copies a String the checker proved free
+of interior NUL bytes, so the operation's only failure is allocation;
+`make` scans arbitrary text, produces `none` when an interior NUL is found,
+and takes the same allocation-failure edge on success paths. Both
+constructors are checked operations and therefore require the explicit
+`else` edge. `ptr` borrows the NUL-terminated buffer for the owner's
+lifetime without consuming it and yields `c_const_ptr(c_char)`, which is why
+several borrows may compose in one call sequence. `release` frees the
+buffer and binds no result; lowering emits it only inside the synthesized
+per-type cleanup shell that a `using` registration pushes, so a program
+cannot spell a release directly.
+
+A registered `c_string` owner is an affine resource: transferring it out of
+its scope (a plain return, an aggregate or `Option`/`Result` constructor, a
+`take` argument, or a match scrutinee) emits `cleanup.disarm` for its entry
+on that path before the owner leaves. The scope still runs its remaining
+entries at exit; a disarmed entry never runs. The verifier requires a disarm
+entry to be active on every path that reaches it.
+
+The verifier rejects `make_lit`/`make` with a non-`string` slot, `ptr` with
+a non-`c_string` slot, `release` with a slot that is not a `c_string`, a
+`release` that binds a result, a `make` result that is not
+`option(c_string)`, a `make_lit` result that is not `c_string`, and a `ptr`
+result that is not `c_const_ptr(c_char)`.
+
 ## Text Display
 
-MIR 6 exposes the Display domain's formatting as operation 98, produced
+MIR 6 exposes the Display domain's formatting as operation 102, produced
 only by the builtin `display` method call on a domain receiver:
 
 ```text
@@ -873,7 +911,8 @@ adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 byte-sequence method operations (80-85), the integer conversion method
 operations (86-87), the C scalar conversion method operations (88-90), the float arithmetic
 operations (91-94), the ordering comparison operation (95), the C
-record field operations (96-97), and the display operation (98).
+record field operations (96-97), the C-string ownership operations (98-101),
+the display operation (102), and the total bitwise operations (103-106).
 Incompatible changes must use a new version and update:
 
 - this document;

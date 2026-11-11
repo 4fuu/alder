@@ -414,7 +414,10 @@ Implemented expressions include:
   share one body form: diverging arms do not mix with `=> { ... }` block
   arms (kind 135), a table-view match rejects them (kind 133), and a match
   whose every arm diverges has no value and is rejected (kind 305);
-- prefix `try` with the exact same error type;
+- prefix `try`: in a function returning `Result`, the operand is `Result`
+  with the same error type; in a function returning `Option`, the operand is
+  `Option` with the same payload type and `none` early-returns from the
+  function;
 - inside `unsafe c { ... }`: one direct imported call, one C record field
   read `rec.field`, or one C record field write `rec.field = value` through
   a `var` local holding a verified by-value C record; the field forms are
@@ -431,6 +434,16 @@ Implemented expressions include:
   function; reads of the table itself are borrows and never copy it;
 - the callback-free `using name = Table.new(T)` registration, whose owner is
   cleanup-covered at every exit and disarmed on transfer;
+- `c.CString`: a string literal builds the bare owner infallibly and an
+  interior NUL in that literal is rejected at compile time (kind 210), while
+  any other `String` value yields `Option(c.CString)` with `none` for an
+  interior NUL, so `using name = try c.CString(text)` composes with Option
+  propagation; a wrong argument count is kind 211 and a non-`String` argument
+  is kind 212. `owner.ptr()` borrows the buffer as `c.ConstPtr(c.Char)`
+  without consuming the owner, and a `using` registration releases the
+  buffer exactly once. A registered owner that leaves its scope (plain
+  return, aggregate or `Option`/`Result` construction, `take` argument, or
+  match scrutinee) is disarmed from that scope and owned by the receiver;
 - M7.5 resource composition: affine owners transfer into aggregate
   construction (records, enums, `Option`, `Result`, fixed arrays), affine
   scrutinees are consumed as a whole, and parts leave an aggregate only by

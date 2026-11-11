@@ -114,6 +114,7 @@ fn mir_v10_forbidden_element(d: Domain, store: MirStore, indexes: MirVIndexes, t
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_ptr()) { return Ok(mir_type_kind_c_ptr()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_const_ptr()) { return Ok(mir_type_kind_c_const_ptr()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_named()) { return Ok(mir_type_kind_c_named()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_string()) { return Ok(mir_type_kind_c_string()) }
     return Ok(0)
 }
 fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type_id: U64) -> Result(U64, __s0_Error) {
@@ -129,6 +130,7 @@ fn mir_v10_forbidden_copy(d: Domain, store: MirStore, indexes: MirVIndexes, type
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_ptr()) { return Ok(mir_type_kind_c_ptr()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_const_ptr()) { return Ok(mir_type_kind_c_const_ptr()) }
     if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_named()) { return Ok(mir_type_kind_c_named()) }
+    if try mir_v6_type_contains(d, store, indexes, type_id, mir_type_kind_c_string()) { return Ok(mir_type_kind_c_string()) }
     return Ok(0)
 }
 fn mir_vphase10(d: Domain, store: MirStore, indexes: MirVIndexes, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {

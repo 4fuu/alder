@@ -1541,6 +1541,43 @@ and five checker rejections); the surface is documented in
 variadics", [docs/mir.md](docs/mir.md) "Binding Blocks and C Types", and
 [docs/c-backend.md](docs/c-backend.md).
 
+Landed C-interop progress: `c.CString` ownership is installed end to end. A
+string literal constructs the bare owner infallibly and the checker rejects an
+interior NUL in the literal (diagnostic 210); any other `String` yields
+`Option(c.CString)` with `none` for an interior NUL, and wrong argument count
+or a non-`String` argument is rejected with 211 and 212. `owner.ptr()` borrows
+the buffer as `c.ConstPtr(c.Char)` without consuming the owner, a callback-free
+`using` registration releases the buffer exactly once through a synthesized
+per-module shell, and `try` now propagates `Option` in a function returning
+`Option` so `using name = try c.CString(text)` composes with the existing
+cleanup rules. MIR gains operations 98-101 (`c.string.make_lit`,
+`c.string.make`, `c.string.ptr`, `c.string.release`), and `str.display` moves
+from 98 to 102; the Go parser, printer, type inference, and verifier mirror the
+new operand rule and the constructors' failure edges so printed MIR
+round-trips. The same slice fixed a general lowering defect the new ownership
+exposed: `lower_binding_expression` built the disarm instruction for a
+transfer, then rebuilt the place/type/load chain from the entry state and
+silently discarded it, so no `using` owner was ever disarmed when it moved out
+of its scope. Table and Vec releases hid it because their storage dies with a
+domain; a moved CString was freed by the exiting scope and again by the
+receiver (ASan heap-use-after-free and a libc double-free abort). The load path
+now threads the transfer state, so every documented transfer path (plain
+return, aggregate and `Option`/`Result` construction, `take` argument, match
+scrutinee, re-registration) disarms exactly the moved entry. Evidence: the
+production qualification `compiler/production_c_string_test.go` (literal, `try`,
+runtime `none`, transfers through `Some` and a plain return, strict-warning
+compile and run with the live allocation count unchanged, both disarms pinned
+in generated C, MIR vocabulary and cross-process determinism, and three checker
+rejections), the MIR accept/reject/printer round trip in
+`mir/verify/c_string_ops_test.go`, and the updated `m75-cleanup-trait` fixture,
+which registers the returned owner and observes the cleanup counter 16 (23
+before the fix). Documentation is in
+[docs/c-interop.md](docs/c-interop.md) "C strings",
+[docs/mir.md](docs/mir.md) "C-String Ownership", and
+[docs/c-backend.md](docs/c-backend.md). A cold `bootstrap/regenerate.sh`
+measured 132.6 s wall and 1.94 GB peak RSS against 132.5 s and 1.92 GB for the
+parent tree on the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

@@ -164,6 +164,22 @@ const (
 	OpCFieldGet
 	OpCFieldSet
 
+	// OpCStringMakeLit builds c.CString from an Alder String whose bytes the
+	// checker proved free of interior NUL. The result is a bare c_string
+	// value; only allocation failure takes the checked edge.
+	OpCStringMakeLit
+	// OpCStringMake builds c.CString from arbitrary Alder text, scanning for
+	// interior NUL. The result is option(c_string): none when the bytes
+	// contain an interior NUL, some carrying the fresh buffer otherwise;
+	// allocation failure takes the checked edge.
+	OpCStringMake
+	// OpCStringPtr borrows the NUL-terminated buffer as a c_const_ptr(c_char).
+	// The owner stays live; release happens exactly once through cleanup.
+	OpCStringPtr
+	// OpCStringRelease frees one c_string buffer. It runs exactly once, from
+	// the synthesized cleanup shell function a using registration pushes.
+	OpCStringRelease
+
 	// OpStrDisplay formats one builtin-domain value as text: the operand
 	// is Bool, I64, or U64, the result is the string type, and the domain
 	// operand owns the fresh allocation. The checked edge fires on
@@ -172,9 +188,9 @@ const (
 
 	// Total bitwise operations over the fixed-width two's-complement
 	// representation. Both binary operands share one integer type; int.not is
-	// the unary complement. None carries a failure edge. Op numbers 99-102
-	// stay reserved for the staged CString slice (98-101 plus the moved
-	// str.display), so this family starts at 103.
+	// the unary complement. None carries a failure edge. The C-string
+	// ownership operations occupy 98-101 and str.display moved to 102, so
+	// this family starts at 103.
 	OpIntAnd OpKind = 103
 	OpIntOr  OpKind = 104
 	OpIntXor OpKind = 105
@@ -385,6 +401,14 @@ func (k OpKind) String() string {
 		return "c.field.get"
 	case OpCFieldSet:
 		return "c.field.set"
+	case OpCStringMakeLit:
+		return "c.string.make_lit"
+	case OpCStringMake:
+		return "c.string.make"
+	case OpCStringPtr:
+		return "c.string.ptr"
+	case OpCStringRelease:
+		return "c.string.release"
 	case OpStrDisplay:
 		return "str.display"
 	case OpIntAnd:
@@ -403,7 +427,8 @@ func (k OpKind) String() string {
 func (k OpKind) ProducesResult() bool {
 	switch k {
 	case OpStore, OpDomainReset, OpDomainDestroy, OpCleanupDisarm,
-		OpCleanupScopeRun, OpCleanupScopeEnd, OpTableViewEnd, OpCFieldSet:
+		OpCleanupScopeRun, OpCleanupScopeEnd, OpTableViewEnd, OpCFieldSet,
+		OpCStringRelease:
 		return false
 	}
 	return true
@@ -420,6 +445,8 @@ func (k OpKind) HasFailEdge() bool {
 	case OpVecConstructChecked, OpVecGrowChecked:
 		return true
 	case OpStrByteChecked, OpStrConcat, OpStrSliceChecked, OpStrFromBytes, OpStrDisplay:
+		return true
+	case OpCStringMakeLit, OpCStringMake:
 		return true
 	}
 	return false

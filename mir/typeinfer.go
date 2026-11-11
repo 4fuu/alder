@@ -751,8 +751,39 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 			return TypeBool, true
 		}
 		return NoType, false
+
+	case OpCStringMakeLit, OpCStringMake, OpCStringPtr, OpCStringRelease:
+		return cStringOpResult(m, f, in)
 	}
 	return NoType, false
+}
+
+// cStringOpResult infers the result type of one c.string operation: the
+// constructors require a String operand, ptr and release require a c_string;
+// make_lit yields c_string, make yields option(c_string), ptr yields
+// c_const_ptr(c_char), and release yields unit.
+func cStringOpResult(m *Module, f *Function, in *Instr) (TypeId, bool) {
+	at, ok := f.ValueType(in.A)
+	if !ok || !m.ValidType(at) {
+		return NoType, false
+	}
+	want := TypeCString
+	if in.Op == OpCStringMakeLit || in.Op == OpCStringMake {
+		want = TypeString
+	}
+	if m.Types[at].Kind != want {
+		return NoType, false
+	}
+	switch in.Op {
+	case OpCStringMakeLit:
+		return m.CString(), true
+	case OpCStringMake:
+		return m.Option(m.CString()), true
+	case OpCStringPtr:
+		return m.CConstPtr(m.CRaw(CScalarChar)), true
+	default: // OpCStringRelease
+		return TypeUnit, true
+	}
 }
 
 // isRawPointerType reports whether t is a raw C pointer token or the legacy

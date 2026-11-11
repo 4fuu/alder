@@ -899,7 +899,7 @@ fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
         if at < mir_primitive_type_count() {
             if rec.kind != mir_type_kind_primitive() || rec.name_start != 0 || rec.name_end != 0 || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
         } else {
-            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_c_named() { return false }
+            if rec.kind == mir_type_kind_primitive() || rec.kind > mir_type_kind_c_string() { return false }
             if rec.kind == mir_type_kind_aggregate() || rec.kind == mir_type_kind_enum() {
                 if !mir_name_valid(store, rec.name_start, rec.name_end, true) || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
                 var part_kind = mir_type_part_variant()
@@ -932,10 +932,10 @@ fn mir_validate_types(idx: MirPrintIndex, store: MirStore) -> Bool {
                     }
                     if param_count > rec.part_count { return false }
                 }
-                if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() || rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() {
+                if rec.kind == mir_type_kind_domain_handle() || rec.kind == mir_type_kind_domain_mark() || rec.kind == mir_type_kind_cleanup_scope() || rec.kind == mir_type_kind_cleanup_id() || rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() || rec.kind == mir_type_kind_c_string() {
                     if rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
-                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() && rec.kind != mir_type_kind_string() && rec.kind != mir_type_kind_bytes() && rec.kind != mir_type_kind_c_raw() && rec.kind != mir_type_kind_c_ptr() && rec.kind != mir_type_kind_c_const_ptr() && rec.kind != mir_type_kind_c_named() {
+                if rec.kind != mir_type_kind_result() && rec.kind != mir_type_kind_function() && rec.kind != mir_type_kind_domain_handle() && rec.kind != mir_type_kind_domain_mark() && rec.kind != mir_type_kind_cleanup_scope() && rec.kind != mir_type_kind_cleanup_id() && rec.kind != mir_type_kind_string() && rec.kind != mir_type_kind_bytes() && rec.kind != mir_type_kind_c_raw() && rec.kind != mir_type_kind_c_ptr() && rec.kind != mir_type_kind_c_const_ptr() && rec.kind != mir_type_kind_c_named() && rec.kind != mir_type_kind_c_string() {
                     if !mir_type_valid(store, rec.elem) || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 { return false }
                 }
                 if rec.kind != mir_type_kind_array() && rec.kind != mir_type_kind_c_raw() && rec.length != 0 { return false }
@@ -1143,7 +1143,7 @@ fn mir_print_term_count(idx: MirPrintIndex, store: MirStore, function: U64, bloc
 }
 
 fn mir_instr_produces(op: U64) -> Bool {
-    return op != mir_op_store() && op != mir_op_domain_reset() && op != mir_op_domain_destroy() && op != mir_op_cleanup_disarm() && op != mir_op_cleanup_scope_run() && op != mir_op_cleanup_scope_end() && op != mir_op_table_view_end() && op != mir_op_c_field_set()
+    return op != mir_op_store() && op != mir_op_domain_reset() && op != mir_op_domain_destroy() && op != mir_op_cleanup_disarm() && op != mir_op_cleanup_scope_run() && op != mir_op_cleanup_scope_end() && op != mir_op_table_view_end() && op != mir_op_c_field_set() && op != mir_op_c_string_release()
 }
 
 fn mir_instr_checked(op: U64) -> Bool {
@@ -1209,6 +1209,10 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     if rec.op == mir_op_const_get() && !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
     if (rec.op == mir_op_call() || rec.op == mir_op_ffi_call_unsafe() || rec.op == mir_op_call_value() || rec.op == mir_op_c_binding_call() || rec.op == mir_op_str_slice_checked()) && !mir_operand_group_valid(idx, store, mir_operand_instruction(), id, 0) { return false }
     if rec.op == mir_op_c_is_null() && !mir_value_valid(idx, store, rec.function, rec.a) { return false }
+    // The c.string vocabulary reads exactly one value operand: the source
+    // String for the constructors, the borrowed owner for ptr, and the
+    // released buffer for release.
+    if rec.op >= mir_op_c_string_make_lit() && rec.op <= mir_op_c_string_release() && !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     return true
 }
 
@@ -1695,6 +1699,7 @@ fn mir_out_type(idx: MirPrintIndex, store: MirStore, id: U64, depth: U64) -> Boo
     if rec.kind == mir_type_kind_c_ptr() { return out_string("c_ptr(") && mir_out_type(idx, store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_c_const_ptr() { return out_string("c_const_ptr(") && mir_out_type(idx, store, rec.elem, depth - 1) && out(41) }
     if rec.kind == mir_type_kind_c_named() { return out(64) && mir_out_name(store, rec.name_start, rec.name_end) }
+    if rec.kind == mir_type_kind_c_string() { return out_string("c_string") }
     if rec.kind == mir_type_kind_function() {
         if !out_string("function(fn(") { return false }
         let param_count = mir_type_part_count_at(idx, store, id, mir_type_part_function_param())
@@ -1917,7 +1922,11 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 95 { return out_string("str.order_lt") }
     if op == 96 { return out_string("c.field.get") }
     if op == 97 { return out_string("c.field.set") }
-    if op == 98 { return out_string("str.display") }
+    if op == 98 { return out_string("c.string.make_lit") }
+    if op == 99 { return out_string("c.string.make") }
+    if op == 100 { return out_string("c.string.ptr") }
+    if op == 101 { return out_string("c.string.release") }
+    if op == 102 { return out_string("str.display") }
     if op == 103 { return out_string("int.and") }
     if op == 104 { return out_string("int.or") }
     if op == 105 { return out_string("int.xor") }
@@ -2095,6 +2104,12 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_c_field_set() {
         if !out(32) || !mir_out_name(store, rec.name_start, rec.name_end) || !out(32) || !mir_out_place(idx, store, rec.function, rec.place) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.a) { return false }
+    }
+    if rec.op >= mir_op_c_string_make_lit() && rec.op <= mir_op_c_string_release() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) { return false }
+    }
+    if rec.op == mir_op_c_string_make_lit() || rec.op == mir_op_c_string_make() {
+        if !mir_out_fail_edge(idx, store, id, rec) { return false }
     }
     if rec.op == mir_op_const_get() {
         if !out_string(" @") || !mir_out_name(store, rec.name_start, rec.name_end) { return false }

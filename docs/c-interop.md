@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, and `unsafe c` field access are checked end to end, while exports, ownership/retention wrappers, CString, and callbacks are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, and `c.CString` ownership are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -230,12 +230,50 @@ C aliasing declarations do not automatically create safe Alder mutable views.
 At most one mutable view may be active, and unknown foreign mutation ends or
 invalidates any incompatible safe capability.
 
+## C strings
+
+`c.CString` builds a NUL-terminated foreign buffer from Alder text and returns
+an affine owner with exactly one release:
+
+```alder
+fn mode_length() -> U64 {
+    using mode = c.CString("rb")
+    let n = unsafe c { cstr.length(mode.ptr()) }
+    return n.to_u64()
+}
+
+fn open_owned(text: String) -> Option(c.CString) {
+    using path = try c.CString(text)
+    return Some(path)
+}
+```
+
+The constructor has two forms. A string literal is copied infallibly: the
+checker decodes the literal, rejects an interior NUL byte at compile time
+(diagnostic 210), and the runtime copy can fail only when allocation fails,
+which takes the checked edge. Any other `String` value produces
+`Option(c.CString)`: an interior NUL yields `none`, allocation failure takes
+the checked edge, and `try`/`match` consume the option. A wrong argument count
+or a non-`String` argument is rejected with diagnostics 211 and 212.
+
+The owner is affine and never a copyable value. A `using` registration
+releases it exactly once at scope exit, and `owner.ptr()` borrows the buffer
+as `c.ConstPtr(c.Char)` without consuming the owner, so several foreign calls
+may borrow the same buffer in sequence. Transferring the owner out of its
+scope — a plain return, an `Option`/`Result`/record/array construction, a
+`take` parameter, or a match scrutinee — disarms that registration before the
+owner leaves, and the receiving scope or aggregate owns the single release.
+No path releases a transferred buffer, and a program cannot spell the release
+operation directly.
+
+The permanent `String`/`Bytes` lifetimes are unchanged: conversion into a
+CString is a copy, and the CString does not borrow the source text.
+
 ## Strings and buffers
 
-C strings use `c.CString`, which validates absence of interior NUL and owns a
-terminating byte. Pointer-plus-length APIs use a checked conversion from
-`U64` to `c.Size`, reject nonrepresentable lengths, and preserve the backing
-value for the complete call/retention lifetime.
+Pointer-plus-length APIs use a checked conversion from `U64` to `c.Size`,
+reject nonrepresentable lengths, and preserve the backing value for the
+complete call/retention lifetime.
 
 A returned pointer/length pair is validated for null/zero consistency,
 representable length, alignment, readable initialization, and ownership before

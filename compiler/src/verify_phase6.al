@@ -562,7 +562,7 @@ fn mir_v6_provenance_free_types(d: Domain, store: MirStore, indexes: MirVIndexes
     while t <= total {
         let typ = __s0_buffer_get(MirTypeRec, store.types, t - 1)
         var seed: U64 = 1
-        if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_raw_ptr() || typ.kind == mir_type_kind_table() || typ.kind == mir_type_kind_id() || typ.kind == mir_type_kind_table_view() || typ.kind == mir_type_kind_table_mut_view() || typ.kind == mir_type_kind_function() || typ.kind == mir_type_kind_string() || typ.kind == mir_type_kind_bytes() || typ.kind == mir_type_kind_domain_handle() || typ.kind == mir_type_kind_domain_mark() || typ.kind == mir_type_kind_cleanup_scope() || typ.kind == mir_type_kind_cleanup_id() { seed = 0 }
+        if typ.kind == mir_type_kind_slice() || typ.kind == mir_type_kind_vec() || typ.kind == mir_type_kind_safe_ref() || typ.kind == mir_type_kind_safe_mut() || typ.kind == mir_type_kind_raw_ptr() || typ.kind == mir_type_kind_table() || typ.kind == mir_type_kind_id() || typ.kind == mir_type_kind_table_view() || typ.kind == mir_type_kind_table_mut_view() || typ.kind == mir_type_kind_function() || typ.kind == mir_type_kind_string() || typ.kind == mir_type_kind_bytes() || typ.kind == mir_type_kind_domain_handle() || typ.kind == mir_type_kind_domain_mark() || typ.kind == mir_type_kind_cleanup_scope() || typ.kind == mir_type_kind_cleanup_id() || typ.kind == mir_type_kind_c_string() { seed = 0 }
         free = try __s0_buffer_append(U64, d, free, seed)
         t = t + 1
     }
