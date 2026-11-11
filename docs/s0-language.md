@@ -692,7 +692,7 @@ lexical fallthrough, return, failed `try`, `break`, and `continue`. Current
 lowering walks the checked site environment to run only active callbacks,
 exactly once in reverse lexical order, on those exits; a checked failure while
 a registration is active runs the registrations it crosses before the process
-aborts. A registration inside a loop body belongs to that iteration's scope, so
+terminates with status 101. A registration inside a loop body belongs to that iteration's scope, so
 it runs at the end of the iteration and on every exit that leaves it, and a
 loop-body binding is re-established by each iteration.
 Unannotated let/var bindings infer scalar types from supported literals,

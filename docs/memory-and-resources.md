@@ -271,7 +271,7 @@ carries the element value itself back to the caller, so a failed insertion
 never drops or copies away the value it was given. `Err` means the table
 refused the insert (identity exhaustion, the runtime capacity policy, or
 slot-storage exhaustion); the table is unchanged. Exhaustion inside the
-element copy itself follows the `copy_to_domain` abort contract instead,
+element copy itself follows the `copy_to_domain` termination contract instead,
 because the copy is an infallible value operation.
 
 Element placement: inserting a storage-bearing element deep-copies it into
@@ -303,10 +303,11 @@ Cleanup is guaranteed on:
 - `break` and `continue` across the resource scope;
 - structured task cancellation and task-group exit.
 
-An invariant panic aborts the process and does not promise caller-frame
-unwinding; the `core.panic` operations use this path and do not run registered
-cleanup. OS process termination, power loss, and a cleanup operation that
-itself aborts likewise provide no remaining-cleanup guarantee.
+An invariant panic terminates the process immediately with status 101 and
+does not unwind or run cleanup; the `core.panic` operations use this path and
+do not run registered cleanup. OS process termination, power loss, and a
+cleanup operation that itself terminates likewise provide no remaining-cleanup
+guarantee.
 
 The automatic cleanup hook is infallible and returns `Unit`. A resource whose
 orderly close can report an operational error exposes an explicit consuming

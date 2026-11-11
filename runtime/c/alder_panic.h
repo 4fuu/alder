@@ -5,8 +5,8 @@
  * binding names beginning with `alder_` are reserved for generated code and
  * the runtime, and the invariant runtime path prints a backtrace rather than
  * a user panic message. This shim is the audited boundary for user panics.
- * It flushes every C output stream, writes the message to stderr, and aborts;
- * Alder cleanup scopes do not run.
+ * It flushes every C output stream, writes the message to stderr, and exits
+ * immediately with status 101; Alder cleanup scopes do not run.
  *
  * The message must be a valid NUL-terminated C string. It is deliberately
  * passed as a plain pointer because the current binding surface has no
@@ -38,7 +38,7 @@ static inline _Noreturn ALDER_PANIC_UNUSED void c_panic(const char *message) {
     fputs(message, stderr);
     fputc('\n', stderr);
     (void)fflush(stderr);
-    abort();
+    _Exit(101);
 }
 
 #ifdef __cplusplus

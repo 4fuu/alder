@@ -424,7 +424,8 @@ conversions between `c.*` scalars and Alder numerics.
 
 The `core.panic` module uses a second toolchain-owned shim,
 `runtime/c/alder_panic.h`. Its `c_panic(const char *)` flushes every C output
-stream, writes the user panic diagnostic to standard error, and aborts. Like
+stream, writes the user panic diagnostic to standard error, and terminates
+with status 101. Like
 the errno shim it is a fixed audited header, not a general user shim surface;
 `core.panic` binds it through an ordinary `import c` block and never exposes
 the runtime's reserved `alder_` names to source.

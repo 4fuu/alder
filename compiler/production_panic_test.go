@@ -3,13 +3,12 @@ package compiler
 import (
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
 )
 
 // The process-terminating assertions are observed through the production
-// driver's project runner. The host maps an aborting child to 128+SIGABRT, so
-// this test pins both the signal-shaped status and the exact stderr contract.
+// driver's project runner. The child exits with the documented invariant status
+// 101, and this test pins that status together with the exact stderr contract.
 const corePanicManifest = "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
 
 func TestProductionCorePanicTerminates(t *testing.T) {
@@ -41,7 +40,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStatus: 101,
 			wantStderr: "panic: boom\n",
 		},
 		{
@@ -55,7 +54,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStatus: 101,
 			wantStderr: "panic: assertion failed: condition\n",
 		},
 		{
@@ -69,7 +68,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStatus: 101,
 			wantStderr: "panic: assertion failed: a == b\n  a: 1\n  b: 2\n",
 		},
 		{
@@ -83,7 +82,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStatus: 101,
 			wantStderr: "panic: assertion failed: a == b\n  a: -1\n  b: 1\n",
 		},
 		{
@@ -97,7 +96,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			wantStatus: 128 + int(syscall.SIGABRT),
+			wantStatus: 101,
 			wantStderr: "panic: assertion failed: a != b\n  a: 1\n  b: 1\n",
 		},
 		{
@@ -169,8 +168,8 @@ pub fn main() -> I32 {
 }
 `,
 	}, "run")
-	if result.status != 128+int(syscall.SIGABRT) {
-		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 128+int(syscall.SIGABRT), result.stdout, result.stderr)
+	if result.status != 101 {
+		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 101, result.stdout, result.stderr)
 	}
 	if result.stdout != "A" {
 		t.Fatalf("stdout = %q, want %q", result.stdout, "A")
@@ -221,11 +220,11 @@ pub fn main() -> I32 {
 }
 `,
 	}, "run")
-	if result.status != 128+int(syscall.SIGABRT) {
-		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 128+int(syscall.SIGABRT), result.stdout, result.stderr)
+	if result.status != 101 {
+		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 101, result.stdout, result.stderr)
 	}
 	if result.stdout != "" {
-		t.Fatalf("cleanup ran before abort: stdout = %q", result.stdout)
+		t.Fatalf("cleanup ran before termination: stdout = %q", result.stdout)
 	}
 	if result.stderr != "panic: boom\n" {
 		t.Fatalf("stderr = %q, want %q", result.stderr, "panic: boom\n")
@@ -257,8 +256,8 @@ pub fn main() -> I32 {
 }
 `,
 	}, "run")
-	if result.status != 128+int(syscall.SIGABRT) {
-		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 128+int(syscall.SIGABRT), result.stdout, result.stderr)
+	if result.status != 101 {
+		t.Fatalf("status = %d, want %d; stdout=%q stderr=%q", result.status, 101, result.stdout, result.stderr)
 	}
 	if result.stderr != "panic: message contains an interior NUL byte\n" {
 		t.Fatalf("stderr = %q, want interior-NUL fallback", result.stderr)

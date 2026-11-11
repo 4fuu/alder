@@ -125,7 +125,7 @@ in API names.
 Implemented core.panic progress: `sysroot/core/panic.al` provides `panic`,
 `assert`, `assert_eq`, and `assert_ne`. A failure flushes C output, writes the
 documented `panic:` or `panic: assertion failed:` diagnostic to standard error,
-and aborts the process without running Alder cleanup. `assert_eq` and
+and terminates the process with status 101 without running Alder cleanup. `assert_eq` and
 `assert_ne` require `T: type(Eq, Display)` and display both operands;
 source-expression capture remains deferred to the test runner. The runtime
 boundary is the toolchain-owned `runtime/c/alder_panic.h` shim.

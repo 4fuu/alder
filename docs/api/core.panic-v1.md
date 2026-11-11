@@ -10,8 +10,8 @@ imported explicitly; it is not part of the prelude.
 
 The functions in this module terminate the process. They do not return a
 `Result`, are not catchable, and do not promise caller-frame unwinding. A
-failed assertion writes a fixed diagnostic to standard error and aborts the
-process. Alder cleanup scopes do not run on that path.
+failed assertion writes a fixed diagnostic to standard error and terminates
+the process with status 101. Alder cleanup scopes do not run on that path.
 
 ## Signatures
 
@@ -20,8 +20,8 @@ module core.panic
 
 /// Terminates the process with `panic: <message>` on standard error.
 ///
-/// This function never returns. The process aborts, Alder cleanup scopes do
-/// not run, and caller frames are not unwound.
+/// This function never returns. The process terminates with status 101,
+/// Alder cleanup scopes do not run, and caller frames are not unwound.
 pub fn panic(message: String) -> Unit
 
 /// Terminates the process when `condition` is false.
@@ -70,11 +70,11 @@ fixed parameter names, not caller source expressions; source-expression
 capture is deferred to the test runner. A passing assertion writes nothing and
 returns `Unit`.
 
-The process terminates by `abort()` after `fflush(NULL)` and a flush of
-standard error. On POSIX hosts the termination signal is `SIGABRT` (a shell
-status of 128 plus 6); it is not an `exit()` status and `atexit` handlers do
-not run. A failure to write the diagnostic does not change the termination
-path.
+The shim calls `fflush(NULL)`, writes the diagnostic to standard error,
+flushes standard error, and calls `_Exit(101)`. Status 101 is the separately
+fixed runtime invariant status; this is not a signal-shaped termination and
+`atexit` handlers do not run. A failure to write the diagnostic does not
+change the termination path.
 
 ## Contracts
 
@@ -93,13 +93,13 @@ path.
   output and no observable side effect beyond operand evaluation.
 - A `String` containing an interior NUL cannot be represented by the current
   C-string boundary. Such a panic writes the fixed message
-  `panic: message contains an interior NUL byte` and still aborts. The
-  signature and abort contract stay stable when the pointer-plus-length buffer
-  surface replaces this fallback.
+  `panic: message contains an interior NUL byte` and still terminates with
+  status 101. The signature and termination contract stay stable when the
+  pointer-plus-length buffer surface replaces this fallback.
 - The runtime shim is `runtime/c/alder_panic.h` (`c_panic`). It is separate
-  from the compiler's `alder_runtime_panic` hook: both terminate by abort, but
+  from the compiler's `alder_runtime_panic` hook: both terminate with status 101, but
   this hook writes the user panic prefix and no backtrace, while
-  `alder_runtime_panic` writes the runtime's fixed diagnostic. See
+  `alder_runtime_panic` writes the runtime's fixed diagnostic and backtrace. See
   [C backend](../c-backend.md).
 
 ## Example
@@ -122,4 +122,4 @@ pub fn core_panic_example() -> U64 {
 ```
 
 The example returns 11. A failing case is observed by a subprocess test: the
-child writes the documented stderr line and terminates with `SIGABRT`.
+child writes the documented stderr line and terminates with status 101.

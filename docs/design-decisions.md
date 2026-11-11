@@ -88,8 +88,8 @@ APIs provide fallible, wrapping, and saturating behavior.
 Status: **Frozen 1.0**
 
 Recoverable failures use `Result`; optional values use `Option`/`T?`; prefix
-`try` propagates errors. Invariant panic terminates the process and does not
-promise stack unwinding or recovery.
+`try` propagates errors. Invariant panic terminates the process immediately
+with status 101 and does not unwind or promise recovery.
 
 ### D009 — One cleanup construct
 
