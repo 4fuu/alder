@@ -9184,6 +9184,11 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         let addr_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
         if binding_dotted_words(state, callee, addr_receiver, "c", "addr") { return expr_token_fail(d, state, base, 217, call) }
     }
+    // c.load and c.store are admitted only inside unsafe c.
+    if callee.kind == 29 && callee.children != 0 {
+        let mem_receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+        if binding_dotted_words(state, callee, mem_receiver, "c", "load") || binding_dotted_words(state, callee, mem_receiver, "c", "store") { return expr_token_fail(d, state, base, 218, call) }
+    }
     if callee.kind != 24 && callee.kind != 29 {
         if callee.kind == 27 {
             let applied_callee_link = call_link_at(parse, callee, 0)
@@ -9402,6 +9407,9 @@ fn check_unsafe_call(d: Domain, state: State, parse: ParseStore, base: CheckStor
     // The unsafe c field forms carry a selector as their root: a read is
     // one child, a write carries the stored value as a second child.
     if call.kind == 29 { return check_unsafe_field_access(d, state, parse, base, store, owner, unsafe_node, unsafe_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    // Whole-value C memory access: c.load(ptr) and c.store(ptr, value).
+    if c_mem_call_ok(state, parse, call, "load") { return check_c_load(d, state, parse, base, store, owner, call, root_link.node, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    if c_mem_call_ok(state, parse, call, "store") { return check_c_store(d, state, parse, base, store, owner, call, root_link.node, site_kind, site_syntax, in_loop) }
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     // Unsafe binding calls dispatch first: a bare word naming exactly one
@@ -9491,6 +9499,7 @@ fn check_unsafe_field_access(d: Domain, state: State, parse: ParseStore, base: C
     let local = __s0_buffer_get(LocalRec, store.locals, binding - 1)
     if local.checked_type == 0 || local.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return expr_token_fail(d, state, base, 206, base_node) }
     let record = __s0_buffer_get(CheckedTypeRec, store.types, local.checked_type - 1)
+    if record.kind == 27 || record.kind == 28 { return check_unsafe_pointer_field(d, state, parse, base, store, owner, unsafe_node, unsafe_id, write, local, binding, record, selector, base_node, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if record.kind != 29 { return expr_token_fail(d, state, base, 206, base_node) }
     let member = binding_record_member_index(store, record.target)
     if member == 0 { return expr_token_fail(d, state, base, 206, base_node) }
@@ -9549,6 +9558,170 @@ fn check_unsafe_field_access(d: Domain, state: State, parse: ParseStore, base: C
         ExprBad(item) => 0
     }
     return append_expression(d, base_store, owner, unsafe_id, 27, field_type.id, field, 0, base_id, 0, 0, site_kind, site_syntax)
+}
+
+// The unsafe c pointer field forms: `unsafe c { ptr.field }` reads through a
+// c.Ptr or c.ConstPtr over a verified record, and
+// `unsafe c { ptr.field = value }` writes through c.Ptr only. The pointer is
+// a local value; the dereference place and the record field select the C
+// storage directly.
+fn check_unsafe_pointer_field(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_node: SyntaxRec, unsafe_id: U64, write: Bool, local: LocalRec, binding: U64, pointer: CheckedTypeRec, selector: SyntaxRec, base_node: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if pointer.arg_count != 1 { return expr_token_fail(d, state, base, 206, base_node) }
+    let pointee = __s0_buffer_get(U64, store.type_args, pointer.first_arg - 1)
+    if pointee == 0 || pointee > __s0_buffer_len(CheckedTypeRec, store.types) { return expr_token_fail(d, state, base, 206, base_node) }
+    let record = __s0_buffer_get(CheckedTypeRec, store.types, pointee - 1)
+    if record.kind != 29 { return expr_token_fail(d, state, base, 206, base_node) }
+    let member = binding_record_member_index(store, record.target)
+    if member == 0 { return expr_token_fail(d, state, base, 206, base_node) }
+    if __s0_buffer_get(BindingMemberRec, store.bindings.members, member - 1).class != 2 { return expr_token_fail(d, state, base, 206, base_node) }
+    let field = binding_field_named(state, store, member, selector)
+    if field == 0 { return expr_token_fail(d, state, base, 207, selector) }
+    let field_rec = __s0_buffer_get(BindingFieldRec, store.bindings.fields, field - 1)
+    let field_type = try binding_type_checked(d, state, parse, store, field_rec.type_index)
+    let base_link = call_link_at(parse, selector, 0)
+    var base_kind: U64 = 5
+    if local.kind == 1 { base_kind = 1 }
+    if write {
+        if pointer.kind == 28 { return expr_token_fail(d, state, field_type.store, 219, selector) }
+        let unit = try binding_type_intern(d, field_type.store, 1, 12, 0, 0)
+        let value_link = call_link_at(parse, unsafe_node, 1)
+        let value_node = __s0_buffer_get(SyntaxRec, parse.nodes, value_link.node - 1)
+        let checked = try check_value_expression_inner(d, state, parse, base, unit.store, owner, value_node, value_link.node, field_type.id, 208, value_node, 0, 0, in_loop)
+        let current = match checked {
+            ExprGood(item) => item.store
+            ExprBad(item) => item
+        }
+        if match checked {
+            ExprGood(item) => false
+            ExprBad(item) => true
+        } { return Ok(ExprBad(current)) }
+        if match checked {
+            ExprGood(item) => item.draft.deferred
+            ExprBad(item) => false
+        } { return expr_deferred(base) }
+        let value_id = match checked {
+            ExprGood(item) => item.draft.expression
+            ExprBad(item) => 0
+        }
+        let base_read = try append_expression(d, current, owner, base_link.node, base_kind, local.checked_type, binding, 0, 0, 0, 0, site_kind, site_syntax)
+        let base_store = match base_read {
+            ExprGood(item) => item.store
+            ExprBad(item) => item
+        }
+        let base_id = match base_read {
+            ExprGood(item) => item.draft.expression
+            ExprBad(item) => 0
+        }
+        return append_expression(d, base_store, owner, unsafe_id, 35, unit.id, field, 0, base_id, value_id, 0, site_kind, site_syntax)
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, field_type.store, field_type.id, expected)) { return expr_token_type_fail(d, state, field_type.store, mismatch_kind, mismatch_node, expected, field_type.id) }
+    let base_read = try append_expression(d, field_type.store, owner, base_link.node, base_kind, local.checked_type, binding, 0, 0, 0, 0, site_kind, site_syntax)
+    let base_store = match base_read {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    let base_id = match base_read {
+        ExprGood(item) => item.draft.expression
+        ExprBad(item) => 0
+    }
+    return append_expression(d, base_store, owner, unsafe_id, 34, field_type.id, field, 0, base_id, 0, 0, site_kind, site_syntax)
+}
+
+// The by-value pointee of a C pointer checked type, or zero when the pointer
+// shape, the pointee, or the named member class is not a loadable value.
+fn c_pointer_pointee(store: CheckStore, checked_type: U64) -> U64 {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let pointer = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if (pointer.kind != 27 && pointer.kind != 28) || pointer.arg_count != 1 { return 0 }
+    let pointee = __s0_buffer_get(U64, store.type_args, pointer.first_arg - 1)
+    if pointee == 0 || pointee > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, pointee - 1)
+    if rec.kind == 26 { return pointee }
+    if rec.kind == 29 {
+        let member = binding_record_member_index(store, rec.target)
+        if member != 0 && __s0_buffer_get(BindingMemberRec, store.bindings.members, member - 1).class != 1 { return pointee }
+    }
+    return 0
+}
+
+// True when the call's dotted callee spells c.load or c.store.
+fn c_mem_call_ok(state: State, parse: ParseStore, call: SyntaxRec, word: __s0_String) -> Bool {
+    if call.kind != 27 || call_link_count(parse, call) == 0 { return false }
+    let callee_link = call_link_at(parse, call, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 29 || callee.children == 0 { return false }
+    let receiver = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1).node - 1)
+    return binding_dotted_words(state, callee, receiver, "c", word)
+}
+
+// check_c_load checks `c.load(ptr)`: the pointer may be c.Ptr or c.ConstPtr
+// over any by-value C type, and the result is that pointee value.
+fn check_c_load(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 3 { return expr_token_fail(d, state, base, 218, call) }
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 218, arg, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    let pointee = c_pointer_pointee(current, draft.checked_type)
+    if pointee == 0 { return expr_token_fail(d, state, current, 218, arg) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, pointee, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, pointee) }
+    return append_expression(d, current, owner, call_id, 36, pointee, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
+}
+
+// check_c_store checks `c.store(ptr, value)`: only c.Ptr may write, and the
+// stored value must have exactly the pointee type. The result is Unit.
+fn check_c_store(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 4 { return expr_token_fail(d, state, base, 218, call) }
+    let arg_link = call_link_at(parse, call, 2)
+    let arg = __s0_buffer_get(SyntaxRec, parse.nodes, arg_link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 218, arg, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    if draft.checked_type == 0 || draft.checked_type > __s0_buffer_len(CheckedTypeRec, current.types) { return expr_token_fail(d, state, current, 218, arg) }
+    if __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1).kind == 28 { return expr_token_fail(d, state, current, 219, arg) }
+    let pointee = c_pointer_pointee(current, draft.checked_type)
+    if pointee == 0 { return expr_token_fail(d, state, current, 218, arg) }
+    let value_link = call_link_at(parse, call, 3)
+    let value_node = __s0_buffer_get(SyntaxRec, parse.nodes, value_link.node - 1)
+    let value_checked = try check_value_expression_inner(d, state, parse, base, current, owner, value_node, value_link.node, pointee, 220, value_node, 0, 0, in_loop)
+    let value_current = match value_checked {
+        ExprGood(item) => item.store
+        ExprBad(item) => item
+    }
+    if match value_checked {
+        ExprGood(item) => false
+        ExprBad(item) => true
+    } { return Ok(ExprBad(value_current)) }
+    let value_draft = match value_checked {
+        ExprGood(item) => item.draft
+        ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if value_draft.deferred { return expr_deferred(base) }
+    let unit = try binding_type_intern(d, value_current, 1, 12, 0, 0)
+    return append_expression(d, unit.store, owner, call_id, 37, unit.id, 0, 0, draft.expression, value_draft.expression, 0, site_kind, site_syntax)
 }
 
 fn check_array_elements(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, link_id: U64, element_type: U64, array_node: SyntaxRec, in_loop: Bool) -> Result(ArrayElementsOutcome, __s0_Error) {

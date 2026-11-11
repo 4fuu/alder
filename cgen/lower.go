@@ -148,11 +148,18 @@ func (g *gen) valueExpr(v mir.ValueId) string {
 
 func (g *gen) fieldName(base *mir.Place, sourceName string) string {
 	t, ok := g.m.PlaceType(g.f, base)
-	if !ok || !g.m.ValidType(t) || g.m.Types[t].Kind != mir.TypeAggregate {
+	if !ok || !g.m.ValidType(t) {
+		return "alder_invalid_field"
+	}
+	cNamed := g.m.Types[t].Kind == mir.TypeCNamed && g.m.Types[t].CClass == mir.CClassRecord
+	if !cNamed && g.m.Types[t].Kind != mir.TypeAggregate {
 		return "alder_invalid_field"
 	}
 	for i, field := range g.m.Types[t].Fields {
 		if field.Name == sourceName {
+			if cNamed {
+				return field.CName
+			}
 			return "alder_f" + strconv.Itoa(i)
 		}
 	}

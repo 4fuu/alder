@@ -555,6 +555,20 @@ non-null buffer like every other empty owning sequence. The verifier rejects a
 view of any other element type, a domain operand that is not a
 `domain_handle`, and a result that is not `bytes`.
 
+## Pointer Places
+
+Pointer member access and whole-value C memory reuse the existing `deref` and
+`field` places instead of adding operations. A `deref` place whose value has
+type `c_ptr(T)` or `c_const_ptr(T)` denotes the pointee, and a `field` place
+over a `c_named` record class resolves its field by Alder name through the
+record's `c_field` parts. A `c_ptr` deref is a mutable place and a
+`c_const_ptr` deref is read-only, so `store` through a const pointer deref is
+rejected. `load` yields the pointee value, `store` writes one, and the C
+backend emits `(*p)` with a const-qualified pointee for `c_const_ptr` and the
+verified C field spelling for a named field. No null check is emitted: the
+program is responsible for a non-null, aligned pointer whose storage lives
+across the access.
+
 ## Zero-Initialized C Values and Local Addresses
 
 MIR 6 exposes `c.Zero` and `c.addr` as operations 109 and 110:

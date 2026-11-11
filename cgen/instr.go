@@ -21,11 +21,14 @@ func (g *gen) place(p *mir.Place) string {
 		}
 		elem := g.m.Types[t].Elem
 		base := g.valueExpr(p.Deref)
+		elemType := g.cType(elem)
 		switch g.m.Types[t].Kind {
 		case mir.TypeSafeRef, mir.TypeSafeMut:
 			base += ".data"
+		case mir.TypeCConstPtr:
+			elemType = "const " + elemType
 		}
-		return "(*(" + g.cType(elem) + " *)" + base + ")"
+		return "(*(" + elemType + " *)" + base + ")"
 	}
 	return "<invalid place>"
 }

@@ -30,7 +30,7 @@ func (m *Module) PlaceType(f *Function, p *Place) (TypeId, bool) {
 				return NoType, false
 			}
 			switch m.Types[t].Kind {
-			case TypeSafeRef, TypeSafeMut, TypeTableView, TypeTableMutView:
+			case TypeSafeRef, TypeSafeMut, TypeTableView, TypeTableMutView, TypeCPtr, TypeCConstPtr:
 				return m.fieldPathType(m.Types[t].Elem, fields)
 			}
 			return NoType, false
@@ -42,7 +42,18 @@ func (m *Module) PlaceType(f *Function, p *Place) (TypeId, bool) {
 
 func (m *Module) fieldPathType(t TypeId, fields []string) (TypeId, bool) {
 	for i := len(fields) - 1; i >= 0; i-- {
-		if !m.ValidType(t) || m.Types[t].Kind != TypeAggregate {
+		if !m.ValidType(t) {
+			return NoType, false
+		}
+		switch m.Types[t].Kind {
+		case TypeAggregate:
+		case TypeCNamed:
+			// A by-value C record exposes its verified fields by Alder name;
+			// the C spelling stays a backend concern.
+			if m.Types[t].CClass != CClassRecord {
+				return NoType, false
+			}
+		default:
 			return NoType, false
 		}
 		found := false

@@ -1724,6 +1724,30 @@ the printer round trip. A cold `bootstrap/regenerate.sh` measured 129.0 s
 wall and 2.08 GB peak RSS against 128.3 s and 2.07 GB for the parent tree on
 the same host.
 
+Landed C-interop progress: pointer member access and whole-value C memory
+make the verified record and scalar bindings usable behind the pointers raw
+functions return. Inside `unsafe c`, `ptr.field` reads through a local holding
+`c.Ptr(Rec)` or `c.ConstPtr(Rec)`, its write form is admitted only through
+`c.Ptr` (kind 219 for a const pointer), and `c.load(ptr)` / `c.store(ptr,
+value)` move a whole by-value C value, with kind 218 for a non-pointer,
+opaque-pointee, or wrong-arity use and kind 220 for a stored value whose type
+does not match. Pointer member access lowers through the existing deref and
+field places with load and store, so no MIR op number is spent: a `c_ptr`
+deref place is mutable, a `c_const_ptr` deref place is read-only, and a
+`c_named` record field resolves by Alder name to its verified C spelling. No
+null check is emitted; non-nullness, alignment, and the pointee's lifetime are
+the unsafe caller's obligation, documented in
+[docs/c-interop.md](docs/c-interop.md) "C records, unions, bitfields, and
+variadics" and [docs/mir.md](docs/mir.md) "Pointer Places". Evidence: the
+production qualification reads and writes a heap record's members through
+`c.Ptr`, round-trips a whole record through `c.load`/`c.store`, reads through
+`c.ConstPtr`, and moves a scalar pointer through both forms, with seven
+rejection shapes; the MIR verifier test pins the accepted deref/field place
+shapes, the const-store rejection, and the non-record pointer rejection, and
+the printed form reparses. A cold `bootstrap/regenerate.sh` measured 132.7 s
+wall and 2.09 GB peak RSS against 137.4 s and 2.08 GB for the parent tree on
+the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

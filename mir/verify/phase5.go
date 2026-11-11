@@ -638,7 +638,10 @@ func placeMutable(m *mir.Module, f *mir.Function, p *mir.Place) bool {
 		return p.Base != nil && placeMutable(m, f, p.Base)
 	case mir.PlaceDeref:
 		if t, ok := f.ValueType(p.Deref); ok && m.ValidType(t) {
-			return m.Types[t].Kind == mir.TypeSafeMut || m.Types[t].Kind == mir.TypeTableMutView
+			switch m.Types[t].Kind {
+			case mir.TypeSafeMut, mir.TypeTableMutView, mir.TypeCPtr:
+				return true
+			}
 		}
 	}
 	return false

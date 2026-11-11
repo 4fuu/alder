@@ -482,6 +482,17 @@ Implemented expressions include:
   mutable view, and the pointer never becomes an Alder value. Every other
   use, type mismatch, immutable or non-local place, and conflicting live view
   are kind 217;
+- pointer member access: inside `unsafe c`, `ptr.field` reads through a local
+  holding `c.Ptr(Rec)` or `c.ConstPtr(Rec)` over a verified record, and
+  `ptr.field = value` writes through `c.Ptr` only (kind 219 for a const
+  pointer);
+- `c.load(ptr)` and `c.store(ptr, value)`: whole-value C memory access behind
+  one pointer, available only inside `unsafe c`. `c.load` takes `c.Ptr(T)` or
+  `c.ConstPtr(T)` and yields `T`; `c.store` takes `c.Ptr(T)` and a value of
+  exactly `T` and yields `Unit`. A non-pointer or opaque-pointee argument and
+  a wrong argument count are kind 218, a const-pointer write is 219, and a
+  mismatched stored value is 220. No null, alignment, or lifetime check is
+  emitted: those are the unsafe caller's obligation;
 - `c.CString`: a string literal builds the bare owner infallibly and an
   interior NUL in that literal is rejected at compile time (kind 210), while
   any other `String` or `Bytes` value yields `Option(c.CString)` with `none`

@@ -399,15 +399,20 @@ if li == 0 { return MirVTypeResult(valid: false, type_id: 0) }
 return MirVTypeResult(valid: true, type_id: __s0_buffer_get(MirLocalRec, store.locals, li - 1).local_type) }
     if p.kind == mir_place_deref() { let t = mir_v5_value_type(store, indexes, function, p.deref_value)
 let k = mir_vtype_kind(store, t)
-if k == mir_type_kind_safe_ref() || k == mir_type_kind_safe_mut() || k == mir_type_kind_table_view() || k == mir_type_kind_table_mut_view() { return MirVTypeResult(valid: true, type_id: __s0_buffer_get(MirTypeRec, store.types, t - 1).elem) }
+if k == mir_type_kind_safe_ref() || k == mir_type_kind_safe_mut() || k == mir_type_kind_table_view() || k == mir_type_kind_table_mut_view() || k == mir_type_kind_c_ptr() || k == mir_type_kind_c_const_ptr() { return MirVTypeResult(valid: true, type_id: __s0_buffer_get(MirTypeRec, store.types, t - 1).elem) }
 return MirVTypeResult(valid: false, type_id: 0) }
     if p.kind == mir_place_field() { let base = mir_v5_place_type(store, indexes, function, p.base)
-if !base.valid || mir_vtype_kind(store, base.type_id) != mir_type_kind_aggregate() { return MirVTypeResult(valid: false, type_id: 0) }
+if !base.valid { return MirVTypeResult(valid: false, type_id: 0) }
+let base_rec = __s0_buffer_get(MirTypeRec, store.types, base.type_id - 1)
+var part_kind: U64 = 0
+if base_rec.kind == mir_type_kind_aggregate() { part_kind = mir_type_part_field() }
+if base_rec.kind == mir_type_kind_c_named() && base_rec.c_class == mir_c_class_record() { part_kind = mir_type_part_c_field() }
+if part_kind == 0 { return MirVTypeResult(valid: false, type_id: 0) }
 let total = mir_vindex_type_part_count(indexes, base.type_id)
 var at: U64 = 0
 while at < total {
     let f = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, base.type_id, at) - 1)
-    if f.kind == mir_type_part_field() && mir_vname_equal(store, p.field_start, p.field_end, f.name_start, f.name_end) { return MirVTypeResult(valid: true, type_id: f.part_type) }
+    if f.kind == part_kind && mir_vname_equal(store, p.field_start, p.field_end, f.name_start, f.name_end) { return MirVTypeResult(valid: true, type_id: f.part_type) }
     at = at + 1
 }
     }
@@ -418,7 +423,7 @@ let p = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
 if p.kind == mir_place_local() { return true }
 if p.kind == mir_place_field() { return mir_v5_place_mutable(store, indexes, function, p.base) }
 if p.kind == mir_place_deref() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, function, p.deref_value))
-return k == mir_type_kind_safe_mut() || k == mir_type_kind_table_mut_view() }
+return k == mir_type_kind_safe_mut() || k == mir_type_kind_table_mut_view() || k == mir_type_kind_c_ptr() }
 return false }
 
 fn mir_v5_bad(d: Domain, out: __s0_Buffer(MirVerifyDiagRec), kind: U64, f: U64, b: U64, i: U64, t: U64, o: U64, expected: U64, actual: U64, reference: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {

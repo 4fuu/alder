@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, and zero-initialized values with local out-parameter addresses are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, and zero-initialized values with local out-parameter addresses, and pointer member access with whole-value `c.load`/`c.store` are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -325,6 +325,20 @@ packing algorithms independently.
   exactly, and yields `Unit`. The receiver must be a single-word local name:
   parameters and nested selectors are rejected because the write targets that
   local's place. A scalar or opaque member binding is not a field receiver;
+- pointer member access works inside `unsafe c` through a local holding
+  `c.Ptr(Rec)` or `c.ConstPtr(Rec)` over a verified record: `ptr.field` reads
+  the pointee's field, and `ptr.field = value` writes it through `c.Ptr` only
+  (diagnostic 219 for a const pointer). The receiver is a single-word local
+  name and the field is the same verified binding field as the by-value form;
+- `c.load(ptr)` and `c.store(ptr, value)` move a whole by-value C value behind
+  one pointer. `c.load` accepts `c.Ptr(T)` or `c.ConstPtr(T)`; `c.store`
+  needs `c.Ptr(T)` and a value whose type is exactly `T`. A pointer whose
+  pointee is opaque, a non-pointer argument, and a wrong argument count are
+  diagnostic 218, a const-pointer write is 219, and a `c.store` value whose
+  type does not match the pointee is 220. No null check is emitted:
+  non-nullness, alignment, and the pointee's lifetime are the unsafe caller's
+  obligation, and a callee or pointer that outlives the storage is never safe
+  with these forms;
 - raw fn signatures move complete records by value in both directions, and
   the generated C uses the declared record spelling directly, so a C callee
   that returns or takes `struct S` round-trips through Alder locals;

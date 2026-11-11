@@ -1800,6 +1800,53 @@ fn lower_c_zero(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRe
     return Ok(LowerStep(state: instr.state, id: value.id))
 }
 
+// `unsafe c { ptr.field }` and its write form lower through a deref place of
+// the pointer value and a verified record field place, then load or store.
+fn lower_c_pointer_field(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(BindingFieldRec, store.bindings.fields) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    if expression.child_count != 1 && expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, expression.parameter_use - 1)
+    let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let base = try lower_direct_expression(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+    if !base.state.valid { return Ok(base) }
+    let deref = try mir_add_place(d, base.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: base.id))
+    let name = try lower_source_word(d, source_state, field.name_source, field.name_start, field.name_end)
+    let named = try mir_append_name(d, deref.store, name)
+    let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: deref.id, field_start: named.start, field_end: named.end, deref_value: 0))
+    let current = lower_with_mir(base.state, field_place.store)
+    if expression.kind == 34 {
+        let value = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+        let instr = try lower_add_instr(d, value.state, function, block, mir_op_load(), value.id, field_place.id, 0, 0, 0, 0, "")
+        return Ok(LowerStep(state: instr.state, id: value.id))
+    }
+    let value_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let value = try lower_direct_expression(d, source_state, spans, store, current, owner, function, block, value_id, environment, panic_block)
+    if !value.state.valid { return Ok(value) }
+    let instr = try lower_add_instr(d, value.state, function, block, mir_op_store(), 0, field_place.id, 0, value.id, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: 0))
+}
+
+// c.load and c.store read or write the whole value behind one C pointer
+// through a deref place.
+fn lower_c_memory(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 && expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let pointer_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let pointer = try lower_direct_expression(d, source_state, spans, store, state, owner, function, block, pointer_id, environment, panic_block)
+    if !pointer.state.valid { return Ok(pointer) }
+    let deref = try mir_add_place(d, pointer.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: pointer.id))
+    let current = lower_with_mir(pointer.state, deref.store)
+    if expression.kind == 36 {
+        let value = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+        let instr = try lower_add_instr(d, value.state, function, block, mir_op_load(), value.id, deref.id, 0, 0, 0, 0, "")
+        return Ok(LowerStep(state: instr.state, id: value.id))
+    }
+    let value_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let value = try lower_direct_expression(d, source_state, spans, store, current, owner, function, block, value_id, environment, panic_block)
+    if !value.state.valid { return Ok(value) }
+    let instr = try lower_add_instr(d, value.state, function, block, mir_op_store(), 0, deref.id, 0, value.id, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: 0))
+}
+
 type LowerCAddrRec {
     matched: Bool
     state: LowerState
@@ -5056,6 +5103,8 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 30 { return lower_c_string_make(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 31 { return lower_c_string_ptr(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 32 { return lower_c_zero(d, source_state, spans, store, state, owner, function, block, expression) }
+    if expression.kind == 34 || expression.kind == 35 { return lower_c_pointer_field(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
+    if expression.kind == 36 || expression.kind == 37 { return lower_c_memory(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
     if expression.kind == 13 {
         if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(CheckedTryRec, store.control.tries) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let checked = __s0_buffer_get(CheckedTryRec, store.control.tries, expression.parameter_use - 1)
@@ -7446,6 +7495,57 @@ fn lower_model_c_zero_addr_ok(store: CheckStore, item: CheckedExprRec, annotatio
     return child.kind == 1 || child.kind == 5 || child.kind == 21
 }
 
+// The pointer member and whole-value memory shapes: a deref place over a
+// c.Ptr or c.ConstPtr value, with a verified record field for the member
+// forms and a c.Ptr-only write for the store forms.
+fn lower_model_c_ptr_memory_ok(store: CheckStore, item: CheckedExprRec) -> Bool {
+    if item.annotation != 0 || item.operator != 0 || item.bool_value != 0 { return false }
+    if item.kind == 34 || item.kind == 35 {
+        if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(BindingFieldRec, store.bindings.fields) { return false }
+        let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, item.parameter_use - 1)
+        if field.owner == 0 || field.owner > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return false }
+        if __s0_buffer_get(BindingMemberRec, store.bindings.members, field.owner - 1).member_kind != 1 { return false }
+        if item.kind == 34 {
+            if item.child_count != 1 { return false }
+        } else {
+            if item.child_count != 2 { return false }
+            if item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+            let result = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+            if result.kind != 1 || result.target != 12 { return false }
+        }
+        let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        if base_id == 0 || base_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+        let base = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
+        if base.kind != 1 && base.kind != 5 && base.kind != 22 { return false }
+        if base.parameter_use == 0 || base.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return false }
+        let base_local = __s0_buffer_get(LocalRec, store.locals, base.parameter_use - 1)
+        if base_local.owner != item.owner { return false }
+        if base_local.checked_type == 0 || base_local.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+        let pointer = __s0_buffer_get(CheckedTypeRec, store.types, base_local.checked_type - 1)
+        return pointer.kind == 27 || pointer.kind == 28
+    }
+    if item.parameter_use != 0 { return false }
+    if item.kind == 36 {
+        if item.child_count != 1 { return false }
+    } else {
+        if item.child_count != 2 { return false }
+        if item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
+        if result.kind != 1 || result.target != 12 { return false }
+    }
+    let pointer_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+    if pointer_id == 0 || pointer_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let pointer_expr = __s0_buffer_get(CheckedExprRec, store.expressions, pointer_id - 1)
+    if pointer_expr.checked_type == 0 || pointer_expr.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let pointer = __s0_buffer_get(CheckedTypeRec, store.types, pointer_expr.checked_type - 1)
+    if pointer.kind != 27 && pointer.kind != 28 { return false }
+    if item.kind == 37 && pointer.kind != 27 { return false }
+    if pointer.arg_count != 1 || pointer.first_arg == 0 { return false }
+    let pointee = __s0_buffer_get(U64, store.type_args, pointer.first_arg - 1)
+    if item.kind == 36 && item.checked_type != pointee { return false }
+    return true
+}
+
 fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     // Ownership is validated below in stable record order. Build dense counts
     // once instead of rediscovering each owner with nested whole-table scans.
@@ -7805,7 +7905,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 33 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 37 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -7848,6 +7948,9 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             if base.kind != 1 && base.kind != 5 { return false }
             if base.parameter_use == 0 || base.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return false }
             if __s0_buffer_get(LocalRec, store.locals, base.parameter_use - 1).owner != item.owner { return false }
+        }
+        if item.kind >= 34 && item.kind <= 37 {
+            if !lower_model_c_ptr_memory_ok(store, item) { return false }
         }
         if item.kind == 1 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 1 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
         if item.kind == 5 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 2 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }

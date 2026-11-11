@@ -107,10 +107,13 @@ fn cgen_place_type(store: MirStore, indexes: MirVIndexes, function: U64, place: 
     if item.kind == mir_place_local() { return cgen_local_type(store, indexes, function, item.local) }
     if item.kind == mir_place_deref() { return __s0_buffer_get(MirTypeRec, store.types, cgen_value_type(store, indexes, function, item.deref_value) - 1).elem }
     let base_type = cgen_place_type(store, indexes, function, item.base)
+    let base_rec = __s0_buffer_get(MirTypeRec, store.types, base_type - 1)
+    var part_kind: U64 = mir_type_part_field()
+    if base_rec.kind == mir_type_kind_c_named() && base_rec.c_class == mir_c_class_record() { part_kind = mir_type_part_c_field() }
     var at: U64 = 0
     while at < mir_vindex_type_part_count(indexes, base_type) {
         let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, base_type, at) - 1)
-        if part.kind == mir_type_part_field() && mir_vname_equal(store, part.name_start, part.name_end, item.field_start, item.field_end) { return part.part_type }
+        if part.kind == part_kind && mir_vname_equal(store, part.name_start, part.name_end, item.field_start, item.field_end) { return part.part_type }
         at = at + 1
     }
     return 0
@@ -131,18 +134,36 @@ fn cgen_put_place(d: Domain, writer: CgenWriter, store: MirStore, indexes: MirVI
     if item.kind == mir_place_local() { return cgen_put_local(d, writer, item.local) }
     if item.kind == mir_place_field() {
         let base_type = cgen_place_type(store, indexes, function, item.base)
+        let base_rec = __s0_buffer_get(MirTypeRec, store.types, base_type - 1)
         var out = try cgen_put_place(d, writer, store, indexes, function, item.base)
+        if base_rec.kind == mir_type_kind_c_named() && base_rec.c_class == mir_c_class_record() {
+            out = try cgen_put(d, out, ".")
+            return cgen_put_c_field(d, out, store, indexes, base_type, item.field_start, item.field_end)
+        }
         out = try cgen_put(d, out, ".alder_f")
         return cgen_put_u64(d, out, cgen_field_ordinal(store, indexes, base_type, item.field_start, item.field_end))
     }
     let reference_type = cgen_value_type(store, indexes, function, item.deref_value)
     let reference = __s0_buffer_get(MirTypeRec, store.types, reference_type - 1)
     var out = try cgen_put(d, writer, "(*(")
+    if reference.kind == mir_type_kind_c_const_ptr() { out = try cgen_put(d, out, "const ") }
     out = try cgen_put_type(d, out, store, reference.elem)
     out = try cgen_put(d, out, " *)")
     out = try cgen_put_value_read(d, out, store, indexes, function, item.deref_value)
     if reference.kind == mir_type_kind_safe_ref() || reference.kind == mir_type_kind_safe_mut() { out = try cgen_put(d, out, ".data") }
     return cgen_put(d, out, ")")
+}
+
+// The C spelling of one verified c_named record field, selected by its
+// Alder name.
+fn cgen_put_c_field(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, type_id: U64, start: U64, end: U64) -> Result(CgenWriter, __s0_Error) {
+    var at: U64 = 0
+    while at < mir_vindex_type_part_count(indexes, type_id) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        if part.kind == mir_type_part_c_field() && mir_vname_equal(store, part.name_start, part.name_end, start, end) { return cgen_put_name(d, initial, store, part.c_name_start, part.c_name_end) }
+        at = at + 1
+    }
+    return cgen_put(d, initial, "alder_invalid_field")
 }
 
 fn cgen_variant_ordinal(store: MirStore, indexes: MirVIndexes, type_id: U64, start: U64, end: U64) -> U64 {
