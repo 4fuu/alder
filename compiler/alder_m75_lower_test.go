@@ -736,6 +736,42 @@ fn main() -> I32 {
     if names.len() != 4 { return 54 }
     if scores.get(9) != None { return 55 }
     if scores.get(2) == None { return 56 }
+    // For-in over a method-result sequence: the sequence expression
+    // terminates the entry block and its value lives in the block that
+    // finishes the projection loop, so the loop-head jump must leave that
+    // block. A named sequence binding lowers in place and pins the
+    // unchanged path, and an empty method result must make zero trips.
+    var key_total: U64 = 0
+    for k in ordered.keys() {
+        key_total = key_total + k
+    }
+    if key_total != 6 { return 57 }
+    var value_total: U64 = 0
+    for v in ordered.values() {
+        value_total = value_total + v
+    }
+    if value_total != 66 { return 58 }
+    var named_total: U64 = 0
+    let key_copy = ordered.keys()
+    for k in key_copy {
+        named_total = named_total + k
+    }
+    if named_total != 6 { return 59 }
+    if !seen.insert(7) { return 60 }
+    var item_total: U64 = 0
+    var trips: U64 = 0
+    for item in seen.items() {
+        item_total = item_total + item
+        trips = trips + 1
+    }
+    if item_total != 7 { return 61 }
+    if trips != 1 { return 62 }
+    var emptied = Set.new(U64)
+    var zero_trips: U64 = 0
+    for item in emptied.items() {
+        zero_trips = zero_trips + 1
+    }
+    if zero_trips != 0 { return 63 }
     return 0
 }
 `}

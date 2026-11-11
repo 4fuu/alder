@@ -5119,6 +5119,13 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         // statement-keyed literal name, and two for statements in one function
         // must not share either.
         let zero_value = try lower_int_value_seq(d, source_state, store, length_instr.state, function, active, 0)
+        // Capture the loop entry block before the head/body/step/join blocks
+        // exist: a sequence expression that lowered control flow (ordered
+        // projections and calls) has already terminated the entry block, and
+        // the last open block at this point is where the sequence value and
+        // its length live, so the head jump must leave exactly that block.
+        // With a sequence that lowered in place this is the entry block.
+        let sequence_block = lower_open_block(zero_value.state.mir, function, active)
         let head = try lower_add_block(d, zero_value.state, function, "bb_for_head")
         let body = try lower_add_block(d, head.state, function, "bb_for_body")
         // `continue` jumps to the step block, which advances the index and
@@ -5130,7 +5137,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         // function do not produce duplicate value names.
         let index_param = try mir_add_block_param(d, join.state.mir, function, head.id, 0, try lower_decimal_name(d, "__for_index_", head.id), mir_type_u64())
         let sequence_param = try mir_add_block_param(d, index_param.store, function, head.id, 1, try lower_decimal_name(d, "__for_sequence_", head.id), sequence_param_type_id)
-        current = try lower_jump_two(d, lower_with_mir(current, sequence_param.store), function, active, head.id, zero_value.id, sequence.id)
+        current = try lower_jump_two(d, lower_with_mir(current, sequence_param.store), function, sequence_block, head.id, zero_value.id, sequence.id)
         let compared = try lower_add_result(d, current, function, head.id, 1, source_state, store)
         let compare = try lower_add_instr(d, compared.state, function, head.id, mir_op_int_lt(), compared.id, 0, 0, index_param.id, length_value.id, 0, "")
         current = try lower_branch(d, compare.state, function, head.id, compared.id, body.id, join.id)
