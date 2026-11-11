@@ -230,3 +230,201 @@ impl Writer for ByteSink {
         return Ok(())
     }
 }
+
+// Buffered streams. The reader keeps a byte window that a refill replaces
+// from the source; the writer accumulates bytes and hands them to its sink
+// on flush. Both take their source/sink by value: a capability value is
+// copyable, and an affine owner moves into the wrapper exactly once.
+
+/// Buffers reads from any `Reader`. Copyable when its source is; the
+/// compiler updates a uniquely owned reader in place through `mut self`.
+pub type BufReader(Source: type(Reader)) {
+    source: Source
+    buffer: Vec(U8)
+    position: U64
+    length: U64
+}
+
+impl(Source: type(Reader)) BufReader(Source) {
+    fn new(source: Source) -> BufReader(Source) {
+        return BufReader(Source)(source: source, buffer: zero_bytes(4096), position: 0, length: 0)
+    }
+
+    fn with_capacity(capacity: U64, source: Source) -> BufReader(Source) {
+        var room = capacity
+        if room == 0 { room = 1 }
+        return BufReader(Source)(source: source, buffer: zero_bytes(room), position: 0, length: 0)
+    }
+
+    /// Reads through `delimiter` into the result, without it at end of
+    /// stream. `None` means end of stream before any byte was read.
+    fn read_until(mut self, delimiter: U8) -> Result(Option(Vec(U8)), IoError) {
+        var out: Vec(U8) = Vec.new(U8)
+        var scanning = true
+        while scanning {
+            if self.position >= self.length {
+                let filled = try self.refill()
+                if filled == 0 {
+                    scanning = false
+                    if out.len() == 0 { return Ok(None) }
+                    return Ok(Some(out))
+                }
+            }
+            if scanning {
+                let one = self.buffer[self.position]
+                self.position = self.position + 1
+                out.push(one)
+                if one == delimiter { scanning = false }
+            }
+        }
+        return Ok(Some(out))
+    }
+
+    /// One line through the newline, which is kept. Invalid UTF-8 is
+    /// `InvalidInput`.
+    fn read_line(mut self) -> Result(Option(String), IoError) {
+        let line = try self.read_until(10)
+        var result: Result(Option(String), IoError) = Ok(None)
+        match line {
+            Some(bytes) => {
+                let data = bytes.slice(0, bytes.len()).to_bytes()
+                match data.to_string_checked() {
+                    Some(text) => { result = Ok(Some(text)) }
+                    None => { result = Err(InvalidInput) }
+                }
+            }
+            None => { result = Ok(None) }
+        }
+        return result
+    }
+
+    fn refill(mut self) -> Result(U64, IoError) {
+        let size = self.buffer.len()
+        // A mutable view taken from a field loses its writes when passed as
+        // a call argument (view-by-root-local limitation), so read into a
+        // local copy of the window and store it back.
+        var scratch = self.buffer
+        let count = try self.source.read(scratch.slice_mut(0, size))
+        self.buffer = scratch
+        self.position = 0
+        self.length = count
+        return Ok(count)
+    }
+}
+
+impl(Source: type(Reader)) Reader for BufReader(Source) {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError) {
+        let size = buffer.len()
+        var produced: U64 = 0
+        while produced < size {
+            if self.position >= self.length {
+                let filled = try self.refill()
+                if filled == 0 { return Ok(produced) }
+            }
+            let available = self.length - self.position
+            var chunk = size - produced
+            if chunk > available { chunk = available }
+            var at: U64 = 0
+            while at < chunk {
+                buffer[produced + at] = self.buffer[self.position + at]
+                at = at + 1
+            }
+            self.position = self.position + chunk
+            produced = produced + chunk
+        }
+        return Ok(produced)
+    }
+}
+
+/// Buffers writes to any `Writer` that cleans up as an owner.
+pub type BufWriter(Sink: type(Writer, Cleanup)) {
+    sink: Sink
+    buffer: Vec(U8)
+    length: U64
+}
+
+impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
+    fn new(sink: Sink) -> BufWriter(Sink) {
+        return BufWriter(Sink)(sink: sink, buffer: zero_bytes(4096), length: 0)
+    }
+
+    fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink) {
+        var room = capacity
+        if room == 0 { room = 1 }
+        return BufWriter(Sink)(sink: sink, buffer: zero_bytes(room), length: 0)
+    }
+
+}
+
+impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
+    fn write(mut self, data: [U8]) -> Result(U64, IoError) {
+        let size = data.len()
+        if size == 0 { return Ok(0) }
+        let room = self.buffer.len()
+        if self.length + size > room {
+            match self.flush() {
+                Ok(_) => {}
+                Err(error) => { return Err(error) }
+            }
+        }
+        if size >= room {
+            return self.sink.write(data)
+        }
+        let base = self.length
+        let total = base + size
+        if true {
+            var view: MutSlice(U8) = self.buffer.slice_mut(0, total)
+            var at: U64 = 0
+            while at < size {
+                view[base + at] = data[at]
+                at = at + 1
+            }
+        }
+        self.length = total
+        return Ok(size)
+    }
+
+    fn flush(mut self) -> Result(Unit, IoError) {
+        var offset: U64 = 0
+        while offset < self.length {
+            let written = try self.sink.write(self.buffer.slice(offset, self.length))
+            if written == 0 { return Err(InvalidInput) }
+            offset = offset + written
+        }
+        self.length = 0
+        return Ok(())
+    }
+}
+
+impl(Sink: type(Writer, Cleanup)) Cleanup for BufWriter(Sink) {
+    fn cleanup(take self) -> Unit {
+        // Best-effort flush: a `take self` binding cannot become a mutable
+        // local, so the pending bytes go to the sink directly and every
+        // write error is swallowed. `into_sink` is the observing release.
+        // The window is copied before the sink moves out, and it is a local
+        // so the field-view-as-argument limitation cannot drop the bytes.
+        let pending = self.length
+        var window = self.buffer
+        let sink = self.sink
+        var offset: U64 = 0
+        while offset < pending {
+            match sink.write(window.slice(offset, pending)) {
+                Ok(written) => {
+                    if written == 0 { offset = pending } else { offset = offset + written }
+                }
+                Err(_) => { offset = pending }
+            }
+        }
+        sink.cleanup()
+    }
+}
+
+fn zero_bytes(capacity: U64) -> Vec(U8) {
+    var out: Vec(U8) = Vec.new(U8)
+    var at: U64 = 0
+    while at < capacity {
+        out.push(0)
+        at = at + 1
+    }
+    return out
+}

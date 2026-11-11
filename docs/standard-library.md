@@ -192,13 +192,24 @@ Required modules:
 Implemented std.io progress (slice 1): `sysroot/std/io.al` provides the
 `Reader`, `Writer`, and `Seek` traits with the `copy_to` default body,
 `SeekFrom`, `IoError` with `from_errno`, `Display`, and `Error`, the
-`read_exact`, `write_all`, and `read_to_end` helpers, and the host-free
-`ByteCursor` and `ByteSink` streams. Evidence:
-`compiler/production_io_test.go` runs the installed module through the
-production driver and checks cursor advancement, end-of-stream, the `copy_to`
-default body, the error category report, and the mutable-place rejection.
-The capability types, host files, and standard streams arrive with the
-C-binding buffer surface as slice 2.
+`read_exact`, `write_all`, and `read_to_end` helpers, the host-free
+`ByteCursor` and `ByteSink` streams, and the buffered `BufReader`/`BufWriter`
+over generic readers and writers. `BufReader` serves reads from its window and
+refills from the source; `BufWriter` buffers small writes, flushes on
+overflow or demand, and its cleanup flushes the state captured at `using`
+registration (S0 registrations capture the owner, so a writer registered
+before its last writes must be flushed explicitly).
+Evidence: `compiler/production_io_test.go` runs the installed module through
+the production driver and checks cursor advancement, end-of-stream, the
+`copy_to` default body, the error category report, line reads across a small
+buffer, read refills, buffered write ordering through a validating sink, and
+the mutable-place rejection.
+
+`into_source` and `into_sink` are pending the checker rule that a moved
+affine field of a taken owner is an ownership transfer (code 93 today); until
+then the wrapped owner is released through `flush` plus `using`/`Cleanup`, and
+the snapshot records the gap. The capability types, host files, and standard
+streams arrive with the C-binding buffer surface as slice 2.
 
 The hosted `std` module graph is acyclic and fixed by the snapshots:
 `std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports

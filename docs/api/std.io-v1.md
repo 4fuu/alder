@@ -233,7 +233,7 @@ impl(Source: type(Reader)) BufReader(Source) {
     fn with_capacity(capacity: U64, source: Source) -> BufReader(Source)
     fn read_line(mut self) -> Result(Option(String), IoError)
     fn read_until(mut self, delimiter: U8) -> Result(Option(Vec(U8)), IoError)
-    fn into_source(take self) -> Source
+    // fn into_source(take self) -> Source     (pending; see below)
 }
 
 impl(Source: type(Reader)) Reader for BufReader(Source) {
@@ -248,7 +248,7 @@ pub type BufWriter(Sink: type(Writer, Cleanup)) {
 impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
     fn new(sink: Sink) -> BufWriter(Sink)
     fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink)
-    fn into_sink(take self) -> Result(Sink, IoError)
+    // fn into_sink(take self) -> Result(Sink, IoError)     (pending; see below)
 }
 
 impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
@@ -260,6 +260,22 @@ impl(Sink: type(Writer, Cleanup)) Cleanup for BufWriter(Sink) {
     // callers that must observe them use `into_sink`.
 }
 ```
+
+`BufWriter.cleanup` flushes the state captured when the `using` registration
+ran: S0 registrations capture the owner at registration time (the same rule
+that makes a registered vector's binding immutable). A program that registers
+a writer before writing must flush before the scope ends; `into_sink` will be
+the observing release once the pending checker rule lands.
+
+`into_source` and `into_sink` are pending. Both give the wrapped affine owner
+back by moving it out of the taken wrapper, and the checker's owner-flow
+currently reports such a method with code 93 ("affine owner reaches function
+exit without an ownership transfer") instead of recording the field move as a
+transfer. The buffered types work today through `flush` plus `using`/`Cleanup`;
+the two methods return when the consumed-field-move rule lands. A
+`BufReader(ByteCursor)` over a copyable source is copyable, so `take self` is
+rejected for that instantiation by the `take`-on-affine rule; `into_source` is
+for affine sources.
 
 ### Standard streams and text helpers
 
