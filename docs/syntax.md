@@ -508,7 +508,9 @@ impl User {
 - There are no extension-method searches, runtime lookup, overload sets, or
   method values in the core.
 
-Associated functions omit `self` and are called as `File.open(io, path)`. Opaque
+Associated functions omit `self` and are called as `File.open(io, path)` —
+with the type named bare or through an import's namespace prefix, as in
+`bytes.BytesBuilder.new()`. Opaque
 library values and affine owners use named associated constructors such as
 `TaskGroup.new()` and `Table.new(Player)`; a type is not implicitly callable
 merely because it has no public fields. Record construction remains

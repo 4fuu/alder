@@ -658,6 +658,59 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     return reject_parse(d, state, initial, 12)
 }
 
+// dotted_callee_associated decides whether a dotted call callee names an
+// associated function through a type instead of a method on a value: the
+// leftmost segment of the dotted chain must be a plain word that starts
+// uppercase or matches the namespace a bare import binds. The caller uses
+// the answer to keep the dotted base out of the call's runtime arguments,
+// so the qualified form `bytes.BytesBuilder.new()` behaves exactly like
+// the two-segment form `BytesBuilder.new()`.
+fn dotted_callee_associated(state: State, cursor: ParseCursor, callee: SyntaxRec) -> Bool {
+    var base = callee
+    while base.kind == 29 && base.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, base.children - 1)
+        base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, base_link.node - 1)
+    }
+    if base.kind != 24 { return false }
+    let source = __s0_buffer_get(SourceRec, state.sources, base.source)
+    let first = text_byte(state, source, base.name_start)
+    if first >= 65 && first <= 90 { return true }
+    var root_at: U64 = 0
+    while root_at < __s0_buffer_len(U64, cursor.store.roots) {
+        let root = __s0_buffer_get(SyntaxRec, cursor.store.nodes, __s0_buffer_get(U64, cursor.store.roots, root_at) - 1)
+        if root.source == base.source && (root.kind == 41 || root.kind == 42) {
+            var candidate_start = root.name_start
+            var candidate_end = root.name_end
+            var path_at = root.name_start
+            while path_at < root.name_end {
+                if text_byte(state, source, path_at) == 46 { candidate_start = path_at + 1 }
+                path_at = path_at + 1
+            }
+            var child_link = root.children
+            while child_link != 0 {
+                let child = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, child_link - 1)
+                let child_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, child.node - 1)
+                if child_node.kind == 44 {
+                    candidate_start = child_node.name_start
+                    candidate_end = child_node.name_end
+                }
+                child_link = child.next
+            }
+            if candidate_end - candidate_start == base.name_end - base.name_start {
+                var equal = true
+                var name_at: U64 = 0
+                while name_at < base.name_end - base.name_start {
+                    if text_byte(state, source, candidate_start + name_at) != text_byte(state, source, base.name_start + name_at) { equal = false }
+                    name_at = name_at + 1
+                }
+                if equal { return true }
+            }
+        }
+        root_at = root_at + 1
+    }
+    return false
+}
+
 fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let primary = try parse_primary(d, state, initial, depth)
     if parse_step_bad(primary) { return Ok(primary) }
@@ -673,47 +726,7 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             let callee = __s0_buffer_get(SyntaxRec, cursor.store.nodes, value.node - 1)
             if callee.kind == 29 {
                 let base_link = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, callee.children - 1)
-                let base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, base_link.node - 1)
-                let source = __s0_buffer_get(SourceRec, state.sources, base.source)
-                var associated = false
-                if base.kind == 24 {
-                    let first = text_byte(state, source, base.name_start)
-                    associated = first >= 65 && first <= 90
-                    var root_at: U64 = 0
-                    while root_at < __s0_buffer_len(U64, cursor.store.roots) {
-                        let root = __s0_buffer_get(SyntaxRec, cursor.store.nodes, __s0_buffer_get(U64, cursor.store.roots, root_at) - 1)
-                        if root.source == base.source && (root.kind == 41 || root.kind == 42) {
-                            var candidate_start = root.name_start
-                            var candidate_end = root.name_end
-                            var path_at = root.name_start
-                            while path_at < root.name_end {
-                                if text_byte(state, source, path_at) == 46 { candidate_start = path_at + 1 }
-                                path_at = path_at + 1
-                            }
-                            var child_link = root.children
-                            while child_link != 0 {
-                                let child = __s0_buffer_get(SyntaxLinkRec, cursor.store.links, child_link - 1)
-                                let child_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, child.node - 1)
-                                if child_node.kind == 44 {
-                                    candidate_start = child_node.name_start
-                                    candidate_end = child_node.name_end
-                                }
-                                child_link = child.next
-                            }
-                            if candidate_end - candidate_start == base.name_end - base.name_start {
-                                var equal = true
-                                var name_at: U64 = 0
-                                while name_at < base.name_end - base.name_start {
-                                    if text_byte(state, source, candidate_start + name_at) != text_byte(state, source, base.name_start + name_at) { equal = false }
-                                    name_at = name_at + 1
-                                }
-                                if equal { associated = true }
-                            }
-                        }
-                        root_at = root_at + 1
-                    }
-                }
-                if !associated {
+                if !dotted_callee_associated(state, cursor, callee) {
                     cursor = try add_link(d, cursor, base_link.node, children)
                     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
                 }

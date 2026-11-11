@@ -5301,26 +5301,21 @@ fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore,
     return true
 }
 
-// The first argument link of a method call is the receiver, so its
-// explicit type arguments start one link later than a free call's. The
-// parser links the receiver only for non-associated dot callees: a callee
-// that resolves as one qualified name, or whose base word starts
-// uppercase (a type's associated function), keeps its base inside the
-// callee node instead.
+// The parser links a receiver for a dotted callee exactly when it did not
+// treat the callee as an associated call: it re-adds the callee's base node
+// as the call's first argument link. The receiver is therefore readable from
+// the tree by node identity, without re-deriving the parser's associated
+// rule, so qualified associated callees such as `bytes.BytesBuilder.new()`
+// carry no phantom receiver whatever their segments resolve to.
 fn call_receiver_links(state: State, parse: ParseStore, store: CheckStore, call: SyntaxRec) -> U64 {
     let callee_link = call_link_at(parse, call, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 29 { return 0 }
-    if symbol_named(state, parse, store, callee) != 0 { return 0 }
-    if callee.children != 0 {
-        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
-        let base = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
-        if base.kind == 24 && base.name_end > base.name_start {
-            let source = __s0_buffer_get(SourceRec, state.sources, base.source)
-            let first = text_byte(state, source, base.name_start)
-            if first >= 65 && first <= 90 { return 0 }
-        }
-    }
+    if callee.children == 0 { return 0 }
+    if call_link_count(parse, call) < 2 { return 0 }
+    let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
+    let first = call_link_at(parse, call, 1)
+    if first.node != base_link.node { return 0 }
     return 1
 }
 

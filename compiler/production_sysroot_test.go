@@ -1461,6 +1461,68 @@ func TestProductionSysrootTextBytesRuns(t *testing.T) {
 	}
 }
 
+// sysrootNamespaceBytesMain exercises the bare-namespace import form: the
+// import binds only the final path component, so every std.bytes name must
+// resolve through the qualified `bytes.` prefix, including associated calls
+// on a namespace-qualified type such as `bytes.BytesBuilder.new()`.
+func sysrootNamespaceBytesMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.bytes
+
+fn fail(code: I32) -> I32 {
+    return code
+}
+
+pub fn main() -> I32 {
+    // The qualified zero-arg associated call keeps its dotted base inside
+    // the callee instead of a phantom first argument.
+    var b = bytes.BytesBuilder.new()
+    if b.len() != 0 { return fail(1) }
+    b = b.push_byte(65)
+    b = b.push_bytes(bytes.u16_le_bytes(16993))
+    let done = b.finish()
+    if done.len() != 3 { return fail(2) }
+    if !(done == "AaB".to_bytes()) { return fail(3) }
+
+    // Qualified free functions keep their argument links intact.
+    if bytes.of_byte(200).len() != 1 { return fail(4) }
+    if bytes.u16_le_bytes(1).byte(1) != 0 { return fail(5) }
+    if bytes.hex_encode(done) != "416142" { return fail(6) }
+    return 0
+}
+`,
+	}
+}
+
+func TestProductionSysrootNamespaceRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootNamespaceBytesMain(), "test-plan")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("namespace-qualified std.bytes plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, " module std.bytes\n") {
+		t.Fatalf("plan does not list the std.bytes module: %q", plan.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootNamespaceBytesMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("namespace-qualified std.bytes behavior run failed: %+v", run)
+	}
+}
+
 func TestProductionSysrootEnvRuns(t *testing.T) {
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
