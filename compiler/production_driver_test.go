@@ -762,7 +762,7 @@ func buildRuntimeObject(t *testing.T, cc, root string) string {
 }
 
 func strictC11Flags() []string {
-	return []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	return []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off"}
 }
 
 // buildRuntimeObjectTesting compiles the runtime under the strict warning set
@@ -849,7 +849,7 @@ func compileAndRunProductionArtifactWithDriver(t *testing.T, cc, root, object, g
 	if err := os.WriteFile(driver, []byte(driverText), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion"}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off"}
 	args = append(args, extra...)
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe)
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {

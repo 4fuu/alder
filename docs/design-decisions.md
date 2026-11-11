@@ -317,6 +317,38 @@ Rationale: Alder 1.0 has no trait objects and no trait inheritance, so a typed
 several; a report needs neither feature, and typed access stays with the
 variant payload where the error-taxonomy rules already put it.
 
+### D026 — Float arithmetic is IEEE 754 with a defined zero divisor
+
+Status: **Milestone 8**
+
+The binary operators `+`, `-`, `*`, and `/` on `F32` and `F64` are IEEE 754
+binary operations in the default non-stop mode: they never take a failure
+edge, overflow produces the signed infinity, underflow is gradual, and
+division by zero is defined rather than an error — the quotient is the
+signed infinity whose sign is the XOR of the operand signs, and NaN when both
+operands are zero or either operand is NaN. Comparisons follow IEEE 754: NaN
+compares unordered with every operand (`==` is false, `!=` is true), and the
+two zeros compare equal.
+
+Generated C never emits a bare float division: `float.div` lowers through the
+runtime helpers `alder_f64_div`/`alder_f32_div`, which branch on the divisor
+and build the IEEE result directly. ISO C11 leaves `x/0` undefined, and Annex
+F defines it only where `__STDC_IEC_559__` is defined; that macro is not
+reliably defined on every tier-1 toolchain (for example Apple clang), so the
+backend does not gate on it. Floating-point contraction is disabled both in
+the compiler's strict build flags (`-ffp-contract=off`) and in every
+generated program (`#pragma STDC FP_CONTRACT OFF`, preceded by a GCC-only
+diagnostic-ignore because GCC does not implement the pragma and warns under
+`-Wunknown-pragmas`), so `a * b + c` always computes and rounds as written.
+Alder still does not promise NaN payloads, FTZ/denormal control, or honoring
+ambient foreign changes to the rounding mode.
+
+Rationale: the C interop exact-value conversion tests and the standard
+library's `math` helpers need exact, predictable float results on every
+supported toolchain. Relying on Annex F would leave division silently
+undefined on common toolchains, and contraction is the one compiler license
+that can legally change `a * b + c` without any diagnostic.
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.

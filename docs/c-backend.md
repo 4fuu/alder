@@ -291,6 +291,36 @@ The backend must also define lowering for:
 
 No optimization may assume a checked failure is impossible unless a MIR proof or canonical optimization removed the check first.
 
+## Float Semantics
+
+`F32` and `F64` follow IEEE 754 binary32 and binary64 in the default non-stop
+mode (decision D026). Comparisons lower to C's IEEE operators, so NaN is
+unordered with every operand, the two zeros compare equal, and no failure
+edge exists. Arithmetic never traps: overflow produces the signed infinity,
+underflow is gradual, and division by zero is defined at the language and MIR
+level.
+
+ISO C11 leaves float division by zero undefined; Annex F defines it only
+where `__STDC_IEC_559__` is defined, and tier-1 toolchains such as Apple
+clang do not reliably define that macro. Generated code therefore never emits
+a bare float division: `float.div` calls the runtime helpers
+`alder_f64_div`/`alder_f32_div`, which branch on the divisor and return the
+IEEE quotient — the signed infinity carrying the XOR of the operand signs, or
+NaN when the dividend is zero or NaN — and perform the plain, defined
+division only for a nonzero divisor. No signal is raised and no failure edge
+is taken; `float.add`, `float.sub`, and `float.mul` lower to plain C
+arithmetic, which is defined for every operand pair.
+
+Floating-point contraction is disabled in every generated program. The
+prelude emits `#pragma STDC FP_CONTRACT OFF`; because GCC does not implement
+that pragma and rejects it under `-Wunknown-pragmas` (an error in the strict
+warning set) even when `-ffp-contract=off` is passed, the pragma is preceded
+by a GCC-only block that ignores `-Wunknown-pragmas`. Clang implements the
+pragma. The compiler's own strict build flags additionally keep
+`-ffp-contract=off`, so GCC builds get the no-contraction guarantee from the
+flag while user builds get it from the pragma. The backend makes no
+flush-to-zero assumption and does not change the rounding mode.
+
 ## Pointers, Aliasing, and Alignment
 
 Safe MIR references are not arbitrary C pointers. Their lowering must preserve:

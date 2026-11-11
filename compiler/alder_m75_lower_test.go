@@ -113,7 +113,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of trait dispatch: %v\n%s", err, output)
 	}
@@ -208,7 +208,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of generic impl dispatch: %v\n%s", err, output)
 	}
@@ -308,7 +308,7 @@ func runAlderVecLoopLowerBehavior(t *testing.T, exe string) {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of vec loop: %v\n%s", err, output)
 	}
@@ -384,7 +384,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of fn values: %v\n%s", err, output)
 	}
@@ -465,7 +465,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of default methods: %v\n%s", err, output)
 	}
@@ -539,7 +539,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of closures: %v\n%s", err, output)
 	}
@@ -811,7 +811,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of ordered collections: %v\n%s", err, output)
 	}
@@ -888,7 +888,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of mut-cursor drain: %v\n%s", err, output)
 	}
@@ -1001,7 +1001,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of constrained shapes: %v\n%s", err, output)
 	}
@@ -1066,7 +1066,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of generic trait methods: %v\n%s", err, output)
 	}
@@ -1167,7 +1167,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of generic-trait defaults: %v\n%s", err, output)
 	}
@@ -1256,7 +1256,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of fn-value domain program: %v\n%s", err, output)
 	}
@@ -1389,7 +1389,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of Eq operator dispatch: %v\n%s", err, output)
 	}
@@ -1490,4 +1490,210 @@ fn main() -> I32 {
 		t.Fatalf("run Order less behavior: %v\n%s", err, output)
 	}
 	t.Logf("Order less program exited cleanly under strict C11")
+}
+
+// M8 float semantics: the approved IEEE-754 profile for F64 and F32.
+// Comparisons are IEEE (NaN is unordered, so == and every ordering are
+// false and != is true; signed zeros compare equal), + - * are plain
+// correctly-rounded operations that overflow to signed infinity, and
+// division is defined for a zero divisor through the runtime helper
+// (signed infinity by operand sign XOR, NaN for 0/0). The generated C
+// carries FP_CONTRACT OFF, asserted with an expression whose fused
+// multiply-add evaluation would produce a different value. Alder-only.
+func runAlderFloatBinaryBehavior(t *testing.T, exe string) {
+	t.Helper()
+	files := map[string]string{"float-binary.al": `fn main() -> I32 {
+    let a: F64 = 1.5
+    let b: F64 = 2.5
+    if a != a { return 1 }
+    if a == b { return 2 }
+    if a >= b { return 3 }
+    if a > b { return 4 }
+    if b <= a { return 5 }
+    if b < a { return 6 }
+    if b == a { return 7 }
+    if !(a < b) { return 8 }
+    if !(a <= a) { return 9 }
+    if !(b > a) { return 10 }
+    if !(b >= a) { return 11 }
+    if !(b != a) { return 12 }
+    let fa: F32 = 1.5
+    let fb: F32 = 2.5
+    if fa != fa { return 13 }
+    if fa == fb { return 14 }
+    if fa >= fb { return 15 }
+    if fa > fb { return 16 }
+    if fb <= fa { return 17 }
+    if fb < fa { return 18 }
+    if fb == fa { return 19 }
+    if !(fa < fb) { return 20 }
+    if !(fa <= fa) { return 21 }
+    if !(fb > fa) { return 22 }
+    if !(fb >= fa) { return 23 }
+    if !(fb != fa) { return 24 }
+    let zero: F64 = 0.0
+    let nan64 = zero / zero
+    if nan64 == nan64 { return 25 }
+    if nan64 < a { return 26 }
+    if nan64 <= a { return 27 }
+    if nan64 > a { return 28 }
+    if nan64 >= a { return 29 }
+    if a < nan64 { return 30 }
+    if a <= nan64 { return 31 }
+    if a > nan64 { return 32 }
+    if a >= nan64 { return 33 }
+    if a == nan64 { return 34 }
+    if !(nan64 != nan64) { return 35 }
+    if !(a != nan64) { return 36 }
+    let one: F64 = 1.0
+    let neg_zero = zero * (zero - a)
+    if !(neg_zero == zero) { return 37 }
+    let pinf = one / zero
+    let ninf = one / neg_zero
+    if !(ninf < zero) { return 38 }
+    let bigger: F64 = 1e307
+    if !(pinf > bigger) { return 39 }
+    if !(ninf != pinf) { return 40 }
+    if pinf != pinf { return 41 }
+    if !(ninf == ninf) { return 42 }
+    if pinf == ninf { return 43 }
+    if ninf == zero { return 44 }
+    if pinf == zero { return 45 }
+    let big: F64 = 1e308
+    let overflowed = big * 10.0
+    if !(overflowed == pinf) { return 46 }
+    if !(big < pinf) { return 47 }
+    let nan_b = neg_zero / zero
+    if nan_b == nan64 { return 48 }
+    if !(nan_b != nan64) { return 49 }
+    if nan_b >= a { return 50 }
+    let four: F64 = 4.0
+    let quarter: F64 = 0.25
+    let quotient = one / four
+    if quotient != quarter { return 51 }
+    if !(quotient == quarter) { return 52 }
+    let half: F64 = 0.5
+    let threeq: F64 = 0.75
+    let sum64 = half + quarter
+    if sum64 != threeq { return 53 }
+    if !(sum64 == threeq) { return 54 }
+    let half32: F32 = 0.5
+    let quarter32: F32 = 0.25
+    let threeq32: F32 = 0.75
+    let sum32 = half32 + quarter32
+    if sum32 != threeq32 { return 55 }
+    let zero32: F32 = 0.0
+    let one32: F32 = 1.0
+    let pinf32 = one32 / zero32
+    let big32: F32 = 1.0e10
+    if !(pinf32 > big32) { return 56 }
+    if pinf32 != pinf32 { return 57 }
+    // 1.0e10 is exactly representable in F32 (5^10 fits the mantissa), so
+    // the chain stays finite through 1e30 and overflows to +Inf at 1e40.
+    let over32 = big32 * big32 * big32 * big32
+    if !(over32 == pinf32) { return 58 }
+    let neg_zero32 = zero32 * (zero32 - fa)
+    let ninf32 = one32 / neg_zero32
+    if !(ninf32 < zero32) { return 59 }
+    let nan32 = zero32 / zero32
+    if nan32 == nan32 { return 60 }
+    if nan32 < fa { return 61 }
+    if !(nan32 != nan32) { return 62 }
+    let two53: F64 = 9007199254740992.0
+    let eps = one / two53
+    let x = one - eps
+    if x == one { return 63 }
+    let two52: F64 = 4503599627370496.0
+    let tiny = one / two52
+    let y = one + tiny
+    if y == one { return 64 }
+    let product = x * y
+    let nocontract = product + (zero - one)
+    if nocontract != zero { return 65 }
+    if !(nocontract == zero) { return 66 }
+    return 0
+}
+`}
+	first := runLowerCompiler(t, exe, files, []string{"float-binary.al"})
+	second := runLowerCompiler(t, exe, files, []string{"float-binary.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered float MIR changed across processes")
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered float MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered float MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("float MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"float-binary.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"float-binary.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written float C changed across processes")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "float-binary.c")
+	program := filepath.Join(dir, "float-binary.exe")
+	// The parameterless hosted entry takes no domain argument.
+	driver := fmt.Sprintf("\nint main(void) { int32_t status = alder_fn_main_%d(); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of float behavior: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run float behavior: %v\n%s", err, output)
+	}
+	// The sanitizer rerun proves the zero-divisor branch, not an unguarded
+	// division, realizes float.div: UBSan's float-divide-by-zero check
+	// never fires although the fixture divides by zero locals throughout.
+	if !floatDivSanitizersSupported(t, cc) {
+		t.Log("float sanitizer rerun skipped: toolchain lacks ASan/UBSan/float-divide-by-zero")
+		return
+	}
+	sanProgram := filepath.Join(dir, "float-binary-san.exe")
+	sanArgs := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-fsanitize=address,undefined,float-divide-by-zero", "-g", "-fno-omit-frame-pointer", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", sanProgram}
+	if output, err := exec.Command(cc, sanArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("sanitizer compile of float behavior: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(sanProgram).CombinedOutput(); err != nil {
+		t.Fatalf("sanitizer run of float behavior: %v\n%s", err, output)
+	}
+	t.Logf("float behavior exited cleanly under strict C11 and ASan/UBSan/float-divide-by-zero")
+}
+
+// floatDivSanitizersSupported probes whether the host toolchain can build
+// and run binaries with ASan, UBSan, and the float-divide-by-zero UBSan
+// check enabled together.
+func floatDivSanitizersSupported(t *testing.T, cc string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "probe.c")
+	if err := os.WriteFile(probe, []byte("int main(void) { return 0; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, "probe.exe")
+	args := []string{"-fsanitize=address,undefined,float-divide-by-zero", probe, "-o", exe}
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Logf("float sanitizer build unsupported on this host: %v\n%s", err, out)
+		return false
+	}
+	if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+		t.Logf("float sanitizer run unsupported on this host: %v\n%s", err, out)
+		return false
+	}
+	return true
 }

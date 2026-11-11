@@ -147,7 +147,7 @@ int main(void) {
 	if err := os.WriteFile(driverPath, []byte(driver), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Dir(genPath), "-I", filepath.Join(root, "runtime", "c"), genPath, driverPath, object, "-o", program}
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile view-aggregate generated C: %v\n%s", err, out)
@@ -294,7 +294,7 @@ fn main() -> I32 {
 	if err := os.WriteFile(driverPath, []byte(driver), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Dir(genPath), "-I", filepath.Join(root, "runtime", "c"), genPath, driverPath, object, "-o", program}
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile array-order generated C: %v\n%s", err, out)

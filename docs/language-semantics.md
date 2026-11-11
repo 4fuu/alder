@@ -134,6 +134,14 @@ must be nonnegative and smaller than the source width.
 
 Bitwise `&`, `|`, `^`, and `~` operate on the fixed-width representation.
 
+Float `+`, `-`, `*`, and `/` on `F32` and `F64` follow IEEE 754 in the default
+non-stop mode and never fail: overflow produces the signed infinity, underflow
+is gradual, and division by zero is defined — the quotient is the signed
+infinity with the sign of the XOR of the operand signs, and NaN when both
+operands are zero or either operand is NaN. Float comparison and equality
+follow IEEE 754: NaN compares unordered with every operand, and the two zeros
+compare equal (decision D026).
+
 ### Conversions
 
 There are no implicit width, signedness, integer/float, or C ABI conversions.

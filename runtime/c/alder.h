@@ -521,6 +521,15 @@ static inline bool alder_string_utf8_valid(const uint8_t *data, uint64_t len) {
 bool alder_i64_from_f64(double v, int64_t *out);
 bool alder_u64_from_f64(double v, uint64_t *out);
 
+/*
+ * IEEE-754 division with a defined zero divisor for float.div lowering.
+ * A zero divisor yields the IEEE result: signed infinity with the XOR of
+ * the operand signs, or NaN for 0/0 and NaN operands. A nonzero divisor
+ * performs the plain defined division.
+ */
+double alder_f64_div(double a, double b);
+float alder_f32_div(float a, float b);
+
 /* ------------------------------------------------------------------ */
 /* Scoped cleanup                                                      */
 /* ------------------------------------------------------------------ */

@@ -3,6 +3,10 @@
 #include "alder.h"
 #include <float.h>
 #include <string.h>
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#endif
+#pragma STDC FP_CONTRACT OFF
 
 static ALDER_MAYBE_UNUSED int64_t alder_fn_arithmetic_0(int64_t alder_v0, int64_t alder_v1, int64_t alder_v2, uint8_t alder_v3, AlderSlice alder_v4, uint64_t alder_v5);
 

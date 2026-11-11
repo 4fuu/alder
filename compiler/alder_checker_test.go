@@ -214,7 +214,10 @@ func runCheckerConformance(t *testing.T, exe string) {
 	// function-value moved out: the Alder checker now accepts a non-generic
 	// function name as a function value (M7.5 C5b); the Go oracle still rejects
 	// it, so the shared fixture keeps testing only the oracle side.
-	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "float-arithmetic", "index-not-u64", "shadowing", "unreachable-statement"} {
+	// float-arithmetic moved out for the same reason: the Alder checker
+	// accepts F32/F64 + - * / since the IEEE-754 float commit, while the Go
+	// oracle keeps rejecting in its own corpus.
+	for _, fixture := range []string{"unknown-name", "unknown-type", "type-mismatch", "immutable-assign", "map-key-signed", "map-value-string", "nested-slice", "type-cycle", "match-nonexhaustive", "match-unknown-variant", "try-not-result", "try-error-mismatch", "using-callback-type", "literal-out-of-range", "fall-off-end", "reserved-name", "duplicate-decl", "alloc-as-slice-param", "bind-mark", "bind-unit", "ffi-unsupported-type", "index-not-u64", "shadowing", "unreachable-statement"} {
 		t.Run("shared-reject-"+fixture, func(t *testing.T) {
 			text, err := os.ReadFile(filepath.Join("..", "frontend", "testdata", "reject", fixture+".al"))
 			if err != nil {
@@ -853,6 +856,8 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"fn arithmetic(a: I64, b: I64) -> I64 { return (a + b) - (a * b) / (b % a) }\n" +
 			"fn shifts(value: U64, count: U64) -> U64 { return (value << count) >> count }\n" +
 			"fn comparisons(a: I64, b: I64) -> Bool { return (a == b || a != b) && (a < b || a <= b) && (a > b || a >= b) }\n" +
+			"fn float_comparison(a: F64, b: F64) -> Bool { return a <= b }\n" +
+			"fn float_arithmetic(a: F64, b: F64) -> F64 { return (a + b) - (a * b) / b }\n" +
 			"fn full_width(value: U64) -> U64 { return value + 18446744073709551615 }\n" +
 			"fn signed_min(value: I64) -> I64 { return value + -9223372036854775808 }\n" +
 			"fn inferred(value: I64) -> Bool { let integer = 1\n let truth = true\n let text = \"scalar\"\n let copied = value\n let nested = -copied + integer\n return truth }\n" +
@@ -902,7 +907,9 @@ func runCheckerConformance(t *testing.T, exe string) {
 		// implements Eq per docs/standard-library.md, and the acceptance
 		// behavior lives in runAlderEqOperatorBehavior.
 		{name: "operator-arithmetic-type.al", text: "fn f(a: Bool, b: Bool) -> Bool { return a + b }\n", marker: "+", kind: 37},
-		{name: "operator-float-arithmetic.al", text: "fn f(a: F64, b: F64) -> F64 { return a + b }\n", marker: "+", kind: 37},
+		// float arithmetic moved out: F32/F64 + - * / are accepted since the
+		// IEEE-754 float commit; the acceptance behavior lives in the
+		// operator-slice fixture and runAlderFloatBinaryBehavior.
 		{name: "operator-arithmetic-mismatch.al", text: "fn f(a: I64, b: U64) -> I64 { return a + b }\n", marker: "+", kind: 38},
 	}
 	for _, tc := range operatorRejects {

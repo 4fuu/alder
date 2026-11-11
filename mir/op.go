@@ -144,6 +144,15 @@ const (
 	OpCNumWrap
 	OpCNumCast
 
+	// Plain IEEE-754 float arithmetic: both operands share one float type,
+	// the result carries that type, and none of them carries a failure
+	// edge. Division by zero is defined at the MIR level (signed infinity,
+	// NaN for 0/0); the C backend realizes it through the runtime helper.
+	OpFloatAdd
+	OpFloatSub
+	OpFloatMul
+	OpFloatDiv
+
 	// OpStrOrderLt reports whether the left String or Bytes value orders
 	// strictly before the right one in unsigned byte-lexicographic order
 	// with the shorter prefix ordering first.
@@ -340,6 +349,14 @@ func (k OpKind) String() string {
 		return "c.num.wrap"
 	case OpCNumCast:
 		return "c.num.cast"
+	case OpFloatAdd:
+		return "float.add"
+	case OpFloatSub:
+		return "float.sub"
+	case OpFloatMul:
+		return "float.mul"
+	case OpFloatDiv:
+		return "float.div"
 	case OpStrOrderLt:
 		return "str.order_lt"
 	}

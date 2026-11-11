@@ -824,14 +824,9 @@ fn main() -> I32 {
 		// outside the structural Eq domain still rejects the operators.
 		{"eq-option-float-component", "fn main() -> I32 {\n    let a: Option(F64) = Some(1.0)\n    let b: Option(F64) = Some(2.0)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
 		{"eq-result-signed-component", "fn main() -> I32 {\n    let a: Result(U64, I64) = Ok(1)\n    let b: Result(U64, I64) = Ok(2)\n    if a == b { return 1 }\n    return 0\n}\n", 303},
-		// Float comparison and ordering reject at the checker instead of
-		// reaching a backend with no float comparison to lower to.
-		{"eq-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    if w == 3.5 { return 1 }\n    return 0\n}\n", 304},
-		{"ne-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    if w != 3.5 { return 1 }\n    return 0\n}\n", 304},
-		{"lt-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    if w < 3.5 { return 1 }\n    return 0\n}\n", 304},
-		{"le-f32-direct", "fn main() -> I32 {\n    let w: F32 = 1.5\n    if w <= 3.5 { return 1 }\n    return 0\n}\n", 304},
-		{"gt-f32-direct", "fn main() -> I32 {\n    let w: F32 = 1.5\n    if w > 3.5 { return 1 }\n    return 0\n}\n", 304},
-		{"ge-f32-result", "fn pick() -> F32 {\n    return 1.5\n}\nfn main() -> I32 {\n    if pick() >= 3.5 { return 1 }\n    return 0\n}\n", 304},
+		// Float remainder stays integer-only: no float semantics were
+		// decided for %, so it keeps the integer-operand diagnostic.
+		{"mod-f64-direct", "fn main() -> I32 {\n    let w: F64 = 1.5\n    let r = w % 2.0\n    if r > 0.0 { return 1 }\n    return 0\n}\n", 37},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

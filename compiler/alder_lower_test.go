@@ -32,6 +32,7 @@ func runLowerConformance(t *testing.T, exe string) {
 	t.Run("m75-generic-methods", func(t *testing.T) { runAlderM75GenericMethodLowerBehavior(t, exe) })
 	t.Run("m75-generic-trait-defaults", func(t *testing.T) { runAlderGenericTraitDefaultLowerBehavior(t, exe) })
 	t.Run("m8-eq-operators", func(t *testing.T) { runAlderEqOperatorBehavior(t, exe) })
+	t.Run("m8-float-binary", func(t *testing.T) { runAlderFloatBinaryBehavior(t, exe) })
 	t.Run("m8-order-less", func(t *testing.T) { runAlderOrderLessBehavior(t, exe) })
 	t.Run("m75-fn-value-domain", func(t *testing.T) { runAlderFnValueDomainLowerBehavior(t, exe) })
 	t.Run("m75-vec-loop-scalars", func(t *testing.T) { runAlderVecLoopLowerBehavior(t, exe) })
@@ -415,7 +416,7 @@ int main(void) {
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "match-name-behavior.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
 	if compiled, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile match-name C: %v\n%s", err, compiled)
 	}
@@ -575,7 +576,7 @@ int main(void) {
 		t.Skip("gcc not available")
 	}
 	program := filepath.Join(dir, "short-circuit.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile short-circuit C: %v\n%s", err, output)
 	}
@@ -705,7 +706,7 @@ func runArrayCgenBehavior(t *testing.T, module *mir.Module, coreExe string, file
 			t.Fatal(err)
 		}
 		program := filepath.Join(dir, name+".exe")
-		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 		if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 			t.Fatalf("compile array C: %v\n%s", err, output)
 		}
@@ -943,7 +944,7 @@ func runM71CgenBehavior(t *testing.T, module *mir.Module, coreExe string, files 
 		if err := os.WriteFile(file, text, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+		args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
 		if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 			t.Fatalf("strict C11 compile of %s: %v\n%s", name, err, output)
 		}
@@ -1228,7 +1229,7 @@ func runPreferredResultNameCgenBehavior(t *testing.T, coreExe string, files map[
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "preferred-result-name.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), cfile, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), cfile, filepath.Join(root, "runtime", "c", "alder.c"), "-o", output}
 	if compileOutput, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict C11 compile of preferred-name collision: %v\n%s", err, compileOutput)
 	}
@@ -1340,7 +1341,7 @@ int main(void) {
 		t.Fatal(err)
 	}
 	exe := filepath.Join(dir, "lower-behavior.exe")
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-DALDER_RUNTIME_TESTING", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("compile lowered C: %v\n%s", err, output)
 	}

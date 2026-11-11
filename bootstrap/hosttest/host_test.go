@@ -177,7 +177,7 @@ func compileHostWithStub(t *testing.T, entry string) string {
 		t.Fatal(err)
 	}
 	args := []string{
-		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", "..", stub, filepath.Join("..", "alder_host.c"), "-o", exe,
 	}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
@@ -202,7 +202,7 @@ func compileNativeHost(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion",
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Join(repo, "bootstrap"),
 		`-DALDER_HOST_CC="` + cc + `"`,
 		`-DALDER_HOST_RUNTIME_C="` + filepath.Join(repo, "runtime", "c", "alder.c") + `"`,

@@ -1,0 +1,73 @@
+mir 6
+
+fn @f64_add(%a: f64, %b: f64) -> f64 {
+entry:
+  %r = float.add %a, %b
+  return %r
+}
+
+fn @f64_sub(%a: f64, %b: f64) -> f64 {
+entry:
+  %r = float.sub %a, %b
+  return %r
+}
+
+fn @f64_mul(%a: f64, %b: f64) -> f64 {
+entry:
+  %r = float.mul %a, %b
+  return %r
+}
+
+fn @f64_div(%a: f64, %b: f64) -> f64 {
+entry:
+  %r = float.div %a, %b
+  return %r
+}
+
+fn @f32_div(%a: f32, %b: f32) -> f32 {
+entry:
+  %r = float.div %a, %b
+  return %r
+}
+
+fn @f32_add(%a: f32, %b: f32) -> f32 {
+entry:
+  %r = float.add %a, %b
+  return %r
+}
+
+fn @f64_eq(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.eq %a, %b
+  return %r
+}
+
+fn @f64_ne(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.ne %a, %b
+  return %r
+}
+
+fn @f64_lt(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.lt %a, %b
+  return %r
+}
+
+fn @f64_le(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.le %a, %b
+  return %r
+}
+
+fn @f64_gt(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.gt %a, %b
+  return %r
+}
+
+fn @f64_ge(%a: f64, %b: f64) -> bool {
+entry:
+  %r = float.ge %a, %b
+  return %r
+}

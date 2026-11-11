@@ -18,6 +18,8 @@
  */
 #include "alder.h"
 
+#include <math.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -342,6 +344,41 @@ bool alder_u64_from_f64(double v, uint64_t *out) {
     }
     *out = (uint64_t)v; /* in-range conversion is defined */
     return true;
+}
+
+/*
+ * IEEE-754 float division with a defined zero divisor. Plain C11 leaves
+ * x/0 undefined (Annex F defines it only under __STDC_IEC_559__, which is
+ * not reliably defined on every tier-1 toolchain), so the generated
+ * backend never emits a bare division: this helper branches on the divisor
+ * and produces the IEEE result directly, signed infinity carrying the XOR
+ * of the operand signs, NaN for 0/0 and for NaN operands. With a nonzero
+ * divisor the plain division is defined and computes the IEEE quotient.
+ */
+double alder_f64_div(double a, double b) {
+    if (b == 0.0) {
+        if (a == 0.0 || a != a) {
+            return (double)NAN;
+        }
+        if (signbit(a) != signbit(b)) {
+            return -(double)INFINITY;
+        }
+        return (double)INFINITY;
+    }
+    return a / b;
+}
+
+float alder_f32_div(float a, float b) {
+    if (b == 0.0f) {
+        if (a == 0.0f || a != a) {
+            return (float)NAN;
+        }
+        if (signbit(a) != signbit(b)) {
+            return -(float)INFINITY;
+        }
+        return (float)INFINITY;
+    }
+    return a / b;
 }
 
 /* ------------------------------------------------------------------ */

@@ -459,7 +459,11 @@ func (g *gen) emitModule(b *strings.Builder) {
 		b.WriteString("#include \"alder_host.h\"\n")
 	}
 	b.WriteString("#include <float.h>\n")
-	b.WriteString("#include <string.h>\n\n")
+	b.WriteString("#include <string.h>\n")
+	b.WriteString("#if defined(__GNUC__) && !defined(__clang__)\n")
+	b.WriteString("#pragma GCC diagnostic ignored \"-Wunknown-pragmas\"\n")
+	b.WriteString("#endif\n")
+	b.WriteString("#pragma STDC FP_CONTRACT OFF\n\n")
 
 	g.emitBindings(b)
 	g.emitTypes(b)

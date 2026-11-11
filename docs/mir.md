@@ -339,6 +339,25 @@ operations are total and carry no failure edge. The verifier rejects them on
 mismatched operand types, non-integer operand types, and `try` results not
 consumed as `option(T)` of the operand type.
 
+## Float Arithmetic
+
+MIR 6 exposes the plain IEEE-754 float arithmetic as operations 91-94:
+
+```text
+float.add a, b    float.sub a, b    float.mul a, b    float.div a, b
+```
+
+Both operands share one `f64` or one `f32` type and the result carries that
+type. None of the operations carries a failure edge, and none ever fails:
+`float.add`, `float.sub`, and `float.mul` compute the IEEE result for every
+operand pair, and `float.div` is defined for a zero divisor — the quotient is
+the signed infinity with the XOR of the operand signs, and NaN when both
+operands are zero or either operand is NaN (decision D026). The C backend
+realizes the zero-divisor contract through the `alder_f64_div`/`alder_f32_div`
+runtime helpers; the verifier rejects the operations on mismatched or
+non-float operand types. Comparisons on the same types are `float.eq` through
+`float.ge` in the comparisons section below.
+
 ## Byte-Sequence Methods
 
 MIR 6 also exposes the byte-sequence surface as operations 80-85, produced

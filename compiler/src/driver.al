@@ -308,11 +308,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 28 { if !out_string("cannot assign to immutable binding ") || !driver_out_message_quote(json) || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return driver_out_message_quote(json) }
     if kind == 37 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
-        return out_string(" requires integer operands (float arithmetic is not available in the current MIR profile)") }
+        return out_string(" requires integer operands") }
     if kind == 303 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" requires a type that implements Eq (integers, Bool, String, Bytes, or records and enums of Eq components)") }
-    if kind == 304 { if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
-        return out_string(" does not yet support float operands (float comparison is not available in the current MIR profile)") }
     if kind == 39 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" must be called") }
     if kind == 40 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }

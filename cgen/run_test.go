@@ -28,6 +28,7 @@ var runFixtures = []struct {
 	{"str", "str_driver.c"},
 	{"convert", "convert_driver.c"},
 	{"cnum", "cnum_driver.c"},
+	{"float", "float_driver.c"},
 }
 
 // buildRuntimeObject compiles the runtime once under the strict warning set
@@ -42,7 +43,7 @@ func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
 	object := filepath.Join(t.TempDir(), "alder.o")
 	args := append([]string{
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-		"-Wshadow", "-Wconversion",
+		"-Wshadow", "-Wconversion", "-ffp-contract=off",
 	}, extra...)
 	args = append(args, "-I", filepath.Join("..", "runtime", "c"),
 		"-c", filepath.Join("..", "runtime", "c", "alder.c"), "-o", object)
@@ -57,7 +58,7 @@ func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
 func runArgs(gen, driver, object string) []string {
 	return []string{
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-		"-Wshadow", "-Wconversion",
+		"-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Dir(gen),
 		"-I", filepath.Join("..", "runtime", "c"),
 		gen, driver, object,

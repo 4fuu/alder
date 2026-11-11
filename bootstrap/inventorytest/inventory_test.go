@@ -15,7 +15,7 @@ import (
 var inventoryStrictFlags = []string{
 	"-std=c11",
 	"-Wall", "-Wextra", "-Werror", "-pedantic",
-	"-Wshadow", "-Wconversion",
+	"-Wshadow", "-Wconversion", "-ffp-contract=off",
 }
 
 type inventoryResult struct {

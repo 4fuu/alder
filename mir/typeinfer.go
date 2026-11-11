@@ -554,6 +554,16 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return TypeBool, true
 
+	case OpFloatAdd, OpFloatSub, OpFloatMul, OpFloatDiv:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !IsFloatType(ta) {
+			return NoType, false
+		}
+		if tb, ok := f.ValueType(in.B); !ok || tb != ta {
+			return NoType, false
+		}
+		return ta, true
+
 	case OpIntTrunc:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) ||

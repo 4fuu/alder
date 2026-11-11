@@ -15,7 +15,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_copy_to_domain() { return 3 }
     if op == mir_op_cleanup_push() { return 33 }
     if op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() { return 1 }
-    if (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || (op >= mir_op_int_add_try() && op <= mir_op_int_mul_wrapping()) || (op >= mir_op_int_eq() && op <= mir_op_float_ge()) { return 3 }
+    if (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || (op >= mir_op_int_add_try() && op <= mir_op_int_mul_wrapping()) || (op >= mir_op_int_eq() && op <= mir_op_float_ge()) || (op >= mir_op_float_add() && op <= mir_op_float_div()) { return 3 }
     if op == mir_op_slice_len() { return 1 }
     if op == mir_op_slice_index_checked() || op == mir_op_array_index_checked() { return 3 }
     if op == mir_op_slice_range_checked() { return 7 }

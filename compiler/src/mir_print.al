@@ -1161,7 +1161,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_str_len() || rec.op == mir_op_str_to_bytes() {
         if !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     }
-    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_add_try() && rec.op <= mir_op_int_mul_wrapping()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() || rec.op == mir_op_str_byte_checked() || rec.op == mir_op_str_from_bytes() {
+    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_add_try() && rec.op <= mir_op_int_mul_wrapping()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || (rec.op >= mir_op_float_add() && rec.op <= mir_op_float_div()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() || rec.op == mir_op_str_byte_checked() || rec.op == mir_op_str_from_bytes() {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {
@@ -1880,7 +1880,6 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 51 { return out_string("call") }
     if op == 65 { return out_string("call.value") }
     if op == 66 { return out_string("str.eq") }
-    if op == 91 { return out_string("str.order_lt") }
     if op == 67 { return out_string("fn.value") }
     if op == 68 { return out_string("table.insert.try") }
     if op == 69 { return out_string("c.call.unsafe") }
@@ -1905,6 +1904,11 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 88 { return out_string("c.num.try") }
     if op == 89 { return out_string("c.num.wrap") }
     if op == 90 { return out_string("c.num.cast") }
+    if op == 91 { return out_string("float.add") }
+    if op == 92 { return out_string("float.sub") }
+    if op == 93 { return out_string("float.mul") }
+    if op == 94 { return out_string("float.div") }
+    if op == 95 { return out_string("str.order_lt") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -2031,6 +2035,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) || !mir_out_fail_edge(idx, store, id, rec) { return false }
     }
     if rec.op >= mir_op_int_add_try() && rec.op <= mir_op_int_mul_wrapping() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
+    }
+    if rec.op >= mir_op_float_add() && rec.op <= mir_op_float_div() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_slice_index_checked() {

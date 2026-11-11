@@ -96,7 +96,7 @@ Before submitting Go changes, run:
 
 Before submitting C runtime changes, additionally run:
 
-- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/alder.c` must pass;
+- `gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -ffp-contract=off -fsyntax-only runtime/c/alder.c` must pass;
 - `go test ./runtime -count=1` must pass (strict-warning compile-and-run tests, plus ASan/UBSan runs when the host toolchain supports them);
 - `go test ./cgen -count=1` must pass (golden generated-C fixtures, strict-warning compilation of every golden, compile-and-run behavior fixtures, verified-only gate, and cross-process determinism);
 - `go test ./frontend -count=1` must pass (pinned printed-MIR goldens, pinned rejection diagnostics, end-to-end source-to-C11 compile-and-run programs, and in-process and cross-process determinism).

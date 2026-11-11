@@ -344,7 +344,8 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 
 	case OpIntAddTry, OpIntSubTry, OpIntMulTry,
 		OpIntAddSaturating, OpIntSubSaturating, OpIntMulSaturating,
-		OpIntAddWrapping, OpIntSubWrapping, OpIntMulWrapping:
+		OpIntAddWrapping, OpIntSubWrapping, OpIntMulWrapping,
+		OpFloatAdd, OpFloatSub, OpFloatMul, OpFloatDiv:
 		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B))
 
 	case OpSliceLen:

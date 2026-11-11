@@ -284,7 +284,7 @@ func TestAlderMIRCoreConformance(t *testing.T) {
 	if err := os.WriteFile(cf, []byte(generated), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cf, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-DALDER_HOST_CONFORMANCE", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cf, filepath.Join(root, "bootstrap", "alder_host.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-o", exe}
 	if output, compileErr := exec.Command(cc, args...).CombinedOutput(); compileErr != nil {
 		t.Fatalf("strict C11 compile: %v\n%s", compileErr, output)
 	}

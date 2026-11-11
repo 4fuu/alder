@@ -290,7 +290,10 @@ func (p *parser) parseConstDecl() error {
 // parseConstValueFor parses a constant value with its declared type in
 // scope. A u64 constant is printed as the unsigned decimal of its 64-bit
 // pattern, which may exceed the signed int64 range, so such a token is read
-// as an unsigned integer and stored as the equivalent bit pattern.
+// as an unsigned integer and stored as the equivalent bit pattern. A float
+// constant is printed in Go's shortest 'g' form, which writes integral
+// values without a decimal point ("1.0" prints as "1"), so an integer token
+// under a float declared type reads as that float value.
 func (p *parser) parseConstValueFor(t TypeId) (ConstValue, error) {
 	if t == TypeU64 && p.peek().kind == tokInt {
 		if _, err := strconv.ParseInt(p.peek().text, 10, 64); err != nil {
@@ -301,6 +304,14 @@ func (p *parser) parseConstValueFor(t TypeId) (ConstValue, error) {
 			}
 			return ConstValue{Kind: ConstInt, Int: int64(u)}, nil
 		}
+	}
+	if IsFloatType(t) && p.peek().kind == tokInt {
+		tok := p.next()
+		f, err := strconv.ParseFloat(tok.text, 64)
+		if err != nil {
+			return ConstValue{}, p.errf(tok, "float literal %q out of range", tok.text)
+		}
+		return ConstValue{Kind: ConstFloat, Float: f}, nil
 	}
 	return p.parseConstValue()
 }
@@ -1463,6 +1474,13 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = parseConv(op)
 
+	case "float.add", "float.sub", "float.mul", "float.div":
+		op, ok := floatArithOpByName[t.text]
+		if !ok {
+			return in, p.errf(t, "internal error: unknown float arithmetic %q", t.text)
+		}
+		err = parseBinary(op)
+
 	case "const.get":
 		in.Op = OpConstGet
 		nameTok, err := p.expectAtName("a constant name")
@@ -2218,4 +2236,10 @@ var convOpByName = map[string]OpKind{
 // cNumOpByName maps the C-boundary conversion names to operations.
 var cNumOpByName = map[string]OpKind{
 	"c.num.try": OpCNumTry, "c.num.wrap": OpCNumWrap, "c.num.cast": OpCNumCast,
+}
+
+// floatArithOpByName maps the plain IEEE-754 arithmetic names to operations.
+var floatArithOpByName = map[string]OpKind{
+	"float.add": OpFloatAdd, "float.sub": OpFloatSub,
+	"float.mul": OpFloatMul, "float.div": OpFloatDiv,
 }

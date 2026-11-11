@@ -3107,6 +3107,33 @@ fn lower_m75_scan(d: Domain, source_state: State, store: CheckStore, state: Lowe
     return lower_jump_value(d, added.state, function, different_block.id, head.id, next.id)
 }
 
+// Float operands are the kind-1 checked primitives with the F32 or F64
+// target; lowering reads the operand expression's checked type directly.
+fn lower_float_operand(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let operand = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    return operand.kind == 1 && (operand.target == 10 || operand.target == 11)
+}
+
+// Float binary expressions lower to the plain IEEE-754 arithmetic and
+// comparison operations: the result carries the operand type and none of
+// them can fail, so the dispatch ignores the panic edge exactly like the
+// plain integer comparisons do.
+fn lower_float_binary_op(store: CheckStore, operand_checked: U64, operator: U64) -> U64 {
+    if !lower_float_operand(store, operand_checked) { return 0 }
+    if operator == 3 { return mir_op_float_add() }
+    if operator == 4 { return mir_op_float_sub() }
+    if operator == 5 { return mir_op_float_mul() }
+    if operator == 6 { return mir_op_float_div() }
+    if operator == 10 { return mir_op_float_eq() }
+    if operator == 11 { return mir_op_float_ne() }
+    if operator == 12 { return mir_op_float_lt() }
+    if operator == 13 { return mir_op_float_le() }
+    if operator == 14 { return mir_op_float_gt() }
+    if operator == 15 { return mir_op_float_ge() }
+    return 0
+}
+
 // Reports whether an Eq operand lowers through the structural walk instead
 // of a primitive comparison: String, Bytes, Bool, records, enums, generic
 // applications over Eq components, and builtin Option and Result do, while
@@ -4225,6 +4252,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if expression.operator == 13 { op = mir_op_int_le() }
         if expression.operator == 14 { op = mir_op_int_gt() }
         if expression.operator == 15 { op = mir_op_int_ge() }
+        // Float operands override the int table: the table maps every
+        // comparison operator unconditionally, so a fill-in dispatch after
+        // it would never fire for float == and !=.
+        let float_op = lower_float_binary_op(store, __s0_buffer_get(CheckedExprRec, store.expressions, left_id - 1).checked_type, expression.operator)
+        if float_op != 0 { op = float_op }
         if expression.operator == 7 {
             let quotient = try lower_add_result(d, right.state, function, block, expression.checked_type, source_state, store)
             let divided = try lower_add_instr(d, quotient.state, function, block, mir_op_int_div_checked(), quotient.id, 0, 0, left.id, right.id, panic_block, "")

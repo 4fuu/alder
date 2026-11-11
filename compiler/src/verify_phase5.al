@@ -425,6 +425,7 @@ return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() 
 return MirVTypeResult(valid: mir_vtype_kind(store, ta) == mir_type_kind_table() && tb == mir_v5_find_unary(indexes, mir_type_kind_id(), elem), type_id: mir_type_bool()) }
     if x.op >= mir_op_int_eq() && x.op <= mir_op_int_ge() { return MirVTypeResult(valid: mir_v5_is_int(ta) && ta == tb, type_id: mir_type_bool()) }
     if x.op >= mir_op_float_eq() && x.op <= mir_op_float_ge() { return MirVTypeResult(valid: mir_v5_is_float(ta) && ta == tb, type_id: mir_type_bool()) }
+    if x.op >= mir_op_float_add() && x.op <= mir_op_float_div() { return MirVTypeResult(valid: mir_v5_is_float(ta) && ta == tb, type_id: ta) }
     if x.op == mir_op_int_trunc() { return MirVTypeResult(valid: mir_v5_is_int(ta) && mir_v5_is_int(x.type_op) && ((mir_v5_signed(ta) && mir_v5_signed(x.type_op)) || (!mir_v5_signed(ta) && !mir_v5_signed(x.type_op))) && mir_v5_width(x.type_op) < mir_v5_width(ta), type_id: x.type_op) }
     if x.op == mir_op_int_zext() { return MirVTypeResult(valid: mir_v5_is_int(ta) && !mir_v5_signed(ta) && mir_v5_is_int(x.type_op) && mir_v5_width(x.type_op) > mir_v5_width(ta), type_id: x.type_op) }
     if x.op == mir_op_int_sext() { return MirVTypeResult(valid: mir_v5_is_int(ta) && mir_v5_signed(ta) && mir_v5_is_int(x.type_op) && mir_v5_width(x.type_op) > mir_v5_width(ta), type_id: x.type_op) }
@@ -617,6 +618,9 @@ if __s0_buffer_get(MirFunctionRec, store.functions, x.target - 1).result_type !=
 let tb = mir_v5_value_type(store, indexes, x.function, x.b)
 if !mir_v5_is_int(ta) || ta != tb { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, ta, tb, x.b) } }
     if x.op >= mir_op_float_eq() && x.op <= mir_op_float_ge() { let ta = mir_v5_value_type(store, indexes, x.function, x.a)
+let tb = mir_v5_value_type(store, indexes, x.function, x.b)
+if !mir_v5_is_float(ta) || ta != tb { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, ta, tb, x.b) } }
+    if x.op >= mir_op_float_add() && x.op <= mir_op_float_div() { let ta = mir_v5_value_type(store, indexes, x.function, x.a)
 let tb = mir_v5_value_type(store, indexes, x.function, x.b)
 if !mir_v5_is_float(ta) || ta != tb { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, ta, tb, x.b) } }
     if x.op == mir_op_slice_len() || x.op == mir_op_slice_index_checked() || x.op == mir_op_slice_range_checked() { if mir_v5_elem(store, mir_v5_value_type(store, indexes, x.function, x.a)) == 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_slice(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }

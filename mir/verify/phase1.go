@@ -514,7 +514,8 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
 		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
-		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
+		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe,
+		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
 		require(in.A, "left operand")
 		require(in.B, "right operand")
 	case mir.OpSliceLen:
@@ -651,7 +652,8 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
 		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
-		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
+		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe,
+		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
 		add(in.A)
 		add(in.B)
 	case mir.OpSliceLen:

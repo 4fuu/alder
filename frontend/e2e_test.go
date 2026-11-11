@@ -117,7 +117,7 @@ func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
 	object := filepath.Join(t.TempDir(), "alder.o")
 	args := append([]string{
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-		"-Wshadow", "-Wconversion",
+		"-Wshadow", "-Wconversion", "-ffp-contract=off",
 	}, extra...)
 	args = append(args,
 		"-I", filepath.Join("..", "runtime", "c"),
@@ -177,7 +177,7 @@ func TestE2E(t *testing.T) {
 					exe := filepath.Join(t.TempDir(), e2e.src+".exe")
 					args := []string{
 						"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-						"-Wshadow", "-Wconversion",
+						"-Wshadow", "-Wconversion", "-ffp-contract=off",
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
 						genPath, driverPath, runtimeObject,
@@ -223,7 +223,7 @@ int main(void) { return (int)alder_fn_main_%d(); }
 		exe := filepath.Join(t.TempDir(), "checked_panic.exe")
 		args := []string{
 			"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-			"-Wshadow", "-Wconversion",
+			"-Wshadow", "-Wconversion", "-ffp-contract=off",
 			"-I", filepath.Dir(genPath),
 			"-I", filepath.Join("..", "runtime", "c"),
 			genPath, driverPath, runtimeObject,
@@ -349,7 +349,7 @@ fn main(d: Domain) -> I32 {
 					exe := filepath.Join(t.TempDir(), tc.name+".exe")
 					args := []string{
 						"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-						"-Wshadow", "-Wconversion",
+						"-Wshadow", "-Wconversion", "-ffp-contract=off",
 						"-I", filepath.Dir(genPath),
 						"-I", filepath.Join("..", "runtime", "c"),
 						genPath, driverPath, runtimeObject,
@@ -522,7 +522,7 @@ int main(void) {
 			exe := filepath.Join(t.TempDir(), "buffer_failures.exe")
 			args := []string{
 				"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-				"-Wshadow", "-Wconversion", "-DALDER_RUNTIME_TESTING",
+				"-Wshadow", "-Wconversion", "-ffp-contract=off", "-DALDER_RUNTIME_TESTING",
 				"-I", filepath.Dir(genPath),
 				"-I", filepath.Join("..", "runtime", "c"),
 				genPath, driverPath, runtimeObject,

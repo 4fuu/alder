@@ -4444,16 +4444,19 @@ fn float_type(state: State, parse: ParseStore, store: CheckStore, checked_type: 
     return primitive_type_named(state, parse, store, checked_type, "F32") || primitive_type_named(state, parse, store, checked_type, "F64")
 }
 
-// Comparison and ordering operators reject F32 and F64 operands outright:
-// the old primitive comparison profile admitted them, but the backend
-// lowers no float comparison yet and verification refused the whole
-// function, so a plain float comparison reported an internal failure
-// instead of a diagnostic. They reject here until the float-semantics
-// decision returns the operators.
-fn float_comparison_operand(store: CheckStore, checked_type: U64) -> Bool {
+// Float operands are the kind-1 primitives whose target is F32 or F64; the
+// arithmetic gate and the lowering dispatch both consult this shape.
+fn float_primitive_operand(store: CheckStore, checked_type: U64) -> Bool {
     if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
     let operand = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     return operand.kind == 1 && (operand.target == 10 || operand.target == 11)
+}
+
+// + - * / accept same-type F32/F64 operands under IEEE-754 semantics; %
+// stays integer-only because no float remainder was decided.
+fn float_arithmetic_operand(store: CheckStore, checked_type: U64, operator: U64) -> Bool {
+    if operator < 3 || operator > 6 { return false }
+    return float_primitive_operand(store, checked_type)
 }
 
 fn expression_type_equal(d: Domain, state: State, parse: ParseStore, store: CheckStore, left: U64, right: U64) -> Result(Bool, __s0_Error) {
@@ -9102,7 +9105,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     if left_draft.deferred { return expr_deferred(base) }
     let left_limits = int_result_range(state, parse, __s0_buffer_get(CheckedTypeRec, left_store.types, left_draft.checked_type - 1))
     if (operator == 8 || operator == 9) && !left_limits.integer { return expr_token_fail(d, state, base, 33, expression) }
-    if operator >= 3 && operator <= 7 && !left_limits.integer { return expr_token_fail(d, state, base, 37, expression) }
+    if operator >= 3 && operator <= 7 && !left_limits.integer && !float_arithmetic_operand(left_store, left_draft.checked_type, operator) { return expr_token_fail(d, state, base, 37, expression) }
     var operand_mismatch: U64 = 38
     if operator == 8 || operator == 9 { operand_mismatch = 34 }
     if operator >= 10 && operator <= 15 { operand_mismatch = 35 }
@@ -9127,7 +9130,6 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     }
     var result_type = left_draft.checked_type
     if operator >= 10 && operator <= 15 {
-        if float_comparison_operand(right_store, left_draft.checked_type) { return expr_token_fail(d, state, base, 304, expression) }
         // `==` and `!=` dispatch on Eq: every primitive keeps the existing
         // comparison profile (floats included), String and Bytes compare by
         // bytes, and records and enums — generic applications included —

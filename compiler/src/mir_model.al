@@ -182,7 +182,11 @@ fn mir_op_int_convert_wrap() -> U64 { return 87 }
 fn mir_op_c_num_try() -> U64 { return 88 }
 fn mir_op_c_num_wrap() -> U64 { return 89 }
 fn mir_op_c_num_cast() -> U64 { return 90 }
-fn mir_op_str_order_lt() -> U64 { return 91 }
+fn mir_op_float_add() -> U64 { return 91 }
+fn mir_op_float_sub() -> U64 { return 92 }
+fn mir_op_float_mul() -> U64 { return 93 }
+fn mir_op_float_div() -> U64 { return 94 }
+fn mir_op_str_order_lt() -> U64 { return 95 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

@@ -3,6 +3,10 @@
 #include "alder.h"
 #include <float.h>
 #include <string.h>
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#endif
+#pragma STDC FP_CONTRACT OFF
 
 typedef struct AlderTy12 AlderTy12;
 

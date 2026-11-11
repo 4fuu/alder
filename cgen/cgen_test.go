@@ -177,7 +177,7 @@ func writeGenerated(t *testing.T, name string) string {
 func strictArgs(gen string) []string {
 	return []string{
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
-		"-Wshadow", "-Wconversion",
+		"-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Join("..", "runtime", "c"),
 		"-fsyntax-only", gen,
 	}

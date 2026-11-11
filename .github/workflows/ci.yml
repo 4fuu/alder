@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       # Canonical C check from AGENTS.md and CONTRIBUTING.md.
       - name: gcc -fsyntax-only runtime/c/alder.c
-        run: gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -fsyntax-only runtime/c/alder.c
+        run: gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -ffp-contract=off -fsyntax-only runtime/c/alder.c
 
   bootstrap:
     name: source bootstrap

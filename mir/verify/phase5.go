@@ -287,6 +287,9 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	case mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe:
 		c.expectSamePair(in.A, in.B, "float operand", mir.IsFloatType, "a float")
 
+	case mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
+		c.expectSamePair(in.A, in.B, "float operand", mir.IsFloatType, "a float")
+
 	case mir.OpIntTrunc:
 		c.expect(in.A, "integer operand", mir.IsIntType, "an integer")
 		if t, ok := f.ValueType(in.A); ok && t != mir.NoType && mir.IsIntType(t) && m.ValidType(in.TypeOp) && mir.IsIntType(in.TypeOp) {

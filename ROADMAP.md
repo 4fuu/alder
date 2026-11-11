@@ -1460,10 +1460,24 @@ run fixture `cgen/testdata/run/cnum.mir`, and the production qualification
 compiled and run under the strict warning set, print/MIR and cross-process
 determinism, and eight checker rejections); the surface is documented in
 [docs/c-interop.md](docs/c-interop.md) "Scalar conversions", with the
-emission contract in [docs/c-backend.md](docs/c-backend.md). Float
-comparison and float arithmetic remain outside the S0/MIR profile pending
-the semantics decision, so float-value assertions currently observe the
-checked narrowing's `some`/`none`.
+emission contract in [docs/c-backend.md](docs/c-backend.md).
+
+Landed language progress: float comparison and float arithmetic are in the
+S0/MIR profile under the approved IEEE-754 semantics (decision
+[D026](docs/design-decisions.md)). The checker accepts the six comparisons
+and `+`/`-`/`*`/`/` on same-type `F32`/`F64` operands (float `%` and unary
+float minus still reject), MIR gains the total operations 91-94 with no
+failure edge, and `float.div` lowers through `alder_f64_div`/`alder_f32_div`,
+which branch on a zero divisor to produce the IEEE signed infinity (NaN for
+0/0) instead of the undefined bare C division. Every generated program emits
+`#pragma STDC FP_CONTRACT OFF`, so `a * b + c` computes as written. Evidence:
+the MIR verifier accept/reject tests in `mir/verify`, the strict-and-sanitizer
+cgen run fixture `cgen/testdata/run/float.mir`, and the 66-return-code
+conformance behavior `m8-float-binary` covering NaN unorderedness, signed
+zeros, 1/±0 → ±Inf, overflow, exact sums, and no-contraction under
+`-fsanitize=address,undefined,float-divide-by-zero` where the toolchain
+supports it. C-interop float-value assertions can now compare exactly instead
+of observing the checked narrowing's `some`/`none`.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 

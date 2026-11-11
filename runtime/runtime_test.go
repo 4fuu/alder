@@ -16,7 +16,7 @@ import (
 var strictFlags = []string{
 	"-std=c11",
 	"-Wall", "-Wextra", "-Werror", "-pedantic",
-	"-Wshadow", "-Wconversion",
+	"-Wshadow", "-Wconversion", "-ffp-contract=off",
 }
 
 // testPrograms are the runtime behavior test programs, one per runtime area.

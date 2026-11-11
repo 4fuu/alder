@@ -69,7 +69,8 @@ var bootstrapRejectFixtures = []string{
 	"bind-mark",
 	"bind-unit",
 	"ffi-unsupported-type",
-	"float-arithmetic",
+	// float-arithmetic moved to the Go Stage 0 rejection list only: the
+	// Alder checker accepts F32/F64 + - * / since the IEEE-754 float commit.
 	"index-not-u64",
 	"shadowing",
 	"unreachable-statement",
@@ -408,7 +409,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 	if err := os.WriteFile(driver, []byte(text), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-ffp-contract=off", "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"), cfile, driver, object, "-o", exe}
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("strict generated C compile: %v\n%s", err, output)
 	}
@@ -578,7 +579,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "9b379af35bbca9130b7286e25591f4d49849539586ca8c78610ca159a5f5c2fb"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "8e0cb6a492a1490270d2cd8fe30e80b593381136369788b8a9c052def73f0add"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

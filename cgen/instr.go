@@ -209,6 +209,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping:
 		g.emitIntMode(b, in)
 
+	case mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
+		g.emitFloatBinary(b, in)
+
 	case mir.OpSliceLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
 
@@ -702,6 +705,31 @@ func (g *gen) emitIntChecked(b *strings.Builder, in *mir.Instr) {
 		b.WriteString("  if (" + g.tmp(in, "") + " > (uint64_t)" + limit + ") { " + g.failBody(in) + " }\n")
 		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(t) + ")" + g.tmp(in, "") + ";\n")
 	}
+}
+
+// emitFloatBinary lowers the plain IEEE-754 float arithmetic. Division goes
+// through the runtime helper so a zero divisor yields the IEEE signed
+// infinity or NaN result instead of the undefined plain C11 division; the
+// other operations emit plain C arithmetic under the translation unit's
+// FP_CONTRACT OFF pragma.
+func (g *gen) emitFloatBinary(b *strings.Builder, in *mir.Instr) {
+	if in.Op == mir.OpFloatDiv {
+		helper := "alder_f32_div"
+		if t, ok := g.f.ValueType(in.A); ok && t == mir.TypeF64 {
+			helper = "alder_f64_div"
+		}
+		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" +
+			g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
+		return
+	}
+	arith := "+"
+	switch in.Op {
+	case mir.OpFloatSub:
+		arith = "-"
+	case mir.OpFloatMul:
+		arith = "*"
+	}
+	b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + " " + arith + " " + g.valueExpr(in.B) + ";\n")
 }
 
 // emitIntMode lowers the non-terminating integer arithmetic: the try forms

@@ -320,6 +320,30 @@ fn cgen_put_tmp(d: Domain, writer: CgenWriter, value: U64, suffix: __s0_String) 
     return cgen_put(d, out, suffix)
 }
 
+// Float arithmetic emits plain C arithmetic under the translation unit's
+// FP_CONTRACT OFF pragma. Division goes through the runtime helper so a
+// zero divisor yields the IEEE signed infinity or NaN result instead of
+// the undefined plain C11 division.
+fn cgen_emit_float_binary(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = ")
+    if item.op == mir_op_float_div() {
+        if cgen_value_type(store, indexes, item.function, item.a) == mir_type_f64() { out = try cgen_put(d, out, "alder_f64_div(") } else { out = try cgen_put(d, out, "alder_f32_div(") }
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        return cgen_put(d, out, ");\n")
+    }
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    if item.op == mir_op_float_add() { out = try cgen_put(d, out, " + ") }
+    if item.op == mir_op_float_sub() { out = try cgen_put(d, out, " - ") }
+    if item.op == mir_op_float_mul() { out = try cgen_put(d, out, " * ") }
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    return cgen_put(d, out, ";\n")
+}
+
 fn cgen_emit_int_checked(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
     let type_id = cgen_value_type(store, indexes, item.function, item.a)
     let width = cgen_int_width(type_id)
@@ -1430,6 +1454,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     }
     if item.op >= mir_op_int_add_checked() && item.op <= mir_op_int_shr_checked() { return cgen_emit_int_checked(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_wrapping() { return cgen_emit_int_mode(d, out, store, indexes, instruction, item) }
+    if item.op >= mir_op_float_add() && item.op <= mir_op_float_div() { return cgen_emit_float_binary(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_slice_len() {
         out = try cgen_put(d, out, "  ")
         out = try cgen_put_value(d, out, item.result)
