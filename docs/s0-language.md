@@ -454,8 +454,10 @@ __s0_buffer_slice
 
 The same boundary covers the `Domain` and `DomainMark` types, the fixed
 `Map(K, V)` type with its `Get`/`Set`/`Remove` operations, `__s0_Error`,
-`__s0_Buffer(T)`, `__s0_String`, and the `fn main(root: Domain)` entry form;
-a parameterless `fn main() -> I32` remains the ordinary hosted entry. The
+`__s0_Buffer(T)`, `__s0_String`, the `fn main(root: Domain)` entry form, and
+since M8 the narrow direct C import `import c name: fn(...) -> T` (header
+binding blocks replaced it on the public surface); a parameterless
+`fn main() -> I32` remains the ordinary hosted entry. The
 profile exists only so `compiler/src/*.al`, `bootstrap/spike/*.al`, and the
 test fixtures that still exercise these runtime mechanisms can compile. The
 flag itself is not a supported language feature and is removed together with
@@ -517,6 +519,13 @@ capped, because `parse_block` and `parse_statement` do not thread `depth`; that
 is a known gap rather than a deliberate exclusion.
 
 ## C bridge
+
+Since M8 the narrow direct C import is part of the private bootstrap
+profile (see "Temporary memory and cleanup bridges"):
+ordinary modules declare C surface through header binding blocks, and an
+ordinary `import c name: fn(...) -> T` is rejected with the stable
+bootstrap-private diagnostic. Under the private profile the form still
+behaves as follows.
 
 S0 declares one concrete symbol:
 
@@ -658,7 +667,7 @@ ordinary programs:
 | `__s0_Buffer` | ordinary source `Vec`/builders work |
 | explicit `Domain`/`DomainMark` | storage inference is verified |
 | callback `using ... with ...` | affine `Cleanup` selection works (the clause is profile-gated since M7.5) |
-| direct `import c name` | header binding blocks work |
+| direct `import c name` | header binding blocks work (profile-gated since M8; the form remains only for the compiler's own host shims) |
 | temporary `main` signatures | project targets and standard host entry work |
 
 S0 remains frozen except for correctness and work needed to reach the

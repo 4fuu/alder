@@ -1487,7 +1487,7 @@ field's declared binding type) and the field write `rec.field = value`
 non-record or scalar receiver with diagnostic 206, an unknown field with
 207, a value type mismatch with 208, and a write through a non-`var`
 binding with 209; lowering assigns record fields source-order MIR ordinals
-that match the raw-fn parameter ordinals, and MIR gains operations 91-92
+that match the raw-fn parameter ordinals, and MIR gains operations 96-97
 (`c.field.get`/`c.field.set`) validated by the verifier, mirrored in the Go
 verifier, printer, and op model. The C backend lowers field reads and
 writes to plain member access through the declared C spelling and moves
@@ -1502,6 +1502,21 @@ and five checker rejections); the surface is documented in
 [docs/c-interop.md](docs/c-interop.md) "C records, unions, bitfields, and
 variadics", [docs/mir.md](docs/mir.md) "Binding Blocks and C Types", and
 [docs/c-backend.md](docs/c-backend.md).
+
+Landed C-interop progress: the narrow S0 C bridge (`import c name:
+fn(...) -> T`) no longer appears on the public surface. Ordinary modules
+reject the form at the checker with the stable bootstrap-private diagnostic
+106 ("bootstrap operation ... is private to the compiler's bootstrap sources
+(--bootstrap-private)") before the signature resolves, while
+`compiler/src/*.al`, `bootstrap/spike/*.al`, and the conformance fixtures
+that exercise the bridge's call mechanics keep it under the private
+bootstrap profile. This closes the s0-language removal-gate row "direct
+`import c name`": header binding blocks own the public C surface. Evidence:
+the `direct-c-import` rejection case in
+`compiler/production_binding_test.go`, the extended private-profile detector
+in the checker conformance runner (all existing narrow-import fixtures still
+pass under `--bootstrap-private`), and the bootstrap fixed point, which
+compiles the compiler's own host imports under the profile.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 

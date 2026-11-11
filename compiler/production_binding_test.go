@@ -176,6 +176,11 @@ var m8BindingRejections = []struct {
 		"import c \"time.h\" as ctime {\n    raw fn no = \"f\"() -> c.Int\n}\nfn main() -> I32 {\n    unsafe c { ctime.no() }\n    return 0\n}\n",
 		"a C binding call's non-unit result must be used",
 	},
+	{
+		"direct-c-import",
+		"import c note: fn(I64) -> Unit\nfn main() -> I32 { return 0 }\n",
+		"bootstrap operation \"note\" is private to the compiler's bootstrap sources (--bootstrap-private)",
+	},
 }
 
 func TestM8BindingProductionQualification(t *testing.T) {

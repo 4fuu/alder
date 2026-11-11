@@ -104,6 +104,10 @@ var privateProfileReject = map[string]bool{
 	// The callback `using` clause is bootstrap-private since M7.5, so its
 	// rejects (and the Go oracle that still accepts the form) run privately.
 	"using-callback-type.al": true,
+	// The narrow direct C import is bootstrap-private since M8; its
+	// unsupported-signature reject keeps testing the signature diagnostic
+	// under the profile instead of the new import gate.
+	"ffi-unsupported-type.al": true,
 }
 
 // privateProfileFiles reports whether a self-hosting acceptance corpus still
@@ -117,6 +121,9 @@ func privateProfileFiles(files map[string]string) bool {
 		}
 		for _, line := range strings.Split(text, "\n") {
 			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
+				return true
+			}
+			if hasNarrowCImport(line) {
 				return true
 			}
 		}
@@ -579,7 +586,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "c345acdf9c14a18797ac5e6dc47c92d7f02e8bb3b63e3d836e4e8563ad78cc83"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "c21bb2998ebd734c2acc4d27369f1d1e31e9ac9738e374f203ada892bb25733d"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

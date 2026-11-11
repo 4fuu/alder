@@ -405,4 +405,7 @@ implementation such as Fil-C as an optional lane; it is a debugging aid, not a
 supported toolchain.
 
 S0's `import c name: fn(...)` and single direct call are a narrow bootstrap
-bridge and do not establish this complete contract.
+bridge and do not establish this complete contract. Since M8 that bridge is
+private to the compiler's bootstrap sources: ordinary modules reject it with
+the stable bootstrap-private diagnostic and declare C surface through header
+binding blocks.

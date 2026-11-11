@@ -1550,6 +1550,16 @@ func checkerOwnersBlocks(v []checkerBlock) []int {
 	return r
 }
 
+// hasNarrowCImport reports whether a source line declares the narrow direct
+// C import (`import c name: fn(...) -> T`), which is bootstrap-private since
+// M8: header binding blocks own the public surface, and the conformance and
+// qualification fixtures that still exercise the bridge's call mechanics run
+// under the private bootstrap profile.
+func hasNarrowCImport(line string) bool {
+	fields := strings.Fields(line)
+	return len(fields) >= 3 && fields[0] == "import" && fields[1] == "c" && strings.HasSuffix(fields[2], ":")
+}
+
 // privateProfileSources reports whether a checker-conformance source set
 // still uses the S0 bootstrap bridges and needs the private bootstrap
 // profile. The ordinary-mode gate itself is pinned by the production-driver
@@ -1565,6 +1575,9 @@ func privateProfileSources(files map[string]string) bool {
 		// builtin Table owner, so corpus programs using it need the profile.
 		for _, line := range strings.Split(text, "\n") {
 			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
+				return true
+			}
+			if hasNarrowCImport(line) {
 				return true
 			}
 		}

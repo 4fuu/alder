@@ -960,6 +960,20 @@ func runProductionCompiler(t *testing.T, exe string, files map[string]string, ar
 	return runProductionCompilerAtRoot(t, exe, t.TempDir(), files, args...)
 }
 
+// runPrivateProductionCompiler runs a fixture under the private bootstrap
+// profile. M7.5-era qualification programs declare their C host stubs with
+// the narrow direct import, which is bootstrap-private since M8; the tests
+// themselves are not user programs and keep exercising those stubs under the
+// profile.
+func runPrivateProductionCompiler(t *testing.T, exe string, files map[string]string, args ...string) productionResult {
+	t.Helper()
+	if len(args) == 0 {
+		t.Fatal("private production run needs a subcommand")
+	}
+	profiled := append([]string{args[0], "--bootstrap-private"}, args[1:]...)
+	return runProductionCompiler(t, exe, files, profiled...)
+}
+
 func runProductionCompilerAtRoot(t *testing.T, exe, dir string, files map[string]string, args ...string) productionResult {
 	t.Helper()
 	for name, text := range files {

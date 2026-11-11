@@ -3883,7 +3883,22 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, indexes: next.indexes, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics, traits: next.traits, closures: next.closures, interp: next.interp, bindings: next.bindings)))
 }
 
+// The narrow direct C import (`import c name: fn(...) -> T`) is the S0
+// bootstrap bridge that header binding blocks replaced; since M8 ordinary
+// modules must declare C surface through binding blocks. Outside the private
+// bootstrap profile the import is rejected with the bootstrap-operation
+// diagnostic before its signature resolves, so users see the profile note,
+// not a follow-on unknown-name or signature error at the call site.
+fn reject_bootstrap_c_import(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
+    if check_bootstrap_private() { return Ok(CheckGood(store)) }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+    return check_fail(d, store, 106, root, 0, 0, 0)
+}
+
 fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, signature: SyntaxRec) -> Result(CheckResult, __s0_Error) {
+    let gated = try reject_bootstrap_c_import(d, state, parse, store, owner)
+    if check_result_bad(gated) { return Ok(gated) }
     let result_link = __s0_buffer_get(SyntaxLinkRec, parse.links, signature.children - 1)
     let params = try check_type_links(d, state, parse, store, owner, result_link.next, 3, 0)
     let current = match params {

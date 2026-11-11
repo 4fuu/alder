@@ -1461,6 +1461,9 @@ func privateProfileLowerSources(files map[string]string) bool {
 			if strings.Contains(line, "using ") && strings.Contains(line, " with ") {
 				return true
 			}
+			if hasNarrowCImport(line) {
+				return true
+			}
 		}
 	}
 	return false
