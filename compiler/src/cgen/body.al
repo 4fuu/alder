@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_str_display() { return false }
+        if item.op > mir_op_int_not() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -501,6 +501,58 @@ fn cgen_emit_int_checked(d: Domain, initial: CgenWriter, store: MirStore, indexe
 // wrapping at that width exactly: saturating at 64 bits keeps the value on
 // the same side of the narrow bound, and truncation keeps the low bits the
 // width-w wrap produces.
+// cgen_emit_int_bitwise lowers the total bitwise operations over the
+// fixed-width two's-complement representation. The C operators run on the
+// unsigned type of the operand width, and a signed result receives that bit
+// pattern by memcpy so no implementation-defined signed conversion occurs.
+fn cgen_emit_int_bitwise(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    let type_id = cgen_value_type(store, indexes, item.function, item.a)
+    let width = cgen_int_width(type_id)
+    let signed = cgen_int_signed(type_id)
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    if signed {
+        out = try cgen_put(d, out, "uint")
+        out = try cgen_put_u64(d, out, width)
+        out = try cgen_put(d, out, "_t ")
+        out = try cgen_put_tmp(d, out, item.result, "u")
+        out = try cgen_put(d, out, " = ")
+    } else {
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = (")
+        out = try cgen_put_type(d, out, store, type_id)
+        out = try cgen_put(d, out, ")(")
+    }
+    if item.op == mir_op_int_not() {
+        out = try cgen_put(d, out, "~(uint")
+        out = try cgen_put_u64(d, out, width)
+        out = try cgen_put(d, out, "_t)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    } else {
+        out = try cgen_put(d, out, "(uint")
+        out = try cgen_put_u64(d, out, width)
+        out = try cgen_put(d, out, "_t)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        if item.op == mir_op_int_and() { out = try cgen_put(d, out, " & ") }
+        if item.op == mir_op_int_xor() { out = try cgen_put(d, out, " ^ ") }
+        if item.op == mir_op_int_or() { out = try cgen_put(d, out, " | ") }
+        out = try cgen_put(d, out, "(uint")
+        out = try cgen_put_u64(d, out, width)
+        out = try cgen_put(d, out, "_t)")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    }
+    if signed {
+        out = try cgen_put(d, out, ";\n  memcpy(&")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, ", &")
+        out = try cgen_put_tmp(d, out, item.result, "u")
+        out = try cgen_put(d, out, ", sizeof(")
+        out = try cgen_put_tmp(d, out, item.result, "u")
+        return cgen_put(d, out, "));\n")
+    }
+    return cgen_put(d, out, ");\n")
+}
+
 fn cgen_emit_int_mode(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
     let type_id = cgen_value_type(store, indexes, item.function, item.a)
     let width = cgen_int_width(type_id)
@@ -1506,6 +1558,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         return Ok(out)
     }
     if item.op >= mir_op_int_add_checked() && item.op <= mir_op_int_shr_checked() { return cgen_emit_int_checked(d, out, store, indexes, instruction, item) }
+    if item.op >= mir_op_int_and() && item.op <= mir_op_int_not() { return cgen_emit_int_bitwise(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_int_add_try() && item.op <= mir_op_int_mul_wrapping() { return cgen_emit_int_mode(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_float_add() && item.op <= mir_op_float_div() { return cgen_emit_float_binary(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_slice_len() {

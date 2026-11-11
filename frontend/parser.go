@@ -640,7 +640,7 @@ func (p *parser) parseType() (TypeExpr, error) {
 }
 
 // parseExpr parses an expression with the precedence table:
-// || < && < == != < < <= > >= < << >> < + - < * / % < unary < postfix.
+// || < && < == != < < <= > >= < | < ^ < & < << >> < + - < * / % < unary < postfix.
 func (p *parser) parseExpr() (Expr, error) {
 	return p.parseBinary(0)
 }
@@ -650,9 +650,12 @@ var binaryPrecedence = map[string]int{
 	"&&": 2,
 	"==": 3, "!=": 3,
 	"<": 4, "<=": 4, ">": 4, ">=": 4,
-	"<<": 5, ">>": 5,
-	"+": 6, "-": 6,
-	"*": 7, "/": 7, "%": 7,
+	"|":  5,
+	"^":  6,
+	"&":  7,
+	"<<": 8, ">>": 8,
+	"+": 9, "-": 9,
+	"*": 10, "/": 10, "%": 10,
 }
 
 func (p *parser) parseBinary(minPrec int) (Expr, error) {
@@ -686,7 +689,7 @@ func (p *parser) parseBinary(minPrec int) (Expr, error) {
 
 func (p *parser) parseUnary() (Expr, error) {
 	t := p.cur()
-	if t.kind == tokPunct && (t.text == "-" || t.text == "!") {
+	if t.kind == tokPunct && (t.text == "-" || t.text == "!" || t.text == "~") {
 		p.advance()
 		if err := p.requireSameLineAfterPrevious("a unary expression"); err != nil {
 			return nil, err

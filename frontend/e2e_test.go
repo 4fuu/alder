@@ -25,6 +25,7 @@ var e2eFixtures = []struct {
 	private bool
 }{
 	{"arith", "default", false},
+	{"bitwise", "default", false},
 	{"else-if", "default", false},
 	{"structs", "default", false},
 	{"enums", "default", false},

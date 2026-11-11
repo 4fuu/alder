@@ -169,6 +169,16 @@ const (
 	// operand owns the fresh allocation. The checked edge fires on
 	// allocation failure only.
 	OpStrDisplay
+
+	// Total bitwise operations over the fixed-width two's-complement
+	// representation. Both binary operands share one integer type; int.not is
+	// the unary complement. None carries a failure edge. Op numbers 99-102
+	// stay reserved for the staged CString slice (98-101 plus the moved
+	// str.display), so this family starts at 103.
+	OpIntAnd OpKind = 103
+	OpIntOr  OpKind = 104
+	OpIntXor OpKind = 105
+	OpIntNot OpKind = 106
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -377,6 +387,14 @@ func (k OpKind) String() string {
 		return "c.field.set"
 	case OpStrDisplay:
 		return "str.display"
+	case OpIntAnd:
+		return "int.and"
+	case OpIntOr:
+		return "int.or"
+	case OpIntXor:
+		return "int.xor"
+	case OpIntNot:
+		return "int.not"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

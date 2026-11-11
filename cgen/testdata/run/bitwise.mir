@@ -1,0 +1,73 @@
+mir 6
+
+fn @and_u8(%a: u8, %b: u8) -> u8 {
+entry:
+  %r = int.and %a, %b
+  return %r
+}
+
+fn @or_u8(%a: u8, %b: u8) -> u8 {
+entry:
+  %r = int.or %a, %b
+  return %r
+}
+
+fn @xor_u8(%a: u8, %b: u8) -> u8 {
+entry:
+  %r = int.xor %a, %b
+  return %r
+}
+
+fn @not_u8(%a: u8) -> u8 {
+entry:
+  %r = int.not %a
+  return %r
+}
+
+fn @and_i8(%a: i8, %b: i8) -> i8 {
+entry:
+  %r = int.and %a, %b
+  return %r
+}
+
+fn @not_i8(%a: i8) -> i8 {
+entry:
+  %r = int.not %a
+  return %r
+}
+
+fn @and_u64(%a: u64, %b: u64) -> u64 {
+entry:
+  %r = int.and %a, %b
+  return %r
+}
+
+fn @not_u64(%a: u64) -> u64 {
+entry:
+  %r = int.not %a
+  return %r
+}
+
+fn @and_i64(%a: i64, %b: i64) -> i64 {
+entry:
+  %r = int.and %a, %b
+  return %r
+}
+
+fn @not_i64(%a: i64) -> i64 {
+entry:
+  %r = int.not %a
+  return %r
+}
+
+fn @or_i64(%a: i64, %b: i64) -> i64 {
+entry:
+  %r = int.or %a, %b
+  return %r
+}
+
+fn @xor_i64(%a: i64, %b: i64) -> i64 {
+entry:
+  %r = int.xor %a, %b
+  return %r
+}

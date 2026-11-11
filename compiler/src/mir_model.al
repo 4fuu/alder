@@ -190,6 +190,12 @@ fn mir_op_str_order_lt() -> U64 { return 95 }
 fn mir_op_c_field_get() -> U64 { return 96 }
 fn mir_op_c_field_set() -> U64 { return 97 }
 fn mir_op_str_display() -> U64 { return 98 }
+// Total bitwise operations over the fixed-width two's-complement
+// representation. 99-102 stay reserved for the staged CString slice.
+fn mir_op_int_and() -> U64 { return 103 }
+fn mir_op_int_or() -> U64 { return 104 }
+fn mir_op_int_xor() -> U64 { return 105 }
+fn mir_op_int_not() -> U64 { return 106 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

@@ -181,8 +181,12 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 
 	case mir.OpIntAddTry, mir.OpIntSubTry, mir.OpIntMulTry,
 		mir.OpIntAddSaturating, mir.OpIntSubSaturating, mir.OpIntMulSaturating,
-		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping:
+		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
+		mir.OpIntAnd, mir.OpIntOr, mir.OpIntXor:
 		c.expectSamePair(in.A, in.B, "integer operand", mir.IsIntType, "an integer")
+
+	case mir.OpIntNot:
+		c.expect(in.A, "operand", mir.IsIntType, "an integer")
 
 	case mir.OpSliceLen:
 		c.expect(in.Slice, "slice operand", func(t mir.TypeId) bool {

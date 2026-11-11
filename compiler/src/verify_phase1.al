@@ -16,6 +16,8 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_cleanup_push() { return 33 }
     if op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() { return 1 }
     if (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || (op >= mir_op_int_add_try() && op <= mir_op_int_mul_wrapping()) || (op >= mir_op_int_eq() && op <= mir_op_float_ge()) || (op >= mir_op_float_add() && op <= mir_op_float_div()) { return 3 }
+    if op >= mir_op_int_and() && op <= mir_op_int_xor() { return 3 }
+    if op == mir_op_int_not() { return 1 }
     if op == mir_op_slice_len() { return 1 }
     if op == mir_op_slice_index_checked() || op == mir_op_array_index_checked() { return 3 }
     if op == mir_op_slice_range_checked() { return 7 }
@@ -1046,7 +1048,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_str_display() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_str_display(), i.op, 0)) } else {
+        if i.op > mir_op_int_not() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_int_not(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false

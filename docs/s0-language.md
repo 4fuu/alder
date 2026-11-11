@@ -359,9 +359,9 @@ explicitly.
 Implemented expressions include:
 
 - integer, float, Boolean, string/bytes, and fixed-array literals;
-- unary `-` and `!`;
-- checked arithmetic, shifts, comparisons, equality for supported primitives,
-  and short-circuit Boolean operators;
+- unary `-`, `!`, and `~`;
+- checked arithmetic, shifts, bitwise `&`/`|`/`^`, comparisons, equality for
+  supported primitives, and short-circuit Boolean operators;
 - named builtin overflow methods on the eight integer types:
   `add_checked`/`sub_checked`/`mul_checked` yield `Option(T)` (`none` on
   overflow, `some` with the wrapped result otherwise), `*_saturating` clamp
@@ -435,8 +435,8 @@ Implemented expressions include:
   only through a plain local binding, and a registration drains every element
   at scope exit.
 
-Bitwise source operators, closures, ordered `Map`/`Set`, modules, `pub`,
-async, and the 1.0 standard library are absent.
+Closures, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0 standard
+library are absent.
 
 ## Temporary memory and cleanup bridges
 

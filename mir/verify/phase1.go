@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpStrDisplay {
+	if in.Op > mir.OpIntNot {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -521,9 +521,12 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe,
-		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
+		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv,
+		mir.OpIntAnd, mir.OpIntOr, mir.OpIntXor:
 		require(in.A, "left operand")
 		require(in.B, "right operand")
+	case mir.OpIntNot:
+		require(in.A, "operand")
 	case mir.OpSliceLen:
 		require(in.Slice, "slice operand")
 	case mir.OpSliceIndexChecked:
@@ -668,9 +671,12 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		mir.OpIntAddWrapping, mir.OpIntSubWrapping, mir.OpIntMulWrapping,
 		mir.OpIntEq, mir.OpIntNe, mir.OpIntLt, mir.OpIntLe, mir.OpIntGt, mir.OpIntGe,
 		mir.OpFloatEq, mir.OpFloatNe, mir.OpFloatLt, mir.OpFloatLe, mir.OpFloatGt, mir.OpFloatGe,
-		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
+		mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv,
+		mir.OpIntAnd, mir.OpIntOr, mir.OpIntXor:
 		add(in.A)
 		add(in.B)
+	case mir.OpIntNot:
+		add(in.A)
 	case mir.OpSliceLen:
 		add(in.Slice)
 	case mir.OpSliceIndexChecked:

@@ -1483,6 +1483,19 @@ zeros, 1/±0 → ±Inf, overflow, exact sums, and no-contraction under
 supports it. C-interop float-value assertions can now compare exactly instead
 of observing the checked narrowing's `some`/`none`.
 
+Landed language progress continues with the total bitwise family. The
+checker accepts `&`, `|`, and `^` on same-type integer operands and unary `~`,
+using the precedence frozen in [docs/syntax.md](docs/syntax.md); the operands
+keep their fixed-width two's-complement representation and the operations
+never fail. MIR gains operations 103-106 (`int.and`/`int.or`/`int.xor`/
+`int.not`), the C backend computes them on the unsigned width type and
+transfers signed results by `memcpy`, and the Go Stage 0 frontend carries the
+same rules. Evidence: the MIR verifier accept/reject tests in `mir/verify`, the
+strict-and-sanitizer cgen run fixture `cgen/testdata/run/bitwise.mir`, the
+`frontend` end-to-end `bitwise` program, and
+`compiler/production_bitwise_test.go`, which compiles and runs the production
+driver output and pins the non-integer and mixed-width rejections.
+
 Landed C-interop progress continues with by-value verified records. The
 checker accepts raw fn signatures with complete record parameters and
 results, and inside `unsafe c` the field read `rec.field` (yielding the

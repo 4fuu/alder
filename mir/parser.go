@@ -1481,6 +1481,17 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		err = parseBinary(op)
 
+	case "int.and", "int.or", "int.xor":
+		op, ok := bitwiseOpByName[t.text]
+		if !ok {
+			return in, p.errf(t, "internal error: unknown bitwise operation %q", t.text)
+		}
+		err = parseBinary(op)
+
+	case "int.not":
+		in.Op = OpIntNot
+		in.A, err = p.parseValueRef()
+
 	case "const.get":
 		in.Op = OpConstGet
 		nameTok, err := p.expectAtName("a constant name")
@@ -2288,4 +2299,9 @@ var cNumOpByName = map[string]OpKind{
 var floatArithOpByName = map[string]OpKind{
 	"float.add": OpFloatAdd, "float.sub": OpFloatSub,
 	"float.mul": OpFloatMul, "float.div": OpFloatDiv,
+}
+
+// bitwiseOpByName maps the total bitwise binary names to operations.
+var bitwiseOpByName = map[string]OpKind{
+	"int.and": OpIntAnd, "int.or": OpIntOr, "int.xor": OpIntXor,
 }

@@ -4218,6 +4218,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = try lower_jump_value(d, falsity.state, function, false_block.id, join.id, falsity.id)
             return Ok(LowerStep(state: current, id: param.id))
         }
+        if expression.kind == 6 && expression.operator == 21 {
+            let result = try lower_add_result(d, left.state, function, block, expression.checked_type, source_state, store)
+            let instr = try lower_add_instr(d, result.state, function, block, mir_op_int_not(), result.id, 0, 0, left.id, 0, 0, "")
+            return Ok(LowerStep(state: instr.state, id: result.id))
+        }
         if expression.kind == 7 && (expression.operator == 16 || expression.operator == 17) {
             if expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(left.state), id: 0)) }
             let source_block = lower_open_block(left.state.mir, function, block)
@@ -4257,6 +4262,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if expression.operator == 13 { op = mir_op_int_le() }
         if expression.operator == 14 { op = mir_op_int_gt() }
         if expression.operator == 15 { op = mir_op_int_ge() }
+        if expression.operator == 18 { op = mir_op_int_and() }
+        if expression.operator == 19 { op = mir_op_int_xor() }
+        if expression.operator == 20 { op = mir_op_int_or() }
         // Float operands override the int table: the table maps every
         // comparison operator unconditionally, so a fill-in dispatch after
         // it would never fire for float == and !=.
@@ -4286,7 +4294,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             b = left.id
         }
         let result = try lower_add_result(d, working, function, block, expression.checked_type, source_state, store)
-        let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, a, b, panic_block, "")
+        var fail: U64 = panic_block
+        if expression.operator >= 18 && expression.operator <= 20 { fail = 0 }
+        let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, 0, a, b, fail, "")
         return Ok(LowerStep(state: instr.state, id: result.id))
     }
     if expression.kind >= 8 && expression.kind <= 11 {
@@ -7503,8 +7513,8 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 if element_type.kind != 1 || element_type.target != 6 { return false }
             }
         }
-        if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2)) { return false }
-        if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 17) { return false }
+        if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2 && item.operator != 21)) { return false }
+        if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 20) { return false }
         if item.kind != 6 && item.kind != 7 && item.operator != 0 { return false }
         if item.kind == 6 {
             let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
@@ -7519,7 +7529,8 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             let right = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child).expression - 1)
             if left.checked_type != right.checked_type { return false }
             if item.operator >= 3 && item.operator <= 9 && item.checked_type != left.checked_type { return false }
-            if item.operator >= 10 {
+            if item.operator >= 18 && item.operator <= 20 && item.checked_type != left.checked_type { return false }
+            if item.operator >= 10 && item.operator <= 17 {
                 let checked_type = __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1)
                 if checked_type.kind != 1 || checked_type.target != 1 { return false }
             }

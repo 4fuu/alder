@@ -339,6 +339,21 @@ operations are total and carry no failure edge. The verifier rejects them on
 mismatched operand types, non-integer operand types, and `try` results not
 consumed as `option(T)` of the operand type.
 
+## Total Bitwise Operations
+
+MIR 6 exposes the total bitwise family as operations 103-106:
+
+```text
+int.and a, b    int.or a, b    int.xor a, b    int.not a
+```
+
+Both binary operands share one integer type and the result carries that type;
+`int.not` is the unary complement of its integer operand. All four operate on
+the type's fixed-width two's-complement representation and none carries a
+failure edge. The verifier rejects mismatched operand types, non-integer
+operands, and a failure edge attached to any of them. Numbers 99-102 stay
+reserved for the staged CString slice.
+
 ## Float Arithmetic
 
 MIR 6 exposes the plain IEEE-754 float arithmetic as operations 91-94:

@@ -31,6 +31,7 @@ var runFixtures = []struct {
 	{"convert", "convert_driver.c", ""},
 	{"cnum", "cnum_driver.c", ""},
 	{"float", "float_driver.c", ""},
+	{"bitwise", "bitwise_driver.c", ""},
 	{"crecord", "crecord_driver.c", "crecord.c"},
 }
 

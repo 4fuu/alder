@@ -270,6 +270,8 @@ Narrow shifts are width-aware and must not be implemented by blindly calling a 6
 
 Shift semantics are defined on the two's-complement bit pattern: left shifts wrap, right shifts are arithmetic for signed values and logical for unsigned. The 64-bit helpers fail on shift counts below zero or at or above 64; narrow lowering applies the source-width check described above. Division fails on division by zero and on `INT64_MIN / -1`.
 
+The total bitwise operations (103-106, `int.and`, `int.or`, `int.xor`, and `int.not`) apply the C operators to the unsigned type of the operand width, `uintN_t`, where every bit pattern is defined. An unsigned result is cast back to its type; a signed result receives the same-width unsigned bit pattern with `memcpy`, so lowering never applies a bitwise operator to a signed C value or relies on an implementation-defined unsigned-to-signed conversion. No runtime helper is needed.
+
 Depending on the final language rule, checked operations lower to:
 
 - the runtime helpers above;

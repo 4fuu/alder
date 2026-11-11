@@ -78,7 +78,7 @@ fn fail_lex(d: Domain, state: State, kind: U64, source: U64, start: U64, end: U6
 }
 
 fn punctuation(byte: U8) -> Bool {
-    return byte == 40 || byte == 41 || byte == 123 || byte == 125 || byte == 91 || byte == 93 || byte == 44 || byte == 58 || byte == 59 || byte == 61 || byte == 46 || byte == 60 || byte == 62 || byte == 33 || byte == 38 || byte == 124 || byte == 43 || byte == 45 || byte == 42 || byte == 47 || byte == 37
+    return byte == 40 || byte == 41 || byte == 123 || byte == 125 || byte == 91 || byte == 93 || byte == 44 || byte == 58 || byte == 59 || byte == 61 || byte == 46 || byte == 60 || byte == 62 || byte == 33 || byte == 38 || byte == 124 || byte == 94 || byte == 126 || byte == 43 || byte == 45 || byte == 42 || byte == 47 || byte == 37
 }
 
 fn pair_operator(a: U8, b: U8) -> Bool {

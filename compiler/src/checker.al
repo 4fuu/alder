@@ -4628,6 +4628,10 @@ fn expression_operator(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, ">=") { return 15 }
     if node_word(state, node, "&&") { return 16 }
     if node_word(state, node, "||") { return 17 }
+    if node_word(state, node, "&") { return 18 }
+    if node_word(state, node, "^") { return 19 }
+    if node_word(state, node, "|") { return 20 }
+    if node_word(state, node, "~") { return 21 }
     return 0
 }
 
@@ -9194,6 +9198,10 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             if limits.integer && !limits.signed { return expr_token_fail(d, state, base, 30, expression) }
             if !limits.integer { return expr_token_fail(d, state, base, 31, expression) }
         }
+        if operator == 21 {
+            let limits = int_result_range(state, parse, __s0_buffer_get(CheckedTypeRec, child_store.types, child_draft.checked_type - 1))
+            if !limits.integer { return expr_token_fail(d, state, base, 37, expression) }
+        }
         if expected != 0 && !(try expression_type_equal(d, state, parse, child_store, child_draft.checked_type, expected)) { return expr_token_type_fail(d, state, child_store, mismatch_kind, mismatch_node, expected, child_draft.checked_type) }
         return append_expression(d, child_store, owner, expression_id, 6, child_draft.checked_type, 0, 0, child_draft.expression, 0, operator, site_kind, site_syntax)
     }
@@ -9420,10 +9428,12 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     if left_draft.deferred { return expr_deferred(base) }
     let left_limits = int_result_range(state, parse, __s0_buffer_get(CheckedTypeRec, left_store.types, left_draft.checked_type - 1))
     if (operator == 8 || operator == 9) && !left_limits.integer { return expr_token_fail(d, state, base, 33, expression) }
+    if operator >= 18 && operator <= 20 && !left_limits.integer { return expr_token_fail(d, state, base, 37, expression) }
     if operator >= 3 && operator <= 7 && !left_limits.integer && !float_arithmetic_operand(left_store, left_draft.checked_type, operator) { return expr_token_fail(d, state, base, 37, expression) }
     var operand_mismatch: U64 = 38
     if operator == 8 || operator == 9 { operand_mismatch = 34 }
     if operator >= 10 && operator <= 15 { operand_mismatch = 35 }
+    if operator >= 18 && operator <= 20 { operand_mismatch = 330 }
     let checked_right = try check_value_expression_inner(d, state, parse, base, left_store, owner, right, right_link.node, left_draft.checked_type, operand_mismatch, expression, 0, 0, in_loop)
     let right_store = match checked_right {
         ExprGood(value) => value.store
@@ -9441,6 +9451,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     if !(try expression_type_equal(d, state, parse, right_store, left_draft.checked_type, right_draft.checked_type)) {
         if operator == 8 || operator == 9 { return expr_token_fail(d, state, base, 34, expression) }
         if operator >= 10 && operator <= 15 { return expr_token_fail(d, state, base, 35, expression) }
+        if operator >= 18 && operator <= 20 { return expr_token_type_fail(d, state, right_store, 330, expression, left_draft.checked_type, right_draft.checked_type) }
         return expr_token_fail(d, state, base, 38, expression)
     }
     var result_type = left_draft.checked_type

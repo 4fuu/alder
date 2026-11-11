@@ -1407,6 +1407,9 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 			k.note(e, prim(pBool))
 			return prim(pBool), nil
 		}
+		if x.Op == "~" {
+			return k.checkBitwiseNot(x, xt)
+		}
 		if xt.isInt() {
 			if !xt.isSigned() {
 				return nil, diag(x.P, "cannot negate unsigned type %s", xt.display())
@@ -1614,6 +1617,8 @@ func (k *bodyChecker) checkBinary(x *Binary) (*Type, error) {
 		}
 		k.note(x, xt)
 		return xt, nil
+	case "&", "|", "^":
+		return k.checkBitwiseBinary(x, xt)
 	case "==", "!=", "<", "<=", ">", ">=":
 		yt, err := k.checkExpr(x.Y, xt)
 		if err != nil {
@@ -1637,6 +1642,33 @@ func (k *bodyChecker) checkBinary(x *Binary) (*Type, error) {
 	}
 	if !typeEqual(xt, yt) {
 		return nil, k.mismatch(x.P, "operand", xt, yt)
+	}
+	k.note(x, xt)
+	return xt, nil
+}
+
+// checkBitwiseBinary checks a total bitwise operation. Both operands must
+// have the same integer type; the result carries that type and no failure
+// edge exists.
+func (k *bodyChecker) checkBitwiseBinary(x *Binary, xt *Type) (*Type, error) {
+	if !xt.isInt() {
+		return nil, diag(x.P, "operator %s requires integer operands, got %s", x.Op, xt.display())
+	}
+	yt, err := k.checkExpr(x.Y, xt)
+	if err != nil {
+		return nil, err
+	}
+	if !typeEqual(xt, yt) {
+		return nil, k.mismatch(x.P, "operand", xt, yt)
+	}
+	k.note(x, xt)
+	return xt, nil
+}
+
+// checkBitwiseNot checks the total unary complement of an integer value.
+func (k *bodyChecker) checkBitwiseNot(x *Unary, xt *Type) (*Type, error) {
+	if !xt.isInt() {
+		return nil, diag(x.P, "operator ~ requires an integer operand, got %s", xt.display())
 	}
 	k.note(x, xt)
 	return xt, nil

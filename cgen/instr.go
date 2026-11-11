@@ -212,6 +212,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpFloatAdd, mir.OpFloatSub, mir.OpFloatMul, mir.OpFloatDiv:
 		g.emitFloatBinary(b, in)
 
+	case mir.OpIntAnd, mir.OpIntOr, mir.OpIntXor, mir.OpIntNot:
+		g.emitIntBitwise(b, in)
+
 	case mir.OpSliceLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.Slice) + ".len;\n")
 
@@ -749,6 +752,42 @@ func (g *gen) emitFloatBinary(b *strings.Builder, in *mir.Instr) {
 		arith = "*"
 	}
 	b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + " " + arith + " " + g.valueExpr(in.B) + ";\n")
+}
+
+// emitIntBitwise lowers the total bitwise operations over the fixed-width
+// two's-complement representation. The C operators are applied to the
+// unsigned type of the operand width, which is fully defined for every bit
+// pattern; a signed result then receives that bit pattern by memcpy so no
+// implementation-defined signed conversion is involved.
+func (g *gen) emitIntBitwise(b *strings.Builder, in *mir.Instr) {
+	t, _ := g.f.ValueType(in.A)
+	width, signed := intInfo(t)
+	u := "uint" + strconv.Itoa(width) + "_t"
+	not := in.Op == mir.OpIntNot
+	opName := "&"
+	if not {
+		opName = "~"
+	} else {
+		switch in.Op {
+		case mir.OpIntOr:
+			opName = "|"
+		case mir.OpIntXor:
+			opName = "^"
+		}
+	}
+	expr := ""
+	if not {
+		expr = opName + "(" + u + ")" + g.valueExpr(in.A)
+	} else {
+		expr = "(" + u + ")" + g.valueExpr(in.A) + " " + opName + " (" + u + ")" + g.valueExpr(in.B)
+	}
+	if signed {
+		tmp := g.tmp(in, "u")
+		b.WriteString("  " + u + " " + tmp + " = " + expr + ";\n")
+		b.WriteString("  memcpy(&" + g.val(in.Result) + ", &" + tmp + ", sizeof(" + tmp + "));\n")
+		return
+	}
+	b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(t) + ")(" + expr + ");\n")
 }
 
 // emitIntMode lowers the non-terminating integer arithmetic: the try forms

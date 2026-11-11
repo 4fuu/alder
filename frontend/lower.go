@@ -1653,6 +1653,16 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 			b.setCur(join)
 			return params[0], nil
 		}
+		if x.Op == "~" {
+			v, err := b.expr(x.X)
+			if err != nil {
+				return 0, err
+			}
+			typ := b.ann[e].typ
+			id := b.res(b.l.ty(typ))
+			b.emit(mir.Instr{Op: mir.OpIntNot, Result: id, A: v})
+			return id, nil
+		}
 		if il, ok := x.X.(*IntLit); ok && il.Value == -9223372036854775808 {
 			typ := b.ann[e].typ
 			return b.constGet(typ, mir.ConstValue{Kind: mir.ConstInt, Int: il.Value}), nil
@@ -1842,6 +1852,10 @@ func (b *fb) binary(x *Binary) (mir.ValueId, error) {
 		return r, nil
 	}
 	id := b.res(b.l.ty(typ))
+	if x.Op == "&" || x.Op == "|" || x.Op == "^" {
+		b.emit(mir.Instr{Op: arithMirOp(x.Op), Result: id, A: a, B: bv})
+		return id, nil
+	}
 	b.emit(mir.Instr{Op: arithMirOp(x.Op), Result: id, A: a, B: bv, FailTarget: b.panicBlock()})
 	return id, nil
 }
@@ -1886,8 +1900,14 @@ func arithMirOp(op string) mir.OpKind {
 		return mir.OpIntDivChecked
 	case "<<":
 		return mir.OpIntShlChecked
+	case ">>":
+		return mir.OpIntShrChecked
+	case "&":
+		return mir.OpIntAnd
+	case "|":
+		return mir.OpIntOr
 	}
-	return mir.OpIntShrChecked
+	return mir.OpIntXor
 }
 
 // mirVariantName maps a source variant name to the MIR variant name.

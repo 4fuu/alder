@@ -1158,10 +1158,10 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     if rec.op == mir_op_aggregate_construct() {
         if !mir_type_valid(store, rec.type_op) || !mir_operand_group_valid(idx, store, mir_operand_aggregate_field(), id, 0) { return false }
     }
-    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_str_len() || rec.op == mir_op_str_to_bytes() {
+    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_str_len() || rec.op == mir_op_str_to_bytes() || rec.op == mir_op_int_not() {
         if !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     }
-    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_add_try() && rec.op <= mir_op_int_mul_wrapping()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || (rec.op >= mir_op_float_add() && rec.op <= mir_op_float_div()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() || rec.op == mir_op_str_byte_checked() || rec.op == mir_op_str_from_bytes() || rec.op == mir_op_str_display() {
+    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked()) || (rec.op >= mir_op_int_add_try() && rec.op <= mir_op_int_mul_wrapping()) || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || (rec.op >= mir_op_float_add() && rec.op <= mir_op_float_div()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || rec.op == mir_op_slice_index_checked() || rec.op == mir_op_array_index_checked() || rec.op == mir_op_copy_to_domain() || rec.op == mir_op_str_byte_checked() || rec.op == mir_op_str_from_bytes() || rec.op == mir_op_str_display() || (rec.op >= mir_op_int_and() && rec.op <= mir_op_int_xor()) {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {
@@ -1213,7 +1213,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
 }
 
 fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirInstrRec) -> Bool {
-    if rec.op > mir_op_str_display() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
+    if rec.op > mir_op_int_not() || !mir_block_valid(idx, store, rec.function, rec.block) || !mir_instruction_operands_valid(idx, store, id, rec) { return false }
     var may_omit_result = false
     if rec.op == mir_op_call() && mir_function_valid(store, rec.target) && __s0_buffer_get(MirFunctionRec, store.functions, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
     if rec.op == mir_op_ffi_call_unsafe() && mir_import_valid(store, rec.target) && __s0_buffer_get(MirImportRec, store.imports, rec.target - 1).result_type == mir_type_unit() { may_omit_result = true }
@@ -1918,6 +1918,10 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 96 { return out_string("c.field.get") }
     if op == 97 { return out_string("c.field.set") }
     if op == 98 { return out_string("str.display") }
+    if op == 103 { return out_string("int.and") }
+    if op == 104 { return out_string("int.or") }
+    if op == 105 { return out_string("int.xor") }
+    if op == 106 { return out_string("int.not") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -2024,10 +2028,10 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
         }
         if !out_string(" }") { return false }
     }
-    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_str_len() || rec.op == mir_op_str_to_bytes() {
+    if rec.op == mir_op_domain_create() || rec.op == mir_op_domain_mark() || rec.op == mir_op_domain_destroy() || rec.op == mir_op_slice_len() || rec.op == mir_op_cleanup_disarm() || rec.op == mir_op_cleanup_scope_run() || rec.op == mir_op_cleanup_scope_end() || rec.op == mir_op_table_view_end() || (rec.op >= mir_op_vec_len() && rec.op <= mir_op_vec_as_mut_slice()) || rec.op == mir_op_array_as_slice() || rec.op == mir_op_str_len() || rec.op == mir_op_str_to_bytes() || rec.op == mir_op_int_not() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) { return false }
     }
-    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() {
+    if rec.op == mir_op_domain_reset() || (rec.op >= mir_op_int_eq() && rec.op <= mir_op_float_ge()) || rec.op == mir_op_table_insert() || rec.op == mir_op_table_insert_try() || rec.op == mir_op_table_lookup() || rec.op == mir_op_table_lookup_mut() || rec.op == mir_op_table_remove() || (rec.op >= mir_op_int_and() && rec.op <= mir_op_int_xor()) {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) { return false }
     }
     if rec.op == mir_op_alloc() || rec.op == mir_op_alloc_checked() {

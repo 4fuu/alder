@@ -251,7 +251,7 @@ func (l *lexer) lexToken() (token, error) {
 	case c == '"':
 		return l.lexString(line, col)
 
-	case strings.ContainsRune("(){}[],:;=.<>!&|+-*/%", rune(c)):
+	case strings.ContainsRune("(){}[],:;=.<>!&|^~+-*/%", rune(c)):
 		if c == ';' {
 			return token{}, l.errf(line, col, "semicolons are not allowed; end the statement with a line break or \"}\"")
 		}

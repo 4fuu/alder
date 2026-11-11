@@ -257,9 +257,12 @@ fn expression_precedence(state: State, cursor: ParseCursor) -> U64 {
     if token_punct(state, cursor, "&&") { return 2 }
     if token_punct(state, cursor, "==") || token_punct(state, cursor, "!=") { return 3 }
     if token_punct(state, cursor, "<") || token_punct(state, cursor, "<=") || token_punct(state, cursor, ">") || token_punct(state, cursor, ">=") { return 4 }
-    if token_punct(state, cursor, "<<") || token_punct(state, cursor, ">>") { return 5 }
-    if token_punct(state, cursor, "+") || token_punct(state, cursor, "-") { return 6 }
-    if token_punct(state, cursor, "*") || token_punct(state, cursor, "/") || token_punct(state, cursor, "%") { return 7 }
+    if token_punct(state, cursor, "|") { return 5 }
+    if token_punct(state, cursor, "^") { return 6 }
+    if token_punct(state, cursor, "&") { return 7 }
+    if token_punct(state, cursor, "<<") || token_punct(state, cursor, ">>") { return 8 }
+    if token_punct(state, cursor, "+") || token_punct(state, cursor, "-") { return 9 }
+    if token_punct(state, cursor, "*") || token_punct(state, cursor, "/") || token_punct(state, cursor, "%") { return 10 }
     return 0
 }
 
@@ -794,7 +797,7 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
 
 fn parse_unary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
-    if token_punct(state, initial, "-") || token_punct(state, initial, "!") {
+    if token_punct(state, initial, "-") || token_punct(state, initial, "!") || token_punct(state, initial, "~") {
         let cursor = ParseCursor(token: initial.token + 1, store: initial.store)
         if !expression_line_ok(state, cursor, depth) { return reject_parse(d, state, cursor, 13) }
         let operand = try parse_unary(d, state, cursor, depth)
