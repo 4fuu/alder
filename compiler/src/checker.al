@@ -1188,10 +1188,28 @@ fn node_word(state: State, node: SyntaxRec, word: __s0_String) -> Bool {
     return source_word(state, source, node.name_start, node.name_end, word)
 }
 
+fn source_path_is(state: State, source: U64, word: __s0_String) -> Bool {
+    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    if rec.path_end - rec.path_start != len(word) { return false }
+    var at: U64 = 0
+    while at < len(word) {
+        if __s0_buffer_get(U8, state.paths, rec.path_start + at) != word[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
+// core.error is prelude-loaded from the installed sysroot. Its declarations
+// use the ordinary trait and record machinery, but the reserved prelude name
+// Error and global name lookup must admit this one source path.
+fn prelude_error_source(state: State, source: U64) -> Bool {
+    return source_path_is(state, source, "core/error.al")
+}
+
 fn reserved_symbol(state: State, node: SyntaxRec) -> Bool {
     let source = __s0_buffer_get(SourceRec, state.sources, node.source)
     if node.name_end - node.name_start >= 5 && source_word(state, source, node.name_start, node.name_start + 5, "__s0_") { return true }
-    return node_word(state, node, "Bool") || node_word(state, node, "I8") || node_word(state, node, "I16") || node_word(state, node, "I32") || node_word(state, node, "I64") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64") || node_word(state, node, "F32") || node_word(state, node, "F64") || node_word(state, node, "Unit") || node_word(state, node, "String") || node_word(state, node, "Bytes") || node_word(state, node, "Option") || node_word(state, node, "Result") || node_word(state, node, "Map") || node_word(state, node, "Ptr") || node_word(state, node, "Vec") || node_word(state, node, "MutSlice") || node_word(state, node, "Domain") || node_word(state, node, "DomainMark") || node_word(state, node, "__s0_String") || node_word(state, node, "__s0_Buffer") || node_word(state, node, "__s0_Error") || node_word(state, node, "len") || node_word(state, node, "range") || node_word(state, node, "__s0_alloc") || node_word(state, node, "__s0_domain_create") || node_word(state, node, "__s0_domain_mark") || node_word(state, node, "__s0_domain_reset") || node_word(state, node, "__s0_domain_destroy") || node_word(state, node, "__s0_map_create") || node_word(state, node, "__s0_buffer_new") || node_word(state, node, "__s0_buffer_len") || node_word(state, node, "__s0_buffer_append") || node_word(state, node, "__s0_buffer_get") || node_word(state, node, "__s0_buffer_set") || node_word(state, node, "__s0_buffer_slice") || node_word(state, node, "Get") || node_word(state, node, "Set") || node_word(state, node, "Remove") || node_word(state, node, "None") || node_word(state, node, "Some") || node_word(state, node, "Ok") || node_word(state, node, "Err") || node_word(state, node, "Eq") || node_word(state, node, "Hash") || node_word(state, node, "Iterator") || node_word(state, node, "IntoIterator") || node_word(state, node, "Cleanup") || node_word(state, node, "AsyncCleanup") || node_word(state, node, "Order") || node_word(state, node, "Display") || node_word(state, node, "Error") || node_word(state, node, "trait") || node_word(state, node, "where") || node_word(state, node, "Self")
+    return node_word(state, node, "Bool") || node_word(state, node, "I8") || node_word(state, node, "I16") || node_word(state, node, "I32") || node_word(state, node, "I64") || node_word(state, node, "U8") || node_word(state, node, "U16") || node_word(state, node, "U32") || node_word(state, node, "U64") || node_word(state, node, "F32") || node_word(state, node, "F64") || node_word(state, node, "Unit") || node_word(state, node, "String") || node_word(state, node, "Bytes") || node_word(state, node, "Option") || node_word(state, node, "Result") || node_word(state, node, "Map") || node_word(state, node, "Ptr") || node_word(state, node, "Vec") || node_word(state, node, "MutSlice") || node_word(state, node, "Domain") || node_word(state, node, "DomainMark") || node_word(state, node, "__s0_String") || node_word(state, node, "__s0_Buffer") || node_word(state, node, "__s0_Error") || node_word(state, node, "len") || node_word(state, node, "range") || node_word(state, node, "__s0_alloc") || node_word(state, node, "__s0_domain_create") || node_word(state, node, "__s0_domain_mark") || node_word(state, node, "__s0_domain_reset") || node_word(state, node, "__s0_domain_destroy") || node_word(state, node, "__s0_map_create") || node_word(state, node, "__s0_buffer_new") || node_word(state, node, "__s0_buffer_len") || node_word(state, node, "__s0_buffer_append") || node_word(state, node, "__s0_buffer_get") || node_word(state, node, "__s0_buffer_set") || node_word(state, node, "__s0_buffer_slice") || node_word(state, node, "Get") || node_word(state, node, "Set") || node_word(state, node, "Remove") || node_word(state, node, "None") || node_word(state, node, "Some") || node_word(state, node, "Ok") || node_word(state, node, "Err") || node_word(state, node, "Eq") || node_word(state, node, "Hash") || node_word(state, node, "Iterator") || node_word(state, node, "IntoIterator") || node_word(state, node, "Cleanup") || node_word(state, node, "AsyncCleanup") || node_word(state, node, "Order") || node_word(state, node, "Display") || (node_word(state, node, "Error") && !prelude_error_source(state, node.source)) || node_word(state, node, "trait") || node_word(state, node, "where") || node_word(state, node, "Self")
 }
 
 fn reserved_value_name(state: State, store: CheckStore, node: SyntaxRec) -> Bool {
@@ -5420,7 +5438,7 @@ fn symbol_named(state: State, parse: ParseStore, store: CheckStore, node: Syntax
     var at: U64 = 0
     while at < __s0_buffer_len(SymbolRec, store.symbols) {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
-        if symbol.inherent_owner == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source) { return at + 1 }
+        if symbol.inherent_owner == 0 && same_name(state, node.source, node.name_start, node.name_end, symbol.source, symbol.name_start, symbol.name_end) && (module_source == 0 || symbol.module_source == module_source || prelude_error_source(state, symbol.source)) { return at + 1 }
         at = at + 1
     }
     if module_source == 0 { return 0 }

@@ -30,6 +30,9 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`core.panic` public snapshot v1](api/core.panic-v1.md), covering the
   Milestone 8 process-terminating panic and assertion surface in the installed
   sysroot;
+- [`core.error` public snapshot v1](api/core.error-v1.md), covering the
+  Milestone 8 prelude `Error` trait, default `cause`, and `ErrorReport`
+  flattening surface;
 - [`std.io` public snapshot v1](api/std.io-v1.md), covering the Milestone 8
   hosted capability layer (`Io`, `BlockingIo`, `Blocking`, `Reader`,
   `Writer`, `Seek`, buffers, standard streams, exact helpers, `IoError`, and
@@ -110,7 +113,9 @@ Required `core` areas:
 - `core.memory`: safe size/alignment queries needed by generic code, without
   raw allocation;
 - `core.panic`: `panic`, `assert`, `assert_eq`, `assert_ne`, and
-  process-terminating invariant APIs.
+  process-terminating invariant APIs;
+- `core.error`: the prelude `Error` trait, default `cause` report, and
+  `ErrorReport` flattening value.
 
 Index syntax is checked and terminates on an invalid index. `get` returns
 `Option`. Checked, wrapping, and saturating numeric behavior is always explicit
@@ -123,6 +128,15 @@ and aborts the process without running Alder cleanup. `assert_eq` and
 `assert_ne` require `T: type(Eq, Display)` and display both operands;
 source-expression capture remains deferred to the test runner. The runtime
 boundary is the toolchain-owned `runtime/c/alder_panic.h` shim.
+
+Implemented core.error progress: `sysroot/core/error.al` is the prelude source
+for D025. It defines the `Error` trait with a defaulted `cause` method returning
+`None`, and the `ErrorReport` value with public `message` and `causes` fields
+(the source spelling makes both fields readable by ordinary record access).
+`ErrorReport.of(E: type(Error, Display), error: E)` builds the flattened chain,
+nearest cause first, by recursively calling `cause`. The compiler loads this
+prelude source for a project that names `Error` or `ErrorReport`, even when the
+project does not import it explicitly.
 
 ## Text and bytes
 

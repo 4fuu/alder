@@ -141,8 +141,10 @@ Milestone 7.5 adds the static trait surface of
   (`IntoIterator(IteratorType, Item)` keeps that order).
 - The builtin standard traits `Eq`, `Hash`, `Order`, `Display`,
   `Iterator(Item)`, `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
-  without source declarations; `Error` is a reserved name without an
-  implementation until its API is designed with the standard library.
+  without source declarations. `Error` is a prelude trait with a defaulted
+  `cause` method and the prelude `ErrorReport` value; its source-backed
+  prelude contract is documented in
+  [`core.error`](api/core.error-v1.md).
 - Coherence holds per compilation unit: exactly one implementation may exist
   for a concrete trait application. Orphan-rule enforcement across a package
   graph waits for the module system.

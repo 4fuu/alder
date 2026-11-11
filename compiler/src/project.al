@@ -605,6 +605,48 @@ fn project_request_sysroot_module(source: U64, start: U64, end: U64) -> U64 {
     return unsafe c { alderhost_sysroot_request_finish() }
 }
 
+fn project_request_sysroot_literal(word: __s0_String) -> U64 {
+    if !unsafe c { alderhost_sysroot_request_reset() } { return 0 }
+    var at: U64 = 0
+    while at < len(word) {
+        if !project_sysroot_request_byte(word[at]) { return 0 }
+        at = at + 1
+    }
+    return unsafe c { alderhost_sysroot_request_finish() }
+}
+
+fn project_source_mentions_error(source: U64) -> Bool {
+    let end = unsafe c { alderhost_source_text_len(source - 1) }
+    var at: U64 = 0
+    while at + 5 <= end {
+        if project_source_byte(source, at) == 69 && project_source_byte(source, at + 1) == 114 && project_source_byte(source, at + 2) == 114 && project_source_byte(source, at + 3) == 111 && project_source_byte(source, at + 4) == 114 { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// core.error is a prelude source, but it still lives in the installed sysroot.
+// Load it only when the project mentions the Error family; unrelated projects
+// keep their existing source closure and build plan. An explicit core.error
+// import has already loaded the same path, so this is a no-op then.
+fn project_prepare_error_prelude() -> Bool {
+    if !unsafe c { alderhost_sysroot_available() } { return true }
+    let count = unsafe c { alderhost_source_count() }
+    var source: U64 = 1
+    while source <= count {
+        if project_source_path_is(source, "core/error.al") { return true }
+        source = source + 1
+    }
+    source = 1
+    var required = false
+    while source <= count {
+        if project_source_mentions_error(source) { required = true }
+        source = source + 1
+    }
+    if !required { return true }
+    return project_request_sysroot_literal("core/error.al") != 0
+}
+
 fn project_source_path_prefix_is(source: U64, word: __s0_String) -> Bool {
     let end = unsafe c { alderhost_source_path_len(source - 1) }
     if end < len(word) { return false }
@@ -1119,6 +1161,7 @@ fn project_compile_closed(d: Domain, plan: ProjectPlanRec) -> I32 {
         return 0
     }
     if (plan.action == 2 || plan.action == 3) && !project_configure_outputs(plan) { return project_fail(12) }
+    if plan.action != 4 && !project_prepare_error_prelude() { return project_fail(12) }
     return project_compile_prepared(d)
 }
 

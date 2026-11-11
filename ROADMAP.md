@@ -1429,10 +1429,11 @@ safe values, affine owners, `Result`, and locally audited `unsafe c`; no S0 C
 bridge appears publicly.
 
 Deferred from this milestone by scope decision: the `Range` library type stays
-out until source syntax uses it (no current syntax does), and `Error` remains a
-reserved name until the hosted OS wrappers need it. Builtins stay builtins in
-this milestone: the prelude is the builtin names, and library helpers are
-imported explicitly.
+out until source syntax uses it (no current syntax does). `Error` is a prelude
+trait with a defaulted `cause` method, and `ErrorReport` is the prelude value
+that flattens a typed cause chain (D025); the compiler loads `core.error` for
+projects that name either surface. Builtins stay builtins in this milestone:
+the prelude is the builtin names, and library helpers are imported explicitly.
 
 Constraint syntax (D024): trait constraints move from `where` clauses onto
 the type parameter, `T: type(Order)` and `K: type(Eq, Hash)`. The Alder
@@ -1536,6 +1537,18 @@ stderr for every function, passing assertions, stdout flushing, the interior-NUL
 fallback, and an unsatisfied Eq constraint; the `core.panic` snapshot example
 runs under the docs API example gate. The runtime boundary is
 `runtime/c/alder_panic.h`.
+
+Landed standard-library progress: `core.error` is the prelude source for
+D025's `Error` trait and `ErrorReport` value. Root errors implement `Error`
+with an empty impl and inherit the default `None` cause; wrapper errors return
+the report of their typed payload, and `ErrorReport.of` flattens the chain
+nearest cause first. Projects that name `Error` or `ErrorReport` load the
+prelude source from the installed sysroot, while unrelated projects keep their
+existing plan and source closure. Evidence:
+`compiler/production_error_test.go` runs a root error, a wrapper cause chain,
+the default cause, and an explicit `core.error` import through the production
+driver; it rejects a mismatched `cause` result and a report operand that lacks
+`Error`. Docs: the frozen [`core.error` snapshot](docs/api/core.error-v1.md).
 
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`

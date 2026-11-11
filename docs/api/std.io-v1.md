@@ -417,8 +417,8 @@ prints the report one cause per line, per
 Hosted errors in this snapshot family are all root errors: `IoError` writes
 `impl Error for IoError { }` and inherits the default, as do `PathError`,
 `EnvError`, and `ProcessError`. The compiler recognition commit for `Error`
-follows the sysroot thread's `Display` commit, because `ErrorReport.of`
-requires `Display`.
+and `ErrorReport` is available: `core.error` is prelude-loaded, so these empty
+implementations resolve without an explicit import.
 
 ## Contracts
 
