@@ -302,7 +302,8 @@ Cleanup is guaranteed on:
 - structured task cancellation and task-group exit.
 
 An invariant panic aborts the process and does not promise caller-frame
-unwinding. OS process termination, power loss, and a cleanup operation that
+unwinding; the `core.panic` operations use this path and do not run registered
+cleanup. OS process termination, power loss, and a cleanup operation that
 itself aborts likewise provide no remaining-cleanup guarantee.
 
 The automatic cleanup hook is infallible and returns `Unit`. A resource whose

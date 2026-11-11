@@ -419,6 +419,13 @@ spelling policy reserves that prefix, and the policy has no exceptions.
 Reading the errno value's integer into Alder requires the explicit checked
 conversions between `c.*` scalars and Alder numerics.
 
+The `core.panic` module uses a second toolchain-owned shim,
+`runtime/c/alder_panic.h`. Its `c_panic(const char *)` flushes every C output
+stream, writes the user panic diagnostic to standard error, and aborts. Like
+the errno shim it is a fixed audited header, not a general user shim surface;
+`core.panic` binds it through an ordinary `import c` block and never exposes
+the runtime's reserved `alder_` names to source.
+
 ## Native linking and tooling
 
 Headers, defines, libraries, C shims, target, and toolchain come from the

@@ -91,6 +91,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.panic-v1.al": {
+			style:   "project",
+			srcName: "core_panic_example.al",
+			mainText: `module hello.main
+
+import hello.core_panic_example { core_panic_example }
+
+pub fn main() -> I32 {
+    if core_panic_example() == 11 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.text-v1.al": {
 			style:   "project",
 			srcName: "std_text_example.al",

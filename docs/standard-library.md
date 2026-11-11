@@ -27,6 +27,9 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`core.num` public snapshot v1](api/core.num-v1.md), covering the
   Milestone 8 integer limits and explicit-overflow absolute value in the
   installed sysroot;
+- [`core.panic` public snapshot v1](api/core.panic-v1.md), covering the
+  Milestone 8 process-terminating panic and assertion surface in the installed
+  sysroot;
 - [`std.io` public snapshot v1](api/std.io-v1.md), covering the Milestone 8
   hosted capability layer (`Io`, `BlockingIo`, `Blocking`, `Reader`,
   `Writer`, `Seek`, buffers, standard streams, exact helpers, `IoError`, and
@@ -106,11 +109,20 @@ Required `core` areas:
 - `core.format`: `Display`, formatting arguments, and interpolation support;
 - `core.memory`: safe size/alignment queries needed by generic code, without
   raw allocation;
-- `core.panic`: `assert`, `assert_eq`, and process-terminating invariant APIs.
+- `core.panic`: `panic`, `assert`, `assert_eq`, `assert_ne`, and
+  process-terminating invariant APIs.
 
 Index syntax is checked and terminates on an invalid index. `get` returns
 `Option`. Checked, wrapping, and saturating numeric behavior is always explicit
 in API names.
+
+Implemented core.panic progress: `sysroot/core/panic.al` provides `panic`,
+`assert`, `assert_eq`, and `assert_ne`. A failure flushes C output, writes the
+documented `panic:` or `panic: assertion failed:` diagnostic to standard error,
+and aborts the process without running Alder cleanup. `assert_eq` and
+`assert_ne` require `T: type(Eq, Display)` and display both operands;
+source-expression capture remains deferred to the test runner. The runtime
+boundary is the toolchain-owned `runtime/c/alder_panic.h` shim.
 
 ## Text and bytes
 

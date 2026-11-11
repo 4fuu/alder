@@ -235,6 +235,16 @@ domain that owns it.
 
 Unchecked runtime failures (allocation failure, identity exhaustion, rejected float narrowing or float-to-int conversion, `unreachable` execution, and runtime contract violations the verifier already rejects) terminate the process with a fixed message via `alder_runtime_panic`. Checked MIR operations always branch to their explicit failure edge; that edge may return, use typed `fail`, or explicitly clean up and use valueless `panic`.
 
+### Panic hooks
+
+Generated code has two terminating diagnostics. `alder_runtime_panic` is the
+runtime's unchecked-failure hook. `c_panic`, declared by the toolchain-owned
+`runtime/c/alder_panic.h` shim and used by `core.panic`, flushes all C output,
+writes the user-facing `panic: ...` or `panic: assertion failed: ...` line to
+standard error, and aborts. Both terminate by `abort()` and differ in the
+message they write; `c_panic` additionally flushes C output first. Neither
+unwinds caller frames or runs Alder cleanup.
+
 ### Documented M3 limitations
 
 - unit-typed function parameters are dropped from the C ABI (semantically exact);

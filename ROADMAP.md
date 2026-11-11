@@ -1517,6 +1517,18 @@ stay rejected. The Go Stage 0 frontend carries the same rules. Evidence: the
 driver output and pins the standalone, non-`Unit` argument, and unit-payload
 mismatch rejections.
 
+Landed standard-library progress: `core.panic` is installed at
+`sysroot/core/panic.al` with `panic`, `assert`, `assert_eq`, and `assert_ne`.
+Failures flush C output, write the documented `panic:`/`panic: assertion
+failed:` diagnostic to stderr, and abort without running Alder cleanup;
+`assert_eq`/`assert_ne` require `T: type(Eq, Display)` and display both
+operands, while source-expression capture waits for the test runner. Evidence:
+`compiler/production_panic_test.go` checks the SIGABRT-shaped status and exact
+stderr for every function, passing assertions, stdout flushing, the interior-NUL
+fallback, and an unsatisfied Eq constraint; the `core.panic` snapshot example
+runs under the docs API example gate. The runtime boundary is
+`runtime/c/alder_panic.h`.
+
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
 state with value semantics and unbiased rejection ranges; `seeded`,
