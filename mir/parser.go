@@ -1595,6 +1595,20 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		return in, nil
 
+	case "str.display":
+		in.Op = OpStrDisplay
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectPunct(","); err != nil {
+			return in, err
+		}
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
 	case "str.len", "str.to_bytes":
 		if p.m.FormatVersion < ClosureFormatVersion {
 			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)

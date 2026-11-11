@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_c_field_set() { return false }
+        if item.op > mir_op_str_display() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2121,6 +2121,31 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
         out = try cgen_put(d, out, ", ")
         out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
         return cgen_put(d, out, ");\n")
+    }
+    if item.op == mir_op_str_display() {
+        // The helper returns an empty null view on allocation failure,
+        // which the checked edge observes; the Bool helper never fails.
+        let operand_type = cgen_value_type(store, indexes, item.function, item.b)
+        var helper: __s0_String = "alder_string_from_i64"
+        if operand_type == mir_type_bool() { helper = "alder_string_from_bool" }
+        if operand_type == mir_type_u64() { helper = "alder_string_from_u64" }
+        out = try cgen_put(d, out, "  AlderString ")
+        out = try cgen_put_tmp(d, out, item.result, "s")
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put(d, out, helper)
+        out = try cgen_put(d, out, "(")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        out = try cgen_put(d, out, ", ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+        out = try cgen_put(d, out, ");\n  if (")
+        out = try cgen_put_tmp(d, out, item.result, "s")
+        out = try cgen_put(d, out, ".data == NULL) ")
+        out = try cgen_emit_checked_edge(d, out, store, indexes, instruction, item)
+        out = try cgen_put(d, out, "\n  ")
+        out = try cgen_put_value(d, out, item.result)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put_tmp(d, out, item.result, "s")
+        return cgen_put(d, out, ";\n")
     }
     if item.op == mir_op_str_len() { return cgen_emit_str_len(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_byte_checked() { return cgen_emit_str_byte_checked(d, out, store, indexes, instruction, item) }

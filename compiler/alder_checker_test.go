@@ -188,6 +188,7 @@ func runCheckerConformance(t *testing.T, exe string) {
 	t.Run("m75-traits", func(t *testing.T) { runAlderM75CheckerBehavior(t, exe) })
 	t.Run("m75-ordered", func(t *testing.T) { runAlderM75OrderedCheckerBehavior(t, exe) })
 	t.Run("m8-order", func(t *testing.T) { runAlderM8OrderCheckerBehavior(t, exe) })
+	t.Run("m8-display", func(t *testing.T) { runAlderM8DisplayCheckerBehavior(t, exe) })
 	t.Run("m75-mut-cursors", func(t *testing.T) { runAlderM75MutCursorCheckerBehavior(t, exe) })
 	t.Run("m75-tables", func(t *testing.T) { runAlderM75TableCheckerBehavior(t, exe) })
 	t.Run("m75-guards", func(t *testing.T) { runAlderM75GuardCheckerBehavior(t, exe) })
@@ -2493,7 +2494,7 @@ func validateCheckerManifest(m checkerManifest) error {
 		if annotation.target >= 1 && annotation.target <= len(m.symbols) {
 			targetKind, targetArity = m.symbols[annotation.target-1].kind, m.symbols[annotation.target-1].arity
 		}
-		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 1000 || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
+		validTarget := annotation.kind == 1 && (targetKind == 12 && targetArity == 0 || targetKind == 13) || annotation.kind == 2 && targetKind == 1 || annotation.kind == 3 && targetKind == 2 || annotation.kind == 4 && targetKind == 3 || annotation.kind == 5 && annotation.target == 0 && annotation.builtin >= 1 && annotation.builtin <= 1001 || annotation.kind == 5 && annotation.target != 0 && annotation.builtin == 43 || annotation.kind == 6 && annotation.target == 0 && (annotation.builtin == 5 || annotation.builtin == 6)
 		validType := annotation.checkedType >= 1 && annotation.checkedType <= len(m.types)
 		validVariant := annotation.kind != 4 && annotation.variantUse == 0
 		if annotation.kind == 4 && annotation.variantUse >= 1 && annotation.variantUse <= len(m.uses) {

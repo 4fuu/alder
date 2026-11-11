@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/4fuu/alder/mir"
@@ -1798,4 +1799,134 @@ func floatDivSanitizersSupported(t *testing.T, cc string) bool {
 		return false
 	}
 	return true
+}
+
+// M8 Display: the builtin display method lowers String receivers to the
+// receiver value itself and scalar receivers through a widening
+// (int.sext/int.zext for the narrow forms) into str.display with the
+// storage domain in slot a, the widened value in slot b, and the
+// allocation-failure edge to the panic block. User impl Display methods
+// lower as ordinary resolved-impl methods. Pinned by cross-process MIR and
+// C determinism, the shared verifier, a strict C11 compile, and a run whose
+// checksum covers every domain type plus record, enum, and generic
+// dispatch.
+func runAlderDisplayBehavior(t *testing.T, exe string) {
+	t.Helper()
+	source := `type Point {
+    x: I64
+    y: I64
+}
+
+enum Shape {
+    circle
+    square
+}
+
+impl Display for Point {
+    fn display(self) -> String {
+        let open = "(".concat(self.x.display())
+        let mid = open.concat(",")
+        let close = mid.concat(self.y.display())
+        return close.concat(")")
+    }
+}
+
+impl Display for Shape {
+    fn display(self) -> String {
+        return "shape"
+    }
+}
+
+fn show(T: type(Display), x: T) -> String {
+    return x.display()
+}
+
+fn main() -> I32 {
+    let t = true.display()
+    if t != "true" { return 1 }
+    let f = false.display()
+    if f != "false" { return 2 }
+    let a: I8 = -8
+    if a.display() != "-8" { return 3 }
+    let b: I16 = -16
+    if b.display() != "-16" { return 4 }
+    let c: I32 = -32
+    if c.display() != "-32" { return 5 }
+    let d: I64 = -64
+    if d.display() != "-64" { return 6 }
+    let e: U8 = 8
+    if e.display() != "8" { return 7 }
+    let g: U16 = 16
+    if g.display() != "16" { return 8 }
+    let h: U32 = 32
+    if h.display() != "32" { return 9 }
+    let i: U64 = 64
+    if i.display() != "64" { return 10 }
+    let wide: U64 = 1234567890
+    if wide.display() != "1234567890" { return 11 }
+    let bottom: I64 = -9223372036854775808
+    if bottom.display() != "-9223372036854775808" { return 12 }
+    let s = "hi".display()
+    if s != "hi" { return 13 }
+    let pt = Point(x: 1, y: -2)
+    if pt.display() != "(1,-2)" { return 14 }
+    if show(Point, pt) != "(1,-2)" { return 15 }
+    if show(Shape, circle) != "shape" { return 16 }
+    if show(String, "str") != "str" { return 17 }
+    if show(U64, 9) != "9" { return 18 }
+    if show(Bool, true) != "true" { return 19 }
+    return 0
+}
+`
+	files := map[string]string{"display.al": source}
+	first := runLowerCompiler(t, exe, files, []string{"display.al"})
+	second := runLowerCompiler(t, exe, files, []string{"display.al"})
+	if !bytes.Equal(first, second) {
+		t.Fatal("lowered Display MIR changed across processes")
+	}
+	if !strings.Contains(string(first), "str.display") {
+		t.Fatalf("lowered Display MIR lacks str.display:\n%s", first)
+	}
+	module, err := mir.Parse(string(first))
+	if err != nil {
+		t.Fatalf("parse lowered Display MIR: %v\n%s", err, first)
+	}
+	if diagnostics := verify.Module(module); len(diagnostics) != 0 {
+		t.Fatalf("verify lowered Display MIR: %s\n%s", verify.Errors(diagnostics), first)
+	}
+	mainID, ok := module.Function("main")
+	if !ok {
+		t.Fatal("Display MIR has no main function")
+	}
+	generated := runResourceCgenCompiler(t, exe, files, []string{"display.al"})
+	if repeat := runResourceCgenCompiler(t, exe, files, []string{"display.al"}); !bytes.Equal(generated, repeat) {
+		t.Fatal("Alder-written Display C changed across processes")
+	}
+	if !strings.Contains(string(generated), "alder_string_from_i64") {
+		t.Fatal("generated Display C lacks the integer display helpers")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "display.c")
+	program := filepath.Join(dir, "display.exe")
+	// The hidden storage domain makes the hosted entry take the root domain.
+	driver := fmt.Sprintf("\nint main(void) { AlderDomain root = {0}; if (!alder_domain_init(&root, NULL)) return 2; int32_t status = alder_fn_main_%d(&root); alder_domain_destroy(&root); return status; }\n", mainID)
+	if err := os.WriteFile(file, append(append([]byte(nil), generated...), []byte(driver)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow", "-Wconversion", "-I", filepath.Join(root, "runtime", "c"), file, filepath.Join(root, "runtime", "c", "alder.c"), "-o", program}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("strict C11 compile of Display dispatch: %v\n%s", err, output)
+	}
+	if output, err := conformanceCommand(program).CombinedOutput(); err != nil {
+		t.Fatalf("run Display behavior: %v\n%s", err, output)
+	}
+	t.Logf("Display program exited cleanly under strict C11")
 }

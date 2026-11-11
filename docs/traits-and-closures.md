@@ -98,7 +98,10 @@ override structural `==` with a surprising user implementation. User-defined
 operators are not trait sugar in 1.0. The builtin `Order` trait is likewise
 language-provided over the closed scalar domain (unsigned integers, `Bool`,
 `String`, `Bytes`) with the callable `less` method, and `std.collection`
-builds stable sorting on it; see [S0 language](s0-language.md).
+builds stable sorting on it; the builtin `Display` trait is likewise
+language-provided over the scalar formatting domain with the callable
+`display` method, and user `impl Display` blocks are accepted for declared
+types; see [S0 language](s0-language.md).
 
 ## Standard traits
 

@@ -163,6 +163,12 @@ const (
 	// name operand carries the field's C spelling.
 	OpCFieldGet
 	OpCFieldSet
+
+	// OpStrDisplay formats one builtin-domain value as text: the operand
+	// is Bool, I64, or U64, the result is the string type, and the domain
+	// operand owns the fresh allocation. The checked edge fires on
+	// allocation failure only.
+	OpStrDisplay
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -369,6 +375,8 @@ func (k OpKind) String() string {
 		return "c.field.get"
 	case OpCFieldSet:
 		return "c.field.set"
+	case OpStrDisplay:
+		return "str.display"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -393,7 +401,7 @@ func (k OpKind) HasFailEdge() bool {
 		return true
 	case OpVecConstructChecked, OpVecGrowChecked:
 		return true
-	case OpStrByteChecked, OpStrConcat, OpStrSliceChecked, OpStrFromBytes:
+	case OpStrByteChecked, OpStrConcat, OpStrSliceChecked, OpStrFromBytes, OpStrDisplay:
 		return true
 	}
 	return false

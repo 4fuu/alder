@@ -1170,3 +1170,127 @@ fn main() -> I32 {
 		})
 	}
 }
+
+// M8 Display: the builtin `display` text method over the Display domain
+// (Bool, signed and unsigned integers, String) plus user impl Display
+// blocks for declared record and enum types. Unlike Order, user impls are
+// accepted because error types must implement Display. Receivers outside
+// the domain reject with 257 at the call, missing or wrong-signature impl
+// methods reject with 121 and 123, duplicate impls reject with 107, an
+// impl over a builtin type rejects with 110, and a constraint
+// instantiation over an out-of-domain type rejects with 111.
+func runAlderM8DisplayCheckerBehavior(t *testing.T, exe string) {
+	t.Helper()
+	accept := map[string]string{
+		"display-domain.al": `fn main() -> I32 {
+    let t = true.display()
+    if t != "true" { return 1 }
+    let f = false.display()
+    if f != "false" { return 2 }
+    let a: I8 = -8
+    if a.display() != "-8" { return 3 }
+    let b: I16 = -16
+    if b.display() != "-16" { return 4 }
+    let c: I32 = -32
+    if c.display() != "-32" { return 5 }
+    let d: I64 = -64
+    if d.display() != "-64" { return 6 }
+    let e: U8 = 8
+    if e.display() != "8" { return 7 }
+    let g: U16 = 16
+    if g.display() != "16" { return 8 }
+    let h: U32 = 32
+    if h.display() != "32" { return 9 }
+    let i: U64 = 64
+    if i.display() != "64" { return 10 }
+    let s = "hi".display()
+    if s != "hi" { return 11 }
+    let zero: U64 = 0
+    if zero.display() != "0" { return 12 }
+    return 0
+}
+`,
+		"display-user-impls.al": `type Point {
+    x: I64
+    y: I64
+}
+
+enum Shape {
+    circle
+    square
+}
+
+impl Display for Point {
+    fn display(self) -> String {
+        let open = "(".concat(self.x.display())
+        let mid = open.concat(",")
+        let close = mid.concat(self.y.display())
+        return close.concat(")")
+    }
+}
+
+impl Display for Shape {
+    fn display(self) -> String {
+        return "shape"
+    }
+}
+
+fn show(T: type(Display), x: T) -> String {
+    return x.display()
+}
+
+fn main() -> I32 {
+    let pt = Point(x: 1, y: -2)
+    let direct = pt.display()
+    if direct != "(1,-2)" { return 1 }
+    let generic = show(Point, pt)
+    if generic != "(1,-2)" { return 2 }
+    let sh = show(Shape, circle)
+    if sh != "shape" { return 3 }
+    let plain = show(String, "str")
+    if plain != "str" { return 4 }
+    let num = show(U64, 9)
+    if num != "9" { return 5 }
+    let flag = show(Bool, true)
+    if flag != "true" { return 6 }
+    return 0
+}
+`,
+	}
+	for name, source := range accept {
+		t.Run("accept-"+name, func(t *testing.T) {
+			files := map[string]string{name: source}
+			manifest := parseCheckerManifest(t, runAlderChecker(t, exe, files, []string{name}, false), files)
+			if len(manifest.diagnostics) != 0 {
+				t.Fatalf("Display acceptance diagnostics: %+v", manifest.diagnostics)
+			}
+		})
+	}
+
+	rejections := []struct {
+		name, source string
+		code         int
+	}{
+		{"display-f64-receiver", "fn main() -> I32 {\n    let f: F64 = 1.5\n    if f.display() != \"1.5\" { return 1 }\n    return 0\n}\n", 257},
+		{"display-bytes-receiver", "fn main() -> I32 {\n    if \"ab\".to_bytes().display() != \"ab\" { return 1 }\n    return 0\n}\n", 257},
+		{"display-record-no-impl", "type Box {\n    v: U64\n}\nfn main() -> I32 {\n    let b = Box(v: 1)\n    if b.display() != \"\" { return 1 }\n    return 0\n}\n", 257},
+		{"display-impl-missing-method", "type Box {\n    v: U64\n}\nimpl Display for Box {\n}\nfn main() -> I32 {\n    return 0\n}\n", 121},
+		{"display-impl-wrong-signature", "type Box {\n    v: U64\n}\nimpl Display for Box {\n    fn display(self, other: Box) -> String {\n        return \"x\"\n    }\n}\nfn main() -> I32 {\n    return 0\n}\n", 123},
+		{"display-impl-duplicate", "type Box {\n    v: U64\n}\nimpl Display for Box {\n    fn display(self) -> String {\n        return \"a\"\n    }\n}\nimpl Display for Box {\n    fn display(self) -> String {\n        return \"b\"\n    }\n}\nfn main() -> I32 {\n    return 0\n}\n", 107},
+		{"display-impl-for-builtin", "impl Display for U64 {\n    fn display(self) -> String {\n        return \"x\"\n    }\n}\nfn main() -> I32 {\n    return 0\n}\n", 110},
+		{"display-generic-f64-instantiation", "fn show(T: type(Display), x: T) -> String {\n    return x.display()\n}\nfn main() -> I32 {\n    let f: F64 = 1.5\n    if show(F64, f) != \"\" { return 1 }\n    return 0\n}\n", 111},
+	}
+	for _, tc := range rejections {
+		t.Run(tc.name, func(t *testing.T) {
+			files := map[string]string{tc.name + ".al": tc.source}
+			text := runAlderChecker(t, exe, files, []string{tc.name + ".al"}, true)
+			manifest := parseCheckerManifest(t, text, files)
+			if len(manifest.diagnostics) != 1 {
+				t.Fatalf("expected exactly one rejection diagnostic, got %+v", manifest.diagnostics)
+			}
+			if manifest.diagnostics[0].kind != tc.code {
+				t.Fatalf("expected diagnostic kind %d, got %d", tc.code, manifest.diagnostics[0].kind)
+			}
+		})
+	}
+}

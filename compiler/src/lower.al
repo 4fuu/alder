@@ -542,11 +542,12 @@ fn lower_has_storage(store: CheckStore) -> Bool {
     // results in the function's hidden domain, so any concat, slice, or
     // from-bytes call enables the storage machinery for the module. Length,
     // byte reads, and to_bytes reinterprets never allocate and stay outside
-    // this gate.
+    // this gate. The M8 Display builtin allocates the same way through
+    // str.display, so it forces the model on too.
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let builtin = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at).builtin
-        if builtin == 58 || builtin == 59 || builtin == 61 { return true }
+        if builtin == 58 || builtin == 59 || builtin == 61 || builtin == 1001 { return true }
         at = at + 1
     }
     return false
@@ -4443,8 +4444,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1000 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1001 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         if annotation.builtin == 1000 { return lower_order_less_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+        if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -6724,6 +6726,45 @@ fn lower_c_field_access(d: Domain, source_state: State, spans: __s0_Buffer(Check
     return Ok(LowerStep(state: instr.state, id: 0))
 }
 
+// Display surface (M8): the builtin display method. A String receiver is
+// its own text, so the call lowers to the receiver value itself. Every
+// other builtin-domain receiver widens to I64 (signed) or U64 (unsigned
+// integers; Bool stays raw) and formats through the checked str.display
+// instruction: domain in slot a, the value in slot b, with the allocation
+// failure edge to the panic block.
+fn lower_display_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_syntax, environment, panic_block)
+    let receiver_type = lower_builtin_child_type(store, expression, 0)
+    if receiver_type == 0 { return Ok(LowerStep(state: lower_invalid(receiver.state), id: 0)) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+    if checked.kind == 2 { return Ok(LowerStep(state: receiver.state, id: receiver.id)) }
+    if checked.kind != 1 || checked.target < 1 || checked.target > 9 { return Ok(LowerStep(state: lower_invalid(receiver.state), id: 0)) }
+    var value = receiver.id
+    var current = receiver.state
+    // Targets 5 (I64) and 9 (U64) are already the str.display operand
+    // widths, so widening them would be a same-width extension the
+    // verifier rejects; Bool stays raw.
+    if checked.target != 1 && checked.target != 5 && checked.target != 9 {
+        var op: U64 = mir_op_int_sext()
+        var wide_type: U64 = mir_type_i64()
+        if checked.target >= 6 {
+            op = mir_op_int_zext()
+            wide_type = mir_type_u64()
+        }
+        let widened = try lower_add_typed_result(d, current, function, block, wide_type)
+        let instr = try lower_add_instr(d, widened.state, function, block, op, widened.id, 0, wide_type, receiver.id, 0, 0, "")
+        value = widened.id
+        current = instr.state
+    }
+    let domain = lower_storage_domain_value(current, store, owner, expression_id)
+    if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let result = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+    let added = try lower_add_instr_three(d, result.state, function, block, mir_op_str_display(), result.id, 0, domain, value, 0, panic_block)
+    return Ok(LowerStep(state: added.state, id: result.id))
+}
+
 // M8 C-boundary conversions: lower to c.num.try, c.num.wrap, or c.num.cast
 // with the receiver value in slot a and the target type in type_op (the
 // option(E) type for the try form, where E is the target scalar). The
@@ -6787,7 +6828,7 @@ fn lower_model_c_convert_ok(store: CheckStore, annotation: CallAnnotationRec, ex
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1000 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1001 { return false }
     if annotation.builtin == 1000 {
         // M8 Order surface: a scalar Order receiver, a same-type argument,
         // and a Bool result.
@@ -6801,6 +6842,19 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
             return result.kind == 1 && result.target == 1
         }
         return false
+    }
+    if annotation.builtin == 1001 {
+        // M8 Display surface: a builtin-domain receiver, no argument, and
+        // a String result. The domain check is inlined because the lower
+        // layer never imports checker helpers.
+        if expression.child_count != 1 || annotation.target != 0 { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 { return false }
+        let first = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        let receiver_ok = (first.kind == 1 && first.target >= 1 && first.target <= 9) || first.kind == 2
+        if !receiver_ok { return false }
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        return result.kind == 2
     }
     if annotation.builtin >= 65 { return lower_model_c_convert_ok(store, annotation, expression) }
     if annotation.builtin >= 62 {
@@ -7319,7 +7373,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1000 { return false } }
+            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1001 { return false } }
             at = at + 1
         } else {
         if item.kind == 7 {

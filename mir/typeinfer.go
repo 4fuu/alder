@@ -453,6 +453,13 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return TypeBool, true
 
+	case OpStrDisplay:
+		ta, ok := f.ValueType(in.A)
+		if !ok || (ta != TypeBool && ta != TypeI64 && ta != TypeU64) {
+			return NoType, false
+		}
+		return m.String(), true
+
 	case OpStrLen, OpStrByteChecked, OpStrToBytes:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !m.ValidType(ta) || (m.Types[ta].Kind != TypeString && m.Types[ta].Kind != TypeBytes) {

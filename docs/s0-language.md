@@ -133,11 +133,10 @@ Milestone 7.5 adds the static trait surface of
   in the declaration's scope across the whole parameter list, so a
   constraint may name a parameter declared before or after it
   (`IntoIterator(IteratorType, Item)` keeps that order).
-- The builtin standard traits `Eq`, `Hash`, `Order`, `Iterator(Item)`,
-  `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
-  without source declarations; `Display` and `Error` are reserved
-  names without implementations until their APIs are designed with the
-  standard library.
+- The builtin standard traits `Eq`, `Hash`, `Order`, `Display`,
+  `Iterator(Item)`, `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
+  without source declarations; `Error` is a reserved name without an
+  implementation until its API is designed with the standard library.
 - Coherence holds per compilation unit: exactly one implementation may exist
   for a concrete trait application. Orphan-rule enforcement across a package
   graph waits for the module system.
@@ -175,6 +174,17 @@ Milestone 7.5 adds the static trait surface of
   is rejected with a diagnostic. Signed integers, floats, and composites
   join only if a later decision widens the domain; user `impl Order`
   blocks are rejected like `Eq` and `Hash`.
+- The builtin `Display` trait has the single requirement
+  `fn display(self) -> String`, and the language provides the
+  implementation for the scalar formatting domain: `Bool`, the signed and
+  unsigned integers (decimal, signed values with `-`), and `String` (the
+  string itself). The method is directly callable as `x.display()`.
+  Unlike the structural traits, user `impl Display` blocks are accepted
+  for declared record and enum types and participate in coherence and the
+  generic per-instance re-check like any trait implementation. A receiver
+  or generic instantiation outside the domain without a user
+  implementation (floats, `Bytes`, composites) is rejected with a
+  diagnostic; widening the domain waits for a later decision.
 - Trait-method dispatch is static: a dot-call resolves inherent methods
   first, then the unique trait implementation providing that method name for
   the receiver's concrete type. Because generic bodies are checked per

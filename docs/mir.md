@@ -460,6 +460,27 @@ rejects `str.order_lt` on non-sequence operand types, on mismatched
 sequence operand types within one operation, and on results not of type
 `bool`.
 
+## Text Display
+
+MIR 6 exposes the Display domain's formatting as operation 98, produced
+only by the builtin `display` method call on a domain receiver:
+
+```text
+str.display a, b -> string
+```
+
+Slot `a` holds the domain handle and slot `b` holds the value, which the
+verifier checks against the widened operand types `bool`, `i64`, or `u64`:
+the lowering extends signed receivers to `i64`, unsigned receivers to
+`u64`, and keeps `bool` raw, so `I8`-`I32`, `U8`-`U32`, and the 64-bit
+scalars all reach one operation. The operation always produces a fresh
+`string` owned by the domain and carries a checked edge that fires when
+the result allocation fails. `String` receivers of the builtin `display`
+call lower to the receiver value itself, so no `str.display` instruction
+exists for them. The verifier rejects `str.display` on a domain operand
+that is not the domain handle, on value operands outside `bool`, `i64`,
+and `u64`, and on results not of type `string`.
+
 ## Comparisons and Conversions
 
 Comparisons require operands of the same type and produce `bool`:
@@ -836,8 +857,8 @@ adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 `c.is_null`, the integer overflow method operations (71-79), the
 byte-sequence method operations (80-85), the integer conversion method
 operations (86-87), the C scalar conversion method operations (88-90), the float arithmetic
-operations (91-94), the ordering comparison operation (95), and the C
-record field operations (96-97).
+operations (91-94), the ordering comparison operation (95), the C
+record field operations (96-97), and the display operation (98).
 Incompatible changes must use a new version and update:
 
 - this document;

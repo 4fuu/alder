@@ -457,6 +457,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpStrFromBytes:
 		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.A))
 		printFailEdge(b, f, in)
+	case OpStrDisplay:
+		b.WriteString(" " + valueName(f, in.Domain) + ", " + valueName(f, in.A))
+		printFailEdge(b, f, in)
 	case OpFnValue:
 		b.WriteString(" @" + fnName(m, in.Callee))
 		if in.A != NoValue {

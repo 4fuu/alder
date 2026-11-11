@@ -448,6 +448,12 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			return m.ValidType(t) && m.Types[t].Kind == mir.TypeBytes
 		}, "bytes")
 
+	case mir.OpStrDisplay:
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		c.expect(in.A, "display operand", func(t mir.TypeId) bool {
+			return t == mir.TypeBool || t == mir.TypeI64 || t == mir.TypeU64
+		}, "bool, i64, or u64")
+
 	case mir.OpFFICallUnsafe:
 		if int(in.FFIImport) < len(m.Imports) {
 			imp := &m.Imports[in.FFIImport]

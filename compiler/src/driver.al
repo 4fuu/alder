@@ -403,6 +403,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not implement Order; the Order domain is Bool, unsigned integers, String, and Bytes") { return false }
         return out_string("")
     }
+    if kind == 257 {
+        if !out_string("type ") || !driver_out_diagnostic_type(detail_a, detail_b) || !out_string(" does not implement Display; the builtin Display domain is Bool, signed and unsigned integers, and String, and a declared type can implement Display itself") { return false }
+        return out_string("")
+    }
     if kind == 255 { return out_string("float literal is out of range for F32") }
     if kind == 256 { return out_string("float literal is not exactly representable as F32; write the nearest F32 value's exact decimal digits") }
     if kind == 125 { return out_string("structural Eq, Hash, and Order implementations are language-provided and cannot be declared") }

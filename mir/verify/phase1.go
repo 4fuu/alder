@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpCFieldSet {
+	if in.Op > mir.OpStrDisplay {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -478,6 +478,9 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpStrFromBytes:
 		require(in.Domain, "domain operand")
 		require(in.A, "bytes operand")
+	case mir.OpStrDisplay:
+		require(in.Domain, "domain operand")
+		require(in.A, "display operand")
 	case mir.OpFnValue:
 		if int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil {
 			errs = append(errs, Error{Loc: loc, Msg: "fn.value target is not a function"})
@@ -714,6 +717,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Lo)
 		add(in.Hi)
 	case mir.OpStrFromBytes:
+		add(in.Domain)
+		add(in.A)
+	case mir.OpStrDisplay:
 		add(in.Domain)
 		add(in.A)
 	case mir.OpFnValue:

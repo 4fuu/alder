@@ -501,6 +501,22 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 		}
 		b.WriteString("  " + g.val(in.Result) + " = " + helper + "(" + g.valueExpr(in.A) + ", " + g.valueExpr(in.B) + ");\n")
 
+	case mir.OpStrDisplay:
+		// The operand arrives widened to bool/i64/u64 by the lowering, so the
+		// helper choice reads the operand's own MIR type. Only the integer
+		// helpers allocate; a NULL data pointer routes to the checked edge.
+		ta, _ := g.f.ValueType(in.A)
+		helper := "alder_string_from_i64"
+		if ta == mir.TypeBool {
+			helper = "alder_string_from_bool"
+		} else if ta == mir.TypeU64 {
+			helper = "alder_string_from_u64"
+		}
+		s := g.tmp(in, "s")
+		b.WriteString("  AlderString " + s + " = " + helper + "(" + g.valueExpr(in.Domain) + ", " + g.valueExpr(in.A) + ");\n")
+		b.WriteString("  if (" + s + ".data == NULL) " + g.failBody(in) + "\n")
+		b.WriteString("  " + g.val(in.Result) + " = " + s + ";\n")
+
 	case mir.OpStrLen:
 		b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + ".len;\n")
 

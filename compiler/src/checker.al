@@ -1340,10 +1340,12 @@ fn validate_inherent_owners(d: Domain, state: State, parse: ParseStore, store: C
     return Ok(CheckGood(store))
 }
 
-// Builtin standard trait IDs. Order is language-provided with synthesized
-// scalar implementations; Display and Error are reserved names without
-// declarations until their APIs are designed with the standard library;
-// implementations of reserved traits are rejected as unknown traits.
+// Builtin standard trait IDs. Order and Display are language-provided;
+// Order's implementations are synthesized scalars and user impl blocks are
+// rejected, while Display accepts user implementations for nominal types.
+// Error stays a reserved name without declarations until its API is
+// designed with the standard library; implementations of reserved traits
+// are rejected as unknown traits.
 fn builtin_trait_id(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, "Eq") { return 1 }
     if node_word(state, node, "Hash") { return 2 }
@@ -1351,6 +1353,7 @@ fn builtin_trait_id(state: State, node: SyntaxRec) -> U64 {
     if node_word(state, node, "IntoIterator") { return 4 }
     if node_word(state, node, "Cleanup") { return 5 }
     if node_word(state, node, "Order") { return 7 }
+    if node_word(state, node, "Display") { return 8 }
     return 0
 }
 
@@ -7908,6 +7911,23 @@ fn check_order_less_method(d: Domain, state: State, parse: ParseStore, base: Che
     return append_sequence_method(d, current, owner, call_id, result, 1000, receiver_expression, draft.expression, 0, 0, site_kind, site_syntax)
 }
 
+// Display surface (M8): the builtin display method over the language
+// domain (Bool, signed and unsigned integers, String). The call takes no
+// argument and produces a String. Bytes, floats, and composites are
+// outside the v1 domain and reject with their own diagnostic; nominal
+// types route to their user Display implementations instead of this
+// builtin path.
+fn check_display_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if !display_supported(store, receiver_type_id) { return expr_token_single_type_fail(d, state, base, 257, callee, receiver_type_id) }
+    // Method-call links include both the selected callee and its receiver.
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 41, call) }
+    var current = store
+    current = try append_checked_type(d, current, owner, 2, call_id, 0, 0, 0)
+    let result = canonical_type_id(current, 2, 0, 0, 0)
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
+    return append_sequence_method(d, current, owner, call_id, result, 1001, receiver_expression, 0, 0, 0, site_kind, site_syntax)
+}
+
 // Ordered-collection key domain (M7.5): the domain the inline structural
 // compare lowers. Unsigned integers and Bool compare directly; String and
 // Bytes compare through str.eq; records and enums compare through place
@@ -8528,6 +8548,12 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // reject instead of a generic unknown-method one; the helper
         // rejects receivers outside the scalar Order domain.
         if node_word(state, callee, "less") { return check_order_less_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+        // Display surface (M8): the builtin display method on the language
+        // domain. Routed before the byte-sequence methods like less, but
+        // only for non-nominal receivers, so a nominal type falls through
+        // to its own user Display implementation; the helper rejects
+        // receivers outside the builtin domain.
+        if node_word(state, callee, "display") && receiver_type.kind != 7 { return check_display_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         // Byte-sequence surface (M8): String and Bytes methods. Routed before
         // the sequence-method names, which otherwise capture len and slice and
         // reject these receivers at the sequence guard.
@@ -8566,6 +8592,10 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
                 if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
             }
+            // Display surface (M8): a display call on a nominal type with
+            // no user Display implementation reads as the domain reject,
+            // not a generic unknown-method one.
+            if node_word(state, callee, "display") { return expr_token_single_type_fail(d, state, base, 257, callee, receiver_draft.checked_type) }
             // A builtin byte-sequence or sequence method name on a nominal
             // type that provides no such method gets its own diagnostic: the
             // generic unknown-method reject reads as if the name never
@@ -11921,6 +11951,10 @@ fn validate_one_trait_impl(d: Domain, state: State, parse: ParseStore, initial: 
         if rec.trait_builtin == 5 {
             receiver_kind = 48
         }
+        if rec.trait_builtin == 8 {
+            word = "display"
+            result_type = canonical_type_id(store, 2, 0, 0, 0)
+        }
         var found: U64 = 0
         var method_at = rec.first_method
         while method_at < rec.first_method + rec.method_count {
@@ -12866,6 +12900,24 @@ fn order_scalar_supported(store: CheckStore, checked_type: U64) -> Bool {
     return checked.kind == 2 || checked.kind == 14
 }
 
+// Display domain (M8): Bool, signed and unsigned integers, and String.
+// Bytes and floats stay outside v1; composites fail closed, so only the
+// builtin scalars and types with a user Display implementation satisfy a
+// Display constraint.
+fn display_supported(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 1 { return checked.target >= 1 && checked.target <= 9 }
+    return checked.kind == 2
+}
+
+// One synthesized Display impl record for a scalar type.
+fn append_display_impls_for(d: Domain, store: CheckStore, checked_type: U64) -> Result(CheckStore, __s0_Error) {
+    var impls = store.traits.impls
+    impls = try __s0_buffer_append(TraitImplRec, d, impls, TraitImplRec(trait_builtin: 8, trait_symbol: 0, first_arg: 0, arg_count: 0, self_type: checked_type, owner_node: 0, first_method: 0, method_count: 0, synthesized: 1))
+    return Ok(trait_store_with(store, impls, store.traits.impl_index))
+}
+
 // One synthesized Order impl record for a scalar type.
 fn append_order_impls_for(d: Domain, store: CheckStore, checked_type: U64) -> Result(CheckStore, __s0_Error) {
     var impls = store.traits.impls
@@ -12939,6 +12991,22 @@ fn synthesize_structural_impls(d: Domain, state: State, parse: ParseStore, store
             }
         }
         order_kind = order_kind + 1
+    }
+    // Scalar Display impls: the same seeded and interned scans, gated to
+    // the Display domain. Composites fail closed, so no symbol scan runs
+    // for Display; user implementations supply the nominal coverage.
+    var display_seeded: U64 = 1
+    while display_seeded <= 12 {
+        if display_supported(current, display_seeded) {
+            let with_impls = try append_display_impls_for(d, current, display_seeded)
+            current = with_impls
+        }
+        display_seeded = display_seeded + 1
+    }
+    let display_string = canonical_type_id(current, 2, 0, 0, 0)
+    if display_string != 0 {
+        let with_impls = try append_display_impls_for(d, current, display_string)
+        current = with_impls
     }
     return build_trait_indexes(d, state, parse, current)
 }
