@@ -207,9 +207,13 @@ type Instr struct {
 	Op     OpKind
 	Result ValueId // NoValue when the operation produces no value
 
-	// load / store
+	// load / store; also the optional owner local of cleanup.push
 	Place    Place
 	StoreVal ValueId
+	// HasPlace marks a cleanup.push that names the owner's local place.
+	// The backend loads the place when the hook runs, so the hook observes
+	// the owner's current value rather than its registration-time copy.
+	HasPlace bool
 
 	// aggregate.construct
 	AggType   TypeId

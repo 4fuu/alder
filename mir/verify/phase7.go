@@ -25,10 +25,12 @@ const (
 // cleanupEntry describes one registration site. Registrations are identified
 // by their push result, not by callback/argument equality.
 type cleanupEntry struct {
-	Push     cleanupSite
-	ID       mir.ValueId
-	Callback mir.FunctionId
-	Args     []mir.ValueId
+	Push       cleanupSite
+	ID         mir.ValueId
+	Callback   mir.FunctionId
+	Args       []mir.ValueId
+	HasPlace   bool
+	PlaceLocal mir.LocalId
 }
 
 // cleanupAnalysis is the Phase 7 result consumed by later analyses. The union
@@ -105,7 +107,12 @@ func analyzeCleanupFunction(m *mir.Module, f *mir.Function) (*cleanupAnalysis, [
 				in := &b.Instrs[ii]
 				if in.Op == mir.OpCleanupPush && in.Scope == scope {
 					entryIndex[in.Result] = len(entries)
-					entries = append(entries, cleanupEntry{Push: cleanupSite{mir.BlockId(bi), ii}, ID: in.Result, Callback: in.CleanupFn, Args: append([]mir.ValueId(nil), in.CleanupArgs...)})
+					entry := cleanupEntry{Push: cleanupSite{mir.BlockId(bi), ii}, ID: in.Result, Callback: in.CleanupFn, Args: append([]mir.ValueId(nil), in.CleanupArgs...)}
+					if in.HasPlace && in.Place.Kind == mir.PlaceLocal {
+						entry.HasPlace = true
+						entry.PlaceLocal = in.Place.Local
+					}
+					entries = append(entries, entry)
 				}
 			}
 		}
@@ -157,6 +164,14 @@ func analyzeOneScope(f *mir.Function, scope mir.ValueId, entries []cleanupEntry,
 				n := c
 				valid := true
 				invalidMsg := ""
+				// The registration names the owner's local place, so the
+				// scope-exit run loads the owner's current value. A whole-local
+				// store while the registration is active would replace that
+				// value behind the hook's back and double-own the old one.
+				if in.Op == mir.OpStore && in.Place.Kind == mir.PlaceLocal && c.status == cleanupOpen && cleanupPlaceActive(c.active, entries, in.Place.Local) {
+					valid = false
+					invalidMsg = "cleanup registration's owner local cannot be reassigned while registered"
+				}
 				switch in.Op {
 				case mir.OpCleanupScopeBegin:
 					if in.Result == scope {
@@ -278,6 +293,15 @@ func cleanupActiveAppend(active string, index int) string {
 	var encoded [4]byte
 	binary.BigEndian.PutUint32(encoded[:], uint32(index))
 	return active + string(encoded[:])
+}
+
+func cleanupPlaceActive(active string, entries []cleanupEntry, local mir.LocalId) bool {
+	for i := range entries {
+		if entries[i].HasPlace && entries[i].PlaceLocal == local && cleanupActiveContains(active, i) {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanupActiveContains(active string, index int) bool {

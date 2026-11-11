@@ -1657,7 +1657,12 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
                 out = try cgen_put(d, out, ".alder_f")
                 out = try cgen_put_u64(d, out, field)
                 out = try cgen_put(d, out, " = ")
-                out = try cgen_put_value_read(d, out, store, indexes, item.function, argument.value)
+                if item.place != 0 && field + 1 == cgen_cleanup_owner_field(store, indexes, item, instruction) {
+                    out = try cgen_put(d, out, "&")
+                    out = try cgen_put_place(d, out, store, indexes, item.function, item.place)
+                } else {
+                    out = try cgen_put_value_read(d, out, store, indexes, item.function, argument.value)
+                }
                 out = try cgen_put(d, out, ";\n")
                 field = field + 1
             }

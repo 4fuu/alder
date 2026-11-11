@@ -275,7 +275,7 @@ The initial verifier correlates invalidation by SSA handle derivation (see Verif
 
 ```text
 cleanup.scope.begin -> cleanup_scope
-cleanup.push scope, function(arguments...) -> cleanup_id
+cleanup.push scope, function(arguments...) [place local %x] -> cleanup_id
 cleanup.disarm cleanup_id
 cleanup.scope.run scope
 cleanup.scope.end scope
@@ -290,6 +290,29 @@ Properties:
 - backend-specific C `goto` structure does not leak into MIR.
 
 The cleanup function of `cleanup.push` must have result type `unit`.
+
+A nominal `Cleanup` hook is registered with `place local %x`, naming the
+owner's local slot. `cleanup.scope.run` loads that local immediately before
+each hook invocation, so the hook observes the owner's value at scope exit
+rather than a copy captured at registration. This is what makes a `mut self`
+method's updates visible to cleanup:
+
+```text
+%id = cleanup.push %scope, @cleanup, (%owner) place local %held
+...
+%ref = borrow_mut local %held
+call @poke(%ref, %value)     ; the hook sees the updated %held
+cleanup.scope.run %scope
+```
+
+The place must be a local of the registering function and its type must match
+the hook's owner parameter, which is the last argument (a hook emitted for a
+function with storage carries a hidden leading domain parameter). A whole-local
+store to a registered place while the registration is active is rejected: it
+would replace the value the hook loads and abandon the old owner. Field stores
+through a `borrow_mut` remain legal. Builtin releases (table and `c_string`
+shells, and the per-element `Vec` drain) do not carry a place and keep their
+registration-time capture semantics.
 
 ## Checked Operations
 

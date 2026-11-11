@@ -394,8 +394,12 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 			}
 		}
 	}
-	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut || in.Op == mir.OpCFieldSet || in.Op == mir.OpCAddr {
+	placeBased := in.Op == mir.OpCleanupPush && in.HasPlace
+	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut || in.Op == mir.OpCFieldSet || in.Op == mir.OpCAddr || (in.Op == mir.OpCleanupPush && placeBased) {
 		errs = append(errs, checkPlaceIntegrity(f, &in.Place, loc)...)
+	}
+	if in.Op == mir.OpCleanupPush && placeBased && in.Place.Kind != mir.PlaceLocal {
+		errs = append(errs, Error{Loc: loc, Msg: "cleanup.push place must be a local"})
 	}
 	if in.Op == mir.OpCall && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
 		errs = append(errs, Error{Loc: loc, Msg: "callee is nil or out of range"})

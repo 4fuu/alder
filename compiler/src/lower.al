@@ -5598,13 +5598,30 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let value = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         active = lower_open_block(value.state.mir, function, active)
         current = try lower_store_binding(d, value.state, function, active, statement.binding, value.id)
+        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, statement.body - 1)
+        // A nominal Cleanup hook takes the owner by `take self`; register the
+        // owner's local place so the scope-exit run loads the current value,
+        // not the registration-time copy. Builtin releases (table, c_string)
+        // and the Vec element drain keep their capture semantics.
+        var owner_place: U64 = 0
+        if cleanup.callback != 0 {
+            let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1)
+            let owner_type = __s0_buffer_get(CheckedTypeRec, store.types, initializer.checked_type - 1)
+            if owner_type.kind == 7 {
+                let mapped = lower_binding_lookup(current, statement.binding)
+                if mapped.binding != 0 && mapped.parameter == 0 {
+                    let placed = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+                    owner_place = placed.id
+                    current = lower_with_mir(current, placed.store)
+                }
+            }
+        }
         let empty = try __s0_buffer_new(U64, d)
         let scope_type = try mir_intern_type(d, current.mir, mir_type_kind_cleanup_scope(), 0, 0, 0, empty, 0)
         let scope_value = try mir_add_value(d, scope_type.store, function, try lower_result_name(d, scope_type.store, function, try lower_decimal_name(d, "cleanup_scope", statement.binding)), scope_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(scope_type.store, function, active) + 1)
         let begun = try lower_add_instr(d, lower_with_mir(current, scope_value.store), function, active, mir_op_cleanup_scope_begin(), scope_value.id, 0, 0, 0, 0, 0, "")
         let cleanup_type = try mir_intern_type(d, begun.state.mir, mir_type_kind_cleanup_id(), 0, 0, 0, empty, 0)
         let cleanup_value = try mir_add_value(d, cleanup_type.store, function, try lower_result_name(d, cleanup_type.store, function, try lower_decimal_name(d, "cleanup_id", statement.binding)), cleanup_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(cleanup_type.store, function, active) + 1)
-        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, statement.body - 1)
         var callback = lower_owner_lookup(current.owners, cleanup.callback)
         var vec_drain = false
         if cleanup.callback == 0 {
@@ -5635,7 +5652,7 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
             }
         }
         if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
-        let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, 0, 0, scope_value.id, 0, callback, "")
+        let pushed = try lower_add_instr(d, lower_with_mir(begun.state, cleanup_value.store), function, active, mir_op_cleanup_push(), cleanup_value.id, owner_place, 0, scope_value.id, 0, callback, "")
         current = pushed.state
         var cleanup_ordinal: U64 = 0
         if (cleanup.callback != 0 || vec_drain) && state.has_storage && !lower_owner_aliases_domain(source_state, store, cleanup.callback) {

@@ -331,6 +331,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 		b.WriteString(" " + valueName(f, in.Scope) + ", @" + fnName(m, in.CleanupFn) + ", (")
 		printArgs(b, f, in.CleanupArgs)
 		b.WriteString(")")
+		if in.HasPlace {
+			b.WriteString(" place " + printPlace(m, f, &in.Place))
+		}
 
 	case OpCleanupDisarm:
 		b.WriteString(" " + valueName(f, in.CleanupID))

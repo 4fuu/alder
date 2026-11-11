@@ -546,6 +546,27 @@ fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes
     return cgen_put(d, out, "}\n")
 }
 
+// The place-based cleanup records the owner local, not the hook's other
+// arguments. A hook can also carry a hidden leading domain parameter, so the
+// owner is the field whose type matches the local, not field zero.
+fn cgen_cleanup_owner_field(store: MirStore, indexes: MirVIndexes, item: MirInstrRec, at: U64) -> U64 {
+    if item.place == 0 { return 0 }
+    let owner_type = cgen_place_type(store, indexes, item.function, item.place)
+    if owner_type == 0 { return 0 }
+    let count = cgen_operand_count(store, indexes, mir_operand_instruction(), at, 0)
+    var ordinal: U64 = 0
+    var field: U64 = 0
+    while ordinal < count {
+        let parameter = cgen_function_param(store, indexes, item.target, ordinal)
+        if parameter.param_type != mir_type_unit() {
+            if parameter.param_type == owner_type { return field + 1 }
+            field = field + 1
+        }
+        ordinal = ordinal + 1
+    }
+    return 0
+}
+
 fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
     var out = initial
     var at: U64 = 0
@@ -554,6 +575,8 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
         if item.op == mir_op_cleanup_push() {
             let count = cgen_operand_count(store, indexes, mir_operand_instruction(), at + 1, 0)
+            let owner_field = cgen_cleanup_owner_field(store, indexes, item, at + 1)
+            let place_based = item.place != 0 && owner_field != 0
             out = try cgen_put(d, out, "typedef struct AlderCtx_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " {\n")
@@ -564,6 +587,7 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
                 if parameter.param_type != mir_type_unit() {
                     out = try cgen_put(d, out, "  ")
                     out = try cgen_put_type(d, out, store, parameter.param_type)
+                    if place_based && field + 1 == owner_field { out = try cgen_put(d, out, " *") }
                     out = try cgen_put(d, out, " alder_f")
                     out = try cgen_put_u64(d, out, field)
                     out = try cgen_put(d, out, ";\n")
@@ -581,7 +605,16 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " *alder_c = (AlderCtx_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, " *)alder_ctx;\n") }
+            out = try cgen_put(d, out, " *)alder_ctx;\n")
+            if place_based {
+                // The scope-exit run loads the registered local, so the hook
+                // observes the owner's current value.
+                out = try cgen_put(d, out, "  ")
+                out = try cgen_put_type(d, out, store, cgen_place_type(store, indexes, item.function, item.place))
+                out = try cgen_put(d, out, " alder_owner = *alder_c->alder_f")
+                out = try cgen_put_u64(d, out, owner_field - 1)
+                out = try cgen_put(d, out, ";\n")
+            } }
             out = try cgen_put(d, out, "  ")
             out = try cgen_emit_function_name(d, out, store, item.target)
             out = try cgen_put(d, out, "(")
@@ -592,8 +625,10 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
                 let parameter = cgen_function_param(store, indexes, item.target, ordinal)
                 if parameter.param_type != mir_type_unit() {
                     if !first { out = try cgen_put(d, out, ", ") }
+                    if place_based && field + 1 == owner_field { out = try cgen_put(d, out, "alder_owner") } else {
                     out = try cgen_put(d, out, "alder_c->alder_f")
                     out = try cgen_put_u64(d, out, field)
+                    }
                     field = field + 1
                     first = false
                 }

@@ -127,6 +127,24 @@ if x.function == function && x.instruction == instruction && x.active == active 
 at = at + 1 }
 return false }
 
+fn mir_v7_place_conflict(store: MirStore, indexes: MirVIndexes, nodes: __s0_Buffer(MirV7Node), active: U64, place: U64) -> Bool {
+    // A place-based registration names the owner's local. Reassigning that
+    // whole local while the registration is armed replaces the value the
+    // scope-exit hook will load and abandons the old owner.
+    var at = active
+    while at != 0 {
+        let node = __s0_buffer_get(MirV7Node, nodes, at - 1)
+        let v = __s0_buffer_get(MirValueRec, store.values, node.entry - 1)
+        let iid = mir_v6_instruction_for_value(store, indexes, v)
+        if iid != 0 {
+            let push = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
+            if push.place != 0 && push.place == place { return true }
+        }
+        at = node.parent
+    }
+    return false
+}
+
 fn mir_v7_one(d: Domain, store: MirStore, indexes: MirVIndexes, function: U64, scope: U64, node_base: U64, run_base: U64, analysis0: MirV7Analysis) -> Result(MirV7Analysis, __s0_Error) { var analysis = analysis0
 var out = analysis.diagnostics
 var nodes = analysis.nodes
@@ -153,6 +171,8 @@ seen = add.seen
 queue = add.queue }
 var relevant = false
 var valid = true
+if x.op == mir_op_store() && status == mir_v7_open() && x.place != 0 && __s0_buffer_get(MirPlaceRec, store.places, x.place - 1).kind == mir_place_local() && mir_v7_place_conflict(store, indexes, nodes, active, x.place) { relevant = true
+valid = false }
 if x.op == mir_op_cleanup_scope_begin() && x.result == scope { relevant = true
 valid = status == mir_v7_absent() || status == mir_v7_ended()
 if valid { status = mir_v7_open()

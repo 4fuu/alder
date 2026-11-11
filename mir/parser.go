@@ -1197,6 +1197,13 @@ func (p *parser) parseOp() (Instr, error) {
 		if err = p.expectPunct(")"); err != nil {
 			return in, err
 		}
+		if p.peekIdent("place") && !p.peek().bol {
+			p.next()
+			if in.Place, err = p.parsePlace(); err != nil {
+				return in, err
+			}
+			in.HasPlace = true
+		}
 
 	case "cleanup.disarm":
 		in.Op = OpCleanupDisarm

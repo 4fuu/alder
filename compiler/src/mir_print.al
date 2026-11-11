@@ -1169,6 +1169,11 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     }
     if rec.op == mir_op_cleanup_push() {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_function_valid(store, rec.target) || !mir_operand_group_valid(idx, store, mir_operand_instruction(), id, 0) { return false }
+        if rec.place != 0 {
+            if !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) { return false }
+            if __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).function != rec.function { return false }
+            if __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).kind != mir_place_local() { return false }
+        }
     }
     if rec.op == mir_op_slice_range_checked() {
         if !mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) || !mir_value_valid(idx, store, rec.function, rec.c) { return false }
@@ -2064,6 +2069,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_cleanup_push() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", @") || !mir_out_function_name(store, rec.target) || !out_string(", (") || !mir_out_operand_values(idx, store, mir_operand_instruction(), id, 0, rec.function) || !out(41) { return false }
+        if rec.place != 0 {
+            if !out_string(" place ") || !mir_out_place(idx, store, rec.function, rec.place) { return false }
+        }
     }
     if rec.op >= mir_op_int_add_checked() && rec.op <= mir_op_int_shr_checked() {
         if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) || !mir_out_fail_edge(idx, store, id, rec) { return false }

@@ -158,6 +158,15 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		c.expectExact(in.Scope, "scope operand", m.CleanupScope())
 		if int(in.CleanupFn) < len(m.Functions) {
 			callee := m.Functions[in.CleanupFn]
+			if in.HasPlace {
+				// The owner is the last argument: a hook in a function with
+				// storage carries a hidden leading domain parameter.
+				if in.Place.Kind == mir.PlaceLocal && int(in.Place.Local) < len(f.Locals) && len(callee.Params) > 0 {
+					if f.Locals[in.Place.Local].Type != callee.Params[len(callee.Params)-1].Type {
+						c.errs = append(c.errs, Error{Loc: c.loc, Msg: "cleanup.push place type differs from the owner parameter"})
+					}
+				}
+			}
 			if callee.Result != mir.TypeUnit {
 				c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("cleanup function @%s must return unit", callee.Name)})
 			}

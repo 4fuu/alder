@@ -1099,6 +1099,8 @@ scan = scan + 1 }
             }
             if !a_ok || !b_ok || !c_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.a)) }
             if i.place != 0 && !mir_vid_valid(i.place, __s0_buffer_len(MirPlaceRec, store.places)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) }
+            if i.op == mir_op_cleanup_push() && i.place != 0 { let owner_place = __s0_buffer_get(MirPlaceRec, store.places, i.place - 1)
+                if owner_place.function != i.function || owner_place.kind != mir_place_local() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) } }
             if ((mask / 16) % 2 == 1) && !mir_vtype_exists(store, i.type_op) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, i.type_op, id, 0, 0, i.type_op)) }
             if (i.op == mir_op_call() || i.op == mir_op_cleanup_push()) && !mir_vid_valid(i.target, function_count) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }
             if i.op == mir_op_ffi_call_unsafe() && !mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.target)) }

@@ -175,7 +175,7 @@ fn main() -> I32 {
 
 // Buffered streams: BufReader serves reads from its window and refills from
 // the source; BufWriter buffers small writes, flushes on overflow or demand,
-// and its cleanup flushes the registration-captured state. The sink below
+// and cleanup flushes the bytes written after registration. The sink below
 // validates every byte in order, so a lost or reordered buffered byte fails
 // the run instead of only changing a count.
 func ioBufferedMain() map[string]string {
@@ -253,24 +253,19 @@ fn buffered_reads() -> I32 {
 }
 
 fn buffered_writes() -> I32 {
-    let writer = io.BufWriter.with_capacity(4, Checker(total: 0, failure: 0, expected: 7))
+    using held = io.BufWriter.with_capacity(4, Checker(total: 0, failure: 0, expected: 7))
     let head: Array(U8, 2) = [65, 66]
-    match writer.write(head.slice(0, 2)) {
+    match held.write(head.slice(0, 2)) {
         Ok(n) => { if n != 2 { return 1 } }
         Err(_) => { return 2 }
     }
     let tail: Array(U8, 5) = [67, 68, 69, 70, 71]
-    match writer.write(tail.slice(0, 5)) {
+    match held.write(tail.slice(0, 5)) {
         Ok(n) => { if n != 5 { return 3 } }
         Err(_) => { return 4 }
     }
-    match writer.flush() {
-        Ok(_) => {}
-        Err(_) => { return 5 }
-    }
-    // Registration captures the already-flushed writer; cleanup then sees
-    // the checker's final state and asserts the byte count.
-    using held = writer
+    // No explicit flush: the scope-exit cleanup loads the current writer and
+    // flushes the five pending bytes before releasing the sink.
     return 0
 }
 
