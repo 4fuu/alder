@@ -640,6 +640,30 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return in.TypeOp, true
 
+	case OpCFieldGet:
+		_, field, ok := m.CNamedRecordField(f, in.A, in.CField)
+		if !ok {
+			return NoType, false
+		}
+		return field.Type, true
+
+	case OpCFieldSet:
+		// The write form targets a place holding the record; the stored
+		// value must have the field's type. No result is produced.
+		pt, ok := m.PlaceType(f, &in.Place)
+		if !ok || !m.ValidType(pt) || m.Types[pt].Kind != TypeCNamed || m.Types[pt].CClass != CClassRecord {
+			return NoType, false
+		}
+		for _, tf := range m.Types[pt].Fields {
+			if tf.Name == in.CField {
+				if vt, ok := f.ValueType(in.A); !ok || vt != tf.Type {
+					return NoType, false
+				}
+				return TypeUnit, true
+			}
+		}
+		return NoType, false
+
 	case OpConstGet:
 		c, ok := m.ConstDecl(in.Const)
 		if !ok {

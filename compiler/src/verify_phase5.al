@@ -81,6 +81,30 @@ fn mir_v5_c_num_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, ta
     return MirVTypeResult(valid: pair != 0, type_id: x.type_op)
 }
 
+// Field resolution for c.field.get/set on a record-class c_named type:
+// returns the field's type id, 0 when the type is not a record or the
+// instruction name names no c_field part.
+fn mir_v5_c_field_lookup(store: MirStore, indexes: MirVIndexes, t: U64, ns: U64, ne: U64) -> U64 {
+    if t == 0 || t > __s0_buffer_len(MirTypeRec, store.types) { return 0 }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, t - 1)
+    if rec.kind != mir_type_kind_c_named() || rec.c_class != mir_c_class_record() { return 0 }
+    let total = mir_vindex_type_part_count(indexes, t)
+    var at: U64 = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, t, at) - 1)
+        if part.kind == mir_type_part_c_field() && mir_vname_equal(store, ns, ne, part.name_start, part.name_end) { return part.part_type }
+        at = at + 1
+    }
+    return 0
+}
+
+// Result typing for c.field.get: the field's type, valid only when the
+// name resolves on a record operand.
+fn mir_v5_c_field_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, ta: U64) -> MirVTypeResult {
+    let ft = mir_v5_c_field_lookup(store, indexes, ta, x.name_start, x.name_end)
+    return MirVTypeResult(valid: ft != 0, type_id: ft)
+}
+
 fn mir_v5_is_enum(store: MirStore, t: U64) -> Bool { let k = mir_vtype_kind(store, t)
 return k == mir_type_kind_enum() || k == mir_type_kind_option() || k == mir_type_kind_result() }
 fn mir_v5_width(t: U64) -> U64 { if t == mir_type_i8() || t == mir_type_u8() { return 8 }
@@ -389,6 +413,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op <= mir_op_int_mul_try() { return MirVTypeResult(valid: pair, type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), ta)) }
     return MirVTypeResult(valid: pair, type_id: ta) }
     if x.op >= mir_op_c_num_try() && x.op <= mir_op_c_num_cast() { return mir_v5_c_num_result(store, indexes, x, ta) }
+    if x.op == mir_op_c_field_get() { return mir_v5_c_field_result(store, indexes, x, ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)
@@ -668,6 +693,7 @@ if !(mir_v5_is_int(ta) && mir_v5_is_int(x.type_op)) { result = try mir_v5_bad(d,
         else { result = try mir_v5_check_binding_args(d, store, indexes, result, x, id, x.target) }
     }
     if x.op == mir_op_c_is_null() && !mir_v5_is_raw_pointer(store, mir_v5_value_type(store, indexes, x.function, x.a)) { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_c_ptr(), mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a)), x.a) }
+    if x.op == mir_op_c_field_get() || x.op == mir_op_c_field_set() { result = try mir_v5_c_field_operands(d, store, indexes, result, x, id) }
     if x.op == mir_op_str_len() || x.op == mir_op_str_to_bytes() || x.op == mir_op_str_byte_checked() { let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.a))
 if k != mir_type_kind_string() && k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_string(), k, x.a) }
 if x.op == mir_op_str_byte_checked() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.b, mir_type_u64()) } }
@@ -690,6 +716,25 @@ if k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad
     if x.result != 0 { let inferred = mir_v5_infer(store, indexes, id, x)
 let stored = mir_v5_value_type(store, indexes, x.function, x.result)
 if !inferred.valid { if __s0_buffer_len(MirVerifyDiagRec, result) == baseline { result = try mir_v5_bad(d, result, mir_vdiag_bad_result_type(), x.function, x.block, id, 0, 0, 0, stored, x.result) } } else { if stored != inferred.type_id { result = try mir_v5_bad(d, result, mir_vdiag_bad_result_type(), x.function, x.block, id, 0, 0, inferred.type_id, stored, x.result) } } }
+    return Ok(result)
+}
+
+// Grammar for c.field.get/set. The read form resolves the named field on
+// the record operand's type; the write form resolves it on the target
+// place's type and checks the stored value against the field's type.
+fn mir_v5_c_field_operands(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), x: MirInstrRec, id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) { var result = out
+    var record_type: U64 = 0
+    if x.op == mir_op_c_field_get() {
+        record_type = mir_v5_value_type(store, indexes, x.function, x.a)
+    } else {
+        if x.place == 0 || x.place > __s0_buffer_len(MirPlaceRec, store.places) { return Ok(result) }
+        let placed = mir_v5_place_type(store, indexes, x.function, x.place)
+        if !placed.valid { return Ok(result) }
+        record_type = placed.type_id
+    }
+    let ft = mir_v5_c_field_lookup(store, indexes, record_type, x.name_start, x.name_end)
+    if ft == 0 { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_c_named(), mir_vtype_kind(store, record_type), x.a) }
+    if x.op == mir_op_c_field_set() && ft != 0 { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, ft) }
     return Ok(result)
 }
 

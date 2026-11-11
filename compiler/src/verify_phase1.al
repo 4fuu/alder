@@ -1,5 +1,5 @@
 fn mir_vop_produces(op: U64) -> Bool {
-    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end())
+    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end() || op == mir_op_c_field_set())
 }
 fn mir_vop_checked(op: U64) -> Bool {
     return op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked() || op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() || op == mir_op_str_byte_checked() || op == mir_op_str_concat() || op == mir_op_str_slice_checked() || op == mir_op_str_from_bytes()
@@ -26,6 +26,8 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op >= mir_op_int_trunc() && op <= mir_op_float_from_int() { return 17 }
     if op == mir_op_int_convert_checked() || op == mir_op_int_convert_wrap() { return 17 }
     if op >= mir_op_c_num_try() && op <= mir_op_c_num_cast() { return 17 }
+    if op == mir_op_c_field_get() { return 65 }
+    if op == mir_op_c_field_set() { return 73 }
     if op == mir_op_const_get() { return 64 }
     if op == mir_op_call() || op == mir_op_ffi_call_unsafe() { return 32 }
     if op == mir_op_vec_new() { return 16 }
@@ -1043,7 +1045,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_str_order_lt() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_str_order_lt(), i.op, 0)) } else {
+        if i.op > mir_op_c_field_set() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_c_field_set(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false

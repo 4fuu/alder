@@ -366,3 +366,54 @@ func TestRejectVersion5BindingSyntax(t *testing.T) {
 		t.Fatal("version 5 must reject c_* types")
 	}
 }
+
+func TestPrintBindingFieldOps(t *testing.T) {
+	m := NewModule()
+	stamp := m.AddCNamed("Stamp", "struct stamp", CClassRecord, []Field{
+		{Name: "seconds", Type: m.CRaw(CScalarLong), CName: "tv_sec"},
+		{Name: "nanos", Type: m.CRaw(CScalarLong), CName: "tv_nsec"},
+	})
+	block := m.AddBinding("sys", "time.h")
+	b := &m.Bindings[block]
+	b.Types = append(b.Types, stamp)
+	b.Funcs = append(b.Funcs, BindingFunc{Name: "zero", CName: "make_stamp", Sig: FuncSig{
+		Params: nil, Result: stamp, Env: NoType,
+	}})
+	f := m.AddFunction("main", []Param{}, TypeUnit)
+	bb := f.AddBlock("bb0", nil)
+	rec := addResultNamed(t, m, f, bb, "v0", Instr{Op: OpCBindingCall, CBinding: 0})
+	loc := f.AddLocal("rec", stamp)
+	set := Instr{Op: OpCFieldSet, Result: NoValue, A: rec, Place: Place{Kind: PlaceLocal, Local: loc}, CField: "nanos"}
+	bb.AddInstr(set)
+	flag := addResultNamed(t, m, f, bb, "v1", Instr{Op: OpCFieldGet, A: rec, CField: "seconds"})
+	_ = flag
+	bb.SetTerm(Terminator{Kind: TermReturn, Result: NoValue})
+
+	want := `mir 6
+
+binding @sys "time.h" {
+  c_type record @Stamp = "struct stamp" { seconds: c_long = "tv_sec", nanos: c_long = "tv_nsec" }
+  c_fn @zero = "make_stamp"() -> @Stamp
+}
+
+fn @main() {
+  local %rec: @Stamp
+
+bb0:
+  %v0 = c.call.unsafe @sys.zero()
+  c.field.set nanos local %rec, %v0
+  %v1 = c.field.get seconds(%v0)
+  return
+}
+`
+	if got := Print(m); got != want {
+		t.Fatalf("binding field op printing:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	parsed, err := Parse(want)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if again := Print(parsed); again != want {
+		t.Fatalf("binding field op round trip:\n%s", again)
+	}
+}

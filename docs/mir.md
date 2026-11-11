@@ -782,7 +782,7 @@ ordinary typed code may not name them (phase 9), and they cannot be element
 types of Alder aggregates or copied through Alder aggregate rules
 (phase 10).
 
-Two operations consume bindings:
+Two operations consume bindings directly, and two more consume record fields:
 
 - `c.call.unsafe` (op 69) performs one root call to a `c_fn`. Its `target`
   holds the flat binding-function index (block-major, in declaration order
@@ -794,6 +794,16 @@ Two operations consume bindings:
 - `c.is_null` (op 70) observes a raw pointer for nullity and yields `bool`.
   It is the only operation besides explicit boundaries allowed to consume a
   `raw_ptr` value (phase 9).
+- `c.field.get` (op 96) reads one field of a by-value C record. Its `a`
+  operand is a value of `c_named` record class, its target type is the
+  declared field type, and its name is the Alder field spelling of a
+  `c_field` part of that record; the verifier rejects an unknown field name,
+  a non-record receiver, or a target that does not match the field's declared
+  type. It produces a value.
+- `c.field.set` (op 97) writes one field of a by-value C record held in a
+  place. Its place must be a local of `c_named` record class, its `a` operand
+  must have the declared field type, and its name selects the same `c_field`
+  part as `c.field.get`. It binds no result.
 
 Binding operand kinds: a `c.call.unsafe` argument is `binding_param` (9)
 whose `operand_type` is the declared parameter type and whose owner is the
@@ -825,8 +835,9 @@ function-type environments, `fn.value`, and `call.value`; and current `mir 6`
 adds C binding blocks, the `c_*` raw type vocabulary, `c.call.unsafe`,
 `c.is_null`, the integer overflow method operations (71-79), the
 byte-sequence method operations (80-85), the integer conversion method
-operations (86-87), the C scalar conversion method operations (88-90), and
-the ordering comparison operation (91).
+operations (86-87), the C scalar conversion method operations (88-90), the float arithmetic
+operations (91-94), the ordering comparison operation (95), and the C
+record field operations (96-97).
 Incompatible changes must use a new version and update:
 
 - this document;

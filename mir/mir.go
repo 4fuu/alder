@@ -251,7 +251,8 @@ type Instr struct {
 	Const     string
 	Callee    FunctionId
 	FFIImport ImportId
-	CBinding  int // flattened block-major index into Module.Bindings functions
+	CBinding  int    // flattened block-major index into Module.Bindings functions
+	CField    string // c.field.get / c.field.set: the Alder field name
 	Args      []ValueId
 
 	// Checked operations: the explicit failure edge. Required for checked

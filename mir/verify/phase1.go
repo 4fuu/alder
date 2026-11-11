@@ -346,7 +346,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpStrOrderLt {
+	if in.Op > mir.OpCFieldSet {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -390,7 +390,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 			}
 		}
 	}
-	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut {
+	if in.Op == mir.OpLoad || in.Op == mir.OpStore || in.Op == mir.OpBorrow || in.Op == mir.OpBorrowMut || in.Op == mir.OpCFieldSet {
 		errs = append(errs, checkPlaceIntegrity(f, &in.Place, loc)...)
 	}
 	if in.Op == mir.OpCall && (int(in.Callee) >= len(m.Functions) || m.Functions[in.Callee] == nil) {
@@ -428,6 +428,9 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 		if in.Op == op && !m.ValidType(in.TypeOp) {
 			errs = append(errs, Error{Loc: loc, Msg: "type operand out of range"})
 		}
+	}
+	if (in.Op == mir.OpCFieldGet || in.Op == mir.OpCFieldSet) && in.CField == "" {
+		errs = append(errs, Error{Loc: loc, Msg: "c.field operation needs a record field name"})
 	}
 	return errs
 }
@@ -563,6 +566,10 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		requireAll(in.Args, "call argument")
 	case mir.OpCIsNull:
 		require(in.A, "c.is_null operand")
+	case mir.OpCFieldGet:
+		require(in.A, "c.field.get record operand")
+	case mir.OpCFieldSet:
+		require(in.A, "c.field.set value operand")
 	}
 	return errs
 }
@@ -622,6 +629,11 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 			add(in.Place.Deref)
 		}
 		add(in.StoreVal)
+	case mir.OpCFieldSet:
+		if in.Place.Kind == mir.PlaceDeref {
+			add(in.Place.Deref)
+		}
+		add(in.A)
 	case mir.OpAggregateConstruct:
 		for _, af := range in.AggFields {
 			add(af.Value)
@@ -730,6 +742,8 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 	case mir.OpIntTrunc, mir.OpIntZext, mir.OpIntSext, mir.OpFloatConvert,
 		mir.OpIntFromFloat, mir.OpFloatFromInt, mir.OpIntConvertChecked, mir.OpIntConvertWrap,
 		mir.OpCNumTry, mir.OpCNumWrap, mir.OpCNumCast:
+		add(in.A)
+	case mir.OpCFieldGet:
 		add(in.A)
 	case mir.OpCall, mir.OpFFICallUnsafe:
 		for _, v := range in.Args {

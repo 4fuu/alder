@@ -1740,6 +1740,38 @@ func (p *parser) parseOp() (Instr, error) {
 		in.Op = OpCIsNull
 		in.A, err = p.parseValueRef()
 
+	case "c.field.get", "c.field.set":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		fieldTok, fieldErr := p.expectIdent("a record field name")
+		if fieldErr != nil {
+			return in, fieldErr
+		}
+		in.CField = fieldTok.text
+		if t.text == "c.field.get" {
+			in.Op = OpCFieldGet
+			if err = p.expectPunct("("); err != nil {
+				return in, err
+			}
+			in.A, err = p.parseValueRef()
+			if err != nil {
+				return in, err
+			}
+			err = p.expectPunct(")")
+			break
+		}
+		// The write form stores into a place holding the record, in the
+		// same operand order as store: place first, then the value.
+		in.Op = OpCFieldSet
+		if in.Place, err = p.parsePlace(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.A, err = p.parseValueRef()
+
 	default:
 		return in, p.errf(t, "unknown operation %q", t.text)
 	}

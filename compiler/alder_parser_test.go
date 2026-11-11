@@ -385,10 +385,10 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"match-binding-eof.al", "fn bad(x: U64) -> U64 {\n return match x { Some(", 3, "", 0, 0},
 		{"match-body-eof.al", "fn bad(x: U64) -> U64 {\n return match x { Some =>", 12, "", 0, 0},
 		{"unsafe-language.al", "fn bad() -> U64 {\n return unsafe rust { f() }\n}\n", 17, "rust", 0, 4},
-		{"unsafe-not-call.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x }\n}\n", 18, "unsafe", 0, 6},
-		{"unsafe-binary-root.al", "fn bad() -> U64 {\n return unsafe c { f() + g() }\n}\n", 18, "unsafe", 0, 6},
+		{"unsafe-not-call.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x }\n}\n", 30, "unsafe", 0, 6},
+		{"unsafe-binary-root.al", "fn bad() -> U64 {\n return unsafe c { f() + g() }\n}\n", 30, "unsafe", 0, 6},
 		{"unsafe-extra-expression.al", "fn bad(x: U64) -> U64 {\n return unsafe c { f() x }\n}\n", 18, "x }", 0, 1},
-		{"unsafe-not-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x", 18, "unsafe", 0, 6},
+		{"unsafe-not-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { x", 30, "unsafe", 0, 6},
 		{"unsafe-call-eof.al", "fn bad(x: U64) -> U64 {\n return unsafe c { f()", 18, "", 0, 0},
 		{"for-missing-in.al", "fn bad(xs: U64) -> U64 {\n for x xs {}\n}\n", 4, "xs {}", 0, 2},
 		// `using x = expr` without a `with` clause is the M7.5 public form, so

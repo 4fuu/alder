@@ -1,0 +1,51 @@
+mir 6
+
+binding @rec "crecord.h" {
+  c_type record @pair = "struct crec_pair" { left: c_long = "left", right: c_ulong = "right" }
+  c_fn @make = "crec_make"(c_long, c_ulong) -> @pair
+  c_fn @left = "crec_left"(@pair) -> c_long
+  c_fn @bump = "crec_bump_left"(@pair, c_long) -> @pair
+  c_fn @total = "crec_total"(@pair) -> c_long
+}
+
+fn @read_left(%p: @pair) -> c_long {
+entry:
+  %v = c.field.get left(%p)
+  return %v
+}
+
+fn @read_right(%p: @pair) -> c_ulong {
+entry:
+  %v = c.field.get right(%p)
+  return %v
+}
+
+fn @write_left(%seed: @pair, %v: c_long) -> @pair {
+  local %s: @pair
+
+entry:
+  store local %s, %seed
+  c.field.set left local %s, %v
+  %q = load local %s
+  return %q
+}
+
+fn @round_trip(%l: c_long, %r: c_ulong) -> c_long {
+entry:
+  %p = c.call.unsafe @rec.make(%l, %r)
+  %t = c.call.unsafe @rec.total(%p)
+  return %t
+}
+
+fn @round_trip_pair(%l: c_long, %r: c_ulong) -> @pair {
+entry:
+  %p = c.call.unsafe @rec.make(%l, %r)
+  return %p
+}
+
+fn @bump_and_read(%p: @pair, %d: c_long) -> c_long {
+entry:
+  %q = c.call.unsafe @rec.bump(%p, %d)
+  %v = c.field.get left(%q)
+  return %v
+}

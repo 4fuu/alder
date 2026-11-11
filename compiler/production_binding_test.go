@@ -147,11 +147,6 @@ var m8BindingRejections = []struct {
 		"non-scalar C binding types are only valid behind c.Ptr or c.ConstPtr",
 	},
 	{
-		"record-by-value",
-		"import c \"time.h\" as ctime {\n    record type T = \"t_t\" {\n        a: c.Int\n    }\n    raw fn f = \"f\"(v: T) -> c.Int\n}\nfn main() -> I32 { return 0 }\n",
-		"non-scalar C binding types are only valid behind c.Ptr or c.ConstPtr",
-	},
-	{
 		"non-integral-const",
 		"import c \"time.h\" as ctime {\n    const Epsilon = \"EPSILON\": c.Double\n}\nfn main() -> I32 { return 0 }\n",
 		"a C binding constant must have an integral c.* type",

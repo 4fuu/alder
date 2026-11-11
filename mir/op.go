@@ -157,6 +157,12 @@ const (
 	// strictly before the right one in unsigned byte-lexicographic order
 	// with the shorter prefix ordering first.
 	OpStrOrderLt
+
+	// OpCFieldGet reads a record field inside an unsafe c block and
+	// OpCFieldSet writes one. Their type_op names the record type and the
+	// name operand carries the field's C spelling.
+	OpCFieldGet
+	OpCFieldSet
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -359,6 +365,10 @@ func (k OpKind) String() string {
 		return "float.div"
 	case OpStrOrderLt:
 		return "str.order_lt"
+	case OpCFieldGet:
+		return "c.field.get"
+	case OpCFieldSet:
+		return "c.field.set"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -367,7 +377,7 @@ func (k OpKind) String() string {
 func (k OpKind) ProducesResult() bool {
 	switch k {
 	case OpStore, OpDomainReset, OpDomainDestroy, OpCleanupDisarm,
-		OpCleanupScopeRun, OpCleanupScopeEnd, OpTableViewEnd:
+		OpCleanupScopeRun, OpCleanupScopeEnd, OpTableViewEnd, OpCFieldSet:
 		return false
 	}
 	return true

@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_str_order_lt() { return false }
+        if item.op > mir_op_c_field_set() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -992,6 +992,59 @@ fn cgen_emit_int_convert_wrap(d: Domain, initial: CgenWriter, store: MirStore, i
     out = try cgen_put(d, out, ", sizeof(")
     out = try cgen_put_tmp(d, out, item.result, "")
     return cgen_put(d, out, "));\n")
+}
+
+// The C-boundary record field operations. The record operand renders as
+// its declared C spelling, so the access is an ordinary C member read or
+// write through the verified binding's field spelling.
+fn cgen_emit_c_field_access(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    if item.op == mir_op_c_field_set() {
+        // The write form targets a place holding the record: an ordinary
+        // C member assignment through the verified binding's field
+        // spelling.
+        let place_type = cgen_place_type(store, indexes, item.function, item.place)
+        let field = cgen_c_field_part(store, indexes, place_type, item.name_start, item.name_end)
+        if field.owner == 0 {
+            return cgen_put(d, initial, "  /* missing c field part */\n")
+        }
+        var out = try cgen_put(d, initial, "  ")
+        out = try cgen_put_place(d, out, store, indexes, item.function, item.place)
+        out = try cgen_put(d, out, ".")
+        out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+        out = try cgen_put(d, out, " = ")
+        out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+        return cgen_put(d, out, ";\n")
+    }
+    let rec_type = cgen_value_type(store, indexes, item.function, item.a)
+    let field = cgen_c_field_part(store, indexes, rec_type, item.name_start, item.name_end)
+    if field.owner == 0 {
+        return cgen_put(d, initial, "  /* missing c field part */\n")
+    }
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ".")
+    out = try cgen_put_name(d, out, store, field.c_name_start, field.c_name_end)
+    return cgen_put(d, out, ";\n")
+}
+
+// Field lookup for the C-boundary field operations: the c_field part whose
+// Alder name matches the instruction name. owner 0 means not found; real
+// parts always carry their record's type id.
+fn cgen_c_field_part(store: MirStore, indexes: MirVIndexes, rec_type: U64, ns: U64, ne: U64) -> MirTypePartRec {
+    var not_found = MirTypePartRec(kind: 0, owner: 0, ordinal: 0, name_start: 0, name_end: 0, part_type: 0, c_name_start: 0, c_name_end: 0)
+    if rec_type == 0 || rec_type > __s0_buffer_len(MirTypeRec, store.types) { return not_found }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, rec_type - 1)
+    if rec.kind != mir_type_kind_c_named() || rec.c_class != mir_c_class_record() { return not_found }
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirTypePartRec, store.type_parts) {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, at)
+        if part.kind == mir_type_part_c_field() && part.owner == rec_type && mir_vname_equal(store, part.name_start, part.name_end, ns, ne) { return part }
+        at = at + 1
+    }
+    return not_found
 }
 
 // C-boundary conversion emission (M8). Total pairs and wrapping forms emit a
@@ -2080,6 +2133,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_int_convert_checked() { return cgen_emit_int_convert_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_int_convert_wrap() { return cgen_emit_int_convert_wrap(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
 

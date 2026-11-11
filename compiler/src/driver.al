@@ -190,6 +190,7 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 22 { return out_string("public C binding blocks are not supported; bind through a private binding block") }
     if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
     if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
+    if kind == 30 { return out_string("unsafe c block must contain a direct call or field access") }
     if kind == 50 { return out_string("a generic implementation is a trait implementation: write `impl(Param: type(Trait)) Trait for Type`") }
     return out_string("invalid source syntax")
 }
@@ -262,6 +263,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 203 { return out_string("a C binding call's non-unit result must be used") }
     if kind == 204 { return out_string("unsafe c does not name a raw fn of a C binding block") }
     if kind == 205 { return out_string("no such C conversion method on this receiver") }
+    if kind == 206 { return out_string("unsafe c field access requires a local binding holding a C record value") }
+    if kind == 207 { return out_string("no such field on the bound C record") }
+    if kind == 208 { return out_string("a C field assignment value does not match the field's declared binding type") }
+    if kind == 209 { return out_string("a C field assignment requires a var binding") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

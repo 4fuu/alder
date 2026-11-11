@@ -437,6 +437,29 @@ func (m *Module) AddCNamed(name, cName string, class CClass, fields []Field) Typ
 	return TypeId(len(m.Types) - 1)
 }
 
+// CNamedRecordField resolves one field of a record-class c_named value:
+// the value must carry a TypeCNamed type with CClassRecord whose field list
+// names field. It returns the record's type id and the field declaration.
+func (m *Module) CNamedRecordField(f *Function, value ValueId, field string) (TypeId, Field, bool) {
+	if f == nil {
+		return NoType, Field{}, false
+	}
+	t, ok := f.ValueType(value)
+	if !ok || !m.ValidType(t) {
+		return NoType, Field{}, false
+	}
+	nt := &m.Types[t]
+	if nt.Kind != TypeCNamed || nt.CClass != CClassRecord {
+		return NoType, Field{}, false
+	}
+	for _, tf := range nt.Fields {
+		if tf.Name == field {
+			return t, tf, true
+		}
+	}
+	return t, Field{}, false
+}
+
 // Option interns and returns option(elem).
 func (m *Module) Option(elem TypeId) TypeId {
 	return m.intern(TypeOption, func(t *Type) bool { return t.Elem == elem }, func(t *Type) { t.Elem = elem })

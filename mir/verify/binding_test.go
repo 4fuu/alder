@@ -390,3 +390,108 @@ bb0:
 		t.Fatalf("c.is_null on raw/legacy pointers rejected:\n%s", Errors(errs).String())
 	}
 }
+
+func TestBindingRecordByValueAndFieldsAccepted(t *testing.T) {
+	const text = `mir 6
+
+binding @sys "time.h" {
+  c_type record @stamp = "struct timespec" { seconds: c_long = "tv_sec", nanos: c_long = "tv_nsec" }
+  c_fn @zero = "make_stamp"() -> @stamp
+  c_fn @take = "take_stamp"(@stamp) -> c_long
+}
+
+fn @main(%n: c_long) -> c_long {
+  local %s: @stamp
+
+bb0:
+  %r = c.call.unsafe @sys.zero()
+  store local %s, %r
+  c.field.set nanos local %s, %n
+  %v = load local %s
+  %t = c.call.unsafe @sys.take(%v)
+  %u = c.field.get seconds(%v)
+  return %u
+}
+`
+	if errs := Module(mustParse(t, text)); len(errs) != 0 {
+		t.Fatalf("record by value and c.field ops rejected:\n%s", Errors(errs).String())
+	}
+}
+
+func TestCFieldRejectedOnNonRecord(t *testing.T) {
+	const text = `mir 6
+
+binding @sys "time.h" {
+  c_type scalar @sec = "time_t"
+  c_fn @now = "clock"() -> @sec
+}
+
+fn @main() -> u64 {
+bb0:
+  %t = c.call.unsafe @sys.now()
+  %v = c.field.get seconds(%t)
+  return %v
+}
+`
+	mustReject(t, text, "record-class c_type value")
+}
+
+func TestCFieldRejectedOnUnknownField(t *testing.T) {
+	const text = `mir 6
+
+binding @sys "time.h" {
+  c_type record @stamp = "struct timespec" { seconds: c_long = "tv_sec" }
+  c_fn @zero = "make_stamp"() -> @stamp
+}
+
+fn @main() -> c_long {
+bb0:
+  %s = c.call.unsafe @sys.zero()
+  %v = c.field.get nanos(%s)
+  return %v
+}
+`
+	mustReject(t, text, `not a field of record @stamp`)
+}
+
+func TestCFieldSetRejectedOnTypeMismatch(t *testing.T) {
+	const text = `mir 6
+
+binding @sys "time.h" {
+  c_type record @stamp = "struct timespec" { seconds: c_long = "tv_sec" }
+  c_fn @zero = "make_stamp"() -> @stamp
+  c_fn @flag = "stamp_flag"() -> c_int
+}
+
+fn @main() -> c_long {
+  local %s: @stamp
+
+bb0:
+  %r = c.call.unsafe @sys.zero()
+  store local %s, %r
+  %n = c.call.unsafe @sys.flag()
+  c.field.set seconds local %s, %n
+  %v = c.field.get seconds(%r)
+  return %v
+}
+`
+	mustReject(t, text, `c.field.set "seconds"`)
+}
+
+func TestCFieldGetResultTypePinned(t *testing.T) {
+	const text = `mir 6
+
+binding @sys "time.h" {
+  c_type record @stamp = "struct timespec" { seconds: c_long = "tv_sec" }
+  c_fn @zero = "make_stamp"() -> @stamp
+}
+
+fn @main() -> c_int {
+bb0:
+  %s = c.call.unsafe @sys.zero()
+  %v = c.field.get seconds(%s)
+  return %v
+}
+`
+	mustReject(t, text, "return operand: expected c_int, got c_long")
+}

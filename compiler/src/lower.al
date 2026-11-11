@@ -858,8 +858,8 @@ fn lower_storage_domain_value(state: LowerState, store: CheckStore, owner: U64, 
 
 // A binding spelling byte range to a string: explicit "..." spellings live
 // in state.values (source zero), name spellings in a source file.
-fn lower_binding_word(d: Domain, source_state: State, source: U64, start: U64, end: U64) -> Result(__s0_String, __s0_Error) {
-    if source == 0 { return lower_word(d, source_state.values, start, end) }
+fn lower_binding_word(d: Domain, source_state: State, from_values: Bool, source: U64, start: U64, end: U64) -> Result(__s0_String, __s0_Error) {
+    if from_values { return lower_word(d, source_state.values, start, end) }
     return lower_source_word(d, source_state, source, start, end)
 }
 
@@ -952,7 +952,7 @@ fn lower_binding_named(d: Domain, source_state: State, store: CheckStore, state:
     if found == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, found - 1)
     let name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
-    let c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+    let c_name = try lower_binding_word(d, source_state, member.spelling_values, member.spelling_source, member.spelling_start, member.spelling_end)
     let built = try mir_add_c_named_type(d, state.mir, name, c_name, member.class)
     return Ok(LowerStep(state: lower_with_mir(state, built.store), id: built.type_id))
 }
@@ -968,7 +968,7 @@ fn lower_binding_fields(d: Domain, source_state: State, store: CheckStore, state
         let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, field_at)
         if field.owner == member_index {
             let field_name = try lower_source_word(d, source_state, field.name_source, field.name_start, field.name_end)
-            let field_c_name = try lower_binding_word(d, source_state, field.spelling_source, field.spelling_start, field.spelling_end)
+            let field_c_name = try lower_binding_word(d, source_state, field.spelling_values, field.spelling_source, field.spelling_start, field.spelling_end)
             let field_type = try lower_binding_type(d, source_state, store, current, field.type_index)
             if !field_type.state.valid { return Ok(field_type.state) }
             current = lower_with_mir(field_type.state, try mir_add_c_field_part(d, field_type.state.mir, type_id, ordinal, field_name, field_c_name, field_type.id))
@@ -1667,7 +1667,7 @@ fn lower_binding_claims(d: Domain, source_state: State, store: CheckStore, state
     while block_at < __s0_buffer_len(BindingBlockRec, store.bindings.blocks) {
         let block = __s0_buffer_get(BindingBlockRec, store.bindings.blocks, block_at)
         let name = try lower_source_word(d, source_state, block.name_source, block.name_start, block.name_end)
-        let header = try lower_binding_word(d, source_state, block.header_source, block.header_start, block.header_end)
+        let header = try lower_binding_word(d, source_state, true, block.header_source, block.header_start, block.header_end)
         let made = try mir_add_binding(d, current.mir, name, header)
         current = lower_with_mir(current, made.store)
         var member_at: U64 = 0
@@ -1712,7 +1712,7 @@ fn lower_binding_declarations(d: Domain, source_state: State, store: CheckStore,
             let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
             if member.block_node == block.node && member.member_kind == 2 {
                 let fn_name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
-                let fn_c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+                let fn_c_name = try lower_binding_word(d, source_state, member.spelling_values, member.spelling_source, member.spelling_start, member.spelling_end)
                 let result_type = try lower_binding_type(d, source_state, store, current, member.checked_type)
                 if !result_type.state.valid { return Ok(result_type.state) }
                 let made_fn = try mir_add_binding_fn(d, result_type.state.mir, block_at + 1, fn_name, fn_c_name, result_type.id)
@@ -1738,7 +1738,7 @@ fn lower_binding_declarations(d: Domain, source_state: State, store: CheckStore,
             let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_at)
             if member.block_node == block.node && member.member_kind == 3 {
                 let const_name = try lower_source_word(d, source_state, member.name_source, member.name_start, member.name_end)
-                let const_c_name = try lower_binding_word(d, source_state, member.spelling_source, member.spelling_start, member.spelling_end)
+                let const_c_name = try lower_binding_word(d, source_state, member.spelling_values, member.spelling_source, member.spelling_start, member.spelling_end)
                 let const_type = try lower_binding_type(d, source_state, store, current, member.checked_type)
                 if !const_type.state.valid { return Ok(const_type.state) }
                 current = const_type.state
@@ -3986,6 +3986,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let result = try lower_add_result(d, typ.state, function, block, expression.checked_type, source_state, store)
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_c_is_null(), result.id, 0, 0, child.id, 0, 0, "")
         return Ok(LowerStep(state: instr.state, id: result.id))
+    }
+    if expression.kind == 27 || expression.kind == 28 {
+        return lower_c_field_access(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block)
     }
     if expression.kind == 23 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
@@ -6689,6 +6692,38 @@ fn lower_order_bool_less(d: Domain, source_state: State, spans: __s0_Buffer(Chec
     return Ok(LowerStep(state: current, id: param.id))
 }
 
+// M8 C-boundary record fields. The read lowers to c.field.get over the
+// base local's record value; the write lowers to c.field.set through the
+// base local's MIR place with the checked value in slot a and yields no
+// value. The checker pins the base to a single-word local read (kind 5),
+// whose parameter_use names the local, and stores the 1-based field record
+// index in the field expression's own parameter_use.
+fn lower_c_field_access(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(BindingFieldRec, store.bindings.fields) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    if expression.child_count == 0 || expression.first_child == 0 || expression.child_count > 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let base_child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    if base_child == 0 || base_child > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let base_expr = __s0_buffer_get(CheckedExprRec, store.expressions, base_child - 1)
+    if base_expr.kind != 1 && base_expr.kind != 5 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    if base_expr.parameter_use == 0 || base_expr.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, expression.parameter_use - 1)
+    let name = try lower_source_word(d, source_state, field.name_source, field.name_start, field.name_end)
+    if expression.kind == 27 {
+        let base = try lower_expression(d, source_state, spans, store, state, owner, function, block, base_child, environment, panic_block)
+        if !base.state.valid { return Ok(base) }
+        let result = try lower_add_result(d, base.state, function, block, expression.checked_type, source_state, store)
+        let instr = try lower_add_instr(d, result.state, function, block, mir_op_c_field_get(), result.id, 0, 0, base.id, 0, 0, name)
+        return Ok(LowerStep(state: instr.state, id: result.id))
+    }
+    let lookup = lower_binding_lookup(state, base_expr.parameter_use)
+    if lookup.parameter != 0 || lookup.mir_id == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let value_child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let value = try lower_expression(d, source_state, spans, store, state, owner, function, block, value_child, environment, panic_block)
+    if !value.state.valid { return Ok(value) }
+    let instr = try lower_add_instr(d, value.state, function, block, mir_op_c_field_set(), 0, lookup.mir_id, 0, value.id, 0, 0, name)
+    return Ok(LowerStep(state: instr.state, id: 0))
+}
+
 // M8 C-boundary conversions: lower to c.num.try, c.num.wrap, or c.num.cast
 // with the receiver value in slot a and the target type in type_op (the
 // option(E) type for the try form, where E is the target scalar). The
@@ -7329,7 +7364,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 26 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 28 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -7356,6 +7391,22 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         }
         if item.kind == 1 || item.kind == 5 || item.kind == 22 {
             if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(LocalRec, store.locals) || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).owner != item.owner { return false }
+        }
+        if item.kind == 27 || item.kind == 28 {
+            // C-boundary field access: the field record lives under a
+            // record type member, and the base child is the owner's local
+            // read. The value child's type identity stays checker-enforced.
+            if item.parameter_use == 0 || item.parameter_use > __s0_buffer_len(BindingFieldRec, store.bindings.fields) { return false }
+            let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, item.parameter_use - 1)
+            if field.owner == 0 || field.owner > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return false }
+            if __s0_buffer_get(BindingMemberRec, store.bindings.members, field.owner - 1).member_kind != 1 { return false }
+            if item.annotation != 0 || item.operator != 0 { return false }
+            if item.child_count != 1 && item.child_count != 2 { return false }
+            if item.kind == 27 && item.child_count != 1 { return false }
+            let base = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
+            if base.kind != 1 && base.kind != 5 { return false }
+            if base.parameter_use == 0 || base.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return false }
+            if __s0_buffer_get(LocalRec, store.locals, base.parameter_use - 1).owner != item.owner { return false }
         }
         if item.kind == 1 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 1 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
         if item.kind == 5 && (__s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).kind != 2 || __s0_buffer_get(LocalRec, store.locals, item.parameter_use - 1).checked_type != item.checked_type) { return false }
@@ -7538,7 +7589,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
                 element_at = element_at + 1
             }
         }
-        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.kind != 22 && item.kind != 24 && item.parameter_use != 0 { return false }
+        if item.kind != 1 && item.kind != 5 && item.kind != 12 && item.kind != 13 && item.kind != 21 && item.kind != 22 && item.kind != 24 && item.kind != 27 && item.kind != 28 && item.parameter_use != 0 { return false }
         at = at + 1
     }
     at = 0

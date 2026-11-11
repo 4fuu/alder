@@ -400,7 +400,10 @@ Implemented expressions include:
   arms (kind 135), a table-view match rejects them (kind 133), and a match
   whose every arm diverges has no value and is rejected (kind 305);
 - prefix `try` with the exact same error type;
-- a single direct imported call in `unsafe c { ... }`;
+- inside `unsafe c { ... }`: one direct imported call, one C record field
+  read `rec.field`, or one C record field write `rec.field = value` through
+  a `var` local holding a verified by-value C record; the field forms are
+  rejected with kinds 206-209 outside those shapes;
 - M7.5 table identity: `Table(T)` over concrete ordinary values (including
   vec-bearing records),
   `Table.new(T)`, `t.insert(value) -> T.Id`, `t.remove(id) -> Bool`, and
@@ -543,7 +546,8 @@ this document split, it contains:
   integer literals, and decoded string literals, plus direct calls with
   all-or-none explicit or inferred generic arguments, generic record
   constructors, expected-type generic enum variants, and direct
-  imported calls inside `unsafe c`. Checked bodies also retain exhaustive enum,
+  imported calls and verified-record field reads and writes inside
+  `unsafe c`. Checked bodies also retain exhaustive enum,
   `Option`, and `Result` matches (including expression statements), concrete
   builtin constructors, and exact-error-type `try` records;
 - deterministic concrete function specialization closure. Instances are keyed

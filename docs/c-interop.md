@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, and the checked scalar conversions are checked end to end, while records by value, unsafe field access, exports, and callbacks are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, and `unsafe c` field access are checked end to end, while exports, ownership/retention wrappers, CString, and callbacks are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -253,7 +253,16 @@ system C compiler remains the layout authority. Alder does not reproduce ABI
 packing algorithms independently.
 
 - ordinary non-bitfield fields may be read/written in `unsafe c` through the
-  verified binding;
+  verified binding. A read `unsafe c { rec.field }` requires a local binding
+  holding that record's value and yields the field's declared binding type; a
+  write `unsafe c { rec.field = value }` additionally requires a `var`
+  binding and a value whose type matches the field's declared binding type
+  exactly, and yields `Unit`. The receiver must be a single-word local name:
+  parameters and nested selectors are rejected because the write targets that
+  local's place. A scalar or opaque member binding is not a field receiver;
+- raw fn signatures move complete records by value in both directions, and
+  the generated C uses the declared record spelling directly, so a C callee
+  that returns or takes `struct S` round-trips through Alder locals;
 - unions are opaque in safe code; a wrapper selects and validates the active
   member;
 - bitfields and flexible array members require a C shim with ordinary getter,

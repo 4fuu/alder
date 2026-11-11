@@ -12,23 +12,26 @@ import (
 
 // runFixtures pairs each behavior fixture with its C driver. The driver
 // includes the generated translation unit ("gen.c"), so static functions and
-// type definitions are visible to it.
+// type definitions are visible to it. An extra fixture source is compiled
+// and linked with the program when the binding probes a real C record.
 var runFixtures = []struct {
 	mir    string
 	driver string
+	extra  string
 }{
-	{"checked", "checked_driver.c"},
-	{"loop", "loop_driver.c"},
-	{"enum", "enum_driver.c"},
-	{"domain", "domain_driver.c"},
-	{"cleanup", "cleanup_driver.c"},
-	{"table", "table_driver.c"},
-	{"cfg", "cfg_driver.c"},
-	{"regressions", "regressions_driver.c"},
-	{"str", "str_driver.c"},
-	{"convert", "convert_driver.c"},
-	{"cnum", "cnum_driver.c"},
-	{"float", "float_driver.c"},
+	{"checked", "checked_driver.c", ""},
+	{"loop", "loop_driver.c", ""},
+	{"enum", "enum_driver.c", ""},
+	{"domain", "domain_driver.c", ""},
+	{"cleanup", "cleanup_driver.c", ""},
+	{"table", "table_driver.c", ""},
+	{"cfg", "cfg_driver.c", ""},
+	{"regressions", "regressions_driver.c", ""},
+	{"str", "str_driver.c", ""},
+	{"convert", "convert_driver.c", ""},
+	{"cnum", "cnum_driver.c", ""},
+	{"float", "float_driver.c", ""},
+	{"crecord", "crecord_driver.c", "crecord.c"},
 }
 
 // buildRuntimeObject compiles the runtime once under the strict warning set
@@ -60,6 +63,7 @@ func runArgs(gen, driver, object string) []string {
 		"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
 		"-Wshadow", "-Wconversion", "-ffp-contract=off",
 		"-I", filepath.Dir(gen),
+		"-I", "testdata/run",
 		"-I", filepath.Join("..", "runtime", "c"),
 		gen, driver, object,
 	}
@@ -94,6 +98,9 @@ func TestRunFixtures(t *testing.T) {
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
 					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver), object)
+					if rf.extra != "" {
+						args = append(args, filepath.Join("testdata", "run", rf.extra))
+					}
 					args = append(args, "-o", exe)
 					if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 						t.Fatalf("compile %s failed: %v\n%s", rf.mir, err, out)
@@ -522,6 +529,9 @@ func TestRunFixturesSanitizers(t *testing.T) {
 					gen := generateRun(t, rf.mir)
 					exe := filepath.Join(t.TempDir(), rf.mir+".exe")
 					args := runArgs(gen, filepath.Join("testdata", "run", rf.driver), object)
+					if rf.extra != "" {
+						args = append(args, filepath.Join("testdata", "run", rf.extra))
+					}
 					args = append(args,
 						"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer",
 						"-o", exe)

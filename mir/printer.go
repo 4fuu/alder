@@ -411,6 +411,12 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCNumTry, OpCNumWrap, OpCNumCast:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
 
+	case OpCFieldGet:
+		b.WriteString(" " + in.CField + "(" + valueName(f, in.A) + ")")
+
+	case OpCFieldSet:
+		b.WriteString(" " + in.CField + " " + printPlace(m, f, &in.Place) + ", " + valueName(f, in.A))
+
 	case OpConstGet:
 		b.WriteString(" @" + in.Const)
 

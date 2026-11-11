@@ -569,6 +569,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 
 	case mir.OpCIsNull:
 		b.WriteString("  " + g.val(in.Result) + " = (bool)((" + g.valueExpr(in.A) + ") == (void *)0);\n")
+
+	case mir.OpCFieldGet, mir.OpCFieldSet:
+		g.emitCFieldAccess(b, in)
 	}
 }
 
@@ -1329,6 +1332,46 @@ func (g *gen) cConvCompare(src, dst mir.TypeId, tmp string) string {
 		return tmp + " >= 0 && (uint64_t)" + tmp + " <= (uint64_t)" + cConvLimit(g.m, dst, false)
 	}
 	return "(uint64_t)" + tmp + " <= (uint64_t)" + cConvLimit(g.m, dst, false)
+}
+
+// emitCFieldAccess lowers the C-boundary record field operations. The
+// record operand renders as its declared C spelling, so the access is an
+// ordinary C member read or write through the verified binding's field
+// spelling.
+func (g *gen) emitCFieldAccess(b *strings.Builder, in *mir.Instr) {
+	if in.Op == mir.OpCFieldSet {
+		// The write form targets a place holding the record: an ordinary
+		// C member assignment through the verified binding's field
+		// spelling.
+		field, ok := g.cFieldAtPlace(&in.Place, in.CField)
+		if !ok {
+			b.WriteString("  /* unreachable c.field.set */\n")
+			return
+		}
+		b.WriteString("  " + g.place(&in.Place) + "." + field.CName + " = " + g.valueExpr(in.A) + ";\n")
+		return
+	}
+	_, field, ok := g.m.CNamedRecordField(g.f, in.A, in.CField)
+	if !ok {
+		b.WriteString("  /* unreachable c.field */\n")
+		return
+	}
+	b.WriteString("  " + g.val(in.Result) + " = " + g.valueExpr(in.A) + "." + field.CName + ";\n")
+}
+
+// cFieldAtPlace resolves the field declaration of the record type a place
+// holds, for the write form.
+func (g *gen) cFieldAtPlace(p *mir.Place, name string) (mir.Field, bool) {
+	t, ok := g.m.PlaceType(g.f, p)
+	if !ok || !g.m.ValidType(t) || g.m.Types[t].Kind != mir.TypeCNamed || g.m.Types[t].CClass != mir.CClassRecord {
+		return mir.Field{}, false
+	}
+	for _, tf := range g.m.Types[t].Fields {
+		if tf.Name == name {
+			return tf, true
+		}
+	}
+	return mir.Field{}, false
 }
 
 // emitCNumConvert lowers the C-boundary conversion operations. Integer

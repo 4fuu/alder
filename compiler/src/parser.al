@@ -406,10 +406,30 @@ fn parse_unsafe_c(d: Domain, state: State, initial: ParseCursor, depth: U64) -> 
     if parse_step_bad(expr) { return Ok(expr) }
     let value = parse_step_value(expr)
     let rec = __s0_buffer_get(SyntaxRec, value.cursor.store.nodes, value.node - 1)
-    if rec.kind != 27 { return reject_parse(d, state, initial, 18) }
-    if !token_punct(state, value.cursor, "}") { return reject_parse(d, state, value.cursor, 18) }
-    let close = parse_token(state, value.cursor)
-    cursor = try add_link(d, ParseCursor(token: value.cursor.token + 1, store: value.cursor.store), value.node, 0)
+    // Inside the braces: a direct call, a field read, or a field write.
+    // The write form is an assignment-shaped selector; its right-hand side
+    // must stay on the same line as the selector.
+    var end_cursor = value.cursor
+    if rec.kind == 29 {
+        if token_punct(state, end_cursor, "=") {
+            let rhs_cursor = ParseCursor(token: end_cursor.token + 1, store: end_cursor.store)
+            if !expression_line_ok(state, rhs_cursor, depth) { return reject_parse(d, state, rhs_cursor, 13) }
+            let rhs = try parse_expression(d, state, rhs_cursor, depth + 1)
+            if parse_step_bad(rhs) { return Ok(rhs) }
+            let written = parse_step_value(rhs)
+            end_cursor = written.cursor
+            let head = try add_link(d, ParseCursor(token: end_cursor.token + 1, store: end_cursor.store), value.node, 0)
+            let head_id = __s0_buffer_len(SyntaxLinkRec, head.store.links)
+            cursor = try add_link(d, head, written.node, head_id)
+        } else {
+            cursor = try add_link(d, ParseCursor(token: end_cursor.token + 1, store: end_cursor.store), value.node, 0)
+        }
+    } else {
+        if rec.kind != 27 { return reject_parse(d, state, initial, 30) }
+        cursor = try add_link(d, ParseCursor(token: end_cursor.token + 1, store: end_cursor.store), value.node, 0)
+    }
+    if !token_punct(state, end_cursor, "}") { return reject_parse(d, state, end_cursor, 18) }
+    let close = parse_token(state, end_cursor)
     let node = try add_syntax(d, cursor, 36, initial.token + 1, start.source, start.start, close.end, 0, 0, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
     return Ok(Parsed(node))
 }

@@ -1479,6 +1479,30 @@ zeros, 1/±0 → ±Inf, overflow, exact sums, and no-contraction under
 supports it. C-interop float-value assertions can now compare exactly instead
 of observing the checked narrowing's `some`/`none`.
 
+Landed C-interop progress continues with by-value verified records. The
+checker accepts raw fn signatures with complete record parameters and
+results, and inside `unsafe c` the field read `rec.field` (yielding the
+field's declared binding type) and the field write `rec.field = value`
+(requiring a `var` local and an exactly matching value type), rejecting a
+non-record or scalar receiver with diagnostic 206, an unknown field with
+207, a value type mismatch with 208, and a write through a non-`var`
+binding with 209; lowering assigns record fields source-order MIR ordinals
+that match the raw-fn parameter ordinals, and MIR gains operations 91-92
+(`c.field.get`/`c.field.set`) validated by the verifier, mirrored in the Go
+verifier, printer, and op model. The C backend lowers field reads and
+writes to plain member access through the declared C spelling and moves
+records by value through raw fn calls using the declared struct spelling;
+binding emission pins field offset, fit, and type with `_Static_assert`/
+`_Generic` probes per field. Evidence: the MIR-level `mir/verify` binding
+tests, the cgen run fixture `cgen/testdata/run/crecord.mir`, and the
+production qualification `compiler/production_c_record_test.go` (a
+C-fixture program moving a record by value in every direction, compiled and
+run under the strict warning set, print/MIR and cross-process determinism,
+and five checker rejections); the surface is documented in
+[docs/c-interop.md](docs/c-interop.md) "C records, unions, bitfields, and
+variadics", [docs/mir.md](docs/mir.md) "Binding Blocks and C Types", and
+[docs/c-backend.md](docs/c-backend.md).
+
 ## Milestone 9: Async Runtime and Structured Concurrency
 
 Status: **required before Alder 1.0**

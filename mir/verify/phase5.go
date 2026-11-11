@@ -496,6 +496,47 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 		} else if tb != ta {
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "str.order_lt operands must have the same type"})
 		}
+
+	case mir.OpCFieldGet, mir.OpCFieldSet:
+		if in.Op == mir.OpCFieldGet {
+			_, _, ok := m.CNamedRecordField(f, in.A, in.CField)
+			if !ok {
+				if t, tok := f.ValueType(in.A); tok && m.ValidType(t) && m.Types[t].Kind == mir.TypeCNamed && m.Types[t].CClass == mir.CClassRecord {
+					c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("c.field %q is not a field of record @%s", in.CField, m.Types[t].Name)})
+				} else {
+					c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.field operand must be a record-class c_type value"})
+				}
+			}
+			break
+		}
+		// The write form targets a place holding the record: the place
+		// must be mutable and the stored value must have the field's type.
+		pt, ok := m.PlaceType(f, &in.Place)
+		if !ok {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.field.set place is not well-formed"})
+			break
+		}
+		if !m.ValidType(pt) || m.Types[pt].Kind != mir.TypeCNamed || m.Types[pt].CClass != mir.CClassRecord {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.field.set place must hold a record-class c_type"})
+			break
+		}
+		if !placeMutable(m, f, &in.Place) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.field.set target is read-only"})
+		}
+		var field *mir.Field
+		for i := range m.Types[pt].Fields {
+			if m.Types[pt].Fields[i].Name == in.CField {
+				field = &m.Types[pt].Fields[i]
+				break
+			}
+		}
+		if field == nil {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("c.field %q is not a field of record @%s", in.CField, m.Types[pt].Name)})
+			break
+		}
+		if t, tok := f.ValueType(in.A); tok && t != field.Type {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: fmt.Sprintf("c.field.set %q: expected %s, got %s", in.CField, m.TypeString(field.Type), m.TypeString(t))})
+		}
 	}
 
 	// Checked failure edge arguments must match the failure target parameters.

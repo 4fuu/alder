@@ -18,6 +18,8 @@ fn run_cgen(d: Domain, mir: MirStore, verified: MirVerifyCompleteOutput) -> I32 
     }
 }
 
+// One validated binding member record with its Alder name span and C
+// spelling byte range filled from the member node.
 fn finish_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, result: MirVerifyCompleteOutput, reports: __s0_Buffer(CopySiteRec)) -> I32 {
     if !result.complete { return driver_failure(4, "internal", "internal compiler failure: verification refused") }
     if host_report_copies() && !driver_report_copies(state, store.locals, reports) { return driver_internal_error() }
