@@ -5750,28 +5750,29 @@ fn record_source_arg(parse: ParseStore, call: SyntaxRec, use: DeclTypeUseRec, st
     return 0
 }
 
-// The root local of a mut argument that names a chain of field projections
-// over a place, or zero when the argument is not such a chain. A field path
-// names storage the caller owns, so the callee can borrow that storage
+// The root local of a mut argument that names a chain of field and index
+// projections over a place, or zero when the argument is not such a chain. The
+// path names storage the caller owns, so the callee can borrow that storage
 // exclusively instead of receiving a copy that would swallow the write.
-fn mut_argument_field_root(store: CheckStore, expression: U64) -> U64 {
+fn mut_argument_place_root(store: CheckStore, expression: U64) -> U64 {
     var current = expression
     var depth: U64 = 0
     while depth < 32 && current != 0 && current <= __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, current - 1)
         if item.kind == 1 || item.kind == 5 { return item.parameter_use }
-        if item.kind != 21 || item.child_count != 1 || item.first_child == 0 || item.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return 0 }
-        current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        if item.kind == 21 && item.child_count == 1 { current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        } else { if item.kind == 19 && item.child_count == 2 { current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        } else { return 0 } }
         depth = depth + 1
     }
     return 0
 }
 
-// check_mut_argument_field admits a field path of a mutable place as a `mut`
-// argument: the root binding must be mutable exactly as a place root is, and
-// no live view of that root may block the exclusive borrow.
-fn check_mut_argument_field(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, arg: SyntaxRec, expression: U64, place_fail: U64) -> Result(ExprOutcome, __s0_Error) {
-    let root = mut_argument_field_root(store, expression)
+// check_mut_argument_place admits a field or index path of a mutable place as
+// a `mut` argument: the root binding must be mutable exactly as a place root
+// is, and no live view of that root may block the exclusive borrow.
+fn check_mut_argument_place(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, arg: SyntaxRec, expression: U64, place_fail: U64) -> Result(ExprOutcome, __s0_Error) {
+    let root = mut_argument_place_root(store, expression)
     if root == 0 { return expr_token_fail(d, state, store, place_fail, arg) }
     let binding = __s0_buffer_get(LocalRec, store.locals, root - 1)
     let root_type = __s0_buffer_get(CheckedTypeRec, store.types, binding.checked_type - 1)
@@ -5806,7 +5807,7 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     var place_fail: U64 = 92
     if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { place_fail = 146 }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if parameter_node.kind == 47 && expression.kind == 21 { return check_mut_argument_field(d, state, parse, store, owner, arg, expression_id, place_fail) }
+    if parameter_node.kind == 47 && (expression.kind == 21 || expression.kind == 19) { return check_mut_argument_place(d, state, parse, store, owner, arg, expression_id, place_fail) }
     // A newly formed exclusive view is itself the capability a mut
     // parameter borrows; the ordering rule keeps it last so no temporary
     // descriptor is invalidated before call entry.

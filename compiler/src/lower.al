@@ -2856,38 +2856,52 @@ fn lower_binding_expression(d: Domain, source_state: State, spans: __s0_Buffer(C
 type LowerArgumentPlaceRec {
     state: LowerState
     place: U64
+    root: U64
 }
 
-// A field place chain for a mut argument. Each level projects from the place
-// below it, and the root names the caller's binding, so `self.inner` passes
-// the field of the receiver rather than a temporary copy of it.
-fn lower_mut_argument_place(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, expression_id: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
-    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+// A field or index place chain for a mut argument. Each level projects from
+// the place below it, and the root names the caller's binding, so `self.inner`
+// passes the field of the receiver and `rows[i]` passes the element rather
+// than a temporary copy of either.
+fn lower_mut_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if expression.kind == 1 || expression.kind == 5 {
         let mapped = lower_binding_lookup(state, expression.parameter_use)
-        if mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+        if mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
         var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
         if mapped.parameter == 0 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
             place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
         }
-        return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id))
+        return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id, root: expression.parameter_use))
     }
-    if expression.kind != 21 || expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
-    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    if expression.kind == 21 {
+        if expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
+        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
+        let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let base = try lower_mut_argument_place(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
+        if !base.state.valid { return Ok(base) }
+        let field = __s0_buffer_get(DeclTypeUseRec, store.uses, expression.parameter_use - 1)
+        if field.role != 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(base.state), place: 0, root: 0)) }
+        let named = try mir_append_name(d, base.state.mir, try lower_source_word(d, source_state, field.source, field.name_start, field.name_end))
+        let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: base.place, field_start: named.start, field_end: named.end, deref_value: 0))
+        return Ok(LowerArgumentPlaceRec(state: lower_with_mir(base.state, field_place.store), place: field_place.id, root: base.root))
+    }
+    if expression.kind != 19 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
+    if expression.child_count != 2 || expression.first_child == 0 || expression.first_child + 1 > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
     let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-    let base = try lower_mut_argument_place(d, source_state, store, state, function, base_id)
+    let index_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+    let base_expression = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
+    let base = try lower_mut_argument_place(d, source_state, spans, store, state, owner, function, block, base_id, environment, panic_block)
     if !base.state.valid { return Ok(base) }
-    let field = __s0_buffer_get(DeclTypeUseRec, store.uses, expression.parameter_use - 1)
-    if field.role != 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(base.state), place: 0)) }
-    let named = try mir_append_name(d, base.state.mir, try lower_source_word(d, source_state, field.source, field.name_start, field.name_end))
-    let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: base.place, field_start: named.start, field_end: named.end, deref_value: 0))
-    return Ok(LowerArgumentPlaceRec(state: lower_with_mir(base.state, field_place.store), place: field_place.id))
+    let base_is_root = base_expression.kind == 1 || base_expression.kind == 5
+    let indexed = try lower_index_place(d, source_state, spans, store, base.state, owner, function, block, MirBuildStep(store: base.state.mir, id: base.place), base_expression.checked_type, index_id, base.root, base_is_root, environment, panic_block)
+    return Ok(LowerArgumentPlaceRec(state: indexed.state, place: indexed.id, root: base.root))
 }
 
 fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64, borrow_kind: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if borrow_kind == 2 && expression.kind == 21 { return lower_mut_argument_place(d, source_state, store, state, function, expression_id) }
+    if borrow_kind == 2 && (expression.kind == 21 || expression.kind == 19) { return lower_mut_argument_place(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block) }
     let mapped = lower_binding_lookup(state, expression.parameter_use)
     let named = expression.kind == 1 || expression.kind == 5
     let plain = named && mapped.binding != 0 && mapped.parameter != 1
@@ -2902,15 +2916,15 @@ fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(Check
         let slot = try mir_add_local(d, ordinary.state.mir, function, lower_local_count(ordinary.state.mir, function), slot_name, ordinary.id)
         let place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
         let stored = try lower_add_instr(d, lower_with_mir(ordinary.state, place.store), function, block, mir_op_store(), 0, place.id, 0, staged.id, 0, 0, "")
-        return Ok(LowerArgumentPlaceRec(state: stored.state, place: place.id))
+        return Ok(LowerArgumentPlaceRec(state: stored.state, place: place.id, root: 0))
     }
-    if !named || mapped.binding == 0 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
-    if borrow_kind == 1 && mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    if !named || mapped.binding == 0 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
+    if borrow_kind == 1 && mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0, root: 0)) }
     var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
     if mapped.parameter == 0 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
         place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
     }
-    return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id))
+    return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id, root: expression.parameter_use))
 }
 
 fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
@@ -5104,6 +5118,68 @@ fn lower_chain_environment(d: Domain, store: CheckStore, owner: U64, link_id: U6
     return Ok(environment)
 }
 
+// The element place of `base[index_expression]`. The checker rejects a
+// non-place base before this runs; `base_is_root` says the base place is the
+// root binding itself, whose MIR storage type comes from the local (a
+// reference for a mut parameter) rather than from the checked type.
+fn lower_index_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, base: MirBuildStep, base_type: U64, index_expression: U64, root_local: U64, base_is_root: Bool, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    var current = state
+    var container_mir: U64 = 0
+    if root_local == 0 || root_local > __s0_buffer_len(LocalRec, store.locals) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let place_root_local = __s0_buffer_get(LocalRec, store.locals, root_local - 1)
+    let container = __s0_buffer_get(CheckedTypeRec, store.types, base_type - 1)
+    if (container.kind != 8 && container.kind != 15 && container.kind != 17 && container.kind != 18) || container.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    // A local base keeps the local's storage type, which for a
+    // reference-initialized binding is a mutable reference rather than the
+    // value type. A projected base stores its own checked type.
+    if base_is_root {
+        let lowered_root = try lower_local_type(d, source_state, store, current, owner, root_local, place_root_local)
+        current = lowered_root.state
+        container_mir = lowered_root.id
+    } else {
+        let lowered_base = try lower_type(d, source_state, store, current, base_type)
+        current = lowered_base.state
+        container_mir = lowered_base.id
+    }
+    if container_mir == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    var sequence_value: U64 = 0
+    if container.kind == 8 || container.kind == 18 || container.kind == 17 {
+        let loaded = try lower_add_typed_result(d, current, function, block, container_mir)
+        let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, base.id, 0, 0, 0, 0, "")
+        current = load.state
+        sequence_value = loaded.id
+        if container.kind == 17 {
+            let elem_checked = __s0_buffer_get(U64, store.type_args, container.first_arg - 1)
+            let elem = try lower_type(d, source_state, store, current, elem_checked)
+            let empty_view = try __s0_buffer_new(U64, d)
+            let view_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty_view, 0)
+            let view = try lower_add_typed_result(d, lower_with_mir(elem.state, view_type.store), function, block, view_type.type_id)
+            let converted = try lower_add_instr(d, view.state, function, block, mir_op_vec_as_mut_slice(), view.id, 0, 0, loaded.id, 0, 0, "")
+            current = converted.state
+            sequence_value = view.id
+        }
+    } else {
+        let empty_ref = try __s0_buffer_new(U64, d)
+        let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), container_mir, 0, 0, empty_ref, 0)
+        let borrowed = try lower_add_typed_result(d, lower_with_mir(current, ref_type.store), function, block, ref_type.type_id)
+        let borrow = try lower_add_instr(d, borrowed.state, function, block, mir_op_borrow_mut(), borrowed.id, base.id, 0, 0, 0, 0, "")
+        current = borrow.state
+        sequence_value = borrowed.id
+    }
+    let index = try lower_expression(d, source_state, spans, store, current, owner, function, block, index_expression, environment, panic_block)
+    let active = lower_open_block(index.state.mir, function, block)
+    let elem_checked = __s0_buffer_get(U64, store.type_args, container.first_arg - 1)
+    let elem = try lower_type(d, source_state, store, index.state, elem_checked)
+    let empty = try __s0_buffer_new(U64, d)
+    let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
+    let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, ""), ref_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(ref_type.store, function, active) + 1)
+    var index_op = mir_op_slice_index_checked()
+    if container.kind == 15 { index_op = mir_op_array_index_checked() }
+    let indexed = try lower_add_instr(d, lower_with_mir(elem.state, result.store), function, active, index_op, result.id, 0, 0, sequence_value, index.id, panic_block, "")
+    let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: result.id))
+    return Ok(LowerStep(state: lower_with_mir(indexed.state, deref.store), id: deref.id))
+}
+
 fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, place_id: U64, nested: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if place_id == 0 || place_id > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place_id - 1)
@@ -5142,60 +5218,9 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         return Ok(LowerStep(state: lower_with_mir(current, result.store), id: result.id))
     }
     if checked.kind != 3 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-    let container = __s0_buffer_get(CheckedTypeRec, store.types, base_type - 1)
-    if (container.kind != 8 && container.kind != 15 && container.kind != 17 && container.kind != 18) || container.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-    var container_mir: U64 = 0
-    // A local base keeps the local's storage type, which for a
-    // reference-initialized binding is a mutable reference rather than the
-    // value type. A projected base stores its own checked type.
     var base_is_local = checked.base == 0
     if checked.base != 0 { base_is_local = __s0_buffer_get(CheckedPlaceRec, store.control.places, checked.base - 1).kind == 1 }
-    if base_is_local {
-        let lowered_root = try lower_local_type(d, source_state, store, current, owner, checked.root, place_root_local)
-        current = lowered_root.state
-        container_mir = lowered_root.id
-    } else {
-        let lowered_base = try lower_type(d, source_state, store, current, base_type)
-        current = lowered_base.state
-        container_mir = lowered_base.id
-    }
-    if container_mir == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-    var sequence_value: U64 = 0
-    if container.kind == 8 || container.kind == 18 || container.kind == 17 {
-        let loaded = try lower_add_typed_result(d, current, function, block, container_mir)
-        let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, base.id, 0, 0, 0, 0, "")
-        current = load.state
-        sequence_value = loaded.id
-        if container.kind == 17 {
-            let elem_checked = __s0_buffer_get(U64, store.type_args, container.first_arg - 1)
-            let elem = try lower_type(d, source_state, store, current, elem_checked)
-            let empty_view = try __s0_buffer_new(U64, d)
-            let view_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty_view, 0)
-            let view = try lower_add_typed_result(d, lower_with_mir(elem.state, view_type.store), function, block, view_type.type_id)
-            let converted = try lower_add_instr(d, view.state, function, block, mir_op_vec_as_mut_slice(), view.id, 0, 0, loaded.id, 0, 0, "")
-            current = converted.state
-            sequence_value = view.id
-        }
-    } else {
-        let empty_ref = try __s0_buffer_new(U64, d)
-        let ref_type = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), container_mir, 0, 0, empty_ref, 0)
-        let borrowed = try lower_add_typed_result(d, lower_with_mir(current, ref_type.store), function, block, ref_type.type_id)
-        let borrow = try lower_add_instr(d, borrowed.state, function, block, mir_op_borrow_mut(), borrowed.id, base.id, 0, 0, 0, 0, "")
-        current = borrow.state
-        sequence_value = borrowed.id
-    }
-    let index = try lower_expression(d, source_state, spans, store, current, owner, function, block, checked.index, environment, panic_block)
-    let active = lower_open_block(index.state.mir, function, block)
-    let elem_checked = __s0_buffer_get(U64, store.type_args, container.first_arg - 1)
-    let elem = try lower_type(d, source_state, store, index.state, elem_checked)
-    let empty = try __s0_buffer_new(U64, d)
-    let ref_type = try mir_intern_type(d, elem.state.mir, mir_type_kind_safe_mut(), elem.id, 0, 0, empty, 0)
-    let result = try mir_add_value(d, ref_type.store, function, try lower_result_name(d, ref_type.store, function, ""), ref_type.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(ref_type.store, function, active) + 1)
-    var index_op = mir_op_slice_index_checked()
-    if container.kind == 15 { index_op = mir_op_array_index_checked() }
-    let indexed = try lower_add_instr(d, lower_with_mir(elem.state, result.store), function, active, index_op, result.id, 0, 0, sequence_value, index.id, panic_block, "")
-    let deref = try mir_add_place(d, indexed.state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: result.id))
-    return Ok(LowerStep(state: lower_with_mir(indexed.state, deref.store), id: deref.id))
+    return lower_index_place(d, source_state, spans, store, current, owner, function, block, base, base_type, checked.index, checked.root, base_is_local, environment, panic_block)
 }
 
 // The place a mutating collection operation writes its rebuilt header back

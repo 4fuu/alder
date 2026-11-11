@@ -74,10 +74,10 @@ A non-self `mut` parameter follows the same exclusive-borrow rule. It is
 legal for affine owners and scoped capabilities, and for copyable values only
 when the parameter's type is a type parameter constrained by a trait with at
 least one `mut self` requirement (the iterator-cursor case). The argument
-must then be a mutable place: a `var` binding, an owner, a field path of one
-of those, or another `mut` parameter forwarding the cursor. A `let`-bound
-copyable argument is rejected because the callee would advance a discarded
-copy instead of the caller's value.
+must then be a mutable place: a `var` binding, an owner, a field or element
+path of one of those, or another `mut` parameter forwarding the cursor. A
+`let`-bound copyable argument is rejected because the callee would advance a
+discarded copy instead of the caller's value.
 
 Mutation through a mutable slice or table view is allowed only while its
 exclusive scope is active. The base owner cannot be relocated, removed,
