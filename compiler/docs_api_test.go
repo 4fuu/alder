@@ -39,7 +39,7 @@ func snapshotExampleCases() map[string]snapshotExampleCase {
 		"core.collection-v1.al": {
 			style: "single",
 			mainText: `pub fn main() -> I32 {
-    if collection_example() == 42 { return 0 }
+    if collection_example() == 324 { return 0 }
     return 1
 }
 `,

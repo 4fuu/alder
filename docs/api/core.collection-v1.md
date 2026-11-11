@@ -1,9 +1,11 @@
 # `core.collection` Public Signature Snapshot v1
 
-Status: **Milestone 7.1 frozen snapshot**
+Status: **Milestone 7.1 frozen snapshot, extended by the Milestone 8
+ordered-collection addition**
 
 This is the first versioned public snapshot for the Milestone 7.1 `Vec(T)`
-surface. It is normative together with the executable example in
+surface, extended below with the Milestone 8 insertion-ordered `Map(K, V)` and
+`Set(T)` surfaces. It is normative together with the executable example in
 [`examples/core.collection-v1.al`](examples/core.collection-v1.al).
 
 ## Signatures
@@ -75,3 +77,67 @@ signatures, calls, and vector representations do not expose this mechanism.
 M7.1 rejects `Vec(T)` deterministically when `T` is affine or scoped, including
 through a nested aggregate. Affine-element cleanup and transfer are owned by
 Milestone 7.5, not this snapshot.
+
+## Milestone 8 addition: insertion-ordered `Map` and `Set`
+
+The Milestone 8 ordered-collection addition extends this snapshot with the
+insertion-ordered `Map(K, V)` and `Set(T)` builtin surfaces. They are ordinary
+value collections: copies are independent, keys and elements are compared with
+the language-provided structural equality and hashing domain, and iteration
+order is insertion order.
+
+```alder
+impl Map(K, V) {
+    pub fn new(K: type, V: type) -> Map(K, V)
+
+    pub fn insert(mut self, key: K, value: V) -> Bool
+    pub fn get(self, key: K) -> Option(V)
+    pub fn remove(mut self, key: K) -> Bool
+    pub fn len(self) -> U64
+    pub fn keys(self) -> Vec(K)
+    pub fn values(self) -> Vec(V)
+}
+
+impl Set(T) {
+    pub fn new(T: type) -> Set(T)
+
+    pub fn insert(mut self, value: T) -> Bool
+    pub fn contains(self, value: T) -> Bool
+    pub fn remove(mut self, value: T) -> Bool
+    pub fn len(self) -> U64
+    pub fn items(self) -> Vec(T)
+}
+```
+
+The exact calls are `Map.new(K, V)` and `Set.new(T)`, spelling the type
+arguments explicitly. `insert` returns whether the key or element was newly
+inserted; inserting an existing map key replaces the value and keeps the key's
+position. `remove` reports whether the key or element was present, and removal
+compacts the remaining entries in insertion order, so reinserting a removed
+key places it at the end. `keys`, `values`, and `items` return an owned
+`Vec` snapshot of the current order; later mutations do not change a returned
+snapshot.
+
+`K` for `Map` and `T` for `Set` must be in the structural equality and hashing
+domain: unsigned integers, `Bool`, `String`, `Bytes`, and non-generic records
+and enums whose every component supports them. Types outside that domain are
+rejected with diagnostic 127. `V` and `T` must be recursively copyable
+(diagnostic 128); a collection value with storage-backed parts is copied
+independently on every read.
+
+Today the operations that move stored values out of the collection — `remove`
+on either type and the `keys`, `values`, and `items` snapshots — require
+provenance-free types, so they reject keys, values, or elements with
+storage-backed parts such as `String`, `Bytes`, or `Vec` with diagnostic 129
+until the move loop can carry them. `insert`, `get`, `contains`, and `len`
+accept those types: a `Map(String, U64)` inserts and reads `String` keys today.
+This restriction is a documented temporary boundary of this snapshot, not part
+of the long-term contract; the long-term contract is the full structural
+domain everywhere.
+
+Like `Vec`, the ordered collections reject affine and scoped element types and
+terminate on checked growth arithmetic through the ordinary invariant-failure
+path. The snapshot example
+[`examples/core.collection-v1.al`](examples/core.collection-v1.al) pins the
+`Vec` surface together with replace-preserves-position, reinsertion-at-end,
+snapshot ordering, and set duplicate collapse; its checksum is normative.
