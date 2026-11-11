@@ -438,6 +438,16 @@ Implemented expressions include:
   function; reads of the table itself are borrows and never copy it;
 - the callback-free `using name = Table.new(T)` registration, whose owner is
   cleanup-covered at every exit and disarmed on transfer;
+- call-scoped C buffer borrows: inside `unsafe c`, a `Bytes`, `[U8]`, or
+  `MutSlice(U8)` argument may stand for a raw fn parameter declared
+  `c.ConstPtr(T)` or `c.Ptr(T)` with a byte-addressable pointee (`c.Char`,
+  `c.SChar`, `c.UChar`, or an opaque type). The pointer is valid only for the
+  call, the buffer is never moved, immutable buffers satisfy only `c.ConstPtr`,
+  one buffer may not be borrowed mutably twice in a call (kind 215), a
+  non-byte pointee is kind 213, and an immutable buffer for a mutable pointer
+  is kind 214. An empty buffer still passes a valid address through the
+  runtime dummy. The length is the caller's responsibility inside the unsafe
+  block;
 - `c.CString`: a string literal builds the bare owner infallibly and an
   interior NUL in that literal is rejected at compile time (kind 210), while
   any other `String` value yields `Option(c.CString)` with `none` for an

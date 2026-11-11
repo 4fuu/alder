@@ -188,6 +188,31 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	case mir.OpIntNot:
 		c.expect(in.A, "operand", mir.IsIntType, "an integer")
 
+	case mir.OpCBufferPtr:
+		c.expect(in.A, "buffer operand", func(t mir.TypeId) bool {
+			if !m.ValidType(t) {
+				return false
+			}
+			rec := m.Types[t]
+			if rec.Kind == mir.TypeBytes {
+				return true
+			}
+			if rec.Kind == mir.TypeSlice || rec.Kind == mir.TypeSafeMut {
+				return rec.Elem == mir.TypeU8
+			}
+			return false
+		}, "bytes or a u8 slice")
+		if !m.ValidType(in.TypeOp) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr result type is not a C pointer"})
+			break
+		}
+		pointer := m.Types[in.TypeOp]
+		if pointer.Kind != mir.TypeCPtr && pointer.Kind != mir.TypeCConstPtr {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr result type is not a C pointer"})
+		} else if !m.IsCBytePointee(pointer.Elem) {
+			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr pointee is not byte-addressable"})
+		}
+
 	case mir.OpSliceLen:
 		c.expect(in.Slice, "slice operand", func(t mir.TypeId) bool {
 			_, ok := m.ElemType(t)

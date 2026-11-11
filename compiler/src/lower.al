@@ -1731,6 +1731,62 @@ fn lower_binding_fn_flat_index(store: CheckStore, member_index: U64) -> U64 {
     return count + 1
 }
 
+
+// ---- Call-scoped buffer borrows ------------------------------------------
+// A raw-call argument whose declared parameter is c.Ptr/c.ConstPtr and whose
+// checked type is Bytes, [U8], or MutSlice(U8) borrows the buffer for the
+// call: one c.buffer.ptr instruction reads the data pointer through the
+// declared C pointer type. The buffer is never moved and the pointer never
+// becomes an ordinary value.
+type LowerCBufferRec {
+    matched: Bool
+    state: LowerState
+    id: U64
+}
+
+fn lower_binding_field_for_ordinal(store: CheckStore, owner: U64, ordinal: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(BindingFieldRec, store.bindings.fields) {
+        let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, at)
+        if field.owner == owner && field.ordinal == ordinal { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn lower_c_buffer_argument(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, annotation: CallAnnotationRec, ordinal: U64, child_id: U64, checked_type: U64, environment: U64, panic_block: U64) -> Result(LowerCBufferRec, __s0_Error) {
+    if annotation.kind != 7 { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    let field_index = lower_binding_field_for_ordinal(store, annotation.target, ordinal)
+    if field_index == 0 { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    let field = __s0_buffer_get(BindingFieldRec, store.bindings.fields, field_index - 1)
+    if field.type_index == 0 || field.type_index > __s0_buffer_len(BindingTypeRec, store.bindings.types) { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    let declared = __s0_buffer_get(BindingTypeRec, store.bindings.types, field.type_index - 1)
+    if declared.kind != 27 && declared.kind != 28 { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    var buffer_kind: U64 = 0
+    if actual.kind == 14 { buffer_kind = 1 }
+    if (actual.kind == 8 || actual.kind == 18) && actual.arg_count == 1 {
+        let elem = __s0_buffer_get(U64, store.type_args, actual.first_arg - 1)
+        if elem != 0 && elem <= __s0_buffer_len(CheckedTypeRec, store.types) {
+            let element = __s0_buffer_get(CheckedTypeRec, store.types, elem - 1)
+            if element.kind == 1 && element.target == 6 { buffer_kind = 1
+                if actual.kind == 18 { buffer_kind = 2 }
+            }
+        }
+    }
+    if buffer_kind == 0 { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    if declared.kind == 27 && buffer_kind != 2 { return Ok(LowerCBufferRec(matched: false, state: state, id: 0)) }
+    let buffer = try lower_direct_expression(d, source_state, spans, store, state, owner, function, block, child_id, environment, panic_block)
+    if !buffer.state.valid { return Ok(LowerCBufferRec(matched: true, state: buffer.state, id: 0)) }
+    let pointer_type = try lower_binding_type(d, source_state, store, buffer.state, field.type_index)
+    if !pointer_type.state.valid { return Ok(LowerCBufferRec(matched: true, state: pointer_type.state, id: 0)) }
+    let name = try lower_result_name(d, pointer_type.state.mir, function, "")
+    let value = try mir_add_value(d, pointer_type.state.mir, function, name, pointer_type.id, mir_value_def_instruction(), block, lower_instruction_ordinal(pointer_type.state.mir, function, block) + 1)
+    let instr = try lower_add_instr(d, lower_with_mir(pointer_type.state, value.store), function, block, mir_op_c_buffer_ptr(), value.id, 0, pointer_type.id, buffer.id, 0, 0, "")
+    return Ok(LowerCBufferRec(matched: true, state: instr.state, id: value.id))
+}
+
 // An unsafe binding call expression is valid when the call carries no extra
 // flags and its argument count equals the member's parameter field count;
 // per-argument types ride on the checker and the MIR verifier's signature
@@ -4526,7 +4582,11 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     }
                 }
             }
-            if sequence_borrow {
+            var buffer_argument = LowerCBufferRec(matched: false, state: current, id: 0)
+            if annotation.kind == 7 && child_id != 0 { buffer_argument = try lower_c_buffer_argument(d, source_state, spans, store, current, owner, function, block, annotation, ordinal, child_id, checked_child.checked_type, environment, panic_block) }
+            if buffer_argument.matched {
+                child = LowerStep(state: buffer_argument.state, id: buffer_argument.id)
+            } else { if sequence_borrow {
                 let actual = __s0_buffer_get(CheckedTypeRec, store.types, checked_child.checked_type - 1)
                 if actual.kind == 15 { child = try lower_array_view(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block, false) }
                 if actual.kind == 17 {
@@ -4554,7 +4614,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
                 let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, borrowed_place.place, 0, 0, 0, 0, "")
                 child = LowerStep(state: borrowed.state, id: value.id)
-            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } }
+            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } }
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1

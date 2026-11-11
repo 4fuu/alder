@@ -513,6 +513,30 @@ a non-`c_string` slot, `release` with a slot that is not a `c_string`, a
 `option(c_string)`, a `make_lit` result that is not `c_string`, and a `ptr`
 result that is not `c_const_ptr(c_char)`.
 
+## Call-Scoped Buffer Borrows
+
+MIR 6 exposes the call-scoped buffer borrow as operation 107, produced only
+as a raw binding-call argument:
+
+```text
+c.buffer.ptr a, P
+```
+
+Slot `a` is a `bytes` value or a `slice(u8)`/`safe_mut(u8)` value, and the
+type operand `P` is the declared `c_ptr(T)` or `c_const_ptr(T)` parameter type.
+`T` must be a byte-addressable C pointee: `c_raw` with a char-width scalar
+(`c_char`, `c_schar`, `c_uchar`) or an opaque `c_named` type. The operation
+reads the buffer's data pointer, binds no failure edge, and produces `P`.
+
+MIR does not distinguish an immutable `[U8]` view from `MutSlice(U8)`: both
+lower to `slice(u8)`. The checker owns the rule that an immutable buffer can
+satisfy only `c_const_ptr(T)` and that one buffer is not borrowed mutably
+twice in a call. The verifier checks the operand and pointee shapes. The C
+backend substitutes the runtime's non-null one-byte dummy when the buffer's
+data pointer is null, so an empty buffer still reaches C as a valid address.
+The pointer is valid only for the call; no other operation may consume it or
+store it as an ordinary value.
+
 ## Text Display
 
 MIR 6 exposes the Display domain's formatting as operation 102, produced
@@ -912,7 +936,8 @@ byte-sequence method operations (80-85), the integer conversion method
 operations (86-87), the C scalar conversion method operations (88-90), the float arithmetic
 operations (91-94), the ordering comparison operation (95), the C
 record field operations (96-97), the C-string ownership operations (98-101),
-the display operation (102), and the total bitwise operations (103-106).
+the display operation (102), the total bitwise operations (103-106), and the
+call-scoped buffer borrow (107).
 Incompatible changes must use a new version and update:
 
 - this document;

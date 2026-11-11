@@ -1492,6 +1492,12 @@ func (p *parser) parseOp() (Instr, error) {
 		in.Op = OpIntNot
 		in.A, err = p.parseValueRef()
 
+	case "c.buffer.ptr":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		err = parseConv(OpCBufferPtr)
+
 	case "const.get":
 		in.Op = OpConstGet
 		nameTok, err := p.expectAtName("a constant name")

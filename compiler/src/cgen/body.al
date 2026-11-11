@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_int_not() { return false }
+        if item.op > mir_op_c_buffer_ptr() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2279,7 +2279,32 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_int_convert_wrap() { return cgen_emit_int_convert_wrap(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_num_try() && item.op <= mir_op_c_num_cast() { return cgen_emit_c_convert(d, out, store, indexes, instruction, item) }
     if item.op >= mir_op_c_string_make_lit() && item.op <= mir_op_c_string_release() { return cgen_emit_c_string_op(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
+    return Ok(out)
+}
+
+
+// One call-scoped buffer borrow: the values of Bytes, [U8], and MutSlice(U8)
+// all carry a data pointer first, so the borrow reads that pointer through
+// the declared C pointer type. An empty buffer whose data pointer is null
+// must still pass a valid address, so the result falls back to the runtime's
+// one-byte dummy storage.
+fn cgen_emit_c_buffer_ptr(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = (")
+    out = try cgen_put_type(d, out, store, item.type_op)
+    out = try cgen_put(d, out, ")")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ".data;\n  if (")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " == NULL) { ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = (")
+    out = try cgen_put_type(d, out, store, item.type_op)
+    out = try cgen_put(d, out, ")alder_c_buffer_dummy; }\n")
     return Ok(out)
 }
 

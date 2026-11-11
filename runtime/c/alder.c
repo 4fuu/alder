@@ -95,6 +95,8 @@ size_t alder_runtime_live_allocations(void) {
     return g_live_allocations;
 }
 
+uint8_t alder_c_buffer_dummy[1] = {0};
+
 #include <execinfo.h>
 _Noreturn void alder_runtime_panic(const char *message) {
     void *frames[32];

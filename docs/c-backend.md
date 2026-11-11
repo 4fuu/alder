@@ -180,6 +180,16 @@ value and the scope's `run` invokes the shell once. A transfer emits
 scope's later `run` skips that single entry while still running the others in
 reverse registration order.
 
+The call-scoped buffer borrow (`c.buffer.ptr`, op 107) reads the buffer's
+data pointer through the declared C pointer type, so `Bytes`, `AlderBytes`,
+and `AlderSlice` values all cross as one pointer for one call. The emitted
+statement assigns `<result> = (<P>)<buffer>.data;` and then substitutes
+`alder_c_buffer_dummy` when the data pointer is null, because an empty Alder
+buffer may be null-backed while C library entry points reject a null pointer
+even at zero length. `alder_c_buffer_dummy` is one writable byte exported by
+`runtime/c/alder.h`; it is not owned by any Alder value and a callee must not
+retain it. The borrow adds no allocation and no cleanup registration.
+
 ### Domains, cleanup, and tables
 
 - `domain.create` initializes a hidden per-site `AlderDomain` slot and the handle value points to it; re-creating after destroy re-initializes the same slot, which is sound because the current MIR profile forbids carrying local-domain handles across backedges. Loop-carried local descriptors may name allocations in an external parameter domain only when the function cannot reset or destroy any parameter domain through verified MIR effects; those allocations remain live for the call and do not reuse a hidden domain slot. Unsafe foreign code remains responsible for honoring its wrapper's domain-lifetime contract;

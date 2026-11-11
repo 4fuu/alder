@@ -2524,10 +2524,11 @@ fn check_unsafe_binding_call(d: Domain, state: State, parse: ParseStore, base: C
     // storage model rejects as loop-carried storage (verify_phase6). The
     // shape mirrors infer_call_arguments. The member's checked_type is the
     // result's binding type index recorded when the block was checked.
-    return check_unsafe_binding_arguments(d, state, parse, base, store, owner, unsafe_id, call, receivers, member_index, member.checked_type, 0, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    let mut_roots = try __s0_buffer_new(U64, d)
+    return check_unsafe_binding_arguments(d, state, parse, base, store, owner, unsafe_id, call, receivers, member_index, member.checked_type, 0, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop, mut_roots)
 }
 
-fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_id: U64, call: SyntaxRec, receivers: U64, member_index: U64, result_index: U64, ordinal: U64, argument_count: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_id: U64, call: SyntaxRec, receivers: U64, member_index: U64, result_index: U64, ordinal: U64, argument_count: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool, mut_roots: __s0_Buffer(U64)) -> Result(ExprOutcome, __s0_Error) {
     if ordinal == argument_count {
         let result_checked = try binding_type_checked(d, state, parse, store, result_index)
         if result_checked.id == 0 { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
@@ -2555,8 +2556,117 @@ fn check_unsafe_binding_arguments(d: Domain, state: State, parse: ParseStore, ba
     // check appended for this ordinal.
     let declared_index = try binding_param_type_index(d, current, member_index, ordinal, 0)
     let declared = try binding_type_checked(d, state, parse, current, declared_index)
-    if declared.id == 0 || !binding_arg_compatible(declared.store, declared.id, draft.checked_type) { return expr_token_fail(d, state, base, 200, arg) }
-    return check_unsafe_binding_arguments(d, state, parse, base, declared.store, owner, unsafe_id, call, receivers, member_index, result_index, ordinal + 1, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    if declared.id == 0 { return expr_token_fail(d, state, base, 200, arg) }
+    var accepted = binding_arg_compatible(declared.store, declared.id, draft.checked_type)
+    var roots = mut_roots
+    if !accepted {
+        let buffer_kind = c_buffer_argument_kind(declared.store, draft.checked_type)
+        if buffer_kind != 0 {
+            let converted = try check_c_buffer_argument(d, declared.store, declared.id, buffer_kind, c_buffer_root(declared.store, draft.expression), mut_roots)
+            if converted.code != 0 { return expr_token_fail(d, state, base, converted.code, arg) }
+            accepted = converted.matched
+            roots = converted.roots
+        }
+    }
+    if !accepted { return expr_token_fail(d, state, base, 200, arg) }
+    return check_unsafe_binding_arguments(d, state, parse, base, declared.store, owner, unsafe_id, call, receivers, member_index, result_index, ordinal + 1, argument_count, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop, roots)
+}
+
+
+// ---- Call-scoped buffer borrows ------------------------------------------
+// Inside unsafe c, a Bytes, [U8], or MutSlice(U8) argument may stand for a
+// declared c.ConstPtr(T)/c.Ptr(T) parameter whose pointee is byte-addressable
+// (c.Char, c.SChar, c.UChar, or an opaque bound type). The argument is
+// borrowed for the call only: it is never moved, the pointer never becomes an
+// ordinary value, and lowering emits one c.buffer.ptr instruction. Immutable
+// buffers satisfy c_const_ptr only; MutSlice(U8) satisfies either form.
+
+type CBufferArgRec {
+    matched: Bool
+    code: U64
+    roots: __s0_Buffer(U64)
+}
+
+// 27 for c.Ptr, 28 for c.ConstPtr, zero for any other declared type.
+fn c_declared_pointer_kind(store: CheckStore, declared: U64) -> U64 {
+    if declared == 0 || declared > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, declared - 1)
+    if rec.kind == 27 || rec.kind == 28 { return rec.kind }
+    return 0
+}
+
+fn c_pointee_byte_addressable(store: CheckStore, declared: U64) -> Bool {
+    let pointer = __s0_buffer_get(CheckedTypeRec, store.types, declared - 1)
+    if pointer.arg_count != 1 { return false }
+    let elem = __s0_buffer_get(U64, store.type_args, pointer.first_arg - 1)
+    if elem == 0 || elem > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, elem - 1)
+    if rec.kind == 26 { return rec.target == 0 || rec.target == 1 || rec.target == 2 }
+    if rec.kind == 29 {
+        var at: U64 = 0
+        while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+            let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+            if member.member_kind == 1 && member.member_node == rec.target { return member.class == 1 }
+            at = at + 1
+        }
+    }
+    return false
+}
+
+// 0 is not a buffer, 1 is an immutable buffer (Bytes or [U8]), and 2 is a
+// mutable buffer (MutSlice(U8)).
+fn c_buffer_argument_kind(store: CheckStore, checked_type: U64) -> U64 {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if rec.kind == 14 { return 1 }
+    if rec.kind == 8 || rec.kind == 18 {
+        if rec.arg_count != 1 { return 0 }
+        let elem = __s0_buffer_get(U64, store.type_args, rec.first_arg - 1)
+        if elem == 0 || elem > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+        let element = __s0_buffer_get(CheckedTypeRec, store.types, elem - 1)
+        if element.kind != 1 || element.target != 6 { return 0 }
+        if rec.kind == 18 { return 2 }
+        return 1
+    }
+    return 0
+}
+
+// The binding root of a buffer read, or zero when the argument is a computed
+// value. Two borrows of one root in the same call conflict when either is
+// mutable.
+fn c_buffer_root(store: CheckStore, expression: U64) -> U64 {
+    if expression == 0 || expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return 0 }
+    let rec = __s0_buffer_get(CheckedExprRec, store.expressions, expression - 1)
+    if rec.kind == 1 || rec.kind == 5 { return rec.parameter_use }
+    return 0
+}
+
+fn c_buffer_roots_conflict(roots: __s0_Buffer(U64), root: U64, mutable: Bool) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, roots) {
+        let entry = __s0_buffer_get(U64, roots, at)
+        if entry / 2 == root {
+            if mutable || entry % 2 == 1 { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+fn check_c_buffer_argument(d: Domain, store: CheckStore, declared: U64, argument_kind: U64, root: U64, roots: __s0_Buffer(U64)) -> Result(CBufferArgRec, __s0_Error) {
+    let pointer_kind = c_declared_pointer_kind(store, declared)
+    if pointer_kind == 0 || argument_kind == 0 { return Ok(CBufferArgRec(matched: false, code: 0, roots: roots)) }
+    if !c_pointee_byte_addressable(store, declared) { return Ok(CBufferArgRec(matched: false, code: 213, roots: roots)) }
+    let mutable = pointer_kind == 27
+    if mutable && argument_kind != 2 { return Ok(CBufferArgRec(matched: false, code: 214, roots: roots)) }
+    var next = roots
+    if root != 0 {
+        if c_buffer_roots_conflict(roots, root, mutable) { return Ok(CBufferArgRec(matched: false, code: 215, roots: roots)) }
+        var flag: U64 = 0
+        if mutable { flag = 1 }
+        next = try __s0_buffer_append(U64, d, roots, root * 2 + flag)
+    }
+    return Ok(CBufferArgRec(matched: true, code: 0, roots: next))
 }
 
 // Recursive scan so no join carries the found index through a loop cycle.
@@ -7619,10 +7729,11 @@ fn c_convert_builtin(state: State, callee: SyntaxRec, receiver: CheckedTypeRec) 
         }
         if receiver.target < 2 { return 0 }
         if receiver.target > 9 { return 0 }
-        // Integer receivers convert only into integer c scalars; the
+        // Integer receivers convert only into integer c scalars; the two
         // float spellings are rejected so every accepted pair crosses the
-        // boundary with a defined MIR conversion form.
-        if scalar_index >= 11 { return 0 }
+        // boundary with a defined MIR conversion form. c_size (13) and
+        // c_ptrdiff (14) are integer target scalars.
+        if scalar_index == 11 || scalar_index == 12 { return 0 }
         return (receiver.target - 2) * 45 + scalar_index * 3 + form + 520
     }
     return 0

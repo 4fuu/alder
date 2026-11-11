@@ -195,6 +195,23 @@ type Type struct {
 	CClass   CClass    // TypeCNamed: scalar, opaque, or record
 }
 
+// IsCBytePointee reports whether t is a byte-addressable C pointee for a
+// call-scoped buffer borrow: c_char, c_schar, c_uchar, or an opaque named C
+// type used behind pointers.
+func (m *Module) IsCBytePointee(t TypeId) bool {
+	if !m.ValidType(t) {
+		return false
+	}
+	rec := m.Types[t]
+	if rec.Kind == TypeCRaw {
+		return rec.Length == CScalarChar || rec.Length == CScalarSChar || rec.Length == CScalarUChar
+	}
+	if rec.Kind == TypeCNamed {
+		return rec.CClass == CClassOpaque
+	}
+	return false
+}
+
 // ValidType reports whether t is a defined type of the module.
 func (m *Module) ValidType(t TypeId) bool {
 	return int(t) < len(m.Types)

@@ -114,6 +114,16 @@ void alder_domain_destroy(AlderDomain *domain);
  * cleanup entries). Tests use it to prove leak-free domain lifecycles. */
 size_t alder_runtime_live_allocations(void);
 
+/*
+ * Call-scoped buffer borrows pass a pointer for the duration of one foreign
+ * call. An empty Alder buffer may have a null data pointer, and C library
+ * entry points such as memcpy and read reject or misuse a null pointer even
+ * with a zero count, so the generated code substitutes this writable
+ * one-byte storage. The dummy is not owned by any Alder value and must never
+ * be retained by the callee.
+ */
+extern uint8_t alder_c_buffer_dummy[1];
+
 /* Test-only deterministic domain-allocation failure injection. Production
  * builds expose neither these symbols nor their state. Allow N eligible calls
  * to alder_domain_alloc, then fail subsequent calls until the hook is cleared. */

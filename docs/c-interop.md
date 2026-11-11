@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, and `c.CString` ownership are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, and call-scoped buffer borrows are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -270,6 +270,30 @@ The permanent `String`/`Bytes` lifetimes are unchanged: conversion into a
 CString is a copy, and the CString does not borrow the source text.
 
 ## Strings and buffers
+
+Inside `unsafe c`, a `Bytes`, `[U8]`, or `MutSlice(U8)` argument may be passed
+for a raw fn parameter declared `c.ConstPtr(T)` or `c.Ptr(T)`, where `T` is
+`c.Char`, `c.SChar`, `c.UChar`, or an opaque bound type:
+
+```alder
+let n = unsafe c { posix.read(fd, buffer, buffer.len().to_c_size()) }
+```
+
+The argument is a call-scoped borrow: the pointer is valid only for that one
+call, the buffer is not moved or copied, and no pointer value can be stored in
+an Alder binding. `Bytes` and `[U8]` satisfy only `c.ConstPtr(T)`;
+`MutSlice(U8)` satisfies either form. The same buffer may not be borrowed
+mutably more than once in one call. Passing an empty buffer still passes a
+valid address: when the data pointer is null, the generated code substitutes
+the runtime's writable one-byte dummy, because C library entry points such as
+`memcpy` and `read` reject or misuse a null pointer even at length zero.
+
+The length argument is the caller's responsibility inside the `unsafe c`
+block; the compiler does not infer it from the borrowed buffer. A callee that
+retains the pointer is never safe with this form: the wrapper must copy to
+foreign-owned storage, pin the buffer with an explicit affine owner, or use
+`c.CString`. Slices and strings have no implicit C representation outside this
+borrow.
 
 Pointer-plus-length APIs use a checked conversion from `U64` to `c.Size`,
 reject nonrepresentable lengths, and preserve the backing value for the

@@ -1,0 +1,28 @@
+mir 6
+
+binding @buf "cbuffer.h" {
+  c_type opaque @Buffer = "CBuffer"
+  c_fn @fill = "cbuf_fill"(c_ptr(@Buffer), c_size) -> c_size
+  c_fn @sum = "cbuf_sum"(c_const_ptr(@Buffer), c_size) -> c_size
+}
+
+fn @fill(%v: slice(u8), %n: c_size) -> c_size {
+entry:
+  %p = c.buffer.ptr %v, c_ptr(@Buffer)
+  %r = c.call.unsafe @buf.fill(%p, %n)
+  return %r
+}
+
+fn @sum_slice(%v: slice(u8), %n: c_size) -> c_size {
+entry:
+  %p = c.buffer.ptr %v, c_const_ptr(@Buffer)
+  %r = c.call.unsafe @buf.sum(%p, %n)
+  return %r
+}
+
+fn @sum_bytes(%v: bytes, %n: c_size) -> c_size {
+entry:
+  %p = c.buffer.ptr %v, c_const_ptr(@Buffer)
+  %r = c.call.unsafe @buf.sum(%p, %n)
+  return %r
+}

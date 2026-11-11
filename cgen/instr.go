@@ -589,6 +589,10 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpCIsNull:
 		b.WriteString("  " + g.val(in.Result) + " = (bool)((" + g.valueExpr(in.A) + ") == (void *)0);\n")
 
+	case mir.OpCBufferPtr:
+		b.WriteString("  " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")" + g.valueExpr(in.A) + ".data;\n")
+		b.WriteString("  if (" + g.val(in.Result) + " == NULL) { " + g.val(in.Result) + " = (" + g.cType(in.TypeOp) + ")alder_c_buffer_dummy; }\n")
+
 	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
 		g.emitCStringOp(b, in)
 

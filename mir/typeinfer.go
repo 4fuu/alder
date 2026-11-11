@@ -588,6 +588,30 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return ta, true
 
+	case OpCBufferPtr:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		operand := m.Types[ta]
+		switch operand.Kind {
+		case TypeBytes:
+		case TypeSlice, TypeSafeMut:
+			if operand.Elem != TypeU8 {
+				return NoType, false
+			}
+		default:
+			return NoType, false
+		}
+		pointer := m.Types[in.TypeOp]
+		if pointer.Kind != TypeCPtr && pointer.Kind != TypeCConstPtr {
+			return NoType, false
+		}
+		if !m.IsCBytePointee(pointer.Elem) {
+			return NoType, false
+		}
+		return in.TypeOp, true
+
 	case OpIntTrunc:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !IsIntType(ta) || !m.ValidType(in.TypeOp) || !IsIntType(in.TypeOp) ||

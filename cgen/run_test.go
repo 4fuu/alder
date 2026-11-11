@@ -33,6 +33,7 @@ var runFixtures = []struct {
 	{"float", "float_driver.c", ""},
 	{"bitwise", "bitwise_driver.c", ""},
 	{"crecord", "crecord_driver.c", "crecord.c"},
+	{"cbuffer", "cbuffer_driver.c", "cbuffer.c"},
 }
 
 // buildRuntimeObject compiles the runtime once under the strict warning set

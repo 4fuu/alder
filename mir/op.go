@@ -195,6 +195,11 @@ const (
 	OpIntOr  OpKind = 104
 	OpIntXor OpKind = 105
 	OpIntNot OpKind = 106
+
+	// OpCBufferPtr borrows an Alder buffer as a C pointer for one call. The
+	// operand is bytes or a u8 slice and TypeOp names the declared C pointer
+	// type; the pointer never becomes an ordinary value.
+	OpCBufferPtr OpKind = 107
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -419,6 +424,8 @@ func (k OpKind) String() string {
 		return "int.xor"
 	case OpIntNot:
 		return "int.not"
+	case OpCBufferPtr:
+		return "c.buffer.ptr"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

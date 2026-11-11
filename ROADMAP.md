@@ -1589,6 +1589,38 @@ before the fix). Documentation is in
 measured 132.6 s wall and 1.94 GB peak RSS against 132.5 s and 1.92 GB for the
 parent tree on the same host.
 
+Landed C-interop progress: call-scoped buffer borrows. Inside `unsafe c`, a
+`Bytes`, `[U8]`, or `MutSlice(U8)` argument may stand for a raw fn parameter
+declared `c.ConstPtr(T)` or `c.Ptr(T)` when `T` is a byte-addressable pointee
+(`c.Char`, `c.SChar`, `c.UChar`, or an opaque bound type). The borrow lasts
+exactly one call, never moves the buffer, and never materializes a pointer as
+an Alder value; immutable buffers satisfy only `c.ConstPtr`, and one buffer
+may not be borrowed mutably twice in a call (checker 215, with 213 for a
+non-byte pointee and 214 for an immutable buffer at a mutable pointer). An
+empty buffer whose data pointer is null reaches C as the runtime's writable
+one-byte dummy, because C library entry points reject NULL even at length
+zero. MIR gains operation 107 (`c.buffer.ptr a, P`), mirrored in the Go
+parser, printer, type inference, verifier, and cgen, and the C backend emits
+the data-pointer read with the dummy fallback. The same slice fixed the
+integer-receiver C conversion guard that rejected `to_c_size` and
+`to_c_ptrdiff` (it excluded every scalar id at or above the two float ids),
+which the buffer length conversions need. Evidence: the production
+qualification `compiler/production_c_buffer_test.go` (MutSlice fill, `[U8]`
+and `Bytes` reads, zero-length borrows of empty buffers, MIR and C
+determinism, and four rejections), the cgen run fixture
+`cgen/testdata/run/cbuffer.mir` (including a null-backed slice), and the MIR
+accept/reject/round trip in `mir/verify/c_buffer_ops_test.go`. The
+lifetime-class qualification in
+`compiler/production_lifetime_classes_test.go` pins an affine `Cleanup` owner
+on normal and early exits (exactly-once release through the imported
+counter), a call-scoped borrow of a CString owner, and a copy into Alder
+storage that is read back after the owner releases. Documentation is in
+[docs/c-interop.md](docs/c-interop.md) "Strings and buffers",
+[docs/mir.md](docs/mir.md) "Call-Scoped Buffer Borrows", and
+[docs/c-backend.md](docs/c-backend.md). A cold `bootstrap/regenerate.sh`
+measured 128.0 s wall and 2.01 GB peak RSS against 134.5 s and 2.00 GB for the
+parent tree on the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

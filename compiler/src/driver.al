@@ -279,6 +279,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 210 { return out_string("a c.CString literal may not contain an interior NUL byte") }
     if kind == 211 { return out_string("c.CString takes exactly one string argument") }
     if kind == 212 { return out_string("c.CString argument must be a String value") }
+    if kind == 213 { return out_string("a buffer argument requires a byte-addressable C pointee (c.Char, c.SChar, c.UChar, or an opaque bound type)") }
+    if kind == 214 { return out_string("a mutable C pointer parameter requires a MutSlice(U8) argument") }
+    if kind == 215 { return out_string("the same buffer is borrowed more than once in one unsafe C call") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }
