@@ -3129,25 +3129,29 @@ fn lower_structural_builtin_variant_operand(operand: CheckedTypeRec) -> Bool {
 
 // `==` and `!=` over the structural Eq operands that do not already lower to
 // one primitive comparison: String and Bytes compare byte-wise and records
-// and enums decompose into their Eq components, so both operand values spill
-// into fresh locals and lower_m75_key_equal selects between the two join
-// constants. Operator 11 swaps which arm produces true.
-fn lower_structural_equal(d: Domain, source_state: State, store: CheckStore, left: LowerStep, right: LowerStep, function: U64, block: U64, expression: CheckedExprRec, operand_checked: U64, expression_id: U64) -> Result(LowerStep, __s0_Error) {
-    let equal_block = try lower_add_block(d, right.state, function, "bb_eq_equal")
+// and enums decompose into their Eq components. Each operand expression
+// lowers first and spills into a fresh local in the block where its value is
+// defined, so operands whose result is a join parameter (ordered-collection
+// builtins and matches produce them) still dominate the comparison;
+// lower_m75_key_equal then selects between the two join constants. Operator
+// 11 swaps which arm produces true.
+fn lower_structural_equal_exprs(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, left_id: U64, right_id: U64, operand_checked: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    let equal_block = try lower_add_block(d, state, function, "bb_eq_equal")
     let different_block = try lower_add_block(d, equal_block.state, function, "bb_eq_different")
     let join = try lower_add_block(d, different_block.state, function, "bb_eq_join")
     let result_type = try lower_type(d, source_state, store, join.state, expression.checked_type)
     let param = try mir_add_block_param(d, result_type.state.mir, function, join.id, 0, try lower_decimal_name(d, "__alder_eq_join", join.id), result_type.id)
-    var current = lower_with_mir(result_type.state, param.store)
-    let operand = try lower_type(d, source_state, store, current, operand_checked)
+    let operand = try lower_type(d, source_state, store, lower_with_mir(result_type.state, param.store), operand_checked)
     let left_ordinal = lower_local_count(operand.state.mir, function)
     let left_place = try lower_helper_local_place(d, operand.state, function, left_ordinal, try lower_decimal_name(d, "eq_left", expression_id), operand.id)
-    let left_store = try lower_add_instr(d, left_place.state, function, block, mir_op_store(), 0, left_place.id, 0, left.id, 0, 0, "")
-    current = left_store.state
-    let right_place = try lower_helper_local_place(d, current, function, left_ordinal + 1, try lower_decimal_name(d, "eq_right", expression_id), operand.id)
-    let right_store = try lower_add_instr(d, right_place.state, function, block, mir_op_store(), 0, right_place.id, 0, right.id, 0, 0, "")
-    current = right_store.state
-    let walked = try lower_m75_key_equal(d, source_state, store, current, operand_checked, function, block, left_place.id, right_place.id, equal_block.id, different_block.id)
+    let right_place = try lower_helper_local_place(d, left_place.state, function, left_ordinal + 1, try lower_decimal_name(d, "eq_right", expression_id), operand.id)
+    let left = try lower_expression(d, source_state, spans, store, right_place.state, owner, function, block, left_id, environment, panic_block)
+    let left_block = lower_open_block(left.state.mir, function, block)
+    let left_store = try lower_add_instr(d, left.state, function, left_block, mir_op_store(), 0, left_place.id, 0, left.id, 0, 0, "")
+    let right = try lower_expression(d, source_state, spans, store, left_store.state, owner, function, left_block, right_id, environment, panic_block)
+    let right_block = lower_open_block(right.state.mir, function, left_block)
+    let right_store = try lower_add_instr(d, right.state, function, right_block, mir_op_store(), 0, right_place.id, 0, right.id, 0, 0, "")
+    let walked = try lower_m75_key_equal(d, source_state, store, right_store.state, operand_checked, function, right_block, left_place.id, right_place.id, equal_block.id, different_block.id)
     let bool_suffix = __s0_buffer_len(MirConstRec, walked.mir.constants) + 1
     var equal_truth: U64 = 1
     var different_truth: U64 = 0
@@ -4148,6 +4152,20 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 6 || expression.kind == 7 {
         if expression.child_count == 0 || expression.first_child == 0 || expression.first_child - 1 + expression.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let left_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        // Eq operands outside the primitive kinds route through the structural
+        // walk before any operand lowers: String, Bytes, records, enums, and
+        // generic applications over them share the Map-key lowering instead of
+        // the int comparisons, and the walk lowers and spills its own operand
+        // expressions where their values are defined.
+        var structural_operand: U64 = 0
+        if expression.kind == 7 && (expression.operator == 10 || expression.operator == 11) {
+            let operand_checked = __s0_buffer_get(CheckedExprRec, store.expressions, left_id - 1).checked_type
+            if lower_structural_operand(store, operand_checked) { structural_operand = operand_checked }
+        }
+        if structural_operand != 0 {
+            let eq_right_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
+            return lower_structural_equal_exprs(d, source_state, spans, store, state, owner, function, block, expression, left_id, eq_right_id, structural_operand, expression_id, environment, panic_block)
+        }
         let left = try lower_expression(d, source_state, spans, store, state, owner, function, block, left_id, environment, panic_block)
         if expression.kind == 6 && expression.operator == 2 {
             let source_block = lower_open_block(left.state.mir, function, block)
@@ -4193,16 +4211,6 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             if expression.child_count != 2 { return Ok(LowerStep(state: lower_invalid(left.state), id: 0)) }
             let right_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child).expression
             right = try lower_expression(d, source_state, spans, store, left.state, owner, function, block, right_id, environment, panic_block)
-        }
-        // Eq operands outside the primitive kinds route through the structural
-        // walk: String, Bytes, records, enums, and generic applications over
-        // them share the Map-key lowering instead of the int comparisons.
-        if expression.kind == 7 && (expression.operator == 10 || expression.operator == 11) {
-            let eq_left_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-            let operand_checked = __s0_buffer_get(CheckedExprRec, store.expressions, eq_left_id - 1).checked_type
-            if lower_structural_operand(store, operand_checked) {
-                return lower_structural_equal(d, source_state, store, left, right, function, block, expression, operand_checked, expression_id)
-            }
         }
         var op: U64 = 0
         if expression.operator == 3 { op = mir_op_int_add_checked() }

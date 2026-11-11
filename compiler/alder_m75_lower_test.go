@@ -725,6 +725,17 @@ fn main() -> I32 {
         None => 9
     }
     if delta_seen != 9 { return 48 }
+    // Ordered-builtin results compare directly as Eq operands: their
+    // lowering joins through block parameters, so each operand spills in
+    // the block where its value is defined before the structural walk.
+    if seen.contains(2) == false { return 49 }
+    if seen.contains(9) != false { return 50 }
+    if seen.remove(2) == false { return 51 }
+    if seen.len() != 0 { return 52 }
+    if names.insert("delta", 5) == false { return 53 }
+    if names.len() != 4 { return 54 }
+    if scores.get(9) != None { return 55 }
+    if scores.get(2) == None { return 56 }
     return 0
 }
 `}
