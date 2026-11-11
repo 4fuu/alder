@@ -1882,13 +1882,25 @@ fn mir_v6_places_same(store: MirStore, indexes: MirVIndexes, a: U64, b: U64) -> 
     return true
 }
 
+// A borrow is a transparent link to the place it borrows: a local or field
+// chain reports the local that holds the storage, and a deref recursively
+// traces the reference value.
+fn mir_v6_view_base_borrowed(store: MirStore, indexes: MirVIndexes, function: U64, place: U64, depth: U64) -> U64 {
+    if depth > 16 || place == 0 || place > __s0_buffer_len(MirPlaceRec, store.places) { return 0 }
+    let rec = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
+    if rec.kind == mir_place_deref() { return mir_v6_view_base(store, indexes, function, rec.deref_value, depth + 1) }
+    let root = __s0_buffer_get(U64, indexes.place_root, place - 1)
+    if root == 0 { return 0 }
+    return root + 2
+}
+
 // mir_v6_view_base walks a view value back to the storage it views. The
 // result is 0 when the walk cannot name the storage, 1 when the storage is one
 // this frame cannot relocate (a parameter, a constant, an allocation, or a call
 // result), and local + 2 when a local slot of this frame holds it. A view is
 // followed through as_slice, slice range and index, a switch payload through
-// its scrutinee, and a load from a view slot through every value stored into
-// that slot.
+// its scrutinee, the borrow that forms an array view, and a load from a view
+// slot through every value stored into that slot.
 fn mir_v6_view_base(store: MirStore, indexes: MirVIndexes, function: U64, value: U64, depth: U64) -> U64 {
     if depth > 16 { return 0 }
     let vi = mir_vindex_value(indexes, function, value)
@@ -1935,6 +1947,7 @@ fn mir_v6_view_base(store: MirStore, indexes: MirVIndexes, function: U64, value:
     }
     if x.op == mir_op_vec_as_slice() || x.op == mir_op_vec_as_mut_slice() || x.op == mir_op_slice_range_checked() || x.op == mir_op_slice_index_checked() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }
     if x.op == mir_op_array_as_slice() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }
+    if x.op == mir_op_borrow() || x.op == mir_op_borrow_mut() { return mir_v6_view_base_borrowed(store, indexes, function, x.place, depth + 1) }
     if x.op == mir_op_alloc() || x.op == mir_op_alloc_checked() || x.op == mir_op_vec_new() || x.op == mir_op_vec_construct_checked() || x.op == mir_op_vec_grow_checked() || x.op == mir_op_copy_to_domain() || x.op == mir_op_table_create() || x.op == mir_op_const_get() || x.op == mir_op_call() || x.op == mir_op_call_value() { return 1 }
     return 0
 }
