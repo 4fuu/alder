@@ -523,7 +523,11 @@ const @name: type = literal
 Constant types are `unit`, `bool`, integer and float primitives, `string`, and
 `bytes`; private source-bootstrap constants may additionally use `slice(u8)`.
 Integer literals are decimal `i64`-range values; floats print with
-shortest-round-trip formatting. Quoted `string` payloads must be valid UTF-8,
+shortest-round-trip formatting. An `f32` constant must be finite and exactly
+representable in binary32; the verifier rejects any other bit pattern, and
+the source checker enforces the same rule on `F32`-typed float literals
+(diagnostics 255 and 256), so a literal never rounds silently. Quoted
+`string` payloads must be valid UTF-8,
 while quoted `bytes` payloads preserve every decoded byte.
 
 `u64` constants carry the full unsigned range. Values that fit `i64` print

@@ -1498,7 +1498,7 @@ static int alderhost_native_build(struct AlderHostContext *context, bool *built)
             (void)remove(driver_temp); free(binary_temp); free(driver_temp); return -1;
         }
         compile_argv[16] = (char *)ALDER_HOST_RUNTIME_C; compile_argv[17] = driver_temp;
-        compile_argv[18] = "-o"; compile_argv[19] = binary_temp; compile_argv[20] = NULL;
+        compile_argv[18] = "-lm"; compile_argv[19] = "-o"; compile_argv[20] = binary_temp; compile_argv[21] = NULL;
     }
     result = alderhost_wait_argv(compile_argv);
     (void)remove(driver_temp);

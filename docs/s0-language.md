@@ -580,7 +580,11 @@ same-type `F32`/`F64` operands follow IEEE-754 semantics (decision D026: no
 failure edge, signed-infinity overflow, and division by zero defined as the
 signed infinity, NaN for 0/0), all with the Go Stage 0 operand rules. Float
 `%` and unary minus applied to a float still reject with diagnostics 37 and
-31. Direct calls support concrete and
+31. An `F32`-typed float literal must denote a value the binary32 format
+represents exactly: a magnitude beyond `F32`'s range rejects with diagnostic
+255, and any other literal rounding would change — including one that lands
+on a subnormal or zero — rejects with 256, so the written decimal digits name
+the stored value; `F64` literals accept any finite value. Direct calls support concrete and
 generic user functions, generic records, variants resolved through a concrete
 expected enum, unary-payload inference through declared generic enums, and one
 direct C-import root in `unsafe c`; record fields are checked and stored in

@@ -230,16 +230,19 @@ pub fn std_math_example() -> I64 {
 }
 
 fn near_f32(x: F32, y: F32) -> Bool {
+    // The tolerance constant spells the exact decimal digits of its `F32`
+    // value, as every F32 literal must.
     let diff = math.abs_f32(x - y)
-    return diff < 0.0001
+    return diff < 9.9999997473787516e-05
 }
 ```
 
 ## Dependencies and sequencing
 
 - Needs the C-binding thread's binding blocks and `unsafe c` calls for the
-  libm functions (`sqrt`, `pow`, `exp`, `log`, `sin`, and siblings) plus the
-  checked raw-integer conversions used inside float classification.
+  libm functions (`sqrt`, `pow`, `exp`, `log`, `sin`, and siblings). The
+  classification helpers derive from the IEEE float comparisons and
+  arithmetic of decision D026 and need no C surface.
 - Needs no sysroot text or numeric-conversion surface: the example compares
   floats and adds integers only.
 - A generic float-width trait (`T: type(Float)`) waits for that trait's

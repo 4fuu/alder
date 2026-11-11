@@ -1343,8 +1343,13 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		if expected != nil && expected.isFloat() {
 			t = expected
 		}
-		if t.prim == pF32 && (x.Value > 3.4028234663852886e38 || x.Value < -3.4028234663852886e38) {
-			return nil, diag(x.P, "float literal %g is out of range for F32", x.Value)
+		if t.prim == pF32 {
+			if x.Value > 3.4028234663852886e38 || x.Value < -3.4028234663852886e38 {
+				return nil, diag(x.P, "float literal %g is out of range for F32", x.Value)
+			}
+			if float64(float32(x.Value)) != x.Value {
+				return nil, diag(x.P, "float literal %g is not exactly representable as F32", x.Value)
+			}
 		}
 		k.note(e, t)
 		return t, nil

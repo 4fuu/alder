@@ -54,6 +54,8 @@ var rejectFixtures = []string{
 	"unknown-name",
 	"unknown-type",
 	"type-mismatch",
+	"float-literal-f32-range",
+	"float-literal-f32-exact",
 	"immutable-assign",
 	"map-key-signed",
 	"map-value-string",

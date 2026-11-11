@@ -297,6 +297,68 @@ fn main() -> I32 {
 }
 `
 
+// TestM8BindingNameCollision pins the argument-window rule for a qualified
+// binding call whose raw member shares its name with a module function:
+// `cmath.dpow(left, right)` under a plain `fn dpow` must still bind two
+// arguments, because the member route counts its receiver from the callee's
+// own dotted shape, not from whether a same-named symbol exists. Before the
+// receiver-count fix, the same-named symbol made the window treat the
+// callee alias as an argument and the good call rejected.
+func TestM8BindingNameCollision(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+
+	const collisionProgram = `import c "math.h" as cmath {
+    raw fn dpow = "pow"(x: c.Double, y: c.Double) -> c.Double
+}
+
+fn dpow(base: F64, exponent: F64) -> F64 {
+    let left = base.to_c_double()
+    let right = exponent.to_c_double()
+    let done = unsafe c { cmath.dpow(left, right) }
+    return done.to_f64()
+}
+
+fn main() -> I32 {
+    let two: F64 = 2.0
+    let ten: F64 = 10.0
+    let value = dpow(two, ten)
+    let check = value.to_c_float_checked()
+    var code: I32 = 9
+    match check {
+        Some(v) => { code = 0 }
+        None => { code = 1 }
+    }
+    return code
+}
+`
+	files := map[string]string{"collide.al": collisionProgram}
+	check := runProductionCompiler(t, exe, files, "check", "collide.al")
+	if check.status != 0 || check.stderr != "" {
+		t.Fatalf("collision check result: %+v stderr=%s", check, check.stderr)
+	}
+
+	wrongArity := strings.Replace(collisionProgram, "cmath.dpow(left, right)", "cmath.dpow(left, right, left)", 1)
+	if wrongArity == collisionProgram {
+		t.Fatal("arity mutation changed nothing")
+	}
+	bad := map[string]string{"collide.al": wrongArity}
+	rejected := runProductionCompiler(t, exe, bad, "check", "collide.al")
+	if rejected.status == 0 || !strings.Contains(rejected.stderr, "a C binding call takes 2 argument(s), got 3") {
+		t.Fatalf("wrong-arity collision not rejected: status=%d stderr=%q", rejected.status, rejected.stderr)
+	}
+}
+
 // TestM8BindingUnsafeCallsProduction drives raw fn members and unsafe c
 // calls through the production driver: the generated translation unit
 // includes the fixture header, pins every binding member with

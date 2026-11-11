@@ -2472,6 +2472,15 @@ fn binding_call_member(state: State, parse: ParseStore, store: CheckStore, calle
 // expressions, then compare against the declared C parameter types with the
 // one widening rule; the result carries the declared binding result type,
 // ordinary Unit for void C functions.
+fn binding_call_receiver_count(callee: SyntaxRec) -> U64 {
+    // The member route already matched the callee shape: a bare member
+    // name has no receiver, and a qualified alias.member call has exactly
+    // the alias as its receiver link, whether or not a module symbol
+    // shares the member's name.
+    if callee.kind == 29 { return 1 }
+    return 0
+}
+
 fn check_unsafe_binding_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, unsafe_id: U64, call: SyntaxRec, member_index: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_index - 1)
     let fn_node = __s0_buffer_get(SyntaxRec, parse.nodes, member.member_node - 1)
@@ -2486,8 +2495,12 @@ fn check_unsafe_binding_call(d: Domain, state: State, parse: ParseStore, base: C
         at = at + 1
     }
     // A dotted qualified callee links its receiver as ordinal 1, so the
-    // argument window starts one link later than a bare callee's.
-    let receivers = call_receiver_links(state, parse, store, call)
+    // argument window starts one link later than a bare callee's. The
+    // count follows the member route's own shape match instead of the
+    // symbol heuristic, which a same-named module symbol would defeat.
+    let callee_link = call_link_at(parse, call, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    let receivers = binding_call_receiver_count(callee)
     let argument_count = call_link_count(parse, call) - 1 - receivers
     if argument_count != param_count {
         let failed = try check_token_detail_fail(d, state, base, 201, call, argument_count, param_count, 0, 0)
@@ -4444,6 +4457,77 @@ fn primitive_type_named(state: State, parse: ParseStore, store: CheckStore, chec
 fn float_type(state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> Bool {
     return primitive_type_named(state, parse, store, checked_type, "F32") || primitive_type_named(state, parse, store, checked_type, "F64")
 }
+
+// check_float_literal_f32 rejects an F32-typed float literal whose value the
+// MIR verifier would refuse as an F32 constant, so the program fails with a
+// diagnostic at the literal instead of an internal verification failure. The
+// literal's decimal text is parsed to its F64 bits exactly as lowering parses
+// it, then tested against the F32 magnitude range and the verifier's
+// exact-representation rule. The return is zero when the literal is
+// acceptable, and otherwise the diagnostic kind to report.
+fn check_float_literal_f32(state: State, expression: SyntaxRec) -> U64 {
+    let token = __s0_buffer_get(TokenRec, state.tokens, expression.token - 1)
+    var at = token.value_start
+    let end = token.value_end
+    var negative: U64 = 0
+    if at < end && __s0_buffer_get(U8, state.values, at) == 45 {
+        negative = 1
+        at = at + 1
+    }
+    var significand: U64 = 0
+    var fraction: I64 = 0
+    var exponent: I64 = 0
+    var exponent_negative = false
+    var after_point = false
+    var after_exponent = false
+    while at < end {
+        let byte = __s0_buffer_get(U8, state.values, at)
+        if byte == 46 { after_point = true } else {
+            if byte == 101 || byte == 69 { after_exponent = true } else {
+                if after_exponent && byte == 45 { exponent_negative = true } else {
+                    if after_exponent && byte == 43 { exponent_negative = false } else {
+                        var digit: U64 = 0
+                        var signed_digit: I64 = 0
+                        if byte == 49 { digit = 1 }
+                        if byte == 50 { digit = 2 }
+                        if byte == 51 { digit = 3 }
+                        if byte == 52 { digit = 4 }
+                        if byte == 53 { digit = 5 }
+                        if byte == 54 { digit = 6 }
+                        if byte == 55 { digit = 7 }
+                        if byte == 56 { digit = 8 }
+                        if byte == 57 { digit = 9 }
+                        if byte == 49 { signed_digit = 1 }
+                        if byte == 50 { signed_digit = 2 }
+                        if byte == 51 { signed_digit = 3 }
+                        if byte == 52 { signed_digit = 4 }
+                        if byte == 53 { signed_digit = 5 }
+                        if byte == 54 { signed_digit = 6 }
+                        if byte == 55 { signed_digit = 7 }
+                        if byte == 56 { signed_digit = 8 }
+                        if byte == 57 { signed_digit = 9 }
+                        if after_exponent { exponent = exponent * 10 + signed_digit } else {
+                            significand = significand * 10 + digit
+                            if after_point { fraction = fraction + 1 }
+                        }
+                    }
+                }
+            }
+        }
+        at = at + 1
+    }
+    if exponent_negative { exponent = 0 - exponent }
+    let bits = unsafe c { alderhost_decimal_f64_bits(negative, significand, exponent - fraction) }
+    // The largest finite F32 widened to F64 bits is exponent 1150 with
+    // fraction 0x7FFFFF shifted into the F64 mantissa field; anything beyond
+    // that magnitude, including an infinite parse, is out of range.
+    let exponent_field = (bits / 4503599627370496) % 2048
+    if exponent_field > 1150 { return 255 }
+    if exponent_field == 1150 && bits % 4503599627370496 > 4503599090499584 { return 255 }
+    if !mir_vfloat_exact_f32(bits) { return 256 }
+    return 0
+}
+
 
 // Float operands are the kind-1 primitives whose target is F32 or F64; the
 // arithmetic gate and the lowering dispatch both consult this shape.
@@ -8806,6 +8890,16 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         if literal_type == 0 { literal_type = primitive_type_id(state, parse, store, "F64") }
         if literal_type == 0 { return expr_deferred(base) }
         if !float_type(state, parse, store, literal_type) { return expr_token_fail(d, state, base, mismatch_kind, mismatch_node) }
+        var f32_rejection: U64 = 0
+        if primitive_type_named(state, parse, store, literal_type, "F32") { f32_rejection = check_float_literal_f32(state, expression) }
+        if f32_rejection != 0 {
+            let failed = try check_token_detail_fail(d, state, base, f32_rejection, expression, 0, 0, 0, 0)
+            let bad = match failed {
+                CheckGood(value) => value
+                CheckBad(value) => value
+            }
+            return Ok(ExprBad(bad))
+        }
         return append_expression(d, store, owner, expression_id, 20, literal_type, 0, 0, 0, 0, 0, site_kind, site_syntax)
     }
     if expression.kind == 22 {

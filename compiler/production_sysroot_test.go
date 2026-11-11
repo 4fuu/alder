@@ -655,6 +655,119 @@ func TestProductionSysrootCollectionRuns(t *testing.T) {
 	}
 }
 
+func TestProductionSysrootMathRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootMathMain(), "test-plan")
+	mathSeed := sysrootModuleSeed(t, repoRoot, "math.al")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("std.math plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, "\nsysroot v1:") {
+		t.Fatalf("plan lost the sysroot identity line: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/math.al bytes "+mathSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.math\n") {
+		t.Fatalf("plan does not list the std.math source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "edge hello.main -> std.math\n") {
+		t.Fatalf("plan does not record the std.math edge: %q", plan.stdout)
+	}
+	repeat := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootMathMain(), "test-plan")
+	if repeat != plan {
+		t.Fatalf("std.math plan changed across processes: first=%q repeat=%q", plan.stdout, repeat.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootMathMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.math behavior run failed: %+v", run)
+	}
+}
+
+func sysrootMathMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.math { is_nan, is_infinite, is_finite, is_sign_negative, is_sign_positive, is_nan_f32, is_infinite_f32, is_finite_f32, is_sign_negative_f32, is_sign_positive_f32, abs, abs_f32, floor, ceil, trunc, round, sqrt, sqrt_f32, pow, max, min, copysign, pi, e, sqrt2, pi_f32 }
+
+pub fn main() -> I32 {
+    let first = check_exact_cases()
+    if first != 0 { return first }
+    let second = check_classification()
+    if second != 0 { return second }
+    let third = check_f32_classification()
+    if third != 0 { return third }
+    let fourth = check_constants()
+    if fourth != 0 { return fourth }
+    return 0
+}
+
+fn check_exact_cases() -> I32 {
+    if sqrt(4.0) != 2.0 { return 1 }
+    if floor(2.5) != 2.0 { return 2 }
+    if ceil(2.5) != 3.0 { return 3 }
+    if trunc(-2.5) != -2.0 { return 4 }
+    if round(2.5) != 3.0 { return 5 }
+    if abs(-7.25) != 7.25 { return 6 }
+    if max(1.5, 2.5) != 2.5 { return 7 }
+    if min(1.5, 2.5) != 1.5 { return 8 }
+    if copysign(3.0, -1.0) != -3.0 { return 9 }
+    if sqrt_f32(4.0) != 2.0 { return 10 }
+    if abs_f32(-1.5) != 1.5 { return 11 }
+    return 0
+}
+
+fn check_classification() -> I32 {
+    if !is_nan(sqrt(-1.0)) { return 1 }
+    if is_nan(1.0) { return 2 }
+    if !is_infinite(pow(0.0, -1.0)) { return 3 }
+    if is_infinite(1.0) { return 4 }
+    if is_infinite(sqrt(-1.0)) { return 5 }
+    if !is_finite(1.0) { return 6 }
+    if !is_finite(0.0) { return 7 }
+    if is_finite(pow(0.0, -1.0)) { return 8 }
+    if is_finite(sqrt(-1.0)) { return 9 }
+    if !is_sign_negative(-0.0) { return 10 }
+    if is_sign_negative(0.0) { return 11 }
+    if !is_sign_positive(1.0) { return 12 }
+    if is_sign_positive(-1.0) { return 13 }
+    if is_sign_negative(sqrt(-1.0)) == is_sign_positive(sqrt(-1.0)) { return 14 }
+    return 0
+}
+
+fn check_f32_classification() -> I32 {
+    if !is_nan_f32(sqrt_f32(-1.0)) { return 1 }
+    if is_nan_f32(1.0) { return 2 }
+    if !is_finite_f32(1.0) { return 3 }
+    if !is_finite_f32(0.0) { return 4 }
+    if !is_sign_negative_f32(-0.0) { return 5 }
+    if !is_sign_negative_f32(-1.0) { return 6 }
+    if !is_sign_positive_f32(0.0) { return 7 }
+    if is_sign_positive_f32(-2.0) { return 8 }
+    return 0
+}
+
+fn check_constants() -> I32 {
+    if pi() < 3.14159265358979 || pi() > 3.14159265358980 { return 1 }
+    if e() < 2.71828182845904 || e() > 2.71828182845905 { return 2 }
+    if sqrt2() < 1.41421356237309 || sqrt2() > 1.41421356237310 { return 3 }
+    if pi_f32() != 3.1415927410125732 { return 4 }
+    return 0
+}
+`,
+	}
+}
+
 func sysrootPathEnvMain() map[string]string {
 	return map[string]string{
 		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
