@@ -217,7 +217,8 @@ fn make(n: U64) -> Res { return Res(n: n) }
 fn relay(take r: Res) -> Res { return r }
 fn main() -> I32 {
     using r = make(7)
-    relay(r)
+    using back = relay(r)
+    if back.n != 7 { return 2 }
     using late = make(9)
     if late.n != 9 { return 1 }
     return 0

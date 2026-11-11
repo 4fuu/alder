@@ -2725,12 +2725,16 @@ fn lower_binding_expression(d: Domain, source_state: State, spans: __s0_Buffer(C
     }
     var value = binding.mir_id
     if binding.parameter != 1 {
-        var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
-        if binding.parameter == 2 || binding.parameter == 3 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: binding.mir_id)) } else {
-            place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        // The place, its type, and the load all extend `current`, not the
+        // entry `state`: a transfer above has already appended the disarm to
+        // this function's MIR, and rebuilding from the entry state would
+        // silently drop it and free a moved owner at scope exit.
+        var place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
+        if binding.parameter == 2 || binding.parameter == 3 { place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: binding.mir_id)) } else {
+            place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: binding.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
         }
         let local = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
-        let local_type = try lower_local_type(d, source_state, store, lower_with_mir(state, place.store), owner, expression.parameter_use, local)
+        let local_type = try lower_local_type(d, source_state, store, lower_with_mir(current, place.store), owner, expression.parameter_use, local)
         let result = try lower_add_typed_result(d, local_type.state, function, block, local_type.id)
         let instr = try lower_add_instr(d, result.state, function, block, mir_op_load(), result.id, place.id, 0, 0, 0, 0, "")
         current = instr.state
