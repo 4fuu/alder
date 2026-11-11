@@ -577,8 +577,10 @@ this document split, it contains:
 - deterministic concrete function specialization closure. Instances are keyed
   by declaration ID and ordered canonical concrete type IDs, registered before
   body checking, and checked in first-discovery FIFO order. Same-instance and
-  finite concrete mutual recursion are accepted; specialization-expanding
-  active polymorphic recursion is rejected;
+  finite concrete mutual recursion are accepted; a recursive chain whose type
+  arguments are proper structural subterms is finite and accepted, while
+  specialization-expanding active polymorphic recursion is rejected with
+  diagnostic 59 naming the callee;
 - private deterministic manifest v14 records used by Go conformance tests. It
   includes a canonical source-span table and stable checker diagnostic
   code/primary/related/note rendering independent of the eventual CLI envelope.

@@ -334,6 +334,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     }
     if kind == 40 { if !out_string("unknown name ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) { return false }
         return driver_out_message_quote(json) }
+    if kind == 59 {
+        if !out_string("generic instantiation does not terminate: ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" is instantiated again with type arguments that do not strictly shrink") { return false }
+        return out_string("")
+    }
     if kind == 65 { return out_string("condition must have type Bool") }
     if kind == 67 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_function_for_body(state, parse, source, start, json) || !driver_out_message_quote(json) { return false }
         return out_string(" may fall off the end without returning a value") }

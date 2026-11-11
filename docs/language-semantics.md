@@ -278,7 +278,9 @@ runtime dispatch.
 Compile-time `type` parameters are inferred and monomorphized before executable
 MIR. Type values do not exist at runtime merely because source code was
 generic. Recursive specialization must produce a finite set of concrete
-instances; specialization-expanding polymorphic recursion is rejected.
+instances; a chain whose type arguments are proper structural subterms is
+finite and accepted, while specialization-expanding polymorphic recursion is
+rejected.
 
 User-defined traits and capturing closures are required by Alder 1.0 and obey
 the static coherence and capture rules in

@@ -3287,11 +3287,82 @@ fn existing_instance(store: CheckStore, declaration: U64, bindings: __s0_Buffer(
     return 0
 }
 
+// The argument an instance carries for one of the declaration's own or
+// implementation parameters, or zero when the instance does not carry it.
+fn instance_param_argument(store: CheckStore, symbol: SymbolRec, declaration: U64, param: U64) -> U64 {
+    let record = __s0_buffer_get(TypeParamRec, store.type_params, param - 1)
+    if record.owner == declaration {
+        var ordinal: U64 = 0
+        var at: U64 = 0
+        while at < param - 1 {
+            if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration { ordinal = ordinal + 1 }
+            at = at + 1
+        }
+        if ordinal < symbol.instance_arg_count { return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + ordinal) }
+        return 0
+    }
+    let impl_owner = generic_impl_param_owner(store, declaration)
+    if impl_owner == 0 { return 0 }
+    let root_id = __s0_buffer_get(SymbolRec, store.symbols, impl_owner - 1).inherent_owner
+    if record.owner != impl_owner || record.node != root_id { return 0 }
+    let own_count = owned_param_count(store, declaration)
+    var impl_ordinal: U64 = 0
+    var at: U64 = 0
+    while at < param - 1 {
+        let candidate = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if candidate.owner == impl_owner && candidate.node == root_id { impl_ordinal = impl_ordinal + 1 }
+        at = at + 1
+    }
+    if own_count + impl_ordinal < symbol.instance_arg_count { return __s0_buffer_get(U64, store.type_args, symbol.first_instance_arg - 1 + own_count + impl_ordinal) }
+    return 0
+}
+
+// Whether `inner` occurs strictly inside `outer`, which makes every
+// instantiation with the inner arguments structurally smaller and therefore
+// finite.
+fn checked_type_strict_subterm(store: CheckStore, outer: U64, inner: U64, depth: U64) -> Bool {
+    if depth > 16 || outer == 0 || outer > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, outer - 1)
+    var at: U64 = 0
+    while at < checked.arg_count {
+        if checked.first_arg == 0 || checked.first_arg - 1 + at >= __s0_buffer_len(U64, store.type_args) { return false }
+        let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at)
+        if child == inner { return true }
+        if checked_type_strict_subterm(store, child, inner, depth + 1) { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// The instance's arguments strictly decrease toward the new bindings:
+// scanning the parameters in instance order, the first difference is a proper
+// structural subterm of the ancestor's argument. A strictly decreasing chain
+// of finite types terminates, so polymorphic recursion with shrinking
+// arguments is not an expansion.
+fn instance_strictly_decreasing(store: CheckStore, symbol: SymbolRec, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let old = instance_param_argument(store, symbol, declaration, at + 1)
+        if old != 0 {
+            let newer = inference_lookup(bindings, at + 1)
+            if newer == 0 { return false }
+            if newer != old { return checked_type_strict_subterm(store, old, newer, 0) }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+// Polymorphic recursion is refused when an ancestor instance of the same
+// declaration already carries different arguments and the chain does not
+// shrink: the monomorphization could not terminate.
 fn expanding_ancestry(store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), parent: U64) -> Bool {
     var at = parent
     while at != 0 {
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, at - 1)
-        if symbol.declaration == declaration && !instance_matches(store, symbol, declaration, bindings) { return true }
+        if symbol.declaration == declaration && !instance_matches(store, symbol, declaration, bindings) {
+            if !instance_strictly_decreasing(store, symbol, declaration, bindings) { return true }
+        }
         at = symbol.discovery_parent
     }
     return false
@@ -3370,11 +3441,19 @@ fn append_instance_uses(d: Domain, store: CheckStore, declaration: U64, instance
     return append_instance_use_index_slots(d, results, 1, parameter_first, parameter_count, result_first, result_count)
 }
 
+// The node a polymorphic-recursion diagnostic names: the callee of a call
+// site, or the site itself for every other instantiation.
+fn instantiation_report_site(parse: ParseStore, site: SyntaxRec) -> SyntaxRec {
+    if site.kind != 27 || site.children == 0 { return site }
+    let callee = call_link_at(parse, site, 0)
+    return __s0_buffer_get(SyntaxRec, parse.nodes, callee.node - 1)
+}
+
 fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), parent: U64, site: SyntaxRec) -> Result(InstanceOutcome, __s0_Error) {
     let found = existing_instance(store, declaration, bindings)
     if found != 0 { return Ok(InstanceGood(InstanceValueRec(store: store, instance: found))) }
     if expanding_ancestry(store, declaration, bindings, parent) {
-        let failed = try check_token_fail(d, state, store, 59, site)
+        let failed = try check_token_fail(d, state, store, 59, instantiation_report_site(parse, site))
         return Ok(InstanceBad(match failed {
             CheckGood(value) => value
             CheckBad(value) => value
