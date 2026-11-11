@@ -1,13 +1,14 @@
 # `std.random` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; seeded `Rng` half implemented**
 
 This is the versioned public snapshot for randomness. It is normative together
 with the executable example
-[`examples/std.random-v1.al`](examples/std.random-v1.al), which lands in the
-module's implementation commit: the docs example runner resolves sysroot
-modules, so the example file cannot precede the module it imports. The module
-lives at `<sysroot>/std/random.al`.
+[`examples/std.random-v1.al`](examples/std.random-v1.al), which lands with the
+OS half: the docs example runner resolves sysroot modules, so the example file
+cannot precede the module it imports. The module lives at
+`<sysroot>/std/random.al`; the seeded `Rng` half is installed now, and the OS
+forms wait on `std.io` v1.
 
 Snapshot v1 covers OS randomness through the capability and a seeded
 deterministic generator with unbiased ranges. OS randomness observes host
@@ -136,11 +137,11 @@ pub fn std_random_example(io: io.Blocking) -> U64 {
 
     // Seeded fill reproduces byte-for-byte.
     var filler = random.Rng.seeded(99)
-    let a: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
+    var a: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
     let left = a.slice_mut(0, 8)
     filler.fill(left)
     var again = random.Rng.seeded(99)
-    let b: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
+    var b: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
     let right = b.slice_mut(0, 8)
     again.fill(right)
     var same = true

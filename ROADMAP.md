@@ -1506,6 +1506,17 @@ requires a mutable owner. Evidence: `compiler/production_mutable_view_args_test.
 runs inherent and trait methods, temporary views, forwarding, and the three
 kept rejections (101, 104, and immutable reassignment).
 
+Landed standard-library progress: `std.random` ships its seeded deterministic
+generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
+state with value semantics and unbiased rejection ranges; `seeded`,
+`next_u64`, `next_u32`, `range_u64`, `range_u32`, and `fill(MutSlice(U8))` are
+implemented. Evidence: `compiler/production_random_test.go` runs the installed
+sysroot module through the production driver and checks independently computed
+SplitMix64 draws, range sums, the 32-bit high word, eight-byte and 21-byte
+fills, value-semantics copies, and the not-yet-landed OS form as a rejection.
+The OS forms wait on `std.io` v1. Docs: [Standard Library](docs/standard-library.md)
+and the frozen [`std.random` snapshot](docs/api/std.random-v1.md).
+
 Landed C-interop progress continues with by-value verified records. The
 checker accepts raw fn signatures with complete record parameters and
 results, and inside `unsafe c` the field read `rec.field` (yielding the

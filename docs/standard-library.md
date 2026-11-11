@@ -209,6 +209,14 @@ Required modules:
 - `std.math`: portable scalar math with documented IEEE behavior and explicit
   exceptional results.
 
+Implemented std.random progress: the seeded deterministic generator half is
+installed at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64` state
+with value semantics, `seeded`, `next_u64`, `next_u32`, and unbiased
+`range_u64`/`range_u32` rejection draws, plus `fill` over a `MutSlice(U8)`. It
+takes no capability, so tests and simulations are deterministic byte for byte.
+The OS forms (`fill`, `u64`, `u32`, `range_u64`, and `range_u32` on the module)
+take the `std.io` capability and land with `std.io` v1.
+
 Calendar and timezone databases are versioned distribution data. Ambient C
 rounding-mode changes are outside safe wrappers and cannot silently redefine
 Alder numeric semantics.
