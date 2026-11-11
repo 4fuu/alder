@@ -77,40 +77,23 @@ pub fn main() -> I32 {
     var source: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
     let left = source.slice_mut(0, 8)
     filler.fill(left)
-    if left[0] != 227 { return 11 }
-    if left[1] != 107 { return 12 }
-    if left[2] != 71 { return 13 }
-    if left[3] != 76 { return 14 }
-    if left[4] != 54 { return 15 }
-    if left[5] != 169 { return 16 }
-    if left[6] != 243 { return 17 }
-    if left[7] != 66 { return 18 }
+    var expected8: Array(U8, 8) = [227, 107, 71, 76, 54, 169, 243, 66]
+    var first_index: U64 = 0
+    while first_index < 8 {
+        if left[first_index] != expected8[first_index] { return 11 }
+        first_index = first_index + 1
+    }
 
     var tailer = random.Rng.seeded(1234)
     var bag: Array(U8, 21) = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     let view = bag.slice_mut(0, 21)
     tailer.fill(view)
-    if view[0] != 219 { return 19 }
-    if view[1] != 28 { return 20 }
-    if view[2] != 24 { return 21 }
-    if view[3] != 47 { return 22 }
-    if view[4] != 27 { return 23 }
-    if view[5] != 246 { return 24 }
-    if view[6] != 12 { return 25 }
-    if view[7] != 187 { return 26 }
-    if view[8] != 36 { return 27 }
-    if view[9] != 101 { return 28 }
-    if view[10] != 240 { return 29 }
-    if view[11] != 77 { return 30 }
-    if view[12] != 54 { return 31 }
-    if view[13] != 161 { return 32 }
-    if view[14] != 199 { return 33 }
-    if view[15] != 151 { return 34 }
-    if view[16] != 218 { return 35 }
-    if view[17] != 37 { return 36 }
-    if view[18] != 192 { return 37 }
-    if view[19] != 155 { return 38 }
-    if view[20] != 228 { return 39 }
+    var expected21: Array(U8, 21) = [219, 28, 24, 47, 27, 246, 12, 187, 36, 101, 240, 77, 54, 161, 199, 151, 218, 37, 192, 155, 228]
+    var second_index: U64 = 0
+    while second_index < 21 {
+        if view[second_index] != expected21[second_index] { return 12 }
+        second_index = second_index + 1
+    }
 
     var keeper = random.Rng.seeded(42)
     if keeper.next_u64() != first { return 40 }
