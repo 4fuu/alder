@@ -293,25 +293,6 @@ import std.path
 // The executable std.fs v1 snapshot example. Everything happens inside one
 // temporary directory that cleanup removes; the checksum is deterministic.
 
-// Option equality between two host strings.
-// uses == once Eq equality lands
-fn name_opt_eq(left: Option(OsString), right: Option(OsString)) -> Bool {
-    match left {
-        Some(one) => {
-            match right {
-                Some(two) => { return one == two }
-                None => { return false }
-            }
-        }
-        None => {
-            match right {
-                Some(_) => { return false }
-                None => { return true }
-            }
-        }
-    }
-}
-
 // The example inputs are fixed, so any early failure aborts with zero.
 pub fn std_fs_example(io: io.Blocking) -> U64 {
     var total: U64 = 0
@@ -417,8 +398,7 @@ pub fn std_fs_example(io: io.Blocking) -> U64 {
         Ok(value) => { value }
         Err(_) => { return 0 }
     }
-    // uses == once Eq equality lands
-    if name_opt_eq(canonical.file_name(), note.file_name()) { total = total + 1 }
+    if canonical.file_name() == note.file_name() { total = total + 1 }
 
     // Rename and remove.
     let moved = match path.Path.parse("moved.bin") {

@@ -164,12 +164,15 @@ fn os_is(left: OsString, right: String) -> Bool {
 }
 
 // Option equality against a literal.
-// uses == once Eq equality lands
 fn os_option_is(left: Option(OsString), right: String) -> Bool {
-    match left {
-        Some(value) => { return os_is(value, right) }
-        None => { return false }
+    var same: Bool = false
+    match OsString.parse(right) {
+        Ok(host) => {
+            if left == Some(host) { same = true }
+        }
+        Err(_) => {}
     }
+    return same
 }
 
 // The example inputs are fixed valid paths, so failed parses contribute
@@ -196,11 +199,8 @@ pub fn std_path_example() -> U64 {
             total = total + names * 10 + dots
 
             // Name, stem, extension, and parent queries.
-            // uses == once Eq equality lands
             if os_option_is(entry.file_name(), "app.conf") { total = total + 100 }
-            // uses == once Eq equality lands
             if os_option_is(entry.file_stem(), "app") { total = total + 200 }
-            // uses == once Eq equality lands
             if os_option_is(entry.extension(), "conf") { total = total + 400 }
             match entry.parent() {
                 Some(up) => { total = total + up.to_os().len() }
@@ -254,5 +254,7 @@ pub fn std_path_example() -> U64 {
 - The example avoids string building, interpolation, and `while let`; its
   `os_is` helper compares a host string against a fixed `String` literal
   through `==` on the exact bytes now that Eq dispatch landed, and its
-  `os_option_is` helper keeps the manual Option walk until builtin
-  `Option` comparisons join the Eq domain (diagnostic 303).
+  `os_option_is` helper compares through builtin `Option` equality now
+  that structural Eq dispatch covers it; only Options and Results with
+  floating or signed components stay outside the domain (diagnostic
+  303).
