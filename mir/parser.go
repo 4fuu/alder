@@ -1723,6 +1723,23 @@ func (p *parser) parseOp() (Instr, error) {
 		err = p.parseOptionalElse(t, &in)
 		return in, err
 
+	case "slice.to_bytes":
+		if p.m.FormatVersion < ClosureFormatVersion {
+			return in, p.errf(t, "slice.to_bytes requires MIR format version %d", BindingFormatVersion)
+		}
+		in.Op = OpSliceToBytes
+		if in.Domain, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		err = p.parseOptionalElse(t, &in)
+		return in, err
+
 	case "ffi.call.unsafe":
 		in.Op = OpFFICallUnsafe
 		impTok, err := p.expectAtName("an import name")

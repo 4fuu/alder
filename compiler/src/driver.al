@@ -452,6 +452,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string(" does not appear in the implementing type")
     }
     if kind == 301 { return out_string("an implementation cannot target a bare type parameter; write a parameterized implementing type instead") }
+    if kind == 306 { return out_string("to_bytes requires a [U8] view: this view's element type is not U8") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
         return out_string(" is used with the wrong argument shape") }

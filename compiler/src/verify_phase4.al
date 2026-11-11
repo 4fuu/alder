@@ -44,7 +44,7 @@ uses = try mir_vp4_use(d, uses, i.c, i.block, id, 0, 0, 0) }
 uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.c, i.block, id, 0, 0, 0) }
     if i.op == mir_op_str_len() || i.op == mir_op_str_to_bytes() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0) }
-    if i.op == mir_op_str_byte_checked() || i.op == mir_op_str_from_bytes() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
+    if i.op == mir_op_str_byte_checked() || i.op == mir_op_str_from_bytes() || i.op == mir_op_slice_to_bytes() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0) }
     if i.op == mir_op_str_slice_checked() { uses = try mir_vp4_use(d, uses, i.a, i.block, id, 0, 0, 0)
 uses = try mir_vp4_use(d, uses, i.b, i.block, id, 0, 0, 0)

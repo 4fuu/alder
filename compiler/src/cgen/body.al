@@ -230,7 +230,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_c_buffer_ptr() { return false }
+        if item.op > mir_op_slice_to_bytes() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -767,6 +767,43 @@ fn cgen_emit_str_to_bytes(d: Domain, initial: CgenWriter, store: MirStore, index
     out = try cgen_put(d, out, ".data, ")
     out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
     return cgen_put(d, out, ".len };\n")
+}
+
+fn cgen_emit_slice_to_bytes(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    // The result is bytes holding a fresh copy of the byte view in operand b;
+    // operand a is the storage domain. Allocation failure takes the edge.
+    var out = initial
+    out = try cgen_put(d, out, "  uint64_t ")
+    out = try cgen_put_tmp(d, out, item.result, "n")
+    out = try cgen_put(d, out, " = ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    out = try cgen_put(d, out, ".len;\n  void *")
+    out = try cgen_put_tmp(d, out, item.result, "p")
+    out = try cgen_put(d, out, " = alder_domain_alloc(")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ", (size_t)")
+    out = try cgen_put_tmp(d, out, item.result, "n")
+    out = try cgen_put(d, out, ", (size_t)1);\n  if (")
+    out = try cgen_put_tmp(d, out, item.result, "p")
+    out = try cgen_put(d, out, " == NULL) ")
+    out = try cgen_emit_checked_edge(d, out, store, indexes, instruction, item)
+    out = try cgen_put(d, out, "\n  if (")
+    out = try cgen_put_tmp(d, out, item.result, "n")
+    out = try cgen_put(d, out, " != (uint64_t)0) { memcpy(")
+    out = try cgen_put_tmp(d, out, item.result, "p")
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    out = try cgen_put(d, out, ".data, (size_t)")
+    out = try cgen_put_tmp(d, out, item.result, "n")
+    out = try cgen_put(d, out, "); }\n  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = (")
+    out = try cgen_put_type(d, out, store, cgen_value_type(store, indexes, item.function, item.result))
+    out = try cgen_put(d, out, "){ (const uint8_t *)")
+    out = try cgen_put_tmp(d, out, item.result, "p")
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_tmp(d, out, item.result, "n")
+    return cgen_put(d, out, " };\n")
 }
 
 fn cgen_emit_str_concat(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, instruction: U64, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
@@ -2270,6 +2307,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_str_len() { return cgen_emit_str_len(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_byte_checked() { return cgen_emit_str_byte_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_to_bytes() { return cgen_emit_str_to_bytes(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_slice_to_bytes() { return cgen_emit_slice_to_bytes(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_concat() { return cgen_emit_str_concat(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_slice_checked() { return cgen_emit_str_slice_checked(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_str_from_bytes() { return cgen_emit_str_from_bytes(d, out, store, indexes, instruction, item) }

@@ -588,6 +588,16 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return ta, true
 
+	case OpSliceToBytes:
+		ta, ok := f.ValueType(in.A)
+		if !ok || !m.ValidType(ta) || m.Types[ta].Kind != TypeSlice || m.Types[ta].Elem != TypeU8 {
+			return NoType, false
+		}
+		if !m.isHandleType(f, in.Domain) {
+			return NoType, false
+		}
+		return m.Bytes(), true
+
 	case OpCBufferPtr:
 		ta, ok := f.ValueType(in.A)
 		if !ok || !m.ValidType(ta) || !m.ValidType(in.TypeOp) {

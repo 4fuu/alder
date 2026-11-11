@@ -108,6 +108,28 @@ fn t_to_string_checked() -> I32 {
     return code
 }
 
+// A slice view of an Array or Vec converts to Bytes by copying its bytes, so
+// the result owns fresh storage and never aliases the view's owner.
+fn t_view_to_bytes() -> I32 {
+    let data: Array(U8, 4) = [65, 66, 67, 68]
+    let part: Bytes = data.slice(1, 3).to_bytes()
+    if part.len() != 2 { return 1 }
+    if part.byte(0) != 66 { return 2 }
+    if part.byte(1) != 67 { return 3 }
+    let whole: Bytes = data.slice(0, 4).to_bytes()
+    if whole.len() != 4 { return 4 }
+    let empty: Bytes = data.slice(2, 2).to_bytes()
+    if empty.len() != 0 { return 5 }
+    var v: Vec(U8) = Vec.new(U8)
+    v.push(90)
+    let from_vec: Bytes = v.slice(0, 1).to_bytes()
+    if from_vec.len() != 1 { return 6 }
+    if from_vec.byte(0) != 90 { return 7 }
+    let joined: Bytes = part.concat(part)
+    if joined.len() != 4 { return 8 }
+    return 0
+}
+
 fn main() -> I32 {
     let a = t_len()
     if a != 0 { return a }
@@ -121,6 +143,8 @@ fn main() -> I32 {
     if e != 0 { return e }
     let f = t_to_string_checked()
     if f != 0 { return f }
+    let g = t_view_to_bytes()
+    if g != 0 { return g }
     return 0
 }
 `
@@ -192,6 +216,16 @@ var strMethodsRejections = []struct {
 		"record-receiver-byte",
 		"type Plain {\n    n: U64\n}\nfn f(p: Plain) -> U8 {\n    return p.byte(0)\n}\nfn main() -> I32 { return 0 }\n",
 		`builtin method "byte" applies only to its builtin receiver types`,
+	},
+	{
+		"u16-view-to-bytes",
+		"fn f(v: [U16]) -> Bytes {\n    return v.to_bytes()\n}\nfn main() -> I32 { return 0 }\n",
+		"to_bytes requires a [U8] view: this view's element type is not U8",
+	},
+	{
+		"mut-view-direct-to-bytes",
+		"fn f(mut v: MutSlice(U8)) -> Bytes {\n    return v.to_bytes()\n}\nfn main() -> I32 { return 0 }\n",
+		"checker diagnostic 61",
 	},
 	{
 		"bool-receiver-len",

@@ -103,7 +103,8 @@ Required `core` areas:
   conversions, parse and format foundations;
 - `core.range`: half-open and inclusive ranges with checked endpoints;
 - `core.array` and `core.slice`: iteration, split, search, comparison, copy,
-  checked `get`, and exclusive mutable operations;
+  checked `get`, `[U8].to_bytes` (a copying view-to-`Bytes` conversion), and
+  exclusive mutable operations;
 - `core.collection`: fundamental `Vec`, insertion-ordered `Map`/`Set`, and
   their checked/fallible capacity operations;
 - `core.iter`: static iterator traits and common lazy adapters;

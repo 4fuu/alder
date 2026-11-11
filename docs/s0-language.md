@@ -400,7 +400,11 @@ Implemented expressions include:
   resolved like an ordinary method, so user impls may declare methods named
   `len` or `to_bytes`, and a call with such a name on a type that provides
   neither a builtin receiver nor an impl method is rejected with a dedicated
-  diagnostic naming the builtin method;
+  diagnostic naming the builtin method. A `[U8]` view also carries
+  `to_bytes() -> Bytes`, which copies the view's bytes into fresh storage, so
+  `Array(U8, N).slice(...)` and `Vec(U8).slice(...)` produce an owning `Bytes`
+  without aliasing the view's owner; a view of any other element type is
+  rejected with its own diagnostic;
 - named builtin conversion methods on the eight integer types: `to_T()` for
   widening pairs is total (widening means `T` is wider and the receiver is
   unsigned or both types are signed), while `to_T_checked() -> Option(T)` and

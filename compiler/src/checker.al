@@ -7546,12 +7546,14 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         arity = 2 }
     if node_word(state, callee, "subview") { builtin = 25
         arity = 2 }
+    if node_word(state, callee, "to_bytes") { builtin = 968 }
     // Method-call links include both the selected callee and its receiver.
     if builtin == 0 || call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 41, call) }
     if builtin == 21 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 23 && sequence.kind == 18 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 24 && sequence.kind != 15 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 25 && sequence.kind != 18 { return expr_token_fail(d, state, base, 61, callee) }
+    if builtin == 968 && sequence.kind != 8 { return expr_token_fail(d, state, base, 61, callee) }
     let element = sequence_element_type(state, parse, store, receiver_type_id)
     // Affine-element vectors transfer elements in and drain them at scope
     // exit: per-element reads and views would duplicate an owner, so only
@@ -7679,6 +7681,11 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if builtin == 24 || builtin == 25 { let made = try canonical_application(d, current, owner, 18, element, 0, 1)
         current = made.store
         result = made.checked_type }
+    if builtin == 968 {
+        let u8_type = primitive_type_id(state, parse, current, "U8")
+        if element != u8_type { return expr_token_fail(d, state, base, 306, callee) }
+        result = canonical_type_id(current, 14, 0, 0, 0)
+    }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, result, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, result) }
     return append_sequence_method(d, current, owner, call_id, result, builtin, receiver_expression, first_expression, second_expression, receiver_place, site_kind, site_syntax)
 }
@@ -9029,7 +9036,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // Sequence methods capture their names only on the receiver kinds
         // that own the builtins; every other receiver falls through to impl
         // lookup, so a user type may provide its own len or slice method.
-        if (receiver_type.kind == 8 || receiver_type.kind == 15 || receiver_type.kind == 17 || receiver_type.kind == 18) && (node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview")) {
+        if (receiver_type.kind == 8 || receiver_type.kind == 15 || receiver_type.kind == 17 || receiver_type.kind == 18) && (node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") || node_word(state, callee, "to_bytes")) {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "add_checked") || node_word(state, callee, "sub_checked") || node_word(state, callee, "mul_checked") || node_word(state, callee, "add_saturating") || node_word(state, callee, "sub_saturating") || node_word(state, callee, "mul_saturating") || node_word(state, callee, "add_wrapping") || node_word(state, callee, "sub_wrapping") || node_word(state, callee, "mul_wrapping")) {

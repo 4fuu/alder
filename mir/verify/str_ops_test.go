@@ -20,7 +20,7 @@ func TestStrOpsAccepted(t *testing.T) {
 	const text = strOpsHeader + `
 const @idx: u64 = 1
 
-fn @seq(%d: domain_handle, %t: string, %b: bytes) -> option(string) {
+fn @seq(%d: domain_handle, %t: string, %b: bytes, %v: slice(u8)) -> option(string) {
 entry:
   %i = const.get @idx
   %l = str.len %t
@@ -30,6 +30,7 @@ entry:
   %a = str.to_bytes %t
   %f = str.from_bytes %d, %b else fail
   %cb = str.concat %d, %b, %b else fail
+  %sb = slice.to_bytes %d, %v else fail
   return %f
 fail:
   panic
@@ -48,7 +49,7 @@ fail:
 	}
 	for _, name := range []string{
 		"str.len", "str.byte.checked", "str.concat", "str.slice.checked",
-		"str.to_bytes", "str.from_bytes",
+		"str.to_bytes", "str.from_bytes", "slice.to_bytes",
 	} {
 		if !strings.Contains(printed, name) {
 			t.Fatalf("printed module lost %s:\n%s", name, printed)
@@ -102,6 +103,54 @@ fn @seq(%t: string, %i: u64) -> u8 {
 entry:
   %r = str.byte.checked %t, %i
   return %r
+}
+`,
+		},
+		{
+			"slice-to-bytes-wrong-element",
+			strOpsHeader + `
+fn @seq(%d: domain_handle, %v: slice(u16)) -> bytes {
+entry:
+  %b = slice.to_bytes %d, %v else fail
+  return %b
+fail:
+  panic
+}
+`,
+		},
+		{
+			"slice-to-bytes-bytes-operand",
+			strOpsHeader + `
+fn @seq(%d: domain_handle, %x: bytes) -> bytes {
+entry:
+  %b = slice.to_bytes %d, %x else fail
+  return %b
+fail:
+  panic
+}
+`,
+		},
+		{
+			"slice-to-bytes-domain-not-handle",
+			strOpsHeader + `
+fn @seq(%v: slice(u8)) -> bytes {
+entry:
+  %b = slice.to_bytes %v, %v else fail
+  return %b
+fail:
+  panic
+}
+`,
+		},
+		{
+			"slice-to-bytes-result-not-bytes",
+			strOpsHeader + `
+fn @seq(%d: domain_handle, %v: slice(u8)) -> string {
+entry:
+  %b = slice.to_bytes %d, %v else fail
+  return %b
+fail:
+  panic
 }
 `,
 		},

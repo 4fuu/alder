@@ -178,6 +178,24 @@ func TestArrayParsePrintParse(t *testing.T) {
 
 // TestParseValueIDs verifies that parsing assigns deterministic IDs: the same
 // text parses to modules whose printed forms and value identities agree.
+func TestSliceToBytesParsePrintParse(t *testing.T) {
+	const text = "mir 6\n\nfn @f(%d: domain_handle, %v: slice(u8)) -> bytes {\nbb0:\n  %b = slice.to_bytes %d, %v else bb_fail\n  return %b\n\nbb_fail:\n  panic\n}\n"
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(m); got != text {
+		t.Fatalf("printed slice.to_bytes differs:\n%s", got)
+	}
+	reparsed, err := Parse(Print(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Print(reparsed); got != text {
+		t.Fatalf("reprinted slice.to_bytes differs:\n%s", got)
+	}
+}
+
 func TestParseValueIDs(t *testing.T) {
 	text := `mir 1
 

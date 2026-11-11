@@ -200,6 +200,9 @@ const (
 	// operand is bytes or a u8 slice and TypeOp names the declared C pointer
 	// type; the pointer never becomes an ordinary value.
 	OpCBufferPtr OpKind = 107
+	// OpSliceToBytes copies a byte view into fresh bytes storage in the
+	// domain operand. Allocation failure takes the failure edge.
+	OpSliceToBytes OpKind = 108
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -426,6 +429,8 @@ func (k OpKind) String() string {
 		return "int.not"
 	case OpCBufferPtr:
 		return "c.buffer.ptr"
+	case OpSliceToBytes:
+		return "slice.to_bytes"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }
@@ -452,6 +457,8 @@ func (k OpKind) HasFailEdge() bool {
 	case OpVecConstructChecked, OpVecGrowChecked:
 		return true
 	case OpStrByteChecked, OpStrConcat, OpStrSliceChecked, OpStrFromBytes, OpStrDisplay:
+		return true
+	case OpSliceToBytes:
 		return true
 	case OpCStringMakeLit, OpCStringMake:
 		return true

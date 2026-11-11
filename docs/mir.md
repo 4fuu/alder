@@ -539,6 +539,22 @@ data pointer is null, so an empty buffer still reaches C as a valid address.
 The pointer is valid only for the call; no other operation may consume it or
 store it as an ordinary value.
 
+## Byte-View Conversion
+
+MIR 6 exposes the byte-view conversion as operation 108:
+
+```text
+slice.to_bytes domain, view else edge -> bytes
+```
+
+`view` is a `slice(u8)` value and the result is a fresh `bytes` value holding a
+copy of the view's bytes in the domain. The operation reads the view's data
+pointer and length, allocates the copy, and takes its failure edge only when
+that allocation fails; an empty view allocates the runtime's one-byte
+non-null buffer like every other empty owning sequence. The verifier rejects a
+view of any other element type, a domain operand that is not a
+`domain_handle`, and a result that is not `bytes`.
+
 ## Text Display
 
 MIR 6 exposes the Display domain's formatting as operation 102, produced

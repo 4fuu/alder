@@ -477,6 +477,12 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			return m.ValidType(t) && m.Types[t].Kind == mir.TypeBytes
 		}, "bytes")
 
+	case mir.OpSliceToBytes:
+		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
+		c.expect(in.A, "byte-view operand", func(t mir.TypeId) bool {
+			return m.ValidType(t) && m.Types[t].Kind == mir.TypeSlice && m.Types[t].Elem == mir.TypeU8
+		}, "slice(u8)")
+
 	case mir.OpStrDisplay:
 		c.expectExact(in.Domain, "domain operand", m.DomainHandle())
 		c.expect(in.A, "display operand", func(t mir.TypeId) bool {

@@ -252,6 +252,7 @@ func TestInferResultType(t *testing.T) {
 		{Name: "d", Type: m.DomainHandle()},
 		{Name: "t", Type: m.String()},
 		{Name: "b", Type: m.Bytes()},
+		{Name: "v", Type: m.Slice(TypeU8)},
 	}, TypeI64)
 	fs.AddBlock("bb0", nil)
 	sIdx := addResult(t, m, fs, Instr{Op: OpConstGet, Const: "ku"})
@@ -270,6 +271,7 @@ func TestInferResultType(t *testing.T) {
 	wantFs("str.slice.checked", Instr{Op: OpStrSliceChecked, Domain: 0, A: byt, Lo: sIdx, Hi: sIdx}, m.Bytes())
 	wantFs("str.to_bytes", Instr{Op: OpStrToBytes, A: str}, m.Bytes())
 	wantFs("str.from_bytes", Instr{Op: OpStrFromBytes, Domain: 0, A: byt}, m.Option(m.String()))
+	wantFs("slice.to_bytes", Instr{Op: OpSliceToBytes, Domain: 0, A: ValueId(3)}, m.Bytes())
 
 	// A producing value used by a later instruction.
 	v := addResult(t, m, f, Instr{Op: OpConstGet, Const: "k"})
@@ -282,6 +284,7 @@ func TestInferResultType(t *testing.T) {
 		{Op: OpIntAddTry, A: x, B: s},
 		{Op: OpIntAddWrapping, A: x, B: s},
 		{Op: OpSliceLen, Slice: x},
+		{Op: OpSliceToBytes, Domain: 0, A: byt},
 		{Op: OpEnumPayloadChecked, EnumValue: e, Variant: "B"},
 		{Op: OpConstGet, Const: "missing"},
 		{Op: OpStore},

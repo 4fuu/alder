@@ -204,6 +204,9 @@ fn mir_op_int_not() -> U64 { return 106 }
 // One call-scoped borrow of an Alder buffer as a C pointer. The operand is
 // bytes, slice(u8), or safe_mut(u8); type_op is the declared c pointer type.
 fn mir_op_c_buffer_ptr() -> U64 { return 107 }
+// [U8].to_bytes copies a byte view into fresh bytes storage in the domain
+// operand a; operand b is the slice. Allocation failure takes the edge.
+fn mir_op_slice_to_bytes() -> U64 { return 108 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

@@ -350,7 +350,7 @@ func checkValueDef(m *mir.Module, f *mir.Function, id mir.ValueId, v *mir.Value)
 func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mir.Instr) []Error {
 	var errs []Error
 	loc := locInstr(f, b, ii, in)
-	if in.Op > mir.OpCBufferPtr {
+	if in.Op > mir.OpSliceToBytes {
 		return []Error{{Loc: loc, Msg: fmt.Sprintf("unknown operation kind %d", in.Op)}}
 	}
 	// The fn.value domain marker is legal only on fn.value; no other op
@@ -482,6 +482,9 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 	case mir.OpStrFromBytes:
 		require(in.Domain, "domain operand")
 		require(in.A, "bytes operand")
+	case mir.OpSliceToBytes:
+		require(in.Domain, "domain operand")
+		require(in.A, "byte-view operand")
 	case mir.OpStrDisplay:
 		require(in.Domain, "domain operand")
 		require(in.A, "display operand")
@@ -733,6 +736,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.Lo)
 		add(in.Hi)
 	case mir.OpStrFromBytes:
+		add(in.Domain)
+		add(in.A)
+	case mir.OpSliceToBytes:
 		add(in.Domain)
 		add(in.A)
 	case mir.OpStrDisplay:

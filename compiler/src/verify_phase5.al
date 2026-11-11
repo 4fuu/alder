@@ -505,6 +505,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() { return mir_v5_c_string_result(store, indexes, x, ta) }
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
+    if x.op == mir_op_slice_to_bytes() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && mir_v5_elem(store, tb) == mir_type_u8(), type_id: mir_v5_find_kind(indexes, mir_type_kind_bytes())) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }
     if x.op == mir_op_array_index_checked() { let array = mir_v5_array_type(store, ta)
     if array == 0 { return MirVTypeResult(valid: false, type_id: 0) }
@@ -811,6 +812,9 @@ if ck != mir_type_kind_string() && ck != mir_type_kind_bytes() { result = try mi
 let oi = mir_v5_operand(store, indexes, mir_operand_instruction(), id, 0, 0)
 if oi != 0 { let o = __s0_buffer_get(MirOperandRec, store.operands, oi - 1)
 result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, oi, o.value, mir_type_u64()) } }
+    if x.op == mir_op_slice_to_bytes() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_domain_handle()))
+let bt = mir_v5_value_type(store, indexes, x.function, x.b)
+if mir_v5_elem(store, bt) != mir_type_u8() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_slice(), mir_vtype_kind(store, bt), x.b) } }
     if x.op == mir_op_str_from_bytes() { result = try mir_v5_expect(d, store, indexes, result, x.function, x.block, id, 0, 0, x.a, mir_v5_find_kind(indexes, mir_type_kind_domain_handle()))
 let k = mir_vtype_kind(store, mir_v5_value_type(store, indexes, x.function, x.b))
 if k != mir_type_kind_bytes() { result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, mir_type_kind_bytes(), k, x.b) } }

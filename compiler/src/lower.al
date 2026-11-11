@@ -4129,6 +4129,16 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let ranged = try lower_add_instr_three(d, result.state, function, active, mir_op_slice_range_checked(), result.id, 0, base.id, first_arg, second_arg, panic_block)
         return Ok(LowerStep(state: ranged.state, id: result.id))
     }
+    if annotation.builtin == 968 {
+        // [U8].to_bytes copies the view into fresh bytes storage. The domain
+        // operand is the allocation site's storage domain, exactly as for
+        // the string concat and slice forms.
+        let domain = lower_storage_domain_value(current, store, owner, expression_id)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        let result = try lower_add_result(d, current, function, active, expression.checked_type, source_state, store)
+        let converted = try lower_add_instr_three(d, result.state, function, active, mir_op_slice_to_bytes(), result.id, 0, domain, receiver.id, 0, panic_block)
+        return Ok(LowerStep(state: converted.state, id: result.id))
+    }
     return Ok(LowerStep(state: lower_invalid(current), id: 0))
 }
 
@@ -4695,6 +4705,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1001 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         if annotation.builtin == 1000 { return lower_order_less_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+        // 968 is the sequence-surface [U8].to_bytes, numbered clear of the
+        // dense families above; it shares the M7.1 sequence lowering.
+        if annotation.builtin == 968 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -7133,6 +7146,17 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         if !receiver_ok { return false }
         let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
         return result.kind == 2
+    }
+    if annotation.builtin == 968 {
+        // [U8].to_bytes: one byte-view receiver child, bytes result.
+        if expression.child_count != 1 || annotation.target != 0 { return false }
+        let view_type = lower_builtin_child_type(store, expression, 0)
+        if view_type == 0 { return false }
+        let view = __s0_buffer_get(CheckedTypeRec, store.types, view_type - 1)
+        if view.kind != 8 || view.arg_count != 1 { return false }
+        let element = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(U64, store.type_args, view.first_arg - 1) - 1)
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        return element.kind == 1 && element.target == 6 && result.kind == 14
     }
     if annotation.builtin >= 65 { return lower_model_c_convert_ok(store, annotation, expression) }
     if annotation.builtin >= 62 {

@@ -22,12 +22,23 @@ impl [T] {
     pub fn slice(self, start: U64, end: U64) -> [T]
 }
 
+impl [U8] {
+    pub fn to_bytes(self) -> Bytes
+}
+
 impl MutSlice(T) {
     pub fn len(self) -> U64
     pub fn get(self, index: U64) -> Option(T)
     pub fn subview(mut self, start: U64, end: U64) -> MutSlice(T)
 }
 ```
+
+`[U8].to_bytes` copies the view's bytes into a fresh `Bytes` value, so the
+result never aliases the view's owner; every other element type has no such
+method. Because `Array(T, N)` and `Vec(T)` form `[T]` views with `slice`, the
+conversion is reachable from both (`data.slice(1, 3).to_bytes()`).
+`MutSlice(U8)` has no immutable view operation yet and therefore no
+`to_bytes` of its own.
 
 `Vec(T).slice` and `Vec(T).slice_mut` are frozen in the
 [`core.collection` v1 snapshot](core.collection-v1.md). Every range is
