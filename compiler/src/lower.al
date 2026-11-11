@@ -2805,9 +2805,10 @@ fn lower_ordered_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
 // recurses field-wise or by tag and payload.
 fn lower_m75_leaf_equal(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, checked_type: U64, left: U64, right: U64, equal_block: U64, different_block: U64) -> Result(LowerState, __s0_Error) {
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 7 {
-        // Aggregate payload: spill both values into fresh locals and
-        // continue the structural walk on the spilled places.
+    if checked.kind == 7 || checked.kind == 9 || checked.kind == 10 {
+        // Aggregate or builtin-variant payload: spill both values into
+        // fresh locals and continue the structural walk on the spilled
+        // places.
         let agg_type = try lower_type(d, source_state, store, state, checked_type)
         let left_ordinal = lower_local_count(agg_type.state.mir, function)
         let left_place = try lower_helper_local_place(d, agg_type.state, function, left_ordinal, try lower_decimal_name(d, "m75_key_nested_left", left_ordinal), agg_type.id)
@@ -2830,6 +2831,100 @@ fn lower_m75_leaf_equal(d: Domain, source_state: State, store: CheckStore, state
     return lower_branch(d, compared.state, function, block, result.id, equal_block, different_block)
 }
 
+// Builtin Option and Result equality: the implicit none/some or ok/err
+// variants compare tag-first through two switches, exactly like the
+// declared-enum walk, but the variant table comes from the builtin kind
+// instead of a variant use list; payload variants continue through the
+// leaf comparison.
+fn lower_m75_builtin_variant_equal(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64, function: U64, block: U64, left_place: U64, right_place: U64, equal_block: U64, different_block: U64) -> Result(LowerState, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.first_arg == 0 || checked.arg_count == 0 { return Ok(lower_invalid(state)) }
+    var current = state
+    var left_blocks = try __s0_buffer_new(U64, d)
+    var ordinal: U64 = 0
+    while ordinal < 2 {
+        let variant_block = try lower_add_block(d, current, function, "bb_m75_key_variant")
+        current = variant_block.state
+        left_blocks = try __s0_buffer_append(U64, d, left_blocks, variant_block.id)
+        ordinal = ordinal + 1
+    }
+    let key_type = try lower_type(d, source_state, store, current, checked_type)
+    if !key_type.state.valid { return Ok(key_type.state) }
+    let left_loaded = try lower_helper_load(d, key_type.state, function, block, left_place, key_type.id)
+    let right_loaded = try lower_helper_load(d, left_loaded.state, function, block, right_place, key_type.id)
+    current = right_loaded.state
+    let source_block = lower_open_block(current.mir, function, block)
+    let left_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: left_loaded.id, target: 0, then_block: 0, else_block: 0))
+    current = lower_with_mir(current, left_term.store)
+    var left_payloads = try __s0_buffer_new(U64, d)
+    ordinal = 0
+    while ordinal < 2 {
+        let name = try lower_builtin_variant_name(d, checked.kind, ordinal)
+        let payload_checked = lower_builtin_variant_payload(store, checked, ordinal)
+        var payload: U64 = 0
+        if payload_checked != 0 {
+            let payload_type = try lower_type(d, source_state, store, current, payload_checked)
+            if !payload_type.state.valid { return Ok(payload_type.state) }
+            let left_payload = try mir_add_value(d, payload_type.state.mir, function, try lower_decimal_name(d, "m75_key_left_payload", source_block * 100 + ordinal), payload_type.id, mir_value_def_switch_case(), source_block, ordinal + 1)
+            current = lower_with_mir(payload_type.state, left_payload.store)
+            payload = left_payload.id
+        }
+        left_payloads = try __s0_buffer_append(U64, d, left_payloads, payload)
+        let case = try lower_add_switch_case(d, current, left_term.id, ordinal, name, payload, __s0_buffer_get(U64, left_blocks, ordinal))
+        current = case.state
+        ordinal = ordinal + 1
+    }
+    ordinal = 0
+    while ordinal < 2 {
+        let name = try lower_builtin_variant_name(d, checked.kind, ordinal)
+        let left_block = __s0_buffer_get(U64, left_blocks, ordinal)
+        let compare = try lower_add_block(d, current, function, "bb_m75_key_payload")
+        current = compare.state
+        let right_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: left_block, kind: mir_term_switch(), value: right_loaded.id, target: 0, then_block: 0, else_block: 0))
+        current = lower_with_mir(current, right_term.store)
+        let payload_checked = lower_builtin_variant_payload(store, checked, ordinal)
+        if payload_checked == 0 {
+            let matching = try lower_add_switch_case(d, current, right_term.id, 0, name, 0, compare.id)
+            let fallback = try lower_add_switch_case(d, matching.state, right_term.id, 1, "", 0, different_block)
+            current = fallback.state
+            current = try lower_jump(d, current, function, compare.id, equal_block)
+        } else {
+            let payload_type = try lower_type(d, source_state, store, current, payload_checked)
+            if !payload_type.state.valid { return Ok(payload_type.state) }
+            let right_payload = try mir_add_value(d, current.mir, function, try lower_decimal_name(d, "m75_key_right_payload", left_block * 100 + ordinal), payload_type.id, mir_value_def_switch_case(), left_block, 1)
+            current = lower_with_mir(current, right_payload.store)
+            let matching = try lower_add_switch_case(d, current, right_term.id, 0, name, right_payload.id, compare.id)
+            let fallback = try lower_add_switch_case(d, matching.state, right_term.id, 1, "", 0, different_block)
+            current = fallback.state
+            current = try lower_m75_leaf_equal(d, source_state, store, current, function, compare.id, payload_checked, __s0_buffer_get(U64, left_payloads, ordinal), right_payload.id, equal_block, different_block)
+        }
+        ordinal = ordinal + 1
+    }
+    return Ok(current)
+}
+
+// Implicit variant tag order: none then some for option, ok then err for
+// result, matching the MIR verifier's case names.
+fn lower_builtin_variant_name(d: Domain, kind: U64, ordinal: U64) -> Result(__s0_String, __s0_Error) {
+    if kind == 9 {
+        if ordinal == 0 { return Ok("none") }
+        return Ok("some")
+    }
+    if ordinal == 0 { return Ok("ok") }
+    return Ok("err")
+}
+
+// The checked payload type of one implicit variant, or zero when the
+// variant carries none.
+fn lower_builtin_variant_payload(store: CheckStore, checked: CheckedTypeRec, ordinal: U64) -> U64 {
+    if checked.kind == 9 {
+        if ordinal == 0 { return 0 }
+        return __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    }
+    if ordinal == 0 { return __s0_buffer_get(U64, store.type_args, checked.first_arg - 1) }
+    return __s0_buffer_get(U64, store.type_args, checked.first_arg)
+}
+
 // Structural key comparison over parallel place chains. The left place is a
 // local stored once before the scan loop; the right place is the entry's key
 // field or the element itself. Everything stays place-based so the scan loop
@@ -2844,6 +2939,9 @@ fn lower_m75_key_equal(d: Domain, source_state: State, store: CheckStore, state:
         let right_type = try lower_type(d, source_state, store, left_loaded.state, checked_type)
         let right_loaded = try lower_helper_load(d, right_type.state, function, block, right_place, right_type.id)
         return lower_m75_leaf_equal(d, source_state, store, right_loaded.state, function, block, checked_type, left_loaded.id, right_loaded.id, equal_block, different_block)
+    }
+    if checked.kind == 9 || checked.kind == 10 {
+        return lower_m75_builtin_variant_equal(d, source_state, store, state, checked_type, function, block, left_place, right_place, equal_block, different_block)
     }
     if checked.kind != 7 { return Ok(lower_invalid(state)) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
@@ -3010,16 +3108,23 @@ fn lower_m75_scan(d: Domain, source_state: State, store: CheckStore, state: Lowe
 }
 
 // Reports whether an Eq operand lowers through the structural walk instead
-// of a primitive comparison: String, Bytes, Bool, records, enums, and
-// generic applications over Eq components do, while plain integers and
-// floats keep their dedicated lowering.
+// of a primitive comparison: String, Bytes, Bool, records, enums, generic
+// applications over Eq components, and builtin Option and Result do, while
+// plain integers and floats keep their dedicated lowering.
 fn lower_structural_operand(store: CheckStore, operand_checked: U64) -> Bool {
     if operand_checked == 0 || operand_checked > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
     let operand = __s0_buffer_get(CheckedTypeRec, store.types, operand_checked - 1)
     if operand.kind == 2 || operand.kind == 14 { return true }
     if operand.kind == 7 { return true }
     if operand.kind == 1 && operand.target == 1 { return true }
-    return false
+    return lower_structural_builtin_variant_operand(operand)
+}
+
+// Builtin Option and Result operands walk the implicit variant comparison;
+// the checker only accepts the operators when every component is in the
+// structural domain.
+fn lower_structural_builtin_variant_operand(operand: CheckedTypeRec) -> Bool {
+    return operand.kind == 9 || operand.kind == 10
 }
 
 // `==` and `!=` over the structural Eq operands that do not already lower to

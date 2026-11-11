@@ -159,7 +159,9 @@ Equality is defined for:
 - strings by exact UTF-8 bytes, with no implicit Unicode normalization;
 - bytes by exact bytes;
 - IDs by type, table identity, slot, and generation;
-- records and enums only when every component has equality.
+- records and enums only when every component has equality;
+- builtin `Option` and `Result` by implicit tag first and then by payload,
+  when every component has equality.
 
 Floating equality follows IEEE-754 comparison behavior, including NaN.
 Resources, tables, views, function values, and raw pointers do not receive

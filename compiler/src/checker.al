@@ -8790,7 +8790,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             if left_draft.checked_type != 0 {
                 let operand_kind = __s0_buffer_get(CheckedTypeRec, right_store.types, left_draft.checked_type - 1).kind
                 comparable = operand_kind == 1 || operand_kind == 2 || operand_kind == 14
-                if !comparable && operand_kind == 7 {
+                if !comparable {
                     let structural = try structural_eq_supported(d, right_store, left_draft.checked_type, 0)
                     comparable = structural
                 }
@@ -12155,21 +12155,21 @@ fn type_implements_cleanup(store: CheckStore, checked_type: U64) -> Bool {
     return trait_impl_for_builtin_type(store, 6, checked_type) != 0
 }
 
-// Structural Eq support: Bool, unsigned integers, String, Bytes, and
-// records or enums whose every component supports them. Generic
-// applications participate: each component substitutes through the
-// application's own arguments before the recursion, so a generic record
-// supports structural equality exactly when its components do. Builtin
-// Option and Result stay outside for now: their payload comparison is not
-// lowered yet, so `==` on them is rejected until the dedicated commit
-// lands. Signed integers and floats stay outside the structural domain, so
-// the synthesized Eq/Hash impl surface and the map-key domain are
-// unchanged.
+// Structural Eq support: Bool, unsigned integers, String, Bytes, builtin
+// Option and Result whose every component supports them, and records or
+// enums whose every component supports them. Generic applications
+// participate: each component substitutes through the application's own
+// arguments before the recursion, so a generic record supports structural
+// equality exactly when its components do. Builtin Option and Result walk
+// their type arguments the same way. Signed integers and floats stay
+// outside the structural domain, so the synthesized Eq/Hash impl surface
+// and the map-key domain are unchanged.
 fn structural_eq_supported(d: Domain, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
     if checked_type == 0 || depth > 16 { return Ok(false) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind == 1 { return Ok(checked.target == 1 || checked.target == 6 || checked.target == 7 || checked.target == 8 || checked.target == 9) }
     if checked.kind == 2 || checked.kind == 14 { return Ok(true) }
+    if checked.kind == 9 || checked.kind == 10 { return structural_eq_builtin_supported(d, store, checked, depth) }
     if checked.kind != 7 { return Ok(false) }
     if checked.target == 0 || checked.target > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
@@ -12185,6 +12185,22 @@ fn structural_eq_supported(d: Domain, store: CheckStore, checked_type: U64, dept
             let supported = try structural_eq_supported(d, substituted.store, substituted.checked_type, depth + 1)
             if !supported { return Ok(false) }
         }
+        at = at + 1
+    }
+    return Ok(true)
+}
+
+// Builtin Option and Result components: every type argument substitutes
+// with empty bindings, so an unbound parameter fails closed, and each
+// component must support the walk itself.
+fn structural_eq_builtin_supported(d: Domain, store: CheckStore, checked: CheckedTypeRec, depth: U64) -> Result(Bool, __s0_Error) {
+    if checked.first_arg == 0 || checked.arg_count == 0 { return Ok(false) }
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    var at: U64 = 0
+    while at < checked.arg_count {
+        let substituted = try substitute_type(d, store, empty, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at))
+        let supported = try structural_eq_supported(d, substituted.store, substituted.checked_type, depth + 1)
+        if !supported { return Ok(false) }
         at = at + 1
     }
     return Ok(true)

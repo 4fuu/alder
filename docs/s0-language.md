@@ -157,8 +157,10 @@ Milestone 7.5 adds the static trait surface of
   synthesized implementation: integers and `Bool` compare as primitives,
   `String` and `Bytes` compare byte-wise, and records and enums decompose
   into their components; a type outside the synthesized domain is rejected
-  with a diagnostic. Builtin `Option` and `Result` payloads are not
-  compared by these operators yet. Per
+  with a diagnostic. Builtin `Option` and `Result` decompose the same way:
+  they compare by implicit tag first (none/some, ok/err) and then by
+  payload, accepted exactly when every component type supports the
+  structural domain. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override
   structural `==` with a surprising user implementation": user `impl Eq`
   and `impl Hash` blocks are rejected. The synthesized methods are not

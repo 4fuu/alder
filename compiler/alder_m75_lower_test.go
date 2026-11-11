@@ -1271,6 +1271,38 @@ fn main() -> I32 {
     if w1 != w2 { return 15 }
     let w3 = Wrap(value: c)
     if w1 == w3 { return 16 }
+    let s5: Option(U64) = Some(5)
+    let s5b: Option(U64) = Some(5)
+    let s6: Option(U64) = Some(6)
+    let n: Option(U64) = None
+    let nb: Option(U64) = None
+    if s5 != s5b { return 17 }
+    if s5 == s6 { return 18 }
+    if s5 == n { return 19 }
+    if n == s5 { return 20 }
+    if n != nb { return 21 }
+    let ok1: Result(U64, U64) = Ok(7)
+    let ok1b: Result(U64, U64) = Ok(7)
+    let ok8: Result(U64, U64) = Ok(8)
+    let err1: Result(U64, U64) = Err(1)
+    let err1b: Result(U64, U64) = Err(1)
+    let err2: Result(U64, U64) = Err(2)
+    if ok1 != ok1b { return 22 }
+    if ok1 == ok8 { return 23 }
+    if err1 != err1b { return 24 }
+    if err1 == err2 { return 25 }
+    if ok1 == err1 { return 26 }
+    if err1 == ok1 { return 27 }
+    let o1: Option(Point) = Some(a)
+    let o2: Option(Point) = Some(b)
+    let o3: Option(Point) = Some(c)
+    if o1 != o2 { return 28 }
+    if o1 == o3 { return 29 }
+    let nested1: Result(Option(U64), U64) = Ok(Some(9))
+    let nested2: Result(Option(U64), U64) = Ok(Some(9))
+    let nested3: Result(Option(U64), U64) = Ok(None)
+    if nested1 != nested2 { return 30 }
+    if nested1 == nested3 { return 31 }
     return 0
 }
 `}
