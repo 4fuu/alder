@@ -5666,6 +5666,47 @@ fn record_source_arg(parse: ParseStore, call: SyntaxRec, use: DeclTypeUseRec, st
     return 0
 }
 
+// The root local of a mut argument that names a chain of field projections
+// over a place, or zero when the argument is not such a chain. A field path
+// names storage the caller owns, so the callee can borrow that storage
+// exclusively instead of receiving a copy that would swallow the write.
+fn mut_argument_field_root(store: CheckStore, expression: U64) -> U64 {
+    var current = expression
+    var depth: U64 = 0
+    while depth < 32 && current != 0 && current <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let item = __s0_buffer_get(CheckedExprRec, store.expressions, current - 1)
+        if item.kind == 1 || item.kind == 5 { return item.parameter_use }
+        if item.kind != 21 || item.child_count != 1 || item.first_child == 0 || item.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return 0 }
+        current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        depth = depth + 1
+    }
+    return 0
+}
+
+// check_mut_argument_field admits a field path of a mutable place as a `mut`
+// argument: the root binding must be mutable exactly as a place root is, and
+// no live view of that root may block the exclusive borrow.
+fn check_mut_argument_field(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, arg: SyntaxRec, expression: U64, place_fail: U64) -> Result(ExprOutcome, __s0_Error) {
+    let root = mut_argument_field_root(store, expression)
+    if root == 0 { return expr_token_fail(d, state, store, place_fail, arg) }
+    let binding = __s0_buffer_get(LocalRec, store.locals, root - 1)
+    let root_type = __s0_buffer_get(CheckedTypeRec, store.types, binding.checked_type - 1)
+    var access = false
+    if root_type.kind == 21 || root_type.kind == 22 {
+        // An exclusive table view grants mutation through its element; an
+        // immutable view stays read-only.
+        if root_type.kind == 22 { access = true }
+    } else { if binding.kind == 2 {
+        if binding.mutable == 1 { access = true }
+    } else {
+        let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
+        if declaration.kind == 47 || declaration.kind == 48 { access = true }
+    } }
+    if !access { return expr_token_fail(d, state, store, place_fail, arg) }
+    if lexical_access_conflict(store, owner, root, 2) { return expr_token_fail(d, state, store, 92, arg) }
+    return expr_draft(store, 0, 0)
+}
+
 fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, arg: SyntaxRec, parameter: DeclTypeUseRec, expression_id: U64) -> Result(ExprOutcome, __s0_Error) {
     let parameter_node = __s0_buffer_get(SyntaxRec, parse.nodes, parameter.node - 1)
     if parameter_node.kind != 47 && parameter_node.kind != 48 { return expr_draft(store, 0, 0) }
@@ -5674,12 +5715,14 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, parameter.checked_type, 0, 0)
     if parameter_node.kind == 48 && category.category != 2 { return expr_token_fail(d, state, base, 90, arg) }
     // A mut cursor parameter borrows the caller's binding exclusively, so
-    // the argument must be a mutable place: a var binding, an owner, or
-    // another mut parameter forwarding the cursor. A let-bound copyable
-    // argument would silently advance a copy and gets its own diagnostic.
+    // the argument must be a mutable place: a var binding, an owner, another
+    // mut parameter forwarding the cursor, or a field path of one of those.
+    // A let-bound copyable argument would silently advance a copy and gets
+    // its own diagnostic.
     var place_fail: U64 = 92
     if parameter_node.kind == 47 && category.category == 1 && !node_word(state, parameter_node, "self") { place_fail = 146 }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if parameter_node.kind == 47 && expression.kind == 21 { return check_mut_argument_field(d, state, parse, store, owner, arg, expression_id, place_fail) }
     if expression.kind != 1 && expression.kind != 5 { return expr_token_fail(d, state, base, place_fail, arg) }
     let binding = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
     var access = false

@@ -36,12 +36,14 @@ body that uses only its declared requirements.
 copyable values in exactly one shape: the parameter's type is a type parameter
 whose constraint names a trait with at least one `mut self`
 requirement, as `I` does above. At the call site the argument must be a
-mutable place — a `var` binding, an owner, or another `mut` parameter
-forwarding the cursor — so `iterator.next()` in the example advances the
-caller's cursor. Passing a `let`-bound copyable cursor is rejected: it would
-advance a discarded copy. (The `while let` loop shape shown above is the 1.0
-source form; the current S0 profile expresses the same drain recursively
-until `while let` lands with the frontend that replaces S0.)
+mutable place — a `var` binding, an owner, a field path of one of those, or
+another `mut` parameter forwarding the cursor — so `iterator.next()` in the
+example advances the caller's cursor. A field path passes that field's
+storage, never a copy that would swallow the callee's write. Passing a
+`let`-bound copyable cursor is rejected: it would advance a discarded copy.
+(The `while let` loop shape shown above is the 1.0 source form; the current
+S0 profile expresses the same drain recursively until `while let` lands with
+the frontend that replaces S0.)
 
 Iteration keeps this model without associated types:
 

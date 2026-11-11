@@ -196,8 +196,9 @@ Milestone 7.5 adds the static trait surface of
   capabilities, and a copyable type parameter constrained by a trait with at
   least one `mut self` requirement (the builtin `Iterator` or a user trait).
   The call-site argument must be a mutable place: a `var` binding, an owner,
-  or another `mut` parameter forwarding the cursor. A `let`-bound copyable
-  argument is rejected, because the callee would advance a discarded copy.
+  a field path of one of those, or another `mut` parameter forwarding the
+  cursor. A `let`-bound copyable argument is rejected, because the callee
+  would advance a discarded copy.
 
 Closures and function values are partially implemented as Milestone 7.5
 work in progress:

@@ -2740,6 +2740,65 @@ fn lower_binding_expression(d: Domain, source_state: State, spans: __s0_Buffer(C
     return Ok(LowerStep(state: current, id: value))
 }
 
+// The storage a borrowed call argument names. An immutable receiver whose
+// argument is not a plain binding stages the value into a temporary, so the
+// callee observes an ordinary value. A mut argument must name the caller's
+// storage instead: a binding, or a chain of field projections over one, since
+// the callee's writes have to reach the value the caller keeps.
+type LowerArgumentPlaceRec {
+    state: LowerState
+    place: U64
+}
+
+// A field place chain for a mut argument. Each level projects from the place
+// below it, and the root names the caller's binding, so `self.inner` passes
+// the field of the receiver rather than a temporary copy of it.
+fn lower_mut_argument_place(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, expression_id: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind == 1 || expression.kind == 5 {
+        let mapped = lower_binding_lookup(state, expression.parameter_use)
+        if mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+        var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
+        if mapped.parameter == 0 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+            place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+        }
+        return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id))
+    }
+    if expression.kind != 21 || expression.child_count != 1 || expression.first_child == 0 || expression.first_child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let base = try lower_mut_argument_place(d, source_state, store, state, function, base_id)
+    if !base.state.valid { return Ok(base) }
+    let field = __s0_buffer_get(DeclTypeUseRec, store.uses, expression.parameter_use - 1)
+    if field.role != 1 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(base.state), place: 0)) }
+    let named = try mir_append_name(d, base.state.mir, try lower_source_word(d, source_state, field.source, field.name_start, field.name_end))
+    let field_place = try mir_add_place(d, named.store, MirPlaceRec(function: function, kind: mir_place_field(), local: 0, base: base.place, field_start: named.start, field_end: named.end, deref_value: 0))
+    return Ok(LowerArgumentPlaceRec(state: lower_with_mir(base.state, field_place.store), place: field_place.id))
+}
+
+fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64, borrow_kind: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if borrow_kind == 2 && expression.kind == 21 { return lower_mut_argument_place(d, source_state, store, state, function, expression_id) }
+    let mapped = lower_binding_lookup(state, expression.parameter_use)
+    let plain = (expression.kind == 1 || expression.kind == 5) && mapped.binding != 0 && mapped.parameter != 1
+    if borrow_kind == 1 && !plain {
+        let staged = try lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
+        let ordinary = try lower_type(d, source_state, store, staged.state, expression.checked_type)
+        let slot_name = try lower_decimal_name(d, "__alder_borrow_temp_", lower_local_count(ordinary.state.mir, function))
+        let slot = try mir_add_local(d, ordinary.state.mir, function, lower_local_count(ordinary.state.mir, function), slot_name, ordinary.id)
+        let place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+        let stored = try lower_add_instr(d, lower_with_mir(ordinary.state, place.store), function, block, mir_op_store(), 0, place.id, 0, staged.id, 0, 0, "")
+        return Ok(LowerArgumentPlaceRec(state: stored.state, place: place.id))
+    }
+    if !plain { return Ok(LowerArgumentPlaceRec(state: lower_invalid(state), place: 0)) }
+    var place: MirBuildStep = MirBuildStep(store: state.mir, id: 0)
+    if mapped.parameter == 0 { place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
+        place = try mir_add_place(d, state.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
+    }
+    return Ok(LowerArgumentPlaceRec(state: lower_with_mir(state, place.store), place: place.id))
+}
+
 fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
@@ -4351,24 +4410,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     child = LowerStep(state: converted.state, id: view.id)
                 }
             } else { if borrow_kind != 0 {
-                let mapped = lower_binding_lookup(current, checked_child.parameter_use)
-                var place: MirBuildStep = MirBuildStep(store: current.mir, id: 0)
-                var borrow_state = current
-                if borrow_kind == 1 && ((checked_child.kind != 1 && checked_child.kind != 5) || mapped.binding == 0 || mapped.parameter == 1) {
-                    let staged = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
-                    let ordinary = try lower_type(d, source_state, store, staged.state, checked_child.checked_type)
-                    let slot_name = try lower_decimal_name(d, "__alder_borrow_temp_", lower_local_count(ordinary.state.mir, function))
-                    let slot = try mir_add_local(d, ordinary.state.mir, function, lower_local_count(ordinary.state.mir, function), slot_name, ordinary.id)
-                    place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
-                    let stored = try lower_add_instr(d, lower_with_mir(ordinary.state, place.store), function, block, mir_op_store(), 0, place.id, 0, staged.id, 0, 0, "")
-                    borrow_state = stored.state
-                } else {
-                    if (checked_child.kind != 1 && checked_child.kind != 5) || mapped.binding == 0 || mapped.parameter == 1 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-                    if mapped.parameter == 0 { place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: mapped.mir_id, base: 0, field_start: 0, field_end: 0, deref_value: 0)) } else {
-                        place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: mapped.mir_id))
-                    }
-                    borrow_state = lower_with_mir(current, place.store)
-                }
+                let borrowed_place = try lower_argument_place(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block, borrow_kind)
+                if !borrowed_place.state.valid { return Ok(LowerStep(state: borrowed_place.state, id: 0)) }
+                let borrow_state = borrowed_place.state
                 let ordinary = try lower_type(d, source_state, store, borrow_state, checked_child.checked_type)
                 let empty = try __s0_buffer_new(U64, d)
                 var reference_kind = mir_type_kind_safe_ref()
@@ -4379,7 +4423,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 }
                 let reference = try mir_intern_type(d, ordinary.state.mir, reference_kind, ordinary.id, 0, 0, empty, 0)
                 let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
-                let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, place.id, 0, 0, 0, 0, "")
+                let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, borrowed_place.place, 0, 0, 0, 0, "")
                 child = LowerStep(state: borrowed.state, id: value.id)
             } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } }
             current = child.state
