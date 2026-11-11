@@ -1460,7 +1460,11 @@ run fixture `cgen/testdata/run/cnum.mir`, and the production qualification
 compiled and run under the strict warning set, print/MIR and cross-process
 determinism, and eight checker rejections); the surface is documented in
 [docs/c-interop.md](docs/c-interop.md) "Scalar conversions", with the
-emission contract in [docs/c-backend.md](docs/c-backend.md).
+emission contract in [docs/c-backend.md](docs/c-backend.md). Since the
+IEEE-754 float decision (D026), the same qualification asserts exact values:
+the conversion round trips compare `dback == 3.5`, `fback == 1.25`,
+`back == 1.5`, `widened == 1.5`, and `fback == 0.5` directly instead of
+observing the checked narrowing's `some`/`none`.
 
 Landed language progress: float comparison and float arithmetic are in the
 S0/MIR profile under the approved IEEE-754 semantics (decision

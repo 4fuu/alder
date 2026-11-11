@@ -110,27 +110,26 @@ fn t_scalars() -> I32 {
         None => {}
     }
     // c.Double and c.Float read through their equal-precision total forms.
-    // Float comparisons are not in the S0/MIR profile yet (semantics
-    // pending a design decision), so the round trip is asserted through
-    // the checked narrowing: a value that survives the round trip inside
-    // float's range yields some, and corruption outside the range would
-    // yield none. TODO(M8 c-interop): once float comparisons land, assert
-    // dback == 3.5 and fback == 1.25 here.
+    // The round trips are exact (D026 float comparisons): dback equals the
+    // C double 3.5 and fback equals the C float 1.25, and both values sit
+    // inside float's range, so the checked narrowing yields some.
     let d = unsafe c { cfx.double_value() }
     let dback = d.to_f64()
+    if dback != 3.5 { return 7 }
     match dback.to_c_float_checked() {
         Some(_) => {}
-        None => { return 7 }
+        None => { return 10 }
     }
     let f = unsafe c { cfx.float_value() }
     let fback = f.to_f32()
+    if fback != 1.25 { return 8 }
     // F32 has no checked narrowing of its own; widen through the total
     // c.Float form into F64 and assert the range there.
     let fwide = fback.to_c_float()
     let fwidened = fwide.to_f64()
     match fwidened.to_c_float_checked() {
         Some(_) => {}
-        None => { return 8 }
+        None => { return 11 }
     }
     // c.Char's signedness is target-dependent: the checked form runs at
     // runtime, and (char)-1 on this host is outside U8's range.
@@ -144,14 +143,13 @@ fn t_scalars() -> I32 {
 
 fn t_floats() -> I32 {
     // F64 -> c.Double and c.Double -> F64 are the total bare forms; the
-    // round trip stays inside float's range. Float comparisons are not in
-    // the profile yet, so exact values assert through the checked
-    // narrowing's some/none. TODO(M8 c-interop): once float comparisons
-    // land, assert back == 1.5 after the round trip, widened == 1.5 after
-    // the checked narrowing, and fback == 0.5 after the F32 round trip.
+    // round trip is exact (D026 float comparisons): back equals 1.5 after
+    // the round trip, widened equals 1.5 after the checked narrowing, and
+    // fback equals 0.5 after the F32 round trip.
     let d: F64 = 1.5
     let cd = d.to_c_double()
     let back = cd.to_f64()
+    if back != 1.5 { return 1 }
     match back.to_c_float_checked() {
         Some(_) => {}
         None => { return 1 }
@@ -162,6 +160,7 @@ fn t_floats() -> I32 {
     match narrow {
         Some(v) => {
             let widened = v.to_f64()
+            if widened != 1.5 { return 6 }
             match widened.to_c_float_checked() {
                 Some(_) => {}
                 None => { return 2 }
@@ -174,12 +173,14 @@ fn t_floats() -> I32 {
         Some(_) => { return 4 }
         None => {}
     }
-    // F32 -> c.Float and c.Float -> F32 are the total bare forms. F32 has
-    // no checked narrowing; widen through c.Float into F64 and assert the
+    // F32 -> c.Float and c.Float -> F32 are the total bare forms, and the
+    // round trip is exact: fback compares equal to 0.5. F32 has no
+    // checked narrowing; widen through c.Float into F64 and assert the
     // range there.
     let f: F32 = 0.5
     let cf = f.to_c_float()
     let fback = cf.to_f32()
+    if fback != 0.5 { return 7 }
     let fwide = fback.to_c_float()
     let fwidened = fwide.to_f64()
     match fwidened.to_c_float_checked() {

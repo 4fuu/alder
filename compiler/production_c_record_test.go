@@ -17,8 +17,7 @@ import (
 // the checker diagnostics for the field forms: reading through a
 // non-record local, an unknown field, a write whose value does not match
 // the field's declared type, a write through a let binding, and a write
-// through a function parameter. Exact float-value assertions stay out of
-// this surface by the same TODO as the conversion test.
+// through a function parameter.
 const cRecordProgram = `import c "crecord.h" as crec {
     record type Stamp = "struct crec_stamp" {
         seconds: c.Long = "tv_sec"
