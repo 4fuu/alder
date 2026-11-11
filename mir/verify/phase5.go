@@ -719,10 +719,19 @@ func checkCStringOpTypes(m *mir.Module, f *mir.Function, in *mir.Instr, loc stri
 	var errs []Error
 	at, ok := f.ValueType(in.A)
 	want := mir.TypeCString
-	if in.Op == mir.OpCStringMakeLit || in.Op == mir.OpCStringMake {
+	if in.Op == mir.OpCStringMakeLit {
 		want = mir.TypeString
 	}
-	if !ok || !m.ValidType(at) || m.Types[at].Kind != want {
+	if !ok || !m.ValidType(at) {
+		errs = append(errs, Error{Loc: loc, Msg: "c.string operand has the wrong type"})
+		return errs
+	}
+	if in.Op == mir.OpCStringMake {
+		if kind := m.Types[at].Kind; kind != mir.TypeString && kind != mir.TypeBytes {
+			errs = append(errs, Error{Loc: loc, Msg: "c.string operand has the wrong type"})
+			return errs
+		}
+	} else if m.Types[at].Kind != want {
 		errs = append(errs, Error{Loc: loc, Msg: "c.string operand has the wrong type"})
 		return errs
 	}

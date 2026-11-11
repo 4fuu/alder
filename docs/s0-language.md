@@ -460,10 +460,11 @@ Implemented expressions include:
   block;
 - `c.CString`: a string literal builds the bare owner infallibly and an
   interior NUL in that literal is rejected at compile time (kind 210), while
-  any other `String` value yields `Option(c.CString)` with `none` for an
-  interior NUL, so `using name = try c.CString(text)` composes with Option
-  propagation; a wrong argument count is kind 211 and a non-`String` argument
-  is kind 212. `owner.ptr()` borrows the buffer as `c.ConstPtr(c.Char)`
+  any other `String` or `Bytes` value yields `Option(c.CString)` with `none`
+  for an interior NUL, so `using name = try c.CString(text)` composes with
+  Option propagation. The `Bytes` form copies exact bytes without a UTF-8
+  requirement; a wrong argument count is kind 211 and an argument that is
+  neither `String` nor `Bytes` is kind 212. `owner.ptr()` borrows the buffer as `c.ConstPtr(c.Char)`
   without consuming the owner, and a `using` registration releases the
   buffer exactly once. A registered owner that leaves its scope (plain
   return, aggregate or `Option`/`Result` construction, `take` argument, or

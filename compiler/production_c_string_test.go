@@ -69,6 +69,29 @@ fn none_path() -> I32 {
     return 2
 }
 
+fn bytes_path() -> I32 {
+    let raw: Bytes = "\xff/\xfe"
+    match c.CString(raw) {
+        Some(owner0) => {
+            using owner = owner0
+            let n = unsafe c { cs.length(owner.ptr()) }
+            let first = unsafe c { cs.first(owner.ptr()) }
+            if n.to_u64() != 3 { return 1 }
+            if first.to_u64() != 255 { return 2 }
+        }
+        None => { return 3 }
+    }
+    let interior: Bytes = "a\0b"
+    match c.CString(interior) {
+        Some(x) => {
+            using y = x
+            return 4
+        }
+        None => { return 0 }
+    }
+    return 5
+}
+
 fn main() -> I32 {
     let a = literal()
     if a != 0 { return a + 10 }
@@ -76,6 +99,8 @@ fn main() -> I32 {
     if b != 0 { return b + 20 }
     let tail = none_path()
     if tail != 0 { return tail + 30 }
+    let raw = bytes_path()
+    if raw != 0 { return raw + 40 }
     return 0
 }
 `
@@ -145,7 +170,7 @@ var cStringRejections = []struct {
     return 0
 }
 `,
-		"c.CString argument must be a String value",
+		"c.CString argument must be a String or Bytes value",
 	},
 }
 

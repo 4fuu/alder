@@ -107,8 +107,8 @@ fn mir_v5_c_field_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, 
 
 // Result typing for the c_string constructors and borrow: make_lit yields
 // the c_string singleton from a String operand, make yields option(c_string)
-// from a String operand, and ptr borrows the c_string owner and yields
-// c_const_ptr(c_char).
+// from a String or Bytes operand, and ptr borrows the c_string owner and
+// yields c_const_ptr(c_char).
 fn mir_v5_c_string_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec, ta: U64) -> MirVTypeResult {
     let cstring = mir_v5_find_kind(indexes, mir_type_kind_c_string())
     if x.op == mir_op_c_string_make_lit() {
@@ -116,7 +116,8 @@ fn mir_v5_c_string_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec,
         return MirVTypeResult(valid: cstring != 0, type_id: cstring)
     }
     if x.op == mir_op_c_string_make() {
-        if mir_vtype_kind(store, ta) != mir_type_kind_string() { return MirVTypeResult(valid: false, type_id: 0) }
+        let k = mir_vtype_kind(store, ta)
+        if k != mir_type_kind_string() && k != mir_type_kind_bytes() { return MirVTypeResult(valid: false, type_id: 0) }
         return MirVTypeResult(valid: cstring != 0, type_id: mir_v5_find_unary(indexes, mir_type_kind_option(), cstring))
     }
     if mir_vtype_kind(store, ta) != mir_type_kind_c_string() { return MirVTypeResult(valid: false, type_id: 0) }
@@ -173,8 +174,9 @@ fn mir_v5_find_c_raw(store: MirStore, scalar: U64) -> U64 {
     return 0
 }
 
-// Operand grammar for the c_string vocabulary: the constructors consume a
-// String value; the borrow and the release consume the c_string owner.
+// Operand grammar for the c_string vocabulary: make_lit consumes a String,
+// make consumes a String or Bytes value, and the borrow and release consume
+// the c_string owner.
 // Release is validated here because it produces no result for the inference
 // check to reject.
 fn mir_v5_c_string_operands(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), x: MirInstrRec, id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
@@ -182,8 +184,11 @@ fn mir_v5_c_string_operands(d: Domain, store: MirStore, indexes: MirVIndexes, ou
     var want: U64 = mir_type_kind_c_string()
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() { want = mir_type_kind_string() }
     let at = mir_v5_value_type(store, indexes, x.function, x.a)
-    if mir_vtype_kind(store, at) != want {
-        result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, want, mir_vtype_kind(store, at), x.a)
+    let kind = mir_vtype_kind(store, at)
+    var valid = kind == want
+    if x.op == mir_op_c_string_make() { valid = kind == mir_type_kind_string() || kind == mir_type_kind_bytes() }
+    if !valid {
+        result = try mir_v5_bad(d, result, mir_vdiag_bad_operand_type(), x.function, x.block, id, 0, 0, want, kind, x.a)
     }
     return Ok(result)
 }

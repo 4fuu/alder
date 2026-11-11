@@ -1641,6 +1641,25 @@ storage that is read back after the owner releases. Documentation is in
 measured 128.0 s wall and 2.01 GB peak RSS against 134.5 s and 2.00 GB for the
 parent tree on the same host.
 
+Landed C-interop progress: `c.CString` accepts exact `Bytes` as well as
+`String`. A `String` literal keeps the infallible bare-owner form and its
+compile-time interior-NUL rejection (210); a `String` or `Bytes` value yields
+`Option(c.CString)` with `none` for an interior NUL, and an argument that is
+neither is rejected with 212. The `Bytes` form copies exact bytes without a
+UTF-8 requirement, which paths, environment strings, and argv need; a `Bytes`
+literal may carry non-UTF-8 bytes. MIR `c.string.make` now accepts a `string`
+or `bytes` operand in the Alder verifier and the Go mirror; the runtime helper
+is unchanged because it is already byte-based. Evidence: the production
+CString qualification gains a non-UTF-8 `Bytes` path (`0xff` round-trips
+through a C length/first-byte fixture) and a `Bytes` interior-NUL `none`
+path, and the MIR verifier/printer test accepts `make` on `bytes` and rejects
+it on `c_string`. Documentation is in
+[docs/c-interop.md](docs/c-interop.md) "C strings",
+[docs/mir.md](docs/mir.md) "C-String Ownership", and
+[docs/s0-language.md](docs/s0-language.md). A cold
+`bootstrap/regenerate.sh` measured 135.8 s wall and 2.06 GB peak RSS against
+133.6 s and 2.06 GB for the parent tree on the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

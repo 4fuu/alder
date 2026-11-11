@@ -15,10 +15,11 @@ import (
 func TestCStringOpsAccepted(t *testing.T) {
 	const text = `mir 6
 
-fn @cs(%d: domain_handle, %s: string) -> c_const_ptr(c_char) {
+fn @cs(%d: domain_handle, %s: string, %b: bytes) -> c_const_ptr(c_char) {
 entry:
   %bare = c.string.make_lit %s else fail
   %made = c.string.make %s else fail
+  %madeb = c.string.make %b else fail
   %ptr = c.string.ptr %bare
   c.string.release %bare
   return %ptr
@@ -51,6 +52,15 @@ func TestCStringOpsRejected(t *testing.T) {
 		{
 			"constructor-operand",
 			`  %bare = c.string.make_lit %p else fail
+  return %p
+fail:
+  panic
+`,
+			"c.string operand has the wrong type",
+		},
+		{
+			"make-wrong-operand",
+			`  %made = c.string.make %p else fail
   return %p
 fail:
   panic

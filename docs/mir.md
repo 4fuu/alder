@@ -487,11 +487,12 @@ c.string.ptr a -> c_const_ptr(c_char)
 c.string.release a
 ```
 
-Slot `a` is a `string` value for the two constructors and a `c_string` value
-for `ptr` and `release`. `make_lit` copies a String the checker proved free
-of interior NUL bytes, so the operation's only failure is allocation;
-`make` scans arbitrary text, produces `none` when an interior NUL is found,
-and takes the same allocation-failure edge on success paths. Both
+Slot `a` is a `string` value for `make_lit`, a `string` or `bytes` value for
+`make`, and a `c_string` value for `ptr` and `release`. `make_lit` copies a
+String the checker proved free of interior NUL bytes, so the operation's only
+failure is allocation; `make` scans arbitrary text or exact bytes, produces
+`none` when an interior NUL is found, and takes the same allocation-failure
+edge on success paths. Both
 constructors are checked operations and therefore require the explicit
 `else` edge. `ptr` borrows the NUL-terminated buffer for the owner's
 lifetime without consuming it and yields `c_const_ptr(c_char)`, which is why
@@ -507,7 +508,8 @@ on that path before the owner leaves. The scope still runs its remaining
 entries at exit; a disarmed entry never runs. The verifier requires a disarm
 entry to be active on every path that reaches it.
 
-The verifier rejects `make_lit`/`make` with a non-`string` slot, `ptr` with
+The verifier rejects `make_lit` with a non-`string` slot, `make` with a slot
+that is neither `string` nor `bytes`, `ptr` with
 a non-`c_string` slot, `release` with a slot that is not a `c_string`, a
 `release` that binds a result, a `make` result that is not
 `option(c_string)`, a `make_lit` result that is not `c_string`, and a `ptr`

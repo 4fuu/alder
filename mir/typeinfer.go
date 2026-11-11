@@ -782,20 +782,24 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 	return NoType, false
 }
 
-// cStringOpResult infers the result type of one c.string operation: the
-// constructors require a String operand, ptr and release require a c_string;
-// make_lit yields c_string, make yields option(c_string), ptr yields
-// c_const_ptr(c_char), and release yields unit.
+// cStringOpResult infers the result type of one c.string operation:
+// make_lit requires a String operand, make accepts String or Bytes, and ptr
+// and release require a c_string; make_lit yields c_string, make yields
+// option(c_string), ptr yields c_const_ptr(c_char), and release yields unit.
 func cStringOpResult(m *Module, f *Function, in *Instr) (TypeId, bool) {
 	at, ok := f.ValueType(in.A)
 	if !ok || !m.ValidType(at) {
 		return NoType, false
 	}
 	want := TypeCString
-	if in.Op == OpCStringMakeLit || in.Op == OpCStringMake {
+	if in.Op == OpCStringMakeLit {
 		want = TypeString
 	}
-	if m.Types[at].Kind != want {
+	if in.Op == OpCStringMake {
+		if kind := m.Types[at].Kind; kind != TypeString && kind != TypeBytes {
+			return NoType, false
+		}
+	} else if m.Types[at].Kind != want {
 		return NoType, false
 	}
 	switch in.Op {

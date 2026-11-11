@@ -251,10 +251,13 @@ fn open_owned(text: String) -> Option(c.CString) {
 The constructor has two forms. A string literal is copied infallibly: the
 checker decodes the literal, rejects an interior NUL byte at compile time
 (diagnostic 210), and the runtime copy can fail only when allocation fails,
-which takes the checked edge. Any other `String` value produces
+which takes the checked edge. Any other `String` or `Bytes` value produces
 `Option(c.CString)`: an interior NUL yields `none`, allocation failure takes
-the checked edge, and `try`/`match` consume the option. A wrong argument count
-or a non-`String` argument is rejected with diagnostics 211 and 212.
+the checked edge, and `try`/`match` consume the option. The `Bytes` form
+copies exact bytes without a UTF-8 requirement, which paths, environment
+strings, and argv need; a `Bytes` literal may therefore carry non-UTF-8
+bytes. A wrong argument count or an argument that is neither `String` nor
+`Bytes` is rejected with diagnostics 211 and 212.
 
 The owner is affine and never a copyable value. A `using` registration
 releases it exactly once at scope exit, and `owner.ptr()` borrows the buffer

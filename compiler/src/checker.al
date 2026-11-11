@@ -8763,8 +8763,9 @@ fn resolve_c_string_type(d: Domain, state: State, parse: ParseStore, store: Chec
 
 // check_c_string_ctor checks `c.CString(expr)`. A string-literal argument
 // builds the owner infallibly and its decoded bytes must be interior-NUL
-// free at compile time; any other argument must check as a String value and
-// produces Option(c_string) for try or match to consume.
+// free at compile time; any other argument must check as a String or Bytes
+// value and produces Option(c_string) for try or match to consume. Bytes
+// carries exact non-UTF-8 path and argv data.
 fn check_c_string_ctor(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     // The dotted callee carries its receiver link: callee + receiver + one
     // argument = three links.
@@ -8807,7 +8808,7 @@ fn check_c_string_ctor(d: Domain, state: State, parse: ParseStore, base: CheckSt
     }
     let option_type = try canonical_application(d, owner_type.store, owner, 9, owner_type.checked_type, 0, 1)
     if expected != 0 && expected != option_type.checked_type { return expr_token_type_fail(d, state, option_type.store, mismatch_kind, mismatch_node, expected, option_type.checked_type) }
-    let payload = try check_value_expression_inner(d, state, parse, base, option_type.store, owner, arg, arg_link.node, string_type, 212, arg, 0, 0, in_loop)
+    let payload = try check_value_expression_inner(d, state, parse, base, option_type.store, owner, arg, arg_link.node, 0, 212, arg, 0, 0, in_loop)
     let current = match payload {
         ExprGood(item) => item.store
         ExprBad(item) => item
@@ -8821,6 +8822,10 @@ fn check_c_string_ctor(d: Domain, state: State, parse: ParseStore, base: CheckSt
         ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return expr_deferred(base) }
+    // A String value converts through UTF-8 text; a Bytes value converts the
+    // exact bytes without a UTF-8 requirement, which paths and argv need.
+    let payload_type = __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1)
+    if payload_type.kind != 2 && payload_type.kind != 14 { return expr_token_fail(d, state, base, 212, arg) }
     return append_call_expression(d, state, parse, current, owner, call_id, 30, option_type.checked_type, 5, 0, 0, call, 4, site_kind, site_syntax, 901)
 }
 
