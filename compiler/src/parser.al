@@ -1322,14 +1322,14 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
 fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
-    // `impl(Param: type(Constraint), ...) Trait for Type` declares a generic
+    // `impl(Param: type(Constraint), ...) Trait for Type` and
+    // `impl(Param: type(Constraint), ...) Type(Param)` declare a generic
     // implementation. The parameter list parses exactly like a trait's list;
-    // its links chain ahead of the trait application, so the parameter nodes
-    // sit at the end of the impl node's child chain (the walkers skip them).
+    // its links chain ahead of the trait or owner application, so the
+    // parameter nodes sit at the end of the impl node's child chain (the
+    // walkers skip them).
     var chained: U64 = 0
-    var generic_list = false
     if token_punct(state, cursor, "(") {
-        generic_list = true
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
         var more = true
         while more {
@@ -1354,9 +1354,6 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if parse_step_bad(owner) { return Ok(owner) }
     let owner_value = parse_step_value(owner)
     cursor = owner_value.cursor
-    // A generic implementation is always a trait implementation: without
-    // the `for` application the parameter list has no meaning.
-    if generic_list && parse_token(state, cursor).keyword != 10 { return reject_parse(d, state, cursor, 50) }
     // `impl Trait(Arguments) for Type { ... }` declares a trait
     // implementation; the trait application is linked first and the
     // implemented type second, so both stay reachable from the impl node.
@@ -1393,7 +1390,7 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
-    cursor = try add_link(d, cursor, owner_value.node, 0)
+    cursor = try add_link(d, cursor, owner_value.node, chained)
     var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
     while !token_punct(state, cursor, "}") {
         if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 4) }

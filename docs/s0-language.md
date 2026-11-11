@@ -124,6 +124,12 @@ Milestone 7.5 adds the static trait surface of
   implementation's scope, so parameters may appear in any order. Methods of
   a generic implementation are checked per concrete instance and their
   bodies never resolve the parameters abstractly.
+- `impl(Param: type(Constraints), ...) Type(Arguments) { ... }` declares a
+  generic inherent implementation with the same parameter rules. Its methods
+  and associated functions are instance-only as well; the receiver type of a
+  method call and the argument and expected-result types of an associated
+  function bind the parameters, and a call that leaves one unbound is
+  rejected.
 - Constraints are written on the type parameter itself (D024):
   `T: type` is unconstrained, and `T: type(Order)`, `K: type(Eq, Hash)`, and
   `I: type(Iterator(T))` attach the listed traits to the parameter in

@@ -94,6 +94,16 @@ constraints hold for the arguments that unification binds. A type parameter
 satisfies the constraints its own declaration lists, so a generic body may
 forward a conditional value to another constrained call.
 
+A generic inherent implementation uses the same form without `for`:
+`impl(Source: type(Reader)) BufReader(Source) { ... }`. Its methods and
+associated functions belong to the applied type, are checked per concrete
+instance, and infer the implementation parameters from the receiver or from
+the argument and expected-result types, so `BufReader.new(cursor)` and
+`reader.read(buffer)` instantiate `BufReader(ByteCursor)` without a written
+application. Every parameter must appear in the owner application, and the
+owner type's constraints must be restated, exactly as for a trait
+implementation; a call that leaves a parameter unbound is rejected.
+
 Implementation lookup uses no import order or source order. The compiler emits
 a deterministic conflict diagnostic naming both package identities. Private
 impls do not exist; an impl's availability follows the visibility of its trait

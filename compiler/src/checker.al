@@ -1277,6 +1277,20 @@ fn symbol_arity(parse: ParseStore, node: SyntaxRec) -> U64 {
     return count
 }
 
+// The owner type node of an inherent implementation. Implementation
+// parameters, when present, trail the owner in the impl node's child chain,
+// so the owner is the last link that is not a parameter.
+fn inherent_impl_owner_node(parse: ParseStore, root: SyntaxRec) -> U64 {
+    var link = root.children
+    var owner: U64 = 0
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind != 7 { owner = item.node }
+        link = item.next
+    }
+    return owner
+}
+
 // Inherent functions remain ordinary static symbols after discovery. Their
 // owning type is recovered from the parser root so the bootstrap model needs
 // no parallel method table or runtime dispatch metadata.
@@ -1294,15 +1308,9 @@ fn inherent_owner_node(parse: ParseStore, function_node: U64) -> U64 {
             }
         }
         if root.kind == 49 {
-            var link = root.children
-            var owner: U64 = 0
-            while link != 0 {
-                let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
-                if item.next == 0 { owner = item.node }
-                link = item.next
-            }
+            let owner = inherent_impl_owner_node(parse, root)
             if owner != 0 {
-                link = root.children
+                var link = root.children
                 while link != 0 {
                     let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
                     if item.node == function_node && item.next != 0 { return owner }
@@ -1327,12 +1335,10 @@ fn validate_inherent_owners(d: Domain, state: State, parse: ParseStore, store: C
     var root_at: U64 = 0
     while root_at < __s0_buffer_len(U64, parse.roots) {
         let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, root_at) - 1)
-        if root.kind == 49 {
-            var link = root.children
-            while __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).next != 0 {
-                link = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).next
-            }
-            let owner = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1).node - 1)
+        if root.kind == 49 && impl_param_links(parse, root, root.children) == 0 {
+            let owner_node = inherent_impl_owner_node(parse, root)
+            if owner_node == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+            let owner = __s0_buffer_get(SyntaxRec, parse.nodes, owner_node - 1)
             if find_declared_type(state, parse, store, owner) == 0 { return check_token_fail(d, state, store, 4, owner) }
         }
         root_at = root_at + 1
@@ -1870,11 +1876,30 @@ fn impl_param_ordinal_for(store: CheckStore, method: U64, param: U64) -> U64 {
     return ordinal
 }
 
+// The parser root that carries an implementation's parameter links. A trait
+// implementation's identity is its root; an inherent implementation's is its
+// owner type node, whose enclosing impl block holds the parameters.
+fn impl_syntax_root(parse: ParseStore, impl_id: U64) -> U64 {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, impl_id - 1)
+    if node.kind == 49 || node.kind == 53 { return impl_id }
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root_id = __s0_buffer_get(U64, parse.roots, at)
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+        if root.kind == 49 && inherent_impl_owner_node(parse, root) == impl_id { return root_id }
+        at = at + 1
+    }
+    return 0
+}
+
 // The syntax node of one implementation parameter, found among the
 // implementation root's kind-7 children by name span. The recorded node of
-// an implementation parameter is the root, so diagnostics and mut-cursor
-// shape checks need this to reach the parameter's own constraint children.
-fn impl_param_syntax_node(parse: ParseStore, root_id: U64, record: TypeParamRec) -> U64 {
+// an implementation parameter is the implementation's identity, so
+// diagnostics and mut-cursor shape checks need this to reach the parameter's
+// own constraint children.
+fn impl_param_syntax_node(parse: ParseStore, impl_id: U64, record: TypeParamRec) -> U64 {
+    let root_id = impl_syntax_root(parse, impl_id)
+    if root_id == 0 { return 0 }
     var link_at = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1).children
     while link_at != 0 {
         let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link_at - 1)
@@ -3584,6 +3609,28 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
             }
         }
         param_at = param_at + 1
+    }
+    // Every method except a generic implementation's first method carries the
+    // implementation's parameters on that first method; inference must have
+    // bound them to concrete types as well.
+    let impl_owner = generic_impl_param_owner(store, declaration)
+    if impl_owner != 0 {
+        let root_id = __s0_buffer_get(SymbolRec, store.symbols, impl_owner - 1).inherent_owner
+        var impl_at: U64 = 0
+        while impl_at < __s0_buffer_len(TypeParamRec, store.type_params) {
+            let impl_param = __s0_buffer_get(TypeParamRec, store.type_params, impl_at)
+            if impl_param.owner == impl_owner && impl_param.node == root_id {
+                let bound = inference_lookup(bindings, impl_at + 1)
+                if bound == 0 || !checked_type_concrete(store, bound) {
+                    let failed = try check_token_fail(d, state, store, 57, site)
+                    return Ok(InstanceBad(match failed {
+                        CheckGood(value) => value
+                        CheckBad(value) => value
+                    }))
+                }
+            }
+            impl_at = impl_at + 1
+        }
     }
     // Every declared constraint must hold for the concrete arguments. The
     // lookup only reads the once-built impl index. A method of a generic
@@ -7055,7 +7102,10 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     let argument_count = call_link_count(parse, call) - 1
     let parameter_count = use_count(store, target, 5)
     if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
-    if symbol.type_arity != 0 {
+    // An associated function of a generic implementation has no type
+    // parameters of its own, but its parameter patterns name the
+    // implementation's parameters, so inference runs for it too.
+    if symbol.type_arity != 0 || impl_method_has_impl_params(store, target) {
         let empty = try __s0_buffer_new(InferenceBindingRec, d)
         var bindings = empty
         if expected != 0 {
@@ -8984,6 +9034,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)
+        if impl_method_has_impl_params(current, target) { return check_inherent_method_call(d, state, parse, base, store, owner, call, call_id, target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if target == 0 {
             // Static trait dispatch: inherent methods win, then the unique
             // trait implementation providing this method name resolves.
@@ -11036,6 +11087,7 @@ fn check_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, own
 // Whether the method belongs to a generic implementation (the implementation
 // head owns parameters). Both the head and later methods are instance-only.
 fn impl_method_has_impl_params(store: CheckStore, method: U64) -> Bool {
+    if method == 0 || method > __s0_buffer_len(SymbolRec, store.symbols) { return false }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
     if symbol.kind != 12 || symbol.inherent_owner == 0 { return false }
     let head = first_impl_method_symbol(store, symbol.inherent_owner)
@@ -11274,7 +11326,16 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(trait_impls_valid) }
-    let public_signatures = try check_public_signatures(d, state, parse, after_trait_impls)
+    let inherent_restated = try validate_inherent_restatements_from(d, state, parse, after_trait_impls, 0)
+    let after_inherent_restated = match inherent_restated {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match inherent_restated {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(inherent_restated) }
+    let public_signatures = try check_public_signatures(d, state, parse, after_inherent_restated)
     let after_public_signatures = match public_signatures {
         CheckGood(value) => value
         CheckBad(value) => value
@@ -11754,7 +11815,15 @@ fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore)
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(impls) }
-    return check_declarations(d, state, parse, with_impls)
+    let inherent_impls = try resolve_inherent_impls_from(d, state, parse, with_impls, 0)
+    if match inherent_impls {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(inherent_impls) }
+    return check_declarations(d, state, parse, match inherent_impls {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    })
 }
 
 fn emit_check_sources(state: State) -> Bool {
@@ -12204,8 +12273,26 @@ fn check_trait_method_call(d: Domain, state: State, parse: ParseStore, base: Che
     let method = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
     let found = generic_impl_for_method(store, method.inherent_owner)
     if found.first_method == 0 || impl_param_count_for(store, found.first_method) == 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    return check_impl_method_call(d, state, parse, base, store, owner, call, call_id, target, found.self_type, receiver_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+}
+
+// An inherent method of a generic implementation is instantiated from its own
+// receiver parameter's declared type, which names the implementation's
+// parameters; unifying it with the concrete receiver type binds them.
+fn check_inherent_method_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, receiver_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver_use = use_by_ordinal(store, target, 5, 0)
+    if receiver_use == 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+    let pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, receiver_use - 1).checked_type
+    return check_impl_method_call(d, state, parse, base, store, owner, call, call_id, target, pattern, receiver_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+}
+
+// The shared tail of an implementation-method call: seed inference from the
+// method's declared receiver pattern, then check the explicit arguments,
+// infer the rest, instantiate, and record the call.
+fn check_impl_method_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, pattern: U64, receiver_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let method = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
     var seeded = try __s0_buffer_new(InferenceBindingRec, d)
-    let unified = try unify_types(d, store, found.self_type, receiver_type, seeded)
+    let unified = try unify_types(d, store, pattern, receiver_type, seeded)
     var bindings = match unified {
         UnifyGood(value) => value
         UnifyConflict => seeded
@@ -12657,6 +12744,46 @@ fn validate_trait_impls(d: Domain, state: State, parse: ParseStore, store: Check
     return validate_trait_impls_at(d, state, parse, store, 0)
 }
 
+// A generic inherent implementation restates its owner type's constraints on
+// the matching parameters, exactly like a generic trait implementation. The
+// check runs here, after declarations were checked, because the type's
+// constraint records do not exist while implementation heads resolve.
+fn validate_inherent_restatements_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, search_at: U64) -> Result(CheckResult, __s0_Error) {
+    var found: U64 = 0
+    var scan = search_at
+    var scanning = true
+    while scanning {
+        if scan >= __s0_buffer_len(U64, parse.roots) { scanning = false } else {
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, scan) - 1)
+            if root.kind == 49 && impl_param_links(parse, root, root.children) != 0 { found = scan + 1
+            scanning = false } else { scan = scan + 1 }
+        }
+    }
+    if found == 0 { return Ok(CheckGood(store)) }
+    let validated = try validate_one_inherent_restatement(d, state, parse, store, __s0_buffer_get(U64, parse.roots, found - 1))
+    if match validated {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(validated) }
+    let current = match validated {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return validate_inherent_restatements_from(d, state, parse, current, found)
+}
+
+fn validate_one_inherent_restatement(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_id: U64) -> Result(CheckResult, __s0_Error) {
+    let owner_node_id = inherent_impl_owner_node(parse, __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1))
+    if owner_node_id == 0 { return Ok(CheckGood(store)) }
+    let head = first_impl_method_symbol(store, owner_node_id)
+    if head == 0 { return Ok(CheckGood(store)) }
+    let owner_symbol = find_declared_type(state, parse, store, __s0_buffer_get(SyntaxRec, parse.nodes, owner_node_id - 1))
+    if owner_symbol == 0 { return Ok(CheckGood(store)) }
+    let self_checked = checked_type_for_syntax(store, head, owner_node_id)
+    if self_checked == 0 { return Ok(CheckGood(store)) }
+    return impl_restates_constraints(d, state, parse, store, head, self_checked, owner_symbol)
+}
+
 // Generic implementation heads: record the parameter list under the
 // implementation's first method before any resolution can name the
 // parameters, and restate the parameter constraints in the first method's
@@ -12669,7 +12796,7 @@ fn record_generic_impl_heads_from(d: Domain, state: State, parse: ParseStore, st
     while scanning {
         if scan >= __s0_buffer_len(U64, parse.roots) { scanning = false } else {
             let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, scan) - 1)
-            if root.kind == 53 && impl_param_links(parse, root, root.children) != 0 { found = scan + 1
+            if (root.kind == 53 || root.kind == 49) && impl_param_links(parse, root, root.children) != 0 { found = scan + 1
             scanning = false } else { scan = scan + 1 }
         }
     }
@@ -12688,10 +12815,16 @@ fn record_generic_impl_heads_from(d: Domain, state: State, parse: ParseStore, st
 
 fn record_generic_impl_head(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_id: U64) -> Result(CheckResult, __s0_Error) {
     let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
-    let head = first_impl_method_symbol(store, root_id)
+    // The implementation's identity is what its methods record as their
+    // inherent owner: the impl block for a trait implementation, the owner
+    // type node for an inherent one.
+    var impl_id = root_id
+    if root.kind == 49 { impl_id = inherent_impl_owner_node(parse, root) }
+    if impl_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    let head = first_impl_method_symbol(store, impl_id)
     if head == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
     let params = impl_param_links(parse, root, root.children)
-    let named = try record_impl_params(d, state, parse, store, head, root_id, params)
+    let named = try record_impl_params(d, state, parse, store, head, impl_id, params)
     if match named {
         CheckGood(value) => false
         CheckBad(value) => true
@@ -13038,6 +13171,68 @@ fn resolve_trait_impls(d: Domain, state: State, parse: ParseStore, store: CheckS
         CheckBad(value) => value
     }
     return build_trait_indexes(d, state, parse, current)
+}
+
+// Generic inherent implementation heads: the owner application resolves in
+// the first method's scope, so the parameters may appear anywhere in it.
+// Methods of such an implementation are instance-only, exactly like methods
+// of a generic trait implementation; this pass only validates the head,
+// because an inherent implementation records no trait instance.
+fn resolve_inherent_impls_from(d: Domain, state: State, parse: ParseStore, store: CheckStore, search_at: U64) -> Result(CheckResult, __s0_Error) {
+    var found: U64 = 0
+    var scan = search_at
+    var scanning = true
+    while scanning {
+        if scan >= __s0_buffer_len(U64, parse.roots) { scanning = false } else {
+            let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, scan) - 1)
+            if root.kind == 49 && impl_param_links(parse, root, root.children) != 0 { found = scan + 1
+            scanning = false } else { scan = scan + 1 }
+        }
+    }
+    if found == 0 { return Ok(CheckGood(store)) }
+    let resolved = try resolve_inherent_impl_at(d, state, parse, store, __s0_buffer_get(U64, parse.roots, found - 1))
+    if match resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(resolved) }
+    let current = match resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return resolve_inherent_impls_from(d, state, parse, current, found)
+}
+
+fn resolve_inherent_impl_at(d: Domain, state: State, parse: ParseStore, store: CheckStore, root_id: U64) -> Result(CheckResult, __s0_Error) {
+    let root = __s0_buffer_get(SyntaxRec, parse.nodes, root_id - 1)
+    let owner_node_id = inherent_impl_owner_node(parse, root)
+    if owner_node_id == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    let owner_node = __s0_buffer_get(SyntaxRec, parse.nodes, owner_node_id - 1)
+    let head = first_impl_method_symbol(store, owner_node_id)
+    if head == 0 { return check_fail(d, store, 110, root, 0, 0, 0) }
+    // An implementation cannot target a bare parameter of its own list.
+    if find_type_param(state, store, head, owner_node) != 0 { return check_token_fail(d, state, store, 301, owner_node) }
+    let owner_symbol = find_declared_type(state, parse, store, owner_node)
+    if owner_symbol == 0 { return check_token_fail(d, state, store, 4, owner_node) }
+    let declared = __s0_buffer_get(SymbolRec, store.symbols, owner_symbol - 1)
+    if declared.kind != 2 && declared.kind != 3 { return check_token_fail(d, state, store, 4, owner_node) }
+    let args_resolved = try resolve_arg_links(d, state, parse, store, head, owner_node.children)
+    if match args_resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(args_resolved) }
+    let current_args = match args_resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    let arg_count = type_arg_count(parse, owner_node.children)
+    if arg_count != declared.type_arity {
+        return check_fail(d, current_args, 5, owner_node, declared.source, declared.name_start, declared.name_end)
+    }
+    let base_len = __s0_buffer_len(U64, current_args.type_args) + 1
+    let recorded = try record_arg_links(d, parse, current_args, head, owner_node.children)
+    let applied = try append_checked_type(d, recorded, head, 7, owner_node_id, owner_symbol, base_len, arg_count)
+    let self_checked = checked_type_for_syntax(applied, head, owner_node_id)
+    return impl_params_all_appear(d, state, parse, applied, head, owner_node_id, self_checked)
 }
 
 // Build both impl indexes once and enforce coherence: exactly one

@@ -326,6 +326,13 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 	if again := runAlderParser(t, exe, files, []string{"b.al", "a.al", "z-empty.al"}, false); again != first {
 		t.Fatal("repeat parser process output changed")
 	}
+	// A generic implementation is not limited to traits: the same parameter
+	// list may declare an inherent implementation of an applied type.
+	genericImplFiles := map[string]string{"impl-generic-inherent.al": "type File(I: type) {\n    id: I\n}\n\nimpl(I: type) File(I) {\n    fn id(self) -> I {\n        return self.id\n    }\n}\n"}
+	genericImplManifest := runAlderParser(t, exe, genericImplFiles, []string{"impl-generic-inherent.al"}, false)
+	if strings.Contains(genericImplManifest, "\nD ") {
+		t.Fatalf("generic inherent implementation rejected:\n%s", genericImplManifest)
+	}
 	rejects := []struct {
 		name, text       string
 		kind, start, end int
@@ -344,7 +351,6 @@ func TestAlderParserConformanceEndToEnd(t *testing.T) {
 		{"where-trait.al", "trait Bad(T: type)\nwhere T: Eq {\n    fn next(self) -> U64\n}\n", 24, 19, 24},
 		{"where-impl.al", "type Box { v: U64 }\ntrait Mark { }\nimpl Mark for Box\nwhere Box: Mark {\n}\n", 24, 53, 58},
 		{"constraint-plus.al", "fn bad(T: type(Eq + Hash), t: T) -> U64 {\n    return 0\n}\n", 4, 18, 19},
-		{"impl-generic-no-for.al", "trait Io {\n}\n\ntype Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Io)) File(I) {\n}\n", 50, 94, 95},
 		{"impl-constraint-plus.al", "trait Io {\n}\n\ntrait Reader {\n    fn read(self) -> U64\n}\n\ntype Token {\n}\n\ntype File(I: type(Io)) {\n    id: I\n}\n\nimpl(I: type(Io + Reader)) Reader for File(I) {\n    fn read(self) -> U64 { return 0 }\n}\n", 4, 127, 128},
 	}
 	for _, tc := range rejects {

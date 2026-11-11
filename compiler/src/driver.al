@@ -191,7 +191,6 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
     if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
     if kind == 30 { return out_string("unsafe c block must contain a direct call or field access") }
-    if kind == 50 { return out_string("a generic implementation is a trait implementation: write `impl(Param: type(Trait)) Trait for Type`") }
     return out_string("invalid source syntax")
 }
 
@@ -250,6 +249,7 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
 // and Eq operator dispatch).
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 156 { return out_string("a module binds the same C header twice") }
+    if kind == 57 { return out_string("type argument inference failed: every type parameter and implementation parameter of the callee must be known at the call site") }
     if kind == 157 { return out_string("C spelling must be a non-reserved C identifier") }
     if kind == 158 { return out_string("scalar binding spelling may not use a struct, union, or enum tag form") }
     if kind == 160 { return out_string("a binding block declares the same member name twice") }
