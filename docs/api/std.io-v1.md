@@ -102,7 +102,7 @@ pub trait Io {
     /// Opens or creates the file at `path` with the requested flags.
     fn open(self, path: Path, mode: FileMode) -> Result(HostFile, IoError)
     /// Reads up to `buffer.len()` bytes; `Ok(0)` means end of file.
-    fn read(self, file: HostFile, buffer: MutSlice(U8)) -> Result(U64, IoError)
+    fn read(self, file: HostFile, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
     /// Writes up to `data.len()` bytes from the start of `data`.
     fn write(self, file: HostFile, data: [U8]) -> Result(U64, IoError)
     /// Moves to `from` and returns the new absolute position.
@@ -137,7 +137,7 @@ pub trait Io {
     fn close_directory(self, take directory: HostDirectory)
         -> Result(Unit, IoError)
     /// Reads from standard input; `Ok(0)` at end of input.
-    fn read_stdin(self, buffer: MutSlice(U8)) -> Result(U64, IoError)
+    fn read_stdin(self, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
     /// Writes to standard output.
     fn write_stdout(self, data: [U8]) -> Result(U64, IoError)
     /// Writes to standard error.
@@ -190,8 +190,8 @@ impl BlockingIo for Blocking {
 /// its default body copies through a bounded internal buffer and does not
 /// flush buffered writers.
 pub trait Reader {
-    fn read(mut self, buffer: MutSlice(U8)) -> Result(U64, IoError)
-    fn copy_to(W: type(Writer), mut self, output: W) -> Result(U64, IoError) {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
+    fn copy_to(W: type(Writer), mut self, mut output: W) -> Result(U64, IoError) {
         // default body: read/write loop with a fixed internal buffer
     }
 }
@@ -229,11 +229,11 @@ pub type BufReader(Source: type(Reader)) {
 }
 
 impl(Source: type(Reader)) BufReader(Source) {
-    pub fn new(source: Source) -> BufReader(Source)
-    pub fn with_capacity(capacity: U64, source: Source) -> BufReader(Source)
-    pub fn read_line(mut self) -> Result(Option(String), IoError)
-    pub fn read_until(mut self, delimiter: U8) -> Result(Option(Vec(U8)), IoError)
-    pub fn into_source(take self) -> Source
+    fn new(source: Source) -> BufReader(Source)
+    fn with_capacity(capacity: U64, source: Source) -> BufReader(Source)
+    fn read_line(mut self) -> Result(Option(String), IoError)
+    fn read_until(mut self, delimiter: U8) -> Result(Option(Vec(U8)), IoError)
+    fn into_source(take self) -> Source
 }
 
 impl(Source: type(Reader)) Reader for BufReader(Source) {
@@ -246,9 +246,9 @@ pub type BufWriter(Sink: type(Writer, Cleanup)) {
 }
 
 impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
-    pub fn new(sink: Sink) -> BufWriter(Sink)
-    pub fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink)
-    pub fn into_sink(take self) -> Result(Sink, IoError)
+    fn new(sink: Sink) -> BufWriter(Sink)
+    fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink)
+    fn into_sink(take self) -> Result(Sink, IoError)
 }
 
 impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
@@ -308,15 +308,15 @@ pub fn eprintln(I: type(Io), io: I, text: String)
 ```alder
 /// Reads until `buffer` is full or fails with `InvalidInput` at end of
 /// stream. The reader's position after a failed call is unspecified.
-pub fn read_exact(R: type(Reader), reader: R, buffer: MutSlice(U8))
+pub fn read_exact(R: type(Reader), mut reader: R, mut buffer: MutSlice(U8))
     -> Result(Unit, IoError)
 
 /// Writes all of `data` or fails; returns `data.len()` on success.
-pub fn write_all(W: type(Writer), writer: W, data: [U8]) -> Result(U64, IoError)
+pub fn write_all(W: type(Writer), mut writer: W, data: [U8]) -> Result(U64, IoError)
 
 /// Reads to end of stream. Growth uses ordinary checked vector growth and
 /// terminates on exhaustion; there is no size limit in v1.
-pub fn read_to_end(R: type(Reader), reader: R) -> Result(Vec(U8), IoError)
+pub fn read_to_end(R: type(Reader), mut reader: R) -> Result(Vec(U8), IoError)
 
 /// Reader over an owned `Bytes` value. Pure and host-free, so buffered
 /// behavior tests never touch the OS.
@@ -325,7 +325,7 @@ pub type ByteCursor {
 }
 
 impl ByteCursor {
-    pub fn new(data: Bytes) -> ByteCursor
+    fn new(data: Bytes) -> ByteCursor
 }
 
 impl Reader for ByteCursor {
@@ -337,9 +337,9 @@ pub type ByteSink {
 }
 
 impl ByteSink {
-    pub fn new() -> ByteSink
-    pub fn len(self) -> U64
-    pub fn into_bytes(take self) -> Bytes
+    fn new() -> ByteSink
+    fn len(self) -> U64
+    fn into_bytes(take self) -> Bytes
 }
 
 impl Writer for ByteSink {
@@ -374,9 +374,9 @@ pub enum IoError {
 impl IoError {
     /// Reads the host error number at this point in the calling thread and
     /// maps it like every capability operation does.
-    pub fn last() -> IoError
+    fn last() -> IoError
     /// Maps one host error number to an `IoError` category.
-    pub fn from_errno(code: I32) -> IoError
+    fn from_errno(code: I32) -> IoError
 }
 
 impl Error for IoError {
@@ -518,12 +518,12 @@ pub fn std_io_example() -> U64 {
     let copied = io.write_all(sink, "world")
     total = total + copied
     let bytes = sink.into_bytes()
-    let replay = io.ByteCursor.new(bytes)
+    var replay = io.ByteCursor.new(bytes)
     var verify: Array(U8, 10) = [104, 101, 108, 108, 111, 119, 111, 114, 108, 100]
     var at: U64 = 0
     var same = true
     while at < 10 {
-        let one = [0]
+        var one: Array(U8, 1) = [0]
         let chunk = io.read_exact(replay, one.slice_mut(0, 1))
         match chunk {
             Ok(_) => {}
@@ -544,11 +544,11 @@ pub fn std_io_example() -> U64 {
 - Needs the C-binding thread's binding blocks, raw `c.*` types, `unsafe c`
   calls, and checked raw-integer conversions, plus an errno read for
   `IoError.last` (requested separately).
-- Needs the D024 constraint syntax (`BufReader(Source: type(Reader))` and the
-  other constrained parameters) and the generic implementation parameter
-  list (D024 extension, `impl(Source: type(Reader)) Reader for
-  BufReader(Source)`), both decided and landing with the constraint-syntax
-  thread before this module's implementation commit.
+- The D024 constraint syntax (`BufReader(Source: type(Reader))` and the
+  other constrained parameters) and the generic implementation parameter list
+  (D024 extension, `impl(Source: type(Reader)) Reader for BufReader(Source)`,
+  and generic inherent implementations such as `impl(Source: type(Reader))
+  BufReader(Source)`) are available on main.
 - A probe on main confirmed trait default bodies calling their own trait's
   requirements, including generic methods such as `Reader.copy_to`; the
   default lands as designed and no free `io.copy` bridge is needed.
