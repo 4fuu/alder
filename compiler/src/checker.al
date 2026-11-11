@@ -4442,6 +4442,18 @@ fn float_type(state: State, parse: ParseStore, store: CheckStore, checked_type: 
     return primitive_type_named(state, parse, store, checked_type, "F32") || primitive_type_named(state, parse, store, checked_type, "F64")
 }
 
+// Comparison and ordering operators reject F32 and F64 operands outright:
+// the old primitive comparison profile admitted them, but the backend
+// lowers no float comparison yet and verification refused the whole
+// function, so a plain float comparison reported an internal failure
+// instead of a diagnostic. They reject here until the float-semantics
+// decision returns the operators.
+fn float_comparison_operand(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let operand = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    return operand.kind == 1 && (operand.target == 10 || operand.target == 11)
+}
+
 fn expression_type_equal(d: Domain, state: State, parse: ParseStore, store: CheckStore, left: U64, right: U64) -> Result(Bool, __s0_Error) {
     let bindings = try __s0_buffer_new(TypeBindingRec, d)
     return interpreted_type_equal(d, state, parse, store, bindings, left, 0, right, 0)
@@ -8778,6 +8790,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     }
     var result_type = left_draft.checked_type
     if operator >= 10 && operator <= 15 {
+        if float_comparison_operand(right_store, left_draft.checked_type) { return expr_token_fail(d, state, base, 304, expression) }
         // `==` and `!=` dispatch on Eq: every primitive keeps the existing
         // comparison profile (floats included), String and Bytes compare by
         // bytes, and records and enums — generic applications included —

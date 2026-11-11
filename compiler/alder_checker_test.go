@@ -852,7 +852,6 @@ func runCheckerConformance(t *testing.T, exe string) {
 			"fn arithmetic(a: I64, b: I64) -> I64 { return (a + b) - (a * b) / (b % a) }\n" +
 			"fn shifts(value: U64, count: U64) -> U64 { return (value << count) >> count }\n" +
 			"fn comparisons(a: I64, b: I64) -> Bool { return (a == b || a != b) && (a < b || a <= b) && (a > b || a >= b) }\n" +
-			"fn float_comparison(a: F64, b: F64) -> Bool { return a <= b }\n" +
 			"fn full_width(value: U64) -> U64 { return value + 18446744073709551615 }\n" +
 			"fn signed_min(value: I64) -> I64 { return value + -9223372036854775808 }\n" +
 			"fn inferred(value: I64) -> Bool { let integer = 1\n let truth = true\n let text = \"scalar\"\n let copied = value\n let nested = -copied + integer\n return truth }\n" +

@@ -549,8 +549,12 @@ Quoted literals default to `String`; an expected `Bytes` type preserves the
 decoded bytes exactly, including NUL and invalid UTF-8. `\xNN` consumes exactly
 two hexadecimal digits. Invalid UTF-8 is rejected only in `String` context.
 The operator slice covers unary `-` and `!`, checked integer arithmetic and
-shifts, integer/float comparison and equality, and short-circuit Boolean
-operators with the Go Stage 0 operand rules. Direct calls support concrete and
+shifts, integer comparison and equality, and short-circuit Boolean
+operators with the Go Stage 0 operand rules. Float comparison and ordering
+operators reject with diagnostic 304 pending the float-semantics decision:
+admitting them reached a backend that lowers no float comparison, and the
+program failed verification as an internal error instead of reporting a
+diagnostic. Direct calls support concrete and
 generic user functions, generic records, variants resolved through a concrete
 expected enum, unary-payload inference through declared generic enums, and one
 direct C-import root in `unsafe c`; record fields are checked and stored in
