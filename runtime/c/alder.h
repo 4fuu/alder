@@ -676,8 +676,8 @@ bool alder_table_remove(AlderTable *table, AlderTableId id);
 /* ------------------------------------------------------------------ */
 
 /*
- * Terminate the process with a message on stderr. Used by generated code
- * for unchecked runtime failures (out-of-memory, identity exhaustion,
+ * Terminate the process with status 101 and a message on stderr. Used by
+ * generated code for unchecked runtime failures (out-of-memory, identity exhaustion,
  * unreachable execution, out-of-range float-to-int conversion). Checked MIR
  * operations never reach this function. Never returns.
  */

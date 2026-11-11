@@ -16,7 +16,7 @@ import (
 // Option constructor: every transfer disarms the registration, so the moved
 // buffer is owned by the caller and never released by the exiting scope.
 // That disarm is the regression this fixture guards; without it the program
-// releases the same buffer twice and the process aborts.
+// releases the same buffer twice and the process terminates.
 const cStringProgram = `import c "cstring.h" as cs {
     raw fn length = "cs_length"(text: c.ConstPtr(c.Char)) -> c.Size
     raw fn first = "cs_first"(text: c.ConstPtr(c.Char)) -> c.Size

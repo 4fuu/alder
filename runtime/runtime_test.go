@@ -4,6 +4,7 @@
 package runtime
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,8 +77,8 @@ func compileAndRun(t *testing.T, cc, object, name string, extra ...string) {
 	}
 }
 
-// TestRuntimePanic checks that alder_runtime_panic prints a message and exits
-// nonzero (the harness normally requires exit code 0).
+// TestRuntimePanic checks that alder_runtime_panic prints its message and
+// exits with the documented invariant status 101.
 func TestRuntimePanic(t *testing.T) {
 	cc := findCompiler(t)
 	dir := t.TempDir()
@@ -93,6 +94,10 @@ func TestRuntimePanic(t *testing.T) {
 	out, err := exec.Command(exe).CombinedOutput()
 	if err == nil {
 		t.Fatal("panic program exited zero")
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 101 {
+		t.Fatalf("panic status = %v, want 101; output=%s", err, out)
 	}
 	if !strings.Contains(string(out), "intentional panic") {
 		t.Fatalf("panic message missing from output: %s", out)

@@ -104,7 +104,7 @@ it performs no directory scanning, path normalization, or pointer exposure.
 Source counts, paths, and file contents that are not representable as `U64`
 are rejected before entry.
 Length and byte accessors require an active invocation and valid indices, and a
-contract violation aborts with a fixed host diagnostic. `alderhost_stdout_byte`
+contract violation terminates with a fixed host diagnostic. `alderhost_stdout_byte`
 and `alderhost_stderr_byte` write exactly one byte without a newline and return
 false outside an active invocation or on write failure. The invocation context
 layout remains private, is active only during `alder_program_entry`, and is
@@ -241,9 +241,9 @@ Generated code has two terminating diagnostics. `alder_runtime_panic` is the
 runtime's unchecked-failure hook. `c_panic`, declared by the toolchain-owned
 `runtime/c/alder_panic.h` shim and used by `core.panic`, flushes all C output,
 writes the user-facing `panic: ...` or `panic: assertion failed: ...` line to
-standard error, and aborts. Both terminate by `abort()` and differ in the
-message they write; `c_panic` additionally flushes C output first. Neither
-unwinds caller frames or runs Alder cleanup.
+standard error, and terminates immediately with status 101. Both hooks use
+status 101 and differ in the message they write; `c_panic` additionally flushes
+C output first. Neither unwinds caller frames or runs Alder cleanup.
 
 ### Documented M3 limitations
 
@@ -532,7 +532,7 @@ function's hidden caller-result domain, which is released at return, so the
 slot must own storage tied to the table's domain rather than alias the
 caller's. A source that is dead after the insert transfers its storage
 instead (the copy-site elision D023 already applies to the element read).
-The copy follows the `copy_to_domain` abort contract on allocation
+The copy follows the `copy_to_domain` termination contract on allocation
 exhaustion; only the insert's own slot-storage allocation reports failure
 back to the caller (`false`, the `try_insert` `Err` payload).
 Every successful domain reset changes the domain epoch and

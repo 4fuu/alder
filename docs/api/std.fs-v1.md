@@ -293,7 +293,7 @@ import std.path
 // The executable std.fs v1 snapshot example. Everything happens inside one
 // temporary directory that cleanup removes; the checksum is deterministic.
 
-// The example inputs are fixed, so any early failure aborts with zero.
+// The example inputs are fixed, so any early failure produces zero.
 pub fn std_fs_example(io: io.Blocking) -> U64 {
     var total: U64 = 0
     let room = match fs.TempDir.new(io, "alder-fs-example") {

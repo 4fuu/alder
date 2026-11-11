@@ -101,11 +101,13 @@ uint8_t alder_c_buffer_dummy[1] = {0};
 _Noreturn void alder_runtime_panic(const char *message) {
     void *frames[32];
     int n = backtrace(frames, 32);
+    (void)fflush(NULL);
     fputs("alder runtime panic: ", stderr);
     fputs(message != NULL ? message : "(null)", stderr);
     fputc('\n', stderr);
     backtrace_symbols_fd(frames, n, 2);
-    abort();
+    (void)fflush(stderr);
+    _Exit(101);
 }
 
 static bool align_is_valid(size_t align) {

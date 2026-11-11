@@ -460,7 +460,7 @@ fn main() -> I32 {
 // the driver makes the insert's slot-storage allocation fail deterministically
 // (four allocations succeed first: the table slot array, the vector's two
 // buffer allocations, and the element deep copy's buffer, which follows the
-// infallible copy_to_domain abort contract), the insert reports Err instead
+// infallible copy_to_domain termination contract), the insert reports Err instead
 // of panicking, and the Err payload hands the vector back with its contents
 // intact. The sum over
 // the returned vector proves the payload carries the original bytes.
@@ -528,7 +528,7 @@ const m75TableTryInsertDefaultProgram = `fn main() -> I32 {
 `
 
 // m75TableInsertAbortProgram pins the panic edge that try_insert deliberately
-// does not take: plain insert past the slot limit still aborts the process,
+// does not take: plain insert past the slot limit still terminates the process,
 // so the non-panicking form is an explicit caller choice, not a silent
 // change of insert behavior.
 const m75TableInsertAbortProgram = `fn main() -> I32 {
@@ -557,7 +557,7 @@ int main(void) {
 // m75TableAllocFailDriver makes the fifth domain allocation fail, which in
 // the Err-payload fixture is the insert's slot-storage allocation (the table
 // slot array, the vector's two buffer allocations, and the element deep
-// copy's buffer come first; the copy aborts on its own OOM per the
+// copy's buffer come first; the copy terminates on its own OOM per the
 // copy_to_domain contract, so the fixture must exhaust past it). This is how
 // the exhaustion-policy Err edge is reached without any earlier same-table
 // insert.
@@ -596,7 +596,7 @@ func TestM75TableTryInsertProduction(t *testing.T) {
 		{"m75-table-try-insert-err-oom.al", m75TableTryInsertErrOomProgram, m75TableAllocFailDriver, testingObject, 0},
 		{"m75-table-try-insert-err-cap.al", m75TableTryInsertErrCapProgram, m75TableSlotLimitDriver, testingObject, 0},
 		{"m75-table-try-insert-default.al", m75TableTryInsertDefaultProgram, "", runtimeObject, 0},
-		{"m75-table-insert-abort.al", m75TableInsertAbortProgram, m75TableSlotLimitDriver, testingObject, -1},
+		{"m75-table-insert-abort.al", m75TableInsertAbortProgram, m75TableSlotLimitDriver, testingObject, 101},
 	} {
 		program := program
 		t.Run(program.name, func(t *testing.T) {

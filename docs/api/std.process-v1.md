@@ -251,7 +251,7 @@ fn bytes_are(left: Bytes, right: String) -> Bool {
     return left == right.to_bytes()
 }
 
-// The example inputs are fixed, so any early failure aborts with a
+// The example inputs are fixed, so any early failure produces a
 // distinctive negative checksum.
 pub fn std_process_example(io: io.Blocking) -> I64 {
     var total: I64 = 0
