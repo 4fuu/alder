@@ -91,6 +91,32 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.text-v1.al": {
+			style:   "project",
+			srcName: "std_text_example.al",
+			mainText: `module hello.main
+
+import hello.std_text_example { std_text_example }
+
+pub fn main() -> I32 {
+    if std_text_example() == 4095 { return 0 }
+    return 1
+}
+`,
+		},
+		"std.bytes-v1.al": {
+			style:   "project",
+			srcName: "std_bytes_example.al",
+			mainText: `module hello.main
+
+import hello.std_bytes_example { std_bytes_example }
+
+pub fn main() -> I32 {
+    if std_bytes_example() == 8388607 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 

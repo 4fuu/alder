@@ -44,7 +44,13 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`std.random` public snapshot v1](api/std.random-v1.md), covering the
   Milestone 8 OS randomness and seeded deterministic generator surface;
 - [`std.math` public snapshot v1](api/std.math-v1.md), covering the Milestone
-  8 scalar float surface.
+  8 scalar float surface;
+- [`std.text` public snapshot v1](api/std.text-v1.md), covering the Milestone
+  8 UTF-8 validation, scalar decoding, exact search/split/replace, checked
+  conversion, and text builder surface;
+- [`std.bytes` public snapshot v1](api/std.bytes-v1.md), covering the
+  Milestone 8 byte construction, search, sorted search, endian integer
+  coding, and hex and Base64 codec surface.
 
 ## Distribution layers
 

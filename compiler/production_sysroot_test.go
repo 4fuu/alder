@@ -114,6 +114,399 @@ pub fn main() -> I32 {
 	}
 }
 
+func sysrootTextBytesMain() map[string]string {
+	return map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.bytes { BytesBuilder, of_byte, find, find_from, split, binary_search, read_u16_le, read_u16_be, read_u32_le, read_u32_be, read_u64_le, read_u64_be, u16_le_bytes, u16_be_bytes, u32_le_bytes, u32_be_bytes, u64_le_bytes, u64_be_bytes, hex_encode, hex_decode, base64_encode, base64_decode }
+import std.text
+
+import hello.builders { builders_check }
+
+fn fail(code: I32) -> I32 {
+    return code
+}
+
+pub fn main() -> I32 {
+    // bytes.of_byte: first, middle, last byte values.
+    if of_byte(0).len() != 1 { return fail(1) }
+    if of_byte(65).byte(0) != 65 { return fail(2) }
+    if of_byte(255).byte(0) != 255 { return fail(3) }
+
+    // BytesBuilder: functional pushes accumulate and finish.
+    var b = BytesBuilder.new()
+    if b.len() != 0 { return fail(4) }
+    b = b.push_byte(65)
+    b = b.push_bytes("bc".to_bytes())
+    let done = b.finish()
+    if done.len() != 3 { return fail(5) }
+    if !(done == "Abc".to_bytes()) { return fail(6) }
+
+    // find / find_from on exact bytes.
+    let hay = "abcabc".to_bytes()
+    var at: U64 = 0
+    var seen: Bool = false
+    match find(hay, "bc".to_bytes()) {
+        Some(found) => {
+            at = found
+            seen = true
+        }
+        None => {}
+    }
+    if !seen { return fail(7) }
+    if at != 1 { return fail(8) }
+    match find_from(hay, "bc".to_bytes(), 2) {
+        Some(found) => {
+            if found != 4 { return fail(9) }
+        }
+        None => { return fail(10) }
+    }
+    var absent: Bool = false
+    match find(hay, "zz".to_bytes()) {
+        Some(_) => {}
+        None => { absent = true }
+    }
+    if !absent { return fail(11) }
+
+    // split with empty pieces, no trailing separator piece.
+    let parts = split("a,b,,c".to_bytes(), ",".to_bytes())
+    if parts.len() != 4 { return fail(12) }
+    if !(parts[0] == "a".to_bytes()) { return fail(13) }
+    if parts[2].len() != 0 { return fail(14) }
+    if !(parts[3] == "c".to_bytes()) { return fail(15) }
+    if split("abc", "").len() != 1 { return fail(16) }
+
+    // binary_search: hit, miss beyond, miss before range, leftmost.
+    let sorted = "abcce".to_bytes()
+    match binary_search(sorted, 99) {
+        Ok(found) => {
+            if found != 2 { return fail(17) }
+        }
+        Err(_) => { return fail(18) }
+    }
+    match binary_search(sorted, 102) {
+        Ok(_) => { return fail(19) }
+        Err(slot) => {
+            if slot != 5 { return fail(20) }
+        }
+    }
+    match binary_search(sorted, 0) {
+        Ok(_) => { return fail(21) }
+        Err(slot) => {
+            if slot != 0 { return fail(22) }
+        }
+    }
+
+    // Endian writes and reads round-trip; the RFC 5297 example constant
+    // fixes the exact byte forms.
+    let le = u32_le_bytes(16909060)
+    if le.len() != 4 { return fail(23) }
+    if le.byte(0) != 4 { return fail(24) }
+    if le.byte(3) != 1 { return fail(25) }
+    match read_u32_le(le, 0) {
+        Ok(value) => {
+            if value != 16909060 { return fail(26) }
+        }
+        Err(_) => { return fail(27) }
+    }
+    let be = u32_be_bytes(16909060)
+    if be.byte(0) != 1 { return fail(28) }
+    if be.byte(3) != 4 { return fail(29) }
+    match read_u32_be(be, 0) {
+        Ok(value) => {
+            if value != 16909060 { return fail(30) }
+        }
+        Err(_) => { return fail(31) }
+    }
+    let wide = u64_le_bytes(18446744073709551615)
+    if wide.len() != 8 { return fail(32) }
+    match read_u64_le(wide, 0) {
+        Ok(value) => {
+            if value != 18446744073709551615 { return fail(33) }
+        }
+        Err(_) => { return fail(34) }
+    }
+    let half = u16_be_bytes(4660)
+    if half.byte(0) != 18 { return fail(35) }
+    if half.byte(1) != 52 { return fail(36) }
+    match read_u16_be(half, 0) {
+        Ok(value) => {
+            if value != 4660 { return fail(37) }
+        }
+        Err(_) => { return fail(38) }
+    }
+    var short: Bool = false
+    match read_u64_be(wide, 1) {
+        Ok(_) => {}
+        Err(_) => { short = true }
+    }
+    if !short { return fail(39) }
+
+    // hex: encode is lowercase, decode accepts both cases, rejects junk.
+    let raw: Bytes = "\xde\xad\xbe\xef"
+    if hex_encode(raw) != "deadbeef" { return fail(40) }
+    match hex_decode("DeAdBeEf") {
+        Ok(again) => {
+            if !(again == raw) { return fail(41) }
+        }
+        Err(_) => { return fail(42) }
+    }
+    var badhex: Bool = false
+    match hex_decode("deadbeef0") {
+        Ok(_) => {}
+        Err(_) => { badhex = true }
+    }
+    if !badhex { return fail(43) }
+    var badchar: Bool = false
+    match hex_decode("deadbeeg") {
+        Ok(_) => {}
+        Err(_) => { badchar = true }
+    }
+    if !badchar { return fail(44) }
+
+    // base64: the RFC 4648 vectors, padding, and strict rejection.
+    if base64_encode("".to_bytes()) != "" { return fail(45) }
+    if base64_encode("f".to_bytes()) != "Zg==" { return fail(46) }
+    if base64_encode("fo".to_bytes()) != "Zm8=" { return fail(47) }
+    if base64_encode("foo".to_bytes()) != "Zm9v" { return fail(48) }
+    if base64_encode("foob".to_bytes()) != "Zm9vYg==" { return fail(49) }
+    if base64_encode("fooba".to_bytes()) != "Zm9vYmE=" { return fail(50) }
+    if base64_encode("foobar".to_bytes()) != "Zm9vYmFy" { return fail(51) }
+    match base64_decode("Zm9vYmFy") {
+        Ok(back) => {
+            if !(back == "foobar".to_bytes()) { return fail(52) }
+        }
+        Err(_) => { return fail(53) }
+    }
+    match base64_decode("Zg==") {
+        Ok(back) => {
+            if !(back == "f".to_bytes()) { return fail(54) }
+        }
+        Err(_) => { return fail(55) }
+    }
+    var badpad: Bool = false
+    match base64_decode("Zg=") {
+        Ok(_) => {}
+        Err(_) => { badpad = true }
+    }
+    if !badpad { return fail(56) }
+    var badbits: Bool = false
+    match base64_decode("Zh==") {
+        Ok(_) => {}
+        Err(_) => { badbits = true }
+    }
+    if !badbits { return fail(57) }
+    var badalpha: Bool = false
+    match base64_decode("Zm9*") {
+        Ok(_) => {}
+        Err(_) => { badalpha = true }
+    }
+    if !badalpha { return fail(58) }
+    var pad1_bits: Bool = false
+    match base64_decode("Zhi=") {
+        Ok(_) => {}
+        Err(_) => { pad1_bits = true }
+    }
+    if !pad1_bits { return fail(100) }
+    match base64_decode("Zh8=") {
+        Ok(back) => {
+            if !(back == "f\x1f".to_bytes()) { return fail(101) }
+        }
+        Err(_) => { return fail(101) }
+    }
+
+    let lone: Bytes = "\xff"
+    let overlong: Bytes = "\xc0\x80"
+    let surrogate_seq: Bytes = "\xed\xa0\x80"
+    let cut: Bytes = "\xc3"
+    let narrow_e0_bytes: Bytes = "\xe0\x80\x80"
+    let wide_f4_bytes: Bytes = "\xf4\x90\x80\x80"
+    // text.validate: ASCII, two-byte, and the rejection edges.
+    match text.validate("hello".to_bytes()) {
+        Ok(count) => {
+            if count != 5 { return fail(59) }
+        }
+        Err(_) => { return fail(60) }
+    }
+    match text.validate("\xc3\xa9".to_bytes()) {
+        Ok(count) => {
+            if count != 1 { return fail(61) }
+        }
+        Err(_) => { return fail(62) }
+    }
+    var badutf: Bool = false
+    match text.validate(lone) {
+        Ok(_) => {}
+        Err(failure) => {
+            match failure {
+                InvalidUtf8(offset) => {
+                    if offset == 0 { badutf = true }
+                }
+                InvalidScalar(_) => {}
+            }
+        }
+    }
+    if !badutf { return fail(63) }
+    var overlong_reject: Bool = false
+    match text.validate(overlong) {
+        Ok(_) => {}
+        Err(_) => { overlong_reject = true }
+    }
+    if !overlong_reject { return fail(64) }
+    var surrogate: Bool = false
+    match text.validate(surrogate_seq) {
+        Ok(_) => {}
+        Err(_) => { surrogate = true }
+    }
+    if !surrogate { return fail(65) }
+    var truncated: Bool = false
+    match text.validate(cut) {
+        Ok(_) => {}
+        Err(_) => { truncated = true }
+    }
+    if !truncated { return fail(66) }
+    var narrow_e0: Bool = false
+    match text.validate(narrow_e0_bytes) {
+        Ok(_) => {}
+        Err(_) => { narrow_e0 = true }
+    }
+    if !narrow_e0 { return fail(67) }
+    var wide_f4: Bool = false
+    match text.validate(wide_f4_bytes) {
+        Ok(_) => {}
+        Err(_) => { wide_f4 = true }
+    }
+    if !wide_f4 { return fail(68) }
+    var four: Bool = false
+    match text.validate("\xf0\x9f\x98\x80".to_bytes()) {
+        Ok(count) => {
+            if count == 1 { four = true }
+        }
+        Err(_) => {}
+    }
+    if !four { return fail(69) }
+
+    // scalar_at, scalar_count, scalars over a two-byte scalar.
+    if text.scalar_count("h\xc3\xa9llo") != 5 { return fail(70) }
+    match text.scalar_at("h\xc3\xa9llo", 1) {
+        Some(one) => {
+            if one.value != 233 { return fail(71) }
+            if one.size != 2 { return fail(72) }
+        }
+        None => { return fail(73) }
+    }
+    var mid: Bool = false
+    match text.scalar_at("h\xc3\xa9llo", 2) {
+        Some(_) => {}
+        None => { mid = true }
+    }
+    if !mid { return fail(74) }
+    var out_of_range: Bool = false
+    match text.scalar_at("h\xc3\xa9llo", 99) {
+        Some(_) => {}
+        None => { out_of_range = true }
+    }
+    if !out_of_range { return fail(75) }
+    let list = text.scalars("h\xc3\xa9llo")
+    if list.len() != 5 { return fail(76) }
+    if list[1] != 233 { return fail(77) }
+
+    // text find / split / replace.
+    match text.find("hello world hello", "world") {
+        Some(found) => {
+            if found != 6 { return fail(78) }
+        }
+        None => { return fail(79) }
+    }
+    var missing: Bool = false
+    match text.find("hello", "world") {
+        Some(_) => {}
+        None => { missing = true }
+    }
+    if !missing { return fail(80) }
+    let pieces = text.split("a:b::c", ":")
+    if pieces.len() != 4 { return fail(81) }
+    if pieces[0] != "a" { return fail(82) }
+    if pieces[2] != "" { return fail(83) }
+    if pieces[3] != "c" { return fail(84) }
+    if text.replace("aaa", "a", "b") != "bbb" { return fail(85) }
+    if text.replace("abcabc", "abc", "x") != "xx" { return fail(86) }
+    if text.replace("abc", "", "z") != "abc" { return fail(87) }
+    if text.replace("aaa", "aa", "b") != "ba" { return fail(88) }
+
+    // from_utf8 round-trip and rejection.
+    match text.from_utf8("h\xc3\xa9llo".to_bytes()) {
+        Ok(value) => {
+            if value != "h\xc3\xa9llo" { return fail(89) }
+        }
+        Err(_) => { return fail(90) }
+    }
+    var reject_utf: Bool = false
+    match text.from_utf8(lone) {
+        Ok(_) => {}
+        Err(_) => { reject_utf = true }
+    }
+    if !reject_utf { return fail(91) }
+
+    if builders_check() != 0 { return builders_check() + 100 }
+    return 0
+}
+`,
+		"src/builders.al": `module hello.builders
+
+import std.text { StringBuilder }
+
+pub fn builders_check() -> I32 {
+    var sb = StringBuilder.new()
+    sb = sb.push_text("a")
+    let pushed = match sb.push_scalar(233) {
+        Ok(next) => next
+        Err(_) => sb
+    }
+    let finished = pushed.finish()
+    if finished != "a\xc3\xa9" { return 1 }
+    if finished.len() != 3 { return 2 }
+    var scalar_reject: Bool = false
+    match sb.push_scalar(55296) {
+        Ok(_) => {}
+        Err(failure) => {
+            match failure {
+                InvalidScalar(value) => {
+                    if value == 55296 { scalar_reject = true }
+                }
+                InvalidUtf8(_) => {}
+            }
+        }
+    }
+    if !scalar_reject { return 3 }
+    var above: Bool = false
+    match sb.push_scalar(1114112) {
+        Ok(_) => {}
+        Err(_) => { above = true }
+    }
+    if !above { return 4 }
+    let junk: Bytes = "\xff"
+    var utf_reject: Bool = false
+    match pushed.push_utf8(junk) {
+        Ok(_) => {}
+        Err(_) => { utf_reject = true }
+    }
+    if !utf_reject { return 5 }
+    var utf_ok: Bool = false
+    let emoji: Bytes = "\xf0\x9f\x98\x80"
+    let grown = match pushed.push_utf8(emoji) {
+        Ok(next) => next
+        Err(_) => pushed
+    }
+    if grown.finish().len() == 7 { utf_ok = true }
+    if !utf_ok { return 6 }
+    return 0
+}
+`,
+	}
+}
+
 func sysrootPathEnvMain() map[string]string {
 	return map[string]string{
 		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
@@ -759,6 +1152,51 @@ func TestProductionSysrootPathEnvRuns(t *testing.T) {
 	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootPathEnvMain(), "run")
 	if run != (productionResult{}) {
 		t.Fatalf("std.path/std.env behavior run failed: %+v", run)
+	}
+}
+
+func TestProductionSysrootTextBytesRuns(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	plan := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootTextBytesMain(), "test-plan")
+	bytesSeed := sysrootModuleSeed(t, repoRoot, "bytes.al")
+	textSeed := sysrootModuleSeed(t, repoRoot, "text.al")
+	if plan.status != 0 || plan.stderr != "" {
+		t.Fatalf("std.text/std.bytes plan failed: %+v", plan)
+	}
+	if !strings.Contains(plan.stdout, "\nsysroot v1:") {
+		t.Fatalf("plan lost the sysroot identity line: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/bytes.al bytes "+bytesSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.bytes\n") {
+		t.Fatalf("plan does not list the std.bytes source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "source std/text.al bytes "+textSeed+" poly64-v1:") ||
+		!strings.Contains(plan.stdout, " module std.text\n") {
+		t.Fatalf("plan does not list the std.text source: %q", plan.stdout)
+	}
+	if !strings.Contains(plan.stdout, "edge hello.main -> std.bytes\n") ||
+		!strings.Contains(plan.stdout, "edge hello.main -> std.text\n") ||
+		!strings.Contains(plan.stdout, "edge hello.builders -> std.text\n") {
+		t.Fatalf("plan does not record the std edges: %q", plan.stdout)
+	}
+	repeat := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootTextBytesMain(), "test-plan")
+	if repeat != plan {
+		t.Fatalf("std.text/std.bytes plan changed across processes: first=%q repeat=%q", plan.stdout, repeat.stdout)
+	}
+
+	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, sysrootTextBytesMain(), "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.text/std.bytes behavior run failed: %+v", run)
 	}
 }
 
