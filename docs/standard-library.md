@@ -68,7 +68,7 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   the Milestone 8 stable sorting entry point over the Order domain in the
   installed sysroot.
 
-M8 exit-audit status (current main):
+M8 exit-audit status (complete):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
 `core.format`, `std.io`, `std.format`, `std.path`, `std.env`, `std.time`,
 `std.random`, `std.math`, `std.text`, `std.bytes`, and `std.collection` are
@@ -85,8 +85,14 @@ networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
 modules are post-M8. The `core.iter`, `core.hash`,
 `core.memory`, `std.parse`, `std.signal`, and `Deque`/heap items belong to
 [Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion), the
-immediate follow-on after M8 closes. `std.c` is the verified C-interop surface
+immediate follow-on to M8. `std.c` is the verified C-interop surface
 rather than a `.al` module; its exit audit is complete.
+
+The M8 exit audit maps every ROADMAP M8 exit criterion and named area to a
+production-driver test. Live affine owners on a terminating
+`core.panic.panic` path need no transfer, so `std.test.expect_err` accepts an
+affine `Ok` payload; every non-diverging path still requires exactly-once
+transfer or registered cleanup (`5ee3b45`).
 
 ## Distribution layers
 

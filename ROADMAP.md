@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **in progress (C-interop complete; hosted foundation largely landed; std.process v1 and the std.test library slice landed)**
+Status: **complete**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
@@ -2043,17 +2043,46 @@ callers to bind the payload with `using name = try expression`, the frozen
 receiver spellings for `std.fs` (`File.open`/`create`/`append`/`open_options`,
 `TempFile.new`, `TempDir.new`) and `std.process` (`command.spawn`/`status`/
 `output`), affine-owner transfer through match arms, and string interpolation
-through `Display`. The only remaining M8 exit item is the final audit:
+through `Display`. The final M8 exit audit is complete:
 
-- a final M8 exit audit that maps every remaining exit clause to evidence.
+- C interop: `TestM8BindingProductionQualification` and
+  `TestAlderBindProbeCrossTarget` cover binding rejection and per-target
+  layouts; `TestM8CConvertProductionQualification` covers integer conversion;
+  `TestM8CBufferBorrowProductionQualification` and
+  `TestM8CStringProductionQualification` cover borrowed/retained buffers and
+  exactly-once release; `TestM8CCallbackProductionQualification`,
+  `TestM8CCallbackOwnerProductionQualification`, `TestM8CExportForeignThreads`,
+  and `TestM8CCallbackOwnerForeignThread` cover callbacks and foreign threads.
+- Hosted foundation: the `TestProduction*`, `TestIo*`, `TestFs*`,
+  `TestProcess*`, `TestTime*`, and `TestProductionStdRandom*` suites cover
+  formatting, text/bytes, collections, paths, I/O/files, environment,
+  processes, time, random, math, and testing primitives. `std.c` and the
+  audited `sysroot/std/c` shims cover the C surface and OS wrappers.
+- Public surface: `TestSysrootPublicSurfaceUsesNoCSpellings` rejects C ABI
+  types on public signatures, fields, payloads, aliases, and constants;
+  `TestM8BindingProductionQualification/direct-c-import` proves the S0 C
+  bridge stays private.
+- Language items: `TestBitwiseProductionQualification`,
+  `TestMutableViewArgumentsProductionQualification`,
+  `TestQualifiedAssociatedCallWithArgument`,
+  `TestUnitLiteralProductionQualification`, and
+  `TestInterpolationProductionQualification` cover the M8 additions.
+- The exit review's last behavior, live affine owners on a terminating
+  `core.panic.panic` path, is covered by
+  `TestProductionCorePanicTerminates/live-owner-panic` and
+  `TestProductionStdTestFailureFormats/expect-err-affine-ok`, with
+  `TestProductionPanicOwnerLeakRejected` keeping the non-panic rule.
+
+Accepted cross-target limits remain: the AArch64 and Windows LLP64 bind and
+shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
 Status: **in progress (`core.memory` landed; no further scope gate)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
-of its exit and into this immediate follow-on. Milestone 8.1 starts as soon as
-Milestone 8 closes. The modules land in dependency order:
+of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
+The modules land in dependency order:
 
 1. `core.memory`: size and alignment queries (landed; see below);
 2. `core.hash`: the stable hashing contract and the hash builders that hash
