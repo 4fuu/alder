@@ -205,6 +205,61 @@ fn main() -> I32 {
 }
 `
 
+// A `using` value registers its own owner domain. A `mut` parameter rooted at
+// that value grows the registered storage, not a temporary frame copy.
+const borrowedStorageUsingRootSource = `type Holder {
+    data: Vec(U8)
+}
+
+impl Cleanup for Holder {
+    fn cleanup(take self) -> Unit { return () }
+}
+
+fn grow(mut holder: Holder) -> Unit {
+    holder.data.push(7)
+    return ()
+}
+
+fn main() -> I32 {
+    using holder = Holder(data: Vec.from_array(U8, [1]))
+    grow(holder)
+    if holder.data.len() != 2 { return 1 }
+    if holder.data[0] != 1 { return 2 }
+    if holder.data[1] != 7 { return 3 }
+    return 0
+}
+`
+
+// Several `mut` parameters in one call keep their own caller domains. Each
+// growth lands in the matching owner, and neither value inherits the other's.
+const borrowedStorageMultipleOwnersSource = `type Holder {
+    data: Vec(U8)
+}
+
+impl Cleanup for Holder {
+    fn cleanup(take self) -> Unit { return () }
+}
+
+fn grow_both(mut left: Holder, mut right: Holder) -> Unit {
+    left.data.push(1)
+    right.data.push(2)
+    return ()
+}
+
+fn main() -> I32 {
+    using left = Holder(data: Vec.from_array(U8, [10]))
+    using right = Holder(data: Vec.from_array(U8, [20]))
+    grow_both(left, right)
+    if left.data.len() != 2 { return 1 }
+    if left.data[0] != 10 { return 2 }
+    if left.data[1] != 1 { return 3 }
+    if right.data.len() != 2 { return 4 }
+    if right.data[0] != 20 { return 5 }
+    if right.data[1] != 2 { return 6 }
+    return 0
+}
+`
+
 func TestM8BorrowedFieldStorageQualification(t *testing.T) {
 	t.Parallel()
 	cc, err := exec.LookPath("gcc")
@@ -227,6 +282,8 @@ func TestM8BorrowedFieldStorageQualification(t *testing.T) {
 		{"branch-join-local", borrowedStorageJoinSource},
 		{"take-parameter-return", borrowedStorageTakeSource},
 		{"delegated-mut-parameter", borrowedStorageDelegateSource},
+		{"using-registered-root", borrowedStorageUsingRootSource},
+		{"multiple-mut-owners", borrowedStorageMultipleOwnersSource},
 	}
 	for _, program := range programs {
 		program := program
