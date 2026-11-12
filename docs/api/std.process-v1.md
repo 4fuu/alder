@@ -1,6 +1,6 @@
 # `std.process` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot; value layer implemented**
+Status: **Milestone 8 frozen snapshot; implemented**
 
 This is the versioned public snapshot for child processes. It is normative
 together with the executable example
@@ -11,12 +11,17 @@ lives at `<sysroot>/std/process.al`.
 
 Snapshot v1 covers the value-semantic `Command`, the affine `Child`, pipes,
 exit status, output capture, waiting, termination, and explicit environment
-inheritance. The value layer is implemented now; spawning, child handles,
-pipe ends, and output capture wait for the `std.io` slice 2 capability and
-host handles. Spawning waits on the host, so it takes the capability, and the
+inheritance. Spawning waits on the host, so it takes the capability, and the
 surfaces are written once against `I: type(io.Io)`. No function in this
 module invokes a shell; the argument vector is passed to the target program
 exactly as built, with no quoting or expansion anywhere in the layer.
+
+`spawn`, `status`, and `output` are static associated functions today: the
+command value is the last argument (`Command.output(io, command)`), so the
+call form is exactly the one shown below. The receiver spelling
+(`command.output(io)`) waits on generic associated receiver-call inference;
+when that lands the parameter becomes `self` without changing the documented
+call expressions.
 
 ## Signatures
 
@@ -61,12 +66,12 @@ impl Command {
     pub fn stdout(mut self, mode: PipeMode) -> Unit
     pub fn stderr(mut self, mode: PipeMode) -> Unit
     /// Spawns the child. The `Command` stays owned and reusable.
-    pub fn spawn(I: type(io.Io), io: I, self) -> Result(Child(I), ProcessError)
+    pub fn spawn(I: type(io.Io), io: I, command: Command) -> Result(Child(I), ProcessError)
     /// Spawns with default wiring, waits, and returns the exit status.
-    pub fn status(I: type(io.Io), io: I, self) -> Result(ExitStatus, ProcessError)
+    pub fn status(I: type(io.Io), io: I, command: Command) -> Result(ExitStatus, ProcessError)
     /// Spawns with standard output and error piped, captures both to end
     /// of stream, waits, and returns status plus captured bytes.
-    pub fn output(I: type(io.Io), io: I, self) -> Result(Output, ProcessError)
+    pub fn output(I: type(io.Io), io: I, command: Command) -> Result(Output, ProcessError)
 }
 
 pub enum PipeMode {
@@ -228,7 +233,13 @@ will use these forms when it lands.
   environment, and `PipeMode.Piped` per stream. Overrides apply in
   insertion order with later keys replacing earlier ones.
 - `spawn` never mutates the `Command`: one description can spawn many
-  children.
+  children. The command is passed by value, so the documented
+  `Command.spawn(io, command)` call form works before generic associated
+  receiver-call inference lands.
+- Process creation is a host operation on `std.io.Io` (`spawn`, `wait`,
+  `kill`, `poll`); `std.process` never forges a host handle. `std.io` builds
+  the pipe-end `HostFile`s, and `Child.take_stdin`/`take_stdout`/`take_stderr`
+  move them out with `Option.take`.
 - `Child` is affine. Forgetting to wait cannot leak a zombie: cleanup kills
   and reaps, and documents that it swallows errors. `wait` is the observing
   release and releases on both arms.
@@ -258,74 +269,86 @@ checksum.
 ```alder
 module hello.std_process_example
 
-import std.env
-import std.io
-import std.path
-import std.process
+import std.io { Blocking }
+import std.path { OsString }
+import std.process { Command, Output, ProcessError }
 
 // The executable std.process v1 snapshot example. One fixed program with
 // fixed arguments and piped capture; the checksum is deterministic.
 
-// Byte equality between a byte vector and a literal.
+fn os_value(value: String) -> Option(OsString) {
+    match OsString.parse(value) {
+        Ok(text) => { return Some(text) }
+        Err(_) => { return None }
+    }
+    return None
+}
+
 fn bytes_are(left: Bytes, right: String) -> Bool {
     return left == right.to_bytes()
 }
 
 // The example inputs are fixed, so any early failure produces a
 // distinctive negative checksum.
-pub fn std_process_example(io: io.Blocking) -> I64 {
+pub fn std_process_example(io: Blocking) -> I64 {
     var total: I64 = 0
 
-    // In-place builder, then capture through Command.output.
-    let program = match path.OsString.parse("/bin/echo") {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let program = match os_value("/bin/echo") {
+        Some(value) => value
+        None => return -1000000
     }
-    let message = match path.OsString.parse("alder") {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let message = match os_value("alder") {
+        Some(value) => value
+        None => return -1000000
     }
-    var command = process.Command.new(program)
+    var command = Command.new(program)
     command.argument(message)
-    let result = match process.Command.output(io, command) {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    command.stdout(Piped)
+    command.stderr(Piped)
+    let result = match Command.output(io, command) {
+        Ok(value) => value
+        Err(_) => return -1000000
     }
     if result.status.success() { total = total + 1 }
     if bytes_are(result.stdout, "alder\n") { total = total + 10 }
 
-    // Explicit environment override path, same fixed program.
-    var scripted = process.Command.new(program)
-    scripted.argument(message)
-    let key = match path.OsString.parse("ALDER_STD_PROCESS_EXAMPLE") {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let scripted = match os_value("/bin/echo") {
+        Some(value) => value
+        None => return -1000000
     }
-    let flag = match path.OsString.parse("1") {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let key = match os_value("ALDER_STD_PROCESS_EXAMPLE") {
+        Some(value) => value
+        None => return -1000000
     }
-    scripted.env(key, flag)
-    let second = match process.Command.output(io, scripted) {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let flag = match os_value("1") {
+        Some(value) => value
+        None => return -1000000
+    }
+    var second_command = Command.new(scripted)
+    second_command.argument(message)
+    second_command.env(key, flag)
+    second_command.stdout(Piped)
+    second_command.stderr(Piped)
+    let second = match Command.output(io, second_command) {
+        Ok(value) => value
+        Err(_) => return -1000000
     }
     if second.status.success() { total = total + 100 }
     if second.stderr.len() == 0 { total = total + 1 }
 
-    // An unsatisfiable program reports NotFound instead of panicking.
-    let missing = match path.OsString.parse("/alder/does/not/exist") {
-        Ok(value) => { value }
-        Err(_) => { return -1000000 }
+    let missing = match os_value("/alder/does/not/exist") {
+        Some(value) => value
+        None => return -1000000
     }
-    var gone = process.Command.new(missing)
-    match process.Command.status(io, gone) {
+    let gone = Command.new(missing)
+    match Command.status(io, gone) {
         Ok(_) => { total = total - 100000 }
         Err(_) => { total = total + 1000 }
     }
 
     return total
 }
+
 ```
 
 ## Dependencies and sequencing
@@ -333,14 +356,12 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
 - Builds on `std.io` (`Reader`/`Writer` for the pipe ends, the capability for
   descriptor operations), `std.path` (`OsString`), and `std.env`
   (`PlatformInfo`).
-- Needs the generic implementation parameter list (D024 extension, decided)
-  for the trait and `Cleanup` impls over `Child(I)` and the pipe ends; the
-  syntax lands with the constraint-syntax thread before the `std.io` commit.
-- Needs the C-binding thread's binding blocks and checked raw-integer
-  conversions for the POSIX process calls (`posix_spawn` or `fork`/`exec`
-  inside the runtime host layer, `waitpid`, `kill`, `pipe`) and their errno
-  mapping; spawn plumbing may need small runtime additions, which this
-  module owns.
+- Depends on the generic `Cleanup` implementations over `Child(I)` and the
+  pipe ends, and on `Option.take` for moving a pipe end out of a child.
+- Process host calls live in the `std.io` capability (`spawn`, `wait`,
+  `kill`, `poll` backed by `sysroot/std/c/process_shim.h`): fork/exec,
+  descriptor arrays, pipes, waitpid status decoding, signalling, and the
+  two-descriptor poll. No shell is involved.
 - Cancellation-aware termination (a canceled parent task terminating its
   child) arrives with Milestone 9; v1 documents cleanup kill-and-reap so the
   M9 change is internal.

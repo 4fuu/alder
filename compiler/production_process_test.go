@@ -7,9 +7,9 @@ import (
 )
 
 // std.process value layer: the command description, stream modes, exit status,
-// output value, and process error category are pure values. Spawning and
-// child handles stay out until the std.io slice 2 capability and host handles
-// exist.
+// output value, and process error category are pure values. The spawning,
+// child-handle, pipe, and capture behavior lives in
+// production_process_v1_test.go.
 func sysrootProcessValueMain() map[string]string {
 	return map[string]string{
 		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",

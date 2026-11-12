@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **in progress (C-interop complete; hosted foundation partially landed; std.fs/std.process finishing)**
+Status: **in progress (C-interop complete; hosted foundation partially landed; std.process v1 landed)**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
@@ -1681,20 +1681,28 @@ of the cross-target probe. The snapshot example runs with checksum 1. Docs:
 Interpolation syntax remains specified but unimplemented and scheduled
 separately.
 
-Landed standard-library progress: `std.process` installs its value layer at
-`sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
-in-place builders, `ExitStatus` exit/signal decomposition, `Output`, and
-`ProcessError` with `Display`/`Error`. Builder methods mutate a mutable
-`Command` binding and return `Unit`; borrowed-place owner-domain provenance
-keeps their `Vec`/`OsString` field growth in the caller's domain. Qualified
-variant expressions such as `PipeMode.Piped` and
-`ProcessError.Platform(info)` are implemented and carry the snapshot surface
-without factory functions. Evidence:
-`compiler/production_process_test.go` runs the value layer through the
-installed sysroot, and `compiler/production_qualified_variant_test.go` pins
-the cross-module construction forms. Spawning, `Child`, pipes, and capture
-wait for `std.io` slice 2. Docs:
-[`std.process` snapshot](docs/api/std.process-v1.md).
+Landed standard-library progress: `std.process` v1 is implemented at
+`sysroot/std/process.al`. `Command` stays a value-semantic, reusable
+description with in-place builders; `Command.spawn`/`status`/`output` start
+children through the `std.io` capability. `Child(I)` is affine, owns the
+`HostChild` bridge, exposes `id`, `take_stdin`/`take_stdout`/`take_stderr`
+through `Option.take`, and reaps through `wait` or kill-and-reap cleanup.
+`ChildStdin` is a `Writer`; `ChildStdout`/`ChildStderr` are `Reader`s, each
+closing its pipe end once. `output` closes an unused stdin pipe, drains stdout
+and stderr with the two-descriptor poll, then waits; `status` requires inherited
+wiring, and `output` requires both captures piped, reporting
+`InvalidConfiguration` otherwise. The host operations `spawn`, `wait`, `kill`,
+and `poll` are on `std.io.Io` with `HostChild`, `ChildStatus`, and `PollPair`;
+`sysroot/std/c/process_shim.h` holds the argv/environment blobs, PATH
+resolution, fork/exec, pipes, waitpid decoding, signalling, and poll. The
+documented call form is `Command.output(io, command)`; the command is passed
+by value until generic associated receiver-call inference lands. Evidence:
+`compiler/production_process_test.go` runs capture, bidirectional pipes,
+kill/wait, environment/working-directory delivery, invalid wiring, and
+`NotFound` through the installed sysroot and sanitizers; the snapshot example
+runs from `docs/api/examples/std.process-v1.al`. Docs:
+[`std.process` snapshot](docs/api/std.process-v1.md) and the
+[`std.io` snapshot](docs/api/std.io-v1.md) additive section.
 
 Landed standard-library progress: `std.fs` installs its value layer at
 `sysroot/std/fs.al`: `Options.read`/`Options.write` and the portable public

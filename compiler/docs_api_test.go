@@ -225,6 +225,21 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.process-v1.al": {
+			style:   "project",
+			srcName: "std_process_example.al",
+			mainText: `module hello.main
+
+import std.io { Blocking }
+import hello.std_process_example { std_process_example }
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    if std_process_example(cap) == 1112 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 
