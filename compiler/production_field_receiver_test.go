@@ -115,11 +115,6 @@ var m75FieldReceiverRejections = []struct {
 	name, source, want string
 }{
 	{
-		"mut-self-field-push",
-		"type Inner {\n    items: Vec(U64)\n}\ntype Outer {\n    inner: Inner\n}\nimpl Outer {\n    fn push_inner(mut self, x: U64) -> Unit {\n        self.inner.items.push(x)\n        return\n    }\n}\nfn main() -> I32 { return 0 }\n",
-		"functional builder convention",
-	},
-	{
 		"immutable-root-push",
 		"type Bag {\n    items: Vec(U64)\n}\nfn main() -> I32 {\n    let b = Bag(items: Vec.new(U64))\n    b.items.push(1)\n    return 0\n}\n",
 		"cannot assign to immutable binding \"b\"",

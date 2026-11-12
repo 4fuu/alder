@@ -4,88 +4,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// M8 borrowed-field storage restriction. A `mut self` receiver or a `mut`
-// parameter borrows the caller's storage, but a Vec/String/Bytes/collection
-// header stored through a field is allocated in the current call's domain.
-// Diagnostic 333 rejects that shape until per-mut-parameter provenance lands.
-// Literals, empty collections, None, and aggregates of those stay accepted.
+// Borrowed-place provenance: growth and relocatable replacement through a
+// `mut self` receiver or `mut` parameter allocate in the domain that owns the
+// caller's place. These shapes were rejected by the interim diagnostic 333;
+// every one now compiles and runs clean under ASan/UBSan.
 
-func borrowedStorageSafeProgram() map[string]string {
-	return map[string]string{
-		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"safe\"\nversion = \"0.1.0\"\n[targets.safe]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
-		"src/main.al": `module safe.main
-
-type Inner {
-    items: Vec(U8)
-}
-
-type Bag {
-    inner: Inner
-    label: String
-    count: U64
-    opt: Option(Vec(U8))
-}
-
-impl Bag {
-    fn new() -> Bag {
-        return Bag(inner: Inner(items: Vec.new(U8)), label: "empty", count: 0, opt: None)
-    }
-
-    fn reset(mut self) -> Unit {
-        self.inner = Inner(items: Vec.new(U8))
-        self.label = "ready"
-        self.count = 0
-        self.opt = None
-        return ()
-    }
-
-    fn set_some(mut self) -> Unit {
-        self.opt = Some(Vec.new(U8))
-        return ()
-    }
-
-    fn scalar(mut self) -> Unit {
-        self.count = self.count + 1
-        return ()
-    }
-
-    fn add(self, byte: U8) -> Bag {
-        var items = self.inner.items
-        items.push(byte)
-        var opt = self.opt
-        return Bag(inner: Inner(items: items), label: self.label, count: self.count, opt: opt)
-    }
-
-    fn first(self) -> U8 {
-        if self.inner.items.len() == 0 { return 0 }
-        return self.inner.items[0]
-    }
-}
-
-fn main() -> I32 {
-    var b = Bag.new()
-    b.reset()
-    if b.label.len() != 5 { return 1 }
-    if b.inner.items.len() != 0 { return 2 }
-    b.set_some()
-    b.scalar()
-    if b.count != 1 { return 3 }
-    b = b.add(66)
-    if b.inner.items.len() != 1 { return 4 }
-    if b.first() != 66 { return 5 }
-    return 0
-}
-`,
-	}
-}
-
-const borrowedStoragePushSource = `module reject.main
-
-type Buf {
+const borrowedStoragePushSource = `type Buf {
     data: Vec(U8)
 }
 
@@ -100,13 +27,13 @@ impl Buf {
 fn main() -> I32 {
     var b = Buf.new()
     b.add(65)
+    if b.data.len() != 1 { return 1 }
+    if b.data[0] != 65 { return 2 }
     return 0
 }
 `
 
-const borrowedStorageAssignLocalSource = `module reject.main
-
-type Bag {
+const borrowedStorageAssignLocalSource = `type Bag {
     data: Vec(U8)
 }
 
@@ -123,13 +50,13 @@ impl Bag {
 fn main() -> I32 {
     var b = Bag.new()
     b.replace()
+    if b.data.len() != 1 { return 1 }
+    if b.data[0] != 1 { return 2 }
     return 0
 }
 `
 
-const borrowedStorageMapInsertSource = `module reject.main
-
-type Registry {
+const borrowedStorageMapInsertSource = `type Registry {
     counts: Map(U64, U64)
 }
 
@@ -144,13 +71,12 @@ impl Registry {
 fn main() -> I32 {
     var r = Registry.new()
     r.add()
+    if r.counts.len() != 1 { return 1 }
     return 0
 }
 `
 
-const borrowedStorageSetInsertSource = `module reject.main
-
-type Registry {
+const borrowedStorageSetInsertSource = `type Registry {
     names: Set(U64)
 }
 
@@ -165,13 +91,12 @@ impl Registry {
 fn main() -> I32 {
     var r = Registry.new()
     r.add()
+    if r.names.len() != 1 { return 1 }
     return 0
 }
 `
 
-const borrowedStorageFieldCopySource = `module reject.main
-
-type Bag {
+const borrowedStorageFieldCopySource = `type Bag {
     data: Vec(U8)
     other: Vec(U8)
 }
@@ -180,6 +105,7 @@ impl Bag {
     fn new() -> Bag { return Bag(data: Vec.new(U8), other: Vec.new(U8)) }
     fn copy_other(mut self) -> Unit {
         self.data = self.other
+        self.data.push(9)
         return ()
     }
 }
@@ -187,14 +113,100 @@ impl Bag {
 fn main() -> I32 {
     var b = Bag.new()
     b.copy_other()
+    if b.data.len() != 1 { return 1 }
+    if b.other.len() != 0 { return 2 }
+    return 0
+}
+`
+
+// A borrowed owner follows a `mut` parameter through delegation: the inner
+// call receives the outer call's owner domain, not the forwarding frame.
+const borrowedStorageDelegateSource = `type Buf {
+    data: Vec(U8)
+}
+
+impl Cleanup for Buf {
+    fn cleanup(take self) -> Unit { return () }
+}
+
+fn append(mut buf: Buf, byte: U8) -> Unit {
+    buf.data.push(byte)
+    return ()
+}
+
+fn forward(mut buf: Buf, byte: U8) -> Unit {
+    append(buf, byte)
+    return ()
+}
+
+fn main() -> I32 {
+    using b = Buf(data: Vec.from_array(U8, [1]))
+    forward(b, 65)
+    if b.data.len() != 2 { return 1 }
+    if b.data[1] != 65 { return 2 }
+    return 0
+}
+`
+
+// A local receives vectors from a branch, then grows the joined value. The
+// local owns its frame domain, so the growth is retained there and the later
+// store into the borrowed field copies into the caller's domain.
+const borrowedStorageJoinSource = `type Bag {
+    data: Vec(U8)
+}
+
+impl Bag {
+    fn new() -> Bag { return Bag(data: Vec.new(U8)) }
+    fn choose(mut self, left: Bool, a: Vec(U8), b: Vec(U8)) -> Unit {
+        var next = Vec.new(U8)
+        if left { next = a } else { next = b }
+        next.push(7)
+        self.data = next
+        return ()
+    }
+}
+
+fn main() -> I32 {
+    var bag = Bag.new()
+    var a = Vec.new(U8)
+    a.push(1)
+    var b = Vec.new(U8)
+    b.push(2)
+    bag.choose(true, a, b)
+    if bag.data.len() != 2 { return 1 }
+    if bag.data[0] != 1 { return 2 }
+    if bag.data[1] != 7 { return 3 }
+    return 0
+}
+`
+
+// A `take` parameter owns its value in the callee frame. Growing it there and
+// returning it goes through the ordinary caller-result copy.
+const borrowedStorageTakeSource = `type Holder {
+    data: Vec(U8)
+}
+
+impl Cleanup for Holder {
+    fn cleanup(take self) -> Unit { return () }
+}
+
+fn grow(take holder: Holder) -> Holder {
+    holder.data.push(7)
+    return holder
+}
+
+fn main() -> I32 {
+    let holder = Holder(data: Vec.from_array(U8, [1]))
+    using grown = grow(holder)
+    if grown.data.len() != 2 { return 1 }
+    if grown.data[0] != 1 { return 2 }
+    if grown.data[1] != 7 { return 3 }
     return 0
 }
 `
 
 func TestM8BorrowedFieldStorageQualification(t *testing.T) {
-	if os.Getenv("UPDATE_GOLDEN") == "" {
-		t.Parallel()
-	}
+	t.Parallel()
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -204,22 +216,7 @@ func TestM8BorrowedFieldStorageQualification(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, exe, _ := getSharedProductionBuild(t, cc, root)
-	env := sysrootEnv(filepath.Join(root, "sysroot"))
-
-	dir := t.TempDir()
-	run := runProductionCompilerEnv(t, exe, dir, env, borrowedStorageSafeProgram(), "run")
-	if run != (productionResult{}) {
-		t.Fatalf("safe borrowed-field behavior run failed: %+v", run)
-	}
-
-	generated := filepath.Join(dir, "build", "x86_64-unknown-linux-gnu", "debug", "safe", "safe.c")
-	source, err := os.ReadFile(generated)
-	if err != nil {
-		t.Fatalf("read generated safe program: %v", err)
-	}
-	runSanitizedGeneratedProgram(t, cc, root, string(source))
-
-	rejections := []struct {
+	programs := []struct {
 		name, source string
 	}{
 		{"mut-self-push", borrowedStoragePushSource},
@@ -227,22 +224,22 @@ func TestM8BorrowedFieldStorageQualification(t *testing.T) {
 		{"map-insert-field", borrowedStorageMapInsertSource},
 		{"set-insert-field", borrowedStorageSetInsertSource},
 		{"field-read-assignment", borrowedStorageFieldCopySource},
+		{"branch-join-local", borrowedStorageJoinSource},
+		{"take-parameter-return", borrowedStorageTakeSource},
+		{"delegated-mut-parameter", borrowedStorageDelegateSource},
 	}
-	for _, rejection := range rejections {
-		rejection := rejection
-		t.Run(rejection.name, func(t *testing.T) {
+	for _, program := range programs {
+		program := program
+		t.Run(program.name, func(t *testing.T) {
 			t.Parallel()
-			result := runProductionCompiler(t, exe, map[string]string{"reject.al": rejection.source}, "check", "reject.al")
-			if result.status != 1 || result.stdout != "" {
-				t.Fatalf("%s: result: %+v", rejection.name, result)
+			result := runProductionCompiler(t, exe, map[string]string{"accept.al": program.source}, "compile", "--emit=c", "accept.al")
+			if result.status != 0 || result.stderr != "" {
+				t.Fatalf("%s: result: %+v", program.name, result)
 			}
-			if !strings.Contains(result.stderr, "[SEM0001]") || !strings.Contains(result.stderr, "functional builder convention") {
-				t.Fatalf("%s: diagnostic does not name the borrowed-field rule: %q", rejection.name, result.stderr)
-			}
+			runSanitizedGeneratedProgram(t, cc, root, result.stdout)
 		})
 	}
 }
-
 func runSanitizedProject(t *testing.T, cc, root, dir, target string) {
 	t.Helper()
 	generated := filepath.Join(dir, "build", "x86_64-unknown-linux-gnu", "debug", target, target+".c")

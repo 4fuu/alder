@@ -25,10 +25,10 @@ bb0:
   return %x
 }
 
-fn @indirect(%f: function(fn(safe_mut(u64), domain_handle) -> u64)) -> u64 {
+fn @indirect(%f: function(fn(safe_mut(u64), domain_handle) -> u64), %borrowed: safe_mut(u64), %owner: domain_handle) -> u64 {
 bb0:
-  %zero = const.get @zero
-  return %zero
+  %r = call.value %f(%borrowed, %owner)
+  return %r
 }
 `
 	if errs := Module(mustParse(t, valid)); len(errs) != 0 {

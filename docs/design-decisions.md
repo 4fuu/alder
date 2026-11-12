@@ -68,15 +68,14 @@ the private bootstrap-storage and full value/view-surface migration.
 
 ### D005B — Borrowed-place owner-domain provenance
 
-Status: **M8 implementation — MIR representation and verifier installed;
-lowering-side owner tracking in progress**
+Status: **M8 implementation — MIR representation, verifier, and lowering installed**
 
 Extends D005A. A `mut` parameter and a `mut self` receiver borrow the caller's
 place, so the callee must use the domain that owns that place for growth and
 relocatable storage replacement. MIR functions carry a hidden owner
 `domain_handle` parameter immediately after each `safe_mut` parameter; direct
 and indirect calls pass the owner alongside the argument, and delegation
-forwards the same value. The lowering contract keeps a local-owner map so a field path,
+forwards the same value. The lowering keeps a local-owner map so a field path,
 `using` owner, table view, or caller-result value resolves to its owning
 domain. `Vec` still carries no domain (D005A), there is no source lifetime
 syntax (D003), and failure to prove placement retains storage in a safe outer

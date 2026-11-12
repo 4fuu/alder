@@ -249,50 +249,27 @@ owns the value, and the callee writes through a reference to it. MIR carries a
 hidden owner `domain_handle` parameter after each `safe_mut` parameter. Direct
 and delegated calls pass that domain with the borrowed argument, so growth and
 relocatable storage replacement allocate in the domain that owns the caller's
-place. The MIR representation and verifier pairing are installed; lowering will
-record the owner of each local under this contract. A `take` parameter owns a
-frame-local value and grows in the callee frame, and a returned value is still
-copied to caller-result storage; a by-value parameter's storage stays in the
-caller's active domain until the callee copies it, and growth uses the domain
-of the value actually stored. A `using` owner, table view, or caller-result
-value carries its own owning domain. If control-flow paths assign different
-owners to one local, lowering copies the value with `copy_to_domain` into the
-nearest dominating domain (the frame domain, or caller-result storage when it
-may be returned), records that domain, and reports the copy site; it never
-rejects the join. There is no
-source lifetime annotation, `Vec` still carries no domain, and no ARC/GC is
-introduced. C export signatures and callback trampolines never carry a
-`safe_mut` or owner parameter because the C ABI has no `mut`.
+place. The MIR representation, verifier pairing, and lowering-side owner map are
+installed. A `mut` parameter or `mut self` receiver resolves to the owner
+domain passed with the borrow; a `take` parameter owns its value in the callee
+frame; a by-value parameter's storage stays in the caller's active domain until
+the callee copies it; and an ordinary local uses the frame domain. A read from a
+borrowed field is an ordinary value copy in the frame domain, so a local never
+carries a caller domain across a control-flow join. The frame domain is the
+nearest domain that dominates both paths; when a value may escape, the normal
+return copy materializes it in caller-result storage.
 
-The interim restriction below remains until the lowering and verifier
-implementation of this owner-domain contract lands.
+Growth (`Vec.push`, `Map`/`Set` insert) through a borrowed field uses the owner
+domain passed with the receiver, and replacing a relocatable field
+(`self.data = value`) materializes the value in that owner domain before the
+store. Diagnostic 333 and its functional-builder workaround are retired. The
+ASan regressions cover `mut self` push, field replacement from a local, map and
+set insert, field-to-field replacement, and a branch-local join; the indirect
+call regression covers a function value whose target borrows a parameter.
 
-### Borrowed-field storage replacement (interim M8 restriction)
-
-The lowering does not yet use the owner parameter for growth and replacement.
-A callee that grows a `Vec`, assigns a `String`/`Bytes`/collection header, or
-rebuilds a `Map`/`Set` through a field of such a receiver would therefore
-allocate in the callee's function domain while the caller keeps a header into
-it; the callee returns, its domain is destroyed, and the caller reads freed
-storage.
-
-Until the lowering uses the owner domain for every growth and replacement,
-diagnostic 333 rejects
-mutating collection operations and relocatable-storage assignments through a
-field rooted in a `mut self` receiver or a `mut` parameter. The rule accepts the
-shapes whose storage is static or empty today: string literals, `Vec.new`,
-`Map.new`, `Set.new`, `None`, and record/array/variant constructions whose
-relocatable children are themselves one of those. A local, a parameter, a field
-read, a call result, or a mutable receiver is rejected because each retains the
-current call's storage. The supported workaround is the functional-builder
-convention: build a new value from a local copy and return it, then rebind the
-caller, for example `value = value.with_item(x)`.
-
-The real fix threads an owning domain token with every `mut` argument and
-receiver through delegation, uses that domain at growth and replacement sites,
-and adds verifier invariants that prove the stored header outlives the call.
-The design is tracked in [Roadmap](../ROADMAP.md) deferred work; the diagnostic
-is removed when the provenance contract and its tests land.
+There is no source lifetime annotation, `Vec` still carries no domain, and no
+ARC/GC is introduced. C export signatures and callback trampolines never carry
+a `safe_mut` or owner parameter because the C ABI has no `mut`.
 
 ## Generational identity with `Table(T)`
 

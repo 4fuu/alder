@@ -282,22 +282,22 @@ Delegation forwards the same owner value, so a field path of a borrowed
 receiver keeps the domain that owns the root place.
 
 The owner domain is the domain that owns the place's relocatable storage.
-The contract requires lowering to record it per local while the function is
-built: `take` parameters own a frame-local value and grow in the callee
-function domain, while a by-value parameter's storage remains in the caller's
-active domain until the callee materializes a copy; growth uses the domain of
-the value actually stored. A returned value still goes through caller-result
-copying, and a caller-result local uses the caller-result domain for a later
-growth. At a control-flow join whose incoming local owners differ, lowering
-materializes the value with `copy_to_domain` into the nearest dominating domain
-(the frame domain, or caller-result storage when the value may be returned),
-records that domain as the local's owner, and exposes the copy site through the
-D023 report. It never adds a rejection for this case.
+Lowering records it per checked local: a `mut` parameter or `mut self` receiver
+uses the hidden owner value; a `take` parameter owns a frame-local value and
+grows in the callee function domain; a by-value parameter's storage remains in
+the caller's active domain until the callee materializes a copy; and an ordinary
+local uses the frame domain. Growth uses the owner of the value actually
+stored, and replacing a relocatable field through a borrowed place copies the
+value into that place's owner with `copy_to_domain` before the store. A returned
+value still goes through caller-result copying, and a caller-result local uses
+the caller-result domain for a later growth.
 
-The MIR representation, parameter pairing, indirect function-type pairing, and
-C export rejection are installed and verified. Lowering-side local owner
-tracking and the join copy remain to be implemented; until then diagnostic 333
-keeps the unsafe field-replacement shapes out of source.
+A local always keeps one owner for its function, so a structured join never
+mixes runtime owners: the frame domain is the nearest domain that dominates
+both paths, and a value that may escape is copied to caller-result storage at
+the return. The D023 report records the value copies that materialize a local
+from a borrowed field. Diagnostic 333 and the functional-builder workaround are
+retired.
 
 A C export signature never carries a `safe_mut` parameter or an owner domain;
 the verifier rejects a `c_export` function with a borrowed parameter. Callback

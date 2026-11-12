@@ -4156,6 +4156,32 @@ fn resolve_c_pointer_type(d: Domain, state: State, parse: ParseStore, store: Che
     return Ok(CheckGood(appended))
 }
 
+// A function type may borrow parameters: `fn(mut T, U) -> R`. The parser
+// skips the `mut` keyword, and this scan recovers the borrowed positions from
+// the source tokens before the checked type is interned. Nested function types
+// are skipped by parenthesis depth, so only the outer parameter list counts.
+fn function_type_mut_mask(state: State, parse: ParseStore, node: SyntaxRec) -> U64 {
+    var mask: U64 = 0
+    var bit: U64 = 1
+    var depth: U64 = 0
+    var at = node.token
+    var scanning = true
+    while scanning && at >= 1 && at <= __s0_buffer_len(TokenRec, state.tokens) {
+        let token = parse_token(state, ParseCursor(token: at, store: parse))
+        if token.kind == 0 { scanning = false } else {
+            if token.kind == 5 {
+                if token_text(state, token, "(") { depth = depth + 1 }
+                if token_text(state, token, ")") {
+                    if depth == 0 { scanning = false } else { depth = depth - 1 }
+                }
+                if depth == 0 && token_text(state, token, ",") { bit = bit * 2 }
+            } else { if depth == 0 && token.kind == 1 && token.keyword == 23 { mask = mask + bit } }
+        }
+        at = at + 1
+    }
+    return mask
+}
+
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     let boundary = declaration_boundary(store, owner)
@@ -4194,12 +4220,13 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
             chain_at = chain_at - 1
         }
         args = try __s0_buffer_append(U64, d, args, unit.checked_type)
-        let existing = canonical_type_for_children(current, 25, 0, args)
+        let mut_mask = function_type_mut_mask(state, parse, node)
+        let existing = canonical_type_for_children(current, 25, mut_mask, args)
         if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, current, owner, node_id, existing))) }
         let start = __s0_buffer_len(U64, current.type_args) + 1
         let recorded = try append_substituted_children(d, current, args, 0)
         let count = __s0_buffer_len(U64, args)
-        let appended = try append_checked_type(d, recorded, owner, 25, node_id, 0, start, count)
+        let appended = try append_checked_type(d, recorded, owner, 25, node_id, mut_mask, start, count)
         return Ok(CheckGood(appended))
     }
     if node.kind == 5 {
@@ -7027,20 +7054,33 @@ fn checked_function_value_type(d: Domain, store: CheckStore, owner: U64, target:
     current = unit_made.store
     let param_total = use_count(current, target, 5)
     var args = try __s0_buffer_new(U64, d)
+    var mut_mask: U64 = 0
+    var mut_bit: U64 = 1
     var ordinal: U64 = 0
     while ordinal < param_total {
         let use_id = use_by_ordinal(current, target, 5, ordinal)
-        args = try __s0_buffer_append(U64, d, args, __s0_buffer_get(DeclTypeUseRec, current.uses, use_id - 1).checked_type)
+        let use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_id - 1)
+        args = try __s0_buffer_append(U64, d, args, use.checked_type)
+        // A function value of a function with a `mut` parameter records that
+        // parameter's mode in the function type's bitmask, so an indirect
+        // call can borrow the argument and pass its owner domain.
+        var local_at: U64 = 0
+        while local_at < __s0_buffer_len(LocalRec, current.locals) {
+            let local = __s0_buffer_get(LocalRec, current.locals, local_at)
+            if local.owner == target && local.kind == 1 && local.syntax == use.node && local.mutable == 1 { mut_mask = mut_mask + mut_bit }
+            local_at = local_at + 1
+        }
+        mut_bit = mut_bit * 2
         ordinal = ordinal + 1
     }
     let result_id = use_by_ordinal(current, target, 6, 0)
     args = try __s0_buffer_append(U64, d, args, __s0_buffer_get(DeclTypeUseRec, current.uses, result_id - 1).checked_type)
     args = try __s0_buffer_append(U64, d, args, unit_made.checked_type)
-    let existing = canonical_type_for_children(current, 25, 0, args)
+    let existing = canonical_type_for_children(current, 25, mut_mask, args)
     if existing != 0 { return Ok(TypeValueRec(store: current, checked_type: existing)) }
     let start = __s0_buffer_len(U64, current.type_args) + 1
     let recorded = try append_substituted_children(d, current, args, 0)
-    let next = try append_checked_type(d, recorded, owner, 25, 0, 0, start, __s0_buffer_len(U64, args))
+    let next = try append_checked_type(d, recorded, owner, 25, 0, mut_mask, start, __s0_buffer_len(U64, args))
     return Ok(TypeValueRec(store: next, checked_type: __s0_buffer_len(CheckedTypeRec, next.types)))
 }
 
@@ -7049,6 +7089,17 @@ fn checked_function_value_type(d: Domain, store: CheckStore, owner: U64, target:
 // parameters and the call produces the result type. Arguments walk
 // recursively: their checked stores are storage-carrying call results that
 // must not cross a loop backedge.
+// True when the function type's borrowed-parameter bitmask marks `ordinal`.
+fn function_param_borrowed(mask: U64, ordinal: U64) -> Bool {
+    var bit: U64 = 1
+    var at: U64 = 0
+    while at < ordinal {
+        bit = bit * 2
+        at = at + 1
+    }
+    return (mask / bit) % 2 == 1
+}
+
 fn check_indirect_call_args(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, fn_checked: CheckedTypeRec, callee_expression: U64, ordinal: U64, prior_first: U64, prior_second: U64, result: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let want_total = fn_checked.arg_count - 2
     if ordinal == want_total {
@@ -7059,7 +7110,7 @@ fn check_indirect_call_args(d: Domain, state: State, parse: ParseStore, base: Ch
     let argument = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
     let want = __s0_buffer_get(U64, store.type_args, fn_checked.first_arg - 1 + ordinal)
     let checked = try check_value_expression_inner(d, state, parse, base, store, owner, argument, link.node, want, 42, argument, 0, 0, in_loop)
-    let current = match checked {
+    var current = match checked {
         ExprGood(value) => value.store
         ExprBad(value) => value
     }
@@ -7072,6 +7123,20 @@ fn check_indirect_call_args(d: Domain, state: State, parse: ParseStore, base: Ch
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return expr_deferred(base) }
+    // A borrowed function-type parameter takes a mutable place exactly like
+    // a direct call's `mut` parameter; lowering borrows that place and passes
+    // the owner domain after it.
+    if function_param_borrowed(fn_checked.target, ordinal) {
+        let mode = try check_mut_argument_place(d, state, parse, current, owner, argument, draft.expression, 92)
+        current = match mode {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match mode {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(ExprBad(current)) }
+    }
     var first = prior_first
     var second = prior_second
     if ordinal == 0 { first = draft.expression } else { second = draft.expression }
@@ -8026,7 +8091,6 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if affine_elements && (builtin == 22 || builtin == 23 || builtin == 24 || builtin == 25) { return expr_token_fail(d, state, base, 141, callee) }
     var gate_store = store
     var receiver_place: U64 = 0
-    var receiver_borrowed = false
     if builtin == 21 || builtin == 24 {
         if receiver_node.kind == 24 {
             let local_id = local_lookup(store, owner, receiver_node, state)
@@ -8057,7 +8121,6 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             let placed_value = place_value(placed, store)
             gate_store = placed_value.store
             receiver_place = placed_value.place
-            receiver_borrowed = placed_value.borrowed
         } else {
             // A field or element receiver is the place the grown header is
             // written back through. A vector of affine elements keeps its
@@ -8068,13 +8131,8 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             let placed_value = place_value(placed, store)
             gate_store = placed_value.store
             receiver_place = placed_value.place
-            receiver_borrowed = placed_value.borrowed
         }
     }
-    // A push through a `mut self` field or a `mut` parameter field grows the
-    // vector in this call's domain and leaves the caller's header dangling.
-    // The functional-builder convention keeps the vector in the caller.
-    if builtin == 21 && receiver_borrowed { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 21 { mode = 2 }
     if builtin == 23 { mode = 3 }
@@ -8942,7 +9000,6 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 144, call) }
     var gate_store = store
     var receiver_place: U64 = 0
-    var receiver_borrowed = false
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 {
         if receiver_node.kind == 24 {
             let local_id = local_lookup(store, owner, receiver_node, state)
@@ -8955,11 +9012,7 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
         let placed_value = place_value(placed, store)
         gate_store = placed_value.store
         receiver_place = placed_value.place
-        receiver_borrowed = placed_value.borrowed
     }
-    // Insert and remove rebuild the collection header through the receiver
-    // place, so the same borrowed-field rule as Vec.push applies.
-    if (builtin == 31 || builtin == 33 || builtin == 38 || builtin == 40) && receiver_borrowed { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
     var access_root: U64 = 0
@@ -11179,38 +11232,6 @@ fn checked_type_owns_storage(d: Domain, store: CheckStore, checked_type: U64, de
     return Ok(false)
 }
 
-// A value stored through a borrowed place may keep storage only when its
-// pointer is static or empty: a literal, an empty Vec/Map/Set, None, or an
-// aggregate whose relocatable children have the same property. A local, a
-// parameter (by-value parameters are materialized in this call's domain), a
-// field read, a call result, and a mutable receiver all retain this call's
-// storage.
-fn borrowed_store_value_safe(d: Domain, store: CheckStore, expression: U64, depth: U64) -> Result(Bool, __s0_Error) {
-    if expression == 0 || expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
-    if depth > 16 { return Ok(false) }
-    let rec = __s0_buffer_get(CheckedExprRec, store.expressions, expression - 1)
-    if rec.kind == 4 || rec.kind == 14 { return Ok(true) }
-    if rec.kind == 18 {
-        if rec.annotation == 0 || rec.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(false) }
-        let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, rec.annotation - 1)
-        return Ok(annotation.builtin == 18 || annotation.builtin == 30 || annotation.builtin == 37)
-    }
-    if rec.kind == 9 || rec.kind == 23 || rec.kind == 10 || rec.kind == 15 || rec.kind == 16 || rec.kind == 17 {
-        var at: U64 = 0
-        while at < rec.child_count {
-            let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, rec.first_child - 1 + at).expression
-            if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
-            let child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
-            if try checked_type_owns_storage(d, store, child.checked_type, depth + 1) {
-                if !(try borrowed_store_value_safe(d, store, child_id, depth + 1)) { return Ok(false) }
-            }
-            at = at + 1
-        }
-        return Ok(true)
-    }
-    return Ok(false)
-}
-
 fn place_bad(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(PlaceOutcome, __s0_Error) {
     let failed = try check_fail(d, store, kind, node, 0, 0, 0)
     let bad = match failed {
@@ -11576,12 +11597,6 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return body_token_fail(d, state, ostore, 87, rhs) }
-    // Replacing relocatable storage through a borrowed field must not install
-    // a header into this call's domain. Literals, empty collections, None, and
-    // aggregates of those stay allowed.
-    if place.place != 0 && place.borrowed && (try checked_type_owns_storage(d, ostore, place.checked_type, 0)) {
-        if !(try borrowed_store_value_safe(d, ostore, draft.expression, 0)) { return body_token_fail(d, state, ostore, 333, rhs) }
-    }
     if __s0_buffer_get(CheckedTypeRec, ostore.types, place.checked_type - 1).kind == 18 { return body_token_fail(d, state, ostore, 104, statement) }
     // A view of frame-local storage assigned inside a loop body would put a
     // header into a slot that survives the backedge, where the next iteration

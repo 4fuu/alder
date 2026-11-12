@@ -393,11 +393,11 @@ both are rejected outside a loop, in a closure body, and in a table-view match
 arm. A `using` registration inside a loop body is rejected, so neither jump can
 cross a cleanup scope. Assignment targets are restricted to the implemented
 identifier/field/index shapes. Growing or replacing relocatable storage
-through a field of a `mut self` receiver or a `mut` parameter is rejected with
-diagnostic 333 until per-mut-parameter owner-domain provenance lands; literals,
-empty collections, `None`, and aggregates of those remain accepted, and the
-functional-builder rebinding pattern is the supported workaround. Every
-non-`Unit` function path returns explicitly.
+through a field of a `mut self` receiver or a `mut` parameter allocates in the
+domain that owns the borrowed place. A local uses the function's frame domain;
+a value read from a borrowed field is an ordinary value copy in that domain,
+and a value stored back into a borrowed field is materialized in the field's
+owner domain first. Every non-`Unit` function path returns explicitly.
 
 Implemented expressions include:
 

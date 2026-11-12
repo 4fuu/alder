@@ -930,6 +930,61 @@ fn lower_storage_domain_value(state: LowerState, store: CheckStore, owner: U64, 
     return lower_domain_value(state, store, owner)
 }
 
+// The local owner map travels in `values` under a key space above every
+// expression, domain, and closure key. An entry stores 0 for the frame domain,
+// 1 for the caller-result domain, and a fixed owner-domain value plus two.
+// Locals without an entry use the frame domain.
+fn lower_local_owner_key(binding: U64) -> U64 { return binding + 4200000000 }
+
+fn lower_local_owner_lookup(state: LowerState, binding: U64) -> U64 {
+    if binding == 0 { return 0 }
+    return lower_keyed_domain_value(state, lower_local_owner_key(binding))
+}
+
+fn lower_with_local_owner(d: Domain, state: LowerState, binding: U64, encoded: U64) -> Result(LowerState, __s0_Error) {
+    let owners = try __s0_buffer_append(LowerValueMapRec, d, state.values, LowerValueMapRec(expression: lower_local_owner_key(binding), value: encoded))
+    return Ok(lower_with_values(state, owners))
+}
+
+fn lower_binding_owner_domain(state: LowerState, store: CheckStore, owner: U64, binding: U64) -> U64 {
+    let encoded = lower_local_owner_lookup(state, binding)
+    if encoded == 0 { return lower_domain_value(state, store, owner) }
+    if encoded == 1 { return lower_result_domain_value(state, store, owner) }
+    return encoded - 2
+}
+
+fn lower_place_owner_domain(state: LowerState, store: CheckStore, owner: U64, place: U64) -> U64 {
+    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return 0 }
+    let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
+    return lower_binding_owner_domain(state, store, owner, checked.root)
+}
+
+// The explicit owner of a borrowed place, or zero when the place is rooted in
+// an ordinary local or `take` parameter that already owns its frame storage.
+fn lower_borrowed_place_owner_domain(state: LowerState, store: CheckStore, place: U64) -> U64 {
+    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return 0 }
+    let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
+    let encoded = lower_local_owner_lookup(state, checked.root)
+    if encoded >= 2 { return encoded - 2 }
+    return 0
+}
+
+// The checked root binding of a name, field, or index expression, or zero
+// when the expression does not read a place.
+fn lower_checked_expression_root(store: CheckStore, expression: U64) -> U64 {
+    var current = expression
+    var depth: U64 = 0
+    while depth < 32 && current != 0 && current <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let item = __s0_buffer_get(CheckedExprRec, store.expressions, current - 1)
+        if item.kind == 1 || item.kind == 5 { return item.parameter_use }
+        if item.kind == 21 && item.child_count == 1 { current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        } else { if item.kind == 19 && item.child_count == 2 { current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression
+        } else { return 0 } }
+        depth = depth + 1
+    }
+    return 0
+}
+
 // A binding spelling byte range to a string: explicit "..." spellings live
 // in state.values (source zero), name spellings in a source file.
 fn lower_binding_word(d: Domain, source_state: State, from_values: Bool, source: U64, start: U64, end: U64) -> Result(__s0_String, __s0_Error) {
@@ -1381,22 +1436,41 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         if checked.arg_count < 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let param_total = checked.arg_count - 2
         var next = state
-        var parts = try __s0_buffer_new(U64, d)
+        var params_only = try __s0_buffer_new(U64, d)
+        var domain_type: U64 = 0
+        var mut_bit: U64 = 1
         var ordinal: U64 = 0
-        while ordinal < param_total + 1 {
+        while ordinal < param_total {
             let part = try lower_type(d, source_state, store, next, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal))
             if !part.state.valid { return Ok(part) }
             next = part.state
-            parts = try __s0_buffer_append(U64, d, parts, part.id)
+            if (checked.target / mut_bit) % 2 == 1 {
+                // A borrowed function-type parameter carries its owner domain
+                // immediately after the safe_mut parameter, exactly like a
+                // function definition and a direct call.
+                let empty = try __s0_buffer_new(U64, d)
+                let reference = try mir_intern_type(d, next.mir, mir_type_kind_safe_mut(), part.id, 0, 0, empty, 0)
+                next = lower_with_mir(next, reference.store)
+                params_only = try __s0_buffer_append(U64, d, params_only, reference.type_id)
+                if next.has_storage {
+                    if domain_type == 0 {
+                        let domain = try lower_domain_mir_type(d, next)
+                        if !domain.state.valid { return Ok(domain) }
+                        next = domain.state
+                        domain_type = domain.id
+                    }
+                    params_only = try __s0_buffer_append(U64, d, params_only, domain_type)
+                }
+            } else {
+                params_only = try __s0_buffer_append(U64, d, params_only, part.id)
+            }
+            mut_bit = mut_bit * 2
             ordinal = ordinal + 1
         }
-        let result_type = __s0_buffer_get(U64, parts, param_total)
-        var params_only = try __s0_buffer_new(U64, d)
-        var param_at: U64 = 0
-        while param_at < param_total {
-            params_only = try __s0_buffer_append(U64, d, params_only, __s0_buffer_get(U64, parts, param_at))
-            param_at = param_at + 1
-        }
+        let result = try lower_type(d, source_state, store, next, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + param_total))
+        if !result.state.valid { return Ok(result) }
+        next = result.state
+        let result_type = result.id
         let env_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + param_total + 1)
         let env_rec = __s0_buffer_get(CheckedTypeRec, store.types, env_checked - 1)
         var env_type: U64 = 0
@@ -3723,7 +3797,8 @@ fn lower_m75_append(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
     let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
     current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
-    let domain = lower_storage_domain_value(current, store, owner, expression_id)
+    var domain = lower_place_owner_domain(current, store, owner, place)
+    if domain == 0 { domain = lower_storage_domain_value(current, store, owner, expression_id) }
     if domain == 0 { return Ok(lower_invalid(current)) }
     let grown = try lower_add_typed_result(d, current, function, capacity_join.id, vector_type)
     let grown_instr = try lower_add_instr_three(d, grown.state, function, capacity_join.id, mir_op_vec_grow_checked(), grown.id, 0, receiver_value, domain, capacity_value.id, panic_block)
@@ -3788,24 +3863,60 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         return Ok(LowerStep(state: made.state, id: result.id))
     }
     if annotation.builtin == 44 {
-        // Indirect call: call.value through the callee's function value.
+        // Indirect call: call.value through the callee's function value. The
+        // checked function type marks borrowed parameters; each one lowers
+        // as a safe_mut borrow plus its owner-domain operand, the same pair a
+        // direct call passes.
+        let fn_checked_id = callee_checked_type(store, expression)
+        if fn_checked_id == 0 || fn_checked_id > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let fn_checked = __s0_buffer_get(CheckedTypeRec, store.types, fn_checked_id - 1)
+        if fn_checked.kind != 25 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let callee_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
         let callee = try lower_expression(d, source_state, spans, store, state, owner, function, block, callee_id, environment, panic_block)
         var current = callee.state
         var active = lower_open_block(current.mir, function, block)
-        var first_arg: U64 = 0
-        var second_arg: U64 = 0
+        var args = try __s0_buffer_new(U64, d)
+        var owners = try __s0_buffer_new(U64, d)
+        var param_bit: U64 = 1
         var ordinal: U64 = 1
         while ordinal < expression.child_count {
             let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
-            let child = try lower_expression(d, source_state, spans, store, current, owner, function, active, child_id, environment, panic_block)
-            current = child.state
+            if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            let checked_child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+            var arg_value: U64 = 0
+            var arg_owner: U64 = 0
+            if (fn_checked.target / param_bit) % 2 == 1 {
+                let placed = try lower_argument_place(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block, 2)
+                if !placed.state.valid { return Ok(LowerStep(state: placed.state, id: 0)) }
+                current = placed.state
+                active = lower_open_block(current.mir, function, active)
+                let ordinary = try lower_type(d, source_state, store, current, checked_child.checked_type)
+                if !ordinary.state.valid { return Ok(LowerStep(state: ordinary.state, id: 0)) }
+                current = ordinary.state
+                let empty = try __s0_buffer_new(U64, d)
+                let reference = try mir_intern_type(d, current.mir, mir_type_kind_safe_mut(), ordinary.id, 0, 0, empty, 0)
+                current = lower_with_mir(current, reference.store)
+                let value = try mir_add_value(d, current.mir, function, try lower_result_name(d, current.mir, function, ""), reference.type_id, mir_value_def_instruction(), active, lower_instruction_ordinal(current.mir, function, active) + 1)
+                current = lower_with_mir(current, value.store)
+                let borrowed = try lower_add_instr(d, current, function, active, mir_op_borrow_mut(), value.id, placed.place, 0, 0, 0, 0, "")
+                current = borrowed.state
+                arg_value = value.id
+                if current.has_storage {
+                    arg_owner = lower_binding_owner_domain(current, store, owner, placed.root)
+                    if arg_owner == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                }
+            } else {
+                let child = try lower_expression(d, source_state, spans, store, current, owner, function, active, child_id, environment, panic_block)
+                current = child.state
+                arg_value = child.id
+            }
             active = lower_open_block(current.mir, function, active)
-            if ordinal == 1 { first_arg = child.id }
-            if ordinal == 2 { second_arg = child.id }
+            args = try __s0_buffer_append(U64, d, args, arg_value)
+            owners = try __s0_buffer_append(U64, d, owners, arg_owner)
+            param_bit = param_bit * 2
             ordinal = ordinal + 1
         }
-        let fn_type = try lower_type(d, source_state, store, current, callee_checked_type(store, expression))
+        let fn_type = try lower_type(d, source_state, store, current, fn_checked_id)
         current = fn_type.state
         let result_type = try lower_type(d, source_state, store, current, expression.checked_type)
         current = result_type.state
@@ -3818,11 +3929,16 @@ fn lower_m75_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         }
         let call = try lower_add_instr(d, current2, function, active, mir_op_call_value(), result, 0, 0, callee.id, 0, 0, "")
         var wired = call.state
+        var argument_ordinal: U64 = 0
         ordinal = 0
-        while ordinal < expression.child_count - 1 {
-            var arg_value: U64 = first_arg
-            if ordinal == 1 { arg_value = second_arg }
-            wired = try lower_add_instr_operand(d, wired, call.id, ordinal, arg_value, mir_operand_instruction(), "")
+        while ordinal < __s0_buffer_len(U64, args) {
+            wired = try lower_add_instr_operand(d, wired, call.id, argument_ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+            argument_ordinal = argument_ordinal + 1
+            let owner_arg = __s0_buffer_get(U64, owners, ordinal)
+            if owner_arg != 0 {
+                wired = try lower_add_instr_operand(d, wired, call.id, argument_ordinal, owner_arg, mir_operand_instruction(), "")
+                argument_ordinal = argument_ordinal + 1
+            }
             ordinal = ordinal + 1
         }
         return Ok(LowerStep(state: wired, id: result))
@@ -4290,7 +4406,8 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
         let doubled = try lower_add_typed_result(d, two.state, function, doubled_block.id, mir_type_u64())
         let multiplied = try lower_add_instr(d, doubled.state, function, doubled_block.id, mir_op_int_mul_checked(), doubled.id, 0, 0, capacity.id, two.id, panic_block, "")
         current = try lower_jump_value(d, multiplied.state, function, doubled_block.id, capacity_join.id, doubled.id)
-        let domain = lower_storage_domain_value(current, store, owner, expression_id)
+        var domain = lower_place_owner_domain(current, store, owner, annotation.place)
+        if domain == 0 { domain = lower_storage_domain_value(current, store, owner, expression_id) }
         if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
         let grown = try lower_add_typed_result(d, current, function, capacity_join.id, vector.id)
         let grown_instr = try lower_add_instr_three(d, grown.state, function, capacity_join.id, mir_op_vec_grow_checked(), grown.id, 0, receiver.id, domain, capacity_value.id, panic_block)
@@ -4850,6 +4967,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     }
                 }
             }
+            var arg_owner: U64 = 0
             var callback_argument = LowerCCallbackRec(matched: false, state: current, id: 0)
             if annotation.kind == 7 && child_id != 0 { callback_argument = try lower_c_callback_argument(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
             var addr_argument = LowerCAddrRec(matched: false, state: current, id: 0)
@@ -4878,6 +4996,10 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let borrowed_place = try lower_argument_place(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block, borrow_kind)
                 if !borrowed_place.state.valid { return Ok(LowerStep(state: borrowed_place.state, id: 0)) }
                 let borrow_state = borrowed_place.state
+                if borrow_kind == 2 && current.has_storage {
+                    arg_owner = lower_binding_owner_domain(borrow_state, store, owner, borrowed_place.root)
+                    if arg_owner == 0 { return Ok(LowerStep(state: lower_invalid(borrow_state), id: 0)) }
+                }
                 let ordinary = try lower_type(d, source_state, store, borrow_state, checked_child.checked_type)
                 let empty = try __s0_buffer_new(U64, d)
                 var reference_kind = mir_type_kind_safe_ref()
@@ -4892,11 +5014,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 child = LowerStep(state: borrowed.state, id: value.id)
             } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } } } }
             current = child.state
-            var arg_owner: U64 = 0
-            if borrow_kind == 2 && current.has_storage {
-                arg_owner = lower_domain_value(current, store, owner)
-                if arg_owner == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
-            }
+            if borrow_kind == 2 && current.has_storage && arg_owner == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
             args = try __s0_buffer_append(U64, d, args, child.id)
             owners = try __s0_buffer_append(U64, d, owners, arg_owner)
             ordinal = ordinal + 1
@@ -5629,7 +5747,28 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let place = try lower_checked_place(d, source_state, spans, store, current, owner, function, active, statement.place, 0, statement.environment, panic_here)
         let value = try lower_expression(d, source_state, spans, store, place.state, owner, function, active, statement.expression, statement.environment, panic_here)
         active = lower_open_block(value.state.mir, function, active)
-        let instr = try lower_add_instr(d, value.state, function, active, mir_op_store(), 0, place.id, 0, value.id, 0, 0, "")
+        current = value.state
+        var stored_value = value.id
+        // Replacing storage through a borrowed place materializes the value
+        // in the domain that owns the place. A value already read from the
+        // same place needs no second copy.
+        let target_owner = lower_borrowed_place_owner_domain(value.state, store, statement.place)
+        if target_owner != 0 {
+            let rhs_root = lower_checked_expression_root(store, statement.expression)
+            let place_root = __s0_buffer_get(CheckedPlaceRec, store.control.places, statement.place - 1).root
+            if rhs_root == 0 || rhs_root != place_root {
+                let rhs_expression = __s0_buffer_get(CheckedExprRec, store.expressions, statement.expression - 1)
+                let typ = try lower_type(d, source_state, store, value.state, rhs_expression.checked_type)
+                if typ.state.valid && typ.state.has_storage && (try lower_mir_type_copy_relocatable(d, typ.state.mir, typ.id)) {
+                    let result = try lower_add_typed_result(d, typ.state, function, active, typ.id)
+                    let copied = try lower_add_instr(d, result.state, function, active, mir_op_copy_to_domain(), result.id, 0, 0, target_owner, value.id, 0, "")
+                    stored_value = result.id
+                    active = lower_open_block(copied.state.mir, function, active)
+                    current = copied.state
+                }
+            }
+        }
+        let instr = try lower_add_instr(d, current, function, active, mir_op_store(), 0, place.id, 0, stored_value, 0, 0, "")
         return Ok(LowerFlowStep(state: instr.state, block: active, terminated: false))
     }
     if statement.kind == 11 {
@@ -6147,14 +6286,18 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             let parameter = try mir_add_function_param(d, parameter_type.state.mir, function, param_ordinal, name, parameter_type.id)
             current = lower_with_mir(current, parameter.store)
             // Every borrowed runtime parameter carries the domain that owns
-            // the caller's place. The placeholder owner value is supplied by
-            // the call site; lowering uses it for growth and replacement once
-            // the local-owner map lands.
+            // the caller's place. A by-value parameter's storage lives in the
+            // caller's active domain, so both kinds are recorded in the local
+            // owner map; a `take` parameter owns its value in this frame and
+            // keeps the default frame owner.
+            var owner_encoded: U64 = 0
+            if local.mutable == 0 { owner_encoded = 1 }
             if local.mutable == 1 && current.has_storage {
                 let owner_name = try lower_decimal_name(d, "__owner_", checked_params_seen)
                 let domain_type = try lower_domain_mir_type(d, current)
                 let owner_parameter = try mir_add_function_param(d, domain_type.state.mir, function, param_ordinal + 1, owner_name, domain_type.id)
                 current = lower_with_mir(domain_type.state, owner_parameter.store)
+                owner_encoded = owner_parameter.id + 2
                 param_ordinal = param_ordinal + 1
             }
             if local.mutable == 2 {
@@ -6184,6 +6327,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.id))
                 current = lower_with_values(current, domains)
             }
+            current = try lower_with_local_owner(d, current, binding, owner_encoded)
             param_ordinal = param_ordinal + 1
             checked_params_seen = checked_params_seen + 1
         } else {
@@ -7974,7 +8118,9 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14 || item.kind == 16) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
-        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16 || item.kind == 17 || item.kind == 18 || item.kind == 19 || item.kind == 20 || item.kind == 21 || item.kind == 22 || item.kind == 23 || item.kind == 24 || item.kind == 25) && item.target != 0 { return false }
+        // A function type stores its borrowed-parameter positions in `target`;
+        // every other parameterized kind keeps target zero.
+        if ((item.kind >= 8 && item.kind <= 14) || item.kind == 16 || item.kind == 17 || item.kind == 18 || item.kind == 19 || item.kind == 20 || item.kind == 21 || item.kind == 22 || item.kind == 23 || item.kind == 24) && item.target != 0 { return false }
         if item.arg_count == 0 && item.first_arg != 0 { return false }
         if item.arg_count != 0 {
             if item.first_arg == 0 || item.first_arg - 1 + item.arg_count > __s0_buffer_len(U64, store.type_args) { return false }

@@ -1594,11 +1594,11 @@ own bootstrap `main` still uses the untouched I32 path.
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
 functional builders, `ExitStatus` exit/signal decomposition, `Output`, and
-`ProcessError` with `Display`/`Error`. Storage-backed builders return a new
-`Command` and callers rebind it, matching `std.text.StringBuilder`; in-place
-`Vec`/`OsString` field assignment is not safely expressible with the current
-storage plan; the required owner-domain provenance for borrowed receivers
-remains deferred. Qualified variant expressions such as `PipeMode.Piped` and
+`ProcessError` with `Display`/`Error`. Storage-backed builders currently return
+a new `Command` and callers rebind it; borrowed-place owner-domain provenance
+now makes in-place `Vec`/`OsString` field assignment safe, and restoring the
+snapshot's in-place builder form is a follow-up API change. Qualified variant
+expressions such as `PipeMode.Piped` and
 `ProcessError.Platform(info)` are implemented and carry the snapshot surface
 without factory functions. Evidence:
 `compiler/production_process_fs_test.go` runs the value layer through the
@@ -2046,18 +2046,18 @@ The following items are not part of the current implementation scope:
   bytes into preallocated field storage and are independent of this view
   restriction. A field-rooted mutable view needs a Vec-view MIR operation over
   `safe_mut` storage.
-- borrowed-field storage replacement: growing or replacing relocatable storage
-  through a field of a `mut self` receiver or `mut` parameter is rejected by
-  diagnostic 333 until the owner-domain lowering uses the caller's domain.
-  The MIR representation and verifier are installed under D005B: a
-  `domain_handle` owner parameter follows every `safe_mut` parameter, function
-  types/calls pair it, export signatures reject borrowed parameters, and C
-  export wrappers guard against one. The remaining work is the lowering-side
-  local-owner map, owner use at growth and replacement, `copy_to_domain` at
-  control-flow joins (nearest dominating domain, never a rejection), restored
-  in-place `std.process` builders, and an unbounded `ByteSink`. The regression
-  set is the ASan field-receiver repro, `write_all` into `ByteSink` read back
-  in `main`, `m75-field-receiver.al`, and in-place `Command` builders. Docs:
+- borrowed-place owner-domain provenance: D005B is installed. A
+  `domain_handle` owner parameter follows every `safe_mut` parameter in the
+  storage model, direct and indirect calls pair it, function types carry the
+  borrowed-parameter mask, exit C exports reject borrowed parameters, and
+  lowering uses the owner for `Vec`/`Map`/`Set` growth and relocatable field
+  replacement. The local-owner map uses the frame domain for ordinary locals,
+  caller-result storage for by-value parameters, and the callee frame for
+  `take`; ASan regressions cover the former diagnostic 333 shapes, a
+  branch-local join, and an indirect `mut` call. Diagnostic 333 and the
+  functional-builder workaround are retired. Remaining follow-up: restore the
+  snapshot's in-place `std.process` builders and an unbounded `ByteSink` once
+  the corresponding API slices land. Docs:
   [Memory and Resources](docs/memory-and-resources.md) and D005B.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or
