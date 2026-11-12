@@ -636,6 +636,22 @@ fn main(n: I64, s: [U8]) -> I64 {
 	}
 }
 
+func TestBraceEscapeDecodesToLiteralBraces(t *testing.T) {
+	m := compileStr(t, `fn main() -> I32 {
+    let text: String = "\{left\} and \{right\}"
+    return 0
+}`)
+	found := false
+	for _, constant := range m.Constants {
+		if constant.Value.Kind == mir.ConstString && constant.Value.String == "{left} and {right}" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("escaped brace string constant not found in %+v", m.Constants)
+	}
+}
+
 // TestSmokeString exercises distinct String and Bytes value flow.
 func TestSmokeString(t *testing.T) {
 	src := `

@@ -372,6 +372,10 @@ func (l *lexer) lexString(line, col int) (token, error) {
 				b.WriteByte('"')
 			case '0':
 				b.WriteByte(0)
+			case '{':
+				b.WriteByte('{')
+			case '}':
+				b.WriteByte('}')
 			default:
 				return token{}, l.errf(line, col, "invalid escape \\%s", string(c2))
 			}

@@ -211,13 +211,15 @@ fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __
                                     if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
                                     let escape = text_byte(state, source, pos)
                                     var decoded: U8 = 0
-                                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48 || escape == 120
+                                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48 || escape == 120 || escape == 123 || escape == 125
                                     if escape == 110 { decoded = 10 }
                                     if escape == 116 { decoded = 9 }
                                     if escape == 114 { decoded = 13 }
                                     if escape == 92 { decoded = 92 }
                                     if escape == 34 { decoded = 34 }
                                     if escape == 48 { decoded = 0 }
+                                    if escape == 123 { decoded = 123 }
+                                    if escape == 125 { decoded = 125 }
                                     if !valid { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
                                     if escape == 120 {
                                         if pos + 2 >= length || !hex_digit(text_byte(state, source, pos + 1)) || !hex_digit(text_byte(state, source, pos + 2)) { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }

@@ -244,6 +244,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 		{path: "b-keywords.al", text: []byte(strings.Join(keywordRaw, " ") + "\r\n// trailing trivia\n"), tokens: keywords},
 		{path: "c-values.al", text: []byte("/* leading */ " + strings.Join(valueRaw, " ") + "\n"), tokens: valueTokens},
 		{path: "d-boundaries.al", text: []byte("- -> --1 .5 1..2 1.e2 /**/ // eof"), tokens: boundaryTokens},
+		{path: "e-escapes.al", text: []byte(`"\{left\} and \{right\}"`), tokens: []expectedLexerToken{{raw: `"\{left\} and \{right\}"`, semantic: []byte("{left} and {right}"), kind: 4}}},
 	}
 	files := make(map[string][]byte, len(fixtures))
 	var order []string
@@ -253,7 +254,7 @@ func TestAlderLexerConformanceEndToEnd(t *testing.T) {
 	}
 	want := expectedLexerManifest(t, fixtures)
 	first := runAlderLexer(t, exe, dir, files, order, false)
-	second := runAlderLexer(t, exe, dir, files, []string{"a-empty.al", "b-keywords.al", "c-values.al", "d-boundaries.al"}, false)
+	second := runAlderLexer(t, exe, dir, files, []string{"a-empty.al", "b-keywords.al", "c-values.al", "d-boundaries.al", "e-escapes.al"}, false)
 	if first != want || second != want || first != second {
 		t.Fatalf("valid token manifest mismatch\nwant:\n%s\ngot:\n%s", want, first)
 	}
