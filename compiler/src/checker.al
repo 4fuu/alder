@@ -368,6 +368,7 @@ type BodyEventBuildRec {
 type PlaceValueRec {
     store: CheckStore
     place: U64
+    borrowed: Bool
     checked_type: U64
 }
 
@@ -7898,6 +7899,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if affine_elements && (builtin == 22 || builtin == 23 || builtin == 24 || builtin == 25) { return expr_token_fail(d, state, base, 141, callee) }
     var gate_store = store
     var receiver_place: U64 = 0
+    var receiver_borrowed = false
     if builtin == 21 || builtin == 24 {
         if receiver_node.kind == 24 {
             let local_id = local_lookup(store, owner, receiver_node, state)
@@ -7921,13 +7923,14 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             // through. An affine-element vector is already checked as an
             // owning binding, so it records the plain local place.
             var placed: PlaceOutcome = PlaceDefer
-            if owning { placed = try append_place(d, store, owner, checked_expression_syntax(store, receiver_expression), 1, 0, local_id, 0, 0, local.checked_type) } else {
+            if owning { placed = try append_place(d, store, owner, checked_expression_syntax(store, receiver_expression), 1, 0, local_id, 0, 0, local.checked_type, local.kind == 1 && local.mutable == 1) } else {
                 placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
             }
             if place_failed(placed) { return place_expr_failure(placed, store, base) }
             let placed_value = place_value(placed, store)
             gate_store = placed_value.store
             receiver_place = placed_value.place
+            receiver_borrowed = placed_value.borrowed
         } else {
             // A field or element receiver is the place the grown header is
             // written back through. A vector of affine elements keeps its
@@ -7938,12 +7941,13 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             let placed_value = place_value(placed, store)
             gate_store = placed_value.store
             receiver_place = placed_value.place
+            receiver_borrowed = placed_value.borrowed
         }
     }
     // A push through a `mut self` field or a `mut` parameter field grows the
     // vector in this call's domain and leaves the caller's header dangling.
     // The functional-builder convention keeps the vector in the caller.
-    if builtin == 21 && borrowed_place_root(gate_store, receiver_place) { return expr_token_fail(d, state, base, 333, callee) }
+    if builtin == 21 && receiver_borrowed { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 21 { mode = 2 }
     if builtin == 23 { mode = 3 }
@@ -8811,6 +8815,7 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
     if call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 144, call) }
     var gate_store = store
     var receiver_place: U64 = 0
+    var receiver_borrowed = false
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 {
         if receiver_node.kind == 24 {
             let local_id = local_lookup(store, owner, receiver_node, state)
@@ -8823,10 +8828,11 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
         let placed_value = place_value(placed, store)
         gate_store = placed_value.store
         receiver_place = placed_value.place
+        receiver_borrowed = placed_value.borrowed
     }
     // Insert and remove rebuild the collection header through the receiver
     // place, so the same borrowed-field rule as Vec.push applies.
-    if (builtin == 31 || builtin == 33 || builtin == 38 || builtin == 40) && borrowed_place_root(gate_store, receiver_place) { return expr_token_fail(d, state, base, 333, callee) }
+    if (builtin == 31 || builtin == 33 || builtin == 38 || builtin == 40) && receiver_borrowed { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
     var access_root: U64 = 0
@@ -10760,19 +10766,6 @@ fn concrete_field_type(d: Domain, store: CheckStore, aggregate: U64, field: U64)
     return substitute_type(d, store, bindings, __s0_buffer_get(DeclTypeUseRec, store.uses, field - 1).checked_type)
 }
 
-// A place rooted in a `mut` parameter or a `mut self` receiver borrows the
-// caller's storage. Growing or replacing relocatable storage through that
-// place allocates in this call's storage domain, and the caller keeps a header
-// into storage that dies at return. The provenance design in M8 will let the
-// target domain travel with the borrow; until then these shapes are rejected.
-fn borrowed_place_root(store: CheckStore, place: U64) -> Bool {
-    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
-    let rec = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
-    if rec.root == 0 || rec.root > __s0_buffer_len(LocalRec, store.locals) { return false }
-    let local = __s0_buffer_get(LocalRec, store.locals, rec.root - 1)
-    return local.kind == 1 && local.mutable == 1
-}
-
 // Relocatable storage is the value type whose header points at storage that
 // another domain owns: String, Bytes, Vec, Map, Set, the bootstrap buffer and
 // string bridges, and aggregates, arrays, Option, or Result containing one.
@@ -10856,10 +10849,10 @@ fn place_token_bad(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     return Ok(PlaceBad(bad))
 }
 
-fn append_place(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, base: U64, root: U64, field: U64, index: U64, checked_type: U64) -> Result(PlaceOutcome, __s0_Error) {
+fn append_place(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, base: U64, root: U64, field: U64, index: U64, checked_type: U64, borrowed: Bool) -> Result(PlaceOutcome, __s0_Error) {
     let places = try __s0_buffer_append(CheckedPlaceRec, d, store.control.places, CheckedPlaceRec(owner: owner, syntax: syntax, kind: kind, base: base, root: root, field: field, index: index, checked_type: checked_type))
     let control = CheckedControlStore(blocks: store.control.blocks, statement_links: store.control.statement_links, statements: store.control.statements, places: places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups, table_views: store.control.table_views)
-    return Ok(PlaceGood(PlaceValueRec(store: with_control(store, control), place: __s0_buffer_len(CheckedPlaceRec, places), checked_type: checked_type)))
+    return Ok(PlaceGood(PlaceValueRec(store: with_control(store, control), place: __s0_buffer_len(CheckedPlaceRec, places), borrowed: borrowed, checked_type: checked_type)))
 }
 
 fn place_store(outcome: PlaceOutcome, store: CheckStore) -> CheckStore {
@@ -10874,8 +10867,8 @@ fn place_store(outcome: PlaceOutcome, store: CheckStore) -> CheckStore {
 fn place_value(outcome: PlaceOutcome, store: CheckStore) -> PlaceValueRec {
     let current = match outcome {
         PlaceGood(value) => value
-        PlaceBad(value) => PlaceValueRec(store: store, place: 0, checked_type: 0)
-        PlaceDefer => PlaceValueRec(store: store, place: 0, checked_type: 0)
+        PlaceBad(value) => PlaceValueRec(store: store, place: 0, borrowed: false, checked_type: 0)
+        PlaceDefer => PlaceValueRec(store: store, place: 0, borrowed: false, checked_type: 0)
     }
     return current
 }
@@ -10983,7 +10976,7 @@ fn check_place_level(d: Domain, state: State, parse: ParseStore, store: CheckSto
             // store through an immutable root.
             if projection != 3 && local.mutable == 0 { return place_bad(d, store, 28, node) }
         }
-        return append_place(d, store, owner, node_id, 1, 0, local_id, 0, 0, local.checked_type)
+        return append_place(d, store, owner, node_id, 1, 0, local_id, 0, 0, local.checked_type, local.kind == 1 && local.mutable == 1)
     }
     if node.kind != 29 && node.kind != 30 { return Ok(PlaceDefer) }
     let head = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
@@ -11011,7 +11004,7 @@ fn check_place_level(d: Domain, state: State, parse: ParseStore, store: CheckSto
         let field = field_use_named(state, base_store, aggregate.target, node)
         if field == 0 { return place_bad(d, base_store, 61, node) }
         let concrete = try concrete_field_type(d, base_store, aggregate_type, field)
-        return append_place(d, concrete.store, owner, node_id, 2, base_value.place, base_place.root, field, 0, concrete.checked_type)
+        return append_place(d, concrete.store, owner, node_id, 2, base_value.place, base_place.root, field, 0, concrete.checked_type, base_value.borrowed)
     }
     // Indexing is the one reference-style mutation permitted through an
     // immutable slice binding; every other immutable root refuses the store.
@@ -11042,7 +11035,7 @@ fn check_place_level(d: Domain, state: State, parse: ParseStore, store: CheckSto
         if base_checked.kind == 8 || base_checked.kind == 18 { return place_token_bad(d, state, base_store, 103, statement) }
         return place_bad(d, base_store, 28, place_root_node(parse, node))
     }
-    return append_place(d, current, owner, node_id, 3, base_value.place, base_place.root, 0, index_draft.expression, element_type)
+    return append_place(d, current, owner, node_id, 3, base_value.place, base_place.root, 0, index_draft.expression, element_type, base_value.borrowed)
 }
 
 // Place components are checked before the assignment value, and the whole
@@ -11185,8 +11178,8 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
     } { return body_token_fail(d, state, store, 87, target) }
     let place = match checked_place {
         PlaceGood(value) => value
-        PlaceBad(value) => PlaceValueRec(store: value, place: 0, checked_type: 0)
-        PlaceDefer => PlaceValueRec(store: store, place: 0, checked_type: 0)
+        PlaceBad(value) => PlaceValueRec(store: value, place: 0, borrowed: false, checked_type: 0)
+        PlaceDefer => PlaceValueRec(store: store, place: 0, borrowed: false, checked_type: 0)
     }
     let rhs = __s0_buffer_get(SyntaxRec, parse.nodes, head.node - 1)
     let outcome = try check_value_expression(d, state, parse, place.store, owner, rhs, head.node, place.checked_type, 24, statement, 2, statement_id, in_loop)
@@ -11206,7 +11199,7 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
     // Replacing relocatable storage through a borrowed field must not install
     // a header into this call's domain. Literals, empty collections, None, and
     // aggregates of those stay allowed.
-    if place.place != 0 && borrowed_place_root(ostore, place.place) && (try checked_type_owns_storage(d, ostore, place.checked_type, 0)) {
+    if place.place != 0 && place.borrowed && (try checked_type_owns_storage(d, ostore, place.checked_type, 0)) {
         if !(try borrowed_store_value_safe(d, ostore, draft.expression, 0)) { return body_token_fail(d, state, ostore, 333, rhs) }
     }
     if __s0_buffer_get(CheckedTypeRec, ostore.types, place.checked_type - 1).kind == 18 { return body_token_fail(d, state, ostore, 104, statement) }
