@@ -33,12 +33,13 @@ impl MutSlice(T) {
 }
 ```
 
-A mutable view must be formed from a binding (`let`/`var` local or a `mut`
-parameter). A field or element receiver is loaded as a value copy, so its
-view would write into that copy; `slice_mut` and `subview` on such a receiver
-are rejected. Copy the field into a `var` local, take the view there, and
-store the local back when the writes are done. Immutable views may still be
-formed from any place because they only read the bytes.
+A mutable view is formed from a place: a `let`/`var` local, a `mut`
+parameter, or a field or element path of one. A field or element receiver is
+read as its collection header, and writes through the view land in the place's
+existing storage, not in a copy. A mutable view is not formed from a call
+result or another temporary, and it cannot escape the function or block that
+owns the viewed storage. Immutable views may also be formed from any field or
+element place because they only read.
 
 `[U8].to_bytes` copies the view's bytes into a fresh `Bytes` value, so the
 result never aliases the view's owner; every other element type has no such

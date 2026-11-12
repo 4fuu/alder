@@ -3316,6 +3316,20 @@ fn lower_direct_expression(d: Domain, source_state: State, spans: __s0_Buffer(Ch
     return lower_expression(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block)
 }
 
+// A mutable view of a field or element place reads the collection header from
+// that place instead of copying the enclosing value. Lowering the receiver as
+// an ordinary expression would spill and copy the whole record, and a Vec
+// copy would clone its storage, so the view would write into a detached copy.
+fn lower_place_view_receiver(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, place_id: U64, checked_type: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    let placed = try lower_receiver_place(d, source_state, spans, store, state, owner, function, block, place_id, environment, panic_block)
+    if !placed.state.valid || placed.id == 0 { return Ok(LowerStep(state: lower_invalid(placed.state), id: 0)) }
+    let lowered = try lower_type(d, source_state, store, placed.state, checked_type)
+    if !lowered.state.valid { return Ok(LowerStep(state: lower_invalid(lowered.state), id: 0)) }
+    let loaded = try lower_add_typed_result(d, lowered.state, function, block, lowered.id)
+    let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, placed.id, 0, 0, 0, 0, "")
+    return Ok(LowerStep(state: load.state, id: loaded.id))
+}
+
 // Model shapes for the ordered-collection builtins: statics take no runtime
 // children, methods take the receiver plus their runtime operands, and the
 // result types must match the receiver's key/value element types.
@@ -4354,6 +4368,8 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     var receiver = LowerStep(state: state, id: 0)
     if receiver_checked.kind == 15 {
         receiver = try lower_array_view(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block, annotation.builtin == 24)
+    } else if annotation.builtin == 24 && (receiver_expression.kind == 21 || receiver_expression.kind == 19) && annotation.place != 0 {
+        receiver = try lower_place_view_receiver(d, source_state, spans, store, state, owner, function, active, annotation.place, receiver_expression.checked_type, environment, panic_block)
     } else {
         receiver = try lower_direct_expression(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block)
     }

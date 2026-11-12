@@ -1882,16 +1882,57 @@ fn mir_v6_places_same(store: MirStore, indexes: MirVIndexes, a: U64, b: U64) -> 
     return true
 }
 
-// A borrow is a transparent link to the place it borrows: a local or field
-// chain reports the local that holds the storage, and a deref recursively
-// traces the reference value.
+// A borrow is a transparent link to the place it borrows: a local reports the
+// slot, a field follows its base place, and a deref recursively traces the
+// reference value. Following fields matters for a header loaded from
+// `self.buffer`, whose place is a field over a parameter deref.
 fn mir_v6_view_base_borrowed(store: MirStore, indexes: MirVIndexes, function: U64, place: U64, depth: U64) -> U64 {
     if depth > 16 || place == 0 || place > __s0_buffer_len(MirPlaceRec, store.places) { return 0 }
     let rec = __s0_buffer_get(MirPlaceRec, store.places, place - 1)
     if rec.kind == mir_place_deref() { return mir_v6_view_base(store, indexes, function, rec.deref_value, depth + 1) }
-    let root = __s0_buffer_get(U64, indexes.place_root, place - 1)
-    if root == 0 { return 0 }
-    return root + 2
+    if rec.kind == mir_place_field() { return mir_v6_view_base_borrowed(store, indexes, function, rec.base, depth + 1) }
+    if rec.kind != mir_place_local() { return 0 }
+    return rec.local + 2
+}
+
+// mir_v6_view_base_loaded_place resolves the storage behind a load. A local
+// slot either holds the collection header itself or is the one slot every
+// view store into it agrees on. A field or element place names storage this
+// frame reaches through a local or a reference; a view header stored in such a
+// field is opaque here, but a collection header loaded from it has that
+// place's base. Tracing the place keeps a view of `self.buffer` accepted
+// without treating an arbitrary field-resident view as stable.
+fn mir_v6_view_base_loaded_place(store: MirStore, indexes: MirVIndexes, function: U64, value_type: U64, place_id: U64, depth: U64) -> U64 {
+    if place_id == 0 || place_id > __s0_buffer_len(MirPlaceRec, store.places) { return 0 }
+    let place = __s0_buffer_get(MirPlaceRec, store.places, place_id - 1)
+    if place.kind != mir_place_local() {
+        if mir_v6_view_storage_type(store, value_type) { return 0 }
+        return mir_v6_view_base_borrowed(store, indexes, function, place_id, depth + 1)
+    }
+    if !mir_v6_view_storage_type(store, value_type) { return place.local + 2 }
+    var found: U64 = 0
+    var any = false
+    let slot_root = __s0_buffer_get(U64, indexes.place_root, place_id - 1)
+    let bcount = mir_vindex_block_count(indexes, function)
+    var b: U64 = 1
+    while b <= bcount {
+        let icount = mir_vindex_instr_count(indexes, function, b)
+        var ii: U64 = 0
+        while ii < icount {
+            let sid = mir_vindex_instr(indexes, function, b, ii)
+            let st = __s0_buffer_get(MirInstrRec, store.instructions, sid - 1)
+            if st.op == mir_op_store() && __s0_buffer_get(U64, indexes.place_root, st.place - 1) == slot_root && mir_v6_places_same(store, indexes, st.place, place_id) {
+                let base = mir_v6_view_base(store, indexes, function, st.a, depth + 1)
+                if base == 0 || (any && base != found) { return 0 }
+                found = base
+                any = true
+            }
+            ii = ii + 1
+        }
+        b = b + 1
+    }
+    if any { return found }
+    return 0
 }
 
 // mir_v6_view_base walks a view value back to the storage it views. The
@@ -1918,32 +1959,7 @@ fn mir_v6_view_base(store: MirStore, indexes: MirVIndexes, function: U64, value:
     if iid == 0 { return 0 }
     let x = __s0_buffer_get(MirInstrRec, store.instructions, iid - 1)
     if x.op == mir_op_load() {
-        let place = __s0_buffer_get(MirPlaceRec, store.places, x.place - 1)
-        if place.kind != mir_place_local() { return 0 }
-        if !mir_v6_view_storage_type(store, rec.value_type) { return place.local + 2 }
-        var found: U64 = 0
-        var any = false
-        let slot_root = __s0_buffer_get(U64, indexes.place_root, x.place - 1)
-        let bcount = mir_vindex_block_count(indexes, function)
-        var b: U64 = 1
-        while b <= bcount {
-            let icount = mir_vindex_instr_count(indexes, function, b)
-            var ii: U64 = 0
-            while ii < icount {
-                let sid = mir_vindex_instr(indexes, function, b, ii)
-                let st = __s0_buffer_get(MirInstrRec, store.instructions, sid - 1)
-                if st.op == mir_op_store() && __s0_buffer_get(U64, indexes.place_root, st.place - 1) == slot_root && mir_v6_places_same(store, indexes, st.place, x.place) {
-                    let base = mir_v6_view_base(store, indexes, function, st.a, depth + 1)
-                    if base == 0 || (any && base != found) { return 0 }
-                    found = base
-                    any = true
-                }
-                ii = ii + 1
-            }
-            b = b + 1
-        }
-        if any { return found }
-        return 0
+        return mir_v6_view_base_loaded_place(store, indexes, function, rec.value_type, x.place, depth)
     }
     if x.op == mir_op_vec_as_slice() || x.op == mir_op_vec_as_mut_slice() || x.op == mir_op_slice_range_checked() || x.op == mir_op_slice_index_checked() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }
     if x.op == mir_op_array_as_slice() { return mir_v6_view_base(store, indexes, function, x.a, depth + 1) }

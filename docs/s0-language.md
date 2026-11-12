@@ -417,11 +417,12 @@ Implemented expressions include:
   overflow, `some` with the wrapped result otherwise), `*_saturating` clamp
   at the type's boundary, and `*_wrapping` wrap on the two's-complement
   pattern;
-- mutable views are formed from bindings: `slice_mut` and `subview` reject a
-  field or element receiver because that receiver is loaded as a value copy,
-  so a write through its view would be lost; copy the field into a `var`
-  local, view the local, and store it back. Immutable views may be formed
-  from a field or element receiver, since they only read;
+- mutable views are formed from places: a local binding, a `mut` parameter,
+  or a field or element path of one. `slice_mut` and `subview` read a field
+  or element receiver as its collection header, and writes through the view
+  land in that place's existing storage. A view is still rejected from a call
+  result or another temporary, and it cannot escape its owning scope;
+  immutable views may be formed from any place, since they only read;
 - named builtin byte-sequence methods on `String` and `Bytes`: `len()` is
   the byte count, `byte(index) -> U8` rejects an index at or above the
   length through the panic path, `concat(other) -> Self` joins two sequences

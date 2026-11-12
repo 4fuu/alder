@@ -811,16 +811,7 @@ impl(Source: type(Reader)) BufReader(Source) {
 
     fn refill(mut self) -> Result(U64, IoError) {
         let size = self.buffer.len()
-        // A mutable view must be formed from a binding, so the source reads
-        // into a local copy. Copy the bytes back element by element; replacing
-        // the field header would install the callee's storage in the caller.
-        var scratch = self.buffer
-        let count = try self.source.read(scratch.slice_mut(0, size))
-        var at: U64 = 0
-        while at < count {
-            self.buffer[at] = scratch[at]
-            at = at + 1
-        }
+        let count = try self.source.read(self.buffer.slice_mut(0, size))
         self.position = 0
         self.length = count
         return Ok(count)
@@ -918,13 +909,15 @@ impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
         }
         let base = self.length
         let total = base + size
-        // The buffer is preallocated at `room` bytes. Copy into its existing
-        // storage; replacing the field header would install the callee's
-        // storage in the caller.
-        var at: U64 = 0
-        while at < size {
-            self.buffer[base + at] = data[at]
-            at = at + 1
+        // The view borrows the field storage directly. Scope it so the
+        // exclusive borrow ends before the length update below.
+        if true {
+            var view: MutSlice(U8) = self.buffer.slice_mut(0, total)
+            var at: U64 = 0
+            while at < size {
+                view[base + at] = data[at]
+                at = at + 1
+            }
         }
         self.length = total
         return Ok(size)

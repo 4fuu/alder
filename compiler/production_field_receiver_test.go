@@ -108,6 +108,84 @@ fn main() -> I32 {
 }
 `
 
+// m75FieldViewProgram forms mutable views from field and element places: a
+// field view passed directly as the final call argument, a field view bound in
+// a scoped local and written in a loop, and a view of a vector element. All
+// three write through the original storage, not a copy of the field header.
+const m75FieldViewProgram = `fn fill(value: U8, mut view: MutSlice(U8)) -> U64 {
+    var at: U64 = 0
+    while at < view.len() {
+        view[at] = value
+        at = at + 1
+    }
+    return at
+}
+type Inner {
+    items: Vec(U8)
+}
+type Outer {
+    inner: Inner
+    rows: Vec(Vec(U8))
+}
+impl Outer {
+    fn fill_direct(mut self, value: U8) -> U64 {
+        return fill(value, self.inner.items.slice_mut(0, 2))
+    }
+    fn fill_scoped(mut self, value: U8) -> U64 {
+        let size = self.inner.items.len()
+        if true {
+            var view: MutSlice(U8) = self.inner.items.slice_mut(0, size)
+            var at: U64 = 0
+            while at < size {
+                view[at] = value
+                at = at + 1
+            }
+        }
+        return self.inner.items.len()
+    }
+    fn fill_row(mut self, value: U8) -> U64 {
+        return fill(value, self.rows[0].slice_mut(0, 1))
+    }
+}
+fn main() -> I32 {
+    var row = Vec.new(U8)
+    row.push(0)
+    var rows = Vec.new(Vec(U8))
+    rows.push(row)
+    var outer = Outer(inner: Inner(items: Vec.from_array(U8, [0, 0])), rows: rows)
+    let direct = outer.fill_direct(7)
+    if direct != 2 { return 1 }
+    if outer.inner.items[0] != 7 { return 2 }
+    if outer.inner.items[1] != 7 { return 3 }
+    let scoped = outer.fill_scoped(9)
+    if scoped != 2 { return 4 }
+    if outer.inner.items[0] != 9 { return 5 }
+    if outer.inner.items[1] != 9 { return 6 }
+    let in_row = outer.fill_row(5)
+    if in_row != 1 { return 7 }
+    if outer.rows[0][0] != 5 { return 8 }
+    return 0
+}
+`
+
+func TestM8FieldPlaceMutableViewQualification(t *testing.T) {
+	t.Parallel()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	result := runProductionCompiler(t, exe, map[string]string{"accept.al": m75FieldViewProgram}, "compile", "--emit=c", "accept.al")
+	if result.status != 0 || result.stderr != "" {
+		t.Fatalf("field-place mutable view: result: %+v", result)
+	}
+	runSanitizedGeneratedProgram(t, cc, root, result.stdout)
+}
+
 // m75FieldReceiverRejections pins the rules a field receiver must keep: the
 // root binding has to be mutable, a live view of the same field still excludes
 // the mutation, and a table lookup is still only a match scrutinee.
@@ -140,14 +218,9 @@ var m75FieldReceiverRejections = []struct {
 		"argument does not provide the parameter's required exclusive or owning access",
 	},
 	{
-		"mutable-field-view",
+		"escaping-mutable-field-view",
 		"type Bag {\n    items: Vec(U8)\n}\nimpl Bag {\n    fn view(mut self) -> MutSlice(U8) {\n        return self.items.slice_mut(0, 1)\n    }\n}\nfn main() -> I32 { return 0 }\n",
-		"a mutable view must be formed from a binding",
-	},
-	{
-		"mutable-field-view-argument",
-		"fn fill(value: U8, mut view: MutSlice(U8)) -> U64 {\n    var at: U64 = 0\n    while at < view.len() {\n        view[at] = value\n        at = at + 1\n    }\n    return at\n}\ntype Bag {\n    items: Vec(U8)\n}\nfn main() -> I32 {\n    var bag = Bag(items: Vec.new(U8))\n    let n = fill(7, bag.items.slice_mut(0, 1))\n    return 0\n}\n",
-		"a mutable view must be formed from a binding",
+		"semantic error (checker diagnostic 104)",
 	},
 	{
 		"live-table-view-of-field-blocks-insert",

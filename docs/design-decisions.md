@@ -392,6 +392,26 @@ supported toolchain. Relying on Annex F would leave division silently
 undefined on common toolchains, and contraction is the one compiler license
 that can legally change `a * b + c` without any diagnostic.
 
+### D027 — Mutable views form from field and element places
+
+Status: **Milestone 8**
+
+`slice_mut` and `subview` may form a mutable view from a local binding, a
+`mut` parameter, or a field or element path of one. The receiver is read as
+its collection header and writes go through the existing backing storage; the
+field or element header is not copied into a detached vector. The view remains
+non-escaping, and the existing lexical exclusivity rule still rejects any
+owner mutation while the view is live. A call result or other temporary is not
+a place and cannot be viewed.
+
+Rationale: the earlier binding-only rule existed because loading a field or
+element receiver copied the collection and lost the writes. Lowering now
+resolves the receiver place directly, and the MIR Phase 6 view-base analysis
+follows a collection header loaded from a field or element place to the
+parameter or local behind it. Keeping the rule would force every buffered
+reader and writer to copy its window, obscuring the storage that the view
+actually borrows.
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.
