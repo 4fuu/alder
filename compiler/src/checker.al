@@ -11560,7 +11560,7 @@ fn with_control(store: CheckStore, control: CheckedControlStore) -> CheckStore {
 }
 
 fn append_checked_statement(d: Domain, store: CheckStore, owner: U64, syntax: U64, kind: U64, environment: U64, expression: U64, place: U64, binding: U64, body: U64, alternative: U64, guaranteed: Bool) -> Result(BodyStep, __s0_Error) {
-    let statements = try __s0_buffer_append(CheckedStatementRec, d, store.control.statements, CheckedStatementRec(owner: owner, syntax: syntax, kind: kind, environment: environment, expression: expression, place: place, binding: binding, body: body, alternative: alternative))
+    let statements = try __s0_buffer_append(CheckedStatementRec, d, store.control.statements, CheckedStatementRec(owner: owner, syntax: syntax, kind: kind, environment: environment, expression: expression, place: place, binding: binding, body: body, alternative: alternative, diverges: guaranteed))
     let control = CheckedControlStore(blocks: store.control.blocks, statement_links: store.control.statement_links, statements: statements, places: store.control.places, matches: store.control.matches, match_arms: store.control.match_arms, tries: store.control.tries, cleanups: store.control.cleanups, table_views: store.control.table_views)
     return Ok(BodyGood(BodyValueRec(store: with_control(store, control), environment: current_environment(store, owner), semantic: __s0_buffer_len(CheckedStatementRec, statements), guaranteed_return: guaranteed)))
 }
@@ -12903,6 +12903,10 @@ fn owner_flow_statement(store: CheckStore, binding: U64, statement_id: U64, stat
     let expression = owner_flow_expression(store, binding, statement.expression, state)
     if expression.error_kind != 0 { return expression }
     let current = expression.state
+    // A statement-position core.panic.panic call ends the process, so a
+    // still-live owner needs no transfer, cleanup registration, or later use
+    // on that path. Every non-diverging path keeps the exactly-once rules.
+    if statement.kind == 5 && statement.diverges { return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0) }
     if statement.kind == 4 {
         if owner_flow_live(current, affine_mask) { return OwnerFlowRec(state: current, terminated: true, error_kind: 93, syntax: statement.syntax) }
         return OwnerFlowRec(state: current, terminated: true, error_kind: 0, syntax: 0)

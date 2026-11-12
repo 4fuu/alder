@@ -55,13 +55,10 @@ pub fn expect_ok(T: type, E: type(Display), take result: Result(T, E)) -> T {
 }
 
 /// Returns the error value of `result`, or terminates with `expected Err`
-/// when the result is `Ok`.
+/// when the result is `Ok`. An `Ok` payload is discarded by the terminating
+/// path, where Alder cleanup does not run.
 pub fn expect_err(T: type, E: type, take result: Result(T, E)) -> E {
     match result {
-        // The Ok payload is discarded. A copyable T is the supported case; an
-        // affine T is rejected at the call because no cleanup runs on the
-        // terminating path, so the caller must use match when Ok owns a
-        // resource.
         Ok(_) => { panic.panic("expected Err, found Ok") }
         Err(error) => { return error }
     }

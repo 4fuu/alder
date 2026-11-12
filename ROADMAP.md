@@ -2042,10 +2042,9 @@ constructors, and seeded cases), the using-on-Result diagnostic that tells
 callers to bind the payload with `using name = try expression`, the frozen
 receiver spellings for `std.fs` (`File.open`/`create`/`append`/`open_options`,
 `TempFile.new`, `TempDir.new`) and `std.process` (`command.spawn`/`status`/
-`output`), and affine-owner transfer through match arms. The remaining M8 exit
-items are explicit:
+`output`), affine-owner transfer through match arms, and string interpolation
+through `Display`. The only remaining M8 exit item is the final audit:
 
-- string interpolation from `docs/syntax.md` and `docs/language-semantics.md`;
 - a final M8 exit audit that maps every remaining exit clause to evidence.
 
 ## Milestone 8.1: Standard-library completion

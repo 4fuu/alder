@@ -100,6 +100,28 @@ pub fn main() -> I32 {
 			wantStderr: "panic: assertion failed: a != b\n  a: 1\n  b: 1\n",
 		},
 		{
+			name: "live-owner-panic",
+			source: `module hello.main
+
+import core.panic { panic }
+import std.fs { TempFile }
+import std.io { Blocking }
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    match TempFile.new(cap, "panic-owner") {
+        Ok(owner) => {
+            let file = owner.keep()
+            panic("boom")
+        }
+        Err(_) => { return 1 }
+    }
+}
+`,
+			wantStatus: 101,
+			wantStderr: "panic: boom\n",
+		},
+		{
 			name: "passing-assertions",
 			source: `module hello.main
 
@@ -379,5 +401,48 @@ pub fn main() -> I32 {
 	}, "check")
 	if result.status != 1 || !strings.Contains(result.stderr, "unreachable statement") {
 		t.Fatalf("code after panic: %+v stderr=%s", result, result.stderr)
+	}
+}
+
+// A non-panic path still has to transfer or register every affine owner: the
+// panic exception is limited to a path the checker marks as diverging.
+func TestProductionPanicOwnerLeakRejected(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+		"alder.toml": corePanicManifest,
+		"src/main.al": `module hello.main
+
+import std.fs { TempFile }
+import std.io { Blocking }
+
+fn leak(cap: Blocking) -> I32 {
+    let file = match TempFile.new(cap, "leak") {
+        Ok(value) => value.keep()
+        Err(_) => return 1
+    }
+    return 0
+}
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    return leak(cap)
+}
+`,
+	}, "check")
+	if result.status == 0 {
+		t.Fatalf("live owner without a terminating panic was accepted: %+v", result)
+	}
+	if !strings.Contains(result.stderr, "affine owner reaches function exit without an ownership transfer") {
+		t.Fatalf("diagnostic = %q", result.stderr)
 	}
 }

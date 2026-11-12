@@ -188,6 +188,31 @@ pub fn main() -> I32 {
 `,
 			wantStderr: "panic: expected Err, found Ok\n",
 		},
+		{
+			name: "expect-err-affine-ok",
+			source: `module hello.main
+
+import std.test
+
+pub type Holder {
+    value: U64
+}
+
+impl Cleanup for Holder {
+    fn cleanup(take self) -> Unit {
+        return
+    }
+}
+
+pub fn main() -> I32 {
+    let held: Result(Holder, String) = Ok(Holder(value: 1))
+    let why = test.expect_err(Holder, String, held)
+    if why == "kept" { return 0 }
+    return 1
+}
+`,
+			wantStderr: "panic: expected Err, found Ok\n",
+		},
 	}
 
 	for _, tc := range cases {
@@ -243,31 +268,6 @@ pub fn main() -> I32 {
 }
 `,
 			want: "does not implement a trait required here",
-		},
-		{
-			name: "affine-ok-payload",
-			source: `module hello.main
-
-import std.test
-
-pub type Holder {
-    value: U64
-}
-
-impl Cleanup for Holder {
-    fn cleanup(take self) -> Unit {
-        return
-    }
-}
-
-pub fn main() -> I32 {
-    let held: Result(Holder, String) = Ok(Holder(value: 1))
-    let why = test.expect_err(Holder, String, held)
-    if why == "kept" { return 0 }
-    return 1
-}
-`,
-			want: "affine owner reaches function exit without an ownership transfer",
 		},
 	}
 	for _, tc := range cases {

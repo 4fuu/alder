@@ -366,6 +366,11 @@ type CheckedStatementRec {
     binding: U64
     body: U64
     alternative: U64
+    // True when this statement guarantees that control leaves the block
+    // through return, break, continue, an all-diverging match/if, or a
+    // statement-position core.panic.panic call. Owner flow uses it to let a
+    // terminating panic path skip exactly-once transfer for still-live owners.
+    diverges: Bool
 }
 
 // A place is a chain of projections over one root local. Place kinds are

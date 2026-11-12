@@ -348,6 +348,14 @@ do not run registered cleanup. OS process termination, power loss, and a
 cleanup operation that itself terminates likewise provide no remaining-cleanup
 guarantee.
 
+Owner flow treats a path that ends in a recognized statement-position
+`core.panic.panic` call as a terminating path. An affine owner still live
+there needs no transfer, cleanup registration, or later use: the process
+exits and no later code can observe it. Every other path keeps the
+exactly-once rules unchanged, including `return`, `break`, `continue`, and
+ordinary block fallthrough; a live owner that reaches one of those without a
+transfer or registered cleanup still reports diagnostic 93.
+
 The automatic cleanup hook is infallible and returns `Unit`. A resource whose
 orderly close can report an operational error exposes an explicit consuming
 method such as `finish(take self) -> Result(Unit, E)`. Calling it disarms the

@@ -799,7 +799,12 @@ loops fall through. The panic call is recognized by its resolved symbol, not
 by the spelling `panic`; an ordinary function that happens to be named
 `panic`, and every wrapper, remains a normal `Unit` call. A recognized call
 lowers to the call followed by an `unreachable` MIR terminator and does not
-run cleanup scopes. `using` cleanup facts cover
+run cleanup scopes. Owner flow treats that call as a terminating path: an
+affine owner still live when the panic executes needs no transfer or cleanup
+registration, because the process exits and nothing can observe it. A
+non-diverging path still requires exactly-once transfer or registered
+cleanup; a live owner that reaches a return or ordinary fallthrough without
+either remains diagnostic 93. `using` cleanup facts cover
 lexical fallthrough, return, failed `try`, `break`, and `continue`. Current
 lowering walks the checked site environment to run only active callbacks,
 exactly once in reverse lexical order, on those exits; a checked failure while
