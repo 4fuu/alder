@@ -148,6 +148,13 @@ static inline int io_stat_path(const char *path, io_file_stat *out) {
     return 0;
 }
 
+static inline int io_lstat(const char *path, io_file_stat *out) {
+    struct stat info;
+    if (lstat(path, &info) != 0) { return -1; }
+    io_fill_stat(&info, out);
+    return 0;
+}
+
 static inline int io_close(int fd) {
     /* POSIX leaves the descriptor state unspecified after an interrupted
      * close, so a retry could close a descriptor another operation reused. */

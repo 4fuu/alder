@@ -260,8 +260,13 @@ and the path; `finish` moves the handle out and closes it, `keep` transfers the
 owner, and cleanup closes a still-owned handle. `Metadata.modified` uses signed
 `std.io.Timestamp` seconds, so a pre-1970 modification time round-trips.
 Opening is a module function because the generic implementation parameter is
-not inferable at an associated call. Directory iteration and temporary owners
-remain pending.
+not inferable at an associated call. Directory iteration is installed:
+`Entries` skips the synthetic `.` and `..` entries, `read_dir_sorted` orders by
+exact name bytes, and `remove_dir_all` unlinks symlinks instead of descending
+through them, consulting `io.lstat` whenever the host reports an unknown entry
+kind. The walk has a documented TOCTOU window: v1 has no `openat`/`unlinkat`,
+so a component replaced between the check and the unlink could redirect the
+call. Temporary owners remain pending.
 
 ## Contracts
 

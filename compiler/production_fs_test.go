@@ -109,6 +109,65 @@ fn main() -> I32 {
 }
 `
 
+const fsDirectoryProgram = `module hello.main
+
+import std.fs { metadata, read_dir, read_dir_sorted, remove_dir_all }
+import std.io { Blocking, EntryKind, IoError }
+import std.path { Path }
+
+fn io_path(value: String) -> Result(Path, IoError) {
+    match Path.parse(value) {
+        Ok(parsed) => { return Ok(parsed) }
+        Err(_) => { return Err(IoError.InvalidInput) }
+    }
+    return Err(IoError.InvalidInput)
+}
+
+fn probe_main(cap: Blocking) -> Result(I32, IoError) {
+    let dir = try io_path("/tmp/alder-fs-tree")
+    let sorted = try read_dir_sorted(cap, dir)
+    if sorted.len() != 5 { return Ok(1) }
+    if sorted[0].name.to_bytes() != "a".to_bytes() { return Ok(2) }
+    if sorted[1].name.to_bytes() != "b".to_bytes() { return Ok(3) }
+    if sorted[2].name.to_bytes() != "c".to_bytes() { return Ok(4) }
+    if sorted[3].name.to_bytes() != "link".to_bytes() { return Ok(5) }
+    if sorted[4].name.to_bytes() != "sub".to_bytes() { return Ok(6) }
+    if sorted[3].kind != EntryKind.Symlink { return Ok(7) }
+    let listing = try read_dir(cap, dir)
+    var count: U64 = 0
+    var reading = true
+    while reading {
+        let item = try listing.next()
+        match item {
+            Some(value) => {
+                let name = value.name.to_bytes()
+                if name.len() == 1 && name.byte(0) == 46 { return Ok(8) }
+                if name.len() == 2 && name.byte(0) == 46 && name.byte(1) == 46 { return Ok(9) }
+                count = count + 1
+            }
+            None => { reading = false }
+        }
+    }
+    try listing.close()
+    if count != 5 { return Ok(10) }
+    try remove_dir_all(cap, dir)
+    match metadata(cap, dir) {
+        Ok(_) => { return Ok(11) }
+        Err(_) => {}
+    }
+    return Ok(0)
+}
+
+fn main() -> I32 {
+    let cap = Blocking()
+    match probe_main(cap) {
+        Ok(code) => { return code }
+        Err(_) => { return 90 }
+    }
+    return 91
+}
+`
+
 func resetFsProbeFile(t *testing.T) {
 	t.Helper()
 	path := "/tmp/alder-fs-probe.txt"
@@ -157,4 +216,53 @@ func TestFsProductionFileAndValues(t *testing.T) {
 	}
 	_ = os.Remove("/tmp/alder-fs-probe.txt")
 	_ = os.Remove("/tmp/alder-fs-probe-moved.txt")
+}
+func TestFsProductionDirectoryWalk(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+
+	tree := "/tmp/alder-fs-tree"
+	target := "/tmp/alder-fs-target.txt"
+	_ = os.RemoveAll(tree)
+	_ = os.Remove(target)
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tree, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{"a": "a", "b": "b", "c": "c"} {
+		if err := os.WriteFile(filepath.Join(tree, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tree, "sub", "d"), []byte("d"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(tree, "link")); err != nil {
+		t.Fatal(err)
+	}
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+		"alder.toml":  manifest,
+		"src/main.al": fsDirectoryProgram,
+	}, "run")
+	if result.status != 0 {
+		t.Fatalf("fs directory probe: %+v stderr=%s", result, result.stderr)
+	}
+	if _, err := os.Stat(tree); !os.IsNotExist(err) {
+		t.Fatalf("remove_dir_all left %s: %v", tree, err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("remove_dir_all followed the symlink: %v", err)
+	}
+	_ = os.Remove(target)
 }

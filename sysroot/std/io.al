@@ -19,6 +19,7 @@ import c "std/c/io_shim.h" as posix {
     raw fn seek = "io_seek"(fd: c.Int, offset: c.LongLong, whence: c.Int, result: c.Ptr(c.LongLong)) -> c.Int
     raw fn fstat = "io_fstat"(fd: c.Int, out: c.Ptr(FileStatRaw)) -> c.Int
     raw fn stat_path = "io_stat_path"(path: c.ConstPtr(c.Char), out: c.Ptr(FileStatRaw)) -> c.Int
+    raw fn lstat = "io_lstat"(path: c.ConstPtr(c.Char), out: c.Ptr(FileStatRaw)) -> c.Int
     raw fn close = "io_close"(fd: c.Int) -> c.Int
     raw fn sync = "io_fsync"(fd: c.Int) -> c.Int
     raw fn fchmod = "io_fchmod"(fd: c.Int, mode: c.UInt) -> c.Int
@@ -250,6 +251,8 @@ pub trait Io {
     fn stat(self, mut file: HostFile) -> Result(FileStat, IoError)
     /// Metadata of the file at `path`, following symlinks.
     fn stat_path(self, path: Path) -> Result(FileStat, IoError)
+    /// Metadata of `path` without following a final symlink.
+    fn lstat(self, path: Path) -> Result(FileStat, IoError)
     /// Replaces the file's permission mode.
     fn set_permissions(self, mut file: HostFile, mode: U32) -> Result(Unit, IoError)
     /// Renames `from` to `to` in place.
@@ -348,6 +351,15 @@ fn seek_whence(from: SeekFrom) -> I32 {
     }
 }
 
+fn file_stat_from(raw: FileStatRaw) -> FileStat {
+    let kind = unsafe c { raw.kind }
+    let size = unsafe c { raw.size }
+    let mode = unsafe c { raw.mode }
+    let seconds = unsafe c { raw.seconds }
+    let nanos = unsafe c { raw.nanos }
+    return FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping()))
+}
+
 impl Io for Blocking {
     fn open(self, path: Path, mode: FileMode) -> Result(HostFile, IoError) {
         let path_bytes = try host_path(path)
@@ -393,12 +405,7 @@ impl Io for Blocking {
         var raw = c.Zero(FileStatRaw)
         let rc = unsafe c { posix.fstat(file.handle.to_c_int(), c.addr(raw)) }
         if rc.to_i32() != 0 { return Err(IoError.last()) }
-        let kind = unsafe c { raw.kind }
-        let size = unsafe c { raw.size }
-        let mode = unsafe c { raw.mode }
-        let seconds = unsafe c { raw.seconds }
-        let nanos = unsafe c { raw.nanos }
-        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())))
+        return Ok(file_stat_from(raw))
     }
 
     fn stat_path(self, path: Path) -> Result(FileStat, IoError) {
@@ -406,12 +413,15 @@ impl Io for Blocking {
         var raw = c.Zero(FileStatRaw)
         let rc = unsafe c { posix.stat_path(path_bytes.slice(0, path_bytes.len()), c.addr(raw)) }
         if rc.to_i32() != 0 { return Err(IoError.last()) }
-        let kind = unsafe c { raw.kind }
-        let size = unsafe c { raw.size }
-        let mode = unsafe c { raw.mode }
-        let seconds = unsafe c { raw.seconds }
-        let nanos = unsafe c { raw.nanos }
-        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())))
+        return Ok(file_stat_from(raw))
+    }
+
+    fn lstat(self, path: Path) -> Result(FileStat, IoError) {
+        let path_bytes = try host_path(path)
+        var raw = c.Zero(FileStatRaw)
+        let rc = unsafe c { posix.lstat(path_bytes.slice(0, path_bytes.len()), c.addr(raw)) }
+        if rc.to_i32() != 0 { return Err(IoError.last()) }
+        return Ok(file_stat_from(raw))
     }
 
     fn set_permissions(self, mut file: HostFile, mode: U32) -> Result(Unit, IoError) {

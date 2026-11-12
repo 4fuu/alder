@@ -117,6 +117,9 @@ pub trait Io {
     fn stat(self, mut file: HostFile) -> Result(FileStat, IoError)
     /// Metadata of the file at `path`, following symlinks.
     fn stat_path(self, path: Path) -> Result(FileStat, IoError)
+    /// Metadata of `path` without following a final symlink. Callers that
+    /// walk a tree use it to unlink links instead of descending through them.
+    fn lstat(self, path: Path) -> Result(FileStat, IoError)
     /// Replaces the file's permission mode.
     fn set_permissions(self, mut file: HostFile, mode: U32) -> Result(Unit, IoError)
     /// Renames `from` to `to` in place.

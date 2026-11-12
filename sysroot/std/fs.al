@@ -1,6 +1,6 @@
 module std.fs
 
-import std.io { EntryKind, FileMode, FileStat, HostFile, Io, IoError, Reader, Seek, SeekFrom, Writer, read_to_end, write_all }
+import std.io { EntryKind, FileMode, FileStat, HostDirectory, HostFile, Io, IoError, Reader, Seek, SeekFrom, Writer, read_to_end, write_all }
 import std.path { OsString, Path }
 import std.text
 import std.time { SystemTime }
@@ -232,4 +232,135 @@ pub fn remove_dir(I: type(Io), io: I, path: Path) -> Result(Unit, IoError) {
 /// Creates one directory.
 pub fn make_dir(I: type(Io), io: I, path: Path) -> Result(Unit, IoError) {
     return io.make_directory(path)
+}
+
+/// One entry of a listing: the exact name bytes and the host-reported kind.
+pub type Entry {
+    pub name: OsString
+    pub kind: EntryKind
+}
+
+/// A listing in host order. Affine: cleanup closes the listing.
+pub type Entries(IoType: type(Io)) {
+    io: IoType
+    directory: HostDirectory
+    location: Path
+}
+
+impl(IoType: type(Io)) Entries(IoType) {
+    fn path(self) -> Path {
+        return self.location
+    }
+
+    fn next(mut self) -> Result(Option(Entry), IoError) {
+        var reading = true
+        while reading {
+            let item = try self.io.read_directory(self.directory)
+            match item {
+                Some(value) => {
+                    if !is_dot_name(value.name) {
+                        return Ok(Some(Entry(name: value.name, kind: value.kind)))
+                    }
+                }
+                None => { return Ok(None) }
+            }
+        }
+        return Ok(None)
+    }
+
+    fn close(take self) -> Result(Unit, IoError) {
+        let directory = self.directory
+        return self.io.close_directory(directory)
+    }
+}
+
+impl(IoType: type(Io)) Cleanup for Entries(IoType) {
+    fn cleanup(take self) -> Unit {
+        let closed = self.io.close_directory(self.directory)
+        return
+    }
+}
+
+fn is_dot_name(name: OsString) -> Bool {
+    let data = name.to_bytes()
+    if data.len() == 1 { return data.byte(0) == 46 }
+    if data.len() == 2 { return data.byte(0) == 46 && data.byte(1) == 46 }
+    return false
+}
+
+fn entry_less(left: Entry, right: Entry) -> Bool {
+    let a = left.name.to_bytes()
+    let b = right.name.to_bytes()
+    var at: U64 = 0
+    while at < a.len() && at < b.len() {
+        if a.byte(at) < b.byte(at) { return true }
+        if a.byte(at) > b.byte(at) { return false }
+        at = at + 1
+    }
+    return a.len() < b.len()
+}
+
+/// Lists `path` in host order.
+pub fn read_dir(I: type(Io), io: I, path: Path) -> Result(Entries(I), IoError) {
+    let directory = try io.open_directory(path)
+    return Ok(Entries(io: io, directory: directory, location: path))
+}
+
+/// Lists `path` fully and returns entries sorted by exact name bytes.
+pub fn read_dir_sorted(I: type(Io), io: I, path: Path) -> Result(Vec(Entry), IoError) {
+    var entries: Vec(Entry) = Vec.new(Entry)
+    using listing = try read_dir(io, path)
+    var reading = true
+    while reading {
+        let item = try listing.next()
+        match item {
+            Some(value) => { entries.push(value) }
+            None => { reading = false }
+        }
+    }
+    try listing.close()
+    var at: U64 = 1
+    while at < entries.len() {
+        let current = entries[at]
+        var slot = at
+        while slot > 0 && entry_less(current, entries[slot - 1]) {
+            entries[slot] = entries[slot - 1]
+            slot = slot - 1
+        }
+        entries[slot] = current
+        at = at + 1
+    }
+    return Ok(entries)
+}
+
+/// Removes `path` and everything under it. Symbolic links are unlinked and
+/// never followed. The walk has a TOCTOU window: no openat/unlinkat in v1, so
+/// a component replaced between lstat and unlink could redirect the call.
+pub fn remove_dir_all(I: type(Io), io: I, path: Path) -> Result(Unit, IoError) {
+    let root = try io.lstat(path)
+    if root.kind == EntryKind.Symlink { return remove_file(io, path) }
+    if root.kind != EntryKind.Directory { return remove_file(io, path) }
+    using listing = try read_dir(io, path)
+    var reading = true
+    while reading {
+        let item = try listing.next()
+        match item {
+            Some(value) => {
+                let child = path.join(Path.from_os(value.name))
+                var recurse = value.kind == EntryKind.Directory
+                if value.kind == EntryKind.Unknown {
+                    let info = try io.lstat(child)
+                    recurse = info.kind == EntryKind.Directory
+                }
+                if recurse {
+                    try remove_dir_all(io, child)
+                } else {
+                    try remove_file(io, child)
+                }
+            }
+            None => { reading = false }
+        }
+    }
+    try listing.close()
+    return remove_dir(io, path)
 }

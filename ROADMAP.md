@@ -1576,7 +1576,11 @@ so pre-1970 modification times round-trip. Evidence:
 `compiler/production_fs_test.go` opens, seeks, reads, writes, changes
 permissions, and reads metadata through `File`, and separately exercises the
 free helpers against a file whose mtime the Go harness sets to -1 second.
-Directory iteration and temporary owners remain pending.
+Directory iteration is installed: `Entries`/`read_dir` skip `.` and `..`,
+`read_dir_sorted` orders by exact name bytes, and `remove_dir_all` unlinks
+symlinks rather than following them, using `io.lstat` for unknown host entry
+kinds. The documented TOCTOU window remains because v1 has no
+`openat`/`unlinkat`. Temporary owners remain pending.
 
 `std.time` v1 lands on the `std.io` capability: normalized checked
 `Duration`, monotonic `Instant` with checked differences, wall-clock

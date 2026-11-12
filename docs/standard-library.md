@@ -283,8 +283,10 @@ whole-file operations and `Metadata` on the `std.io` capability. `File` is
 affine with `finish`/`keep`/cleanup releases, `Metadata.modified` preserves
 signed pre-1970 wall-clock seconds, and owner mode bits map to `Permissions`.
 Evidence: `compiler/production_fs_test.go` exercises the file methods and the
-free helpers, including a host mtime set before the epoch. Directory iteration
-and temporary owners remain pending.
+free helpers, including a host mtime set before the epoch. Directory iteration is installed:
+`Entries`/`read_dir` skip `.` and `..`, `read_dir_sorted` orders by exact name
+bytes, and `remove_dir_all` unlinks symlinks without following them (using
+`io.lstat` for unknown host entry kinds). Temporary owners remain pending.
 
 Implemented std.time progress: `sysroot/std/time.al` installs the v1 surface.
 `Duration` is normalized seconds plus nanos with checked arithmetic and a
