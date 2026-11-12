@@ -1580,7 +1580,11 @@ Directory iteration is installed: `Entries`/`read_dir` skip `.` and `..`,
 `read_dir_sorted` orders by exact name bytes, and `remove_dir_all` unlinks
 symlinks rather than following them, using `io.lstat` for unknown host entry
 kinds. The documented TOCTOU window remains because v1 has no
-`openat`/`unlinkat`. Temporary owners remain pending.
+`openat`/`unlinkat`. Temporary owners are installed: `temp_root` reads
+`TMPDIR` through the new `std.env.get`, and `temp_file`/`temp_dir` derive a
+unique hex suffix from `io.random_bytes`, retrying on `AlreadyExists`.
+`TempFile` stores the host handle directly (cleanup closes and unlinks) and
+`TempDir` carries an affine token so exactly one owner removes the tree.
 
 `std.time` v1 lands on the `std.io` capability: normalized checked
 `Duration`, monotonic `Instant` with checked differences, wall-clock
@@ -2130,6 +2134,13 @@ The following items are not part of the current implementation scope:
   `fn make(text: String) -> Result(c.CString, U64) { return match c.CString(text) { Some(value) => Ok(value) None => Err(1) } }`
   fails with "affine owner must be transferred on every reachable path or on
   none". `std.io` avoids it by building host paths in a `Vec(U8)` buffer.
+- `using` on a generic type whose `Cleanup` impl comes from another module is
+  rejected with diagnostic 136 ("using requires an affine owner implementing
+  Cleanup"). `using file = fs.open(io, path)` and
+  `using temp = fs.temp_file(io, "x")` fail even though `File`/`TempFile`
+  implement `Cleanup`; an explicit `owner.cleanup()` works, and the
+  non-generic `io.HostFile` `using` case works. The `std.fs` fixtures call
+  cleanup explicitly until generic cleanup registration is fixed.
 - a trait method call whose name matches an imported free function resolves to
   the free function and reports diagnostic 58. With
   `import std.fs { File, open, read }` and a local `file: File(Blocking)`,

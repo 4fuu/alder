@@ -211,11 +211,12 @@ pub type TempFile(IoType: type(io.Io)) {
     // private: file, path
 }
 
+// Creation is a module function: the generic implementation parameter of
+// TempFile cannot be inferred at an associated call.
+pub fn temp_file(I: type(io.Io), io: I, prefix: String)
+    -> Result(TempFile(I), io.IoError)
+
 impl(IoType: type(io.Io)) TempFile(IoType) {
-    /// Creates a file with a fresh unique name under the temporary root.
-    /// The name never exists beforehand; creation is retry-until-unique.
-    pub fn new(I: type(io.Io), io: I, prefix: String)
-        -> Result(TempFile(I), io.IoError)
     /// The file's path.
     pub fn path(self) -> Path
     /// Disarms removal and returns the open file. The file keeps its path;
@@ -235,11 +236,10 @@ pub type TempDir(IoType: type(io.Io)) {
     // private: path
 }
 
+pub fn temp_dir(I: type(io.Io), io: I, prefix: String)
+    -> Result(TempDir(I), io.IoError)
+
 impl(IoType: type(io.Io)) TempDir(IoType) {
-    /// Creates a directory with a fresh unique name under the temporary
-    /// root.
-    pub fn new(I: type(io.Io), io: I, prefix: String)
-        -> Result(TempDir(I), io.IoError)
     /// The directory's path.
     pub fn path(self) -> Path
     /// Disarms removal and returns the path.
@@ -266,7 +266,14 @@ exact name bytes, and `remove_dir_all` unlinks symlinks instead of descending
 through them, consulting `io.lstat` whenever the host reports an unknown entry
 kind. The walk has a documented TOCTOU window: v1 has no `openat`/`unlinkat`,
 so a component replaced between the check and the unlink could redirect the
-call. Temporary owners remain pending.
+call. Temporary owners are installed: `temp_root` reads `env.get("TMPDIR")`
+and falls back to `/tmp`; `temp_file`/`temp_dir` use 16 random bytes as a hex
+suffix and retry on `AlreadyExists`. `TempFile` stores the host handle
+directly so cleanup closes and unlinks without nesting one consumed field in
+another; `TempDir` carries an affine token so exactly one owner removes the
+tree. Both expose `keep` as the observing release. The snapshot spells
+environment lookup `env.get` because `var` is a language keyword and cannot
+follow a module qualifier.
 
 ## Contracts
 

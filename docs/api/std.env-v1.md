@@ -54,7 +54,7 @@ impl env {
     /// the entry contract. A copy; safe to retain.
     pub fn arguments() -> Vec(OsString)
     /// The value of environment variable `name`, `None` when unset.
-    pub fn var(name: OsString) -> Option(OsString)
+    pub fn get(name: OsString) -> Option(OsString)
     /// Sets environment variable `name` to `value` in this process.
     pub fn set_var(name: OsString, value: OsString) -> Result(Unit, EnvError)
     /// Removes environment variable `name` from this process.

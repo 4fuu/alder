@@ -1,6 +1,7 @@
 module std.fs
 
 import std.io { EntryKind, FileMode, FileStat, HostDirectory, HostFile, Io, IoError, Reader, Seek, SeekFrom, Writer, read_to_end, write_all }
+import std.env
 import std.path { OsString, Path }
 import std.text
 import std.time { SystemTime }
@@ -61,10 +62,16 @@ pub fn append(I: type(Io), io: I, path: Path) -> Result(File(I), IoError) {
     return open_options(io, path, Options(read: false, write: true, append: true, truncate: false, create: true, create_new: false))
 }
 
+/// Opens a host handle with explicit flags. File and TempFile share it so a
+/// taken temporary owner never nests one consumed field inside another.
+fn open_handle(I: type(Io), io: I, path: Path, options: Options) -> Result(HostFile, IoError) {
+    let mode = FileMode(read: options.read, write: options.write, append: options.append, truncate: options.truncate, create: options.create, create_new: options.create_new)
+    return io.open(path, mode)
+}
+
 /// Opens with explicit flags.
 pub fn open_options(I: type(Io), io: I, path: Path, options: Options) -> Result(File(I), IoError) {
-    let mode = FileMode(read: options.read, write: options.write, append: options.append, truncate: options.truncate, create: options.create, create_new: options.create_new)
-    let handle = try io.open(path, mode)
+    let handle = try open_handle(io, path, options)
     return Ok(File(io: io, handle: handle, path: path))
 }
 
@@ -363,4 +370,166 @@ pub fn remove_dir_all(I: type(Io), io: I, path: Path) -> Result(Unit, IoError) {
     }
     try listing.close()
     return remove_dir(io, path)
+}
+
+/// The system temporary root (`TMPDIR` when set, `/tmp` otherwise).
+pub fn temp_root(I: type(Io), io: I) -> Result(Path, IoError) {
+    let name = env_name("TMPDIR")
+    match name {
+        Some(value) => {
+            match env.get(value) {
+                Some(found) => { return Ok(Path.from_os(found)) }
+                None => {}
+            }
+        }
+        None => {}
+    }
+    return match Path.parse("/tmp") {
+        Ok(value) => Ok(value)
+        Err(_) => Err(IoError.InvalidInput)
+    }
+}
+
+fn env_name(value: String) -> Option(OsString) {
+    match OsString.parse(value) {
+        Ok(parsed) => { return Some(parsed) }
+        Err(_) => { return None }
+    }
+    return None
+}
+
+fn temp_path(I: type(Io), io: I, root: Path, prefix: String) -> Result(Path, IoError) {
+    var raw: Array(U8, 16) = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    io.random_bytes(raw.slice_mut(0, 16))
+    let digits: Array(U8, 16) = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    var name: Vec(U8) = copy_text_bytes(prefix)
+    name.push(45)
+    var at: U64 = 0
+    while at < 16 {
+        let one = raw[at]
+        name.push(digits[(one / 16).to_u64()])
+        name.push(digits[(one % 16).to_u64()])
+        at = at + 1
+    }
+    return match OsString.from_bytes(name.slice(0, name.len()).to_bytes()) {
+        Ok(value) => Ok(root.join(Path.from_os(value)))
+        Err(_) => Err(IoError.InvalidInput)
+    }
+}
+
+/// One exclusive temporary file. Affine: cleanup closes the file and removes
+/// it. Creation retries a fresh random name until the host accepts it.
+pub type TempFile(IoType: type(Io)) {
+    io: IoType
+    handle: HostFile
+    location: Path
+    marker: OwnedMarker
+}
+
+pub fn temp_file(I: type(Io), io: I, prefix: String) -> Result(TempFile(I), IoError) {
+    let root = try temp_root(io)
+    var attempt: U64 = 0
+    while attempt < 16 {
+        let path = try temp_path(io, root, prefix)
+        let made = open_handle(io, path, Options(read: true, write: true, append: false, truncate: false, create: false, create_new: true))
+        match made {
+            Ok(handle) => { return Ok(TempFile(io: io, handle: handle, location: path, marker: OwnedMarker(armed: true))) }
+            Err(error) => {
+                match error {
+                    AlreadyExists => {}
+                    _ => { return Err(error) }
+                }
+            }
+        }
+        attempt = attempt + 1
+    }
+    return Err(IoError.AlreadyExists)
+}
+
+impl(IoType: type(Io)) TempFile(IoType) {
+    fn path(self) -> Path {
+        return self.location
+    }
+
+    fn keep(take self) -> File(IoType) {
+        let handle = self.handle
+        let io = self.io
+        let location = self.location
+        let marker = self.marker
+        marker.cleanup()
+        return File(io: io, handle: handle, path: location)
+    }
+}
+
+impl(IoType: type(Io)) Cleanup for TempFile(IoType) {
+    fn cleanup(take self) -> Unit {
+        let handle = self.handle
+        let closed = self.io.close(handle)
+        let removed = remove_file(self.io, self.location)
+        let marker = self.marker
+        marker.cleanup()
+        return
+    }
+}
+
+
+/// Private affine token. A record containing it is affine, so exactly one
+/// owner removes a temporary directory; cleanup releases the token too.
+pub type OwnedMarker {
+    armed: Bool
+}
+
+impl Cleanup for OwnedMarker {
+    fn cleanup(take self) -> Unit {
+        return
+    }
+}
+
+/// One exclusive temporary directory. Affine: cleanup removes the tree,
+/// unlinking symbolic links without following them.
+pub type TempDir(IoType: type(Io)) {
+    io: IoType
+    location: Path
+    // Keeps the type affine: exactly one owner removes the tree through keep
+    // or cleanup.
+    marker: OwnedMarker
+}
+
+pub fn temp_dir(I: type(Io), io: I, prefix: String) -> Result(TempDir(I), IoError) {
+    let root = try temp_root(io)
+    var attempt: U64 = 0
+    while attempt < 16 {
+        let path = try temp_path(io, root, prefix)
+        let made = make_dir(io, path)
+        match made {
+            Ok(_) => { return Ok(TempDir(io: io, location: path, marker: OwnedMarker(armed: true))) }
+            Err(error) => {
+                match error {
+                    AlreadyExists => {}
+                    _ => { return Err(error) }
+                }
+            }
+        }
+        attempt = attempt + 1
+    }
+    return Err(IoError.AlreadyExists)
+}
+
+impl(IoType: type(Io)) TempDir(IoType) {
+    fn path(self) -> Path {
+        return self.location
+    }
+
+    fn keep(take self) -> Path {
+        return self.location
+    }
+}
+
+impl(IoType: type(Io)) Cleanup for TempDir(IoType) {
+    fn cleanup(take self) -> Unit {
+        let marker = self.marker
+        marker.cleanup()
+        let removed = remove_dir_all(self.io, self.location)
+        return
+    }
 }

@@ -286,7 +286,10 @@ Evidence: `compiler/production_fs_test.go` exercises the file methods and the
 free helpers, including a host mtime set before the epoch. Directory iteration is installed:
 `Entries`/`read_dir` skip `.` and `..`, `read_dir_sorted` orders by exact name
 bytes, and `remove_dir_all` unlinks symlinks without following them (using
-`io.lstat` for unknown host entry kinds). Temporary owners remain pending.
+`io.lstat` for unknown host entry kinds). Temporary files and directories are
+installed: `temp_root` reads `TMPDIR` through `env.get`, unique names use
+random hex suffixes with `AlreadyExists` retries, and `TempFile`/`TempDir`
+provide best-effort cleanup plus explicit `keep` releases.
 
 Implemented std.time progress: `sysroot/std/time.al` installs the v1 surface.
 `Duration` is normalized seconds plus nanos with checked arithmetic and a

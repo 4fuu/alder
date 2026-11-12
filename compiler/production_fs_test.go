@@ -168,6 +168,61 @@ fn main() -> I32 {
 }
 `
 
+const fsTempProgram = `module hello.main
+
+import std.env
+import std.fs { metadata, temp_dir, temp_file, temp_root, write }
+import std.io { Blocking, IoError }
+import std.path { OsString, Path }
+
+fn env_key(value: String) -> Result(OsString, IoError) {
+    match OsString.parse(value) {
+        Ok(parsed) => { return Ok(parsed) }
+        Err(_) => { return Err(IoError.InvalidInput) }
+    }
+    return Err(IoError.InvalidInput)
+}
+
+fn probe_main(cap: Blocking) -> Result(I32, IoError) {
+    let root = try temp_root(cap)
+    let key = try env_key("TMPDIR")
+    match env.get(key) {
+        Some(value) => {
+            if root.to_os().to_bytes() != value.to_bytes() { return Ok(1) }
+        }
+        None => { return Ok(2) }
+    }
+    let file = try temp_file(cap, "probe")
+    let file_path = file.path()
+    file.cleanup()
+    match metadata(cap, file_path) {
+        Ok(_) => { return Ok(3) }
+        Err(_) => {}
+    }
+    let directory = try temp_dir(cap, "dir")
+    let dir_path = directory.path()
+    let inner_name = try env_key("inner")
+    let inner = dir_path.join(Path.from_os(inner_name))
+    let payload: Array(U8, 1) = [120]
+    try write(cap, inner, payload.slice(0, 1))
+    directory.cleanup()
+    match metadata(cap, dir_path) {
+        Ok(_) => { return Ok(4) }
+        Err(_) => {}
+    }
+    return Ok(0)
+}
+
+fn main() -> I32 {
+    let cap = Blocking()
+    match probe_main(cap) {
+        Ok(code) => { return code }
+        Err(_) => { return 90 }
+    }
+    return 91
+}
+`
+
 func resetFsProbeFile(t *testing.T) {
 	t.Helper()
 	path := "/tmp/alder-fs-probe.txt"
@@ -265,4 +320,25 @@ func TestFsProductionDirectoryWalk(t *testing.T) {
 		t.Fatalf("remove_dir_all followed the symlink: %v", err)
 	}
 	_ = os.Remove(target)
+}
+func TestFsProductionTemporaryOwners(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	dir := t.TempDir()
+	result := runProductionCompilerEnv(t, exe, dir, env, map[string]string{
+		"alder.toml":  manifest,
+		"src/main.al": fsTempProgram,
+	}, "run")
+	if result.status != 0 {
+		t.Fatalf("fs temp probe: %+v stderr=%s", result, result.stderr)
+	}
 }
