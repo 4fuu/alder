@@ -4343,6 +4343,20 @@ fn lower_array_view(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     return Ok(LowerStep(state: converted.state, id: view.id))
 }
 
+// `core.memory` size and align queries: the checker parked the queried
+// checked type in the builtin expression's operator slot. After
+// monomorphization that type is concrete, so lowering emits one MIR query.
+fn lower_memory_query_builtin(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, expression: CheckedExprRec, annotation: CallAnnotationRec) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 0 || expression.operator == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let queried = try lower_type(d, source_state, store, state, expression.operator)
+    if !queried.state.valid { return Ok(LowerStep(state: queried.state, id: 0)) }
+    let result = try lower_add_typed_result(d, queried.state, function, block, mir_type_u64())
+    var op = mir_op_type_size()
+    if annotation.builtin == 971 { op = mir_op_type_align() }
+    let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, queried.id, 0, 0, 0, "")
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
 fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if annotation.builtin == 18 {
         let vector = try lower_type(d, source_state, store, state, expression.checked_type)
@@ -5164,6 +5178,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         // dense families above; it shares the M7.1 sequence lowering.
         if annotation.builtin == 968 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 969 { return lower_option_take(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+        if annotation.builtin == 970 || annotation.builtin == 971 { return lower_memory_query_builtin(d, source_state, store, state, function, block, expression, annotation) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -7767,6 +7782,13 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         let option = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
         return option.kind == 9 && option.arg_count == 1
     }
+    if annotation.builtin == 970 || annotation.builtin == 971 {
+        // core.memory queries carry no runtime child; the queried checked
+        // type sits in the operator slot and the result is U64.
+        if expression.child_count != 0 || annotation.target != 0 || annotation.variant_use != 0 || expression.operator == 0 { return false }
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        return result.kind == 1 && result.target == 9
+    }
     if annotation.builtin == 968 {
         // [U8].to_bytes: one byte-view receiver child, bytes result.
         if expression.child_count != 1 || annotation.target != 0 { return false }
@@ -7999,6 +8021,16 @@ fn lower_cleanup_callback_valid(store: CheckStore, item: CheckedCleanupRec, bind
     if lower_use_by_role(store, item.callback, parameter_role, 1) != 0 { return false }
     let callback_result_type = __s0_buffer_get(CheckedTypeRec, store.types, __s0_buffer_get(DeclTypeUseRec, store.uses, callback_result - 1).checked_type - 1)
     return callback_result_type.kind == 1 && callback_result_type.target == 12
+}
+
+// A core.memory query is the one kind-18 builtin whose operator slot carries
+// a checked type rather than an arithmetic operator. It has no runtime child
+// and its annotation names the query as one of builtins 970 and 971.
+fn lower_model_memory_query_operator(store: CheckStore, item: CheckedExprRec) -> Bool {
+    if item.kind != 18 || item.annotation == 0 || item.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, item.annotation - 1)
+    if annotation.kind != 5 || (annotation.builtin != 970 && annotation.builtin != 971) { return false }
+    return item.child_count == 0 && item.operator >= 1 && item.operator <= __s0_buffer_len(CheckedTypeRec, store.types)
 }
 
 // The c.Zero and c.addr expression shapes: a zero value carries no child and
@@ -8536,7 +8568,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         }
         if item.kind == 6 && (item.child_count != 1 || (item.operator != 1 && item.operator != 2 && item.operator != 21)) { return false }
         if item.kind == 7 && (item.child_count != 2 || item.operator < 3 || item.operator > 20) { return false }
-        if item.kind != 6 && item.kind != 7 && item.operator != 0 { return false }
+        if item.kind != 6 && item.kind != 7 && item.operator != 0 && !lower_model_memory_query_operator(store, item) { return false }
         if item.kind == 6 {
             let child = __s0_buffer_get(CheckedExprRec, store.expressions, __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1).expression - 1)
             if child.checked_type != item.checked_type { return false }

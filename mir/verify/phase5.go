@@ -222,6 +222,9 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 			c.errs = append(c.errs, Error{Loc: c.loc, Msg: "c.buffer.ptr pointee is not byte-addressable"})
 		}
 
+	case mir.OpTypeSize, mir.OpTypeAlign:
+		c.errs = append(c.errs, checkTypeQuery(m, in, c.loc)...)
+
 	case mir.OpCZero:
 		c.errs = append(c.errs, checkCZeroType(m, in, c.loc)...)
 
@@ -779,6 +782,15 @@ func checkCStringOpTypes(m *mir.Module, f *mir.Function, in *mir.Instr, loc stri
 		}
 	}
 	return errs
+}
+
+// checkTypeQuery validates one core.memory query: the type operand names a
+// valid lowered type. Both operations produce u64.
+func checkTypeQuery(m *mir.Module, in *mir.Instr, loc string) []Error {
+	if !m.ValidType(in.TypeOp) {
+		return []Error{{Loc: loc, Msg: in.Op.String() + " type operand is out of range"}}
+	}
+	return nil
 }
 
 // checkCZeroType validates one c.zero: the type operand names a raw C scalar

@@ -7769,8 +7769,40 @@ fn closure_scan_children(d: Domain, state: State, parse: ParseStore, store: Chec
 }
 
 
+// A `core.memory` query is a compile-time fact about one type argument, not
+// a runtime call. The builtin records the queried checked type in the
+// expression's operator slot; lowering reads it after monomorphization.
+fn check_memory_query(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, align: Bool, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 346, call) }
+    let type_link = call_link_at(parse, call, 1)
+    if !expression_type_candidate(state, parse, store, owner, type_link.node) { return expr_token_fail(d, state, base, 346, call) }
+    let resolved = try resolve_expression_type(d, state, parse, store, owner, type_link.node)
+    let current = match resolved {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match resolved {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let queried = checked_type_for_syntax(current, owner, type_link.node)
+    if queried == 0 || queried > __s0_buffer_len(CheckedTypeRec, current.types) { return expr_token_fail(d, state, base, 346, call) }
+    let u64_type = primitive_type_id(state, parse, current, "U64")
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, u64_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, u64_type) }
+    var builtin: U64 = 970
+    if align { builtin = 971 }
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, current.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: u64_type, variant_use: 0, builtin: builtin, place: 0))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(current, owner), syntax: call_id, kind: 18, checked_type: u64_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: queried, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
+    return expr_draft(next, u64_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
 fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    if symbol.kind == 12 && source_path_is(state, symbol.source, "core/memory.al") {
+        if symbol_name_matches_word(state, symbol, "size_of") { return check_memory_query(d, state, parse, base, store, owner, call, call_id, false, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+        if symbol_name_matches_word(state, symbol, "align_of") { return check_memory_query(d, state, parse, base, store, owner, call, call_id, true, expected, mismatch_kind, mismatch_node, site_kind, site_syntax) }
+    }
     let explicit_count = leading_type_arg_count(state, parse, store, owner, call)
     if explicit_count != 0 {
         if symbol.type_arity == 0 { return expr_token_fail(d, state, base, 56, call) }

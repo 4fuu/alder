@@ -223,6 +223,12 @@ fn mir_op_c_callback_make() -> U64 { return 111 }
 // c.callback.owner.register creates the retained owner value; its metadata
 // fields are documented in docs/mir.md.
 fn mir_op_c_callback_owner_register() -> U64 { return 112 }
+// 113 and 115 answer `core.memory` size and alignment queries. Each carries
+// its queried concrete type as the type operand and produces U64. The C
+// backend spells the target compiler's sizeof/_Alignof for that type, with
+// Unit fixed to size 0 and align 1.
+fn mir_op_type_size() -> U64 { return 113 }
+fn mir_op_type_align() -> U64 { return 115 }
 fn mir_op_c_callback_owner_release() -> U64 { return 114 }
 
 fn mir_term_jump() -> U64 { return 0 }

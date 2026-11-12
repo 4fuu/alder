@@ -2345,6 +2345,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op >= mir_op_c_string_make_lit() && item.op <= mir_op_c_string_release() { return cgen_emit_c_string_op(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_type_size() || item.op == mir_op_type_align() { return cgen_emit_type_query(d, out, store, item) }
     if item.op == mir_op_c_addr() { return cgen_emit_c_addr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_callback_make() { return cgen_emit_c_callback_make(d, out, store, item) }
     if item.op == mir_op_c_callback_owner_register() { return cgen_emit_callback_owner_register(d, out, store, indexes, item) }
@@ -2393,6 +2394,24 @@ fn cgen_emit_c_zero(d: Domain, initial: CgenWriter, store: MirStore, indexes: Mi
         out = try cgen_put(d, out, "0")
     }
     return cgen_put(d, out, ";\n")
+}
+
+// type.size and type.align ask the target C compiler about the lowered
+// representation. Unit is the one Alder type whose size contract differs
+// from its C spelling: it lowers to uint8_t for storage but is a value of
+// size 0 and align 1 by definition.
+fn cgen_emit_type_query(d: Domain, initial: CgenWriter, store: MirStore, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = ")
+    if item.type_op == mir_type_unit() {
+        if item.op == mir_op_type_size() { return cgen_put(d, out, "UINT64_C(0);\n") }
+        return cgen_put(d, out, "UINT64_C(1);\n")
+    }
+    out = try cgen_put(d, out, "(uint64_t)")
+    if item.op == mir_op_type_size() { out = try cgen_put(d, out, "sizeof(") } else { out = try cgen_put(d, out, "_Alignof(") }
+    out = try cgen_put_type(d, out, store, item.type_op)
+    return cgen_put(d, out, ");\n")
 }
 
 // One local address under the declared C pointer type; the result is a raw

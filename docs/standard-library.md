@@ -168,6 +168,16 @@ project does not import it explicitly. The generated hosted entry adapter uses
 `program_error_display`/`program_error_chain` for an unhandled `Err`, writes
 `program error:` to standard error, and returns status 1 without exit cleanup.
 
+Implemented core.memory progress: `sysroot/core/memory.al` provides
+`size_of(T)` and `align_of(T)` as compile-time layout queries
+([snapshot](api/core.memory-v1.md)). The checker recognizes the module's
+exports, resolves the one type argument per instance, and lowering emits MIR
+113 `type.size` or 115 `type.align`; the C backend answers with the target C
+compiler's `sizeof`/`_Alignof` over the lowered representation. `Unit` is fixed
+at size 0 and alignment 1. Calls with a non-type argument, wrong arity, or an
+unresolved type are diagnostic 346. No allocation, pointer, or Alder layout
+engine is added.
+
 ## Text and bytes
 
 Required modules:

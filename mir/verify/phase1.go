@@ -416,7 +416,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	if in.Op == mir.OpCIsNull && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: "c.is_null requires MIR format version 6"})
 	}
-	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr) && m.FormatVersion < mir.BindingFormatVersion {
+	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr || in.Op == mir.OpTypeSize || in.Op == mir.OpTypeAlign) && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 6"})
 	}
 	if in.Op == mir.OpCleanupPush && (int(in.CleanupFn) >= len(m.Functions) || m.Functions[in.CleanupFn] == nil) {

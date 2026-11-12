@@ -104,6 +104,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.memory-v1.al": {
+			style:   "project",
+			srcName: "core_memory_example.al",
+			mainText: `module hello.main
+
+import hello.core_memory_example { core_memory_example }
+
+pub fn main() -> I32 {
+    if core_memory_example() == 89 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.text-v1.al": {
 			style:   "project",
 			srcName: "std_text_example.al",

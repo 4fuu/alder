@@ -633,6 +633,12 @@ func (m *Module) InferResultType(f *Function, in *Instr) (TypeId, bool) {
 		}
 		return in.TypeOp, true
 
+	case OpTypeSize, OpTypeAlign:
+		if !m.ValidType(in.TypeOp) {
+			return NoType, false
+		}
+		return TypeU64, true
+
 	case OpCZero:
 		if !m.ValidType(in.TypeOp) {
 			return NoType, false

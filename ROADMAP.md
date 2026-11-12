@@ -2049,13 +2049,13 @@ through `Display`. The only remaining M8 exit item is the final audit:
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **next after Milestone 8 closes; no further scope gate**
+Status: **in progress (`core.memory` landed; no further scope gate)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 starts as soon as
 Milestone 8 closes. The modules land in dependency order:
 
-1. `core.memory`: size and alignment queries;
+1. `core.memory`: size and alignment queries (landed; see below);
 2. `core.hash`: the stable hashing contract and the hash builders that hash
    containers need;
 3. `Deque` and heaps: the remaining `core.collection`/`std.collection` value
@@ -2070,6 +2070,20 @@ Milestone 8 closes. The modules land in dependency order:
 Exit requires each listed module's frozen snapshot, installed implementation,
 and production-driver evidence. The `std.signal` triage records exactly which
 pieces stay in 8.1 and which move to Milestone 9.
+
+Landed M8.1 progress: `core.memory` provides `size_of(T)` and `align_of(T)` as
+compile-time layout queries ([snapshot](docs/api/core.memory-v1.md)). The
+checker resolves the one type argument per instance, lowering emits MIR 113
+`type.size` or 115 `type.align`, and cgen answers with the target C compiler's
+`sizeof`/`_Alignof` over the lowered representation. `Unit` is fixed at size 0
+and alignment 1. The implementation adds no Alder layout engine and no
+allocation surface; diagnostic 346 rejects a non-type argument, wrong arity,
+or unresolved type. Evidence: `compiler/production_memory_test.go` runs the
+primitive, record, enum, string, bytes, option, result, Unit, and generic
+instances and pins the C `sizeof`/`_Alignof` output plus three rejections;
+`mir/verify/type_query_ops_test.go` pins the MIR spelling, round trip, and
+out-of-range rejection; `cgen/type_query_test.go` pins the C emission; and
+`compiler/docs_api_test.go` runs the snapshot example.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 

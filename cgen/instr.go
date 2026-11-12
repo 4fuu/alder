@@ -605,6 +605,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpCZero:
 		g.emitCZero(b, in)
 
+	case mir.OpTypeSize, mir.OpTypeAlign:
+		g.emitTypeQuery(b, in)
+
 	case mir.OpCAddr:
 		g.emitCAddr(b, in)
 	}
@@ -619,6 +622,24 @@ func (g *gen) emitCZero(b *strings.Builder, in *mir.Instr) {
 		return
 	}
 	b.WriteString("  " + g.val(in.Result) + " = 0;\n")
+}
+
+// emitTypeQuery asks the target C compiler about the lowered type. Unit has
+// size 0 and alignment 1 by contract even though its C storage is uint8_t.
+func (g *gen) emitTypeQuery(b *strings.Builder, in *mir.Instr) {
+	if in.TypeOp == mir.TypeUnit {
+		if in.Op == mir.OpTypeSize {
+			b.WriteString("  " + g.val(in.Result) + " = UINT64_C(0);\n")
+		} else {
+			b.WriteString("  " + g.val(in.Result) + " = UINT64_C(1);\n")
+		}
+		return
+	}
+	operator := "sizeof"
+	if in.Op == mir.OpTypeAlign {
+		operator = "_Alignof"
+	}
+	b.WriteString("  " + g.val(in.Result) + " = (uint64_t)" + operator + "(" + g.cType(in.TypeOp) + ");\n")
 }
 
 // emitCAddr forms the address of a local place under the declared C pointer

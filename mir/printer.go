@@ -361,7 +361,7 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCBufferPtr:
 		b.WriteString(" " + valueName(f, in.A) + ", " + m.TypeString(in.TypeOp))
 
-	case OpCZero:
+	case OpCZero, OpTypeSize, OpTypeAlign:
 		b.WriteString(" " + m.TypeString(in.TypeOp))
 
 	case OpCAddr:

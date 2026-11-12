@@ -670,6 +670,23 @@ place that is not rooted at a local, and a read-only place for `c_ptr`.
 Nullity, alignment, and lifetime are the unsafe caller's obligation: the
 operation emits no null check.
 
+## Size and Alignment Queries
+
+MIR 6 exposes `core.memory` queries as operations 113 and 115:
+
+```text
+type.size T
+type.align T
+```
+
+Both operations take one valid lowered type operand `T` and produce `u64`.
+They are compile-time facts about the target C representation: the C backend
+emits `(uint64_t)sizeof(T)` or `(uint64_t)_Alignof(T)` for the lowered type.
+`Unit` is the fixed exception, emitted as the literal `0` for size and `1` for
+alignment even though its C storage spelling is `uint8_t`. The verifier rejects
+a missing or out-of-range type operand. The operations carry no value operand,
+no failure edge, and no runtime work.
+
 ## C Callback Values
 
 MIR 6 exposes one nonretained callback construction as operation 111:

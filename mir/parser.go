@@ -1518,6 +1518,17 @@ func (p *parser) parseOp() (Instr, error) {
 		in.Op = OpCZero
 		in.TypeOp, err = p.parseType()
 
+	case "type.size", "type.align":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		if t.text == "type.size" {
+			in.Op = OpTypeSize
+		} else {
+			in.Op = OpTypeAlign
+		}
+		in.TypeOp, err = p.parseType()
+
 	case "c.addr":
 		if p.m.FormatVersion < BindingFormatVersion {
 			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)

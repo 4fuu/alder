@@ -213,6 +213,12 @@ const (
 	// type for one raw call argument. TypeOp names c_ptr or c_const_ptr
 	// over the place's own type; the pointer never becomes an Alder value.
 	OpCAddr OpKind = 110
+	// OpTypeSize and OpTypeAlign answer core.memory queries. TypeOp names
+	// the queried lowered type and the result is u64. They are compiler
+	// facts about the target C representation, with unit fixed to size 0
+	// and alignment 1.
+	OpTypeSize  OpKind = 113
+	OpTypeAlign OpKind = 115
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -445,6 +451,10 @@ func (k OpKind) String() string {
 		return "c.zero"
 	case OpCAddr:
 		return "c.addr"
+	case OpTypeSize:
+		return "type.size"
+	case OpTypeAlign:
+		return "type.align"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

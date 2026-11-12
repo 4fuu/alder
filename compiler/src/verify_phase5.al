@@ -161,6 +161,13 @@ fn mir_v5_c_zero_result(store: MirStore, x: MirInstrRec) -> MirVTypeResult {
     return MirVTypeResult(valid: valid, type_id: x.type_op)
 }
 
+// type.size and type.align answer a compile-time fact about one valid lowered
+// type and always produce U64.
+fn mir_v5_type_query_result(store: MirStore, x: MirInstrRec) -> MirVTypeResult {
+    let valid = x.type_op >= 1 && x.type_op <= __s0_buffer_len(MirTypeRec, store.types)
+    return MirVTypeResult(valid: valid, type_id: mir_type_u64())
+}
+
 // c.addr yields its C pointer type operand when it names c_ptr or c_const_ptr
 // over the place's own type.
 fn mir_v5_c_addr_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec) -> MirVTypeResult {
@@ -577,6 +584,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_string_make_lit() || x.op == mir_op_c_string_make() || x.op == mir_op_c_string_ptr() { return mir_v5_c_string_result(store, indexes, x, ta) }
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
     if x.op == mir_op_c_zero() { return mir_v5_c_zero_result(store, x) }
+    if x.op == mir_op_type_size() || x.op == mir_op_type_align() { return mir_v5_type_query_result(store, x) }
     if x.op == mir_op_c_addr() { return mir_v5_c_addr_result(store, indexes, x) }
     if x.op == mir_op_c_callback_make() { return mir_v5_c_callback_result(store, x) }
     if x.op == mir_op_c_callback_owner_register() || x.op == mir_op_c_callback_owner_release() { return mir_v5_callback_owner_result(store, indexes, x, ta) }
