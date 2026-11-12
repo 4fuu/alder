@@ -315,10 +315,17 @@ fn run_parse(d: Domain, state: State, store: ParseStore) -> I32 {
     }
 }
 
+fn init_parse_bindings(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64), diagnostics: __s0_Buffer(ParseDiagRec)) -> I32 {
+    return match __s0_buffer_new(ParseBindingRec, d) {
+        Err(error) => storage_error()
+        Ok(bindings) => run_parse(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics, bindings: bindings, binding_count: 0))
+    }
+}
+
 fn init_parse_diagnostics(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64)) -> I32 {
     return match __s0_buffer_new(ParseDiagRec, d) {
         Err(error) => storage_error()
-        Ok(diagnostics) => run_parse(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics))
+        Ok(diagnostics) => init_parse_bindings(d, state, nodes, links, roots, diagnostics)
     }
 }
 

@@ -46,8 +46,8 @@ fn parser_finish(result: ParseResult) -> I32 {
         ParseLexBad(output) => parser_lex_bad(output.state)
     }
 }
-fn parser_parse(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64), diagnostics: __s0_Buffer(ParseDiagRec)) -> I32 {
-    return match parse_sources(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics)) {
+fn parser_parse(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64), diagnostics: __s0_Buffer(ParseDiagRec), bindings: __s0_Buffer(ParseBindingRec)) -> I32 {
+    return match parse_sources(d, state, ParseStore(nodes: nodes, links: links, roots: roots, diagnostics: diagnostics, bindings: bindings, binding_count: 0)) {
         Err(error) => parser_storage_error()
 
         Ok(result) => parser_finish(result)
@@ -55,7 +55,9 @@ fn parser_parse(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: _
 }
 fn parser_init_diags(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec), roots: __s0_Buffer(U64)) -> I32 { return match __s0_buffer_new(ParseDiagRec, d) {
         Err(error) => parser_storage_error()
-        Ok(b) => parser_parse(d, state, nodes, links, roots, b) } }
+        Ok(b) => match __s0_buffer_new(ParseBindingRec, d) {
+            Err(error) => parser_storage_error()
+            Ok(bindings) => parser_parse(d, state, nodes, links, roots, b, bindings) } } }
 fn parser_init_roots(d: Domain, state: State, nodes: __s0_Buffer(SyntaxRec), links: __s0_Buffer(SyntaxLinkRec)) -> I32 { return match __s0_buffer_new(U64, d) {
         Err(error) => parser_storage_error()
         Ok(b) => parser_init_diags(d, state, nodes, links, b) } }

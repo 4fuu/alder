@@ -1,8 +1,20 @@
+// One lexical name visible to the dotted-callee heuristic. Names are
+// append-only; binding_count restores the visible prefix at block, arm,
+// closure, and function exits, so a shadow in an inner scope never affects a
+// dotted call after that scope. source/start/end are the declared word.
+type ParseBindingRec {
+    source: U64
+    start: U64
+    end: U64
+}
+
 type ParseStore {
     nodes: __s0_Buffer(SyntaxRec)
     links: __s0_Buffer(SyntaxLinkRec)
     roots: __s0_Buffer(U64)
     diagnostics: __s0_Buffer(ParseDiagRec)
+    bindings: __s0_Buffer(ParseBindingRec)
+    binding_count: U64
 }
 
 type ParseCursor {
@@ -86,27 +98,62 @@ fn reject_parse(d: Domain, state: State, cursor: ParseCursor, kind: U64) -> Resu
     let token = parse_token(state, cursor)
     let diag = ParseDiagRec(kind: kind, source: token.source, start: token.start, end: token.end)
     let diagnostics = try __s0_buffer_append(ParseDiagRec, d, cursor.store.diagnostics, diag)
-    let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: diagnostics)
+    let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: diagnostics, bindings: cursor.store.bindings, binding_count: cursor.store.binding_count)
     return Ok(Rejected(ParseCursor(token: cursor.token, store: store)))
 }
 
 fn add_syntax(d: Domain, cursor: ParseCursor, kind: U64, token: U64, source: U64, start: U64, end: U64, name_start: U64, name_end: U64, children: U64) -> Result(ParseValue, __s0_Error) {
     let rec = SyntaxRec(kind: kind, token: token, source: source, start: start, end: end, name_start: name_start, name_end: name_end, children: children)
     let nodes = try __s0_buffer_append(SyntaxRec, d, cursor.store.nodes, rec)
-    let store = ParseStore(nodes: nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics)
+    let store = ParseStore(nodes: nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics, bindings: cursor.store.bindings, binding_count: cursor.store.binding_count)
     return Ok(ParseValue(cursor: ParseCursor(token: cursor.token, store: store), node: __s0_buffer_len(SyntaxRec, nodes)))
 }
 
 fn add_link(d: Domain, cursor: ParseCursor, node: U64, next: U64) -> Result(ParseCursor, __s0_Error) {
     let links = try __s0_buffer_append(SyntaxLinkRec, d, cursor.store.links, SyntaxLinkRec(node: node, next: next))
-    let store = ParseStore(nodes: cursor.store.nodes, links: links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics)
+    let store = ParseStore(nodes: cursor.store.nodes, links: links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics, bindings: cursor.store.bindings, binding_count: cursor.store.binding_count)
     return Ok(ParseCursor(token: cursor.token, store: store))
 }
 
 fn add_root(d: Domain, cursor: ParseCursor, node: U64) -> Result(ParseCursor, __s0_Error) {
     let roots = try __s0_buffer_append(U64, d, cursor.store.roots, node)
-    let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: roots, diagnostics: cursor.store.diagnostics)
+    let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: roots, diagnostics: cursor.store.diagnostics, bindings: cursor.store.bindings, binding_count: cursor.store.binding_count)
     return Ok(ParseCursor(token: cursor.token, store: store))
+}
+
+// parse_add_binding records one lexical name for the dotted-callee heuristic.
+// The binding is visible until the enclosing block, arm, closure, or function
+// restores binding_count; the visible prefix is scanned for an exact match.
+fn parse_add_binding(d: Domain, cursor: ParseCursor, token: TokenRec) -> Result(ParseCursor, __s0_Error) {
+    let bindings = try __s0_buffer_append(ParseBindingRec, d, cursor.store.bindings, ParseBindingRec(source: token.source, start: token.start, end: token.end))
+    let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics, bindings: bindings, binding_count: cursor.store.binding_count + 1)
+    return Ok(ParseCursor(token: cursor.token, store: store))
+}
+
+fn parse_restore_bindings(store: ParseStore, count: U64) -> ParseStore {
+    return ParseStore(nodes: store.nodes, links: store.links, roots: store.roots, diagnostics: store.diagnostics, bindings: store.bindings, binding_count: count)
+}
+
+// parse_binding_shadows reports whether the base word names a local or
+// parameter visible in the current parse scope. A lexical binding must win
+// over a bare import namespace of the same spelling.
+fn parse_binding_shadows(state: State, store: ParseStore, base: SyntaxRec) -> Bool {
+    var at: U64 = 0
+    while at < store.binding_count {
+        let binding = __s0_buffer_get(ParseBindingRec, store.bindings, at)
+        if binding.source == base.source && binding.end - binding.start == base.name_end - base.name_start {
+            let source = __s0_buffer_get(SourceRec, state.sources, base.source)
+            var equal = true
+            var offset: U64 = 0
+            while offset < base.name_end - base.name_start {
+                if text_byte(state, source, binding.start + offset) != text_byte(state, source, base.name_start + offset) { equal = false }
+                offset = offset + 1
+            }
+            if equal { return true }
+        }
+        at = at + 1
+    }
+    return false
 }
 
 fn expect_punct(d: Domain, state: State, cursor: ParseCursor, text: __s0_String) -> Result(ParseStep, __s0_Error) {
@@ -295,6 +342,7 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     let pattern = parse_token(state, initial)
     let wildcard = token_ident(state, initial) && token_text(state, pattern, "_")
     if !token_ident(state, initial) { return reject_parse(d, state, initial, 15) }
+    let binding_base = initial.store.binding_count
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
     var children: U64 = 0
     var name_start: U64 = pattern.start
@@ -312,7 +360,8 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
             if parse_step_bad(close) { return Ok(close) }
             cursor = parse_step_cursor(close)
             let binding_node = try add_syntax(d, cursor, 39, binding_cursor.token + 1, binding.source, binding.start, binding.end, binding.start, binding.end, 0)
-            cursor = try add_link(d, binding_node.cursor, binding_node.node, 0)
+            cursor = try parse_add_binding(d, binding_node.cursor, binding)
+            cursor = try add_link(d, cursor, binding_node.node, 0)
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         }
     }
@@ -354,7 +403,8 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
         cursor = try add_link(d, value.cursor, value.node, children)
     }
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let arm = try add_syntax(d, cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+    let arm_cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
+    let arm = try add_syntax(d, arm_cursor, 38, initial.token + 1, pattern.source, pattern.start, end, name_start, name_end, __s0_buffer_len(SyntaxLinkRec, arm_cursor.store.links))
     return Ok(Parsed(arm))
 }
 
@@ -542,6 +592,7 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     let open = try expect_punct(d, state, cursor, "(")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
+    let binding_base = cursor.store.binding_count
     var children: U64 = 0
     if !token_punct(state, cursor, ")") {
         var more = true
@@ -560,6 +611,7 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             let linked = try add_link(d, tv.cursor, tv.node, 0)
             let pnode = try add_syntax(d, linked, 13, colon_cursor.token, param.source, param.start, __s0_buffer_get(SyntaxRec, linked.store.nodes, tv.node - 1).end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            cursor = try parse_add_binding(d, cursor, param)
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -585,6 +637,7 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
         cursor = try add_link(d, block.cursor, block.node, children)
         children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, block.node - 1).end
+        cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
         let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
         return Ok(Parsed(node))
     }
@@ -600,6 +653,7 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
         cursor = try add_link(d, bv.cursor, bv.node, children)
         children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
+        cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
         let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
         return Ok(Parsed(node))
     }
@@ -609,6 +663,7 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     cursor = try add_link(d, bv.cursor, bv.node, children)
     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
     let end = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end
+    cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
     let node = try add_syntax(d, cursor, 58, initial.token + 2, start.source, start.start, end, start.start, start.end, children)
     return Ok(Parsed(node))
 }
@@ -705,6 +760,7 @@ fn dotted_callee_associated(state: State, cursor: ParseCursor, callee: SyntaxRec
         base = __s0_buffer_get(SyntaxRec, cursor.store.nodes, base_link.node - 1)
     }
     if base.kind != 24 { return false }
+    if parse_binding_shadows(state, cursor.store, base) { return false }
     let source = __s0_buffer_get(SourceRec, state.sources, base.source)
     let first = text_byte(state, source, base.name_start)
     if first >= 65 && first <= 90 { return true }
@@ -945,13 +1001,17 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         let sequence = try parse_expression(d, state, cursor, 0)
         if parse_step_bad(sequence) { return Ok(sequence) }
         let sv = parse_step_value(sequence)
-        let body = try parse_block(d, state, sv.cursor)
+        let binding_base = sv.cursor.store.binding_count
+        let loop_binding = try parse_add_binding(d, sv.cursor, name)
+        let body = try parse_block(d, state, loop_binding)
         if parse_step_bad(body) { return Ok(body) }
         let bv = parse_step_value(body)
-        cursor = try add_link(d, bv.cursor, sv.node, 0)
-        let children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
-        cursor = try add_link(d, cursor, bv.node, children)
-        let node = try add_syntax(d, cursor, 34, initial.token + 1, start.source, start.start, __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1).end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
+        var body_cursor = bv.cursor
+        body_cursor = ParseCursor(token: body_cursor.token, store: parse_restore_bindings(body_cursor.store, binding_base))
+        body_cursor = try add_link(d, body_cursor, sv.node, 0)
+        let children = __s0_buffer_len(SyntaxLinkRec, body_cursor.store.links)
+        body_cursor = try add_link(d, body_cursor, bv.node, children)
+        let node = try add_syntax(d, body_cursor, 34, initial.token + 1, start.source, start.start, __s0_buffer_get(SyntaxRec, body_cursor.store.nodes, bv.node - 1).end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, body_cursor.store.links))
         return Ok(Parsed(node))
     }
     if start.keyword == 14 {
@@ -985,7 +1045,8 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
             cursor = try add_link(d, cursor, ev.node, 0)
         }
         let node = try add_syntax(d, cursor, 35, initial.token + 1, start.source, start.start, end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
-        return Ok(Parsed(node))
+        let bound = try parse_add_binding(d, node.cursor, name)
+        return Ok(Parsed(ParseValue(cursor: bound, node: node.node)))
     }
     if start.keyword == 5 || start.keyword == 6 {
         var kind: U64 = 15
@@ -1012,7 +1073,8 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         cursor = try add_link(d, ev.cursor, ev.node, children)
         let rec = __s0_buffer_get(SyntaxRec, cursor.store.nodes, ev.node - 1)
         let node = try add_syntax(d, cursor, kind, initial.token + 1, start.source, start.start, rec.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
-        return Ok(Parsed(node))
+        let bound = try parse_add_binding(d, node.cursor, name)
+        return Ok(Parsed(ParseValue(cursor: bound, node: node.node)))
     }
     if start.keyword == 12 {
         return parse_return_statement(d, state, initial, 0)
@@ -1053,6 +1115,7 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
 fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
     if !token_punct(state, initial, "{") { return reject_parse(d, state, initial, 4) }
+    let binding_base = initial.store.binding_count
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
     var children: U64 = 0
     while !token_punct(state, cursor, "}") {
@@ -1065,7 +1128,7 @@ fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
         if !token_punct(state, cursor, "}") && !line_break_before(state, cursor) { return reject_parse(d, state, cursor, 11) }
     }
     let close = parse_token(state, cursor)
-    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    cursor = ParseCursor(token: cursor.token + 1, store: parse_restore_bindings(cursor.store, binding_base))
     let node = try add_syntax(d, cursor, 14, initial.token + 1, start.source, start.start, close.end, 0, 0, children)
     return Ok(Parsed(node))
 }
@@ -1123,6 +1186,7 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
     let open = try expect_punct(d, state, cursor, "(")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
+    let binding_base = cursor.store.binding_count
     var children: U64 = 0
     var runtime = false
     if !token_punct(state, cursor, ")") {
@@ -1170,6 +1234,8 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
                 }
             }
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            let parameter_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, pnode.node - 1)
+            if parameter_node.kind == 13 || parameter_node.kind == 47 || parameter_node.kind == 48 { cursor = try parse_add_binding(d, cursor, param) }
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -1198,6 +1264,7 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
         let block = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1)
         end = block.end
     }
+    cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
     let node = try add_syntax(d, cursor, 51, initial.token + 1, start.source, start.start, end, name.start, name.end, children)
     return Ok(Parsed(node))
 }
@@ -1263,6 +1330,7 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
     let open = try expect_punct(d, state, cursor, "(")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
+    let binding_base = cursor.store.binding_count
     var children: U64 = 0
     var runtime = false
     if !token_punct(state, cursor, ")") {
@@ -1311,6 +1379,8 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
             }
             }
             cursor = try add_link(d, pnode.cursor, pnode.node, children)
+            let parameter_node = __s0_buffer_get(SyntaxRec, cursor.store.nodes, pnode.node - 1)
+            if parameter_node.kind == 13 || parameter_node.kind == 47 || parameter_node.kind == 48 { cursor = try parse_add_binding(d, cursor, param) }
             children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
             if token_punct(state, cursor, ",") {
                 cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
@@ -1333,6 +1403,7 @@ fn parse_function_owned(d: Domain, state: State, initial: ParseCursor, receiver_
     if parse_step_bad(body) { return Ok(body) }
     let bv = parse_step_value(body)
     cursor = try add_link(d, bv.cursor, bv.node, children)
+    cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, binding_base))
     let block = __s0_buffer_get(SyntaxRec, cursor.store.nodes, bv.node - 1)
     let node = try add_syntax(d, cursor, 12, initial.token + 1, start.source, start.start, block.end, name.start, name.end, __s0_buffer_len(SyntaxLinkRec, cursor.store.links))
     return Ok(Parsed(node))

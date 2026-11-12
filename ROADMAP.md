@@ -2148,12 +2148,6 @@ The following items are not part of the current implementation scope:
   program works after dropping the `read` import. The `std.fs` fixtures keep
   method calls and free-function imports in separate programs until method
   lookup prefers the receiver's trait method.
-- a local binding that shadows a module import is still parsed as the module
-  namespace in a dotted call. With `import hello.util` and a binding named
-  `util`, `util.count()` is parsed as an associated call and the checker
-  reports diagnostic 41 (wrong argument count). Minimal repro:
-  `import hello.util` then `fn probe(util: util.Thing) -> U64 { return util.count() }`.
-  Selected imports (`import hello.util { Thing }`) are unaffected.
 
 ## LLVM Reconsideration Gate
 

@@ -67,7 +67,9 @@ pub import acme.api { Request, Response }
 - `pub import ... { ... }` explicitly re-exports selected names.
 - wildcard imports and implicit preludes other than the documented `core`
   prelude are absent.
-- selected imported names cannot silently shadow a local declaration.
+- selected imported names cannot silently shadow a local declaration, and a
+  local or parameter binding wins over a namespace import in a dotted call
+  within its lexical scope.
 
 Dependencies expose their declared package root. The dependency name in the
 manifest must match that root, so an import has one meaning without a hidden
