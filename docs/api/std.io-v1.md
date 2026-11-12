@@ -12,7 +12,10 @@ example file cannot precede the module it imports. The module lives at
 Snapshot v1 covers the blocking half of the frozen contract: the `Io` and
 `BlockingIo` capability traits, the `Blocking` capability, the `Reader`,
 `Writer`, and `Seek` traits, buffered readers and writers, standard input,
-output, and error, the exact/copy helpers, and `IoError`. The `AsyncIo` trait is
+output, and error, the exact/copy helpers, and `IoError`. The child-process
+slice adds `spawn`, `wait`, `kill`, and `poll` to `Io` with `HostChild`,
+`ChildStatus`, and `PollPair`; `std.process` builds its public `Command` and
+`Child` surface on them. The `AsyncIo` trait is
 declared here with no implementation; `Evented`, `SimIo`, and the suspending
 lowering arrive with Milestone 9 as an additive v2 of this snapshot.
 
@@ -95,6 +98,36 @@ pub type FileStat {
     pub modified: Timestamp
 }
 
+/// How a waited child ended. `kind` 0 is a normal exit with `value` as the
+/// code; 1 is a signal termination with `value` as the signal number.
+pub type ChildStatus {
+    pub kind: U8
+    pub value: I32
+}
+
+/// Readiness of the two descriptors a capture drain watches. Readiness
+/// includes hangup and error states, so the caller always reaches a read that
+/// observes end of stream.
+pub type PollPair {
+    pub first_ready: Bool
+    pub second_ready: Bool
+}
+
+/// One running child and its parent-held pipe ends. The pipe end is absent
+/// when that stream was inherited or already taken. This is the
+/// capability-to-`std.process` bridge; cleanup closes every remaining pipe
+/// end but never waits or kills by itself.
+pub type HostChild {
+    pub pid: I32
+    pub stdin: Option(HostFile)
+    pub stdout: Option(HostFile)
+    pub stderr: Option(HostFile)
+}
+
+impl Cleanup for HostChild {
+    // Best-effort close of every remaining pipe end.
+}
+
 /// The I/O capability trait. Every value that may wait on the host or observe
 /// host nondeterminism flows through an `Io` implementation. Requirement
 /// arguments and results use only `std.io` types, `std.path.Path`, and
@@ -146,6 +179,26 @@ pub trait Io {
     fn write_stdout(self, data: [U8]) -> Result(U64, IoError)
     /// Writes to standard error.
     fn write_stderr(self, data: [U8]) -> Result(U64, IoError)
+    /// Starts a child. `arguments` excludes `argv[0]`; the host receives
+    /// `program` as `argv[0]`. Environment entries are exact `KEY=VALUE`
+    /// strings to set and keys to remove, applied over the inherited
+    /// environment (or an empty one when `clear_environment` is true). A
+    /// stream mode is 0 to inherit the parent descriptor and 1 to create a
+    /// pipe whose parent end is returned in `HostChild`; no shell, quoting, or
+    /// expansion is involved.
+    fn spawn(self, program: OsString, arguments: Vec(OsString),
+             set_environment: Vec(OsString), remove_environment: Vec(OsString),
+             clear_environment: Bool, working_directory: Option(Path),
+             stdin_mode: U8, stdout_mode: U8, stderr_mode: U8)
+        -> Result(HostChild, IoError)
+    /// Waits for `pid` and reports how it ended.
+    fn wait(self, pid: I32) -> Result(ChildStatus, IoError)
+    /// Sends an unconditional kill to `pid`.
+    fn kill(self, pid: I32) -> Result(Unit, IoError)
+    /// Waits until either pipe end has input, hangup, or an error. A
+    /// negative timeout waits without a deadline.
+    fn poll(self, mut first: HostFile, mut second: HostFile, timeout_ms: I32)
+        -> Result(PollPair, IoError)
     /// Sleeps without observing an earlier wakeup.
     fn sleep(self, seconds: U64, nanos: U32)
     /// Reads the monotonic clock.
@@ -478,6 +531,11 @@ implementations resolve without an explicit import.
   `io.close_directory` named as the observing releases. Every owner of a host
   handle (`File(I)`, `Entries(I)`, and the process pipe ends in
   `std.process`) holds exactly one and closes it once.
+- Process creation is a host operation: `spawn`, `wait`, `kill`, and `poll`
+  are on `Io`, so a future `SimIo` can fake processes. `std.io` builds the
+  pipe-end `HostFile`s inside `Blocking.spawn`; `std.process` moves them out
+  with `Option.take` and never forges a handle. The 0/1 stream modes and the
+  exact byte blobs keep the contract free of shell semantics.
 - `BufReader` over a copyable reader is an ordinary copyable value; `BufWriter`
   owns its `Cleanup` sink and is affine. Mutation happens through exclusively
   borrowed method calls and the compiler updates a uniquely owned buffer in

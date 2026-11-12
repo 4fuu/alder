@@ -55,3 +55,33 @@ func TestIoShimAcceptsPresetFeatureMacros(t *testing.T) {
 		t.Fatalf("io shim with preset feature macros: %v\n%s", err, output)
 	}
 }
+
+// The process shim owns descriptor arrays, fork/exec, status decoding, and
+// the two-descriptor poll behind std.io. It is part of every generated program
+// that spawns a child, so it must stay clean under the same strict set as the
+// runtime and the other shims.
+const processShimSource = `#include "std/c/process_shim.h"
+#include <stdio.h>
+int main(void) { return 0; }
+`
+
+func TestProcessShimCompilesStrict(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "process-shim.c")
+	if err := os.WriteFile(source, []byte(processShimSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow",
+		"-Wconversion", "-ffp-contract=off", "-fsyntax-only",
+		"-I", filepath.Join(root, "sysroot"), source}
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("process shim strict compile: %v\n%s", err, output)
+	}
+}
