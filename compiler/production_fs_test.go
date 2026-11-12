@@ -140,7 +140,7 @@ fn probe_main(cap: Blocking) -> Result(I32, IoError) {
     if sorted[3].name.to_bytes() != "link".to_bytes() { return Ok(5) }
     if sorted[4].name.to_bytes() != "sub".to_bytes() { return Ok(6) }
     if sorted[3].kind != EntryKind.Symlink { return Ok(7) }
-    let listing = try read_dir(cap, dir)
+    using listing = try read_dir(cap, dir)
     var count: U64 = 0
     var reading = true
     while reading {
@@ -418,13 +418,14 @@ fn probe(cap: Blocking, path: Path) -> Result(I32, IoError) {
     let file: File(Blocking) = try open(cap, path)
     let reader = BufReader.with_capacity(2, file)
     var one: Array(U8, 1) = [0]
+    var code: I32 = 0
     match reader.read(one.slice_mut(0, 1)) {
-        Ok(n) => { if n != 1 || one[0] != 104 { return Ok(1) } }
-        Err(_) => { return Ok(2) }
+        Ok(n) => { if n != 1 || one[0] != 104 { code = 1 } }
+        Err(_) => { code = 2 }
     }
     let source = reader.into_source()
     using kept = source
-    return Ok(0)
+    return Ok(code)
 }
 
 pub fn main() -> I32 {

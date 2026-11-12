@@ -90,7 +90,9 @@ model, an affine argument transfers into the aggregate being constructed
 its payload by transfer, and parts leave an aggregate only by transferring
 the aggregate itself: there is no field-extraction or per-part move syntax.
 An aggregate owner satisfies the exit rule by being transferred or registered
-with `using`, exactly like any other owner.
+with `using`, exactly like any other owner. An affine match-arm binding is
+scoped to its arm: transferring it into the arm's result counts as its
+transfer, while leaving it live at the end of the arm is rejected.
 
 ## Scoped capabilities
 

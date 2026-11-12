@@ -84,9 +84,9 @@ fn main() -> I32 {
     let taken = holder.take_it()
     match taken {
         Some(item) => {
-            bump(item)
-            if item.n != 8 { return 1 }
-            item.cleanup()
+            using owned = item
+            bump(owned)
+            if owned.n != 8 { return 1 }
         }
         None => { return 2 }
     }
@@ -94,8 +94,8 @@ fn main() -> I32 {
     let taken2 = take_param(holder2)
     match taken2 {
         Some(item) => {
-            if item.n != 2 { return 3 }
-            item.cleanup()
+            using owned = item
+            if owned.n != 2 { return 3 }
         }
         None => { return 4 }
     }
@@ -154,8 +154,8 @@ func TestOptionTakeProduction(t *testing.T) {
 	if !strings.Contains(mirText.stdout, "enum.construct") || !strings.Contains(mirText.stdout, "none") {
 		t.Fatalf("option take MIR does not construct none:\n%s", mirText.stdout)
 	}
-	if !strings.Contains(mirText.stdout, "borrow_mut local %__alder_mut_binding_") {
-		t.Fatalf("option take MIR does not materialize the match binding for the mut argument:\n%s", mirText.stdout)
+	if !strings.Contains(mirText.stdout, "borrow_mut local %owned") && !strings.Contains(mirText.stdout, "borrow_mut local %__alder_mut_binding_") {
+		t.Fatalf("option take MIR does not borrow the registered match binding for the mut argument:\n%s", mirText.stdout)
 	}
 }
 

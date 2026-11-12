@@ -5704,6 +5704,11 @@ fn check_match_arm_links(d: Domain, state: State, parse: ParseStore, base: Check
         }
         if draft.deferred { return Ok(MatchArmsDefer) }
         if binding != 0 && view_root != 0 && !view_expression_ok(current, draft.expression) { return match_arms_fail(d, state, current, 133, body_node) }
+        // The arm expression is the match result, so a direct affine owner
+        // read here transfers into that result, exactly like a return.
+        let transfer = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+        if transfer.rejected { return match_arms_fail(d, state, current, 345, body_node) }
+        current = transfer.store
         arm_body = draft.expression
         arm_value_type = draft.checked_type
     }
@@ -12611,26 +12616,39 @@ fn owner_flow_expression(store: CheckStore, binding: U64, expression_id: U64, st
         current = checked.state
         child = child + 1
     }
+    var match_terminated = false
     if expression.kind == 12 {
         let checked_match = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
         var arm: U64 = 0
         var arm_state: U64 = 2
+        var any_live_arm = false
+        var all_terminated = true
         while arm < checked_match.arm_count {
-            let body = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked_match.first_arm - 1 + arm).body
-            let checked = owner_flow_expression(store, binding, body, current)
+            let arm_record = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked_match.first_arm - 1 + arm)
+            var checked = owner_flow_expression(store, binding, arm_record.body, current)
+            if arm_record.block != 0 { checked = owner_flow_block(store, binding, arm_record.block, current, 0) } else {
+                if arm_record.statement != 0 { checked = owner_flow_statement(store, binding, arm_record.statement, current, 0) }
+            }
             if checked.error_kind != 0 { return checked }
-            if arm_state == 2 { arm_state = checked.state } else {
-                if arm_state != checked.state { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: expression.syntax) }
+            if checked.terminated {
+                // A returning arm leaves the join; only live arms meet here.
+            } else {
+                any_live_arm = true
+                all_terminated = false
+                if arm_state == 2 { arm_state = checked.state } else {
+                    if arm_state != checked.state { return OwnerFlowRec(state: current, terminated: false, error_kind: 94, syntax: expression.syntax) }
+                }
             }
             arm = arm + 1
         }
-        if arm_state != 2 { current = arm_state }
+        if any_live_arm { current = arm_state }
+        match_terminated = all_terminated
     }
     if (expression.kind == 1 || expression.kind == 5 || expression.kind == 22) && expression.parameter_use == binding {
         if current == 1 || current >= 512 { return OwnerFlowRec(state: current, terminated: false, error_kind: 91, syntax: expression.syntax) }
         if expression.kind == 22 { current = 1 }
     }
-    return OwnerFlowRec(state: current, terminated: false, error_kind: 0, syntax: 0)
+    return OwnerFlowRec(state: current, terminated: match_terminated, error_kind: 0, syntax: 0)
 }
 
 // Whether a block declares `binding`, at its own level or inside a nested
@@ -12654,6 +12672,19 @@ fn owner_flow_declares(store: CheckStore, block_id: U64, binding: U64) -> Bool {
         link_id = link.next
     }
     return false
+}
+
+// A match arm binding is introduced only inside its arm, so its owner flow
+// starts at the arm body rather than at function entry. Returning the zero
+// record means the binding is an ordinary local or parameter.
+fn match_arm_for_binding(store: CheckStore, binding: U64) -> CheckedMatchArmRec {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) {
+        let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, at)
+        if arm.binding == binding { return arm }
+        at = at + 1
+    }
+    return CheckedMatchArmRec(owner: 0, syntax: 0, checked_match: 0, variant_use: 0, variant_kind: 0, binding: 0, environment: 0, body: 0, block: 0, guard: 0, statement: 0)
 }
 
 fn owner_flow_block(store: CheckStore, binding: U64, block_id: U64, state: U64, affine_mask: U64) -> OwnerFlowRec {
@@ -12848,7 +12879,20 @@ fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStor
                     }
                 }
             }
-            var flow = owner_flow_block(after, local_at + 1, checked_block.semantic, initial_state, affine_mask)
+            var flow = OwnerFlowRec(state: initial_state, terminated: false, error_kind: 0, syntax: 0)
+            let arm = match_arm_for_binding(after, local_at + 1)
+            if arm.binding != 0 {
+                // An arm binding is live at arm entry; it has no let
+                // declaration statement to reset the flow state.
+                let arm_initial: U64 = 0
+                if arm.block != 0 { flow = owner_flow_block(after, local_at + 1, arm.block, arm_initial, affine_mask) } else {
+                    if arm.statement != 0 { flow = owner_flow_statement(after, local_at + 1, arm.statement, arm_initial, affine_mask) } else {
+                        flow = owner_flow_expression(after, local_at + 1, arm.body, arm_initial)
+                    }
+                }
+            } else {
+                flow = owner_flow_block(after, local_at + 1, checked_block.semantic, initial_state, affine_mask)
+            }
             // A cleanup hook's take-self parameter is the disposal itself:
             // returning without a further transfer is the normal shape, so
             // the inline return-exit rule is cleared for it.

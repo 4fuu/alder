@@ -151,7 +151,10 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     let missing = try os_value("/alder/does/not/exist")
     let missing_command = Command.new(missing)
     match Command.spawn(io, missing_command) {
-        Ok(_) => { return Ok(110) }
+        Ok(unexpected_child) => {
+            using unexpected_owner = unexpected_child
+            return Ok(110)
+        }
         Err(error) => {
             match error {
                 NotFound => {}
