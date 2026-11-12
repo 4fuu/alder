@@ -1,6 +1,6 @@
 # `std.fs` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; value layer implemented**
 
 This is the versioned public snapshot for filesystem access. It is normative
 together with the executable example
@@ -12,7 +12,10 @@ the example file cannot precede the module it imports. The module lives at
 Snapshot v1 covers the affine `File` with `Cleanup`, metadata, directory
 iteration in host order plus the byte-sorted deterministic form, copy,
 rename, remove, canonicalize, permissions query and replace, and temporary
-files and directories that clean up after themselves. File and directory
+files and directories that clean up after themselves. The pure value layer
+(`Options` and `Permissions`) is implemented now; host handles, directory
+iteration, metadata, and temporary owners wait for the `std.io` slice 2
+capability and host handles. File and directory
 operations return `IoError` (the shared OS-layer error of `std.io`, as fixed
 by the `files.copy` design example); path-shape failures are unreachable here
 because `Path` construction is checked.
@@ -31,12 +34,12 @@ import std.time { SystemTime }
 /// Options for `File.open_options`. Construct with `Options.read` or
 /// `Options.write` and adjust fields on a `var` binding.
 pub type Options {
-    read: Bool
-    write: Bool
-    append: Bool
-    truncate: Bool
-    create: Bool
-    create_new: Bool
+    pub read: Bool
+    pub write: Bool
+    pub append: Bool
+    pub truncate: Bool
+    pub create: Bool
+    pub create_new: Bool
 }
 
 impl Options {
@@ -184,9 +187,9 @@ pub type Metadata {
 /// Portable permission query. On POSIX targets these are the owner bits;
 /// other targets map best-effort and document the mapping.
 pub type Permissions {
-    readable: Bool
-    writable: Bool
-    executable: Bool
+    pub readable: Bool
+    pub writable: Bool
+    pub executable: Bool
 }
 ```
 
@@ -243,6 +246,13 @@ impl(IoType: type(io.Io)) Cleanup for TempDir(IoType) {
     // release is `keep` plus `fs.remove_dir_all`.
 }
 ```
+
+## Value-layer progress
+
+`Options.read`, `Options.write`, and the permission record fields are pure
+values and are installed at `sysroot/std/fs.al`. The fields are public because
+callers adjust an `Options` binding and inspect `Permissions` values; the
+remaining file operations wait for the capability and host-handle layer.
 
 ## Contracts
 
