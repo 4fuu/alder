@@ -263,7 +263,10 @@ fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     if parse_step_bad(close) { return Ok(close) }
     cursor = parse_step_value(close).cursor
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    let node = try add_syntax(d, cursor, 6, initial.token + 1, first.source, first.start, end, first.start, first.end, children)
+    // The applied head may be module-qualified (`fs.TempFile(I)`); its name
+    // span covers every dot-separated segment, as the non-generic type form
+    // already does. Only the first segment would resolve as a bare name.
+    let node = try add_syntax(d, cursor, 6, initial.token + 1, first.source, first.start, end, first.start, last.end, children)
     return Ok(Parsed(node))
 }
 
