@@ -4672,8 +4672,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     let parameter = __s0_buffer_get(LocalRec, store.locals, parameter_binding - 1)
                     if parameter.mutable == 1 { borrow_kind = 2 }
                     if parameter.mutable == 0 && target_symbol.inherent_owner != 0 {
-                        let parameter_source = __s0_buffer_get(SourceRec, source_state.sources, parameter.source)
-                        if source_word(source_state, parameter_source, parameter.name_start, parameter.name_end, "self") { borrow_kind = 1 }
+                        // A receiver the checker marked as a transfer is a
+                        // `take self` value; only a borrowed receiver becomes
+                        // a reference argument.
+                        if checked_child.kind != 22 && checked_child.field_move == 0 {
+                            let parameter_source = __s0_buffer_get(SourceRec, source_state.sources, parameter.source)
+                            if source_word(source_state, parameter_source, parameter.name_start, parameter.name_end, "self") { borrow_kind = 1 }
+                        }
                     }
                 }
             }
@@ -5942,7 +5947,21 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             }
             let parameter = try mir_add_function_param(d, parameter_type.state.mir, function, param_ordinal, name, parameter_type.id)
             current = lower_with_mir(current, parameter.store)
-            if (local.mutable == 0 && !read_receiver) || local.mutable == 2 {
+            if local.mutable == 2 {
+                // A `take` parameter owns the incoming value, so it needs a
+                // real local place: field receivers inside the method mutate
+                // it with borrow_mut, and a later field read must observe
+                // those writes.
+                let slot = try mir_add_local(d, current.mir, function, local_ordinal, name, typ.id)
+                current = lower_with_mir(current, slot.store)
+                let place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+                current = lower_with_mir(current, place.store)
+                let stored = try lower_add_instr(d, current, function, 1, mir_op_store(), 0, place.id, 0, parameter.id, 0, 0, "")
+                current = stored.state
+                let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: slot.id, parameter: 0, initial: 0))
+                current = lower_with_bindings(current, bindings)
+                local_ordinal = local_ordinal + 1
+            } else { if (local.mutable == 0 && !read_receiver) {
                 let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: 1, initial: 0))
                 current = lower_with_bindings(current, bindings)
             } else {
@@ -5950,7 +5969,7 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
                 if local.mutable == 1 { parameter_kind = 2 }
                 let bindings = try __s0_buffer_append(LowerBindingMapRec, d, current.bindings, LowerBindingMapRec(binding: binding, mir_id: parameter.id, parameter: parameter_kind, initial: 0))
                 current = lower_with_bindings(current, bindings)
-            }
+            } }
             if aliases_domain && param_ordinal == 0 {
                 let domains = try __s0_buffer_append(LowerValueMapRec, d, current.values, LowerValueMapRec(expression: lower_domain_key(store, owner), value: parameter.id))
                 current = lower_with_values(current, domains)
@@ -7926,6 +7945,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
+        if item.field_move != 0 && (item.kind != 21 || item.field_move > __s0_buffer_len(LocalRec, store.locals)) { return false }
         if (item.child_count == 0 && item.first_child != 0) || (item.child_count != 0 && item.first_child == 0) { return false }
         if item.child_count != 0 && item.first_child - 1 + item.child_count > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return false }
         var child_at: U64 = 0

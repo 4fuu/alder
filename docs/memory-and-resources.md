@@ -317,6 +317,19 @@ resource on both `Ok` and `Err`. A retryable operation instead uses `mut self`
 and leaves fallback cleanup registered. Automatic cleanup remains suitable for
 abandonment and cannot hide a recoverable result.
 
+A `take self` method may move its own direct record fields out one at a time,
+by returning a field, binding it with `let`, or passing it as a `take`
+argument. A moved field is a transfer of that sub-owner, so a later read of the
+same field is the ordinary use-after-transfer error, and the whole owner may
+not be used or transferred once any of its fields has moved. The method exits
+only when every affine field has been moved out or registered with `using`;
+leaving one live is rejected like any other untransferred affine owner. The
+wrapper's own cleanup hook does not run for the taken binding — the registration
+was disarmed before the call, so the consuming method is the release. A method
+that fails after moving a field must itself release that field (and any other
+live field) before returning `Err`. A borrowed receiver (`self` or `mut self`)
+may not move a field.
+
 A cleanup hook whose owner holds a suspending I/O capability, such as a task
 group or an evented socket, may suspend while joining child tasks or completing
 an asynchronous release, so its scope exit is potentially suspending. Once

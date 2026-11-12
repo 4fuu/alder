@@ -507,7 +507,12 @@ Implemented expressions include:
 - M7.5 resource composition: affine owners transfer into aggregate
   construction (records, enums, `Option`, `Result`, fixed arrays), affine
   scrutinees are consumed as a whole, and parts leave an aggregate only by
-  transferring the whole aggregate or registering it with `using`;
+  transferring the whole aggregate or registering it with `using`. A `take
+  self` method may additionally move its own direct fields out one at a time
+  (`return self.field`, `let x = self.field`, or a `take` argument); each such
+  move transfers that sub-owner, the whole owner becomes unusable afterwards,
+  and every affine field must be moved or registered before exit. A borrowed
+  receiver cannot move a field; code 308 names the rejection;
 - `Vec(T)` over a `Cleanup` owner: elements enter by transfer through
   `push`/`from_array`, element reads and views are rejected, a vector grows
   only through a plain local binding, and a registration drains every element

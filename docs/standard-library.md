@@ -206,11 +206,12 @@ the production driver and checks cursor advancement, end-of-stream, the
 buffer, read refills, buffered write ordering through a validating sink, and
 the mutable-place rejection.
 
-`into_source` and `into_sink` are pending the checker rule that a moved
-affine field of a taken owner is an ownership transfer (code 93 today); until
-then the wrapped owner is released through `flush` plus `using`/`Cleanup`, and
-the snapshot records the gap. The capability types, host files, and standard
-streams arrive with the C-binding buffer surface as slice 2.
+`into_source` and `into_sink` return the wrapped owner through the
+consumed-field-move rule: a `take self` method may move one direct field out,
+and the returned owner is owned by the caller. `into_sink` flushes pending
+bytes first and releases the sink itself on a flush error. The capability
+types, host files, and standard streams arrive with the C-binding buffer
+surface as slice 2.
 
 The hosted `std` module graph is acyclic and fixed by the snapshots:
 `std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports

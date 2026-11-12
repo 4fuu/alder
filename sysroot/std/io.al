@@ -311,6 +311,14 @@ impl(Source: type(Reader)) BufReader(Source) {
     }
 }
 
+impl(Source: type(Reader, Cleanup)) BufReader(Source) {
+    /// Returns the wrapped reader. Pending buffered bytes stay unread; the
+    /// buffer is an ordinary `Vec(U8)` that owns no element cleanup.
+    fn into_source(take self) -> Source {
+        return self.source
+    }
+}
+
 impl(Source: type(Reader)) Reader for BufReader(Source) {
     fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError) {
         let size = buffer.len()
@@ -351,6 +359,29 @@ impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
         var room = capacity
         if room == 0 { room = 1 }
         return BufWriter(Sink)(sink: sink, buffer: zero_bytes(room), length: 0)
+    }
+
+    /// Flushes pending bytes and returns the sink. A flush error releases
+    /// the sink here, so the caller no longer holds it.
+    fn into_sink(take self) -> Result(Sink, IoError) {
+        let pending = self.length
+        var offset: U64 = 0
+        while offset < pending {
+            match self.sink.write(self.buffer.slice(offset, pending)) {
+                Ok(written) => {
+                    if written == 0 {
+                        self.sink.cleanup()
+                        return Err(InvalidInput)
+                    }
+                    offset = offset + written
+                }
+                Err(error) => {
+                    self.sink.cleanup()
+                    return Err(error)
+                }
+            }
+        }
+        return Ok(self.sink)
     }
 
 }

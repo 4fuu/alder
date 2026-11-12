@@ -269,11 +269,69 @@ fn buffered_writes() -> I32 {
     return 0
 }
 
+type Tick {
+    position: U64
+}
+
+impl Reader for Tick {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, io.IoError) {
+        if self.position >= 3 { return Ok(0) }
+        if buffer.len() == 0 { return Ok(0) }
+        buffer[0] = 120
+        self.position = self.position + 1
+        return Ok(1)
+    }
+}
+
+impl Cleanup for Tick {
+    fn cleanup(take self) -> Unit {
+        assert(self.position == 1, "buffered source cleanup")
+        return
+    }
+}
+
+fn buffered_into_source() -> I32 {
+    let reader = io.BufReader.with_capacity(2, Tick(position: 0))
+    var one: Array(U8, 1) = [0]
+    var failed: I32 = 0
+    match reader.read(one.slice_mut(0, 1)) {
+        Ok(n) => { if n != 1 { failed = 1 } }
+        Err(_) => { failed = 2 }
+    }
+    if failed == 0 && one[0] != 120 { failed = 3 }
+    let source = reader.into_source()
+    using kept = source
+    return failed
+}
+
+fn buffered_into_sink() -> I32 {
+    let writer = io.BufWriter.with_capacity(4, Checker(total: 0, failure: 0, expected: 3))
+    let data: Array(U8, 3) = [65, 66, 67]
+    var failed: I32 = 0
+    match writer.write(data.slice(0, 3)) {
+        Ok(n) => { if n != 3 { failed = 1 } }
+        Err(_) => { failed = 2 }
+    }
+    var outcome: I32 = 2
+    match writer.into_sink() {
+        Ok(sink) => {
+            using kept = sink
+            outcome = failed
+        }
+        Err(_) => { outcome = 2 }
+    }
+    return outcome
+}
+
 fn main() -> I32 {
     let reads = buffered_reads()
     if reads != 0 { return reads }
     let writes = buffered_writes()
     if writes != 0 { return writes }
+    let consumed = buffered_into_sink()
+    if consumed != 0 { return consumed }
+    let returned = buffered_into_source()
+    if returned != 0 { return returned }
     return 0
 }
 `,

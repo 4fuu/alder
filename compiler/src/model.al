@@ -282,6 +282,9 @@ type CheckedExprRec {
     operator: U64
     site_kind: U64
     site_syntax: U64
+    // For a kind-21 field access, the taken owner local whose field this
+    // expression moves; zero for an ordinary read.
+    field_move: U64
 }
 
 type CheckedExprChildRec {

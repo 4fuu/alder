@@ -1562,10 +1562,9 @@ of stream, the default `copy_to`, the error report, line reads and refills
 across a two-byte buffer, buffered write ordering through a validating sink,
 and the mutable-place rejection for a `let`-bound reader.
 
-`into_source`/`into_sink` are pending the checker rule that a moved affine
-field of a taken owner is an ownership transfer; the snapshot records the gap
-and buffered writes reach the sink through `flush` or scope-exit cleanup
-meanwhile.
+`into_source`/`into_sink` return the wrapped owner through the
+consumed-field-move rule (`take self` moves one direct field); `into_sink`
+flushes pending bytes and releases the sink on a flush error.
 The capability types, host files, and standard streams remain slice 2. Docs:
 [Standard Library](docs/standard-library.md) and the frozen
 [`std.io` snapshot](docs/api/std.io-v1.md).
@@ -1921,6 +1920,11 @@ The following items are not part of the current implementation scope:
   handle through a deref place, so table elements await a storage decision.
   No 1.0 sentence requires the composition, and diagnostic 143 keeps the
   surface honest in the meantime.
+- a mutable view formed directly from a field (`self.buffer.slice_mut(...)`):
+  field loads are value copies, so a view of one would write the copy. The
+  checker rejects the shape with diagnostic 307 and `BufReader`/`BufWriter`
+  copy the field to a local, take the view, and store it back. A field-rooted
+  mutable view needs a Vec-view MIR operation over `safe_mut` storage.
 
 ## LLVM Reconsideration Gate
 
