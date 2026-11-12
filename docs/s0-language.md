@@ -127,9 +127,11 @@ Milestone 7.5 adds the static trait surface of
   default implementation. `Self` names the implementing type inside a trait
   or one of its implementations. Trait and impl methods may declare their
   own leading `type` parameters; an implementation method must declare
-  exactly as many as its requirement, and they match positionally. Method
-  type parameters are recorded in the trait's scope, so their names must be
-  unique across the whole trait and they resolve throughout it; explicit
+  exactly as many as its requirement, and they match positionally. A receiver
+  method may be declared as `fn spawn(I: type(Io), self, io: I)` and called as
+  `command.spawn(io)`. Method type parameters are recorded in the trait's
+  scope, so their names must be unique across the whole trait and they resolve
+  throughout it; explicit
   specialization follows the receiver (`box.combine(U64, 3)`). Defaulted
   requirements synthesize for every trait: a materialized method resolves
   the trait's parameters as the concrete trait arguments of its own

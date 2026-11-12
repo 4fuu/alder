@@ -1699,9 +1699,10 @@ wiring, and `output` requires both captures piped, reporting
 and `poll` are on `std.io.Io` with `HostChild`, `ChildStatus`, and `PollPair`;
 `sysroot/std/c/process_shim.h` holds the argv/environment blobs, PATH
 resolution, fork/exec, pipes, waitpid decoding, signalling, and poll. The
-frozen receiver forms are the target; the command is passed by value to static
-associated calls for the same call expressions until generic associated
-receiver-call inference (C-interop item d) lands. Evidence:
+frozen receiver forms are the target; the command is still passed by value to
+static associated calls for the same call expressions. Receiver-call inference
+is now available, so `std.process` can move to the frozen receiver spelling
+without a language change. Evidence:
 `compiler/production_process_v1_test.go` runs capture, bidirectional pipes,
 kill/wait, environment/working-directory delivery, invalid wiring, and
 `NotFound` through the installed sysroot and sanitizers; the snapshot example

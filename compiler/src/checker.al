@@ -3666,6 +3666,36 @@ fn unify_type_children(d: Domain, store: CheckStore, expected: CheckedTypeRec, a
     }
 }
 
+// An associated function on a generic type has no receiver value to seed its
+// implementation parameters. The method's declared result often names the
+// implementation's own type (for example File(I) inside Result(File(I), E)),
+// so the expected-result type supplies the concrete instance. Walk the
+// expected type's arguments and unify the first application with the same
+// declared target as the implementation's self type.
+fn unify_impl_self_in_expected(d: Domain, store: CheckStore, self_type: U64, expected: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(UnifyOutcome, __s0_Error) {
+    if self_type == 0 || expected == 0 || expected > __s0_buffer_len(CheckedTypeRec, store.types) || self_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(UnifyConflict) }
+    let self_checked = __s0_buffer_get(CheckedTypeRec, store.types, self_type - 1)
+    let candidate = __s0_buffer_get(CheckedTypeRec, store.types, expected - 1)
+    if self_checked.kind == 7 && candidate.kind == 7 && self_checked.target == candidate.target && self_checked.arg_count == candidate.arg_count && self_checked.arg_count != 0 {
+        let unified = try unify_types(d, store, self_type, expected, bindings)
+        if match unified {
+            UnifyGood(value) => true
+            UnifyConflict => false
+        } { return Ok(unified) }
+    }
+    var at: U64 = 0
+    while at < candidate.arg_count {
+        let child = __s0_buffer_get(U64, store.type_args, candidate.first_arg - 1 + at)
+        let nested = try unify_impl_self_in_expected(d, store, self_type, child, bindings)
+        if match nested {
+            UnifyGood(value) => true
+            UnifyConflict => false
+        } { return Ok(nested) }
+        at = at + 1
+    }
+    return Ok(UnifyConflict)
+}
+
 fn unify_types(d: Domain, store: CheckStore, pattern: U64, concrete: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(UnifyOutcome, __s0_Error) {
     let expected = __s0_buffer_get(CheckedTypeRec, store.types, pattern - 1)
     if expected.kind == 6 {
@@ -3897,6 +3927,20 @@ fn instantiation_report_site(parse: ParseStore, site: SyntaxRec) -> SyntaxRec {
     return __s0_buffer_get(SyntaxRec, parse.nodes, callee.node - 1)
 }
 
+// A generic implementation records its own parameters and the first method's
+// parameters on the first method. When a later method is instantiated, its
+// own constraints apply, and the head contributes only constraints on the
+// implementation's parameters, not constraints on the first method's own
+// parameters (those have different parameter IDs in the later method).
+fn constraint_applies_to_instance(store: CheckStore, constraint: TraitConstraintRec, declaration: U64, impl_owner: U64) -> Bool {
+    if constraint.owner == declaration { return true }
+    if impl_owner == 0 || constraint.owner != impl_owner || declaration == impl_owner { return false }
+    if constraint.param == 0 || constraint.param > __s0_buffer_len(TypeParamRec, store.type_params) { return false }
+    let root_id = __s0_buffer_get(SymbolRec, store.symbols, impl_owner - 1).inherent_owner
+    if root_id == 0 { return false }
+    return __s0_buffer_get(TypeParamRec, store.type_params, constraint.param - 1).node == root_id
+}
+
 fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: CheckStore, declaration: U64, bindings: __s0_Buffer(InferenceBindingRec), parent: U64, site: SyntaxRec) -> Result(InstanceOutcome, __s0_Error) {
     let found = existing_instance(store, declaration, bindings)
     if found != 0 { return Ok(InstanceGood(InstanceValueRec(store: store, instance: found))) }
@@ -3955,7 +3999,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
         var constraint_at: U64 = 0
         while constraint_at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
             let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, constraint_at)
-            if (constraint.owner == declaration || (constraint_owner != 0 && constraint.owner == constraint_owner)) && !(try trait_constraint_satisfied(d, store, constraint, bindings, 0)) {
+            if constraint_applies_to_instance(store, constraint, declaration, constraint_owner) && !(try trait_constraint_satisfied(d, store, constraint, bindings, 0)) {
                 let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, constraint.syntax - 1)
                 let failed = try check_token_related_fail(d, state, store, 111, site, syntax)
                 return Ok(InstanceBad(match failed {
@@ -7729,6 +7773,20 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
                 UnifyGood(value) => false
                 UnifyConflict => true
             } { return expr_token_fail(d, state, base, 58, call) }
+            // An associated function of a generic implementation has no
+            // receiver value. Seed the implementation parameters from a
+            // matching application in the expected result (File(I) inside
+            // Result(File(I), E), or Box(C) itself).
+            if impl_method_has_impl_params(store, target) {
+                let impl_self = inherent_impl_self_type(store, parse, target)
+                if impl_self != 0 {
+                    let from_self = try unify_impl_self_in_expected(d, store, impl_self, expected, bindings)
+                    bindings = match from_self {
+                        UnifyGood(value) => value
+                        UnifyConflict => bindings
+                    }
+                }
+            }
         }
         let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, bindings, in_loop)
         let current = match inferred {
@@ -12593,6 +12651,18 @@ fn impl_method_has_impl_params(store: CheckStore, method: U64) -> Bool {
     let head = first_impl_method_symbol(store, symbol.inherent_owner)
     if head == 0 { return false }
     return impl_param_count_for(store, head) != 0
+}
+
+// The resolved owner application of an inherent implementation, recorded on
+// its first method by resolve_inherent_impl_at. Trait implementations use
+// their TraitImplRec self_type instead.
+fn inherent_impl_self_type(store: CheckStore, parse: ParseStore, method: U64) -> U64 {
+    if method == 0 || method > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, method - 1)
+    if symbol.kind != 12 || symbol.inherent_owner == 0 || symbol.inherent_owner > __s0_buffer_len(SyntaxRec, parse.nodes) { return 0 }
+    let head = first_impl_method_symbol(store, symbol.inherent_owner)
+    if head == 0 { return 0 }
+    return checked_type_for_syntax(store, head, symbol.inherent_owner)
 }
 
 fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
