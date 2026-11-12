@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, and zero-initialized values with local out-parameter addresses, and pointer member access with whole-value `c.load`/`c.store` are checked end to end, while exports, general ownership/retention wrappers, callbacks, and explicit shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, and header-only explicit shims, while exports, general ownership/retention wrappers, callbacks, and out-of-line C shims are not implemented yet**
 
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
@@ -444,6 +444,80 @@ wrapper decides whether it:
 Arbitrary executing C cannot be safely interrupted. Cancellation keeps wrapper
 state alive until C returns or the documented C cancellation/join protocol
 completes. See [Async and Structured Concurrency](async.md).
+
+## Explicit shims
+
+Some C surface cannot be spelled as a direct `raw fn`: bitfields,
+flexible-array members, fixed arrays, packed or unusually aligned records,
+function-like macros, inline functions, and variadic calls need a helper with
+an ordinary C ABI. A package or sysroot supplies that helper as a header of
+`static inline` functions. The binding block uses the existing header form:
+
+```c
+/* <sysroot>/std/c/fs_shim.h */
+#ifndef FS_SHIM_H
+#define FS_SHIM_H
+#define _POSIX_C_SOURCE 200809L
+#include <dirent.h>
+#include <stddef.h>
+#include <unistd.h>
+
+static inline const char *fs_dirent_name(const struct dirent *entry) {
+    return entry == NULL ? (const char *)0 : entry->d_name;
+}
+
+static inline size_t fs_dirent_name_length(const struct dirent *entry) {
+    size_t length = 0;
+    if (entry == NULL) { return 0; }
+    while (entry->d_name[length] != '\0') { length += 1; }
+    return length;
+}
+
+static inline int fs_pipe(int *read_end, int *write_end) {
+    int ends[2];
+    if (pipe(ends) != 0) { return -1; }
+    *read_end = ends[0];
+    *write_end = ends[1];
+    return 0;
+}
+#endif
+```
+
+```alder
+import c "std/c/fs_shim.h" as fs {
+    opaque type Dir = "DIR"
+    opaque type Entry = "struct dirent"
+
+    raw fn name = "fs_dirent_name"(entry: c.ConstPtr(Entry)) -> c.ConstPtr(c.Char)
+    raw fn name_length = "fs_dirent_name_length"(entry: c.ConstPtr(Entry)) -> c.Size
+    raw fn pipe = "fs_pipe"(read_end: c.Ptr(c.Int), write_end: c.Ptr(c.Int)) -> c.Int
+}
+```
+
+The shim is header-only in this milestone: no separate `.c` compilation and no
+build-plan object entry exist yet. The header is found through the same
+explicit include roots as every binding header, namely the build plan's
+project/sysroot and native `-I` roots; it is never found through an ambient
+search path. `static inline` gives every translation unit its own copy, so a
+shim adds no link symbol and cannot collide with a C library. C names must stay
+outside the reserved `alder_` prefix and should use the declaring package or
+library prefix.
+
+The shim header must include the real system header and use its types; it does
+not restate a record layout. The existing binding probes pin every Alder
+declaration against the header with `_Static_assert`/`_Generic`, while the C
+compiler checks the header's own definitions. The shim implementation is
+trusted/audited like any other C boundary. A safe wrapper still owns the
+semantic checks: copy a flexible-array name before the next `readdir`, validate
+returned pointers and lengths, and close out-parameter descriptors exactly
+once. `c.addr` is the intended form for local out-parameters such as the two
+pipe ends.
+
+Out-of-line `.c` shims, source objects in the build plan, and shim build/link
+automation arrive with the build driver in the tooling milestone. Until then a
+header-only shim covers macros, inline functions, fixed arrays, flexible
+members, packed records, and fixed-argument wrappers over variadics without
+introducing a link artifact.
 
 ## Toolchain-owned shims
 

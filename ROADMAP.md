@@ -1580,6 +1580,20 @@ runs Unit, both Result success forms, a display-only Err, a wrapper Error cause
 chain, and rejects unsupported results and non-Display errors; the compiler's
 own bootstrap `main` still uses the untouched I32 path.
 
+Landed C-interop progress: header-only explicit shims are available through
+the ordinary binding-block syntax. A package or sysroot supplies a header of
+`static inline` C functions for bitfields, flexible arrays, fixed arrays,
+packed records, macros, inline functions, and fixed-argument wrappers over
+variadics; the generated program includes it through its explicit include
+root and the existing probes pin every bound function. `static inline` keeps
+the shim out of the link symbol table, and C spellings stay outside the
+reserved `alder_` prefix. Evidence:
+`compiler/production_shim_test.go` compiles and runs a dirent name/length
+shim and a pipe shim using `c.addr` under the strict warning set and
+ASan/UBSan. Out-of-line `.c` shims and build-plan source objects remain
+deferred to the build driver. Docs:
+[docs/c-interop.md](docs/c-interop.md) "Explicit shims".
+
 Landed standard-library progress: `std.random` ships its seeded deterministic
 generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
 state with value semantics and unbiased rejection ranges; `seeded`,
