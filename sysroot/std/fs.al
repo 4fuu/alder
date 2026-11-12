@@ -10,12 +10,12 @@ module std.fs
 /// Options for opening a file. Construct with `Options.read` or
 /// `Options.write` and adjust fields on a `var` binding.
 pub type Options {
-    read: Bool
-    write: Bool
-    append: Bool
-    truncate: Bool
-    create: Bool
-    create_new: Bool
+    pub read: Bool
+    pub write: Bool
+    pub append: Bool
+    pub truncate: Bool
+    pub create: Bool
+    pub create_new: Bool
 }
 
 impl Options {
@@ -33,7 +33,7 @@ impl Options {
 /// Portable permission query. On POSIX targets these are the owner bits;
 /// other targets map best-effort and document the mapping.
 pub type Permissions {
-    readable: Bool
-    writable: Bool
-    executable: Bool
+    pub readable: Bool
+    pub writable: Bool
+    pub executable: Bool
 }

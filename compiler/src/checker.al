@@ -3715,7 +3715,7 @@ fn append_instance_role_uses(d: Domain, store: CheckStore, declaration: U64, ins
     let use_id = use_by_ordinal(store, declaration, declaration_role, ordinal)
     let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
     let concrete = try substitute_type(d, store, bindings, use.checked_type)
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, concrete.store.uses, DeclTypeUseRec(owner: instance, role: instance_role, ordinal: use.ordinal, node: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, syntax: use.syntax, checked_type: concrete.checked_type))
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, concrete.store.uses, DeclTypeUseRec(owner: instance, role: instance_role, ordinal: use.ordinal, node: use.node, source: use.source, name_start: use.name_start, name_end: use.name_end, syntax: use.syntax, checked_type: concrete.checked_type, public: use.public))
     var use_order = concrete.store.indexes.use_order
     if indexed { use_order = try __s0_buffer_append(U64, d, use_order, __s0_buffer_len(DeclTypeUseRec, uses)) }
     let indexes = CheckerIndexes(uses: concrete.store.indexes.uses, use_order: use_order, complete: concrete.store.indexes.complete)
@@ -4311,11 +4311,11 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
         use_at = use_at + 1
     }
     if child.kind == 9 && child.children == 0 {
-        let uses = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: owner, role: 2, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: child.name_start, name_end: child.name_end, syntax: 0, checked_type: 0))
+        let uses = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: owner, role: 2, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: child.name_start, name_end: child.name_end, syntax: 0, checked_type: 0, public: 0))
         return Ok(CheckGood(CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)))
     }
     var syntax = link.node
-    if child.kind == 8 || child.kind == 9 || child.kind == 10 || child.kind == 13 || child.kind == 47 || child.kind == 48 {
+    if child.kind == 8 || child.kind == 62 || child.kind == 9 || child.kind == 10 || child.kind == 13 || child.kind == 47 || child.kind == 48 {
         let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
         syntax = head.node
     }
@@ -4368,7 +4368,9 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
     var name_end = child.name_end
     if actual_role == 3 || actual_role == 4 || actual_role == 6 { name_start = 0
         name_end = 0 }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: checked_type_for_syntax(next, owner, syntax)))
+    var field_public: U64 = 0
+    if actual_role == 1 && child.kind == 62 { field_public = 1 }
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: actual_role, ordinal: actual_ordinal, node: link.node, source: child.source, name_start: name_start, name_end: name_end, syntax: syntax, checked_type: checked_type_for_syntax(next, owner, syntax), public: field_public))
     return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, indexes: next.indexes, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics, traits: next.traits, closures: next.closures, interp: next.interp, bindings: next.bindings)))
 }
 
@@ -4417,7 +4419,7 @@ fn check_import_types(d: Domain, state: State, parse: ParseStore, store: CheckSt
             CheckBad(value) => true
         } { return Ok(validated) }
     }
-    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: checked_type_for_syntax(next, owner, result_link.node)))
+    let uses = try __s0_buffer_append(DeclTypeUseRec, d, next.uses, DeclTypeUseRec(owner: owner, role: 4, ordinal: 0, node: result_link.node, source: signature.source, name_start: 0, name_end: 0, syntax: result_link.node, checked_type: checked_type_for_syntax(next, owner, result_link.node), public: 0))
     return Ok(CheckGood(CheckStore(symbols: next.symbols, type_params: next.type_params, types: next.types, type_args: next.type_args, type_annotations: next.type_annotations, uses: uses, indexes: next.indexes, locals: next.locals, environments: next.environments, expressions: next.expressions, call_annotations: next.call_annotations, expression_children: next.expression_children, returns: next.returns, control: next.control, diagnostics: next.diagnostics, traits: next.traits, closures: next.closures, interp: next.interp, bindings: next.bindings)))
 }
 
@@ -6743,6 +6745,20 @@ fn bind_expected_application(d: Domain, store: CheckStore, target: U64, expected
 
 fn check_record_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    // Record fields are module-private unless marked `pub`, so a public
+    // record is constructible outside its module only when every field is
+    // public. This is the opaque-construction boundary; field reads are
+    // still unrestricted in S0 (see ROADMAP).
+    let caller = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.module_source != caller.module_source {
+        var privacy_at: U64 = 0
+        let privacy_fields = use_count(store, target, 1)
+        while privacy_at < privacy_fields {
+            let privacy_field = use_by_ordinal(store, target, 1, privacy_at)
+            if privacy_field != 0 && __s0_buffer_get(DeclTypeUseRec, store.uses, privacy_field - 1).public == 0 { return expr_token_fail(d, state, base, 309, call) }
+            privacy_at = privacy_at + 1
+        }
+    }
     var ordinal: U64 = 1
     let link_count = call_link_count(parse, call)
     while ordinal < link_count {
@@ -7246,7 +7262,7 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     // The result use and its annotation sit on the body block node: the
     // closure node already backs the thunk symbol, and a node can carry only
     // one declaration-side use.
-    let result_use = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: symbol_id, role: 6, ordinal: 0, node: body_link.node, source: node.source, name_start: 0, name_end: 0, syntax: body_link.node, checked_type: result_type))
+    let result_use = try __s0_buffer_append(DeclTypeUseRec, d, current.uses, DeclTypeUseRec(owner: symbol_id, role: 6, ordinal: 0, node: body_link.node, source: node.source, name_start: 0, name_end: 0, syntax: body_link.node, checked_type: result_type, public: 0))
     current = try annotate_checked_type(d, current, symbol_id, body_link.node, result_type)
     current = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: result_use, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
     // The erased function type: declared parameters, result, unit
@@ -7352,12 +7368,12 @@ fn closure_append_uses(d: Domain, parse: ParseStore, store: CheckStore, symbol: 
     var annotated = current
     if stage < declared {
         let param_node = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, param_nodes, stage) - 1)
-        uses = try __s0_buffer_append(DeclTypeUseRec, d, uses, DeclTypeUseRec(owner: symbol, role: 5, ordinal: stage, node: __s0_buffer_get(U64, param_nodes, stage), source: param_node.source, name_start: param_node.name_start, name_end: param_node.name_end, syntax: __s0_buffer_get(U64, param_nodes, stage), checked_type: __s0_buffer_get(U64, args, stage)))
+        uses = try __s0_buffer_append(DeclTypeUseRec, d, uses, DeclTypeUseRec(owner: symbol, role: 5, ordinal: stage, node: __s0_buffer_get(U64, param_nodes, stage), source: param_node.source, name_start: param_node.name_start, name_end: param_node.name_end, syntax: __s0_buffer_get(U64, param_nodes, stage), checked_type: __s0_buffer_get(U64, args, stage), public: 0))
         annotated = try annotate_checked_type(d, current, symbol, __s0_buffer_get(U64, param_nodes, stage), __s0_buffer_get(U64, args, stage))
     } else {
         if stage < declared + captures {
             let binding = __s0_buffer_get(LocalRec, current.locals, __s0_buffer_get(U64, found, stage - declared) - 1)
-            uses = try __s0_buffer_append(DeclTypeUseRec, d, uses, DeclTypeUseRec(owner: symbol, role: 5, ordinal: stage, node: binding.syntax, source: binding.source, name_start: binding.name_start, name_end: binding.name_end, syntax: binding.syntax, checked_type: binding.checked_type))
+            uses = try __s0_buffer_append(DeclTypeUseRec, d, uses, DeclTypeUseRec(owner: symbol, role: 5, ordinal: stage, node: binding.syntax, source: binding.source, name_start: binding.name_start, name_end: binding.name_end, syntax: binding.syntax, checked_type: binding.checked_type, public: 0))
             annotated = try annotate_checked_type(d, current, symbol, binding.syntax, binding.checked_type)
         } else { return Ok(ClosureUsesGood(current)) }
     }

@@ -14,8 +14,8 @@ need an explicit import.
 module core.error
 
 pub type ErrorReport {
-    message: String
-    causes: Vec(String)
+    pub message: String
+    pub causes: Vec(String)
 }
 
 pub trait Error {

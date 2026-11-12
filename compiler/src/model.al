@@ -240,6 +240,9 @@ type DeclTypeUseRec {
     name_end: U64
     syntax: U64
     checked_type: U64
+    // A declared record field is constructible outside its module only when
+    // marked `pub`; fields default to module-private.
+    public: U64
 }
 
 // Checked expressions form an append-only postorder graph per concrete function

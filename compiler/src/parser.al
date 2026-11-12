@@ -1839,10 +1839,17 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
     let open = try expect_punct(d, state, cursor, "{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_value(open).cursor
-    while token_ident(state, cursor) {
-        let payload = is_enum && token_punct(state, ParseCursor(token: cursor.token + 1, store: cursor.store), "(")
+    while token_ident(state, cursor) || (!is_enum && parse_token(state, cursor).keyword == 21) {
         var item_kind: U64 = 8
         if is_enum { item_kind = 9 }
+        if !is_enum && parse_token(state, cursor).keyword == 21 {
+            // A `pub` record field is visible outside its module for
+            // construction. Fields default to module-private.
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            item_kind = 62
+        }
+        let payload = is_enum && token_punct(state, ParseCursor(token: cursor.token + 1, store: cursor.store), "(")
         let item = try parse_named_item(d, state, cursor, item_kind, payload)
         if parse_step_bad(item) { return Ok(item) }
         let value = parse_step_value(item)

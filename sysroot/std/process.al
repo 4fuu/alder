@@ -168,9 +168,9 @@ impl ExitStatus {
 
 /// The result of `Command.output`.
 pub type Output {
-    status: ExitStatus
-    stdout: Bytes
-    stderr: Bytes
+    pub status: ExitStatus
+    pub stdout: Bytes
+    pub stderr: Bytes
 }
 
 /// Process-layer failures. The value layer installs the categories now;

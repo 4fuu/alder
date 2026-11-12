@@ -13,8 +13,8 @@ module std.env
 /// formatted message, as reported at the failure point. Every hosted
 /// module's `Platform`-style variant carries this record.
 pub type PlatformInfo {
-    code: I32
-    message: String
+    pub code: I32
+    pub message: String
 }
 
 /// Failure of checked construction or environment update.
@@ -32,8 +32,8 @@ pub enum EnvError {
 
 /// Compile-time target information of the running build.
 pub type Target {
-    os: TargetOs
-    arch: TargetArch
+    pub os: TargetOs
+    pub arch: TargetArch
 }
 
 /// The operating system family the compiler built for.

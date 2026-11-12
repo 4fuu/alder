@@ -14,8 +14,8 @@ import c "alder_entry.h" as entry {
 /// first. The fields are public so an error display or report consumer can
 /// read the flat chain without a trait object.
 pub type ErrorReport {
-    message: String
-    causes: Vec(String)
+    pub message: String
+    pub causes: Vec(String)
 }
 
 /// A recoverable failure value that reports its wrapped cause. The default

@@ -1975,6 +1975,12 @@ The following items are not part of the current implementation scope:
   handle through a deref place, so table elements await a storage decision.
   No 1.0 sentence requires the composition, and diagnostic 143 keeps the
   surface honest in the meantime.
+- record field *read* privacy: S0 enforces only construction privacy (a
+  record with a non-`pub` field cannot be constructed outside its module,
+  diagnostic 309); reads of any field still type-check across modules. The
+  full module-visibility pass that makes non-`pub` fields unreadable is
+  deferred; the opaque-construction boundary and every `using`/affine rule
+  already hold.
 - a mutable view formed directly from a field (`self.buffer.slice_mut(...)`):
   field loads are value copies, so a view of one would write the copy. The
   checker rejects the shape with diagnostic 307 and `BufReader`/`BufWriter`

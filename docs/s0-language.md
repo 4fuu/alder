@@ -535,7 +535,13 @@ Implemented expressions include:
 - `Vec(T)` over a `Cleanup` owner: elements enter by transfer through
   `push`/`from_array`, element reads and views are rejected, a vector grows
   only through a plain local binding, and a registration drains every element
-  at scope exit.
+  at scope exit;
+- record field construction privacy: record fields default to module-private
+  and a field is constructible from another module only when marked `pub`
+  (diagnostic 309). A public record with any non-`pub` field is therefore an
+  opaque-construction boundary, which is how `HostFile` keeps its descriptor
+  unforgeable. Field *reads* remain unrestricted in S0; read privacy is a
+  recorded gap in ROADMAP.
 
 Closures, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0 standard
 library are absent.

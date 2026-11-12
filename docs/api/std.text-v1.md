@@ -36,8 +36,8 @@ pub enum TextError {
 
 /// One decoded Unicode scalar value and its encoded byte length.
 pub type Scalar {
-    value: U32
-    size: U64
+    pub value: U32
+    pub size: U64
 }
 
 /// Validates `data` as UTF-8: the number of scalar values it encodes, or

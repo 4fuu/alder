@@ -53,8 +53,8 @@ impl Cleanup for HostDirectory {
 
 /// One directory entry as the host reported it.
 pub type DirEntry {
-    name: OsString
-    kind: EntryKind
+    pub name: OsString
+    pub kind: EntryKind
 }
 
 pub enum EntryKind {
@@ -68,30 +68,30 @@ pub enum EntryKind {
 /// Raw open flags of one host open request. `std.fs` builds this from its
 /// public options record; wrappers outside `std.fs` do not need it.
 pub type FileMode {
-    read: Bool
-    write: Bool
-    append: Bool
-    truncate: Bool
-    create: Bool
-    create_new: Bool
+    pub read: Bool
+    pub write: Bool
+    pub append: Bool
+    pub truncate: Bool
+    pub create: Bool
+    pub create_new: Bool
 }
 
 /// Host timestamp in seconds plus sub-second nanos. `seconds` counts from
 /// the platform epoch for wall-clock reads and is unspecified for monotonic
 /// reads; only differences of two monotonic reads are meaningful.
 pub type Timestamp {
-    seconds: U64
-    nanos: U32
+    pub seconds: U64
+    pub nanos: U32
 }
 
 /// Host file metadata as the capability reported it.
 pub type FileStat {
-    kind: EntryKind
-    size: U64
+    pub kind: EntryKind
+    pub size: U64
     /// POSIX mode bits of the owner on POSIX targets; best-effort mapping
     /// elsewhere. Use `std.fs.Permissions` for the portable query.
-    mode: U32
-    modified: Timestamp
+    pub mode: U32
+    pub modified: Timestamp
 }
 
 /// The I/O capability trait. Every value that may wait on the host or observe
