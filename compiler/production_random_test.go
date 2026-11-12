@@ -113,19 +113,6 @@ pub fn main() -> I32 {
 		name, source, want string
 	}{
 		{
-			"os-form-not-landed",
-			`module hello.main
-
-import std.random
-
-pub fn main() -> I32 {
-    random.fill(0)
-    return 0
-}
-`,
-			`unknown name "random.fill"`,
-		},
-		{
 			"seeded-arity",
 			`module hello.main
 
@@ -156,4 +143,66 @@ pub fn main() -> I32 {
 			}
 		})
 	}
+}
+
+// The OS forms go through the installed sysroot and the Blocking capability.
+// Values are unpredictable, so the checks are shape-only: fill must write
+// bytes, every range draw stays in bounds, and a run of draws is not a
+// constant. The same generated program runs again under ASan/UBSan.
+func TestProductionStdRandomOsRuns(t *testing.T) {
+	t.Parallel()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+	files := map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.io { Blocking }
+import std.random
+
+pub fn main() -> I32 {
+    let io = Blocking()
+    var bytes: Array(U8, 32) = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    random.fill(io, bytes.slice_mut(0, 32))
+    var any = false
+    var at: U64 = 0
+    while at < 32 {
+        if bytes[at] != 0 { any = true }
+        at = at + 1
+    }
+    if !any { return 1 }
+
+    let first = random.range_u64(io, 11, 17)
+    if first < 11 || first >= 17 { return 2 }
+    var same: U64 = 0
+    var drawn: U64 = 0
+    while drawn < 64 {
+        let one = random.u64(io)
+        let small = random.u32(io)
+        let in64 = random.range_u64(io, 11, 17)
+        if in64 < 11 || in64 >= 17 { return 3 }
+        if in64 == first { same = same + 1 }
+        let in32 = random.range_u32(io, 3, 5)
+        if in32 < 3 || in32 >= 5 { return 4 }
+        drawn = drawn + 1
+    }
+    if same == 64 { return 5 }
+    return 0
+}
+`,
+	}
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, files, "run")
+	if run != (productionResult{}) {
+		t.Fatalf("std.random OS behavior failed: %+v", run)
+	}
+	runSanitizedProject(t, cc, repoRoot, dir, "hello")
 }

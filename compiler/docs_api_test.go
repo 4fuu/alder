@@ -184,6 +184,21 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.random-v1.al": {
+			style:   "project",
+			srcName: "std_random_example.al",
+			mainText: `module hello.main
+
+import std.io { Blocking }
+import hello.std_random_example { std_random_example }
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    if std_random_example(cap) == 11886 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 

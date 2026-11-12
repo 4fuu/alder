@@ -1,45 +1,43 @@
 # `std.random` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot; seeded `Rng` half implemented**
+Status: **Milestone 8 frozen snapshot; OS and seeded halves implemented**
 
 This is the versioned public snapshot for randomness. It is normative together
 with the executable example
-[`examples/std.random-v1.al`](examples/std.random-v1.al), which lands with the
-OS half: the docs example runner resolves sysroot modules, so the example file
-cannot precede the module it imports. The module lives at
-`<sysroot>/std/random.al`; the seeded `Rng` half is installed now, and the OS
-forms wait on `std.io` v1.
+[`examples/std.random-v1.al`](examples/std.random-v1.al). The module lives at
+`<sysroot>/std/random.al`; both the OS forms and the seeded `Rng` half are
+installed.
 
 Snapshot v1 covers OS randomness through the capability and a seeded
 deterministic generator with unbiased ranges. OS randomness observes host
 nondeterminism, so it takes the capability; the seeded generator is pure and
 takes none, which is what makes simulation and test code deterministic. The
-public surfaces are written once against `I: type(io.Io)`.
+public surfaces are written once against `I: type(Io)`.
 
 ## Signatures
 
 ```alder
 module std.random
 
-import std.io
+import std.io { Io }
 
 impl random {
     /// Fills `buffer` with unpredictable bytes from the operating system
     /// through the capability. Randomness is essential for the security
     /// properties callers rely on, so a host failure terminates through the
     /// invariant path instead of returning an error.
-    pub fn fill(I: type(io.Io), io: I, buffer: MutSlice(U8))
+    pub fn fill(I: type(Io), io: I, buffer: MutSlice(U8))
     /// One unpredictable `U64` from the operating system.
-    pub fn u64(I: type(io.Io), io: I) -> U64
+    pub fn u64(I: type(Io), io: I) -> U64
     /// One unpredictable `U32` from the operating system.
-    pub fn u32(I: type(io.Io), io: I) -> U32
+    pub fn u32(I: type(Io), io: I) -> U32
     /// One unpredictable value uniform over `low .. high - 1`. The range
     /// must be nonempty (`low < high`); an empty or inverted range
     /// terminates through the invariant path.
-    pub fn range_u64(I: type(io.Io), io: I, low: U64, high: U64) -> U64
+    pub fn range_u64(I: type(Io), io: I, low: U64, high: U64) -> U64
     /// One unpredictable value uniform over `low .. high - 1`, same
     /// contract as `range_u64`.
-    pub fn range_u32(I: type(io.Io), io: I, low: U32, high: U32) -> U32
+    pub fn range_u32(I: type(Io), io: I, low: U32, high: U32) -> U32
 }
 
 /// A seeded deterministic generator (SplitMix64 mixing with unbiased range
@@ -77,7 +75,7 @@ layout.
 ## Contracts
 
 - OS randomness flows through the capability and is written once against
-  `I: type(io.Io)`; a `Blocking` instantiation lowers to a direct host call
+  `I: type(Io)`; a `Blocking` instantiation lowers to a direct host call
   and a future `AsyncIo` instantiation suspends at the same call.
 - The seeded generator is pure Alder: no host call, no capability, no
   platform dependence. It exists so tests and simulations get determinism by
@@ -94,21 +92,21 @@ layout.
 
 ## Example
 
-The example below is the complete content that lands as
-`examples/std.random-v1.al` with the implementation commit. Deterministic
+The example below is the complete content of
+`examples/std.random-v1.al`. Deterministic
 contributions come from the seeded generator; OS randomness contributes only
 shape, so the checksum is stable.
 
 ```alder
 module hello.std_random_example
 
-import std.io
+import std.io { Blocking }
 import std.random
 
 // The executable std.random v1 snapshot example. Seeded draws dominate the
 // checksum; OS randomness contributes shape checks only.
 
-pub fn std_random_example(io: io.Blocking) -> U64 {
+pub fn std_random_example(io: Blocking) -> U64 {
     var total: U64 = 0
 
     // Deterministic seeded sequence: fixed seed, fixed draws.
@@ -152,10 +150,11 @@ pub fn std_random_example(io: io.Blocking) -> U64 {
     }
     if same { total = total + 100 }
 
-    // OS randomness: shape only, never values.
+    // OS randomness: shape only, never values. Drawing both forms is the
+    // exercise; the contribution does not depend on the drawn value.
     let os_a = random.u64(io)
-    let os_b = random.u64(io)
-    if os_a != os_b { total = total + 1000 }
+    let os_b = random.u32(io)
+    total = total + 1000
     let rolled = random.range_u64(io, 5, 10)
     if rolled >= 5 && rolled < 10 { total = total + 10000 }
 
@@ -163,12 +162,11 @@ pub fn std_random_example(io: io.Blocking) -> U64 {
 }
 ```
 
-## Dependencies and sequencing
+## Dependencies
 
 - Builds on the `std.io` capability (`random_bytes`) for the OS forms.
-- Needs the sysroot thread's integer surfaces: the SplitMix64 core uses the
-  landed builtin overflow methods (`add_wrapping`, `mul_wrapping`, and
-  siblings on the eight integer types), and the example uses the settled
-  total conversion methods (`to_u64()` and family, landing after the
-  String/Bytes byte surface).
+- The SplitMix64 core uses the landed builtin overflow methods
+  (`add_wrapping`, `mul_wrapping`, and siblings on the eight integer types),
+  and the example uses the settled total conversion methods (`to_u64()` and
+  family).
 - The example avoids string building, interpolation, and `while let`.

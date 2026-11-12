@@ -1655,15 +1655,18 @@ ASan/UBSan. Out-of-line `.c` shims and build-plan source objects remain
 deferred to the build driver. Docs:
 [docs/c-interop.md](docs/c-interop.md) "Explicit shims".
 
-Landed standard-library progress: `std.random` ships its seeded deterministic
-generator half at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64`
-state with value semantics and unbiased rejection ranges; `seeded`,
-`next_u64`, `next_u32`, `range_u64`, `range_u32`, and `fill(MutSlice(U8))` are
-implemented. Evidence: `compiler/production_random_test.go` runs the installed
-sysroot module through the production driver and checks independently computed
-SplitMix64 draws, range sums, the 32-bit high word, eight-byte and 21-byte
-fills, value-semantics copies, and the not-yet-landed OS form as a rejection.
-The OS forms wait on `std.io` v1. Docs: [Standard Library](docs/standard-library.md)
+Landed standard-library progress: `std.random` ships both halves at
+`sysroot/std/random.al`. The OS forms `fill`, `u64`, `u32`, `range_u64`, and
+`range_u32` take the `std.io` capability through `Blocking`; `u64`/`u32`
+assemble four or eight entropy bytes little-endian, and the range forms use
+unbiased rejection sampling. `Rng` is SplitMix64 over one `U64` state with
+value semantics, `seeded`, `next_u64`, `next_u32`, `range_u64`, `range_u32`,
+and `fill(MutSlice(U8))`. Evidence: `compiler/production_random_test.go` runs
+the installed sysroot module through the production driver, checks
+independently computed SplitMix64 draws, range sums, the 32-bit high word,
+eight-byte and 21-byte fills, and value-semantics copies, and exercises the OS
+forms under `Blocking` and ASan/UBSan with shape-only assertions; the snapshot
+example runs with a fixed checksum. Docs: [Standard Library](docs/standard-library.md)
 and the frozen [`std.random` snapshot](docs/api/std.random-v1.md).
 
 Landed C-interop progress continues with by-value verified records. The

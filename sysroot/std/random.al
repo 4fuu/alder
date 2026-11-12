@@ -1,12 +1,12 @@
 module std.random
 
 import core.num { u64_max, u32_max }
+import std.io { Io }
 
-// The Milestone 8 randomness surface (docs/api/std.random-v1.md). This
-// module lands the seeded generator half; the OS forms (`fill`, `u64`,
-// `u32`, `range_u64`, and `range_u32` on the module) additionally take the
-// `std.io` capability and land with `std.io` v1. The `Rng` half takes no
-// capability, so tests and simulations stay deterministic by construction.
+// The Milestone 8 randomness surface (docs/api/std.random-v1.md). The module
+// forms take the `std.io` capability and read host entropy; the seeded `Rng`
+// half takes no capability, so tests and simulations stay deterministic by
+// construction.
 //
 // `Rng` is SplitMix64 mixing over a single-word state with unbiased range
 // reduction. Two generators seeded alike draw identical sequences on every
@@ -17,6 +17,77 @@ import core.num { u64_max, u32_max }
 // inverted range is an invariant violation and terminates through the
 // ordinary checked-integer path: an inverted range fails the checked
 // subtraction and an empty range fails the checked remainder.
+
+/// Fills `buffer` with unpredictable bytes from the operating system through
+/// the capability. Randomness is essential for the security properties
+/// callers rely on, so a host failure terminates through the invariant path.
+pub fn fill(I: type(Io), io: I, buffer: MutSlice(U8)) -> Unit {
+    io.random_bytes(buffer)
+    return
+}
+
+/// One unpredictable `U64` from the operating system, assembled from eight
+/// entropy bytes least significant first.
+pub fn u64(I: type(Io), io: I) -> U64 {
+    var bytes: Array(U8, 8) = [0, 0, 0, 0, 0, 0, 0, 0]
+    io.random_bytes(bytes.slice_mut(0, 8))
+    var value = bytes[0].to_u64()
+    value = value | (bytes[1].to_u64() << 8)
+    value = value | (bytes[2].to_u64() << 16)
+    value = value | (bytes[3].to_u64() << 24)
+    value = value | (bytes[4].to_u64() << 32)
+    value = value | (bytes[5].to_u64() << 40)
+    value = value | (bytes[6].to_u64() << 48)
+    value = value | (bytes[7].to_u64() << 56)
+    return value
+}
+
+/// One unpredictable `U32` from the operating system, assembled from four
+/// entropy bytes least significant first.
+pub fn u32(I: type(Io), io: I) -> U32 {
+    var bytes: Array(U8, 4) = [0, 0, 0, 0]
+    io.random_bytes(bytes.slice_mut(0, 4))
+    var value = bytes[0].to_u32()
+    value = value | (bytes[1].to_u32() << 8)
+    value = value | (bytes[2].to_u32() << 16)
+    value = value | (bytes[3].to_u32() << 24)
+    return value
+}
+
+/// One unpredictable value uniform over `low .. high - 1` by rejection, so
+/// the distribution carries no modulo bias. An empty or inverted range
+/// terminates through the invariant path.
+pub fn range_u64(I: type(Io), io: I, low: U64, high: U64) -> U64 {
+    let span = high - low
+    let zone = u64_max() - u64_max() % span
+    var picked: U64 = 0
+    var spinning: Bool = true
+    while spinning {
+        let drawn = u64(io)
+        if drawn < zone {
+            picked = low + drawn % span
+            spinning = false
+        }
+    }
+    return picked
+}
+
+/// One unpredictable value uniform over `low .. high - 1`, same contract as
+/// `range_u64`.
+pub fn range_u32(I: type(Io), io: I, low: U32, high: U32) -> U32 {
+    let span = high - low
+    let zone = u32_max() - u32_max() % span
+    var picked: U32 = 0
+    var spinning: Bool = true
+    while spinning {
+        let drawn = u32(io)
+        if drawn < zone {
+            picked = low + drawn % span
+            spinning = false
+        }
+    }
+    return picked
+}
 
 /// A seeded deterministic generator. Pure value state: copying a generator
 /// copies its stream position, and drawing mutates a uniquely owned
