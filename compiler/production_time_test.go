@@ -13,7 +13,7 @@ import (
 // fixed parts so no host timing enters the checksum.
 const timeVectorsProgram = `module hello.main
 
-import std.io { Blocking, Io }
+import std.io { Blocking, Io, Timestamp }
 import std.time
 
 fn utc_of(seconds: I64) -> time.UtcDateTime {
@@ -88,6 +88,8 @@ fn main() -> I32 {
     let wall = time.SystemTime.now(cap)
     if wall.unix_seconds() < 1700000000 { return 32 }
     if wall.to_utc().year < 2023 { return 33 }
+    let signed = Timestamp(seconds: -1, nanos: 0)
+    if signed.seconds != -1 { return 34 }
     return 0
 }
 `

@@ -76,11 +76,12 @@ pub type FileMode {
     pub create_new: Bool
 }
 
-/// Host timestamp in seconds plus sub-second nanos. `seconds` counts from
-/// the platform epoch for wall-clock reads and is unspecified for monotonic
-/// reads; only differences of two monotonic reads are meaningful.
+/// Host timestamp in signed seconds plus sub-second nanos. `seconds` counts
+/// from the platform epoch for wall-clock reads and is unspecified for
+/// monotonic reads; only differences of two monotonic reads are meaningful.
+/// Signed seconds preserve pre-1970 file modification times exactly.
 pub type Timestamp {
-    pub seconds: U64
+    pub seconds: I64
     pub nanos: U32
 }
 

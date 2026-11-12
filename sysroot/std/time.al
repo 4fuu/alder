@@ -107,7 +107,7 @@ impl Instant {
     fn checked_duration_since(self, earlier: Instant) -> Option(Duration) {
         if self.value.seconds < earlier.value.seconds { return None }
         if self.value.seconds == earlier.value.seconds && self.value.nanos < earlier.value.nanos { return None }
-        let seconds = self.value.seconds - earlier.value.seconds
+        let seconds = (self.value.seconds - earlier.value.seconds).to_u64_wrapping()
         if self.value.nanos >= earlier.value.nanos {
             return Some(Duration(seconds: seconds, nanos: self.value.nanos - earlier.value.nanos))
         }
@@ -117,7 +117,7 @@ impl Instant {
     fn duration_since(self, earlier: Instant) -> Duration {
         if self.value.seconds < earlier.value.seconds { panic("instant order violated") }
         if self.value.seconds == earlier.value.seconds && self.value.nanos < earlier.value.nanos { panic("instant order violated") }
-        let seconds = self.value.seconds - earlier.value.seconds
+        let seconds = (self.value.seconds - earlier.value.seconds).to_u64_wrapping()
         if self.value.nanos >= earlier.value.nanos {
             return Duration(seconds: seconds, nanos: self.value.nanos - earlier.value.nanos)
         }
@@ -135,7 +135,7 @@ pub type SystemTime {
 impl SystemTime {
     fn now(I: type(Io), io: I) -> SystemTime {
         let stamp = io.wallclock()
-        return SystemTime(seconds: stamp.seconds.to_i64_wrapping(), nanos: stamp.nanos)
+        return SystemTime(seconds: stamp.seconds, nanos: stamp.nanos)
     }
 
     fn from_unix(seconds: I64, nanos: U32) -> SystemTime {

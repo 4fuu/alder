@@ -219,7 +219,7 @@ pub type FileMode {
 
 /// Host timestamp in seconds plus sub-second nanos.
 pub type Timestamp {
-    pub seconds: U64
+    pub seconds: I64
     pub nanos: U32
 }
 
@@ -398,7 +398,7 @@ impl Io for Blocking {
         let mode = unsafe c { raw.mode }
         let seconds = unsafe c { raw.seconds }
         let nanos = unsafe c { raw.nanos }
-        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64().to_u64_wrapping(), nanos: nanos.to_i32().to_u32_wrapping())))
+        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())))
     }
 
     fn stat_path(self, path: Path) -> Result(FileStat, IoError) {
@@ -411,7 +411,7 @@ impl Io for Blocking {
         let mode = unsafe c { raw.mode }
         let seconds = unsafe c { raw.seconds }
         let nanos = unsafe c { raw.nanos }
-        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64().to_u64_wrapping(), nanos: nanos.to_i32().to_u32_wrapping())))
+        return Ok(FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())))
     }
 
     fn set_permissions(self, mut file: HostFile, mode: U32) -> Result(Unit, IoError) {
@@ -534,7 +534,7 @@ impl Io for Blocking {
         if rc.to_i32() != 0 {
             panic("io.monotonic failed")
         }
-        return Timestamp(seconds: seconds.to_i64().to_u64_wrapping(), nanos: nanos.to_i32().to_u32_wrapping())
+        return Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())
     }
 
     fn wallclock(self) -> Timestamp {
@@ -545,7 +545,7 @@ impl Io for Blocking {
         if rc.to_i32() != 0 {
             panic("io.wallclock failed")
         }
-        return Timestamp(seconds: seconds.to_i64().to_u64_wrapping(), nanos: nanos.to_i32().to_u32_wrapping())
+        return Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping())
     }
 
     fn random_bytes(self, buffer: MutSlice(U8)) -> Unit {
