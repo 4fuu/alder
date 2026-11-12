@@ -858,11 +858,11 @@ pub type BufWriter(Sink: type(Writer, Cleanup)) {
 }
 
 impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
-    fn new(sink: Sink) -> BufWriter(Sink) {
+    fn new(take sink: Sink) -> BufWriter(Sink) {
         return BufWriter(Sink)(sink: sink, buffer: zero_bytes(4096), length: 0)
     }
 
-    fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink) {
+    fn with_capacity(capacity: U64, take sink: Sink) -> BufWriter(Sink) {
         var room = capacity
         if room == 0 { room = 1 }
         return BufWriter(Sink)(sink: sink, buffer: zero_bytes(room), length: 0)

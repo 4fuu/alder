@@ -111,7 +111,7 @@ impl W {
 }
 fn main() -> I32 { return 0 }
 `,
-		"cannot move an affine field out of a borrowed owner",
+		"a borrowed parameter cannot be used as an owner",
 	},
 }
 

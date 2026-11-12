@@ -253,8 +253,8 @@ pub type BufWriter(Sink: type(Writer, Cleanup)) {
 }
 
 impl(Sink: type(Writer, Cleanup)) BufWriter(Sink) {
-    fn new(sink: Sink) -> BufWriter(Sink)
-    fn with_capacity(capacity: U64, sink: Sink) -> BufWriter(Sink)
+    fn new(take sink: Sink) -> BufWriter(Sink)
+    fn with_capacity(capacity: U64, take sink: Sink) -> BufWriter(Sink)
     fn into_sink(take self) -> Result(Sink, IoError)
 }
 
@@ -268,8 +268,11 @@ impl(Sink: type(Writer, Cleanup)) Cleanup for BufWriter(Sink) {
 }
 ```
 
-`BufWriter.cleanup` flushes the pending bytes of the value the binding holds
-when the scope exits: a nominal `Cleanup` registration names the owner's local
+The constructors take the sink by transfer: bind the owner locally before
+calling `new` or `with_capacity`, because a borrowed parameter cannot become
+the writer's stored owner. `BufWriter.cleanup` flushes the pending bytes of the
+value the binding holds when the scope exits: a nominal `Cleanup` registration
+names the owner's local
 place, so writes performed after the `using` registration are included. A
 program may register a writer and write through the binding without an
 explicit `flush`.
@@ -281,8 +284,11 @@ no longer holds it. `into_source` returns the wrapped reader and leaves
 pending buffered bytes unread. Both move one direct field out of the taken
 wrapper; its `Vec(U8)` window owns no element cleanup, so no other field needs
 releasing. A `BufReader(ByteCursor)` over a copyable source is copyable, so
-`take self` is rejected for that instantiation by the `take`-on-affine rule;
-`into_source` is for affine sources.
+`take self` is rejected for that instantiation by the `take`-on-affine rule.
+Constructing a `BufReader` over an affine `Reader` is currently rejected: the
+constructor's plain `source` parameter may not become the reader's stored
+owner. A conditional take-if-affine parameter form is deferred, so
+`into_source` currently has no constructible affine instance.
 
 ### Standard streams and text helpers
 
@@ -472,9 +478,10 @@ implementations resolve without an explicit import.
   `io.close_directory` named as the observing releases. Every owner of a host
   handle (`File(I)`, `Entries(I)`, and the process pipe ends in
   `std.process`) holds exactly one and closes it once.
-- `BufReader` and `BufWriter` are ordinary copyable values; mutation happens
-  through exclusively borrowed method calls and the compiler updates a
-  uniquely owned buffer in place. `BufWriter.cleanup` flushes best-effort and
+- `BufReader` over a copyable reader is an ordinary copyable value; `BufWriter`
+  owns its `Cleanup` sink and is affine. Mutation happens through exclusively
+  borrowed method calls and the compiler updates a uniquely owned buffer in
+  place. `BufWriter.cleanup` flushes best-effort and
   cannot report an error; `into_sink` is the observing release.
 - `ByteSink` grows its owned byte vector from writes. `new` starts with 4096
   bytes of capacity and `with_capacity` selects another initial size; `write`

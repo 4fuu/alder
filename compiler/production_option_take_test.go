@@ -53,7 +53,7 @@ impl Holder {
     }
 }
 
-fn drop_slot(value: Option(Res)) -> Unit {
+fn drop_slot(take value: Option(Res)) -> Unit {
     match value {
         Some(item) => { item.cleanup() }
         None => {}

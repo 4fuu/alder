@@ -473,6 +473,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     // 307 retired with field- and element-place mutable views.
     if kind == 308 { return out_string("cannot move an affine field out of a borrowed owner: only a take-self method may move its fields") }
     if kind == 309 { return out_string("cannot construct this record outside its module: a required field is not pub") }
+    if kind == 345 { return out_string("a borrowed parameter cannot be used as an owner; declare the parameter with take to transfer ownership") }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }

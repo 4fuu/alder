@@ -316,7 +316,12 @@ without a value copy.
 
 `using name = expression` accepts an affine type implementing the language's
 special `Cleanup` trait. Registrations run at most once in reverse lexical
-order.
+order. The initializer must name an owned value, such as a local, a field of
+one, or a `take` parameter. A plain, `mut`, or by-value `self` parameter only
+borrows the caller's owner, so every ownership use of it is rejected, including
+`using`, moves, `take` calls, returns, aggregate stores, assignments, and
+captures. Read-only field access, `self` methods, and forwarding to another
+ordinary parameter remain available.
 
 A conditional implementation — one whose `impl` declares type parameters, such
 as `impl(T: type) Cleanup for Boxed(T)` — registers the concrete instance of

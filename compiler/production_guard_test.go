@@ -47,7 +47,7 @@ var m75GuardRejections = []struct {
 	},
 	{
 		"guard-consumes-binding",
-		"type Res { n: U64 }\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn drain_ok(take v: Res) -> Bool {\n    using held = v\n    return true\n}\nfn f(o: Option(Res)) -> U64 {\n    return match o {\n        Some(v) if drain_ok(v) => 1\n        _ => 2\n    }\n}\nfn main() -> I32 { return 0 }\n",
+		"type Res { n: U64 }\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn drain_ok(take v: Res) -> Bool {\n    using held = v\n    return true\n}\nfn f(take o: Option(Res)) -> U64 {\n    return match o {\n        Some(v) if drain_ok(v) => 1\n        _ => 2\n    }\n}\nfn main() -> I32 { return 0 }\n",
 		"match guard only borrows",
 	},
 }

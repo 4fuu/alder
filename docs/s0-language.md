@@ -388,7 +388,12 @@ The second `using` form is the M7.5 public surface: it accepts a `Table(T)`
 owner (registering the builtin release), any affine nominal type implementing
 `Cleanup` (registering the concrete instance of its trait method), or a
 `Vec(T)` of `Cleanup` owners (registering a per-element drain). The
-`with cleanup_function` clause stays the bootstrap-private bridge.
+`with cleanup_function` clause stays the bootstrap-private bridge. The
+initializer must name an owned value. A plain, `mut`, or by-value `self`
+parameter only borrows the caller's owner, so every ownership use of it is
+rejected; declare it with `take` to transfer ownership first. Read-only field
+access, `self` methods, and forwarding to another ordinary parameter remain
+available.
 
 `break` and `continue` jump to the exit and the next iteration of the
 innermost enclosing loop; `continue` in a `for` still runs the index step, and

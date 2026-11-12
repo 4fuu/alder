@@ -50,6 +50,15 @@ type CheckStore {
     bindings: BindingStoreRec
 }
 
+// transfer_owned_argument rewrites owned values but cannot itself report a
+// source diagnostic. rejected tells the caller that the expression is a
+// borrowed parameter used as an owner, so the caller fails at its own syntax
+// node with diagnostic 345.
+type TransferOutcomeRec {
+    store: CheckStore
+    rejected: Bool
+}
+
 // C binding blocks keep their validated members here instead of the ordinary
 // checked-type store: binding types never participate in value cycles, use
 // indexes, or substitution, and lowering reads the same shape to build the
@@ -6374,6 +6383,29 @@ fn mut_argument_place_root(store: CheckStore, expression: U64) -> U64 {
     return 0
 }
 
+// A borrowed parameter (plain, mut, or by-value self) only borrows the
+// caller's owner. Ownership uses of it would duplicate that responsibility, so
+// they are rejected with one diagnostic that names the take parameter mode.
+fn binding_is_borrowed_parameter(parse: ParseStore, binding: LocalRec) -> Bool {
+    if binding.kind != 1 || binding.syntax == 0 || binding.syntax > __s0_buffer_len(SyntaxRec, parse.nodes) { return false }
+    let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
+    return declaration.kind != 48
+}
+
+fn borrowed_parameter_root(parse: ParseStore, store: CheckStore, expression: U64) -> U64 {
+    let root = mut_argument_place_root(store, expression)
+    if root == 0 || root > __s0_buffer_len(LocalRec, store.locals) { return 0 }
+    if !binding_is_borrowed_parameter(parse, __s0_buffer_get(LocalRec, store.locals, root - 1)) { return 0 }
+    return root
+}
+
+fn checked_type_is_affine(d: Domain, state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    let empty = try __s0_buffer_new(TypeBindingRec, d)
+    let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+    let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, checked_type, 0, 0)
+    return Ok(category.category == 2)
+}
+
 // check_mut_argument_place admits a field or index path of a mutable place as
 // a `mut` argument: the root binding must be mutable exactly as a place root
 // is, and no live view of that root may block the exclusive borrow.
@@ -6409,6 +6441,7 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, parameter.checked_type, 0, 0)
     if parameter_node.kind == 48 && category.category != 2 { return expr_token_fail(d, state, base, 90, arg) }
+    if parameter_node.kind == 48 && borrowed_parameter_root(parse, store, expression_id) != 0 { return expr_token_fail(d, state, base, 345, arg) }
     // A mut cursor parameter borrows the caller's binding exclusively, so
     // the argument must be a mutable place: a var binding, an owner, another
     // mut parameter forwarding the cursor, or a field path of one of those.
@@ -6543,39 +6576,54 @@ fn check_positional_call_args(d: Domain, state: State, parse: ParseStore, base: 
 // returns: constructing a record, enum variant, Option/Result wrapper, or
 // array moves the part into the aggregate. Only whole aggregates transfer;
 // there is no field-extraction syntax, so parts leave an aggregate only by
-// transferring the aggregate itself.
-fn transfer_owned_argument(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64) -> Result(CheckStore, __s0_Error) {
-    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(store) }
+// transferring the aggregate itself. A borrowed parameter reports rejected so
+// its caller fails with the ownership diagnostic.
+fn transfer_owned_argument(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64) -> Result(TransferOutcomeRec, __s0_Error) {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
-    if expression.owner != owner { return Ok(store) }
+    if expression.owner != owner { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
     if expression.kind == 21 {
         // A direct affine field of a taken owner moves that field; `left`
         // carries the owner local so the owner flow can mark the field.
         let root = owner_flow_field_base(store, expression_id)
-        if root == 0 || root > __s0_buffer_len(LocalRec, store.locals) { return Ok(store) }
+        if root == 0 || root > __s0_buffer_len(LocalRec, store.locals) { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
         let root_binding = __s0_buffer_get(LocalRec, store.locals, root - 1)
-        if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return Ok(store) }
-        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(store) }
+        if borrowed_parameter_root(parse, store, expression_id) != 0 {
+            if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
+            let concrete = try concrete_field_type(d, store, root_binding.checked_type, expression.parameter_use)
+            let empty = try __s0_buffer_new(TypeBindingRec, d)
+            let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+            let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, concrete.checked_type, 0, 0)
+            return Ok(TransferOutcomeRec(store: store, rejected: category.category == 2))
+        }
+        if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
+        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(DeclTypeUseRec, store.uses) { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
         let concrete = try concrete_field_type(d, store, root_binding.checked_type, expression.parameter_use)
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
         let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, concrete.checked_type, 0, 0)
-        if category.category != 2 { return Ok(store) }
+        if category.category != 2 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
         __s0_buffer_set(CheckedExprRec, store.expressions, expression_id - 1, CheckedExprRec(owner: expression.owner, owner_previous: expression.owner_previous, syntax: expression.syntax, kind: 21, checked_type: expression.checked_type, parameter_use: expression.parameter_use, bool_value: expression.bool_value, left: expression.left, right: expression.right, annotation: expression.annotation, field_move: root, first_child: expression.first_child, child_count: expression.child_count, operator: expression.operator, site_kind: expression.site_kind, site_syntax: expression.site_syntax))
-        return Ok(store)
+        return Ok(TransferOutcomeRec(store: store, rejected: false))
     }
-    if expression.kind != 1 && expression.kind != 5 { return Ok(store) }
-    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(store) }
+    if expression.kind != 1 && expression.kind != 5 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
+    if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
     let binding = __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)
+    if borrowed_parameter_root(parse, store, expression_id) != 0 {
+        let empty = try __s0_buffer_new(TypeBindingRec, d)
+        let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+        let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, expression.checked_type, 0, 0)
+        if category.category == 2 { return Ok(TransferOutcomeRec(store: store, rejected: true)) }
+    }
     var owned = binding.kind == 2
     if binding.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1).kind == 48 { owned = true }
-    if !owned { return Ok(store) }
+    if !owned { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, expression.checked_type, 0, 0)
-    if category.category != 2 { return Ok(store) }
+    if category.category != 2 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
     __s0_buffer_set(CheckedExprRec, store.expressions, expression_id - 1, CheckedExprRec(owner: expression.owner, owner_previous: expression.owner_previous, syntax: expression.syntax, kind: 22, checked_type: expression.checked_type, parameter_use: expression.parameter_use, bool_value: expression.bool_value, left: expression.left, right: expression.right, annotation: expression.annotation, first_child: expression.first_child, child_count: expression.child_count, operator: expression.operator, site_kind: expression.site_kind, site_syntax: expression.site_syntax, field_move: 0))
-    return Ok(store)
+    return Ok(TransferOutcomeRec(store: store, rejected: false))
 }
 
 fn check_record_values(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, ordinal: U64, count: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -6600,8 +6648,9 @@ fn check_record_values(d: Domain, state: State, parse: ParseStore, base: CheckSt
         ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return expr_deferred(base) }
-    let transferred = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
-    return check_record_values(d, state, parse, base, transferred, owner, call, target, ordinal + 1, count, in_loop)
+    let transfer = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+    if transfer.rejected { return expr_token_fail(d, state, base, 345, value) }
+    return check_record_values(d, state, parse, base, transfer.store, owner, call, target, ordinal + 1, count, in_loop)
 }
 
 fn pattern_bound(store: CheckStore, pattern: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Bool {
@@ -6886,7 +6935,15 @@ fn infer_record_values(d: Domain, state: State, parse: ParseStore, base: CheckSt
         ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(CallInferenceDefer) }
-    let after_transfer = try transfer_owned_argument(d, state, parse, after, owner, draft.expression)
+    let transfer = try transfer_owned_argument(d, state, parse, after, owner, draft.expression)
+    if transfer.rejected {
+        let failed = try check_token_fail(d, state, base, 345, value)
+        return Ok(CallInferenceBad(match failed {
+            CheckGood(item) => item
+            CheckBad(item) => item
+        }))
+    }
+    let after_transfer = transfer.store
     var inferred = bindings
     if expected == 0 {
         let unified = try unify_types(d, after_transfer, field.checked_type, draft.checked_type, bindings)
@@ -7422,6 +7479,10 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     var scoped: U64 = 0
     while capture_at < __s0_buffer_len(U64, found) {
         let binding = __s0_buffer_get(LocalRec, store.locals, __s0_buffer_get(U64, found, capture_at) - 1)
+        if binding_is_borrowed_parameter(parse, binding) && (try checked_type_is_affine(d, state, parse, current, binding.checked_type)) {
+            let failed_node = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, found_nodes, capture_at) - 1)
+            return expr_token_fail(d, state, current, 345, failed_node)
+        }
         if !closure_capture_copyable(current, binding.checked_type, 0) {
             let failed_node = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, found_nodes, capture_at) - 1)
             return expr_token_fail(d, state, current, 145, failed_node)
@@ -7772,8 +7833,9 @@ fn check_variant_call(d: Domain, state: State, parse: ParseStore, base: CheckSto
         ExprBad(item) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return expr_deferred(base) }
-    let transferred = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
-    return append_call_expression(d, state, parse, transferred, owner, call_id, 10, expected, 4, checked.target, variant_id, call, 3, site_kind, site_syntax, 0)
+    let transfer = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+    if transfer.rejected { return expr_token_fail(d, state, base, 345, arg) }
+    return append_call_expression(d, state, parse, transfer.store, owner, call_id, 10, expected, 4, checked.target, variant_id, call, 3, site_kind, site_syntax, 0)
 }
 
 fn check_slice_builtin(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -7890,10 +7952,12 @@ fn check_vec_static_builtin(d: Domain, state: State, parse: ParseStore, base: Ch
         if vec_element_allows_affine(state, current, element) {
             // The array of affine owners transfers into the vector, exactly
             // like an aggregate construction part.
-            current = try transfer_owned_argument(d, state, parse, current, owner, match checked {
+            let transfer = try transfer_owned_argument(d, state, parse, current, owner, match checked {
                 ExprGood(value) => value.draft.expression
                 ExprBad(value) => 0
             })
+            if transfer.rejected { return expr_token_fail(d, state, base, 345, value_node) }
+            current = transfer.store
         }
     }
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, vector.checked_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, vector.checked_type) }
@@ -8176,7 +8240,9 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         if affine_elements && builtin == 21 {
             // The pushed element transfers into the vector, exactly like an
             // aggregate construction part.
-            current = try transfer_owned_argument(d, state, parse, current, owner, first_expression)
+            let transfer = try transfer_owned_argument(d, state, parse, current, owner, first_expression)
+            if transfer.rejected { return expr_token_fail(d, state, base, 345, argument) }
+            current = transfer.store
         }
     }
     if arity == 2 {
@@ -10160,8 +10226,9 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
             ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
         }
         if draft.deferred { return expr_deferred(base) }
-        let transferred = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
-        return append_expression(d, transferred, owner, call_id, kind, expected, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
+        let transfer = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+        if transfer.rejected { return expr_token_fail(d, state, base, 345, argument) }
+        return append_expression(d, transfer.store, owner, call_id, kind, expected, 0, 0, draft.expression, 0, 0, site_kind, site_syntax)
     }
     let target = symbol_named(state, parse, store, callee)
     if target != 0 {
@@ -10542,7 +10609,15 @@ fn check_array_elements(d: Domain, state: State, parse: ParseStore, base: CheckS
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return Ok(ArrayElementsDefer) }
-    let transferred = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+    let transfer = try transfer_owned_argument(d, state, parse, current, owner, draft.expression)
+    if transfer.rejected {
+        let failed = try check_token_fail(d, state, current, 345, node)
+        return Ok(ArrayElementsBad(match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }))
+    }
+    let transferred = transfer.store
     var actual_element = prior.element_type
     if actual_element == 0 { actual_element = draft.checked_type }
     // Element child records are appended by the array-literal branch after
@@ -10922,7 +10997,9 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
         // An affine scrutinee is consumed as a whole: its payload arms bind
         // by transfer, and the scrutinee binding itself transfers into the
         // match. Reads of it after the match are use-after-transfer.
-        let scrutinee_consumed = try transfer_owned_argument(d, state, parse, current, owner, scrutinee.expression)
+        let transfer = try transfer_owned_argument(d, state, parse, current, owner, scrutinee.expression)
+        if transfer.rejected { return expr_token_fail(d, state, base, 345, expression) }
+        let scrutinee_consumed = transfer.store
         let scrutinee_type = __s0_buffer_get(CheckedTypeRec, scrutinee_consumed.types, scrutinee.checked_type - 1)
         if scrutinee_type.kind != 5 && scrutinee_type.kind != 7 && scrutinee_type.kind != 9 && scrutinee_type.kind != 10 { return expr_token_fail(d, state, base, 70, expression) }
         // A table lookup scrutinee is the one scoped-view match admitted by
@@ -11547,6 +11624,7 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
     }
     if category.contains_scoped && annotation.kind != 8 && annotation.kind != 18 { return body_token_fail(d, state, ostore, 104, statement) }
     if category.category == 2 {
+        if borrowed_parameter_root(parse, ostore, draft.expression) != 0 { return body_token_fail(d, state, ostore, 345, init) }
         if statement.kind == 16 { return body_token_fail(d, state, ostore, 95, statement) }
         let initializer = __s0_buffer_get(CheckedExprRec, ostore.expressions, draft.expression - 1)
         if initializer.kind == 21 {
@@ -11624,6 +11702,7 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return body_token_fail(d, state, ostore, 87, rhs) }
+    if borrowed_parameter_root(parse, ostore, draft.expression) != 0 && (try checked_type_is_affine(d, state, parse, ostore, draft.checked_type)) { return body_token_fail(d, state, ostore, 345, rhs) }
     if __s0_buffer_get(CheckedTypeRec, ostore.types, place.checked_type - 1).kind == 18 { return body_token_fail(d, state, ostore, 104, statement) }
     // A view of frame-local storage assigned inside a loop body would put a
     // header into a slot that survives the backedge, where the next iteration
@@ -11662,6 +11741,7 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
         let category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, result_use.checked_type, 0, 0)
+        if category.category == 2 && borrowed_parameter_root(parse, current, expression) != 0 { return body_token_fail(d, state, current, 345, syntax) }
         // M7.3 slice 2 admitted a direct immutable slice result; slice 3
         // generalizes that to ordinary aggregates whose scoped parts are all
         // immutable views, materialized into caller-result storage. Mutable
@@ -11961,7 +12041,10 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
         // disarms the entry.
         // A whole-aggregate read of an owning local is consumed here exactly
         // like an argument pass, so a received owner can be registered.
-        current = try transfer_owned_argument(d, state, parse, current, owner, initializer.expression)
+        if borrowed_parameter_root(parse, current, initializer.expression) != 0 && (try checked_type_is_affine(d, state, parse, current, initializer.checked_type)) { return body_token_fail(d, state, current, 345, statement) }
+        let transfer = try transfer_owned_argument(d, state, parse, current, owner, initializer.expression)
+        if transfer.rejected { return body_token_fail(d, state, current, 345, statement) }
+        current = transfer.store
         let using_checked = __s0_buffer_get(CheckedTypeRec, current.types, initializer.checked_type - 1)
         var builtin_table = false
         if using_kind == 19 { builtin_table = true }

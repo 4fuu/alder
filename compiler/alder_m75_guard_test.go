@@ -120,7 +120,7 @@ fn main() -> I32 {
 		{"guard-not-bool", "fn f(o: Option(U64)) -> U64 {\n return match o {\n  Some(v) if v => 1\n  _ => 2\n }\n}\nfn main() -> I32 { return 0 }\n", 77},
 		// A guard only borrows: transferring the affine payload out of the
 		// binding inside the guard is rejected.
-		{"guard-consumes-binding", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn drain_ok(take v: Res) -> Bool {\n using held = v\n return true\n}\nfn f(o: Option(Res)) -> U64 {\n return match o {\n  Some(v) if drain_ok(v) => 1\n  _ => 2\n }\n}\nfn main() -> I32 { return 0 }\n", 148},
+		{"guard-consumes-binding", "type Res {\n n: U64\n}\nimpl Cleanup for Res {\n fn cleanup(take self) -> Unit { return }\n}\nfn drain_ok(take v: Res) -> Bool {\n using held = v\n return true\n}\nfn f(take o: Option(Res)) -> U64 {\n return match o {\n  Some(v) if drain_ok(v) => 1\n  _ => 2\n }\n}\nfn main() -> I32 { return 0 }\n", 148},
 		// A table-view arm's region is one straight-line fail-free block, so
 		// its arm cannot carry a guard.
 		{"guard-view-arm", "fn f(t: Table(U64), id: U64.Id) -> U64 {\n return match t.get(id) {\n  Some(v) if v.n > 1 => 1\n  None => 2\n }\n}\nfn main() -> I32 { return 0 }\n", 149},

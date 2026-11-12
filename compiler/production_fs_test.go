@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -250,6 +251,142 @@ func resetFsProbeFile(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestFsBorrowedOwnerParametersRejected pins the ownership boundary for the
+// installed std.fs owners. A borrowed File or TempDir is not the caller's
+// owner, so registering it with using inside the callee is rejected.
+func TestFsBorrowedOwnerParametersRejected(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	cases := []struct{ name, source string }{
+		{
+			"file",
+			`module hello.main
+
+import std.fs { File }
+import std.io { Blocking }
+
+fn consume(file: File(Blocking)) -> Unit {
+    using held = file
+    return
+}
+
+pub fn main() -> I32 { return 0 }
+`,
+		},
+		{
+			"temp-dir",
+			`module hello.main
+
+import std.fs { TempDir }
+import std.io { Blocking }
+
+fn consume(directory: TempDir(Blocking)) -> Unit {
+    using held = directory
+    return
+}
+
+pub fn main() -> I32 { return 0 }
+`,
+		},
+	}
+	for _, item := range cases {
+		item := item
+		t.Run(item.name, func(t *testing.T) {
+			check := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+				"alder.toml":  manifest,
+				"src/main.al": item.source,
+			}, "check")
+			if check.status == 0 {
+				t.Fatalf("%s borrowed owner was accepted:\n%s", item.name, check.stdout)
+			}
+			if !strings.Contains(check.stderr, "a borrowed parameter cannot be used as an owner") {
+				t.Fatalf("%s diagnostic: status=%d stderr=%s", item.name, check.status, check.stderr)
+			}
+		})
+	}
+}
+
+// TestFsBorrowedOwnerReadsAllowed keeps field reads through self methods and
+// forwarding to another ordinary parameter available on borrowed File and
+// TempDir values. The program releases both owners once through using, and the
+// sanitizer rerun checks that no second release occurred.
+func TestFsBorrowedOwnerReadsAllowed(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	source := `module hello.main
+
+import std.fs { File, TempDir, open, temp_dir }
+import std.io { Blocking, IoError }
+import std.path { Path }
+
+fn forward_file(file: File(Blocking)) -> Unit {
+    return
+}
+
+fn dir_path(directory: TempDir(Blocking)) -> Path {
+    return directory.path()
+}
+
+fn probe(cap: Blocking, path: Path) -> Result(I32, IoError) {
+    using file = try open(cap, path)
+    forward_file(file)
+    using directory = try temp_dir(cap, "borrow")
+    let forwarded_dir = dir_path(directory)
+    let direct_dir = directory.path()
+    if forwarded_dir.to_os().to_bytes().len() != direct_dir.to_os().to_bytes().len() { return Ok(2) }
+    return Ok(0)
+}
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    match Path.parse("/tmp/alder-fs-probe.txt") {
+        Ok(path) => {
+            match probe(cap, path) {
+                Ok(code) => { return code }
+                Err(_) => { return 90 }
+            }
+        }
+        Err(_) => { return 91 }
+    }
+    return 92
+}
+`
+	resetFsProbeFile(t)
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, map[string]string{
+		"alder.toml":  manifest,
+		"src/main.al": source,
+	}, "run")
+	if run != (productionResult{}) {
+		t.Fatalf("borrowed owner reads: %+v stderr=%s", run, run.stderr)
+	}
+	runSanitizedProject(t, cc, root, dir, "hello")
 }
 
 func TestFsProductionFileAndValues(t *testing.T) {

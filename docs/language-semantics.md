@@ -39,7 +39,13 @@ Passing an owner to an ordinary parameter borrows it only for that call.
 `mut` grants exclusive call access. `take` transfers ownership. Returning an
 owner transfers it to the caller. An owner must be returned, transferred,
 explicitly consumed, or cleaned by `using`; silently dropping or overwriting it
-is rejected.
+is rejected. A plain, `mut`, or by-value `self` parameter only borrows the
+caller's owner. Every ownership use of that borrowed value is rejected: a
+`using` registration, moving it into a `let`/`var`, passing it to a `take`
+parameter or `take self` method, returning it, storing or assigning it into an
+aggregate, or capturing it. Field reads, `self` methods, and passing it to
+another ordinary parameter remain available. Declare the parameter with `take`
+to transfer ownership into the callee.
 
 This limited affine rule is the safety boundary for resources and identity. It
 does not turn ordinary values into a move-oriented language.

@@ -2132,6 +2132,11 @@ The following items are not part of the current implementation scope:
   `Vec`/`String`/`Bytes`/`OsString` field cannot live in a table. Growing such
   a field through `get_mut` waits for tables whose elements carry relocatable
   storage.
+- conditional ownership for generic constructors: a plain type parameter cannot
+  become an aggregate field when the concrete instantiation is affine, so
+  `BufReader` currently wraps only copyable readers. An affine `Reader` needs a
+  take-if-affine parameter form, which would also make `BufReader.into_source`
+  reachable for affine sources.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or
   on none, and a branch that returns a `While`/`match` expression value does
