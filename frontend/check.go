@@ -164,6 +164,8 @@ type checker struct {
 	activeFn  map[*FnDecl]string
 
 	ann map[*checkedFn]map[Expr]*annInfo
+
+	hasInterpolation bool
 }
 
 type topLevelDecl struct {
@@ -298,7 +300,7 @@ func checkModule(decls []Decl, bootstrapPrivate bool) (*checkedModule, error) {
 			return nil, err
 		}
 	}
-	return &checkedModule{fns: c.checked, ann: c.ann, imports: c.importSigs}, nil
+	return &checkedModule{fns: c.checked, ann: c.ann, imports: c.importSigs, hasInterpolation: c.hasInterpolation}, nil
 }
 
 func builtinTypeName(name string) bool {
@@ -1362,6 +1364,24 @@ func (k *bodyChecker) checkExpr(e Expr, expected *Type) (*Type, error) {
 		if t.kind == tString && !utf8.ValidString(x.Value) {
 			return nil, diag(x.P, "String literal is not valid UTF-8")
 		}
+		k.note(e, t)
+		return t, nil
+
+	case *InterpLit:
+		for _, part := range x.Parts {
+			if part.Expr == nil {
+				continue
+			}
+			pt, err := k.checkExpr(part.Expr, nil)
+			if err != nil {
+				return nil, err
+			}
+			if pt.kind != tString && !(pt.kind == tPrim && (pt.prim == pBool || pt.isInt())) {
+				return nil, diag(part.Expr.exprPos(), "interpolation part type %s does not implement Display", pt.display())
+			}
+		}
+		k.c.hasInterpolation = true
+		t := &Type{kind: tString}
 		k.note(e, t)
 		return t, nil
 

@@ -131,6 +131,20 @@ type StrLit struct {
 	Value string
 }
 
+// InterpLit is a string with interpolation parts in source order. Literal
+// parts carry text; expression parts carry an expression that must have a
+// builtin Display form.
+type InterpLit struct {
+	P     pos
+	Parts []InterpPart
+}
+
+// InterpPart is one literal or expression segment of an InterpLit.
+type InterpPart struct {
+	Literal string
+	Expr    Expr
+}
+
 // BoolLit is true or false.
 type BoolLit struct {
 	P     pos
@@ -219,22 +233,23 @@ type Try struct {
 	X Expr
 }
 
-func (e *IntLit) exprPos() pos   { return e.P }
-func (e *UnitLit) exprPos() pos  { return e.P }
-func (e *FloatLit) exprPos() pos { return e.P }
-func (e *StrLit) exprPos() pos   { return e.P }
-func (e *BoolLit) exprPos() pos  { return e.P }
-func (e *Ident) exprPos() pos    { return e.P }
-func (e *Unary) exprPos() pos    { return e.P }
-func (e *Binary) exprPos() pos   { return e.P }
-func (e *Call) exprPos() pos     { return e.P }
-func (e *NamedArg) exprPos() pos { return e.P }
-func (e *UnsafeC) exprPos() pos  { return e.P }
-func (e *Field) exprPos() pos    { return e.P }
-func (e *Index) exprPos() pos    { return e.P }
-func (e *Match) exprPos() pos    { return e.P }
-func (e *Try) exprPos() pos      { return e.P }
-func (e *ArrayLit) exprPos() pos { return e.P }
+func (e *IntLit) exprPos() pos    { return e.P }
+func (e *UnitLit) exprPos() pos   { return e.P }
+func (e *FloatLit) exprPos() pos  { return e.P }
+func (e *StrLit) exprPos() pos    { return e.P }
+func (e *InterpLit) exprPos() pos { return e.P }
+func (e *BoolLit) exprPos() pos   { return e.P }
+func (e *Ident) exprPos() pos     { return e.P }
+func (e *Unary) exprPos() pos     { return e.P }
+func (e *Binary) exprPos() pos    { return e.P }
+func (e *Call) exprPos() pos      { return e.P }
+func (e *NamedArg) exprPos() pos  { return e.P }
+func (e *UnsafeC) exprPos() pos   { return e.P }
+func (e *Field) exprPos() pos     { return e.P }
+func (e *Index) exprPos() pos     { return e.P }
+func (e *Match) exprPos() pos     { return e.P }
+func (e *Try) exprPos() pos       { return e.P }
+func (e *ArrayLit) exprPos() pos  { return e.P }
 
 // Stmt is a statement.
 type Stmt interface{ stmtPos() pos }

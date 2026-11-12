@@ -112,7 +112,7 @@ fn cgen_emit_constants(d: Domain, initial: CgenWriter, store: MirStore) -> Resul
             if mir_vtype_kind(store, item.const_type) != mir_type_kind_slice() { out = try cgen_put(d, out, "const ") }
             out = try cgen_put(d, out, "uint8_t alder_str_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, "[] = {")
+            out = try cgen_put(d, out, "[] = \{")
             var byte_at = item.string_start
             if byte_at == item.string_end { out = try cgen_put(d, out, "UINT8_C(0)") }
             while byte_at < item.string_end {
@@ -557,14 +557,14 @@ fn cgen_emit_functions(d: Domain, initial: CgenWriter, store: MirStore, indexes:
 }
 
 fn cgen_emit_host_entry(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, main: U64) -> Result(CgenWriter, __s0_Error) {
-    var out = try cgen_put(d, initial, "int32_t alder_program_entry(void *host_context) {\n  if (host_context == NULL) { return ALDER_PROGRAM_FAILURE_STATUS; }\n")
+    var out = try cgen_put(d, initial, "int32_t alder_program_entry(void *host_context) \{\n  if (host_context == NULL) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n")
     let count = cgen_function_param_count(store, indexes, main)
     if count == 0 {
         out = try cgen_put(d, out, "  return ")
         out = try cgen_emit_function_name(d, out, store, main)
         out = try cgen_put(d, out, "();\n")
     } else {
-        out = try cgen_put(d, out, "  AlderDomain alder_root = {0};\n  int32_t alder_status;\n  if (!alder_domain_init(&alder_root, NULL)) { return ALDER_PROGRAM_FAILURE_STATUS; }\n  alder_status = ")
+        out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  int32_t alder_status;\n  if (!alder_domain_init(&alder_root, NULL)) \{ return ALDER_PROGRAM_FAILURE_STATUS; }\n  alder_status = ")
         out = try cgen_emit_function_name(d, out, store, main)
         out = try cgen_put(d, out, "(&alder_root);\n  alder_domain_destroy(&alder_root);\n  return alder_status;\n")
     }
@@ -604,7 +604,7 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
             let place_based = item.place != 0 && owner_field != 0
             out = try cgen_put(d, out, "typedef struct AlderCtx_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, " {\n")
+            out = try cgen_put(d, out, " \{\n")
             var ordinal: U64 = 0
             var field: U64 = 0
             while ordinal < count {
@@ -625,7 +625,7 @@ fn cgen_emit_cleanup_sites(d: Domain, initial: CgenWriter, store: MirStore, inde
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, ";\nstatic ALDER_MAYBE_UNUSED void alder_cleanup_")
             out = try cgen_put_u64(d, out, at)
-            out = try cgen_put(d, out, "(void *alder_ctx) {\n")
+            out = try cgen_put(d, out, "(void *alder_ctx) \{\n")
             if field == 0 { out = try cgen_put(d, out, "  (void)alder_ctx;\n") } else { out = try cgen_put(d, out, "  AlderCtx_")
             out = try cgen_put_u64(d, out, at)
             out = try cgen_put(d, out, " *alder_c = (AlderCtx_")
@@ -674,22 +674,22 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
     if item.kind == mir_type_kind_string() || item.kind == mir_type_kind_bytes() {
         // The descriptor is {data, len}; the buffer moves into the
         // destination domain, keeping the slice-branch checks and style.
-        out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(uint8_t), &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) {\n    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)1);\n    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n    alder_v.data = alder_p;\n  }\n")
+        out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(uint8_t), &alder_t)) \{ alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) \{ alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) \{\n    if (alder_v.data == NULL) \{ alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, (size_t)1);\n    if (alder_p == NULL) \{ alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n    alder_v.data = alder_p;\n  }\n")
     }
     if item.kind == mir_type_kind_function() {
         // A function value is {code, environment, retain}. A cross-domain
         // copy retains the environment through the hook so the copy owns a
         // complete environment in the destination domain; a same-domain copy
         // (a vector grow) passes zero and stays a plain bit copy.
-        out = try cgen_put(d, out, "  if (alder_retain != 0 && alder_v.retain != NULL && alder_v.env != NULL) { alder_v.env = alder_v.retain(alder_d, alder_v.env); }\n")
+        out = try cgen_put(d, out, "  if (alder_retain != 0 && alder_v.retain != NULL && alder_v.env != NULL) \{ alder_v.env = alder_v.retain(alder_d, alder_v.env); }\n")
     }
     if item.kind == mir_type_kind_slice() || item.kind == mir_type_kind_safe_ref() || item.kind == mir_type_kind_safe_mut() || item.kind == mir_type_kind_vec() {
         out = try cgen_put(d, out, "  uint64_t alder_t;\n  if (!alder_u64_mul_checked(alder_v.len, (uint64_t)sizeof(")
         out = try cgen_put_type(d, out, store, item.elem)
-        out = try cgen_put(d, out, "), &alder_t)) { alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) { alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) {\n    if (alder_v.data == NULL) { alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, _Alignof(")
+        out = try cgen_put(d, out, "), &alder_t)) \{ alder_runtime_panic(\"copy_to_domain: size overflow\"); }\n  if (alder_t > (uint64_t)SIZE_MAX) \{ alder_runtime_panic(\"copy_to_domain: size exceeds size_t\"); }\n  if (alder_v.len > (uint64_t)0) \{\n    if (alder_v.data == NULL) \{ alder_runtime_panic(\"copy_to_domain: null source\"); }\n    void *alder_p = alder_domain_alloc(alder_d, (size_t)alder_t, _Alignof(")
         out = try cgen_put_type(d, out, store, item.elem)
-        out = try cgen_put(d, out, "));\n    if (alder_p == NULL) { alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
-        if cgen_copy_trivial(store, item.elem) { out = try cgen_put(d, out, "    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n") } else { out = try cgen_put(d, out, "    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) { ((")
+        out = try cgen_put(d, out, "));\n    if (alder_p == NULL) \{ alder_runtime_panic(\"copy_to_domain: out of memory\"); }\n")
+        if cgen_copy_trivial(store, item.elem) { out = try cgen_put(d, out, "    memcpy(alder_p, alder_v.data, (size_t)alder_t);\n") } else { out = try cgen_put(d, out, "    for (uint64_t alder_i = (uint64_t)0; alder_i < alder_v.len; alder_i++) \{ ((")
             out = try cgen_put_type(d, out, store, item.elem)
             out = try cgen_put(d, out, " *)alder_p)[alder_i] = alder_copy_ty")
             out = try cgen_put_u64(d, out, item.elem - 1)
@@ -702,7 +702,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
     if item.kind == mir_type_kind_array() && !cgen_copy_trivial(store, item.elem) {
         out = try cgen_put(d, out, "  for (uint64_t alder_i = (uint64_t)0; alder_i < (uint64_t)")
         out = try cgen_put_u64(d, out, item.length)
-        out = try cgen_put(d, out, "; alder_i++) {\n    alder_v.alder_e[alder_i] = alder_copy_ty")
+        out = try cgen_put(d, out, "; alder_i++) \{\n    alder_v.alder_e[alder_i] = alder_copy_ty")
         out = try cgen_put_u64(d, out, item.elem - 1)
         out = try cgen_put(d, out, "(alder_d, alder_v.alder_e[alder_i], alder_retain);\n  }\n")
     }
@@ -715,7 +715,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
             if child != mir_type_unit() && !cgen_copy_trivial(store, child) {
                 if item.kind == mir_type_kind_enum() { out = try cgen_put(d, out, "  if (alder_v.alder_tag == (uint32_t)")
                 out = try cgen_put_u64(d, out, ordinal)
-                out = try cgen_put(d, out, ") {\n  ") }
+                out = try cgen_put(d, out, ") \{\n  ") }
                 out = try cgen_put(d, out, "  alder_v.")
                 if item.kind == mir_type_kind_aggregate() { out = try cgen_put(d, out, "alder_f") } else { out = try cgen_put(d, out, "alder_u.alder_p") }
                 out = try cgen_put_u64(d, out, ordinal)
@@ -737,7 +737,7 @@ fn cgen_emit_copy_helper_body(d: Domain, initial: CgenWriter, store: MirStore, t
             if child != mir_type_unit() && !cgen_copy_trivial(store, child) {
                 out = try cgen_put(d, out, "  if (alder_v.alder_tag == (uint32_t)")
                 out = try cgen_put_u64(d, out, ordinal)
-                out = try cgen_put(d, out, ") {\n    alder_v.alder_u.alder_p")
+                out = try cgen_put(d, out, ") \{\n    alder_v.alder_u.alder_p")
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, " = alder_copy_ty")
                 out = try cgen_put_u64(d, out, child - 1)
@@ -771,7 +771,7 @@ fn cgen_emit_copy_type(d: Domain, initial: CgenTypeState, store: MirStore, type_
     out = try cgen_put_u64(d, out, type_id - 1)
     out = try cgen_put(d, out, "(AlderDomain *alder_d, ")
     out = try cgen_put_type(d, out, store, type_id)
-    out = try cgen_put(d, out, " alder_v, int alder_retain) {\n  (void)alder_retain;\n")
+    out = try cgen_put(d, out, " alder_v, int alder_retain) \{\n  (void)alder_retain;\n")
     out = try cgen_emit_copy_helper_body(d, out, store, type_id)
     let emitted = try __s0_buffer_append(U64, d, state.emitted, type_id)
     return Ok(CgenTypeState(writer: out, emitted: emitted))
@@ -840,7 +840,7 @@ fn cgen_fn_env_aggregate(store: MirStore, indexes: MirVIndexes, function: U64, e
 fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id: U64) -> Result(CgenWriter, __s0_Error) {
     var out = try cgen_put(d, initial, "static ALDER_MAYBE_UNUSED void *alder_env_retain_ty")
     out = try cgen_put_u64(d, out, type_id - 1)
-    out = try cgen_put(d, out, "(AlderDomain *alder_d, void *alder_env) {\n  ")
+    out = try cgen_put(d, out, "(AlderDomain *alder_d, void *alder_env) \{\n  ")
     out = try cgen_put_type(d, out, store, type_id)
     out = try cgen_put(d, out, " *alder_src = (")
     out = try cgen_put_type(d, out, store, type_id)
@@ -852,7 +852,7 @@ fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id
     out = try cgen_put_type(d, out, store, type_id)
     out = try cgen_put(d, out, "), _Alignof(")
     out = try cgen_put_type(d, out, store, type_id)
-    out = try cgen_put(d, out, "));\n  if (alder_dst == NULL) { alder_runtime_panic(\"closure environment: out of memory\"); }\n  *alder_dst = *alder_src;\n")
+    out = try cgen_put(d, out, "));\n  if (alder_dst == NULL) \{ alder_runtime_panic(\"closure environment: out of memory\"); }\n  *alder_dst = *alder_src;\n")
     var ordinal: U64 = 0
     let count = mir_type_part_count(store, type_id, mir_type_part_field())
     while ordinal < count {
@@ -864,7 +864,7 @@ fn cgen_emit_env_retain(d: Domain, initial: CgenWriter, store: MirStore, type_id
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, ".retain != NULL && alder_dst->alder_f")
                 out = try cgen_put_u64(d, out, ordinal)
-                out = try cgen_put(d, out, ".env != NULL) { alder_dst->alder_f")
+                out = try cgen_put(d, out, ".env != NULL) \{ alder_dst->alder_f")
                 out = try cgen_put_u64(d, out, ordinal)
                 out = try cgen_put(d, out, ".env = alder_dst->alder_f")
                 out = try cgen_put_u64(d, out, ordinal)
@@ -916,7 +916,7 @@ fn cgen_emit_env_retain_helpers(d: Domain, initial: CgenWriter, store: MirStore,
                 // A named function value's environment is the domain its
                 // frame will hang off, so retaining it into another domain
                 // rewrites it to that domain.
-                out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED void *alder_env_retain_domain(AlderDomain *alder_d, void *alder_env) {\n  (void)alder_env;\n  return alder_d;\n}\n")
+                out = try cgen_put(d, out, "static ALDER_MAYBE_UNUSED void *alder_env_retain_domain(AlderDomain *alder_d, void *alder_env) \{\n  (void)alder_env;\n  return alder_d;\n}\n")
                 domain_emitted = true
                 wrote = true
             }
@@ -1028,7 +1028,7 @@ fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, 
         out = try cgen_fn_wrapper_result(d, out, store, t.result_type)
         out = try cgen_fn_wrapper_name(d, out, target, fn_type)
         out = try cgen_fn_wrapper_params(d, out, store, fn_type, true, true)
-        out = try cgen_put(d, out, " {\n  (void)alder_env;\n  ")
+        out = try cgen_put(d, out, " \{\n  (void)alder_env;\n  ")
         if t.result_type != mir_type_unit() { out = try cgen_put(d, out, "return ") }
         out = try cgen_emit_function_name(d, out, store, target)
         out = try cgen_put(d, out, "(")
@@ -1058,7 +1058,7 @@ fn cgen_emit_fn_value_wrappers(d: Domain, initial: CgenWriter, store: MirStore, 
             if wrote_argument { out = try cgen_put(d, out, ", ") }
             out = try cgen_put(d, out, "(")
             out = try cgen_put_type(d, out, store, last)
-            out = try cgen_put(d, out, "){ alder_env, (uint64_t)1 }")
+            out = try cgen_put(d, out, ")\{ alder_env, (uint64_t)1 }")
         }
         out = try cgen_put(d, out, ");\n}\n")
         at = at + 3
@@ -1300,7 +1300,7 @@ fn cgen_generate_header(d: Domain, store: MirStore) -> Result(Bool, __s0_Error) 
         }
         block = block + 1
     }
-    out = try cgen_put(d, out, "\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n")
+    out = try cgen_put(d, out, "\n#ifdef __cplusplus\nextern \"C\" \{\n#endif\n\n")
     at = 0
     while at < __s0_buffer_len(MirFunctionRec, store.functions) {
         if __s0_buffer_get(MirFunctionRec, store.functions, at).c_export { out = try cgen_emit_export_prototype(d, out, store, indexes, at + 1) }
@@ -1362,9 +1362,9 @@ fn cgen_emit_one_export(d: Domain, initial: CgenWriter, store: MirStore, indexes
         ordinal = ordinal + 1
     }
     if !wrote { out = try cgen_put(d, out, "void") }
-    out = try cgen_put(d, out, ") {\n")
+    out = try cgen_put(d, out, ") \{\n")
     if has_domain {
-        out = try cgen_put(d, out, "  AlderDomain alder_root = {0};\n  if (!alder_domain_init(&alder_root, NULL)) { alder_runtime_panic(\"export domain initialization failed\"); }\n")
+        out = try cgen_put(d, out, "  AlderDomain alder_root = \{0};\n  if (!alder_domain_init(&alder_root, NULL)) \{ alder_runtime_panic(\"export domain initialization failed\"); }\n")
     }
     if item.result_type == mir_type_unit() {
         out = try cgen_put(d, out, "  ")

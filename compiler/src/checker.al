@@ -10723,6 +10723,210 @@ fn append_array_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
+// Interpolation is represented as checked kind 40: a String-valued parent
+// whose ordered children are literal segments (checked string literals) and
+// display calls. Display calls are ordinary checked expressions, so lowering
+// reuses the user-call and builtin-display paths without a special case.
+type InterpolationPartsRec {
+    store: CheckStore
+    parts: __s0_Buffer(U64)
+}
+
+enum InterpolationPartsOutcome {
+    InterpolationPartsGood(value: InterpolationPartsRec)
+    InterpolationPartsBad(value: CheckStore)
+    InterpolationPartsDefer
+}
+
+// Links are reverse source ordered, so the recursion walks the tail first and
+// rebuilds the parts in source order. The part IDs are collected in a buffer;
+// child records are appended only after every part has been checked, so the
+// parent's child window stays contiguous.
+fn check_interpolation_parts(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, link_id: U64, parts: __s0_Buffer(U64), string_type: U64, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(InterpolationPartsOutcome, __s0_Error) {
+    if link_id == 0 { return Ok(InterpolationPartsGood(InterpolationPartsRec(store: store, parts: parts))) }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, link_id - 1)
+    let before = try check_interpolation_parts(d, state, parse, base, store, owner, link.next, parts, string_type, site_kind, site_syntax, in_loop)
+    let prior = match before {
+        InterpolationPartsGood(value) => value
+        InterpolationPartsBad(value) => InterpolationPartsRec(store: value, parts: parts)
+        InterpolationPartsDefer => InterpolationPartsRec(store: base, parts: parts)
+    }
+    if match before {
+        InterpolationPartsGood(value) => false
+        InterpolationPartsBad(value) => true
+        InterpolationPartsDefer => false
+    } { return Ok(InterpolationPartsBad(prior.store)) }
+    if match before {
+        InterpolationPartsGood(value) => false
+        InterpolationPartsBad(value) => false
+        InterpolationPartsDefer => true
+    } { return Ok(InterpolationPartsDefer) }
+    let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    if child.kind == 22 {
+        let token = __s0_buffer_get(TokenRec, state.tokens, child.token - 1)
+        if token.value_end == token.value_start { return Ok(InterpolationPartsGood(prior)) }
+        let checked = try check_value_expression_inner(d, state, parse, base, prior.store, owner, child, link.node, string_type, 0, child, 0, 0, in_loop)
+        let current = match checked {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(InterpolationPartsBad(current)) }
+        let draft = match checked {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return Ok(InterpolationPartsDefer) }
+        let with_part = try __s0_buffer_append(U64, d, prior.parts, draft.expression)
+        return Ok(InterpolationPartsGood(InterpolationPartsRec(store: current, parts: with_part)))
+    }
+    if child.kind != 68 {
+        let failed = try check_token_fail(d, state, prior.store, 87, child)
+        let bad = match failed {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }
+        return Ok(InterpolationPartsBad(bad))
+    }
+    let checked = try check_interpolation_display_part(d, state, parse, base, prior.store, owner, child, link.node, string_type, in_loop)
+    let current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(InterpolationPartsBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return Ok(InterpolationPartsDefer) }
+    let with_part = try __s0_buffer_append(U64, d, prior.parts, draft.expression)
+    return Ok(InterpolationPartsGood(InterpolationPartsRec(store: current, parts: with_part)))
+}
+
+fn append_interpolation_children(d: Domain, children: __s0_Buffer(CheckedExprChildRec), parts: __s0_Buffer(U64), at: U64) -> Result(__s0_Buffer(CheckedExprChildRec), __s0_Error) {
+    if at == __s0_buffer_len(U64, parts) { return Ok(children) }
+    let next = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: __s0_buffer_get(U64, parts, at)))
+    return append_interpolation_children(d, next, parts, at + 1)
+}
+
+fn append_interpolation_expression(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, parts: __s0_Buffer(U64), site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
+    let children = try append_interpolation_children(d, store.expression_children, parts, 0)
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 40, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: first_child, child_count: __s0_buffer_len(U64, parts), operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: store.call_annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+fn append_display_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0))
+    let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
+    let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 8, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+// One interpolation part: check the embedded expression, then wrap it in the
+// Display call form that matches its receiver. Builtin scalar and String
+// receivers use the checked builtin display; a nominal receiver resolves its
+// user Display implementation and records an ordinary direct call.
+fn check_interpolation_display_part(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, part: SyntaxRec, part_id: U64, string_type: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if part.children == 0 { return expr_token_fail(d, state, base, 87, part) }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, part.children - 1)
+    let child = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, child, link.node, 0, 0, child, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    let receiver_type = draft.checked_type
+    if display_supported(current, receiver_type) {
+        return append_sequence_method(d, current, owner, part_id, string_type, 1001, draft.expression, 0, 0, 0, 0, 0)
+    }
+    let checked_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_type - 1)
+    if checked_type.kind != 7 { return expr_token_single_type_fail(d, state, current, 257, child, receiver_type) }
+    let impl_id = trait_impl_for_builtin_type(current, 8, receiver_type)
+    if impl_id == 0 { return expr_token_single_type_fail(d, state, current, 257, child, receiver_type) }
+    let implementation = __s0_buffer_get(TraitImplRec, current.traits.impls, impl_id - 1)
+    let target = implementation.first_method
+    if target == 0 { return expr_token_single_type_fail(d, state, current, 257, child, receiver_type) }
+    let method = __s0_buffer_get(SymbolRec, current.symbols, target - 1)
+    var instance = target
+    var with_instance = current
+    if method.type_arity != 0 || impl_method_has_impl_params(current, target) {
+        let receiver_use = use_by_ordinal(current, target, 5, 0)
+        if receiver_use == 0 { return expr_token_single_type_fail(d, state, current, 257, child, receiver_type) }
+        let pattern = __s0_buffer_get(DeclTypeUseRec, current.uses, receiver_use - 1).checked_type
+        let empty = try __s0_buffer_new(InferenceBindingRec, d)
+        let unified = try unify_types(d, current, pattern, receiver_type, empty)
+        let bindings = match unified {
+            UnifyGood(value) => value
+            UnifyConflict => empty
+        }
+        if match unified {
+            UnifyGood(value) => false
+            UnifyConflict => true
+        } { return expr_token_single_type_fail(d, state, current, 257, child, receiver_type) }
+        let instantiated = try instantiate_function(d, state, parse, current, target, bindings, owner, part)
+        with_instance = match instantiated {
+            InstanceGood(value) => value.store
+            InstanceBad(value) => value
+        }
+        if match instantiated {
+            InstanceGood(value) => false
+            InstanceBad(value) => true
+        } { return Ok(ExprBad(with_instance)) }
+        instance = match instantiated {
+            InstanceGood(value) => value.instance
+            InstanceBad(value) => 0
+        }
+    }
+    return append_display_call(d, with_instance, owner, part_id, string_type, instance, draft.expression, 0, 0)
+}
+
+fn check_interpolation_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64, expression: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    var current = store
+    var string_type = canonical_type_id(current, 2, 0, 0, 0)
+    if string_type == 0 {
+        current = try append_checked_type(d, current, owner, 2, 0, 0, 0, 0)
+        string_type = canonical_type_id(current, 2, 0, 0, 0)
+    }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, current, string_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, string_type) }
+    let empty_parts = try __s0_buffer_new(U64, d)
+    let parts = try check_interpolation_parts(d, state, parse, store, current, owner, expression.children, empty_parts, string_type, site_kind, site_syntax, in_loop)
+    let values = match parts {
+        InterpolationPartsGood(value) => value
+        InterpolationPartsBad(value) => InterpolationPartsRec(store: value, parts: empty_parts)
+        InterpolationPartsDefer => InterpolationPartsRec(store: store, parts: empty_parts)
+    }
+    if match parts {
+        InterpolationPartsGood(value) => false
+        InterpolationPartsBad(value) => true
+        InterpolationPartsDefer => false
+    } { return Ok(ExprBad(values.store)) }
+    if match parts {
+        InterpolationPartsGood(value) => false
+        InterpolationPartsBad(value) => false
+        InterpolationPartsDefer => true
+    } { return expr_deferred(store) }
+    if __s0_buffer_len(U64, values.parts) == 0 { return expr_token_fail(d, state, values.store, 87, expression) }
+    return append_interpolation_expression(d, values.store, owner, expression_id, string_type, values.parts, site_kind, site_syntax)
+}
+
 // Shared recursive value-expression slice for returns, binding initializers,
 // and assignment values. The base store is retained across the whole traversal
 // so a deferred shape or semantic failure cannot expose a partial graph.
@@ -10734,6 +10938,7 @@ fn check_unit_value_expression(d: Domain, state: State, parse: ParseStore, store
 }
 
 fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, expression: SyntaxRec, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if expression.kind == 67 { return check_interpolation_expression(d, state, parse, store, owner, expression_id, expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 58 { return check_closure_expression(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 27 { return check_ordinary_call(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 36 { return check_unsafe_call(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }

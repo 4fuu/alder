@@ -787,6 +787,33 @@ func (p *parser) parsePostfix() (Expr, error) {
 	}
 }
 
+func parseInterpLit(t token) (Expr, error) {
+	parts := make([]InterpPart, 0, len(t.interp))
+	hasExpression := false
+	for _, piece := range t.interp {
+		if piece.literal != "" {
+			parts = append(parts, InterpPart{Literal: piece.literal})
+		}
+		if piece.tokens == nil {
+			continue
+		}
+		sub := &parser{toks: piece.tokens}
+		expr, err := sub.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if sub.cur().kind != tokEOF {
+			return nil, sub.errf(sub.cur(), "unexpected token in interpolation expression")
+		}
+		parts = append(parts, InterpPart{Expr: expr})
+		hasExpression = true
+	}
+	if !hasExpression {
+		return nil, &astError{line: t.line, col: t.col, msg: "interpolation expression is empty", code: CodeSyntax, span: t.span}
+	}
+	return &InterpLit{P: tokenPos(t), Parts: parts}, nil
+}
+
 func (p *parser) parsePrimary() (Expr, error) {
 	t := p.cur()
 	switch {
@@ -831,6 +858,9 @@ func (p *parser) parsePrimary() (Expr, error) {
 		return &FloatLit{P: tokenPos(t), Value: v}, nil
 	case t.kind == tokStr:
 		p.advance()
+		if len(t.interp) != 0 {
+			return parseInterpLit(t)
+		}
 		return &StrLit{P: tokenPos(t), Value: t.text}, nil
 	case t.kind == tokIdent:
 		switch t.kw {

@@ -5,9 +5,10 @@ Status: **Milestone 8 frozen snapshot; std.format implemented**
 This snapshot is the hosted formatting builder. It composes
 [`core.format`](core.format-v1.md) integer/text rules with
 [`std.text`](std.text-v1.md) `StringBuilder` and the audited shortest-round-trip
-float shim `sysroot/std/c/format_shim.h`. String interpolation is specified in
-the language documentation but is not implemented; this module is the explicit
-call foundation it will use later.
+float shim `sysroot/std/c/format_shim.h`. String interpolation is implemented
+by the source compiler through `Display` and the String concat path; this
+module remains the explicit formatting builder for width, alignment, precision,
+and float control.
 
 ## Signatures
 

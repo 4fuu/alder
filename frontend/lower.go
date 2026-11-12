@@ -35,9 +35,10 @@ type hashEqIDs struct {
 // checkedModule is the result of type-checking: instantiations, annotations,
 // and import signatures.
 type checkedModule struct {
-	fns     []*checkedFn
-	ann     map[*checkedFn]map[Expr]*annInfo
-	imports map[string]*checkSig
+	fns              []*checkedFn
+	ann              map[*checkedFn]map[Expr]*annInfo
+	imports          map[string]*checkSig
+	hasInterpolation bool
 }
 
 // lowerModule produces the MIR module. All type-checking and
@@ -56,6 +57,9 @@ func lowerModule(decls []Decl, cm *checkedModule) (*mir.Module, error) {
 		consts:      make(map[string]string),
 		mapCache:    make(map[string]*mapHelpers),
 		bufferCache: make(map[string]*bufferHelpers),
+	}
+	if cm.hasInterpolation {
+		l.hiddenDomain = true
 	}
 	for _, anns := range cm.ann {
 		for _, a := range anns {
@@ -1615,6 +1619,9 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 		typ := b.ann[e].typ
 		return b.constGet(typ, mir.ConstValue{Kind: mir.ConstString, String: x.Value}), nil
 
+	case *InterpLit:
+		return b.interp(x)
+
 	case *BoolLit:
 		return b.constGet(prim(pBool), mir.ConstValue{Kind: mir.ConstBool, Bool: x.Value}), nil
 
@@ -1750,6 +1757,69 @@ func (b *fb) expr(e Expr) (mir.ValueId, error) {
 
 // place returns the storage place of an Ident/Field expression rooted at a
 // local; ok=false when the expression denotes a value.
+// interp lowers string interpolation as a left-to-right display-and-concat
+// chain in the function's hidden storage domain. The Go Stage 0 frontend has
+// no trait surface, so only the builtin Display domain (Bool, integers, and
+// String) is accepted.
+func (b *fb) interp(x *InterpLit) (mir.ValueId, error) {
+	domain, ok := b.values["__domain"]
+	if !ok {
+		return 0, diag(x.P, "string interpolation requires storage-domain lowering")
+	}
+	stringType := b.l.m.String()
+	result := mir.NoValue
+	for _, part := range x.Parts {
+		var value mir.ValueId
+		if part.Expr == nil {
+			if part.Literal == "" {
+				continue
+			}
+			value = b.constGet(&Type{kind: tString}, mir.ConstValue{Kind: mir.ConstString, String: part.Literal})
+		} else {
+			v, err := b.expr(part.Expr)
+			if err != nil {
+				return 0, err
+			}
+			pt := b.ann[part.Expr].typ
+			if pt == nil {
+				return 0, diag(part.Expr.exprPos(), "internal: interpolation part has no type")
+			}
+			if pt.kind != tString {
+				if pt.kind != tPrim || (!pt.isInt() && pt.prim != pBool) {
+					return 0, diag(part.Expr.exprPos(), "interpolation part type %s does not implement Display", pt.display())
+				}
+				if pt.prim != pBool && pt.prim != pI64 && pt.prim != pU64 {
+					resultType := mir.TypeI64
+					op := mir.OpIntSext
+					if pt.isUnsigned() {
+						resultType = mir.TypeU64
+						op = mir.OpIntZext
+					}
+					widened := b.res(resultType)
+					b.emit(mir.Instr{Op: op, Result: widened, A: v, TypeOp: resultType})
+					v = widened
+				}
+				displayed := b.res(stringType)
+				b.emit(mir.Instr{Op: mir.OpStrDisplay, Result: displayed, Domain: domain, A: v, FailTarget: b.panicBlock()})
+				value = displayed
+			} else {
+				value = v
+			}
+		}
+		if result == mir.NoValue {
+			result = value
+			continue
+		}
+		joined := b.res(stringType)
+		b.emit(mir.Instr{Op: mir.OpStrConcat, Result: joined, Domain: domain, A: result, B: value, FailTarget: b.panicBlock()})
+		result = joined
+	}
+	if result == mir.NoValue {
+		return b.constGet(&Type{kind: tString}, mir.ConstValue{Kind: mir.ConstString, String: ""}), nil
+	}
+	return result, nil
+}
+
 func (b *fb) place(e Expr) (mir.Place, bool) {
 	switch x := e.(type) {
 	case *Ident:

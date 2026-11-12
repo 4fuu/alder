@@ -387,7 +387,7 @@ fn parse_match_arm(d: Domain, state: State, initial: ParseCursor, depth: U64) ->
     // `return` statement that produces no value.
     var body: ParseStep = Rejected(parse_step_cursor(arrow))
     let body_token = parse_token(state, parse_step_cursor(arrow))
-    if token_punct(state, parse_step_cursor(arrow), "{") {
+    if token_punct(state, parse_step_cursor(arrow), "\{") {
         body = try parse_block(d, state, parse_step_cursor(arrow))
     } else if body_token.kind == 1 && body_token.keyword == 12 {
         body = try parse_return_statement(d, state, parse_step_cursor(arrow), depth)
@@ -418,7 +418,7 @@ fn parse_match(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Res
     let scrutinee = try parse_unary(d, state, value_cursor, depth)
     if parse_step_bad(scrutinee) { return Ok(scrutinee) }
     let sv = parse_step_value(scrutinee)
-    let open = try expect_punct(d, state, sv.cursor, "{")
+    let open = try expect_punct(d, state, sv.cursor, "\{")
     if parse_step_bad(open) { return Ok(open) }
     var cursor = try add_link(d, parse_step_cursor(open), sv.node, 0)
     var children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
@@ -463,7 +463,7 @@ fn parse_unsafe_c(d: Domain, state: State, initial: ParseCursor, depth: U64) -> 
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
     if !token_ident(state, cursor) || !token_text(state, parse_token(state, cursor), "c") { return reject_parse(d, state, cursor, 17) }
     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-    let open = try expect_punct(d, state, cursor, "{")
+    let open = try expect_punct(d, state, cursor, "\{")
     if parse_step_bad(open) { return Ok(open) }
     let expr = try parse_expression(d, state, parse_step_cursor(open), depth + 1)
     if parse_step_bad(expr) { return Ok(expr) }
@@ -550,7 +550,7 @@ fn closure_literal_ahead(state: State, initial: ParseCursor) -> Bool {
     let after = parse_token(state, ParseCursor(token: cursor.token + 1, store: cursor.store))
     if after.kind != 5 { return false }
     if token_text(state, after, "=>") { return true }
-    if token_text(state, after, "{") { return true }
+    if token_text(state, after, "\{") { return true }
     if token_text(state, after, "->") {
         if named { return true }
         // An annotated braced closure continues with `{` after the result
@@ -564,7 +564,7 @@ fn closure_literal_ahead(state: State, initial: ParseCursor) -> Bool {
             if step.kind == 0 { return false }
             if nest == 0 && step.kind == 5 {
                 if token_text(state, step, "(") || token_text(state, step, "[") { nest = nest + 1 }
-                else { if token_text(state, step, "{") { return true }
+                else { if token_text(state, step, "\{") { return true }
                     // A result type may itself be `fn(...) -> ...`, so an
                     // arrow at the top level continues the type rather than
                     // ending the scan.
@@ -671,6 +671,82 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     return Ok(Parsed(node))
 }
 
+// Interpolation expressions are deliberately narrower than ordinary
+// expressions: they are brace-free and quote-free so the first closing brace
+// ends the interpolation without a nesting stack. This scan rejects a brace,
+// a string literal, and every keyword except the value words before the
+// ordinary expression parser runs, so the rejection is one parse diagnostic
+// instead of an unrelated downstream parse failure.
+fn interpolation_tokens_ok(state: State, cursor: ParseCursor) -> U64 {
+    var at = cursor.token
+    while at < __s0_buffer_len(TokenRec, state.tokens) {
+        let token = __s0_buffer_get(TokenRec, state.tokens, at)
+        if token.kind == 0 { return 0 }
+        let item = ParseCursor(token: at, store: cursor.store)
+        if token_punct(state, item, "}") { return 1 }
+        if token.kind == 4 { return 2 }
+        if token_punct(state, item, "\{") || token_punct(state, item, "=") || token_punct(state, item, "=>") || token_punct(state, item, "->") { return 2 }
+        if token.kind == 1 {
+            let keyword = token.keyword
+            if !(keyword == 0 || keyword == 16 || keyword == 17 || keyword == 18 || keyword == 26 || keyword == 29) { return 2 }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+// parse_interpolation consumes the segment tokens around one string
+// interpolation, wraps each embedded expression in a kind-68 display part,
+// and links literal segments and display parts in source order. The lexer
+// guarantees the token shape; the checks here turn a malformed interpolation
+// into parse diagnostics 52 and 53.
+fn parse_interpolation(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
+    var cursor = initial
+    var children: U64 = 0
+    var first = true
+    var saw_interpolation = false
+    var seg_end = parse_token(state, cursor).end
+    var more = true
+    while more {
+        let token = parse_token(state, cursor)
+        if token.kind == 4 && (first || token.start == seg_end) {
+            let literal = try add_syntax(d, cursor, 22, cursor.token + 1, token.source, token.start, token.end, 0, 0, 0)
+            cursor = ParseCursor(token: cursor.token + 1, store: literal.cursor.store)
+            cursor = try add_link(d, cursor, literal.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            seg_end = token.end
+            first = false
+        }
+        if token_punct(state, cursor, "\{") && parse_token(state, cursor).start == seg_end {
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            let scan = interpolation_tokens_ok(state, cursor)
+            if scan == 0 { return reject_parse(d, state, cursor, 53) }
+            if scan == 2 { return reject_parse(d, state, cursor, 52) }
+            if token_punct(state, cursor, "}") { return reject_parse(d, state, cursor, 52) }
+            let expression = try parse_expression(d, state, cursor, depth + 1)
+            if parse_step_bad(expression) { return Ok(expression) }
+            let value = parse_step_value(expression)
+            if !token_punct(state, value.cursor, "}") { return reject_parse(d, state, value.cursor, 53) }
+            let close = parse_token(state, value.cursor)
+            var after = ParseCursor(token: value.cursor.token + 1, store: value.cursor.store)
+            let expression_node = __s0_buffer_get(SyntaxRec, after.store.nodes, value.node - 1)
+            after = try add_link(d, after, value.node, 0)
+            let part = try add_syntax(d, after, 68, expression_node.token, expression_node.source, expression_node.start, expression_node.end, 0, 0, __s0_buffer_len(SyntaxLinkRec, after.store.links))
+            cursor = ParseCursor(token: part.cursor.token, store: part.cursor.store)
+            cursor = try add_link(d, cursor, part.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
+            seg_end = close.end
+            saw_interpolation = true
+        } else {
+            more = false
+        }
+    }
+    if !saw_interpolation { return reject_parse(d, state, initial, 52) }
+    let start = parse_token(state, initial)
+    let node = try add_syntax(d, cursor, 67, initial.token + 1, start.source, start.start, seg_end, 0, 0, children)
+    return Ok(Parsed(node))
+}
+
 fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> Result(ParseStep, __s0_Error) {
     let token = parse_token(state, initial)
     if depth > parse_depth_limit() { return parse_depth_reject(d, state, initial) }
@@ -689,6 +765,10 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     if token.keyword == 13 { return parse_match(d, state, initial, depth) }
     if token.keyword == 19 { return parse_unsafe_c(d, state, initial, depth) }
     if token_punct(state, initial, "[") { return parse_array_literal(d, state, initial, depth) }
+    if token.kind == 4 {
+        let next = ParseCursor(token: initial.token + 1, store: initial.store)
+        if token_punct(state, next, "\{") && parse_token(state, next).start == token.end { return parse_interpolation(d, state, initial, depth) }
+    }
     var kind: U64 = 0
     if token.kind == 2 { kind = 20 }
     if token.kind == 3 { kind = 21 }
@@ -1094,7 +1174,7 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
         let node = try add_syntax(d, ParseCursor(token: initial.token + 1, store: initial.store), kind, initial.token + 1, start.source, start.start, start.end, 0, 0, 0)
         return Ok(Parsed(node))
     }
-    if token_punct(state, initial, "{") { return parse_block(d, state, initial) }
+    if token_punct(state, initial, "\{") { return parse_block(d, state, initial) }
     let expr = try parse_expression(d, state, initial, 0)
     if parse_step_bad(expr) { return Ok(expr) }
     let ev = parse_step_value(expr)
@@ -1121,7 +1201,7 @@ fn parse_statement(d: Domain, state: State, initial: ParseCursor) -> Result(Pars
 
 fn parse_block(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
-    if !token_punct(state, initial, "{") { return reject_parse(d, state, initial, 4) }
+    if !token_punct(state, initial, "\{") { return reject_parse(d, state, initial, 4) }
     let binding_base = initial.store.binding_count
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
     var children: U64 = 0
@@ -1262,7 +1342,7 @@ fn parse_trait_method(d: Domain, state: State, initial: ParseCursor, receiver_ty
     children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
     if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
     var end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
-    if token_punct(state, cursor, "{") {
+    if token_punct(state, cursor, "\{") {
         let body = try parse_block(d, state, cursor)
         if parse_step_bad(body) { return Ok(body) }
         let bv = parse_step_value(body)
@@ -1305,7 +1385,7 @@ fn parse_trait(d: Domain, state: State, initial: ParseCursor) -> Result(ParseSte
         cursor = parse_step_cursor(close)
     }
     if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
-    let open = try expect_punct(d, state, cursor, "{")
+    let open = try expect_punct(d, state, cursor, "\{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
     // The `Self` reference node is synthesized once per trait; every method
@@ -1481,7 +1561,7 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         cursor = try add_link(d, impl_value.cursor, impl_value.node, trait_children)
         trait_children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
-        let trait_open = try expect_punct(d, state, cursor, "{")
+        let trait_open = try expect_punct(d, state, cursor, "\{")
         if parse_step_bad(trait_open) { return Ok(trait_open) }
         cursor = parse_step_cursor(trait_open)
         while !token_punct(state, cursor, "}") {
@@ -1501,7 +1581,7 @@ fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         let trait_node = try add_syntax(d, cursor, 53, initial.token + 1, start.source, start.start, parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end, trait_head.name_start, trait_head.name_end, trait_children)
         return Ok(Parsed(trait_node))
     }
-    let open = try expect_punct(d, state, cursor, "{")
+    let open = try expect_punct(d, state, cursor, "\{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_cursor(open)
     cursor = try add_link(d, cursor, owner_value.node, chained)
@@ -1576,7 +1656,7 @@ fn parse_binding_block(d: Domain, state: State, initial: ParseCursor) -> Result(
     let alias = parse_token(state, cursor)
     let alias_token = cursor.token + 1
     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
-    if !token_punct(state, cursor, "{") { return reject_parse(d, state, cursor, 9) }
+    if !token_punct(state, cursor, "\{") { return reject_parse(d, state, cursor, 9) }
     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
     var first = true
     while !token_punct(state, cursor, "}") {
@@ -1636,7 +1716,7 @@ fn parse_c_type_member(d: Domain, state: State, initial: ParseCursor, class: U64
     var children: U64 = __s0_buffer_len(SyntaxLinkRec, linked.store.links)
     cursor = linked
     if class == 2 {
-        if !token_punct(state, cursor, "{") { return reject_parse(d, state, cursor, 9) }
+        if !token_punct(state, cursor, "\{") { return reject_parse(d, state, cursor, 9) }
         cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
         if token_punct(state, cursor, "}") { return reject_parse(d, state, cursor, 21) }
         var first = true
@@ -1861,7 +1941,7 @@ fn parse_module_import(d: Domain, state: State, initial: ParseCursor, public: Bo
         children = __s0_buffer_len(SyntaxLinkRec, cursor.store.links)
         end = alias.end
     } else {
-        if token_punct(state, cursor, "{") {
+        if token_punct(state, cursor, "\{") {
             cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
             if token_punct(state, cursor, "}") { return reject_parse(d, state, cursor, 3) }
             var more = true
@@ -2000,7 +2080,7 @@ fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
         cursor = parse_step_value(close).cursor
     }
     if parse_token(state, cursor).keyword == 28 { return reject_parse(d, state, cursor, 24) }
-    let open = try expect_punct(d, state, cursor, "{")
+    let open = try expect_punct(d, state, cursor, "\{")
     if parse_step_bad(open) { return Ok(open) }
     cursor = parse_step_value(open).cursor
     while token_ident(state, cursor) || (!is_enum && parse_token(state, cursor).keyword == 21) {

@@ -652,6 +652,25 @@ func TestBraceEscapeDecodesToLiteralBraces(t *testing.T) {
 	}
 }
 
+func TestGoOracleInterpolation(t *testing.T) {
+	m := compileStr(t, `fn main() -> I32 {
+    let value: U64 = 7
+    let text: String = "a{value}b"
+    return 0
+}`)
+	printed := mir.Print(m)
+	if !strings.Contains(printed, "str.display") || !strings.Contains(printed, "str.concat") {
+		t.Fatalf("interpolation MIR is missing display/concat:\n%s", printed)
+	}
+	if _, err := Compile(`fn main() -> I32 {
+    let value: F64 = 1.5
+    let text: String = "{value}"
+    return 0
+}`); err == nil || !strings.Contains(err.Error(), "does not implement Display") {
+		t.Fatalf("float interpolation diagnostic = %v", err)
+	}
+}
+
 // TestSmokeString exercises distinct String and Bytes value flow.
 func TestSmokeString(t *testing.T) {
 	src := `

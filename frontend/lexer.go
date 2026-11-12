@@ -68,6 +68,16 @@ type token struct {
 	span Span
 	// leading is the exact whitespace/comment range preceding this token.
 	leading Span
+	// interp holds the literal and expression pieces of an interpolated
+	// string. It is empty for an ordinary string token.
+	interp []interpPiece
+}
+
+// interpPiece is one literal or expression part of an interpolated string.
+// Expression tokens are already lexed with absolute spans and positions.
+type interpPiece struct {
+	literal string
+	tokens  []token
 }
 
 func (t *token) describe() string {
@@ -329,6 +339,7 @@ func (l *lexer) lexNumber(line, col int) (token, error) {
 func (l *lexer) lexString(line, col int) (token, error) {
 	l.advance() // opening quote
 	var b strings.Builder
+	var pieces []interpPiece
 	for {
 		c, ok := l.peek()
 		if !ok || c == '\n' {
@@ -336,7 +347,49 @@ func (l *lexer) lexString(line, col int) (token, error) {
 		}
 		if c == '"' {
 			l.advance()
-			break
+			if len(pieces) != 0 {
+				pieces = append(pieces, interpPiece{literal: b.String()})
+				return token{kind: tokStr, interp: pieces, line: line, col: col}, nil
+			}
+			return token{kind: tokStr, text: b.String(), line: line, col: col}, nil
+		}
+		if c == '{' {
+			pieces = append(pieces, interpPiece{literal: b.String()})
+			b.Reset()
+			l.advance()
+			exprStart := l.pos
+			for {
+				c2, ok2 := l.peek()
+				if !ok2 || c2 == '\n' {
+					return token{}, l.errf(line, col, "unterminated interpolation")
+				}
+				if c2 == '}' {
+					break
+				}
+				if c2 == '"' || c2 == '{' {
+					return token{}, l.errf(line, col, "interpolation expressions are brace-free and quote-free")
+				}
+				l.advance()
+			}
+			if l.pos == exprStart {
+				return token{}, l.errf(line, col, "interpolation expression is empty")
+			}
+			expr := l.src[exprStart:l.pos]
+			l.advance() // }
+			sub, err := lexSource(Source{Text: expr})
+			if err != nil {
+				return token{}, err
+			}
+			if err := checkInterpolationTokens(sub); err != nil {
+				return token{}, err
+			}
+			for i := range sub {
+				sub[i].span = NewSpan(l.source, exprStart+sub[i].span.Start, exprStart+sub[i].span.End)
+				sub[i].leading = NewSpan(l.source, exprStart+sub[i].leading.Start, exprStart+sub[i].leading.End)
+				sub[i].line, sub[i].col = lineColAt(l.src, exprStart+sub[i].span.Start)
+			}
+			pieces = append(pieces, interpPiece{tokens: sub})
+			continue
 		}
 		if c == '\\' {
 			l.advance()
@@ -383,7 +436,37 @@ func (l *lexer) lexString(line, col int) (token, error) {
 		}
 		b.WriteByte(l.advance())
 	}
-	return token{kind: tokStr, text: b.String(), line: line, col: col}, nil
+}
+
+func lineColAt(src string, offset int) (int, int) {
+	line, col := 1, 1
+	if offset > len(src) {
+		offset = len(src)
+	}
+	for i := 0; i < offset; i++ {
+		if src[i] == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+	}
+	return line, col
+}
+
+func checkInterpolationTokens(toks []token) error {
+	for _, t := range toks {
+		if t.kind == tokEOF {
+			continue
+		}
+		if t.kind == tokStr || t.text == "{" || t.text == "=" || t.text == "=>" || t.text == "->" {
+			return &astError{line: t.line, col: t.col, msg: "interpolation expressions are brace-free and quote-free", code: CodeSyntax, span: t.span}
+		}
+		if t.kind == tokIdent && t.kw != kwNone && t.kw != kwTry && t.kw != kwTrue && t.kw != kwFalse {
+			return &astError{line: t.line, col: t.col, msg: "interpolation expressions are brace-free and quote-free", code: CodeSyntax, span: t.span}
+		}
+	}
+	return nil
 }
 
 func isHex(c byte) bool {

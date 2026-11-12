@@ -122,132 +122,197 @@ fn unexpected_end(state: State, source: SourceRec, start: U64, length: U64) -> U
     return start + 1
 }
 
+fn append_lex_byte(d: Domain, state: State, byte: U8) -> Result(State, __s0_Error) {
+    let values = try __s0_buffer_append(U8, d, state.values, byte)
+    return Ok(State(paths: state.paths, texts: state.texts, values: values, sources: state.sources, tokens: state.tokens, diagnostics: state.diagnostics))
+}
+
 fn lex_source(d: Domain, initial: State, source_id: U64) -> Result(LexResult, __s0_Error) {
     let source = __s0_buffer_get(SourceRec, initial.sources, source_id)
     let length = source.text_end - source.text_start
     var state = initial
     var pos: U64 = 0
     var done = false
+    // A string literal is lexed in one of two modes. While `in_string` is
+    // true the lexer decodes literal bytes; `string_allows_interpolation`
+    // distinguishes the outer string from a string inside an interpolation
+    // expression, which stays an ordinary token so the parser can reject it.
+    // At an unescaped `{` the lexer emits the preceding segment, the brace,
+    // and then resumes ordinary token lexing; the first `}` at that level
+    // closes the interpolation and resumes the string.
+    var in_string = false
+    var in_interpolation = false
+    var string_allows_interpolation = false
+    var string_interpolated = false
+    var string_first = false
+    var quote_start: U64 = 0
+    var segment_start: U64 = 0
+    var segment_values_start: U64 = 0
+    var string_leading: U64 = 0
     while !done {
-        let leading = pos
-        var skipping = true
-        while skipping && pos < length {
-            let c = text_byte(state, source, pos)
-            if whitespace(c) {
-                pos = pos + 1
-            } else {
-                if c == 47 && pos + 1 < length && text_byte(state, source, pos + 1) == 47 {
-                    pos = pos + 2
-                    while pos < length && text_byte(state, source, pos) != 10 { pos = pos + 1 }
-                } else {
-                    if c == 47 && pos + 1 < length && text_byte(state, source, pos + 1) == 42 {
-                        let comment_start = pos
-                        pos = pos + 2
-                        var closed = false
-                        while pos < length && !closed {
-                            if text_byte(state, source, pos) == 42 && pos + 1 < length && text_byte(state, source, pos + 1) == 47 {
-                                pos = pos + 2
-                                closed = true
-                            } else {
-                                pos = pos + 1
-                            }
-                        }
-                        if !closed { return fail_lex(d, state, 6, source_id, comment_start, comment_start + 1, 0) }
+        if in_string {
+            if pos == length { return fail_lex(d, state, 5, source_id, quote_start, quote_start + 1, 0) }
+            let item = text_byte(state, source, pos)
+            if item == 10 { return fail_lex(d, state, 5, source_id, quote_start, quote_start + 1, 0) }
+            if item == 34 {
+                if string_interpolated {
+                    if pos > segment_start {
+                        state = try add_token(d, state, source_id, 4, 0, segment_start, pos, segment_start, state.values, segment_values_start)
                     } else {
-                        skipping = false
+                        state = try add_token(d, state, source_id, 4, 0, pos, pos + 1, pos, state.values, segment_values_start)
+                    }
+                } else {
+                    state = try add_token(d, state, source_id, 4, 0, quote_start, pos + 1, string_leading, state.values, segment_values_start)
+                }
+                pos = pos + 1
+                in_string = false
+            } else {
+                if item == 92 {
+                    pos = pos + 1
+                    if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, quote_start, quote_start + 1, 0) }
+                    let escape = text_byte(state, source, pos)
+                    var decoded: U8 = 0
+                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48 || escape == 120 || escape == 123 || escape == 125
+                    if escape == 110 { decoded = 10 }
+                    if escape == 116 { decoded = 9 }
+                    if escape == 114 { decoded = 13 }
+                    if escape == 92 { decoded = 92 }
+                    if escape == 34 { decoded = 34 }
+                    if escape == 48 { decoded = 0 }
+                    if escape == 123 { decoded = 123 }
+                    if escape == 125 { decoded = 125 }
+                    if !valid { return fail_lex(d, state, 4, source_id, quote_start, quote_start + 1, pos - 1) }
+                    if escape == 120 {
+                        if pos + 2 >= length || !hex_digit(text_byte(state, source, pos + 1)) || !hex_digit(text_byte(state, source, pos + 2)) { return fail_lex(d, state, 4, source_id, quote_start, quote_start + 1, pos - 1) }
+                        decoded = hex_value(text_byte(state, source, pos + 1)) * 16 + hex_value(text_byte(state, source, pos + 2))
+                        pos = pos + 2
+                    }
+                    state = try append_lex_byte(d, state, decoded)
+                    pos = pos + 1
+                } else {
+                    if item == 123 && string_allows_interpolation {
+                        var seg_start = segment_start
+                        var seg_end = pos
+                        if string_first {
+                            seg_start = quote_start
+                            if pos == quote_start + 1 { seg_end = pos }
+                        }
+                        if seg_end > seg_start {
+                            state = try add_token(d, state, source_id, 4, 0, seg_start, seg_end, seg_start, state.values, segment_values_start)
+                        }
+                        state = try add_token(d, state, source_id, 5, 0, pos, pos + 1, pos, state.values, __s0_buffer_len(U8, state.values))
+                        pos = pos + 1
+                        segment_start = pos
+                        segment_values_start = __s0_buffer_len(U8, state.values)
+                        string_first = false
+                        string_interpolated = true
+                        in_string = false
+                        in_interpolation = true
+                    } else {
+                        state = try append_lex_byte(d, state, item)
+                        pos = pos + 1
                     }
                 }
             }
-        }
-        if pos == length {
-            let value_start = __s0_buffer_len(U8, state.values)
-            state = try add_token(d, state, source_id, 0, 0, length, length, leading, state.values, value_start)
-            done = true
         } else {
-            let start = pos
-            let c = text_byte(state, source, pos)
-            if alpha(c) {
-                pos = pos + 1
-                while pos < length && ident_continue(text_byte(state, source, pos)) { pos = pos + 1 }
-                let value_start = __s0_buffer_len(U8, state.values)
-                let values = try copy_value(d, state.values, state, source, start, pos)
-                state = try add_token(d, state, source_id, 1, keyword_id(state, source, start, pos), start, pos, leading, values, value_start)
-            } else {
-                if digit(c) || (c == 45 && pos + 1 < length && digit(text_byte(state, source, pos + 1))) {
-                    if c == 45 { pos = pos + 1 }
-                    while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
-                    var kind: U64 = 2
-                    if pos < length && text_byte(state, source, pos) == 46 {
-                        kind = 3
-                        pos = pos + 1
-                        while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
-                    }
-                    if pos < length && (text_byte(state, source, pos) == 101 || text_byte(state, source, pos) == 69) {
-                        kind = 3
-                        pos = pos + 1
-                        if pos < length && (text_byte(state, source, pos) == 43 || text_byte(state, source, pos) == 45) { pos = pos + 1 }
-                        let exponent_start = pos
-                        while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
-                        if exponent_start == pos { return fail_lex(d, state, 3, source_id, start, start + 1, 0) }
-                    }
-                    let value_start = __s0_buffer_len(U8, state.values)
-                    let values = try copy_value(d, state.values, state, source, start, pos)
-                    state = try add_token(d, state, source_id, kind, 0, start, pos, leading, values, value_start)
+            let leading = pos
+            var skipping = true
+            while skipping && pos < length {
+                let c = text_byte(state, source, pos)
+                if whitespace(c) {
+                    pos = pos + 1
                 } else {
-                    if c == 34 {
-                        pos = pos + 1
-                        var values = state.values
-                        let value_start = __s0_buffer_len(U8, values)
-                        var closed = false
-                        while pos < length && !closed {
-                            let item = text_byte(state, source, pos)
-                            if item == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
-                            if item == 34 {
-                                pos = pos + 1
-                                closed = true
-                            } else {
-                                if item == 92 {
-                                    pos = pos + 1
-                                    if pos == length || text_byte(state, source, pos) == 10 { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
-                                    let escape = text_byte(state, source, pos)
-                                    var decoded: U8 = 0
-                                    let valid = escape == 110 || escape == 116 || escape == 114 || escape == 92 || escape == 34 || escape == 48 || escape == 120 || escape == 123 || escape == 125
-                                    if escape == 110 { decoded = 10 }
-                                    if escape == 116 { decoded = 9 }
-                                    if escape == 114 { decoded = 13 }
-                                    if escape == 92 { decoded = 92 }
-                                    if escape == 34 { decoded = 34 }
-                                    if escape == 48 { decoded = 0 }
-                                    if escape == 123 { decoded = 123 }
-                                    if escape == 125 { decoded = 125 }
-                                    if !valid { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
-                                    if escape == 120 {
-                                        if pos + 2 >= length || !hex_digit(text_byte(state, source, pos + 1)) || !hex_digit(text_byte(state, source, pos + 2)) { return fail_lex(d, state, 4, source_id, start, start + 1, pos - 1) }
-                                        decoded = hex_value(text_byte(state, source, pos + 1)) * 16 + hex_value(text_byte(state, source, pos + 2))
-                                        pos = pos + 2
-                                    }
-                                    values = try __s0_buffer_append(U8, d, values, decoded)
-                                    pos = pos + 1
+                    if c == 47 && pos + 1 < length && text_byte(state, source, pos + 1) == 47 {
+                        pos = pos + 2
+                        while pos < length && text_byte(state, source, pos) != 10 { pos = pos + 1 }
+                    } else {
+                        if c == 47 && pos + 1 < length && text_byte(state, source, pos + 1) == 42 {
+                            let comment_start = pos
+                            pos = pos + 2
+                            var closed = false
+                            while pos < length && !closed {
+                                if text_byte(state, source, pos) == 42 && pos + 1 < length && text_byte(state, source, pos + 1) == 47 {
+                                    pos = pos + 2
+                                    closed = true
                                 } else {
-                                    values = try __s0_buffer_append(U8, d, values, item)
                                     pos = pos + 1
                                 }
                             }
-                        }
-                        if !closed { return fail_lex(d, state, 5, source_id, start, start + 1, 0) }
-                        state = try add_token(d, state, source_id, 4, 0, start, pos, leading, values, value_start)
-                    } else {
-                        if c == 59 {
-                            return fail_lex(d, state, 1, source_id, start, start + 1, 0)
+                            if !closed { return fail_lex(d, state, 6, source_id, comment_start, comment_start + 1, 0) }
                         } else {
-                            if punctuation(c) {
+                            skipping = false
+                        }
+                    }
+                }
+            }
+            if pos == length {
+                let value_start = __s0_buffer_len(U8, state.values)
+                state = try add_token(d, state, source_id, 0, 0, length, length, leading, state.values, value_start)
+                done = true
+            } else {
+                let start = pos
+                let c = text_byte(state, source, pos)
+                if in_interpolation && c == 125 {
+                    state = try add_token(d, state, source_id, 5, 0, pos, pos + 1, leading, state.values, __s0_buffer_len(U8, state.values))
+                    pos = pos + 1
+                    in_interpolation = false
+                    in_string = true
+                    segment_start = pos
+                    segment_values_start = __s0_buffer_len(U8, state.values)
+                    string_first = false
+                } else {
+                    if alpha(c) {
+                        pos = pos + 1
+                        while pos < length && ident_continue(text_byte(state, source, pos)) { pos = pos + 1 }
+                        let value_start = __s0_buffer_len(U8, state.values)
+                        let values = try copy_value(d, state.values, state, source, start, pos)
+                        state = try add_token(d, state, source_id, 1, keyword_id(state, source, start, pos), start, pos, leading, values, value_start)
+                    } else {
+                        if digit(c) || (c == 45 && pos + 1 < length && digit(text_byte(state, source, pos + 1))) {
+                            if c == 45 { pos = pos + 1 }
+                            while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
+                            var kind: U64 = 2
+                            if pos < length && text_byte(state, source, pos) == 46 {
+                                kind = 3
                                 pos = pos + 1
-                                if pos < length && pair_operator(c, text_byte(state, source, pos)) { pos = pos + 1 }
-                                let value_start = __s0_buffer_len(U8, state.values)
-                                let values = try copy_value(d, state.values, state, source, start, pos)
-                                state = try add_token(d, state, source_id, 5, 0, start, pos, leading, values, value_start)
+                                while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
+                            }
+                            if pos < length && (text_byte(state, source, pos) == 101 || text_byte(state, source, pos) == 69) {
+                                kind = 3
+                                pos = pos + 1
+                                if pos < length && (text_byte(state, source, pos) == 43 || text_byte(state, source, pos) == 45) { pos = pos + 1 }
+                                let exponent_start = pos
+                                while pos < length && digit(text_byte(state, source, pos)) { pos = pos + 1 }
+                                if exponent_start == pos { return fail_lex(d, state, 3, source_id, start, start + 1, 0) }
+                            }
+                            let value_start = __s0_buffer_len(U8, state.values)
+                            let values = try copy_value(d, state.values, state, source, start, pos)
+                            state = try add_token(d, state, source_id, kind, 0, start, pos, leading, values, value_start)
+                        } else {
+                            if c == 34 {
+                                in_string = true
+                                string_allows_interpolation = !in_interpolation
+                                string_interpolated = false
+                                string_first = true
+                                quote_start = start
+                                segment_start = start + 1
+                                segment_values_start = __s0_buffer_len(U8, state.values)
+                                string_leading = leading
+                                pos = start + 1
                             } else {
-                                return fail_lex(d, state, 2, source_id, start, unexpected_end(state, source, start, length), 0)
+                                if c == 59 {
+                                    return fail_lex(d, state, 1, source_id, start, start + 1, 0)
+                                } else {
+                                    if punctuation(c) {
+                                        pos = pos + 1
+                                        if pos < length && pair_operator(c, text_byte(state, source, pos)) { pos = pos + 1 }
+                                        let value_start = __s0_buffer_len(U8, state.values)
+                                        let values = try copy_value(d, state.values, state, source, start, pos)
+                                        state = try add_token(d, state, source_id, 5, 0, start, pos, leading, values, value_start)
+                                    } else {
+                                        return fail_lex(d, state, 2, source_id, start, unexpected_end(state, source, start, length), 0)
+                                    }
+                                }
                             }
                         }
                     }

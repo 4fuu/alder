@@ -4619,6 +4619,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 1 || expression.kind == 5 || expression.kind == 22 {
         return lower_binding_expression(d, source_state, spans, store, state, owner, function, block, expression_id, expression, expression.kind != 22)
     }
+    if expression.kind == 40 { return lower_interpolation_expression(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind >= 2 && expression.kind <= 4 {
         let typ = try lower_type(d, source_state, store, state, expression.checked_type)
         var kind = mir_const_bool()
@@ -7586,6 +7587,48 @@ fn lower_c_field_access(d: Domain, source_state: State, spans: __s0_Buffer(Check
     return Ok(LowerStep(state: instr.state, id: 0))
 }
 
+// Interpolation lowers as a left-to-right concat chain over its checked
+// children. Literal segments are string constants; display parts are ordinary
+// checked calls (builtin str.display or a user Display method), so this helper
+// needs no separate Display resolution. Empty literal segments are omitted.
+fn lower_interpolation_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count == 0 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    var current = state
+    var result: U64 = 0
+    var ordinal: U64 = 0
+    while ordinal < expression.child_count {
+        let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + ordinal).expression
+        let child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+        var skip = false
+        if child.kind == 4 {
+            if child.syntax == 0 || child.syntax > __s0_buffer_len(CheckedSpanRec, spans) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            let span = __s0_buffer_get(CheckedSpanRec, spans, child.syntax - 1)
+            let token_id = lower_token_for_span(source_state, span)
+            if token_id == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            let token = __s0_buffer_get(TokenRec, source_state.tokens, token_id - 1)
+            if token.value_end == token.value_start { skip = true }
+        }
+        if !skip {
+            let part = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block)
+            if !part.state.valid { return Ok(part) }
+            current = part.state
+            if result == 0 {
+                result = part.id
+            } else {
+                let domain = lower_storage_domain_value(current, store, owner, expression_id)
+                if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+                let added = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+                let instr = try lower_add_instr_three(d, added.state, function, block, mir_op_str_concat(), added.id, 0, domain, result, part.id, panic_block)
+                current = instr.state
+                result = added.id
+            }
+        }
+        ordinal = ordinal + 1
+    }
+    if result == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    return Ok(LowerStep(state: current, id: result))
+}
+
 // Display surface (M8): the builtin display method. A String receiver is
 // its own text, so the call lowers to the receiver value itself. Every
 // other builtin-domain receiver widens to I64 (signed) or U64 (unsigned
@@ -8031,6 +8074,24 @@ fn lower_model_c_ptr_memory_ok(store: CheckStore, item: CheckedExprRec) -> Bool 
     return true
 }
 
+// Checked interpolation shape: a String-valued parent with no call
+// annotation or operator, and one or more String-valued parts. Literal parts
+// and display calls both have the parent's checked type.
+fn lower_model_interpolation_ok(store: CheckStore, item: CheckedExprRec) -> Bool {
+    if item.annotation != 0 || item.operator != 0 || item.parameter_use != 0 || item.bool_value != 0 { return false }
+    if item.checked_type == 0 || item.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    if __s0_buffer_get(CheckedTypeRec, store.types, item.checked_type - 1).kind != 2 { return false }
+    if item.child_count == 0 || item.first_child == 0 { return false }
+    var child_at: U64 = 0
+    while child_at < item.child_count {
+        let child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, item.first_child - 1 + child_at).expression
+        if child == 0 || child > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+        if __s0_buffer_get(CheckedExprRec, store.expressions, child - 1).checked_type != item.checked_type { return false }
+        child_at = child_at + 1
+    }
+    return true
+}
+
 fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: __s0_Buffer(CheckedSpanRec)) -> Bool {
     // Ownership is validated below in stable record order. Build dense counts
     // once instead of rediscovering each owner with nested whole-table scans.
@@ -8402,7 +8463,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 39 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 40 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -8416,6 +8477,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
             child_at = child_at + 1
         }
         if item.site_kind > 8 || (item.site_kind == 0 && item.site_syntax != 0) || (item.site_kind != 0 && item.site_syntax == 0) || item.site_syntax > __s0_buffer_len(CheckedSpanRec, spans) { return false }
+        if item.kind == 40 && !lower_model_interpolation_ok(store, item) { return false }
         if item.kind == 24 {
             // Closure creation: parameter_use names the closure site, whose
             // expression points back here; the value has the erased function

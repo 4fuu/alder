@@ -45,8 +45,11 @@ type LexDiagRec {
 // 38 match arm, 39 match binding, 40 module declaration, 41 module import,
 // 42 public module import, 43 selected import name, 44 import alias,
 // 45 public declaration wrapper, 46 module path, 47 mut runtime parameter, and
-// 48 take runtime parameter, 49 inherent impl declaration, and 50 array
-// literal. An impl's first
+// 48 take runtime parameter, 49 inherent impl declaration, 50 array
+// literal, 66 unit literal, 67 interpolated string, and 68 interpolation
+// display part. Kind-67 children alternate literal segments and display parts
+// in source order; a display part has the embedded expression as its sole
+// child. An impl's first
 // child is its owner type and remaining children are function declarations;
 // receiver parameters use kinds 13, 47, and 48 and the name `self`.
 // Array literal children are their elements in source order.
@@ -256,6 +259,8 @@ type DeclTypeUseRec {
 // parameter_use names their lowering-facing CheckedMatchRec/CheckedTryRec.
 // Ordered children are stored in one
 // flattened child buffer rather than encoded by operator arity.
+// Kind 40 is string interpolation: a String-valued parent whose ordered
+// children are nonempty literal segments and Display calls, both String.
 // Kinds 8..11 are direct user calls, concrete record constructors, concrete
 // enum variants, and direct C-import calls. Their annotation is a stable
 // CallAnnotationRec ID; the annotation names declaration semantic IDs and

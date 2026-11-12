@@ -1467,11 +1467,17 @@ the conversion round trips compare `dback == 3.5`, `fback == 1.25`,
 `back == 1.5`, `widened == 1.5`, and `fback == 0.5` directly instead of
 observing the checked narrowing's `some`/`none`.
 
-Open M8 language item: string interpolation is specified in
-[docs/syntax.md](docs/syntax.md) and [docs/language-semantics.md](docs/language-semantics.md)
-as `"{expr}"` evaluated through `Display` in source order, but it is not
-implemented. It is scheduled separately; `core.format`/`std.format` provide the
-explicit formatting foundation and do not replace the syntax feature.
+Landed M8 language progress: string interpolation is implemented in the
+source compiler as specified in [docs/syntax.md](docs/syntax.md) and
+[docs/language-semantics.md](docs/language-semantics.md). `"{expr}"` evaluates
+each embedded expression through `Display` in source order and concatenates
+the display result with the surrounding text; literal braces use `\{`/`\}`.
+The v1 expression set is brace-free and quote-free, and widening it later is
+additive. Evidence: `compiler/production_interpolation_test.go` compiles and
+runs builtin and user `Display` parts, literal braces, a bare `}`, and
+left-to-right evaluation under the production driver, with rejection coverage
+for floats, empty and malformed interpolations. The Go Stage 0 frontend does
+not implement interpolation because it predates the Display trait surface.
 
 Landed language progress: float comparison and float arithmetic are in the
 S0/MIR profile under the approved IEEE-754 semantics (decision
@@ -1657,7 +1663,8 @@ The integer renderers reject float kinds and precision with explicit errors;
 Unicode centering, zero padding, invalid fill, rejected precision/kind, and
 `I64.min` under ASan/UBSan. Docs:
 [`core.format` snapshot](docs/api/core.format-v1.md). Float rendering remains
-in `std.format` and interpolation syntax remains specified but not implemented.
+in `std.format`; interpolation syntax is implemented through `Display` and
+the String concat path.
 
 Landed standard-library progress: `core.num` adds exact decimal
 `parse_i64`/`parse_u64` and `ParseIntError` to the installed limits and

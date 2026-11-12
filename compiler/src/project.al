@@ -844,17 +844,17 @@ fn project_prepare_entry_wrapper(plan: ProjectPlanRec) -> Bool {
     if shape.kind != 1 {
         if !project_generated_write_literal("import core.error as cerror\n") { return false }
     }
-    if !project_generated_write_literal("\npub fn main() -> I32 {\n") { return false }
+    if !project_generated_write_literal("\npub fn main() -> I32 \{\n") { return false }
     if shape.kind == 1 {
         if !project_generated_write_literal("    entry.main()\n    return 0\n") { return false }
     } else {
-        if !project_generated_write_literal("    match entry.main() {\n") { return false }
-        if shape.kind == 3 { if !project_generated_write_literal("        Ok(value) => { return value }\n") { return false } }
-        else { if !project_generated_write_literal("        Ok(_) => { return 0 }\n") { return false } }
+        if !project_generated_write_literal("    match entry.main() \{\n") { return false }
+        if shape.kind == 3 { if !project_generated_write_literal("        Ok(value) => \{ return value }\n") { return false } }
+        else { if !project_generated_write_literal("        Ok(_) => \{ return 0 }\n") { return false } }
         if project_entry_has_error_impl(shape.error_start, shape.error_end) {
-            if !project_generated_write_literal("        Err(error) => {\n            cerror.program_error_chain(error)\n            return 1\n        }\n") { return false }
+            if !project_generated_write_literal("        Err(error) => \{\n            cerror.program_error_chain(error)\n            return 1\n        }\n") { return false }
         } else {
-            if !project_generated_write_literal("        Err(error) => {\n            cerror.program_error_display(error)\n            return 1\n        }\n") { return false }
+            if !project_generated_write_literal("        Err(error) => \{\n            cerror.program_error_display(error)\n            return 1\n        }\n") { return false }
         }
         if !project_generated_write_literal("    }\n    return 1\n") { return false }
     }
@@ -1312,7 +1312,7 @@ fn project_emit_plan(plan: ProjectPlanRec) -> Bool {
 
 fn project_emit_plan_response(plan: ProjectPlanRec) -> Bool {
     if !driver_json() { return project_emit_plan(plan) }
-    if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"test-plan\",\"success\":true,\"diagnostics\":[],\"artifact\":{\"kind\":\"build-plan\",\"content\":\"") || !driver_select(2) { return false }
+    if !driver_select(0) || !out_string("\{\"version\":1,\"command\":\"test-plan\",\"success\":true,\"diagnostics\":[],\"artifact\":\{\"kind\":\"build-plan\",\"content\":\"") || !driver_select(2) { return false }
     if !project_emit_plan(plan) { return false }
     return driver_select(0) && out_string("\"}}\n")
 }

@@ -106,8 +106,8 @@ fn driver_position(state: State, source_id: U64, offset: U64) -> DriverPosition 
 fn driver_out_range(state: State, source: U64, start: U64, end: U64) -> Bool {
     let first = driver_position(state, source, start)
     let last = driver_position(state, source, end)
-    if !out_string("{\"path\":\"") || !driver_out_json_path(state, source) || !out_string("\",\"startByte\":") || !out_u64(start) || !out_string(",\"endByte\":") || !out_u64(end) { return false }
-    if !out_string(",\"start\":{\"line\":") || !out_u64(first.line) || !out_string(",\"column\":") || !out_u64(first.column) || !out_string("},\"end\":{\"line\":") || !out_u64(last.line) || !out_string(",\"column\":") || !out_u64(last.column) { return false }
+    if !out_string("\{\"path\":\"") || !driver_out_json_path(state, source) || !out_string("\",\"startByte\":") || !out_u64(start) || !out_string(",\"endByte\":") || !out_u64(end) { return false }
+    if !out_string(",\"start\":\{\"line\":") || !out_u64(first.line) || !out_string(",\"column\":") || !out_u64(first.column) || !out_string("},\"end\":\{\"line\":") || !out_u64(last.line) || !out_string(",\"column\":") || !out_u64(last.column) { return false }
     return out_string("}}")
 }
 
@@ -192,9 +192,11 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
     if kind == 30 { return out_string("unsafe c block must contain a direct call or field access") }
     if kind == 31 { return out_string("a callback declaration is `callback type Name = \"spelling\" (params) -> result`") }
-    if kind == 35 { return out_string("an export declaration is `export c fn name(...) -> type { ... }` at module scope") }
+    if kind == 35 { return out_string("an export declaration is `export c fn name(...) -> type \{ ... }` at module scope") }
     if kind == 50 { return out_string("take is not allowed in a function type; only `fn(mut T) -> R` borrows a parameter") }
     if kind == 51 { return out_string("closure parameters cannot be mut or take; declare a named function instead") }
+    if kind == 52 { return out_string("interpolation expressions are brace-free and quote-free: use names, non-string literals, fields, indexing, calls, operators, parentheses, or try") }
+    if kind == 53 { return out_string("expected `}` to close interpolation") }
     return out_string("invalid source syntax")
 }
 
@@ -445,7 +447,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         return out_string("")
     }
     if kind == 257 {
-        if !out_string("type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(" does not implement Display; the builtin Display domain is Bool, signed and unsigned integers, and String, and a declared type can implement Display itself") { return false }
+        if !out_string("type ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(" does not implement Display; the builtin Display domain is Bool, signed and unsigned integers, and String, a declared type can implement Display itself, and floats use std.format") { return false }
         return out_string("")
     }
     if kind == 255 { return out_string("float literal is out of range for F32") }
@@ -529,11 +531,11 @@ fn driver_emit_human_diagnostic(state: State, parse: ParseStore, phase: U64, kin
 }
 
 fn driver_emit_json_diagnostic(state: State, parse: ParseStore, phase: U64, kind: U64, source: U64, start: U64, end: U64, related_source: U64, related_start: U64, related_end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64) -> Bool {
-    if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"") { return false }
+    if !driver_select(0) || !out_string("\{\"version\":1,\"command\":\"") { return false }
     if driver_command() == 1 { if !out_string("check") { return false } } else { if !out_string("compile") { return false } }
-    if !out_string("\",\"success\":false,\"diagnostics\":[{\"code\":\"") || !driver_out_code(phase) || !out_string("\",\"severity\":\"error\",\"message\":\"") || !driver_out_message(state, parse, phase, kind, source, start, end, detail_a, detail_b, detail_c, detail_d, true) || !out_string("\",\"range\":") || !driver_out_range(state, source, start, end) || !out_string(",\"related\":[") { return false }
+    if !out_string("\",\"success\":false,\"diagnostics\":[\{\"code\":\"") || !driver_out_code(phase) || !out_string("\",\"severity\":\"error\",\"message\":\"") || !driver_out_message(state, parse, phase, kind, source, start, end, detail_a, detail_b, detail_c, detail_d, true) || !out_string("\",\"range\":") || !driver_out_range(state, source, start, end) || !out_string(",\"related\":[") { return false }
     if related_start != 0 || related_end != 0 {
-        if !out_string("{\"message\":\"first ") || !driver_out_declaration_kind(detail_b) || !out_string(" declaration of ") || !driver_out_message_quote(true) || !driver_out_node_name(state, parse, source, start, end, true) || !driver_out_message_quote(true) || !out_string(" is here\",\"range\":") || !driver_out_range(state, related_source, related_start, related_end) || !out(125) { return false }
+        if !out_string("\{\"message\":\"first ") || !driver_out_declaration_kind(detail_b) || !out_string(" declaration of ") || !driver_out_message_quote(true) || !driver_out_node_name(state, parse, source, start, end, true) || !driver_out_message_quote(true) || !out_string(" is here\",\"range\":") || !driver_out_range(state, related_source, related_start, related_end) || !out(125) { return false }
     }
     return out_string("],\"notes\":[]}]}\n")
 }
@@ -563,9 +565,9 @@ fn driver_check_diagnostic(state: State, parse: ParseStore, store: CheckStore) -
 
 fn driver_failure(status: U64, kind: __s0_String, message: __s0_String) -> I32 {
     if driver_json() {
-        if !driver_reset_response() || !driver_select(0) || !out_string("{\"version\":1,\"command\":\"") { return 3 }
+        if !driver_reset_response() || !driver_select(0) || !out_string("\{\"version\":1,\"command\":\"") { return 3 }
         if driver_command() == 1 { if !out_string("check") { return 3 } } else { if !out_string("compile") { return 3 } }
-        if !out_string("\",\"success\":false,\"diagnostics\":[],\"failure\":{\"kind\":\"") || !out_string(kind) || !out_string("\",\"message\":\"") || !out_string(message) || !out_string("\"}}\n") { return 3 }
+        if !out_string("\",\"success\":false,\"diagnostics\":[],\"failure\":\{\"kind\":\"") || !out_string(kind) || !out_string("\",\"message\":\"") || !out_string(message) || !out_string("\"}}\n") { return 3 }
     } else {
         if !driver_select(1) || !out_string("alder: ") || !out_string(message) || !out(10) { return 3 }
     }
@@ -580,14 +582,14 @@ fn driver_internal_error() -> I32 { return driver_failure(4, "internal", "intern
 
 fn driver_success_check() -> I32 {
     if driver_json() {
-        if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"check\",\"success\":true,\"diagnostics\":[]}\n") { return 3 }
+        if !driver_select(0) || !out_string("\{\"version\":1,\"command\":\"check\",\"success\":true,\"diagnostics\":[]}\n") { return 3 }
     }
     return 0
 }
 
 fn driver_artifact_start(kind: __s0_String) -> Bool {
     if driver_json() {
-        if !driver_select(0) || !out_string("{\"version\":1,\"command\":\"compile\",\"success\":true,\"diagnostics\":[],\"artifact\":{\"kind\":\"") || !out_string(kind) { return false }
+        if !driver_select(0) || !out_string("\{\"version\":1,\"command\":\"compile\",\"success\":true,\"diagnostics\":[],\"artifact\":\{\"kind\":\"") || !out_string(kind) { return false }
         if unsafe c { alderhost_output_path_len() } != 0 {
             if !out_string("\",\"path\":\"") || !driver_out_json_output_path() || !out_string("\"}}\n") { return false }
         } else {

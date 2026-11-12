@@ -136,7 +136,8 @@ Required `core` areas:
 - `core.iter`: static iterator traits and common lazy adapters;
 - `core.hash`: stable hashing contract plus process-randomized builders for
   attack-facing maps;
-- `core.format`: `Display`, formatting arguments, and interpolation support;
+- `core.format`: `Display`, formatting arguments, and the text rules used by
+  string interpolation;
 - `core.memory`: safe size/alignment queries needed by generic code, without
   raw allocation;
 - `core.panic`: `panic`, `assert`, `assert_eq`, `assert_ne`, and
