@@ -31,8 +31,8 @@ import std.path { OsString, Path }
 
 /// Value-semantic child-process description. Copying a `Command` copies the
 /// whole configuration; builder methods mutate a uniquely owned value in
-/// place and change nothing else. Builders return the updated value; rebind
-/// the result. Validation happens at spawn time, so builders never fail.
+/// place and change nothing else. Validation happens at spawn time, so
+/// builders never fail.
 pub type Command {
     // private: program, arguments, working_directory,
     //          environment_overrides, environment_cleared, pipes
@@ -44,22 +44,22 @@ impl Command {
     /// streams inherited.
     pub fn new(program: OsString) -> Command
     /// Appends one argument, passed through verbatim.
-    pub fn argument(self, value: OsString) -> Command
+    pub fn argument(mut self, value: OsString) -> Unit
     /// Replaces the argument list.
-    pub fn set_arguments(self, values: Vec(OsString)) -> Command
+    pub fn set_arguments(mut self, values: Vec(OsString)) -> Unit
     /// Runs the child with `path` as its working directory.
-    pub fn working_directory(self, path: Path) -> Command
+    pub fn working_directory(mut self, path: Path) -> Unit
     /// Adds one override applied over the inherited environment.
-    pub fn env(self, key: OsString, value: OsString) -> Command
+    pub fn env(mut self, key: OsString, value: OsString) -> Unit
     /// Removes one key from the child's environment.
-    pub fn env_remove(self, key: OsString) -> Command
+    pub fn env_remove(mut self, key: OsString) -> Unit
     /// Starts the child from an empty environment; later `env` overrides
     /// apply on top of the empty set.
-    pub fn clear_environment(self) -> Command
+    pub fn clear_environment(mut self) -> Unit
     /// Selects the wiring of one standard stream. Default is `Inherit`.
-    pub fn stdin(self, mode: PipeMode) -> Command
-    pub fn stdout(self, mode: PipeMode) -> Command
-    pub fn stderr(self, mode: PipeMode) -> Command
+    pub fn stdin(mut self, mode: PipeMode) -> Unit
+    pub fn stdout(mut self, mode: PipeMode) -> Unit
+    pub fn stderr(mut self, mode: PipeMode) -> Unit
     /// Spawns the child. The `Command` stays owned and reusable.
     pub fn spawn(I: type(io.Io), io: I, self) -> Result(Child(I), ProcessError)
     /// Spawns with default wiring, waits, and returns the exit status.
@@ -205,17 +205,16 @@ Equality for `ExitStatus` is structural. `Display` for `ExitStatus`
 (`exited with code N` / `killed by signal N`) lands with the sysroot
 formatting snapshot and is additive.
 
-## Value-layer amendment
+## Value-layer note
 
-The value layer uses functional builder updates (`self -> Command`). In-place
-assignment of a `Vec` or `OsString` field from a `mut self` method is not
-safely expressible with the current storage plan: the field would retain
-storage owned by the builder call's temporary domain, and the same owner-domain
-question repeats through delegated calls. Functional updates keep the value
-semantics and ownership contract unchanged; callers rebind the result
-(`command = command.argument(value)`). Qualified enum-variant expressions such
-as `PipeMode.Piped` and `ProcessError.Platform(info)` are available directly.
-The host spawn layer will use these forms when it lands.
+Builder methods mutate the uniquely owned `Command` in place and return
+`Unit`; callers call them directly on a mutable binding
+(`command.argument(value)`). This is the frozen snapshot shape. Borrowed-place
+owner-domain provenance keeps `Vec` and `OsString` field growth in the
+caller's domain, so the builders remain safe through delegation. Qualified
+enum-variant expressions such as `PipeMode.Piped` and
+`ProcessError.Platform(info)` are available directly. The host spawn layer
+will use these forms when it lands.
 
 ## Contracts
 
@@ -277,7 +276,7 @@ fn bytes_are(left: Bytes, right: String) -> Bool {
 pub fn std_process_example(io: io.Blocking) -> I64 {
     var total: I64 = 0
 
-    // Value-semantic builder, then capture through Command.output.
+    // In-place builder, then capture through Command.output.
     let program = match path.OsString.parse("/bin/echo") {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
@@ -287,7 +286,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
         Err(_) => { return -1000000 }
     }
     var command = process.Command.new(program)
-    command = command.argument(message)
+    command.argument(message)
     let result = match process.Command.output(io, command) {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
@@ -297,7 +296,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
 
     // Explicit environment override path, same fixed program.
     var scripted = process.Command.new(program)
-    scripted = scripted.argument(message)
+    scripted.argument(message)
     let key = match path.OsString.parse("ALDER_STD_PROCESS_EXAMPLE") {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
@@ -306,7 +305,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
     }
-    scripted = scripted.env(key, flag)
+    scripted.env(key, flag)
     let second = match process.Command.output(io, scripted) {
         Ok(value) => { value }
         Err(_) => { return -1000000 }

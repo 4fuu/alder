@@ -21,18 +21,18 @@ import std.process { Command, ExitStatus, Output, PipeMode, ProcessError }
 
 fn run_checks(program: OsString, work_dir: Path) -> I32 {
     var command = Command.new(program)
-    command = command.argument(program)
+    command.argument(program)
     var args: Vec(OsString) = Vec.new(OsString)
     args.push(program)
     args.push(program)
-    command = command.set_arguments(args)
-    command = command.working_directory(work_dir)
-    command = command.env(program, program)
-    command = command.env_remove(program)
-    command = command.clear_environment()
-    command = command.stdin(PipeMode.Piped)
-    command = command.stdout(PipeMode.Inherit)
-    command = command.stderr(PipeMode.Piped)
+    command.set_arguments(args)
+    command.working_directory(work_dir)
+    command.env(program, program)
+    command.env_remove(program)
+    command.clear_environment()
+    command.stdin(PipeMode.Piped)
+    command.stdout(PipeMode.Inherit)
+    command.stderr(PipeMode.Piped)
 
     let exited = ExitStatus.from_exit(3)
     match exited.code() {
@@ -120,4 +120,5 @@ func testSysrootValueModule(t *testing.T, files map[string]string) {
 	if run.status != 0 || run.stderr != "" || run.stdout != "" {
 		t.Fatalf("sysroot value-layer run: status=%d stdout=%q stderr=%q", run.status, run.stdout, run.stderr)
 	}
+	runSanitizedProject(t, cc, root, dir, "hello")
 }

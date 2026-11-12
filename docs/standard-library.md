@@ -218,7 +218,7 @@ types, host files, and standard streams arrive with the C-binding buffer
 surface as slice 2.
 
 Implemented std.process progress (value layer): `sysroot/std/process.al`
-installs `PipeMode`, the value-semantic `Command` and its functional
+installs `PipeMode`, the value-semantic `Command` and its in-place
 builders, `ExitStatus` with exit/signal decomposition, `Output`, and
 `ProcessError` with `Display` and `Error`. Stream modes and process
 categories are constructed with qualified variant expressions such as

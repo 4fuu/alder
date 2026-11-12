@@ -20,8 +20,9 @@ pub enum PipeMode {
 }
 
 /// Value-semantic child-process description. Copying a `Command` copies the
-/// whole configuration; builder methods return an updated value and change
-/// nothing else. Validation happens at spawn time, so builders never fail.
+/// whole configuration; builder methods mutate a uniquely owned value in
+/// place and change nothing else. Validation happens at spawn time, so
+/// builders never fail.
 pub type Command {
     program: OsString
     arguments: Vec(OsString)
@@ -52,67 +53,62 @@ impl Command {
         )
     }
 
-    /// Appends one argument, passed through verbatim. Functional update:
-    /// the result is a new value, matching the storage-backed builder
-    /// convention used by `std.text.StringBuilder`.
-    fn argument(self, value: OsString) -> Command {
-        var arguments = self.arguments
-        arguments.push(value)
-        return rebuild(self, arguments, self.working_directory, self.environment_keys, self.environment_values, self.environment_cleared, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    /// Appends one argument, passed through verbatim.
+    fn argument(mut self, value: OsString) -> Unit {
+        self.arguments.push(value)
+        return
     }
 
     /// Replaces the argument list.
-    fn set_arguments(self, values: Vec(OsString)) -> Command {
-        return rebuild(self, values, self.working_directory, self.environment_keys, self.environment_values, self.environment_cleared, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    fn set_arguments(mut self, values: Vec(OsString)) -> Unit {
+        self.arguments = values
+        return
     }
 
     /// Runs the child with `path` as its working directory.
-    fn working_directory(self, path: Path) -> Command {
-        return rebuild(self, self.arguments, Some(path), self.environment_keys, self.environment_values, self.environment_cleared, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    fn working_directory(mut self, path: Path) -> Unit {
+        self.working_directory = Some(path)
+        return
     }
 
     /// Adds one override applied over the inherited environment.
-    fn env(self, key: OsString, value: OsString) -> Command {
-        var keys = self.environment_keys
-        var values = self.environment_values
-        keys.push(key)
-        values.push(Some(value))
-        return rebuild(self, self.arguments, self.working_directory, keys, values, self.environment_cleared, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    fn env(mut self, key: OsString, value: OsString) -> Unit {
+        self.environment_keys.push(key)
+        self.environment_values.push(Some(value))
+        return
     }
 
     /// Removes one key from the child's environment.
-    fn env_remove(self, key: OsString) -> Command {
-        var keys = self.environment_keys
-        var values = self.environment_values
-        keys.push(key)
-        values.push(None)
-        return rebuild(self, self.arguments, self.working_directory, keys, values, self.environment_cleared, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    fn env_remove(mut self, key: OsString) -> Unit {
+        self.environment_keys.push(key)
+        self.environment_values.push(None)
+        return
     }
 
     /// Starts the child from an empty environment; later `env` overrides
     /// apply on top of the empty set.
-    fn clear_environment(self) -> Command {
-        return rebuild(self, self.arguments, self.working_directory, self.environment_keys, self.environment_values, true, self.stdin_mode, self.stdout_mode, self.stderr_mode)
+    fn clear_environment(mut self) -> Unit {
+        self.environment_cleared = true
+        return
     }
 
     /// Selects the wiring of standard input. Default is `Inherit`.
-    fn stdin(self, mode: PipeMode) -> Command {
-        return rebuild(self, self.arguments, self.working_directory, self.environment_keys, self.environment_values, self.environment_cleared, mode, self.stdout_mode, self.stderr_mode)
+    fn stdin(mut self, mode: PipeMode) -> Unit {
+        self.stdin_mode = mode
+        return
     }
 
     /// Selects the wiring of standard output. Default is `Inherit`.
-    fn stdout(self, mode: PipeMode) -> Command {
-        return rebuild(self, self.arguments, self.working_directory, self.environment_keys, self.environment_values, self.environment_cleared, self.stdin_mode, mode, self.stderr_mode)
+    fn stdout(mut self, mode: PipeMode) -> Unit {
+        self.stdout_mode = mode
+        return
     }
 
     /// Selects the wiring of standard error. Default is `Inherit`.
-    fn stderr(self, mode: PipeMode) -> Command {
-        return rebuild(self, self.arguments, self.working_directory, self.environment_keys, self.environment_values, self.environment_cleared, self.stdin_mode, self.stdout_mode, mode)
+    fn stderr(mut self, mode: PipeMode) -> Unit {
+        self.stderr_mode = mode
+        return
     }
-}
-
-fn rebuild(command: Command, arguments: Vec(OsString), working_directory: Option(Path), environment_keys: Vec(OsString), environment_values: Vec(Option(OsString)), environment_cleared: Bool, stdin_mode: PipeMode, stdout_mode: PipeMode, stderr_mode: PipeMode) -> Command {
-    return Command(program: command.program, arguments: arguments, working_directory: working_directory, environment_keys: environment_keys, environment_values: environment_values, environment_cleared: environment_cleared, stdin_mode: stdin_mode, stdout_mode: stdout_mode, stderr_mode: stderr_mode)
 }
 
 /// How a child exited.

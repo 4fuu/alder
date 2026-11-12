@@ -1601,15 +1601,14 @@ own bootstrap `main` still uses the untouched I32 path.
 
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
-functional builders, `ExitStatus` exit/signal decomposition, `Output`, and
-`ProcessError` with `Display`/`Error`. Storage-backed builders currently return
-a new `Command` and callers rebind it; borrowed-place owner-domain provenance
-now makes in-place `Vec`/`OsString` field assignment safe, and restoring the
-snapshot's in-place builder form is a follow-up API change. Qualified variant
-expressions such as `PipeMode.Piped` and
+in-place builders, `ExitStatus` exit/signal decomposition, `Output`, and
+`ProcessError` with `Display`/`Error`. Builder methods mutate a mutable
+`Command` binding and return `Unit`; borrowed-place owner-domain provenance
+keeps their `Vec`/`OsString` field growth in the caller's domain. Qualified
+variant expressions such as `PipeMode.Piped` and
 `ProcessError.Platform(info)` are implemented and carry the snapshot surface
 without factory functions. Evidence:
-`compiler/production_process_fs_test.go` runs the value layer through the
+`compiler/production_process_test.go` runs the value layer through the
 installed sysroot, and `compiler/production_qualified_variant_test.go` pins
 the cross-module construction forms. Spawning, `Child`, pipes, and capture
 wait for `std.io` slice 2. Docs:
@@ -2105,8 +2104,8 @@ The following items are not part of the current implementation scope:
   branch-local join, and an indirect `mut` call. Function types spell a
   borrowed parameter as `fn(mut T) -> R`; `fn(take T)` and borrowed closure
   parameters are rejected with dedicated diagnostics. Diagnostic 333 and the
-  functional-builder workaround are retired. Remaining follow-up: restore the
-  snapshot's in-place `std.process` builders. Docs:
+  functional-builder workaround are retired; the snapshot's in-place
+  `std.process` builders are restored. Docs:
   [Memory and Resources](docs/memory-and-resources.md) and D005B.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or
