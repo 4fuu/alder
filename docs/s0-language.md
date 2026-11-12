@@ -477,7 +477,8 @@ Implemented expressions include:
   rejected with kind 310;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
-  arms (`=> { ... }`) whose bodies may hold ordinary statements, diverging
+  arms (`=> { ... }`) whose bodies may hold ordinary statements including a
+  last statement-position call to the resolved `core.panic.panic`, diverging
   expression arms (`=> return ...`, where the return is checked against the
   function result type and control never reaches the match join), and `if`
   guards: the guard runs after the pattern matches, a false guard continues
@@ -789,8 +790,13 @@ an element of a field; the grown collection header is written back through
 that place. A view taken through a field excludes mutation of the binding that
 owns it. Lexical environments do not leak block,
 branch, loop, or `for` element bindings. Non-`Unit` functions must return on
-every path, statements after a guaranteed return are rejected before their
-contents, and conservative loops fall through. `using` cleanup facts cover
+every path, statements after a guaranteed return or a statement-position
+`core.panic.panic` call are rejected before their contents, and conservative
+loops fall through. The panic call is recognized by its resolved symbol, not
+by the spelling `panic`; an ordinary function that happens to be named
+`panic`, and every wrapper, remains a normal `Unit` call. A recognized call
+lowers to the call followed by an `unreachable` MIR terminator and does not
+run cleanup scopes. `using` cleanup facts cover
 lexical fallthrough, return, failed `try`, `break`, and `continue`. Current
 lowering walks the checked site environment to run only active callbacks,
 exactly once in reverse lexical order, on those exits; a checked failure while

@@ -1924,6 +1924,7 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             if lower_closure_site_for(store, owner) != 0 { name = try lower_decimal_name(d, "closure", owner) }
             var function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
+            if lower_symbol_is_core_panic(source_state, store, owner) { current = lower_with_mir(current, mir_mark_function_noreturn(current.mir, function.id)) }
             if symbol.c_export && symbol.kind == 12 {
                 let exported = try mir_mark_function_exported(d, current.mir, function.id, base)
                 function = MirBuildStep(store: exported.store, id: function.id)
@@ -5404,6 +5405,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             ordinal = ordinal + 1
         }
         ordinal = 0
+        var joined = false
         while ordinal < checked.arm_count {
             let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
             let arm_block = __s0_buffer_get(U64, arm_blocks, ordinal)
@@ -5434,6 +5436,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     let unit_result = try lower_add_typed_result(d, lower_with_mir(current, unit_const.store), function, flow.block, mir_type_unit())
                     let unit_instr = try lower_add_instr(d, unit_result.state, function, flow.block, mir_op_const_get(), unit_result.id, 0, 0, 0, 0, 0, unit_name)
                     current = try lower_jump_value(d, unit_instr.state, function, lower_open_block(unit_instr.state.mir, function, flow.block), join.id, unit_result.id)
+                    joined = true
                 }
             } else if arm.statement != 0 {
                 // Diverging arm: the return statement lowers inside the arm
@@ -5459,8 +5462,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     }
                 }
                 current = try lower_jump_value(d, current, function, lower_open_block(current.mir, function, arm_block), join.id, value.id)
+                joined = true
             }
             ordinal = ordinal + 1
+        }
+        if !joined && checked_match_statement_diverges(source_state, store, expression_id) {
+            let unreachable = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: join.id, kind: mir_term_unreachable(), value: 0, target: 0, then_block: 0, else_block: 0))
+            current = lower_with_mir(current, unreachable.store)
         }
         return Ok(LowerStep(state: current, id: join_param.id))
     }
@@ -5865,6 +5873,16 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
         let lowered = try lower_expression(d, source_state, spans, store, current, owner, function, active, statement.expression, statement.environment, panic_here)
         current = lowered.state
         active = lower_open_block(current.mir, function, active)
+        // A resolved core.panic.panic call terminates the process inside the
+        // callee. The end of this block is unreachable and no cleanup runs on
+        // the panic path, matching the core.panic contract.
+        if checked_panic_statement(source_state, store, statement.expression) {
+            let unreachable = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: active, kind: mir_term_unreachable(), value: 0, target: 0, then_block: 0, else_block: 0))
+            return Ok(LowerFlowStep(state: lower_with_mir(current, unreachable.store), block: active, terminated: true))
+        }
+        if checked_match_statement_diverges(source_state, store, statement.expression) {
+            return Ok(LowerFlowStep(state: current, block: active, terminated: true))
+        }
         return Ok(LowerFlowStep(state: current, block: active, terminated: false))
     }
     if statement.kind == 6 {
@@ -6498,6 +6516,16 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
     }
     let panic_term = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: panic.id, kind: mir_term_panic(), value: 0, target: 0, then_block: 0, else_block: 0))
     return Ok(lower_with_mir(current, panic_term.store))
+}
+
+// True when the owner symbol is the resolved core.panic.panic function.
+fn lower_symbol_is_core_panic(source_state: State, store: CheckStore, owner: U64) -> Bool {
+    if owner == 0 || owner > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.kind != 12 && symbol.kind != 13 { return false }
+    if !source_path_is(source_state, symbol.source, "core/panic.al") { return false }
+    let source = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
+    return source_word(source_state, source, symbol.name_start, symbol.name_end, "panic")
 }
 
 fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, locals: LowerLocalIndex, state: LowerState) -> Result(LowerState, __s0_Error) {

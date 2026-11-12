@@ -676,11 +676,17 @@ func (p *parser) parseFunctionHeader() (functionBody, error) {
 			return functionBody{}, err
 		}
 	}
+	noreturn := false
+	if p.peek().kind == tokIdent && p.peek().text == "noreturn" {
+		p.next()
+		noreturn = true
+	}
 	if err := p.expectPunct("{"); err != nil {
 		return functionBody{}, err
 	}
 
 	f := p.m.AddFunction(nameTok.text, params, result)
+	f.Noreturn = noreturn
 	body := functionBody{f: f, start: p.pos, typeLimit: len(p.m.Types), constLimit: len(p.m.Constants), importLimit: len(p.m.Imports)}
 	depth := 0
 	for {

@@ -413,6 +413,24 @@ parameter or local behind it. Keeping the rule would force every buffered
 reader and writer to copy its window, obscuring the storage that the view
 actually borrows.
 
+### D028 — Panic is a narrow diverging path end
+
+Status: **Milestone 8**
+
+A statement-position call to the resolved `core.panic.panic` function is a
+diverging path end for checker flow analysis, exactly like `return`: a
+value-returning function may end with it, a match arm or `if`/`else` branch may
+end with it, code after it in the same statement list is unreachable and
+rejected, and cleanup scopes do not run. Recognition uses the call's resolved
+symbol and the declaration source, not the call-site spelling; wrappers such as
+`std.test.fail` remain ordinary `Unit` functions.
+
+Lowering emits the call followed by an `unreachable` MIR terminator. The MIR
+function carries a `noreturn` attribute so the CFG verifier permits that
+terminator in a reachable block only when the block calls a `noreturn`
+function. A general `Never` type is deferred; it would be a wider language
+decision than this single terminating surface.
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.

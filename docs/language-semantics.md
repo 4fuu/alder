@@ -236,7 +236,13 @@ exhaustiveness, and a guard cannot consume a binding.
 An arm body may instead diverge with `return`, which is checked against the
 function's result type and leaves the match without producing a value; the
 match's type comes only from its value-producing arms, so at least one arm
-must produce a value. The type, not a general `move` expression, exposes this rare consumption.
+must produce a value. A statement-position call to the resolved
+`core.panic.panic` function also diverges: it terminates the process with
+status 101 and does not run Alder cleanup. A match arm or `if`/`else` branch
+may end with that call wherever `return` may diverge, and code after it in the
+same statement list is unreachable and rejected. The rule is intentionally
+limited to that one resolved function; wrapper functions remain ordinary
+`Unit` functions and need their own return paths. The type, not a general `move` expression, exposes this rare consumption.
 The `let payload = option else ...` extraction form consumes an affine option
 and transfers its payload, while it copies a copyable payload.
 

@@ -107,12 +107,13 @@ type ConstDecl struct {
 // Function is a MIR function: typed parameters, local slots, basic blocks
 // with SSA-like temporaries, and block parameters instead of phi nodes.
 type Function struct {
-	Name   string
-	Params []Param
-	Result TypeId
-	Locals []Local
-	Blocks []*Block
-	Values []Value
+	Name     string
+	Params   []Param
+	Result   TypeId
+	Noreturn bool
+	Locals   []Local
+	Blocks   []*Block
+	Values   []Value
 }
 
 // Param is a typed parameter of a function or block.

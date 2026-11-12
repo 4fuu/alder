@@ -230,7 +230,7 @@ unreachable
   edge may reach it only after explicit cleanup of current-function cleanup
   scopes; it does not unwind caller frames. MIR 1 modules cannot contain this
   terminator.
-- `unreachable` is valid only in blocks that are unreachable from the entry block. Reachable blocks must not terminate with `unreachable`.
+- `unreachable` is valid only in blocks that are unreachable from the entry block, except that a reachable block may terminate with it after a call to a function marked `noreturn`. A function record may carry the attribute, printed after the result as `fn @name(...) noreturn {`. Lowering marks the resolved `core.panic.panic` function; the call itself performs the process termination, and the terminator states that its continuation cannot be reached.
 - Every statement starts a new line; the parser rejects statements that do not.
 
 ## Storage-Domain Operations

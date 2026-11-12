@@ -11868,6 +11868,69 @@ fn reject_unit_expression_statement(d: Domain, state: State, store: CheckStore, 
     return body_token_fail(d, state, store, 331, statement)
 }
 
+// A direct statement-position call to the resolved core.panic.panic function
+// is a diverging path end: the function never returns, so the surrounding
+// block guarantees an exit just as a return statement does. Resolution goes
+// through the call annotation target and the symbol's declaration source; a
+// local or unrelated function named panic does not match.
+fn checked_panic_statement(state: State, store: CheckStore, expression_id: U64) -> Bool {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind != 8 || expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return false }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+    if annotation.kind != 1 || annotation.target == 0 || annotation.target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+    if (symbol.kind != 12 && symbol.kind != 13) || !source_path_is(state, symbol.source, "core/panic.al") { return false }
+    let source = __s0_buffer_get(SourceRec, state.sources, symbol.source)
+    return source_word(state, source, symbol.name_start, symbol.name_end, "panic")
+}
+
+// True when a checked block contains a statement-position core.panic.panic
+// call at any nesting depth. The helper is only used to recognize matches
+// whose diverging arms end in a panic; plain return-only matches keep their
+// existing fallthrough diagnostics.
+fn checked_block_has_panic(state: State, store: CheckStore, block_id: U64) -> Bool {
+    if block_id == 0 || block_id > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return false }
+    let block = __s0_buffer_get(CheckedBlockRec, store.control.blocks, block_id - 1)
+    var link = block.statements
+    while link != 0 {
+        if link > __s0_buffer_len(CheckedStatementLinkRec, store.control.statement_links) { return false }
+        let item = __s0_buffer_get(CheckedStatementLinkRec, store.control.statement_links, link - 1)
+        if item.statement == 0 || item.statement > __s0_buffer_len(CheckedStatementRec, store.control.statements) { return false }
+        let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, item.statement - 1)
+        if statement.kind == 5 && checked_panic_statement(state, store, statement.expression) { return true }
+        if statement.kind == 6 || statement.kind == 7 || statement.kind == 8 || statement.kind == 9 {
+            if statement.body != 0 && checked_block_has_panic(state, store, statement.body) { return true }
+            if statement.alternative != 0 && checked_block_has_panic(state, store, statement.alternative) { return true }
+        }
+        link = item.next
+    }
+    return false
+}
+
+// A match statement whose every arm diverges and at least one arm ends in a
+// panic call. Return-only matches are left alone so their established
+// trailing-return form keeps compiling.
+fn checked_match_statement_diverges(state: State, store: CheckStore, expression_id: U64) -> Bool {
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return false }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind != 12 || expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(CheckedMatchRec, store.control.matches) { return false }
+    let checked = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1)
+    if checked.arm_count == 0 || checked.first_arm == 0 || checked.first_arm - 1 + checked.arm_count > __s0_buffer_len(CheckedMatchArmRec, store.control.match_arms) { return false }
+    var saw_panic = false
+    var ordinal: U64 = 0
+    while ordinal < checked.arm_count {
+        let arm = __s0_buffer_get(CheckedMatchArmRec, store.control.match_arms, checked.first_arm - 1 + ordinal)
+        if arm.statement == 0 {
+            if arm.block == 0 || arm.block > __s0_buffer_len(CheckedBlockRec, store.control.blocks) { return false }
+            if __s0_buffer_get(CheckedBlockRec, store.control.blocks, arm.block - 1).guaranteed_return == 0 { return false }
+            if checked_block_has_panic(state, store, arm.block) { saw_panic = true }
+        }
+        ordinal = ordinal + 1
+    }
+    return saw_panic
+}
+
 fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, statement: SyntaxRec, statement_id: U64, environment: U64, in_loop: Bool) -> Result(BodyStep, __s0_Error) {
     var expression_id = statement_id
     var expression = statement
@@ -11907,7 +11970,9 @@ fn check_expression_statement(d: Domain, state: State, parse: ParseStore, store:
             if dropped_annotation.kind == 7 { return body_token_fail(d, state, current, 203, expression) }
         }
     }
-    return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, false)
+    var guaranteed = checked_panic_statement(state, current, draft.expression)
+    if !guaranteed && checked_match_statement_diverges(state, current, draft.expression) { guaranteed = true }
+    return append_checked_statement(d, current, owner, statement_id, 5, environment, draft.expression, 0, 0, 0, 0, guaranteed)
 }
 
 // vec_element_cleanup_story reports whether a Vec element type may join an

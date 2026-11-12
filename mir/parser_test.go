@@ -445,3 +445,31 @@ func TestParseVecTypeAndOperations(t *testing.T) {
 		t.Fatal("result did not parse as vec")
 	}
 }
+
+func TestParsePrintNoreturnFunctionAttribute(t *testing.T) {
+	text := `mir 6
+
+fn @panic() noreturn {
+bb0:
+  return
+}
+`
+	m, err := Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Functions) != 1 || m.Functions[0] == nil || !m.Functions[0].Noreturn {
+		t.Fatalf("noreturn attribute not parsed: %+v", m.Functions)
+	}
+	printed := Print(m)
+	if !strings.Contains(printed, "fn @panic() noreturn {") {
+		t.Fatalf("printer dropped noreturn attribute:\n%s", printed)
+	}
+	round, err := Parse(printed)
+	if err != nil {
+		t.Fatalf("round trip: %v\n%s", err, printed)
+	}
+	if !round.Functions[0].Noreturn {
+		t.Fatalf("round trip dropped noreturn attribute:\n%s", printed)
+	}
+}

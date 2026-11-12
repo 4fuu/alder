@@ -3,6 +3,7 @@ package compiler
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,7 +38,6 @@ import core.panic { panic }
 
 pub fn main() -> I32 {
     panic("boom")
-    return 0
 }
 `,
 			wantStatus: 101,
@@ -164,7 +164,6 @@ pub fn main() -> I32 {
     let written = unsafe c { stdio.putchar(letter.to_c_int()) }
     if written.to_i32() != 65 { return 1 }
     panic("boom")
-    return 0
 }
 `,
 	}, "run")
@@ -216,7 +215,6 @@ impl Cleanup for Resource {
 pub fn main() -> I32 {
     using held = Resource(value: 1)
     panic("boom")
-    return 0
 }
 `,
 	}, "run")
@@ -252,7 +250,6 @@ import core.panic { panic }
 pub fn main() -> I32 {
     let text = "a".concat("\0b")
     panic(text)
-    return 0
 }
 `,
 	}, "run")
@@ -293,5 +290,94 @@ pub fn main() -> I32 {
 	}
 	if result.stderr == "" {
 		t.Fatalf("floating Eq constraint produced no diagnostic")
+	}
+}
+
+// A statement-position core.panic.panic call is a diverging path end. The
+// value-returning stop function needs no trailing return, a match arm ending
+// in panic diverges like a return arm, and the generated C keeps compiling
+// under the strict warning set.
+func TestProductionCorePanicDiverges(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	cases := []struct {
+		name       string
+		expression string
+		wantStderr string
+	}{
+		{"value-returning-function", "return stop()", "panic: done\n"},
+		{"match-arm", "return pick(None)", "panic: none\n"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+				"alder.toml": corePanicManifest,
+				"src/main.al": `module hello.main
+
+import core.panic { panic }
+
+fn stop() -> I32 {
+    panic("done")
+}
+
+fn pick(value: Option(U64)) -> I32 {
+    match value {
+        Some(item) => { return item.to_i32_wrapping() }
+        None => { panic("none") }
+    }
+}
+
+pub fn main() -> I32 {
+    if pick(Some(7)) != 7 { return 1 }
+    ` + tc.expression + `
+}
+`,
+			}, "run")
+			if result.status != 101 {
+				t.Fatalf("status = %d, want 101; stdout=%q stderr=%q", result.status, result.stdout, result.stderr)
+			}
+			if result.stderr != tc.wantStderr {
+				t.Fatalf("stderr = %q, want %q", result.stderr, tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestProductionCorePanicRejectsCodeAfter(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+		"alder.toml": corePanicManifest,
+		"src/main.al": `module hello.main
+
+import core.panic { panic }
+
+pub fn main() -> I32 {
+    panic("boom")
+    return 0
+}
+`,
+	}, "check")
+	if result.status != 1 || !strings.Contains(result.stderr, "unreachable statement") {
+		t.Fatalf("code after panic: %+v stderr=%s", result, result.stderr)
 	}
 }

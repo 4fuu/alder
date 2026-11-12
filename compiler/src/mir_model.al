@@ -320,6 +320,9 @@ type MirFunctionRec {
     c_export: Bool
     export_name_start: U64
     export_name_end: U64
+    // A call to this function cannot return, so a reachable block ending in
+    // `unreachable` after the call is valid. Lowering marks core.panic.panic.
+    noreturn: Bool
 }
 
 // value is the owning function's external logical Value ID. Function

@@ -115,6 +115,9 @@ func Print(m *Module) string {
 		if f.Result != TypeUnit {
 			b.WriteString(" -> " + m.TypeString(f.Result))
 		}
+		if f.Noreturn {
+			b.WriteString(" noreturn")
+		}
 		b.WriteString(" {\n")
 		for _, l := range f.Locals {
 			b.WriteString("  local %" + l.Name + ": " + m.TypeString(l.Type) + "\n")

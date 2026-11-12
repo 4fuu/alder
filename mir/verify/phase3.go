@@ -9,6 +9,22 @@ import (
 // phase3CFG checks control-flow structure: valid targets, matching block
 // argument counts, switch case validity and exhaustiveness, entry-block
 // parameters, and unreachable placement.
+// callsNoreturn reports whether the block calls a function marked as never
+// returning. Lowering marks core.panic.panic; a reachable block may end in
+// unreachable after that call because the call cannot fall through.
+func callsNoreturn(m *mir.Module, b *mir.Block) bool {
+	for _, in := range b.Instrs {
+		if in.Op != mir.OpCall {
+			continue
+		}
+		idx := int(in.Callee)
+		if idx >= 0 && idx < len(m.Functions) && m.Functions[idx] != nil && m.Functions[idx].Noreturn {
+			return true
+		}
+	}
+	return false
+}
+
 func phase3CFG(m *mir.Module) []Error {
 	var errs []Error
 	for _, f := range m.Functions {
@@ -98,7 +114,7 @@ func phase3CFG(m *mir.Module) []Error {
 					errs = append(errs, Error{Loc: loc, Msg: "fail requires a value"})
 				}
 			case mir.TermUnreachable:
-				if reach[bi] {
+				if reach[bi] && !callsNoreturn(m, b) {
 					errs = append(errs, Error{Loc: loc, Msg: "unreachable terminator in a reachable block"})
 				}
 			}

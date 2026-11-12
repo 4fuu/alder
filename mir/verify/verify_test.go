@@ -685,3 +685,36 @@ func mustParse(t *testing.T, text string) *mir.Module {
 	}
 	return m
 }
+
+func TestNoreturnCallAllowsReachableUnreachable(t *testing.T) {
+	text := `mir 6
+
+fn @panic() noreturn {
+bb0:
+  return
+}
+
+fn @caller() {
+bb0:
+  call @panic()
+  unreachable
+}
+`
+	m, err := mir.Parse(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if errs := Module(m); len(errs) != 0 {
+		t.Fatalf("noreturn call should admit unreachable: %s", Errors(errs).String())
+	}
+
+	plain := strings.Replace(text, "fn @panic() noreturn {", "fn @panic() {", 1)
+	m, err = mir.Parse(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := Module(m)
+	if len(errs) == 0 || !strings.Contains(Errors(errs).String(), "unreachable terminator in a reachable block") {
+		t.Fatalf("unmarked callee should reject reachable unreachable: %v", errs)
+	}
+}

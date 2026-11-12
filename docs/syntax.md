@@ -458,7 +458,8 @@ let user = users.get(id)
 ```
 
 The `else` branch must diverge with `return`, `break`, `continue`, or
-unrecoverable termination.
+unrecoverable termination. Unrecoverable termination is a statement-position
+call to the resolved `core.panic.panic` function; wrappers are ordinary calls.
 
 `let value = option else ...` extracts by value. It copies a copyable payload.
 If `Option(T)` is affine because `T` is affine, it consumes the option and

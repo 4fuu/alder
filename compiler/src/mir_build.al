@@ -244,7 +244,7 @@ fn mir_mark_function_exported(d: Domain, store: MirStore, function: U64, name: _
     var current = named.store
     if function == 0 || function > __s0_buffer_len(MirFunctionRec, current.functions) { return Ok(MirBuildStep(store: current, id: 0)) }
     let item = __s0_buffer_get(MirFunctionRec, current.functions, function - 1)
-    let rec = MirFunctionRec(name_start: item.name_start, name_end: item.name_end, result_type: item.result_type, c_export: true, export_name_start: named.start, export_name_end: named.end)
+    let rec = MirFunctionRec(name_start: item.name_start, name_end: item.name_end, result_type: item.result_type, c_export: true, export_name_start: named.start, export_name_end: named.end, noreturn: item.noreturn)
     __s0_buffer_set(MirFunctionRec, current.functions, function - 1, rec)
     return Ok(MirBuildStep(store: current, id: function))
 }
@@ -259,8 +259,19 @@ fn mir_add_const(d: Domain, store: MirStore, name: __s0_String, const_type: U64,
 
 fn mir_add_function(d: Domain, store: MirStore, name: __s0_String, result_type: U64) -> Result(MirBuildStep, __s0_Error) {
     let named = try mir_append_name(d, store, name)
-    let items = try __s0_buffer_append(MirFunctionRec, d, named.store.functions, MirFunctionRec(name_start: named.start, name_end: named.end, result_type: result_type, c_export: false, export_name_start: 0, export_name_end: 0))
+    let items = try __s0_buffer_append(MirFunctionRec, d, named.store.functions, MirFunctionRec(name_start: named.start, name_end: named.end, result_type: result_type, c_export: false, export_name_start: 0, export_name_end: 0, noreturn: false))
     return Ok(MirBuildStep(store: mir_with_functions(named.store, items), id: __s0_buffer_len(MirFunctionRec, items)))
+}
+
+// Marks a function whose callers never observe a return. Lowering uses this
+// for core.panic.panic so a reachable block may end in `unreachable` after
+// the call.
+fn mir_mark_function_noreturn(store: MirStore, function: U64) -> MirStore {
+    if function == 0 || function > __s0_buffer_len(MirFunctionRec, store.functions) { return store }
+    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
+    if item.noreturn { return store }
+    __s0_buffer_set(MirFunctionRec, store.functions, function - 1, MirFunctionRec(name_start: item.name_start, name_end: item.name_end, result_type: item.result_type, c_export: item.c_export, export_name_start: item.export_name_start, export_name_end: item.export_name_end, noreturn: true))
+    return store
 }
 
 fn mir_add_value(d: Domain, store: MirStore, function: U64, name: __s0_String, value_type: U64, def_kind: U64, block: U64, item: U64) -> Result(MirBuildStep, __s0_Error) {

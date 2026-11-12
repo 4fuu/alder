@@ -165,6 +165,17 @@ queue = try __s0_buffer_append(U64, d, queue, t.else_block) }
     }
     return Ok(seen)
 }
+fn mir_v3_noreturn_call(store: MirStore, indexes: MirVIndexes, function: U64, block: U64) -> Bool {
+    let count = mir_vindex_instr_count(indexes, function, block)
+    var at: U64 = 0
+    while at < count {
+        let id = mir_vindex_instr(indexes, function, block, at)
+        let i = __s0_buffer_get(MirInstrRec, store.instructions, id - 1)
+        if i.op == mir_op_call() && i.target != 0 && i.target <= __s0_buffer_len(MirFunctionRec, store.functions) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).noreturn { return true }
+        at = at + 1
+    }
+    return false
+}
 fn mir_vseen_block(seen: __s0_Buffer(U64), block: U64) -> Bool { var at: U64 = 0
 while at < __s0_buffer_len(U64, seen) { if __s0_buffer_get(U64, seen, at) == block { return true }
 at = at + 1 }
@@ -230,7 +241,7 @@ prior = prior + 1 }
                     if defaults > 1 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_duplicate_default(), function, t.block, 0, term_id, 0, value_type, 0, 1, defaults, 0)) }
                     if defaults == 0 && !mir_vswitch_exhaustive(store, indexes, term_id, value_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_nonexhaustive_switch(), function, t.block, 0, term_id, 0, value_type, 0, 0, 0, 0)) }
                 }
-                if t.kind == mir_term_unreachable() && mir_vseen_block(reach, t.block) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_reachable_unreachable(), function, t.block, 0, term_id, 0, 0, 0, 0, 0, 0)) }
+                if t.kind == mir_term_unreachable() && mir_vseen_block(reach, t.block) && !mir_v3_noreturn_call(store, indexes, function, t.block) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_reachable_unreachable(), function, t.block, 0, term_id, 0, 0, 0, 0, 0, 0)) }
             }
             block = block + 1
         }

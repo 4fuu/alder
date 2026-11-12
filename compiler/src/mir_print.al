@@ -2576,6 +2576,7 @@ fn mir_out_functions(idx: MirPrintIndex, store: MirStore) -> Bool {
         let rec = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
         if !out_string("\nfn @") || !mir_out_name(store, rec.name_start, rec.name_end) || !out(40) || !mir_out_param_group(idx, store, mir_param_function(), function, 0) || !out(41) { return false }
         if rec.result_type != mir_type_unit() && (!out_string(" -> ") || !mir_out_type(idx, store, rec.result_type, __s0_buffer_len(MirTypeRec, store.types) + 1)) { return false }
+        if rec.noreturn && !out_string(" noreturn") { return false }
         if !out_string(" {\n") { return false }
         let local_count = mir_local_count(idx, store, function)
         let local_group = __s0_buffer_get(MirPrintGroup, idx.locals, function - 1)
