@@ -363,11 +363,10 @@ func TestIoBufferedProductionQualification(t *testing.T) {
 	runSanitizedProject(t, cc, repoRoot, dir, "hello")
 }
 
-// A bounded ByteSink reports a short count at capacity, so write_all turns an
-// incomplete transfer into InvalidInput without installing callee storage in
-// the caller's field. The bound is temporary until borrowed-field provenance
-// lands.
-func TestIoByteSinkCapacityProduction(t *testing.T) {
+// ByteSink grows its field storage with the caller's owner domain. A short
+// initial capacity no longer truncates: write returns the full count and
+// write_all appends everything.
+func TestIoByteSinkGrowthProduction(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
 	}
@@ -392,24 +391,21 @@ fn main() -> I32 {
     var sink = io.ByteSink.with_capacity(2)
     let data: Array(U8, 3) = [1, 2, 3]
     match sink.write(data.slice(0, 3)) {
-        Ok(n) => { if n != 2 { return 1 } }
+        Ok(n) => { if n != 3 { return 1 } }
         Err(_) => { return 2 }
     }
-    if sink.len() != 2 { return 3 }
-    let more: Array(U8, 1) = [4]
-    match sink.write(more.slice(0, 1)) {
-        Ok(n) => { if n != 0 { return 4 } }
+    if sink.len() != 3 { return 3 }
+    match io.write_all(sink, data.slice(0, 3)) {
+        Ok(n) => { if n != 3 { return 4 } }
         Err(_) => { return 5 }
     }
-    match io.write_all(sink, data.slice(0, 3)) {
-        Ok(_) => { return 6 }
-        Err(error) => { if error.display() != "invalid input" { return 7 } }
-    }
-    if sink.len() != 2 { return 8 }
+    if sink.len() != 6 { return 6 }
     let bytes = sink.into_bytes()
-    if bytes.len() != 2 { return 9 }
-    if bytes.byte(0) != 1 { return 10 }
-    if bytes.byte(1) != 2 { return 11 }
+    if bytes.len() != 6 { return 7 }
+    if bytes.byte(0) != 1 { return 8 }
+    if bytes.byte(2) != 3 { return 9 }
+    if bytes.byte(3) != 1 { return 10 }
+    if bytes.byte(5) != 3 { return 11 }
     return 0
 }
 `,
@@ -417,7 +413,7 @@ fn main() -> I32 {
 	dir := t.TempDir()
 	run := runProductionCompilerEnv(t, exe, dir, env, files, "run")
 	if run != (productionResult{}) {
-		t.Fatalf("bounded ByteSink behavior run failed: %+v", run)
+		t.Fatalf("growing ByteSink behavior run failed: %+v", run)
 	}
 	runSanitizedProject(t, cc, repoRoot, dir, "hello")
 }

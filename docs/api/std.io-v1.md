@@ -350,8 +350,9 @@ impl ByteCursor {
 impl Reader for ByteCursor {
 }
 
-/// An in-memory byte sink with a fixed capacity. Pure and host-free.
-/// `new` reserves 4096 bytes; `with_capacity` chooses another size.
+/// Grows an owned byte vector from writes. Pure and host-free.
+/// `new` starts with 4096 bytes of room; `with_capacity` chooses another
+/// initial size.
 pub type ByteSink {
     // private: data, length
 }
@@ -471,12 +472,11 @@ implementations resolve without an explicit import.
   through exclusively borrowed method calls and the compiler updates a
   uniquely owned buffer in place. `BufWriter.cleanup` flushes best-effort and
   cannot report an error; `into_sink` is the observing release.
-- `ByteSink` remains bounded in this std.io slice: `new` reserves 4096 bytes
-  and `with_capacity` selects another fixed size. `write` copies into that
-  storage and returns a short count, including zero, when full; `write_all`
-  therefore reports `InvalidInput` for an incomplete transfer. Owner-domain
-  provenance now makes growth safe; removing this bound is a follow-up std.io
-  API change.
+- `ByteSink` grows its owned byte vector from writes. `new` starts with 4096
+  bytes of capacity and `with_capacity` selects another initial size; `write`
+  grows as needed and returns the full byte count, so `write_all` never sees a
+  capacity-induced short write. Growth through the sink's field is safe now
+  that borrowed-place owner-domain provenance is installed.
 - `ByteSink.into_bytes` takes `self` by value, not `take self`: `take` is
   reserved for affine owners, and a `ByteSink` is an ordinary copyable value
   that the caller may keep using.

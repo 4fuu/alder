@@ -2106,8 +2106,7 @@ The following items are not part of the current implementation scope:
   borrowed parameter as `fn(mut T) -> R`; `fn(take T)` and borrowed closure
   parameters are rejected with dedicated diagnostics. Diagnostic 333 and the
   functional-builder workaround are retired. Remaining follow-up: restore the
-  snapshot's in-place `std.process` builders and an unbounded `ByteSink` once
-  the corresponding API slices land. Docs:
+  snapshot's in-place `std.process` builders. Docs:
   [Memory and Resources](docs/memory-and-resources.md) and D005B.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or

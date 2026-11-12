@@ -685,12 +685,9 @@ impl Reader for ByteCursor {
     }
 }
 
-/// An in-memory byte sink with a fixed capacity. `new` reserves 4096 bytes;
-/// `with_capacity` chooses another size. The capacity is temporary: until
-/// borrowed-field provenance lands, `write` copies into preallocated storage
-/// and reports a short count (including zero) when the sink is full. The
-/// Writer contract allows short writes, so `write_all` reports the incomplete
-/// transfer instead of growing storage in the callee's domain.
+/// Grows an owned byte vector from writes. `new` starts with 4096 bytes of
+/// room; `with_capacity` selects another initial size. `write` grows the
+/// sink to accept every byte and returns the full count.
 pub type ByteSink {
     data: Vec(U8)
     length: U64
@@ -716,15 +713,17 @@ impl ByteSink {
 
 impl Writer for ByteSink {
     fn write(mut self, data: [U8]) -> Result(U64, IoError) {
-        let room = self.data.len() - self.length
-        var count = data.len()
-        if count > room { count = room }
+        let count = data.len()
+        let needed = self.length + count
+        while self.data.len() < needed {
+            self.data.push(0)
+        }
         var at: U64 = 0
         while at < count {
             self.data[self.length + at] = data[at]
             at = at + 1
         }
-        self.length = self.length + count
+        self.length = needed
         return Ok(count)
     }
 
