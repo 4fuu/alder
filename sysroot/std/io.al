@@ -42,6 +42,24 @@ import c "alder_errno.h" as cerrno {
     raw fn last = "c_errno"() -> c.Int
 }
 
+import c "std/c/process_shim.h" as proc {
+    record type ChildStart = "io_child_start" {
+        pid: c.Int
+        stdin_fd: c.Int
+        stdout_fd: c.Int
+        stderr_fd: c.Int
+    }
+
+    record type ChildStatusRaw = "io_child_status" {
+        kind: c.Int
+        value: c.Int
+    }
+
+    raw fn spawn = "io_spawn"(program: c.ConstPtr(c.Char), argv_blob: c.ConstPtr(c.UChar), argv_length: c.Size, set_blob: c.ConstPtr(c.UChar), set_length: c.Size, remove_blob: c.ConstPtr(c.UChar), remove_length: c.Size, clear_environment: c.Int, has_working_directory: c.Int, working_directory: c.ConstPtr(c.Char), stdin_mode: c.Int, stdout_mode: c.Int, stderr_mode: c.Int, out: c.Ptr(ChildStart)) -> c.Int
+    raw fn wait_child = "io_wait_child"(pid: c.Int, out: c.Ptr(ChildStatusRaw)) -> c.Int
+    raw fn kill_child = "io_kill_child"(pid: c.Int) -> c.Int
+}
+
 // The Milestone 8 std.io v1 stream foundation, slice 1: the `Reader`,
 // `Writer`, and `Seek` traits, the portable error category, the exact
 // transfer helpers, and two host-free in-memory streams. Everything here is
@@ -218,6 +236,41 @@ pub type FileMode {
     pub create_new: Bool
 }
 
+/// How a waited child ended. `kind` 0 is a normal exit with `value` as the
+/// code; 1 is a signal termination with `value` as the signal number.
+pub type ChildStatus {
+    pub kind: U8
+    pub value: I32
+}
+
+/// One running child and its parent-held pipe ends. The pipe end is absent
+/// when that stream was inherited. `std.process` owns the lifetime; this
+/// record has no cleanup hook of its own.
+pub type HostChild {
+    pub pid: I32
+    pub stdin: Option(HostFile)
+    pub stdout: Option(HostFile)
+    pub stderr: Option(HostFile)
+}
+
+impl Cleanup for HostChild {
+    fn cleanup(take self) -> Unit {
+        match self.stdin {
+            Some(handle) => { handle.cleanup() }
+            None => {}
+        }
+        match self.stdout {
+            Some(handle) => { handle.cleanup() }
+            None => {}
+        }
+        match self.stderr {
+            Some(handle) => { handle.cleanup() }
+            None => {}
+        }
+        return
+    }
+}
+
 /// Host timestamp in seconds plus sub-second nanos.
 pub type Timestamp {
     pub seconds: I64
@@ -277,6 +330,15 @@ pub trait Io {
     fn write_stdout(self, data: [U8]) -> Result(U64, IoError)
     /// Writes to standard error.
     fn write_stderr(self, data: [U8]) -> Result(U64, IoError)
+    /// Starts a child. `stdin_mode`, `stdout_mode`, and `stderr_mode` are 0
+    /// for inheritance and 1 for a pipe; a piped stream returns its parent
+    /// end in the child record. Arguments and environment entries are exact
+    /// host bytes; no shell, quoting, or expansion is involved.
+    fn spawn(self, program: OsString, arguments: Vec(OsString), set_environment: Vec(OsString), remove_environment: Vec(OsString), clear_environment: Bool, working_directory: Option(Path), stdin_mode: U8, stdout_mode: U8, stderr_mode: U8) -> Result(HostChild, IoError)
+    /// Waits for `pid` and reports how it ended.
+    fn wait(self, pid: I32) -> Result(ChildStatus, IoError)
+    /// Sends an unconditional kill to `pid`.
+    fn kill(self, pid: I32) -> Result(Unit, IoError)
     /// Sleeps without observing an earlier wakeup.
     fn sleep(self, seconds: U64, nanos: U32) -> Unit
     /// Reads the monotonic clock.
@@ -358,6 +420,45 @@ fn file_stat_from(raw: FileStatRaw) -> FileStat {
     let seconds = unsafe c { raw.seconds }
     let nanos = unsafe c { raw.nanos }
     return FileStat(kind: entry_kind(kind.to_i32()), size: size.to_u64(), mode: mode.to_u32(), modified: Timestamp(seconds: seconds.to_i64(), nanos: nanos.to_i32().to_u32_wrapping()))
+}
+
+fn os_bytes(value: OsString) -> Vec(U8) {
+    let data = value.to_bytes()
+    var out: Vec(U8) = Vec.new(U8)
+    var at: U64 = 0
+    while at < data.len() {
+        out.push(data.byte(at))
+        at = at + 1
+    }
+    out.push(0)
+    return out
+}
+
+fn blob_append(blob: Vec(U8), value: OsString) -> Vec(U8) {
+    var copy = blob
+    let data = value.to_bytes()
+    var at: U64 = 0
+    while at < data.len() {
+        copy.push(data.byte(at))
+        at = at + 1
+    }
+    copy.push(0)
+    return copy
+}
+
+fn blob_of(values: Vec(OsString)) -> Vec(U8) {
+    var blob: Vec(U8) = Vec.new(U8)
+    var at: U64 = 0
+    while at < values.len() {
+        blob = blob_append(blob, values[at])
+        at = at + 1
+    }
+    return blob
+}
+
+fn pipe_end(fd: I32) -> Option(HostFile) {
+    if fd >= 0 { return Some(HostFile(handle: fd)) }
+    return None
 }
 
 impl Io for Blocking {
@@ -526,6 +627,45 @@ impl Io for Blocking {
         let count = unsafe c { posix.write(stderr_fd.to_c_int(), data, data.len().to_c_size()) }
         if count.to_i64() < 0 { return Err(IoError.last()) }
         return Ok(count.to_i64().to_u64_wrapping())
+    }
+
+    fn spawn(self, program: OsString, arguments: Vec(OsString), set_environment: Vec(OsString), remove_environment: Vec(OsString), clear_environment: Bool, working_directory: Option(Path), stdin_mode: U8, stdout_mode: U8, stderr_mode: U8) -> Result(HostChild, IoError) {
+        let program_bytes = os_bytes(program)
+        let args_blob = blob_of(arguments)
+        let set_blob = blob_of(set_environment)
+        let remove_blob = blob_of(remove_environment)
+        var cwd: Vec(U8) = Vec.new(U8)
+        var has_cwd: I32 = 0
+        match working_directory {
+            Some(path) => {
+                cwd = try host_path(path)
+                has_cwd = 1
+            }
+            None => {}
+        }
+        var raw = c.Zero(ChildStart)
+        let rc = unsafe c { proc.spawn(program_bytes.slice(0, program_bytes.len()), args_blob.slice(0, args_blob.len()), args_blob.len().to_c_size(), set_blob.slice(0, set_blob.len()), set_blob.len().to_c_size(), remove_blob.slice(0, remove_blob.len()), remove_blob.len().to_c_size(), flag_int(clear_environment).to_c_int(), has_cwd.to_c_int(), cwd.slice(0, cwd.len()), stdin_mode.to_c_int(), stdout_mode.to_c_int(), stderr_mode.to_c_int(), c.addr(raw)) }
+        if rc.to_i32() != 0 { return Err(IoError.last()) }
+        let pid = unsafe c { raw.pid }
+        let input_fd = unsafe c { raw.stdin_fd }
+        let output_fd = unsafe c { raw.stdout_fd }
+        let error_fd = unsafe c { raw.stderr_fd }
+        return Ok(HostChild(pid: pid.to_i32(), stdin: pipe_end(input_fd.to_i32()), stdout: pipe_end(output_fd.to_i32()), stderr: pipe_end(error_fd.to_i32())))
+    }
+
+    fn wait(self, pid: I32) -> Result(ChildStatus, IoError) {
+        var raw = c.Zero(ChildStatusRaw)
+        let rc = unsafe c { proc.wait_child(pid.to_c_int(), c.addr(raw)) }
+        if rc.to_i32() != 0 { return Err(IoError.last()) }
+        let kind = unsafe c { raw.kind }
+        let value = unsafe c { raw.value }
+        return Ok(ChildStatus(kind: kind.to_i32().to_u8_wrapping(), value: value.to_i32()))
+    }
+
+    fn kill(self, pid: I32) -> Result(Unit, IoError) {
+        let rc = unsafe c { proc.kill_child(pid.to_c_int()) }
+        if rc.to_i32() != 0 { return Err(IoError.last()) }
+        return Ok(())
     }
 
     fn sleep(self, seconds: U64, nanos: U32) -> Unit {
