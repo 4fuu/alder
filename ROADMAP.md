@@ -1566,6 +1566,18 @@ and the mutable-place rejection for a `let`-bound reader.
 consumed-field-move rule (`take self` moves one direct field); `into_sink`
 flushes pending bytes and releases the sink on a flush error.
 
+`std.fs` file layer lands on `std.io`: `File` wraps the capability, a host
+handle, and its path; `finish` moves the handle out and closes it, `keep`
+transfers the owner, and cleanup closes a still-owned handle. The whole-file
+`read`/`read_text`/`write`/`write_text` helpers, `metadata`, `canonicalize`,
+`rename`, `remove_file`, `remove_dir`, and `make_dir` are installed.
+`Metadata` maps owner permission bits and carries signed wall-clock seconds,
+so pre-1970 modification times round-trip. Evidence:
+`compiler/production_fs_test.go` opens, seeks, reads, writes, changes
+permissions, and reads metadata through `File`, and separately exercises the
+free helpers against a file whose mtime the Go harness sets to -1 second.
+Directory iteration and temporary owners remain pending.
+
 `std.time` v1 lands on the `std.io` capability: normalized checked
 `Duration`, monotonic `Instant` with checked differences, wall-clock
 `SystemTime` with epoch construction and proleptic-Gregorian `to_utc`
@@ -2114,6 +2126,13 @@ The following items are not part of the current implementation scope:
   `fn make(text: String) -> Result(c.CString, U64) { return match c.CString(text) { Some(value) => Ok(value) None => Err(1) } }`
   fails with "affine owner must be transferred on every reachable path or on
   none". `std.io` avoids it by building host paths in a `Vec(U8)` buffer.
+- a trait method call whose name matches an imported free function resolves to
+  the free function and reports diagnostic 58. With
+  `import std.fs { File, open, read }` and a local `file: File(Blocking)`,
+  `file.read(buffer)` fails even though `File` implements `Reader`; the same
+  program works after dropping the `read` import. The `std.fs` fixtures keep
+  method calls and free-function imports in separate programs until method
+  lookup prefers the receiver's trait method.
 - a local binding that shadows a module import is still parsed as the module
   namespace in a dotted call. With `import hello.util` and a binding named
   `util`, `util.count()` is parsed as an associated call and the checker

@@ -55,7 +55,9 @@ pub type File(IoType: type(io.Io)) {
     // private: io, handle (one affine io.HostFile), path
 }
 
-impl(IoType: type(io.Io)) File(IoType) {
+// Opening is a module function: the generic implementation parameter of File
+// cannot be inferred at an associated call such as `File.open`.
+impl fs {
     /// Opens the file for reading.
     pub fn open(I: type(io.Io), io: I, path: Path) -> Result(File(I), io.IoError)
     /// Creates or truncates the file for writing.
@@ -65,6 +67,9 @@ impl(IoType: type(io.Io)) File(IoType) {
     /// Opens with explicit flags.
     pub fn open_options(I: type(io.Io), io: I, path: Path, options: Options)
         -> Result(File(I), io.IoError)
+}
+
+impl(IoType: type(io.Io)) File(IoType) {
     /// Metadata of this file.
     pub fn metadata(mut self) -> Result(Metadata, io.IoError)
     /// Replaces the file's permission mode.
@@ -137,8 +142,8 @@ impl fs {
 ```alder
 /// One entry of a listing: the exact name bytes and the host-reported kind.
 pub type Entry {
-    name: OsString
-    kind: io.EntryKind
+    pub name: OsString
+    pub kind: io.EntryKind
 }
 
 /// A listing in host order. Affine: cleanup closes the listing.
@@ -178,10 +183,10 @@ impl fs {
 
 ```alder
 pub type Metadata {
-    kind: io.EntryKind
-    length: U64
-    permissions: Permissions
-    modified: SystemTime
+    pub kind: io.EntryKind
+    pub length: U64
+    pub permissions: Permissions
+    pub modified: SystemTime
 }
 
 /// Portable permission query. On POSIX targets these are the owner bits;
@@ -247,12 +252,16 @@ impl(IoType: type(io.Io)) Cleanup for TempDir(IoType) {
 }
 ```
 
-## Value-layer progress
+## Implementation progress
 
-`Options.read`, `Options.write`, and the permission record fields are pure
-values and are installed at `sysroot/std/fs.al`. The fields are public because
-callers adjust an `Options` binding and inspect `Permissions` values; the
-remaining file operations wait for the capability and host-handle layer.
+`Options`, `Permissions`, `File`, the whole-file operations, and `Metadata` are
+installed at `sysroot/std/fs.al`. `File` wraps the capability, its host handle,
+and the path; `finish` moves the handle out and closes it, `keep` transfers the
+owner, and cleanup closes a still-owned handle. `Metadata.modified` uses signed
+`std.io.Timestamp` seconds, so a pre-1970 modification time round-trips.
+Opening is a module function because the generic implementation parameter is
+not inferable at an associated call. Directory iteration and temporary owners
+remain pending.
 
 ## Contracts
 

@@ -278,6 +278,14 @@ Required modules:
 - `std.math`: portable scalar math with documented IEEE behavior and explicit
   exceptional results.
 
+Implemented std.fs progress: `sysroot/std/fs.al` installs `File` plus the
+whole-file operations and `Metadata` on the `std.io` capability. `File` is
+affine with `finish`/`keep`/cleanup releases, `Metadata.modified` preserves
+signed pre-1970 wall-clock seconds, and owner mode bits map to `Permissions`.
+Evidence: `compiler/production_fs_test.go` exercises the file methods and the
+free helpers, including a host mtime set before the epoch. Directory iteration
+and temporary owners remain pending.
+
 Implemented std.time progress: `sysroot/std/time.al` installs the v1 surface.
 `Duration` is normalized seconds plus nanos with checked arithmetic and a
 zero-saturating subtraction, `SystemTime.from_unix`/`unix_seconds`/`to_utc`
