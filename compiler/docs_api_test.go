@@ -143,6 +143,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.test-v1.al": {
+			style:   "project",
+			srcName: "std_test_example.al",
+			mainText: `module hello.main
+
+import hello.std_test_example { std_test_example }
+
+pub fn main() -> I32 {
+    if std_test_example() == 50 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.time-v1.al": {
 			style:   "project",
 			srcName: "std_time_example.al",

@@ -76,7 +76,9 @@ implemented with production-driver evidence. `std.io` v1 is complete for
 blocking and host streams; its `AsyncIo`/`Evented` half is Milestone 9.
 `std.fs` and `std.process` v1 are implemented on the blocking capability,
 including host files, directory iteration, temporary owners, child spawning,
-pipes, capture, and process termination. `core.range` is deferred by
+pipes, capture, and process termination. `std.test`'s runner-independent
+library slice is implemented; its runner, fuzz, and `SimIo` pieces remain
+tooling-milestone work. `core.range` is deferred by
 scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
@@ -278,7 +280,8 @@ them; the documented TOCTOU limit remains `no openat/unlinkat in v1`.
 The hosted `std` module graph is acyclic and fixed by the snapshots:
 `std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports
 `std.path` and `std.env`; `std.fs` and `std.process` additionally build on
-`std.io`, and `std.time` and `std.random` on `std.io`.
+`std.io`, `std.time` and `std.random` on `std.io`, and `std.test` on `std.fs`,
+`std.io`, and `std.random`.
 
 Every operation that waits on the host takes an I/O capability and is written
 once against `I: Io`, so the same API serves blocking tools and evented
@@ -461,9 +464,18 @@ data directory and reported with the command that replays it.
 that advances only when every task is blocked on time, and a test failure that
 lists each blocked task when the program deadlocks.
 
-The test runner isolates tests by process by default, captures output, reports
-stable machine-readable results, and never depends on directory enumeration
-order. Network tests require an explicit opt-in capability.
+Implemented std.test progress: `sysroot/std/test.al` installs the
+runner-independent slice. `fail`, `assert`, `assert_eq`, and `assert_ne` are
+thin `Unit` wrappers over `core.panic`; `expect_ok`/`expect_err` return the
+named payload and terminate with a fixed diagnostic on the wrong arm (with the
+error displayed for `expect_ok`); `temp_file`/`temp_dir` turn `std.fs` setup
+failures into termination and return the affine owners; and `Case`/`cases`
+draw deterministic seeds from `std.random.Rng.seeded`. Evidence:
+`compiler/production_std_test_test.go` checks the passing helpers, independently
+computed SplitMix64 seeds, every documented failure format at status 101, and
+the non-`Display` rejection; the snapshot example runs with a fixed checksum.
+The remaining runner surface in this section is the M8 tooling target, not
+part of the installed module yet.
 
 ## Error taxonomy
 
