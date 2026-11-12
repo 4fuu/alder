@@ -28,10 +28,6 @@ type Outer {
     counts: Map(U64, U64)
 }
 impl Outer {
-    fn push_inner(mut self, x: U64) -> Unit {
-        self.inner.items.push(x)
-        return
-    }
     fn count(self) -> U64 {
         return self.inner.items.len()
     }
@@ -43,28 +39,26 @@ fn main() -> I32 {
     if o.inner.items.len() != 2 { return 1 }
     o.inner.items[1] = 7
     if o.inner.items[1] != 7 { return 2 }
-    o.push_inner(11)
-    if o.count() != 3 { return 3 }
-    if o.inner.items[2] != 11 { return 4 }
+    if o.count() != 2 { return 3 }
     var inner = Vec.new(U64)
     inner.push(1)
     o.rows.push(inner)
     o.rows[0].push(2)
-    if o.rows[0].len() != 2 { return 5 }
-    if o.rows[0][1] != 2 { return 6 }
+    if o.rows[0].len() != 2 { return 4 }
+    if o.rows[0][1] != 2 { return 5 }
     o.names.insert(4)
-    if !o.names.contains(4) { return 7 }
+    if !o.names.contains(4) { return 6 }
     o.names.remove(4)
-    if o.names.contains(4) { return 8 }
+    if o.names.contains(4) { return 7 }
     o.counts.insert(1, 100)
-    if o.counts.len() != 1 { return 9 }
+    if o.counts.len() != 1 { return 8 }
     o.counts.remove(1)
-    if o.counts.len() != 0 { return 10 }
+    if o.counts.len() != 0 { return 9 }
     var total: U64 = 0
     for x in o.inner.items {
         total = total + x
     }
-    if total != 21 { return 11 }
+    if total != 10 { return 10 }
     return 0
 }
 `
@@ -120,6 +114,11 @@ fn main() -> I32 {
 var m75FieldReceiverRejections = []struct {
 	name, source, want string
 }{
+	{
+		"mut-self-field-push",
+		"type Inner {\n    items: Vec(U64)\n}\ntype Outer {\n    inner: Inner\n}\nimpl Outer {\n    fn push_inner(mut self, x: U64) -> Unit {\n        self.inner.items.push(x)\n        return\n    }\n}\nfn main() -> I32 { return 0 }\n",
+		"functional builder convention",
+	},
 	{
 		"immutable-root-push",
 		"type Bag {\n    items: Vec(U64)\n}\nfn main() -> I32 {\n    let b = Bag(items: Vec.new(U64))\n    b.items.push(1)\n    return 0\n}\n",

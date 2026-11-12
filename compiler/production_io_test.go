@@ -128,10 +128,12 @@ func TestIoCoreProductionQualification(t *testing.T) {
 		t.Fatalf("plan does not list std.io and its dependency: %q", plan.stdout)
 	}
 
-	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, ioCoreMain(), "run")
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, ioCoreMain(), "run")
 	if run != (productionResult{}) {
 		t.Fatalf("std.io core behavior run failed: %+v", run)
 	}
+	runSanitizedProject(t, cc, repoRoot, dir, "hello")
 }
 
 // A read helper takes its reader by mutable place: a let-bound cursor would
@@ -353,8 +355,69 @@ func TestIoBufferedProductionQualification(t *testing.T) {
 	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
 	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
 
-	run := runProductionCompilerEnv(t, exe, t.TempDir(), env, ioBufferedMain(), "run")
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, ioBufferedMain(), "run")
 	if run != (productionResult{}) {
 		t.Fatalf("std.io buffered behavior run failed: %+v", run)
 	}
+	runSanitizedProject(t, cc, repoRoot, dir, "hello")
+}
+
+// A bounded ByteSink reports a short count at capacity, so write_all turns an
+// incomplete transfer into InvalidInput without installing callee storage in
+// the caller's field. The bound is temporary until borrowed-field provenance
+// lands.
+func TestIoByteSinkCapacityProduction(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
+
+	files := map[string]string{
+		"alder.toml": "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n",
+		"src/main.al": `module hello.main
+
+import std.io
+
+fn main() -> I32 {
+    var sink = io.ByteSink.with_capacity(2)
+    let data: Array(U8, 3) = [1, 2, 3]
+    match sink.write(data.slice(0, 3)) {
+        Ok(n) => { if n != 2 { return 1 } }
+        Err(_) => { return 2 }
+    }
+    if sink.len() != 2 { return 3 }
+    let more: Array(U8, 1) = [4]
+    match sink.write(more.slice(0, 1)) {
+        Ok(n) => { if n != 0 { return 4 } }
+        Err(_) => { return 5 }
+    }
+    match io.write_all(sink, data.slice(0, 3)) {
+        Ok(_) => { return 6 }
+        Err(error) => { if error.display() != "invalid input" { return 7 } }
+    }
+    if sink.len() != 2 { return 8 }
+    let bytes = sink.into_bytes()
+    if bytes.len() != 2 { return 9 }
+    if bytes.byte(0) != 1 { return 10 }
+    if bytes.byte(1) != 2 { return 11 }
+    return 0
+}
+`,
+	}
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, files, "run")
+	if run != (productionResult{}) {
+		t.Fatalf("bounded ByteSink behavior run failed: %+v", run)
+	}
+	runSanitizedProject(t, cc, repoRoot, dir, "hello")
 }

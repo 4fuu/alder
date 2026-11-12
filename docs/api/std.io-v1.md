@@ -350,13 +350,15 @@ impl ByteCursor {
 impl Reader for ByteCursor {
 }
 
-/// Grows an owned byte vector from writes. Pure and host-free.
+/// An in-memory byte sink with a fixed capacity. Pure and host-free.
+/// `new` reserves 4096 bytes; `with_capacity` chooses another size.
 pub type ByteSink {
-    // private: data
+    // private: data, length
 }
 
 impl ByteSink {
     fn new() -> ByteSink
+    fn with_capacity(capacity: U64) -> ByteSink
     fn len(self) -> U64
     fn into_bytes(self) -> Bytes
 }
@@ -469,6 +471,11 @@ implementations resolve without an explicit import.
   through exclusively borrowed method calls and the compiler updates a
   uniquely owned buffer in place. `BufWriter.cleanup` flushes best-effort and
   cannot report an error; `into_sink` is the observing release.
+- `ByteSink` is bounded until borrowed-field provenance lands: `new` reserves
+  4096 bytes and `with_capacity` selects another fixed size. `write` copies
+  into that storage and returns a short count, including zero, when full;
+  `write_all` therefore reports `InvalidInput` for an incomplete transfer.
+  Provenance makes growth safe and removes this temporary bound.
 - `ByteSink.into_bytes` takes `self` by value, not `take self`: `take` is
   reserved for affine owners, and a `ByteSink` is an ordinary copyable value
   that the caller may keep using.

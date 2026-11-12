@@ -197,33 +197,47 @@ impl Reader for ByteCursor {
     }
 }
 
-/// Grows an owned byte vector from writes. Pure and host-free.
+/// An in-memory byte sink with a fixed capacity. `new` reserves 4096 bytes;
+/// `with_capacity` chooses another size. The capacity is temporary: until
+/// borrowed-field provenance lands, `write` copies into preallocated storage
+/// and reports a short count (including zero) when the sink is full. The
+/// Writer contract allows short writes, so `write_all` reports the incomplete
+/// transfer instead of growing storage in the callee's domain.
 pub type ByteSink {
     data: Vec(U8)
+    length: U64
 }
 
 impl ByteSink {
     fn new() -> ByteSink {
-        return ByteSink(data: Vec.new(U8))
+        return ByteSink.with_capacity(4096)
+    }
+
+    fn with_capacity(capacity: U64) -> ByteSink {
+        return ByteSink(data: zero_bytes(capacity), length: 0)
     }
 
     fn len(self) -> U64 {
-        return self.data.len()
+        return self.length
     }
 
     fn into_bytes(self) -> Bytes {
-        return self.data.slice(0, self.data.len()).to_bytes()
+        return self.data.slice(0, self.length).to_bytes()
     }
 }
 
 impl Writer for ByteSink {
     fn write(mut self, data: [U8]) -> Result(U64, IoError) {
+        let room = self.data.len() - self.length
+        var count = data.len()
+        if count > room { count = room }
         var at: U64 = 0
-        while at < data.len() {
-            self.data.push(data[at])
+        while at < count {
+            self.data[self.length + at] = data[at]
             at = at + 1
         }
-        return Ok(data.len())
+        self.length = self.length + count
+        return Ok(count)
     }
 
     fn flush(mut self) -> Result(Unit, IoError) {
@@ -300,11 +314,16 @@ impl(Source: type(Reader)) BufReader(Source) {
 
     fn refill(mut self) -> Result(U64, IoError) {
         let size = self.buffer.len()
-        // A mutable view must be formed from a binding, so the window is
-        // copied to a local, read into, and stored back.
+        // A mutable view must be formed from a binding, so the source reads
+        // into a local copy. Copy the bytes back element by element; replacing
+        // the field header would install the callee's storage in the caller.
         var scratch = self.buffer
         let count = try self.source.read(scratch.slice_mut(0, size))
-        self.buffer = scratch
+        var at: U64 = 0
+        while at < count {
+            self.buffer[at] = scratch[at]
+            at = at + 1
+        }
         self.position = 0
         self.length = count
         return Ok(count)
@@ -402,18 +421,14 @@ impl(Sink: type(Writer, Cleanup)) Writer for BufWriter(Sink) {
         }
         let base = self.length
         let total = base + size
-        // A mutable view must be formed from a binding, so the window is
-        // copied to a local, written, and stored back.
-        var window = self.buffer
-        if true {
-            var view: MutSlice(U8) = window.slice_mut(0, total)
-            var at: U64 = 0
-            while at < size {
-                view[base + at] = data[at]
-                at = at + 1
-            }
+        // The buffer is preallocated at `room` bytes. Copy into its existing
+        // storage; replacing the field header would install the callee's
+        // storage in the caller.
+        var at: U64 = 0
+        while at < size {
+            self.buffer[base + at] = data[at]
+            at = at + 1
         }
-        self.buffer = window
         self.length = total
         return Ok(size)
     }

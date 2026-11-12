@@ -242,6 +242,33 @@ absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.
 
+### Borrowed-field storage replacement (interim M8 restriction)
+
+A `mut self` receiver and a `mut` parameter are borrowed places: the caller
+owns the value, and the callee writes through a reference to it. The current
+storage plan does not carry that owner domain with the reference. A callee that
+grows a `Vec`, assigns a `String`/`Bytes`/collection header, or rebuilds a
+`Map`/`Set` through a field of such a receiver therefore allocates in the
+callee's function domain while the caller keeps a header into it; the callee
+returns, its domain is destroyed, and the caller reads freed storage.
+
+Until per-mut-parameter owner-domain provenance lands, diagnostic 333 rejects
+mutating collection operations and relocatable-storage assignments through a
+field rooted in a `mut self` receiver or a `mut` parameter. The rule accepts the
+shapes whose storage is static or empty today: string literals, `Vec.new`,
+`Map.new`, `Set.new`, `None`, and record/array/variant constructions whose
+relocatable children are themselves one of those. A local, a parameter, a field
+read, a call result, or a mutable receiver is rejected because each retains the
+current call's storage. The supported workaround is the functional-builder
+convention: build a new value from a local copy and return it, then rebind the
+caller, for example `value = value.with_item(x)`.
+
+The real fix threads an owning domain token with every `mut` argument and
+receiver through delegation, uses that domain at growth and replacement sites,
+and adds verifier invariants that prove the stored header outlives the call.
+The design is tracked in [Roadmap](../ROADMAP.md) deferred work; the diagnostic
+is removed when the provenance contract and its tests land.
+
 ## Generational identity with `Table(T)`
 
 Long-lived identity belongs to a table rather than an interior address:

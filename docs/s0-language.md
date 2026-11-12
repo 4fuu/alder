@@ -389,8 +389,12 @@ innermost enclosing loop; `continue` in a `for` still runs the index step, and
 both are rejected outside a loop, in a closure body, and in a table-view match
 arm. A `using` registration inside a loop body is rejected, so neither jump can
 cross a cleanup scope. Assignment targets are restricted to the implemented
-identifier/field/index shapes. Every non-`Unit` function path returns
-explicitly.
+identifier/field/index shapes. Growing or replacing relocatable storage
+through a field of a `mut self` receiver or a `mut` parameter is rejected with
+diagnostic 333 until per-mut-parameter owner-domain provenance lands; literals,
+empty collections, `None`, and aggregates of those remain accepted, and the
+functional-builder rebinding pattern is the supported workaround. Every
+non-`Unit` function path returns explicitly.
 
 Implemented expressions include:
 

@@ -7940,6 +7940,10 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             receiver_place = placed_value.place
         }
     }
+    // A push through a `mut self` field or a `mut` parameter field grows the
+    // vector in this call's domain and leaves the caller's header dangling.
+    // The functional-builder convention keeps the vector in the caller.
+    if builtin == 21 && borrowed_place_root(gate_store, receiver_place) { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 21 { mode = 2 }
     if builtin == 23 { mode = 3 }
@@ -8820,6 +8824,9 @@ fn check_ordered_method(d: Domain, state: State, parse: ParseStore, base: CheckS
         gate_store = placed_value.store
         receiver_place = placed_value.place
     }
+    // Insert and remove rebuild the collection header through the receiver
+    // place, so the same borrowed-field rule as Vec.push applies.
+    if (builtin == 31 || builtin == 33 || builtin == 38 || builtin == 40) && borrowed_place_root(gate_store, receiver_place) { return expr_token_fail(d, state, base, 333, callee) }
     var mode: U64 = 1
     if builtin == 31 || builtin == 38 || builtin == 33 || builtin == 40 { mode = 2 }
     var access_root: U64 = 0
@@ -10753,6 +10760,84 @@ fn concrete_field_type(d: Domain, store: CheckStore, aggregate: U64, field: U64)
     return substitute_type(d, store, bindings, __s0_buffer_get(DeclTypeUseRec, store.uses, field - 1).checked_type)
 }
 
+// A place rooted in a `mut` parameter or a `mut self` receiver borrows the
+// caller's storage. Growing or replacing relocatable storage through that
+// place allocates in this call's storage domain, and the caller keeps a header
+// into storage that dies at return. The provenance design in M8 will let the
+// target domain travel with the borrow; until then these shapes are rejected.
+fn borrowed_place_root(store: CheckStore, place: U64) -> Bool {
+    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
+    let rec = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
+    if rec.root == 0 || rec.root > __s0_buffer_len(LocalRec, store.locals) { return false }
+    let local = __s0_buffer_get(LocalRec, store.locals, rec.root - 1)
+    return local.kind == 1 && local.mutable == 1
+}
+
+// Relocatable storage is the value type whose header points at storage that
+// another domain owns: String, Bytes, Vec, Map, Set, the bootstrap buffer and
+// string bridges, and aggregates, arrays, Option, or Result containing one.
+// Handles (Table, TableId, Ptr, views, slices, domains, C pointers) are not
+// relocatable storage: replacing their header copies only identity or bounds.
+fn checked_type_owns_storage(d: Domain, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
+    if depth > 16 { return Ok(true) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 2 || checked.kind == 11 || checked.kind == 13 || checked.kind == 14 || checked.kind == 16 || checked.kind == 17 || checked.kind == 23 || checked.kind == 24 { return Ok(true) }
+    if checked.kind == 6 { return Ok(true) }
+    if checked.kind == 9 || checked.kind == 10 || checked.kind == 15 {
+        var at: U64 = 0
+        while at < checked.arg_count {
+            let child = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at)
+            if try checked_type_owns_storage(d, store, child, depth + 1) { return Ok(true) }
+            at = at + 1
+        }
+        return Ok(false)
+    }
+    if checked.kind != 7 { return Ok(false) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == checked.target && (use.role == 1 || use.role == 2) && use.checked_type != 0 {
+            let concrete = try concrete_field_type(d, store, checked_type, at + 1)
+            if try checked_type_owns_storage(d, store, concrete.checked_type, depth + 1) { return Ok(true) }
+        }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+// A value stored through a borrowed place may keep storage only when its
+// pointer is static or empty: a literal, an empty Vec/Map/Set, None, or an
+// aggregate whose relocatable children have the same property. A local, a
+// parameter (by-value parameters are materialized in this call's domain), a
+// field read, a call result, and a mutable receiver all retain this call's
+// storage.
+fn borrowed_store_value_safe(d: Domain, store: CheckStore, expression: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if expression == 0 || expression > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
+    if depth > 16 { return Ok(false) }
+    let rec = __s0_buffer_get(CheckedExprRec, store.expressions, expression - 1)
+    if rec.kind == 4 || rec.kind == 14 { return Ok(true) }
+    if rec.kind == 18 {
+        if rec.annotation == 0 || rec.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(false) }
+        let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, rec.annotation - 1)
+        return Ok(annotation.builtin == 18 || annotation.builtin == 30 || annotation.builtin == 37)
+    }
+    if rec.kind == 9 || rec.kind == 23 || rec.kind == 10 || rec.kind == 15 || rec.kind == 16 || rec.kind == 17 {
+        var at: U64 = 0
+        while at < rec.child_count {
+            let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, rec.first_child - 1 + at).expression
+            if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
+            let child = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+            if try checked_type_owns_storage(d, store, child.checked_type, depth + 1) {
+                if !(try borrowed_store_value_safe(d, store, child_id, depth + 1)) { return Ok(false) }
+            }
+            at = at + 1
+        }
+        return Ok(true)
+    }
+    return Ok(false)
+}
+
 fn place_bad(d: Domain, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(PlaceOutcome, __s0_Error) {
     let failed = try check_fail(d, store, kind, node, 0, 0, 0)
     let bad = match failed {
@@ -11118,6 +11203,12 @@ fn check_assignment(d: Domain, state: State, parse: ParseStore, store: CheckStor
         ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
     }
     if draft.deferred { return body_token_fail(d, state, ostore, 87, rhs) }
+    // Replacing relocatable storage through a borrowed field must not install
+    // a header into this call's domain. Literals, empty collections, None, and
+    // aggregates of those stay allowed.
+    if place.place != 0 && borrowed_place_root(ostore, place.place) && (try checked_type_owns_storage(d, ostore, place.checked_type, 0)) {
+        if !(try borrowed_store_value_safe(d, ostore, draft.expression, 0)) { return body_token_fail(d, state, ostore, 333, rhs) }
+    }
     if __s0_buffer_get(CheckedTypeRec, ostore.types, place.checked_type - 1).kind == 18 { return body_token_fail(d, state, ostore, 104, statement) }
     // A view of frame-local storage assigned inside a loop body would put a
     // header into a slot that survives the backedge, where the next iteration

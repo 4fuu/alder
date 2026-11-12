@@ -200,11 +200,15 @@ over generic readers and writers. `BufReader` serves reads from its window and
 refills from the source; `BufWriter` buffers small writes, flushes on
 overflow or demand, and its cleanup flushes the value the registered
 binding holds at scope exit, including writes performed after `using`.
-Evidence: `compiler/production_io_test.go` runs the installed module through
-the production driver and checks cursor advancement, end-of-stream, the
-`copy_to` default body, the error category report, line reads across a small
-buffer, read refills, buffered write ordering through a validating sink, and
-the mutable-place rejection.
+`ByteSink` is temporarily capacity-bounded: `new` reserves 4096 bytes,
+`with_capacity` selects another size, and `write` returns a short count when
+full until borrowed-field provenance lands. Evidence:
+`compiler/production_io_test.go` runs the installed module through the
+production driver and checks cursor advancement, end-of-stream, the `copy_to`
+default body, the error category report, line reads across a small buffer,
+read refills, buffered write ordering through a validating sink, the full
+`ByteSink` boundary, and the mutable-place rejection; the core, buffered, and
+capacity programs also run under ASan/UBSan.
 
 `into_source` and `into_sink` return the wrapped owner through the
 consumed-field-move rule: a `take self` method may move one direct field out,
