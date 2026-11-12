@@ -14,6 +14,9 @@
 #ifndef FORMAT_SHIM_H
 #define FORMAT_SHIM_H
 
+/* A build or an earlier libc header may already have selected a feature
+ * surface. Every feature-selection macro below is guarded so a redundant
+ * definition never becomes a -Werror build failure on a newer glibc. */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -35,6 +38,19 @@
 
 #if defined(_WIN32)
 #include <locale.h>
+#endif
+
+#if defined(_WIN32) && !defined(__MINGW32__)
+/* UCRT provides a correctly rounded float parser under an explicit locale;
+ * parsing through double and narrowing would round twice in a halfway case
+ * and could make Windows choose a different shortest spelling. */
+#define FORMAT_PARSE_F32(candidate, locale) _strtof_l((candidate), NULL, (locale))
+#else
+/* MinGW-w64's MSVCRT headers do not declare _strtof_l, so this target parses
+ * the candidate as double and narrows. That fallback can round twice where
+ * the exact decimal sits at a float halfway point; the frozen spelling is
+ * therefore only guaranteed on targets with a correctly rounded strtof. */
+#define FORMAT_PARSE_F32(candidate, locale) ((float)_strtod_l((candidate), NULL, (locale)))
 #endif
 
 static inline int format_copy_text(const char *text, unsigned char *out, size_t capacity) {
@@ -103,7 +119,7 @@ static inline int format_f32_bits(uint32_t bits, int precision, int style,
             char candidate[256];
             int count = _snprintf_l(candidate, sizeof candidate, "%.*g", locale, p, (double)value);
             if (count > 0 && (size_t)count < sizeof candidate) {
-                float parsed = (float)_strtod_l(candidate, NULL, locale);
+                float parsed = FORMAT_PARSE_F32(candidate, locale);
                 uint32_t parsed_bits;
                 memcpy(&parsed_bits, &parsed, sizeof parsed_bits);
                 if (parsed_bits == bits) {

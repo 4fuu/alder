@@ -70,6 +70,13 @@ The shim temporarily installs a C numeric locale on the calling thread (POSIX
 locale cannot change the text. It never calls `setlocale` and never retains
 locale state after return.
 
+On Windows the parse-back uses `_strtof_l`, which is correctly rounded. The
+MinGW-w64 MSVCRT headers do not declare `_strtof_l`, so that target falls back
+to `_strtod_l` plus a narrowing cast; the fallback can round twice when the
+candidate sits exactly at a float halfway point, so only that target can choose
+a different shortest spelling in such a case. POSIX, UCRT, and MSVC builds use
+a correctly rounded float parser and share the frozen spelling.
+
 `alternate` is unsupported for floats. `zero_pad` inserts zeros after the sign
 when alignment is right; otherwise `core.format.pad` applies the fill and
 width. `Sign.Plus` and `Sign.Space` prefix nonnegative values, including NaN.
