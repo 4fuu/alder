@@ -298,7 +298,7 @@ domain that owns it.
 
 - ordinary calls lower to direct calls of the generated static functions, with unit arguments omitted;
 - `ffi.call.unsafe` lowers to the import symbol unchanged and parenthesizes it at declaration and call sites so a function-like macro cannot expand; the generated file declares every import prototype so calls are never implicit;
-- import names double as C symbols and must be backend-safe C identifiers. The verifier rejects C keywords, leading underscores, generated/runtime prefixes, names ending `_t`, macro-style uppercase names, `main`, and identifiers declared by always-included headers; retention and cleanup claims remain deferred.
+- import names double as C symbols and must be backend-safe C identifiers. The verifier rejects C keywords, leading underscores, generated/runtime prefixes, names ending `_t`, macro-style uppercase names, `main`, and identifiers declared by always-included headers. These are name rules only: retention and cleanup semantics come from an explicit wrapper's audited contract, not from the import name.
 
 ### Constants and strings
 

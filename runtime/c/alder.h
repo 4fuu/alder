@@ -11,8 +11,10 @@
  *    parameters untouched on failure, unless stated otherwise;
  *  - structures are caller-owned: the runtime allocates and frees only its
  *    own internal storage, never the caller's structs;
- *  - the runtime assumes a single-threaded process for now (structured
- *    concurrency is outside the current scope).
+ *  - independent root domains may be entered from foreign threads; the
+ *    runtime's live-allocation counter and identity serials are C11 atomics.
+ *    Structured concurrency and shared mutable state remain outside this
+ *    contract.
  */
 #ifndef ALDER_RUNTIME_H
 #define ALDER_RUNTIME_H

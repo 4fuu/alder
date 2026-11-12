@@ -241,6 +241,35 @@ func TestM8CStringProductionQualification(t *testing.T) {
 	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, emitted.stdout, cStringDriver, 0,
 		"-I", dir, filepath.Join(dir, "cstring.c"))
 
+	// The moved-owner regression is a use-after-free, so run the same driver
+	// under ASan/UBSan when the host supports it. The live-allocation counter
+	// proves exactly-once accounting; the sanitizers also catch a double free
+	// or a read through a released owner.
+	if closureSanitizersSupported(t, cc) {
+		sanitizedDir := t.TempDir()
+		sanitizedC := filepath.Join(sanitizedDir, "c-string.c")
+		sanitizedDriver := filepath.Join(sanitizedDir, "driver.c")
+		sanitizedExe := filepath.Join(sanitizedDir, "c-string")
+		if err := os.WriteFile(sanitizedC, []byte(emitted.stdout), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(sanitizedDriver, []byte(cStringDriver), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		sanitize := []string{"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer"}
+		args := append(append([]string{}, strictC11Flags()...), sanitize...)
+		args = append(args, "-I", dir, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"),
+			sanitizedC, sanitizedDriver, filepath.Join(dir, "cstring.c"), filepath.Join(root, "runtime", "c", "alder.c"), "-lm", "-o", sanitizedExe)
+		if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("sanitized c-string compile: %v\n%s", err, out)
+		}
+		run := exec.Command(sanitizedExe)
+		run.Env = append(os.Environ(), "ASAN_OPTIONS=detect_leaks=1")
+		if out, err := run.CombinedOutput(); err != nil {
+			t.Fatalf("sanitized c-string run: %v\n%s", err, out)
+		}
+	}
+
 	for _, rejection := range cStringRejections {
 		rejection := rejection
 		t.Run("reject-"+rejection.name, func(t *testing.T) {

@@ -602,18 +602,24 @@ func TestAlderBindProbeCrossTarget(t *testing.T) {
 	_, exe, _ := getSharedProductionBuild(t, hostCC, root)
 	dir := t.TempDir()
 	files := map[string]string{
-		"abi_probe.h": "#ifndef ABI_PROBE_H\n#define ABI_PROBE_H\ntypedef long abi_word;\ntypedef struct abi_pair { abi_word left; abi_word right; } abi_pair;\n#endif\n",
-		"bind.al":     "import c \"abi_probe.h\" as abi {\n    scalar type Word = \"abi_word\"\n    record type Pair = \"abi_pair\" {\n        left: Word = \"left\"\n        right: Word = \"right\"\n    }\n}\n",
+		"abi_probe.h": "#ifndef ABI_PROBE_H\n#define ABI_PROBE_H\ntypedef long abi_word;\ntypedef struct abi_pair { abi_word left; abi_word right; } abi_pair;\nint abi_sum(abi_pair pair);\n#endif\n",
+		"bind.al":     "import c \"abi_probe.h\" as abi {\n    scalar type Word = \"abi_word\"\n    record type Pair = \"abi_pair\" {\n        left: Word = \"left\"\n        right: Word = \"right\"\n    }\n    raw fn sum = \"abi_sum\"(pair: Pair) -> c.Int\n}\n",
 	}
 	emitted := runProductionCompilerAtRoot(t, exe, dir, files, "compile", "--emit=bind", "bind.al")
 	if emitted.status != 0 || emitted.stderr != "" {
 		t.Fatalf("bind probe: %+v stderr=%s", emitted, emitted.stderr)
 	}
+	for _, want := range []string{"CHAR_BIT == 8", "offsetof(", "_Alignof(", "_Generic(&abi_sum"} {
+		if !strings.Contains(emitted.stdout, want) {
+			t.Fatalf("bind probe misses %q", want)
+		}
+	}
 	cfile := filepath.Join(dir, "bind.c")
 	if err := os.WriteFile(cfile, []byte(emitted.stdout), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	output, err := exec.Command(targetCC, "-std=c11", "-fsyntax-only", "-I", dir, cfile).CombinedOutput()
+	args := append(strictC11Flags(), "-fsyntax-only", "-I", dir, cfile)
+	output, err := exec.Command(targetCC, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s bind probe: %v\n%s", targetCC, err, output)
 	}
