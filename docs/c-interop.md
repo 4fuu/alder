@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, header-only explicit shims, `export c fn` C exports with generated headers, and nonretained plus retained callback owners are checked end to end, while general ownership/retention wrappers and out-of-line C shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, header-only explicit shims, `export c fn` C exports with generated headers, standalone `--emit=bind` target-ABI probes, and nonretained plus retained callback owners are checked end to end, while general ownership/retention wrappers and out-of-line C shims are not implemented yet**
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
 and declarations needed for checking and deterministic code generation. Safe
@@ -85,6 +85,29 @@ Binding blocks do not themselves claim a function is safe, nonblocking,
 thread-safe, nonnull, borrowing, retaining, or ownership-transferring. Those
 are semantic properties of the ordinary Alder wrapper and any explicit
 foreign-owner/callback helper it uses.
+
+## Target ABI probes
+
+`compile --emit=bind` emits a standalone C translation unit containing each
+binding block's headers and checks, without a runtime, generated program, or
+entry point. A source set containing bindings but no `main` or `export c fn`
+therefore has a target-ABI check even though it is not a program or library
+artifact. The output is deterministic and is compiled by the selected target
+C compiler; the compiler still generates code for the host target only.
+
+The probe checks the C scalar spelling with `_Generic`, the target's
+`CHAR_BIT == 8`, a 32- or 64-bit pointer width, and the width and alignment of
+`size_t` and `ptrdiff_t` against `void *`, in addition to every record,
+function, field, and constant check used by a program translation unit. Alder
+does not reproduce a target ABI in its own layout engine: the target C compiler
+remains the authority.
+
+Target-specific binding members use the manifest's target source selection,
+not source-level target clauses or a preprocessor. Each target imports the
+platform module that owns its binding block while sharing the same public
+Alder wrapper API. Headers that cannot present a portable field layout on
+every target use an explicit shim instead. Non-default calling conventions,
+packed records, bitfields, flexible arrays, and unions remain shim-only.
 
 ## C types
 
@@ -470,9 +493,14 @@ pointer and must not retain any other scoped Alder value.
 Owner cleanup calls `clear`, then `wait`, then frees the context allocation.
 Exactly-once release uses the existing `using`-owner disarm path. A nonzero
 `clear` result terminates with the runtime invariant status 101: continuing
-would leave C holding a pointer to freed context. Callbacks arriving from
-foreign threads are out of scope until the ABI/thread slice, so v1 owners
-must be used where the C API invokes callbacks on the registering thread.
+would leave C holding a pointer to freed context. `wait` is required and must
+be a real synchronization barrier: it cannot return until no C thread can
+still invoke the callback or access the context. A retained owner may then
+receive callbacks from foreign threads, because the callback trampoline and a
+pure-Alder export each create their own root domain rather than entering the
+single-threaded program entry. Host-shim services that own their own threads
+remain outside this contract until the hosted runtime entry is bridged; the
+wrapper author must audit and document which side of the boundary owns them.
 
 Intentional C exports use explicit syntax:
 
@@ -525,6 +553,15 @@ wrapper decides whether it:
 - is restricted to the local executor/thread;
 - may be transferred between tasks;
 - invokes callbacks from foreign threads.
+
+A pure-Alder `export c fn` may be called directly by a foreign thread: each
+call owns a root domain and does not enter the hosted program entry. A
+retained callback may also arrive on a foreign thread when its owner's `wait`
+is a real barrier. The runtime's live-allocation counter and domain, segment,
+and table serials use C11 `<stdatomic.h>`; a target that defines
+`__STDC_NO_ATOMICS__` is rejected at compile time rather than silently
+remaining racy. Host-shim services with their own threads are excluded until
+the hosted entry bridge exists.
 
 Arbitrary executing C cannot be safely interrupted. Cancellation keeps wrapper
 state alive until C returns or the documented C cancellation/join protocol

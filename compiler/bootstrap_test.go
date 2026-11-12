@@ -206,6 +206,49 @@ func TestAlder1SelfHostingCapableCorpus(t *testing.T) {
 	// Malformed-MIR rejection stays covered by mir.TestInvalidParseFixtures
 	// and the reject fixtures above; accept/output equivalence for every
 	// fixture module stays covered by the verified-artifact subtests.
+	t.Run("bind-probe", func(t *testing.T) {
+		t.Parallel()
+		const header = `#ifndef ABI_PROBE_H
+#define ABI_PROBE_H
+typedef long abi_word;
+typedef struct abi_pair { abi_word left; abi_word right; } abi_pair;
+int abi_sum(abi_pair pair);
+#endif
+`
+		const binding = `import c "abi_probe.h" as abi {
+    scalar type Word = "abi_word"
+    record type Pair = "abi_pair" {
+        left: Word = "left"
+        right: Word = "right"
+    }
+    raw fn sum = "abi_sum"(pair: Pair) -> c.Int
+}
+`
+		dir := t.TempDir()
+		files := map[string]string{"abi_probe.h": header, "bind.al": binding}
+		got := runAlder1AtRoot(t, exe, dir, noGo, files, "compile", "--emit=bind", "bind.al")
+		if got.status != 0 || got.stderr != "" || !strings.Contains(got.stdout, "Standalone C binding and target-ABI probes") || !strings.Contains(got.stdout, "CHAR_BIT == 8") || !strings.Contains(got.stdout, "scalar binding spelling must resolve to a C scalar type") {
+			t.Fatalf("bind probe failed: %+v", got)
+		}
+		cfile := filepath.Join(dir, "bind.c")
+		if err := os.WriteFile(cfile, []byte(got.stdout), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		args := append(strictC11Flags(), "-fsyntax-only", "-I", dir, cfile)
+		if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("compile bind probe: %v\n%s", err, output)
+		}
+		// A field spelling with the same size but the wrong C type must fail
+		// the generated _Generic check, not pass through a size-only probe.
+		wrong := strings.Replace(header, "abi_word right", "long long right", 1)
+		if err := os.WriteFile(filepath.Join(dir, "abi_probe.h"), []byte(wrong), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		output, err := exec.Command(cc, args...).CombinedOutput()
+		if err == nil || !strings.Contains(string(output), "field type does not match") {
+			t.Fatalf("mismatched bind probe: err=%v output=%s", err, output)
+		}
+	})
 	t.Run("emit-mir-scale", func(t *testing.T) {
 		t.Parallel()
 		var b strings.Builder
@@ -540,6 +583,42 @@ func TestAlder1CompilesCompilerSource(t *testing.T) {
 	}
 }
 
+// TestAlderBindProbeCrossTarget runs the same generated bind probe through a
+// target C compiler. It is used by the separate Linux AArch64 and Windows
+// LLP64 CI lanes; the host compiler still generates the probe.
+func TestAlderBindProbeCrossTarget(t *testing.T) {
+	targetCC := os.Getenv("ALDER_BIND_CC")
+	if targetCC == "" {
+		t.Skip("set ALDER_BIND_CC to a target C compiler")
+	}
+	hostCC, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, hostCC, root)
+	dir := t.TempDir()
+	files := map[string]string{
+		"abi_probe.h": "#ifndef ABI_PROBE_H\n#define ABI_PROBE_H\ntypedef long abi_word;\ntypedef struct abi_pair { abi_word left; abi_word right; } abi_pair;\n#endif\n",
+		"bind.al":     "import c \"abi_probe.h\" as abi {\n    scalar type Word = \"abi_word\"\n    record type Pair = \"abi_pair\" {\n        left: Word = \"left\"\n        right: Word = \"right\"\n    }\n}\n",
+	}
+	emitted := runProductionCompilerAtRoot(t, exe, dir, files, "compile", "--emit=bind", "bind.al")
+	if emitted.status != 0 || emitted.stderr != "" {
+		t.Fatalf("bind probe: %+v stderr=%s", emitted, emitted.stderr)
+	}
+	cfile := filepath.Join(dir, "bind.c")
+	if err := os.WriteFile(cfile, []byte(emitted.stdout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := exec.Command(targetCC, "-std=c11", "-fsyntax-only", "-I", dir, cfile).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s bind probe: %v\n%s", targetCC, err, output)
+	}
+}
+
 func TestCommittedSourceBootstrap(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
@@ -582,7 +661,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "cbc475dc7239bf10091a5bd8fbb728b37247d3f5a6d5bd2ce560641739db14d9"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "302392a0ee4015041eef84ea90244b13714db3d20a6de4e46a4a3816ffda0906"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

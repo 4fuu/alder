@@ -126,12 +126,16 @@ how long the gate takes, never what it checks. Entries unused for 14 days are
 pruned.
 
 `.github/workflows/ci.yml` runs these checks on pushes to `main` and on pull
-requests as three independent jobs: the Go checks, the strict C syntax check,
-and `bootstrap/regenerate.sh`. The bootstrap job is gated on the paths
-`regenerate.sh` consumes (`bootstrap/`, `compiler/src/`, `runtime/c/`) because
-it takes about 3 minutes and up to 3.5 GiB, and it defaults to running whenever the
-path comparison cannot be made. Keep the workflow in step with the commands
-above.
+requests as five independent jobs: the Go checks, the strict C syntax check,
+two compile-only bind-probe lanes, and `bootstrap/regenerate.sh`. The lanes run
+`ALDER_BIND_CC=aarch64-linux-gnu-gcc go test ./compiler -run
+'^TestAlderBindProbeCrossTarget$' -count=1` and the same test with
+`ALDER_BIND_CC=x86_64-w64-mingw32-gcc`; both compile the host-generated
+`--emit=bind` unit with the target C compiler. The bootstrap job is gated on
+the paths `regenerate.sh` consumes (`bootstrap/`, `compiler/src/`, `runtime/c/`)
+because it takes about 3 minutes and up to 3.5 GiB, and it defaults to running
+whenever the path comparison cannot be made. Keep the workflow in step with the
+commands above.
 
 `./check` runs the same commands in one shot for the inner loop. It is a thin
 wrapper with no extra flags: `--bootstrap` adds `bootstrap/regenerate.sh` and

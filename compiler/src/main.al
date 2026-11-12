@@ -101,11 +101,30 @@ fn run_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, reports
     }
 }
 
+fn finish_bind(d: Domain, mir: MirStore) -> I32 {
+    if !driver_artifact_start("bind") { return driver_failure(3, "io", "cannot write compiler output") }
+    let generated = match cgen_generate_bind(d, mir) {
+        Err(error) => false
+        Ok(value) => value
+    }
+    if !generated {
+        if driver_output_failed() { return driver_failure(3, "io", "cannot write compiler output") }
+        return driver_internal_error()
+    }
+    if !driver_artifact_finish() { return driver_failure(3, "io", "cannot write compiler output") }
+    return 0
+}
+
+fn finish_lowered(d: Domain, state: State, store: CheckStore, good: LowerGoodRec) -> I32 {
+    if driver_command() == 5 { return finish_bind(d, good.mir) }
+    return run_verify(d, state, store, good.mir, good.reports)
+}
+
 fn finish_lower(d: Domain, state: State, store: CheckStore, result: LowerResult) -> I32 {
     return match result {
         LowerBad => driver_failure(4, "internal", "internal compiler failure: lowering refused")
         LowerModelBad => driver_failure(4, "internal", "internal compiler failure: lowering model refused")
-        LowerGood(good) => run_verify(d, state, store, good.mir, good.reports)
+        LowerGood(good) => finish_lowered(d, state, store, good)
     }
 }
 

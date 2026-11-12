@@ -92,6 +92,19 @@ fresh root domain, which the wrapper destroys exactly once after normal return.
 Null context or failed root initialization returns
 `ALDER_PROGRAM_FAILURE_STATUS` deterministically.
 
+## Binding and target-ABI probes
+
+`compile --emit=bind` emits only the binding translation unit: each binding
+header, `_Generic`/`_Static_assert` field and function checks, scalar spelling
+checks, and target data-model assertions (`CHAR_BIT == 8`, pointer width,
+`size_t`/`ptrdiff_t` width and alignment). It has no generated program entry,
+runtime link, or Alder function bodies, so it runs before the hosted-entry
+verification phase and is usable for a binding-only source set. The C compiler
+that consumes it is the target ABI authority; no Alder layout engine is added.
+The host x86-64 fixture compiles and runs the probe; Linux AArch64 and Windows
+LLP64 compile-only lanes run the same deterministic unit through their target
+C compilers. macOS targets are deferred to a macOS runner.
+
 ## Exported functions
 
 An `export c fn` declaration emits a non-static C definition whose symbol is
@@ -104,7 +117,9 @@ static function, destroys the domain, and returns the result; failed domain
 initialization terminates through `alder_runtime_panic`. A function without
 storage is called directly. Every call is self-contained: there is no global
 initializer, no retained host context, and a foreign thread may call an export
-without entering `alder_program_entry`.
+without entering `alder_program_entry`. The runtime serial counters and live
+allocation count are C11 atomics so independent root domains may enter
+concurrently; `__STDC_NO_ATOMICS__` is a build error.
 
 `compile --emit=header` prints the matching header from the verified MIR: the
 guard word is a digest of the full sorted export-symbol list, each binding
@@ -137,7 +152,12 @@ runtime. Registration allocates the owner and a context block separately,
 copies the context into that block, calls the named setter with the trampoline
 and the stable context address, and builds `Option(owner)`. The generated
 release helper calls the recorded clear function, panics with status 101 when it returns nonzero, calls the wait function, and frees the owner.
-Moving the owner value never moves the context block.
+Moving the owner value never moves the context block. A callback may run on a
+foreign thread after registration: the trampoline enters a per-invocation
+root domain, and the owner's `wait` must be a real barrier that returns only
+after every C thread has stopped using the callback and context. Host-shim
+services with their own threads remain excluded until the hosted entry bridge
+exists.
 
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C

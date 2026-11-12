@@ -1857,7 +1857,7 @@ owner is an affine `Option` value, and its `using` cleanup clears, waits, then
 frees with exactly-once transfer semantics; a nonzero clear terminates with
 status 101 because freed context must never remain registered. Moving the
 owner through a `take` parameter keeps the context address stable. Foreign-
-thread callbacks remain out of scope until the ABI/thread slice. Evidence:
+thread callback entry is added by the ABI/thread slice below. Evidence:
 `compiler/production_c_callback_test.go` compiles and runs synchronous
 nonretained and retained callbacks under the strict warning set, moves the
 retained owner through a generic `take` helper, runs the retained program
@@ -1883,6 +1883,39 @@ A cold `bootstrap/regenerate.sh` measured 112.3 s wall and 2.01 GB peak RSS
 (2,013,632 KiB), down from 2.20 GB and under the 2 GiB project target, against
 109.8 s for the parent tree on the same host; the remaining peak is
 verification itself.
+
+Landed C-interop progress: target ABI probes and foreign-thread entry.
+`compile --emit=bind` emits a deterministic standalone C unit with each
+binding header, `_Generic`/`_Static_assert` record, field, function, and scalar
+spelling checks, then target data-model assertions (`CHAR_BIT == 8`, pointer
+width, `size_t`/`ptrdiff_t` width and alignment). Binding-only sources need no
+`main` or export, and the C compiler remains the target ABI authority; there is
+no Alder layout engine. The host x86-64 fixture emits and compiles the probe,
+mutates a bound field type to pin a diagnostic, and runs a main-less bind source
+with `--emit=bind`; separate CI lanes cross-compile the same deterministic unit
+with `aarch64-linux-gnu-gcc` and `x86_64-w64-mingw32-gcc`. The macOS lane is
+deferred to a macOS runner. Target-specific binding modules use the manifest's
+existing target-root selection, documented in
+[docs/modules-and-builds.md](docs/modules-and-builds.md); no source clauses or
+package work are added.
+
+The runtime now supports foreign-thread entry for pure-Alder exports and
+retained callbacks whose `wait` is a real barrier. The live-allocation counter
+and domain, segment, and table serials use C11 `<stdatomic.h>`; a target that
+defines `__STDC_NO_ATOMICS__` fails the build with `#error`. Each export and
+callback trampoline creates an independent root domain instead of entering
+`alder_program_entry`. Host-shim services that own their own threads remain
+excluded until the hosted-entry bridge exists. Evidence:
+`compiler/production_c_thread_test.go` runs eight pthreads making 500 export
+calls each against an export that uses storage, and registers a retained
+callback whose worker thread invokes the trampoline while cleanup clears,
+waits, joins, and frees under the strict warning set.
+`compiler/bootstrap_test.go` covers the bind fixture and cross-target test;
+`.github/workflows/ci.yml` carries the two compile-only lanes. Documentation is
+in [docs/c-interop.md](docs/c-interop.md) "Target ABI probes" and "Callbacks
+and C calling Alder", [docs/c-backend.md](docs/c-backend.md) "Binding and
+target-ABI probes" and "Exported functions", and
+[docs/modules-and-builds.md](docs/modules-and-builds.md).
 
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
@@ -2025,6 +2058,13 @@ cross-thread wakeup, and is sequenced so the deterministic core lands first:
 
 The following items are not part of the current implementation scope:
 
+- a macOS bind-probe CI lane and macOS foreign-thread run fixtures: deferred
+  to a macOS runner; Linux x86-64, Linux AArch64, and Windows LLP64 compile
+  lanes cover the current target-ABI probes;
+- hosted runtime initialization for host-shim services that own their own
+  threads: pure-Alder exports and retained callbacks with a real `wait` barrier
+  are in scope, but services outside that contract wait for the hosted-entry
+  bridge;
 - LLVM, Cranelift, QBE, or direct machine-code backends;
 - JIT and REPL execution engines;
 - package registry, publishing, and a general semantic-version solver;

@@ -45,6 +45,40 @@ jobs:
       - name: gcc -fsyntax-only runtime/c/alder.c
         run: gcc -std=c11 -Wall -Wextra -Werror -pedantic -Wshadow -Wconversion -ffp-contract=off -fsyntax-only runtime/c/alder.c
 
+  bind-probe-aarch64:
+    name: bind probe (Linux AArch64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install AArch64 cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Cross-compile the bind probe
+        env:
+          ALDER_BIND_CC: aarch64-linux-gnu-gcc
+        run: go test ./compiler -run '^TestAlderBindProbeCrossTarget$' -count=1 -v
+
+  bind-probe-windows:
+    name: bind probe (Windows LLP64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install MinGW-w64 cross compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
+      - name: Cross-compile the bind probe
+        env:
+          ALDER_BIND_CC: x86_64-w64-mingw32-gcc
+        run: go test ./compiler -run '^TestAlderBindProbeCrossTarget$' -count=1 -v
+
   bootstrap:
     name: source bootstrap
     runs-on: ubuntu-latest

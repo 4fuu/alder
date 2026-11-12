@@ -128,7 +128,10 @@ Profiles are selected by the driver, not source conditionals:
   and link policy but cannot disable required safety checks by spelling.
 
 Target-specific source selection is explicit in manifest target tables. Source
-code has no general textual preprocessor.
+code has no general textual preprocessor. A target root may import a
+platform module that owns the target's C binding block while the other modules
+share one public wrapper API; this is the supported way to express
+target-specific binding members.
 
 ## Workspace and source discovery
 

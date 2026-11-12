@@ -20,6 +20,10 @@
 
 #include <math.h>
 
+#if defined(__STDC_NO_ATOMICS__)
+#error "Alder runtime requires C11 <stdatomic.h> for foreign-thread entry"
+#endif
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,11 +53,13 @@ struct AlderCleanupEntry {
     bool armed;
 };
 
-/* Single-threaded by design (structured concurrency is out of scope). */
-static size_t g_live_allocations = 0;
-static uint64_t g_next_domain_serial = 1; /* 0 denotes exhaustion/invalid */
-static uint64_t g_next_segment_serial = 1;
-static uint64_t g_next_table_serial = 1; /* 0 is never a valid serial */
+/* Serial allocation is shared by independent root domains entering from
+ * foreign threads, so it uses C11 atomics. Structured concurrency remains out
+ * of scope. */
+static atomic_size_t g_live_allocations = ATOMIC_VAR_INIT(0);
+static atomic_uint_fast64_t g_next_domain_serial = ATOMIC_VAR_INIT(1); /* 0 denotes exhaustion/invalid */
+static atomic_uint_fast64_t g_next_segment_serial = ATOMIC_VAR_INIT(1);
+static atomic_uint_fast64_t g_next_table_serial = ATOMIC_VAR_INIT(1); /* 0 is never a valid serial */
 
 #if defined(ALDER_RUNTIME_TESTING)
 static uint64_t g_test_domain_allocations_before_failure = UINT64_MAX;
@@ -68,7 +74,7 @@ void alder_runtime_test_clear_domain_alloc_failure(void) {
 }
 
 void alder_runtime_test_exhaust_segment_identities(void) {
-    g_next_segment_serial = 0;
+    atomic_store_explicit(&g_next_segment_serial, 0, memory_order_relaxed);
 }
 
 void alder_runtime_test_set_table_slot_limit(uint64_t slots) {
@@ -79,20 +85,20 @@ void alder_runtime_test_set_table_slot_limit(uint64_t slots) {
 static void *rt_malloc(size_t size) {
     void *p = malloc(size);
     if (p != NULL) {
-        g_live_allocations += 1;
+        (void)atomic_fetch_add_explicit(&g_live_allocations, 1, memory_order_relaxed);
     }
     return p;
 }
 
 static void rt_free(void *p) {
     if (p != NULL) {
-        g_live_allocations -= 1;
+        (void)atomic_fetch_sub_explicit(&g_live_allocations, 1, memory_order_relaxed);
         free(p);
     }
 }
 
 size_t alder_runtime_live_allocations(void) {
-    return g_live_allocations;
+    return atomic_load_explicit(&g_live_allocations, memory_order_relaxed);
 }
 
 uint8_t alder_c_buffer_dummy[1] = {0};
@@ -114,13 +120,20 @@ static bool align_is_valid(size_t align) {
     return align != 0 && (align & (align - 1)) == 0;
 }
 
-static bool take_unique_serial(uint64_t *next, uint64_t *out) {
-    if (*next == 0) {
-        return false;
+static bool take_unique_serial(atomic_uint_fast64_t *next, uint64_t *out) {
+    uint_fast64_t current = atomic_load_explicit(next, memory_order_relaxed);
+    for (;;) {
+        if (current == 0) {
+            return false;
+        }
+        uint_fast64_t following = current == UINT64_MAX ? 0 : current + 1;
+        if (atomic_compare_exchange_weak_explicit(next, &current, following,
+                                                  memory_order_relaxed,
+                                                  memory_order_relaxed)) {
+            *out = (uint64_t)current;
+            return true;
+        }
     }
-    *out = *next;
-    *next = (*next == UINT64_MAX) ? 0 : *next + 1;
-    return true;
 }
 
 static uintptr_t align_up(uintptr_t addr, size_t align) {
@@ -181,7 +194,7 @@ static AlderSegment *new_segment(size_t capacity) {
     if (alloc_size < capacity) {
         return NULL; /* overflow */
     }
-    if (g_next_segment_serial == 0) {
+    if (atomic_load_explicit(&g_next_segment_serial, memory_order_relaxed) == 0) {
         return NULL;
     }
     AlderSegment *seg = (AlderSegment *)rt_malloc(alloc_size);
@@ -567,7 +580,7 @@ bool alder_table_init(AlderTable *table, AlderDomain *domain,
     if (table == NULL || table->serial != 0 || domain == NULL ||
         domain->magic != ALDER_MAGIC || elem_size == 0 ||
         elem_size > (uint64_t)SIZE_MAX || elem_align > (uint64_t)SIZE_MAX ||
-        !align_is_valid((size_t)elem_align) || g_next_table_serial == 0) {
+        !align_is_valid((size_t)elem_align) || atomic_load_explicit(&g_next_table_serial, memory_order_relaxed) == 0) {
         return false;
     }
     AlderTableSlot *slots = (AlderTableSlot *)alder_domain_alloc(
