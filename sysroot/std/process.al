@@ -19,18 +19,6 @@ pub enum PipeMode {
     Piped
 }
 
-impl PipeMode {
-    /// The inherited mode; the same value as the default stream wiring.
-    fn inherit() -> PipeMode {
-        return Inherit
-    }
-
-    /// The piped mode.
-    fn piped() -> PipeMode {
-        return Piped
-    }
-}
-
 /// Value-semantic child-process description. Copying a `Command` copies the
 /// whole configuration; builder methods return an updated value and change
 /// nothing else. Validation happens at spawn time, so builders never fail.
@@ -186,33 +174,6 @@ pub enum ProcessError {
     Unsupported
     /// A host call failed with no portable category.
     Platform(info: PlatformInfo)
-}
-
-impl ProcessError {
-    /// The program-does-not-exist category.
-    fn not_found() -> ProcessError {
-        return NotFound
-    }
-
-    /// The permission-denied category.
-    fn permission_denied() -> ProcessError {
-        return PermissionDenied
-    }
-
-    /// The invalid-command-configuration category.
-    fn invalid_configuration() -> ProcessError {
-        return InvalidConfiguration
-    }
-
-    /// The target-unsupported category.
-    fn unsupported() -> ProcessError {
-        return Unsupported
-    }
-
-    /// A platform-detail category.
-    fn platform(info: PlatformInfo) -> ProcessError {
-        return Platform(info)
-    }
 }
 
 impl Display for ProcessError {

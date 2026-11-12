@@ -77,12 +77,6 @@ pub enum PipeMode {
     Piped
 }
 
-impl PipeMode {
-    /// The inherited mode.
-    pub fn inherit() -> PipeMode
-    /// The piped mode.
-    pub fn piped() -> PipeMode
-}
 ```
 
 ### Child and pipe ends
@@ -202,19 +196,6 @@ pub enum ProcessError {
     Platform(info: PlatformInfo)
 }
 
-impl ProcessError {
-    /// The program-does-not-exist category.
-    pub fn not_found() -> ProcessError
-    /// The permission-denied category.
-    pub fn permission_denied() -> ProcessError
-    /// The invalid-command-configuration category.
-    pub fn invalid_configuration() -> ProcessError
-    /// The target-unsupported category.
-    pub fn unsupported() -> ProcessError
-    /// A platform-detail category.
-    pub fn platform(info: PlatformInfo) -> ProcessError
-}
-
 impl Error for ProcessError {
     // Root error: the default `cause` is `None`.
 }
@@ -226,17 +207,15 @@ formatting snapshot and is additive.
 
 ## Value-layer amendment
 
-The value layer uses functional builder updates (`self -> Command`) and
-public constructor functions for payload-less enum variants. In-place
+The value layer uses functional builder updates (`self -> Command`). In-place
 assignment of a `Vec` or `OsString` field from a `mut self` method is not
 safely expressible with the current storage plan: the field would retain
-storage owned by the builder call's temporary domain. Functional updates
-keep the value semantics and ownership contract unchanged; callers rebind the
-result (`command = command.argument(value)`). `PipeMode.inherit`/`piped`,
-`ExitStatus.from_exit`/`from_signal`, and the `ProcessError` category
-constructors make the same immutable values available without relying on
-qualified enum-variant expressions. The host spawn layer will use these
-constructors when it lands.
+storage owned by the builder call's temporary domain, and the same owner-domain
+question repeats through delegated calls. Functional updates keep the value
+semantics and ownership contract unchanged; callers rebind the result
+(`command = command.argument(value)`). Qualified enum-variant expressions such
+as `PipeMode.Piped` and `ProcessError.Platform(info)` are available directly.
+The host spawn layer will use these forms when it lands.
 
 ## Contracts
 

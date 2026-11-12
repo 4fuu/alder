@@ -1585,11 +1585,15 @@ functional builders, `ExitStatus` exit/signal decomposition, `Output`, and
 `ProcessError` with `Display`/`Error`. Storage-backed builders return a new
 `Command` and callers rebind it, matching `std.text.StringBuilder`; in-place
 `Vec`/`OsString` field assignment is not safely expressible with the current
-storage plan. Enum factory constructors make stream modes and process
-categories available without qualified variant expressions. Evidence:
+storage plan; the required owner-domain provenance for borrowed receivers
+remains deferred. Qualified variant expressions such as `PipeMode.Piped` and
+`ProcessError.Platform(info)` are implemented and carry the snapshot surface
+without factory functions. Evidence:
 `compiler/production_process_fs_test.go` runs the value layer through the
-installed sysroot. Spawning, `Child`, pipes, and capture wait for `std.io`
-slice 2. Docs: [`std.process` snapshot](docs/api/std.process-v1.md).
+installed sysroot, and `compiler/production_qualified_variant_test.go` pins
+the cross-module construction forms. Spawning, `Child`, pipes, and capture
+wait for `std.io` slice 2. Docs:
+[`std.process` snapshot](docs/api/std.process-v1.md).
 
 Landed standard-library progress: `std.fs` installs its value layer at
 `sysroot/std/fs.al`: `Options.read`/`Options.write` and the portable public

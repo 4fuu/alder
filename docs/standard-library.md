@@ -216,8 +216,11 @@ surface as slice 2.
 Implemented std.process progress (value layer): `sysroot/std/process.al`
 installs `PipeMode`, the value-semantic `Command` and its functional
 builders, `ExitStatus` with exit/signal decomposition, `Output`, and
-`ProcessError` with `Display` and `Error`. Spawning, `Child`, pipe ends, and
-captured output wait for the `std.io` slice 2 capability and host handles.
+`ProcessError` with `Display` and `Error`. Stream modes and process
+categories are constructed with qualified variant expressions such as
+`PipeMode.Piped` and `ProcessError.Platform(info)`. Spawning, `Child`, pipe
+ends, and captured output wait for the `std.io` slice 2 capability and host
+handles.
 
 Implemented std.fs progress (value layer): `sysroot/std/fs.al` installs
 `Options.read`/`Options.write` and the portable `Permissions` record. The

@@ -30,9 +30,9 @@ fn run_checks(program: OsString, work_dir: Path) -> I32 {
     command = command.env(program, program)
     command = command.env_remove(program)
     command = command.clear_environment()
-    command = command.stdin(PipeMode.piped())
-    command = command.stdout(PipeMode.inherit())
-    command = command.stderr(PipeMode.piped())
+    command = command.stdin(PipeMode.Piped)
+    command = command.stdout(PipeMode.Inherit)
+    command = command.stderr(PipeMode.Piped)
 
     let exited = ExitStatus.from_exit(3)
     match exited.code() {
@@ -66,15 +66,15 @@ fn run_checks(program: OsString, work_dir: Path) -> I32 {
     if output.stdout.len() != 3 { return 17 }
     if output.stderr.len() != 3 { return 18 }
 
-    let not_found = ProcessError.not_found()
+    let not_found = ProcessError.NotFound
     if not_found.display() != "not found" { return 20 }
-    let denied = ProcessError.permission_denied()
+    let denied = ProcessError.PermissionDenied
     if denied.display() != "permission denied" { return 21 }
-    let invalid = ProcessError.invalid_configuration()
+    let invalid = ProcessError.InvalidConfiguration
     if invalid.display() != "invalid configuration" { return 22 }
-    let unsupported = ProcessError.unsupported()
+    let unsupported = ProcessError.Unsupported
     if unsupported.display() != "unsupported" { return 23 }
-    let platform = ProcessError.platform(PlatformInfo(code: 7, message: "host detail"))
+    let platform = ProcessError.Platform(PlatformInfo(code: 7, message: "host detail"))
     if platform.display() != "host detail" { return 24 }
     match platform.cause() {
         Some(_) => { return 25 }

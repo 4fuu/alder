@@ -6027,6 +6027,42 @@ fn any_variant_named(state: State, store: CheckStore, node: SyntaxRec) -> U64 {
     return 0
 }
 
+// Resolve the type before a qualified variant name: `Mode` in
+// `Mode.Piped` or the `process.PipeMode` prefix in
+// `process.PipeMode.Piped`. The chain is a field-access shape in expression
+// syntax, so the leftmost segment is rebuilt as one qualified type name and
+// resolved through the ordinary import and namespace rules. A chain whose
+// root is a local names a value, not a type, and stays a field access.
+fn qualified_enum_type_symbol(state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec) -> U64 {
+    var left = node
+    while left.kind == 29 && left.children != 0 {
+        let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, left.children - 1)
+        left = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+    }
+    if left.kind != 24 { return 0 }
+    if local_lookup(store, owner, left, state) != 0 { return 0 }
+    let dotted = SyntaxRec(kind: 4, token: node.token, source: node.source, start: left.start, end: node.end, name_start: left.name_start, name_end: node.name_end, children: 0)
+    let symbol = find_declared_type(state, parse, store, dotted)
+    if symbol == 0 { return 0 }
+    let declared = __s0_buffer_get(SymbolRec, store.symbols, symbol - 1)
+    if declared.kind != 3 || declared.type_arity != 0 { return 0 }
+    return symbol
+}
+
+type QualifiedEnumTypeRec {
+    store: CheckStore
+    id: U64
+}
+
+// The checked type of a non-generic enum named by a qualified variant
+// expression. A canonical record is reused when one exists.
+fn qualified_enum_type(d: Domain, store: CheckStore, owner: U64, symbol: U64) -> Result(QualifiedEnumTypeRec, __s0_Error) {
+    let existing = canonical_type_id(store, 7, symbol, 0, 0)
+    if existing != 0 { return Ok(QualifiedEnumTypeRec(store: store, id: existing)) }
+    let appended = try append_checked_type(d, store, owner, 7, 0, symbol, 0, 0)
+    return Ok(QualifiedEnumTypeRec(store: appended, id: __s0_buffer_len(CheckedTypeRec, appended.types)))
+}
+
 fn syntax_contains_call(parse: ParseStore, node_id: U64) -> Bool {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     if node.kind == 27 || node.kind == 36 { return true }
@@ -9488,6 +9524,18 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
     if callee.kind == 29 && symbol_named(state, parse, store, callee) == 0 {
         let receiver_link = __s0_buffer_get(SyntaxLinkRec, parse.links, callee.children - 1)
         let receiver_node = __s0_buffer_get(SyntaxRec, parse.nodes, receiver_link.node - 1)
+        // A payload variant call splits the same way: the dotted prefix names
+        // the enum type, and the tail names the variant. Resolve it before
+        // method dispatch so `Failure.Detail(value)` and
+        // `process.ProcessError.Platform(info)` need no factory functions.
+        let enum_symbol = qualified_enum_type_symbol(state, parse, store, owner, receiver_node)
+        if enum_symbol != 0 {
+            let variant_id = variant_named(state, store, enum_symbol, callee)
+            if variant_id != 0 {
+                let enum_type = try qualified_enum_type(d, store, owner, enum_symbol)
+                return check_variant_call(d, state, parse, base, enum_type.store, owner, call, call_id, callee, enum_type.id, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+            }
+        }
         let static_owner = symbol_named(state, parse, store, receiver_node)
         if static_owner != 0 {
             let static_symbol = __s0_buffer_get(SymbolRec, store.symbols, static_owner - 1)
@@ -10110,6 +10158,21 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
     if expression.kind == 29 {
         let base_link = __s0_buffer_get(SyntaxLinkRec, parse.links, expression.children - 1)
         let base_node = __s0_buffer_get(SyntaxRec, parse.nodes, base_link.node - 1)
+        // A dotted variant name has the same shape as a field access. When its
+        // base resolves to a non-generic enum type, it is a variant value, not
+        // a field of a value: `Mode.Piped` and `process.PipeMode.Piped` both
+        // construct the variant without relying on a bare-name import.
+        let enum_symbol = qualified_enum_type_symbol(state, parse, store, owner, base_node)
+        if enum_symbol != 0 {
+            let variant_id = variant_named(state, store, enum_symbol, expression)
+            if variant_id != 0 {
+                let variant = __s0_buffer_get(DeclTypeUseRec, store.uses, variant_id - 1)
+                if variant.checked_type != 0 { return expr_fail(d, base, 47, expression) }
+                let enum_type = try qualified_enum_type(d, store, owner, enum_symbol)
+                if expected != 0 && !(try expression_type_equal(d, state, parse, enum_type.store, enum_type.id, expected)) { return expr_token_type_fail(d, state, enum_type.store, mismatch_kind, mismatch_node, expected, enum_type.id) }
+                return append_call_expression(d, state, parse, enum_type.store, owner, expression_id, 10, enum_type.id, 4, enum_symbol, variant_id, expression, 0, site_kind, site_syntax, 0)
+            }
+        }
         let checked_base = try check_value_expression_inner(d, state, parse, base, store, owner, base_node, base_link.node, 0, 60, expression, 0, 0, in_loop)
         let current = match checked_base {
             ExprGood(value) => value.store

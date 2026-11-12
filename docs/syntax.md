@@ -194,7 +194,9 @@ named values. Multi-payload and anonymous-record variant sugar are deferred.
 
 An unqualified variant is accepted only when the expected enum type makes it
 unambiguous. Qualification uses `Type.Variant`, for example
-`LookupError.NotFound(name)`.
+`LookupError.NotFound(name)`. When the type comes from another module, the
+import's namespace prefix goes before the type: `process.PipeMode.Piped` or
+`process.ProcessError.Platform(info)`.
 
 ## Compile-time type parameters
 
