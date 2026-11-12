@@ -136,6 +136,22 @@ static uint8_t *segment_data(AlderSegment *seg) {
 /* Storage domains                                                     */
 /* ------------------------------------------------------------------ */
 
+AlderCallbackOwner *alder_callback_owner_new(size_t context_size) {
+    AlderCallbackOwner *owner;
+    if (context_size == 0 || context_size > SIZE_MAX - sizeof(AlderCallbackOwner)) { return NULL; }
+    owner = (AlderCallbackOwner *)calloc(1, sizeof(AlderCallbackOwner) + context_size);
+    return owner;
+}
+
+void *alder_callback_owner_context(AlderCallbackOwner *owner) {
+    if (owner == NULL) { alder_runtime_panic("callback owner is null"); }
+    return (void *)owner->alder_context;
+}
+
+void alder_callback_owner_free(AlderCallbackOwner *owner) {
+    free(owner);
+}
+
 bool alder_domain_init(AlderDomain *domain, AlderDomain *parent) {
     if (domain == NULL || domain->magic == ALDER_MAGIC) {
         return false; /* NULL or double init */

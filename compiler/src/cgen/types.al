@@ -68,6 +68,7 @@ fn cgen_put_type(d: Domain, writer: CgenWriter, store: MirStore, id: U64) -> Res
     if t.kind == mir_type_kind_cleanup_id() { return cgen_put(d, writer, "AlderCleanupId") }
     if t.kind == mir_type_kind_table() { return cgen_put(d, writer, "AlderTable *") }
     if t.kind == mir_type_kind_c_string() { return cgen_put(d, writer, "char *") }
+    if t.kind == mir_type_kind_c_callback_owner() { return cgen_put(d, writer, "AlderCallbackOwner *") }
     return cgen_put(d, writer, "AlderTableId")
 }
 

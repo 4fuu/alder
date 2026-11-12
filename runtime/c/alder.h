@@ -70,6 +70,21 @@ typedef struct {
  * already initialized, the parent is not initialized, or the process-wide
  * domain identity namespace is exhausted.
  */
+/*
+ * A retained callback owner: one heap allocation holds the owner header and a
+ * copied context block. The context address is stable when the owner value is
+ * moved between Alder bindings; alder_callback_owner_free releases both after
+ * the C registration has been unregistered and drained.
+ */
+typedef struct AlderCallbackOwner {
+    max_align_t alder_align;
+    unsigned char alder_context[];
+} AlderCallbackOwner;
+
+AlderCallbackOwner *alder_callback_owner_new(size_t context_size);
+void *alder_callback_owner_context(AlderCallbackOwner *owner);
+void alder_callback_owner_free(AlderCallbackOwner *owner);
+
 bool alder_domain_init(AlderDomain *domain, AlderDomain *parent);
 
 /*

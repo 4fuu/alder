@@ -1830,16 +1830,25 @@ signature, and callback pointers never become ordinary Alder values
 (diagnostics 224-227, parse 31). MIR 111 `c.callback.make` carries the target
 function and callback type; cgen emits a static trampoline that creates a
 per-invocation root domain when needed, enters the runtime, and pins the
-trampoline against the binding typedef with `_Generic`. The C API must not
-retain the callback. Evidence: `compiler/production_c_callback_test.go`
-compiles and runs a synchronous C callback under the strict warning set,
-checks the trampoline shape and cross-process determinism, and pins target
-mismatch and unsafe-only rejections. Documentation is in
+trampoline against the binding typedef with `_Generic`. A retained
+registration uses the unsafe-only `c.CallbackOwner.register(set, clear, wait,
+target, context)`: the context is copied into separate heap storage, the
+owner is an affine `Option` value, and its `using` cleanup clears, waits, then
+frees with exactly-once transfer semantics; a nonzero clear terminates with
+status 101 because freed context must never remain registered. Moving the
+owner through a `take` parameter keeps the context address stable. Foreign-
+thread callbacks remain out of scope until the ABI/thread slice. Evidence:
+`compiler/production_c_callback_test.go` compiles and runs synchronous
+nonretained and retained callbacks under the strict warning set, moves the
+retained owner through a generic `take` helper, runs the retained program
+under ASan/UBSan, checks the trampoline and owner helper shapes and
+cross-process determinism, and pins target-mismatch, clear-contract, and
+unsafe-only rejections. Documentation is in
 [docs/c-interop.md](docs/c-interop.md) "Callbacks and C calling Alder",
 [docs/c-backend.md](docs/c-backend.md) "Callback trampolines",
 [docs/mir.md](docs/mir.md) "C Callback Values", and
 [docs/s0-language.md](docs/s0-language.md). A cold `bootstrap/regenerate.sh`
-measured 136.3 s wall and 2.17 GB peak RSS against 136.1 s and 2.15 GB for the
+measured 139.8 s wall and 2.21 GB peak RSS against 131.0 s and 2.18 GB for the
 parent tree on the same host.
 
 Landed C-interop progress: the narrow S0 C bridge (`import c name:

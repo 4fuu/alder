@@ -132,6 +132,13 @@ and returns the C result. A failed domain initialization panics. A generated
 function-pointer typedef. The trampoline is storage for one raw-call argument:
 no function-pointer value is stored in Alder locals, records, or collections.
 
+A retained `c.CallbackOwner` is one `AlderCallbackOwner *` heap value from the
+runtime. Registration allocates the owner and a context block separately,
+copies the context into that block, calls the named setter with the trampoline
+and the stable context address, and builds `Option(owner)`. The generated
+release helper calls the recorded clear function, panics with status 101 when it returns nonzero, calls the wait function, and frees the owner.
+Moving the owner value never moves the context block.
+
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.

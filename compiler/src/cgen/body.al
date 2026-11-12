@@ -251,7 +251,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_c_callback_make() { return false }
+        if item.op > mir_op_slice_to_bytes() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2347,6 +2347,8 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_addr() { return cgen_emit_c_addr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_callback_make() { return cgen_emit_c_callback_make(d, out, store, item) }
+    if item.op == mir_op_c_callback_owner_register() { return cgen_emit_callback_owner_register(d, out, store, indexes, item) }
+    if item.op == mir_op_c_callback_owner_release() { return cgen_emit_callback_owner_release(d, out, store, indexes, item) }
     if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
@@ -2583,7 +2585,9 @@ fn cgen_callback_earlier(store: MirStore, instruction: U64, target: U64, callbac
     var at: U64 = 0
     while at + 1 < instruction {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op == mir_op_c_callback_make() && item.target == target && item.type_op == callback_type { return true }
+        var prior_type = item.type_op
+        if item.op == mir_op_c_callback_owner_register() && item.type_op != 0 && item.type_op <= __s0_buffer_len(MirTypeRec, store.types) { prior_type = __s0_buffer_get(MirTypeRec, store.types, item.type_op - 1).result_type }
+        if (item.op == mir_op_c_callback_make() || item.op == mir_op_c_callback_owner_register()) && item.target == target && prior_type == callback_type { return true }
         at = at + 1
     }
     return false
@@ -2664,6 +2668,108 @@ fn cgen_emit_callback_trampolines(d: Domain, initial: CgenWriter, store: MirStor
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
         if item.op == mir_op_c_callback_make() && !cgen_callback_earlier(store, at, item.target, item.type_op) {
             out = try cgen_emit_one_callback_trampoline(d, out, store, indexes, item.target, item.type_op)
+        }
+        if item.op == mir_op_c_callback_owner_register() && item.type_op != 0 && item.type_op <= __s0_buffer_len(MirTypeRec, store.types) {
+            let owner = __s0_buffer_get(MirTypeRec, store.types, item.type_op - 1)
+            if !cgen_callback_earlier(store, at, item.target, owner.result_type) {
+                out = try cgen_emit_one_callback_trampoline(d, out, store, indexes, item.target, owner.result_type)
+            }
+        }
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+// One binding-function C name.
+fn cgen_put_binding_fn_name(d: Domain, initial: CgenWriter, store: MirStore, id: U64) -> Result(CgenWriter, __s0_Error) {
+    if id == 0 || id > __s0_buffer_len(MirBindingFnRec, store.binding_funcs) { return cgen_put(d, initial, "NULL") }
+    let rec = __s0_buffer_get(MirBindingFnRec, store.binding_funcs, id - 1)
+    return cgen_put_name(d, initial, store, rec.c_name_start, rec.c_name_end)
+}
+
+// Retained callback registration: heap-allocate the owner and its context,
+// copy the context, call set with the trampoline, and build Option(owner).
+fn cgen_emit_callback_owner_register(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    let owner = __s0_buffer_get(MirTypeRec, store.types, item.type_op - 1)
+    var out = try cgen_put(d, initial, "  AlderCallbackOwner *")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, " = alder_callback_owner_new(sizeof(")
+    out = try cgen_put_type(d, out, store, owner.elem)
+    out = try cgen_put(d, out, "));\n  if (")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, " == NULL) { ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = 0; } else {\n    *((")
+    out = try cgen_put_type(d, out, store, owner.elem)
+    out = try cgen_put(d, out, " *)alder_callback_owner_context(")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, ")) = ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ";\n    if (")
+    out = try cgen_put_binding_fn_name(d, out, store, item.b)
+    out = try cgen_put(d, out, "(alder_callback_")
+    out = try cgen_put_u64(d, out, item.target)
+    out = try cgen_put(d, out, "_")
+    out = try cgen_put_u64(d, out, owner.result_type)
+    out = try cgen_put(d, out, ", (")
+    out = try cgen_put_type(d, out, store, owner.elem)
+    out = try cgen_put(d, out, " *)alder_callback_owner_context(")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, ")) != 0) {\n      alder_callback_owner_free(")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, ");\n      ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = 0;\n    } else {\n      ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_tag = 1;\n      ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, ".alder_u.alder_p1 = ")
+    out = try cgen_put_tmp(d, out, item.result, "owner")
+    out = try cgen_put(d, out, ";\n    }\n  }\n")
+    return Ok(out)
+}
+
+// The synthesized release function call.
+fn cgen_emit_callback_owner_release(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "  alder_callback_owner_release_")
+    out = try cgen_put_u64(d, out, item.type_op)
+    out = try cgen_put(d, out, "(")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    return cgen_put(d, out, ");\n")
+}
+
+// One release helper for an owner type: clear, wait, then free.
+fn cgen_emit_one_owner_release(d: Domain, initial: CgenWriter, store: MirStore, owner_type: U64, clear_id: U64, wait_id: U64) -> Result(CgenWriter, __s0_Error) {
+    let owner = __s0_buffer_get(MirTypeRec, store.types, owner_type - 1)
+    var out = try cgen_put(d, initial, "\nstatic void alder_callback_owner_release_")
+    out = try cgen_put_u64(d, out, owner_type)
+    out = try cgen_put(d, out, "(AlderCallbackOwner *owner) {\n  ")
+    out = try cgen_put_type(d, out, store, owner.elem)
+    out = try cgen_put(d, out, " *context = (")
+    out = try cgen_put_type(d, out, store, owner.elem)
+    out = try cgen_put(d, out, " *)alder_callback_owner_context(owner);\n  if (")
+    out = try cgen_put_binding_fn_name(d, out, store, clear_id)
+    out = try cgen_put(d, out, "(context) != 0) { alder_runtime_panic(\"callback owner clear failed\"); }\n  ")
+    out = try cgen_put_binding_fn_name(d, out, store, wait_id)
+    out = try cgen_put(d, out, "(context);\n  alder_callback_owner_free(owner);\n}\n")
+    return Ok(out)
+}
+
+// Every distinct owner release helper, in first-use order.
+fn cgen_emit_callback_owner_releases(d: Domain, initial: CgenWriter, store: MirStore) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_c_callback_owner_release() {
+            var earlier = false
+            var prior: U64 = 0
+            while prior < at {
+                let p = __s0_buffer_get(MirInstrRec, store.instructions, prior)
+                if p.op == mir_op_c_callback_owner_release() && p.type_op == item.type_op { earlier = true }
+                prior = prior + 1
+            }
+            if !earlier { out = try cgen_emit_one_owner_release(d, out, store, item.type_op, item.b, item.c) }
         }
         at = at + 1
     }

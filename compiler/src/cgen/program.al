@@ -1399,6 +1399,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_env_retain_helpers(d, out, store, indexes)
     let fn_value_sites = try cgen_fn_value_sites(d, store, indexes)
     out = try cgen_emit_fn_value_wrappers(d, out, store, indexes, fn_value_sites)
+    out = try cgen_emit_callback_owner_releases(d, out, store)
     out = try cgen_emit_callback_trampolines(d, out, store, indexes)
     out = try cgen_emit_bodies(d, out, store)
     out = try cgen_emit_exports(d, out, store, indexes)

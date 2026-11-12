@@ -580,6 +580,22 @@ non-null buffer like every other empty owning sequence. The verifier rejects a
 view of any other element type, a domain operand that is not a
 `domain_handle`, and a result that is not `bytes`.
 
+## Retained Callback Owners
+
+MIR 6 exposes retained callback registrations as operations 112 and 114:
+
+```text
+c.callback.owner.register @function, set_binding, clear_binding, wait_binding, context, owner_type
+c.callback.owner.release owner, clear_binding, wait_binding, owner_type
+```
+
+The register result is `option(owner)` for the callback-owner type; the
+`owner_type` records the copied context type as `elem` and the callback
+function-pointer type as `result_type`. The three binding operands are raw fn
+declarations. The release form is emitted only inside the synthesized release
+function for a `using` registration. `c_callback_owner(context, callback)`
+prints as a type, and the owner's context address is stable across owner moves.
+
 ## Pointer Places
 
 Pointer member access and whole-value C memory reuse the existing `deref` and

@@ -725,6 +725,52 @@ fn lower_cstring_release_function(d: Domain, source_state: State, store: CheckSt
     return Ok(LowerStep(state: lower_with_mir(cstring_type.state, term.store), id: made.id))
 }
 
+// The retained callback owner's using release: fn
+// __alder_callback_owner_release_N(owner: owner) -> Unit calls the recorded
+// clear, then wait, then frees the context/owner allocation. A nonzero clear
+// panics because freed context must never remain registered.
+fn lower_callback_owner_release_function(d: Domain, source_state: State, store: CheckStore, state: LowerState, initializer: U64) -> Result(LowerStep, __s0_Error) {
+    let site = lower_callback_owner_site(store, initializer)
+    if site == 0 {
+        // A moved owner registered with `using held = owner` reuses the
+        // release helper already synthesized for its original registration.
+        if initializer == 0 || initializer > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let reuse_expr = __s0_buffer_get(CheckedExprRec, store.expressions, initializer - 1)
+        if reuse_expr.checked_type == 0 || reuse_expr.checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if __s0_buffer_get(CheckedTypeRec, store.types, reuse_expr.checked_type - 1).kind != 33 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        let reuse_type = try lower_type(d, source_state, store, state, reuse_expr.checked_type)
+        if !reuse_type.state.valid { return Ok(reuse_type) }
+        let reuse_name = try lower_decimal_name(d, "__alder_callback_owner_release_", reuse_type.id)
+        let existing = lower_release_function_named(reuse_type.state.mir, reuse_name)
+        if existing == 0 { return Ok(LowerStep(state: lower_invalid(reuse_type.state), id: 0)) }
+        return Ok(LowerStep(state: reuse_type.state, id: existing))
+    }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, site - 1)
+    if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+    if checked.kind != 9 || checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let owner_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let owner_type = try lower_type(d, source_state, store, state, owner_checked)
+    if !owner_type.state.valid { return Ok(owner_type) }
+    let name = try lower_decimal_name(d, "__alder_callback_owner_release_", owner_type.id)
+    let existing = lower_release_function_named(owner_type.state.mir, name)
+    if existing != 0 { return Ok(LowerStep(state: owner_type.state, id: existing)) }
+    let made = try mir_add_function(d, owner_type.state.mir, name, mir_type_unit())
+    let parameter = try mir_add_function_param(d, made.store, made.id, 0, "owner", owner_type.id)
+    let entry = try mir_add_block(d, parameter.store, made.id, 0, "entry")
+    let instr_state = lower_with_mir(owner_type.state, entry.store)
+    let clear_id = lower_binding_fn_flat_index(store, annotation.target)
+    let wait_id = lower_binding_fn_flat_index(store, annotation.variant_use)
+    if clear_id == 0 || wait_id == 0 { return Ok(LowerStep(state: lower_invalid(owner_type.state), id: 0)) }
+    // place carries the wait binding function for the release helper.
+    let released = try lower_add_instr(d, instr_state, made.id, entry.id, mir_op_c_callback_owner_release(), 0, 0, owner_type.id, parameter.id, clear_id, 0, "")
+    let released_rec = __s0_buffer_get(MirInstrRec, released.state.mir.instructions, released.id - 1)
+    __s0_buffer_set(MirInstrRec, released.state.mir.instructions, released.id - 1, MirInstrRec(function: released_rec.function, block: released_rec.block, ordinal: released_rec.ordinal, op: released_rec.op, result: released_rec.result, place: 0, type_op: released_rec.type_op, a: released_rec.a, b: released_rec.b, c: wait_id, target: released_rec.target, name_start: released_rec.name_start, name_end: released_rec.name_end))
+    let term = try mir_add_terminator(d, released.state.mir, MirTermRec(function: made.id, block: entry.id, kind: mir_term_return(), value: 0, target: 0, then_block: 0, else_block: 0))
+    return Ok(LowerStep(state: lower_with_mir(owner_type.state, term.store), id: made.id))
+}
+
 // lower_table_release_function synthesizes (once per table type per module)
 // the builtin release callback used by a callback-free using registration:
 // fn __alder_table_release_N(table: table(T)) -> Unit { return }. Releasing a
@@ -1016,6 +1062,89 @@ fn lower_c_string_type(d: Domain, state: LowerState, checked_type: U64) -> Resul
     return Ok(LowerStep(state: lower_with_types(lower_with_mir(state, built.store), mapped), id: built.type_id))
 }
 
+// One callback-owner checked type interns a unique MIR owner type: the
+// context type is stored in elem and the callback function-pointer type in
+// result_type. Every registration site has its own checked owner type, so a
+// release helper's clear/wait imports cannot be shared accidentally.
+fn lower_callback_owner_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 33 || checked.arg_count != 2 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let context_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let handler_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg)
+    let context = try lower_type(d, source_state, store, state, context_checked)
+    if !context.state.valid { return Ok(context) }
+    let handler = try lower_type(d, source_state, store, context.state, handler_checked)
+    if !handler.state.valid { return Ok(handler) }
+    let empty = try __s0_buffer_new(U64, d)
+    let built = try mir_intern_type(d, handler.state.mir, mir_type_kind_c_callback_owner(), context.id, 0, 0, empty, handler.id)
+    let mapped = try __s0_buffer_append(LowerTypeMapRec, d, handler.state.types, LowerTypeMapRec(checked_type: checked_type, mir_type: built.type_id))
+    return Ok(LowerStep(state: lower_with_types(lower_with_mir(handler.state, built.store), mapped), id: built.type_id))
+}
+
+// The registration expression inside a using initializer: `try` wraps the
+// c.CallbackOwner.register expression, and the cleanup pre-pass needs its
+// annotation metadata.
+fn lower_callback_owner_site(store: CheckStore, initializer: U64) -> U64 {
+    var current = initializer
+    var depth: U64 = 0
+    while depth < 8 && current != 0 && current <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, current - 1)
+        if expression.kind == 39 { return current }
+        if expression.kind == 13 && expression.child_count == 1 && expression.first_child != 0 {
+            // try's payload expression
+            current = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        } else { if expression.kind == 12 && expression.parameter_use != 0 && expression.parameter_use <= __s0_buffer_len(CheckedMatchRec, store.control.matches) {
+            // The match scrutinee carries the registration.
+            current = __s0_buffer_get(CheckedMatchRec, store.control.matches, expression.parameter_use - 1).scrutinee
+        } else { if (expression.kind == 1 || expression.kind == 5 || expression.kind == 22) && expression.parameter_use != 0 {
+            // A local read whose let initializer is the registration.
+            var found: U64 = 0
+            var at: U64 = 0
+            while at < __s0_buffer_len(CheckedStatementRec, store.control.statements) {
+                let statement = __s0_buffer_get(CheckedStatementRec, store.control.statements, at)
+                if (statement.kind == 1 || statement.kind == 2) && statement.binding == expression.parameter_use { found = statement.expression }
+                at = at + 1
+            }
+            if found == 0 { return 0 }
+            current = found
+        } else { return 0 } } }
+        depth = depth + 1
+    }
+    return 0
+}
+
+// M8 c.CallbackOwner lowering. The context is copied into heap-owned storage;
+// set receives the trampoline and the stable context address. The result is
+// Option(owner), none when allocation or set fails. Clear/wait are recorded
+// for the synthesized release helper.
+fn lower_callback_owner_register(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression: CheckedExprRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || expression.first_child == 0 || expression.checked_type == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, expression.checked_type - 1)
+    if checked.kind != 9 || checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let owner_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let owner_type = try lower_type(d, source_state, store, state, owner_checked)
+    if !owner_type.state.valid { return Ok(owner_type) }
+    let option_type = try lower_type(d, source_state, store, owner_type.state, expression.checked_type)
+    if !option_type.state.valid { return Ok(option_type) }
+    let context_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let context = try lower_expression(d, source_state, spans, store, option_type.state, owner, function, block, context_id, environment, panic_block)
+    if !context.state.valid { return Ok(context) }
+    let target = lower_owner_lookup(context.state.owners, expression.parameter_use)
+    if target == 0 { return Ok(LowerStep(state: lower_invalid(context.state), id: 0)) }
+    let set_id = lower_binding_fn_flat_index(store, annotation.owner)
+    let clear_id = lower_binding_fn_flat_index(store, annotation.target)
+    let wait_id = lower_binding_fn_flat_index(store, annotation.variant_use)
+    if set_id == 0 || clear_id == 0 || wait_id == 0 { return Ok(LowerStep(state: lower_invalid(context.state), id: 0)) }
+    let result = try lower_add_result(d, context.state, function, block, expression.checked_type, source_state, store)
+    let instr = try lower_add_instr(d, result.state, function, block, mir_op_c_callback_owner_register(), result.id, wait_id, owner_type.id, context.id, set_id, target, "")
+    let made = __s0_buffer_get(MirInstrRec, instr.state.mir.instructions, instr.id - 1)
+    __s0_buffer_set(MirInstrRec, instr.state.mir.instructions, instr.id - 1, MirInstrRec(function: made.function, block: made.block, ordinal: made.ordinal, op: made.op, result: made.result, place: made.place, type_op: made.type_op, a: made.a, b: made.b, c: clear_id, target: made.target, name_start: made.name_start, name_end: made.name_end))
+    return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
 // M8 c.CString lowering. make_lit consumes the literal's String value
 // (child 0) and produces the bare owner, taking the checked edge only when
 // the runtime copy cannot allocate; make produces option(c_string) where an
@@ -1118,6 +1247,7 @@ fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerSta
         return Ok(LowerStep(state: lower_with_types(lower_with_mir(state, built.store), mapped), id: built.type_id))
     }
     if checked.kind == 31 { return lower_c_string_type(d, state, checked_type) }
+    if checked.kind == 33 { return lower_callback_owner_type(d, source_state, store, state, checked_type) }
     if checked.kind == 3 || checked.kind == 4 {
         var id = mir_type_kind_domain_handle()
         if checked.kind == 4 { id = mir_type_kind_domain_mark() }
@@ -5149,6 +5279,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 30 { return lower_c_string_make(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 31 { return lower_c_string_ptr(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 32 { return lower_c_zero(d, source_state, spans, store, state, owner, function, block, expression) }
+    if expression.kind == 39 { return lower_callback_owner_register(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
     if expression.kind == 38 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     if expression.kind == 34 || expression.kind == 35 { return lower_c_pointer_field(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
     if expression.kind == 36 || expression.kind == 37 { return lower_c_memory(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
@@ -5702,10 +5833,13 @@ fn lower_one_statement(d: Domain, source_state: State, spans: __s0_Buffer(Checke
                     // pre-pass, so the registration only looks it up here.
                     let release_name = try lower_decimal_name(d, "__alder_cstring_release_", owner_step.id)
                     callback = lower_release_function_named(current.mir, release_name)
+                } else { if owner_type.kind == 33 {
+                    let release_name = try lower_decimal_name(d, "__alder_callback_owner_release_", owner_step.id)
+                    callback = lower_release_function_named(current.mir, release_name)
                 } else {
                 let release_name = try lower_decimal_name(d, "__alder_table_release_", owner_step.id)
                 callback = lower_release_function_named(current.mir, release_name)
-                }
+                } }
             }
         }
         if callback == 0 { return Ok(LowerFlowStep(state: lower_invalid(current), block: active, terminated: true)) }
@@ -6147,7 +6281,8 @@ fn lower_functions(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpa
         let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
         if lower_owner_concrete(store, owner) {
             current = try lower_function(d, source_state, spans, store, locals, current, owner)
-            if !current.valid { return Ok(current) }
+                if !current.valid {
+                return Ok(current) }
         }
         owner = owner + 1
     }
@@ -7804,13 +7939,14 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CheckedTypeRec, store.types) {
         let item = __s0_buffer_get(CheckedTypeRec, store.types, at)
-        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 19 && item.kind != 20 && item.kind != 21 && item.kind != 22 && item.kind != 23 && item.kind != 24 && item.kind != 25 && item.kind != 26 && item.kind != 27 && item.kind != 28 && item.kind != 29 && item.kind != 31 { return false }
+        if item.kind != 1 && item.kind != 2 && item.kind != 3 && item.kind != 4 && item.kind != 5 && item.kind != 6 && item.kind != 7 && item.kind != 8 && item.kind != 9 && item.kind != 10 && item.kind != 11 && item.kind != 12 && item.kind != 13 && item.kind != 14 && item.kind != 15 && item.kind != 16 && item.kind != 17 && item.kind != 18 && item.kind != 19 && item.kind != 20 && item.kind != 21 && item.kind != 22 && item.kind != 23 && item.kind != 24 && item.kind != 25 && item.kind != 26 && item.kind != 27 && item.kind != 28 && item.kind != 29 && item.kind != 31 && item.kind != 33 { return false }
         if item.syntax != 0 { return false }
         if item.kind == 1 && (item.target == 0 || item.target > 12 || item.arg_count != 0) { return false }
         if item.kind == 26 && (item.target > 14 || item.arg_count != 0) { return false }
         if (item.kind == 27 || item.kind == 28) && (item.target != 0 || item.arg_count != 1) { return false }
         if item.kind == 29 && (item.target == 0 || item.arg_count != 0) { return false }
         if item.kind == 31 && (item.target != 0 || item.arg_count != 0) { return false }
+        if item.kind == 33 && item.arg_count != 2 { return false }
         if (item.kind == 2 || item.kind == 3 || item.kind == 4 || item.kind == 5 || item.kind == 14 || item.kind == 16) && (item.target != 0 || item.arg_count != 0) { return false }
         if item.kind == 6 && (item.target == 0 || item.target > __s0_buffer_len(TypeParamRec, store.type_params) || item.arg_count != 0) { return false }
         if item.kind == 7 && (item.target == 0 || item.target > __s0_buffer_len(SymbolRec, store.symbols) || (__s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 2 && __s0_buffer_get(SymbolRec, store.symbols, item.target - 1).kind != 3)) { return false }
@@ -7937,7 +8073,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
     at = 0
     while at < __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
         let item = __s0_buffer_get(CallAnnotationRec, store.call_annotations, at)
-        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 7 || !lower_type_concrete(store, item.checked_type) { return false }
+        if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.kind == 0 || item.kind > 8 || !lower_type_concrete(store, item.checked_type) { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.kind == 6 {
@@ -7949,6 +8085,14 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
             else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1001 { return false } }
+            at = at + 1
+        } else {
+        if item.kind == 8 {
+            if item.owner == 0 || item.owner > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return false }
+            if item.target == 0 || item.target > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return false }
+            if item.variant_use == 0 || item.variant_use > __s0_buffer_len(BindingMemberRec, store.bindings.members) { return false }
+            if item.builtin == 0 || item.builtin > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+            if item.place != 0 { return false }
             at = at + 1
         } else {
         if item.kind == 7 {
@@ -7988,12 +8132,13 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         }
         }
         }
+        }
     }
     at = 0
     while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
         let item = __s0_buffer_get(CheckedExprRec, store.expressions, at)
         if item.owner == 0 || item.owner > __s0_buffer_len(SymbolRec, store.symbols) || item.syntax == 0 || item.syntax > __s0_buffer_len(CheckedSpanRec, spans) || !lower_type_concrete(store, item.checked_type) { return false }
-        if item.kind == 0 || item.kind == 25 || item.kind > 37 { return false }
+        if item.kind == 0 || item.kind == 25 || item.kind > 39 { return false }
         let owner = __s0_buffer_get(SymbolRec, store.symbols, item.owner - 1)
         if !lower_owner_concrete(store, item.owner) { return false }
         if item.left != 0 || item.right != 0 { return false }
@@ -8754,11 +8899,15 @@ fn lower_checked(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanR
                     let made = try lower_cstring_release_function(d, source_state, store, state, __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1).checked_type)
                     if !made.state.valid { return Ok(LowerBad) }
                     state = made.state
+                } else { if owner_type.kind == 33 {
+                    let made = try lower_callback_owner_release_function(d, source_state, store, state, cleanup.initializer)
+                    if !made.state.valid { return Ok(LowerBad) }
+                    state = made.state
                 } else {
                 let release = try lower_table_release_function(d, source_state, store, state, cleanup.owner, cleanup.initializer)
                 if !release.state.valid { return Ok(LowerBad) }
                 state = release.state
-                }
+                } }
             }
         }
         release_at = release_at + 1

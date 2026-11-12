@@ -158,3 +158,203 @@ fn main() -> I32 {
 		})
 	}
 }
+
+// M8 retained callback owner: registration copies the context into
+// heap-owned storage, a take/generic move keeps the context address stable,
+// and the using cleanup clears, waits, and frees exactly once.
+const cCallbackOwnerProgram = `import c "ownertest.h" as ev {
+    callback type Handler = "ownertest_handler" (
+        event: c.ConstPtr(c.UChar),
+        length: c.Size,
+        context: c.Ptr(c.UChar),
+    ) -> c.Int
+
+    raw fn set = "ownertest_set"(handler: Handler, context: c.Ptr(c.UChar)) -> c.Int
+    raw fn clear = "ownertest_clear"(context: c.Ptr(c.UChar)) -> c.Int
+    raw fn wait = "ownertest_wait"(context: c.Ptr(c.UChar)) -> Unit
+    raw fn fire = "ownertest_fire"() -> c.Int
+}
+
+fn handle_event(event: c.ConstPtr(c.UChar), length: c.Size, context: c.Ptr(c.UChar)) -> c.Int {
+    let zero = c.Zero(c.UChar)
+    unsafe c { c.store(context, zero) }
+    return c.Zero(c.Int)
+}
+
+fn consume(T: type, take owner: T) -> Unit {
+    using held = owner
+    let status = unsafe c { ev.fire() }
+    return
+}
+
+fn main() -> I32 {
+    var state: c.UChar = c.Zero(c.UChar)
+    let registered = unsafe c { c.CallbackOwner.register(ev.set, ev.clear, ev.wait, handle_event, state) }
+    using owner = match registered {
+        Some(value) => value
+        None => return 1
+    }
+    consume(owner)
+    return 0
+}
+`
+
+const cCallbackOwnerFixtureHeader = `#ifndef OWNERTEST_H
+#define OWNERTEST_H
+#include <stddef.h>
+typedef int (*ownertest_handler)(const unsigned char *event, size_t length, unsigned char *context);
+int ownertest_set(ownertest_handler handler, unsigned char *context);
+int ownertest_clear(unsigned char *context);
+void ownertest_wait(unsigned char *context);
+int ownertest_fire(void);
+#endif
+`
+
+const cCallbackOwnerDriver = `#include "alder_host.h"
+#include "ownertest.h"
+
+static ownertest_handler saved_handler;
+static unsigned char *saved_context;
+static int clear_count;
+static int wait_count;
+
+int ownertest_set(ownertest_handler handler, unsigned char *context) {
+    saved_handler = handler;
+    saved_context = context;
+    return 0;
+}
+int ownertest_clear(unsigned char *context) { (void)context; clear_count += 1; return 0; }
+void ownertest_wait(unsigned char *context) { (void)context; wait_count += 1; }
+int ownertest_fire(void) {
+    unsigned char event = 'A';
+    if (saved_handler == NULL || saved_context == NULL) { return 1; }
+    if (saved_handler(&event, 1, saved_context) != 0) { return 2; }
+    return *saved_context == (unsigned char)0 ? 0 : 3;
+}
+
+int main(void) {
+    int context = 0;
+    if (alder_program_entry(&context) != 0) { return 10; }
+    if (clear_count != 1) { return 11; }
+    if (wait_count != 1) { return 12; }
+    return 0;
+}
+`
+
+func TestM8CCallbackOwnerProductionQualification(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	runtimeObject := buildRuntimeObject(t, cc, root)
+
+	dir := t.TempDir()
+	files := map[string]string{
+		"owner.al":    cCallbackOwnerProgram,
+		"ownertest.h": cCallbackOwnerFixtureHeader,
+	}
+	emitted := runProductionCompilerAtRoot(t, exe, dir, files, "compile", "--emit=c", "owner.al")
+	if emitted.status != 0 || emitted.stderr != "" {
+		t.Fatalf("owner emit=c result: %+v stderr=%s", emitted, emitted.stderr)
+	}
+	for _, want := range []string{
+		"alder_callback_owner_new(sizeof(unsigned char))",
+		"alder_callback_owner_release_",
+		"ownertest_clear(context) != 0",
+		"ownertest_wait(context)",
+	} {
+		if !strings.Contains(emitted.stdout, want) {
+			t.Fatalf("generated owner C misses %q:\n%s", want, emitted.stdout)
+		}
+	}
+	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, emitted.stdout, cCallbackOwnerDriver, 0,
+		"-I", dir)
+
+	rejections := []struct {
+		name, source, want string
+	}{
+		{
+			"clear-result",
+			`import c "ownertest.h" as ev {
+    callback type Handler = "ownertest_handler" (
+        event: c.ConstPtr(c.UChar),
+        length: c.Size,
+        context: c.Ptr(c.UChar),
+    ) -> c.Int
+    raw fn set = "ownertest_set"(handler: Handler, context: c.Ptr(c.UChar)) -> c.Int
+    raw fn wait = "ownertest_wait"(context: c.Ptr(c.UChar)) -> Unit
+}
+fn handle(event: c.ConstPtr(c.UChar), length: c.Size, context: c.Ptr(c.UChar)) -> c.Int { return c.Zero(c.Int) }
+fn main() -> I32 {
+    var state: c.UChar = c.Zero(c.UChar)
+    let registered = unsafe c { c.CallbackOwner.register(ev.set, ev.wait, ev.wait, handle, state) }
+    return 0
+}
+`,
+			"a callback type is a C function-pointer signature, not an ordinary value type",
+		},
+		{
+			"target-mismatch",
+			`import c "ownertest.h" as ev {
+    callback type Handler = "ownertest_handler" (
+        event: c.ConstPtr(c.UChar),
+        length: c.Size,
+        context: c.Ptr(c.UChar),
+    ) -> c.Int
+    raw fn set = "ownertest_set"(handler: Handler, context: c.Ptr(c.UChar)) -> c.Int
+    raw fn clear = "ownertest_clear"(context: c.Ptr(c.UChar)) -> c.Int
+    raw fn wait = "ownertest_wait"(context: c.Ptr(c.UChar)) -> Unit
+}
+fn wrong(event: c.ConstPtr(c.UChar)) -> c.Int { return c.Zero(c.Int) }
+fn main() -> I32 {
+    var state: c.UChar = c.Zero(c.UChar)
+    let registered = unsafe c { c.CallbackOwner.register(ev.set, ev.clear, ev.wait, wrong, state) }
+    return 0
+}
+`,
+			"a C callback target does not match the bound callback type",
+		},
+	}
+	for _, rejection := range rejections {
+		rejection := rejection
+		t.Run("reject-"+rejection.name, func(t *testing.T) {
+			result := runProductionCompiler(t, exe, map[string]string{"reject.al": rejection.source}, "check", "reject.al")
+			if result.status == 0 || !strings.Contains(result.stderr, rejection.want) {
+				t.Fatalf("reject %s: %+v stderr=%s", rejection.name, result, result.stderr)
+			}
+		})
+	}
+
+	// The same driver under ASan/UBSan catches a moved-owner use-after-free or
+	// a double clear/free that the observable counters would miss.
+	sanitizedDir := t.TempDir()
+	sanitizedC := filepath.Join(sanitizedDir, "owner.c")
+	sanitizedDriver := filepath.Join(sanitizedDir, "driver.c")
+	sanitizedExe := filepath.Join(sanitizedDir, "owner")
+	if err := os.WriteFile(sanitizedC, []byte(emitted.stdout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sanitizedDriver, []byte(cCallbackOwnerDriver), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sanitize := []string{"-fsanitize=address,undefined", "-g", "-fno-omit-frame-pointer"}
+	args := append(append([]string{}, strictC11Flags()...), sanitize...)
+	args = append(args, "-I", dir, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"),
+		sanitizedC, sanitizedDriver, filepath.Join(root, "runtime", "c", "alder.c"), "-lm", "-o", sanitizedExe)
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("sanitized owner compile: %v\n%s", err, out)
+	}
+	run := exec.Command(sanitizedExe)
+	run.Env = append(os.Environ(), "ASAN_OPTIONS=detect_leaks=1")
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("sanitized owner run: %v\n%s", err, out)
+	}
+}

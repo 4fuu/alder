@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, header-only explicit shims, and `export c fn` C exports with generated headers are checked end to end, while general ownership/retention wrappers, callbacks, and out-of-line C shims are not implemented yet**
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, header-only explicit shims, `export c fn` C exports with generated headers, and nonretained plus retained callback owners are checked end to end, while general ownership/retention wrappers and out-of-line C shims are not implemented yet**
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
 and declarations needed for checking and deterministic code generation. Safe
@@ -443,11 +443,34 @@ and cannot retain Alder storage. The C API must not retain this callback; a
 retained registration uses `c.CallbackOwner`.
 
 A callback retained after the initiating call requires an affine
-`c.CallbackOwner` containing the registration, context storage, target
-function, thread/cancellation contract, and unregister/release operation. Its
-cleanup unregisters and waits for in-flight callbacks when the C API promises a
-usable synchronization mechanism. Without such a promise the wrapper remains
-unsafe.
+`c.CallbackOwner`. Registration is unsafe-only and names the raw setter,
+clearer, waiter, callback target, and context value:
+
+```alder
+let registered = unsafe c {
+    c.CallbackOwner.register(ev.set, ev.clear, ev.wait, on_event, state)
+}
+using owner = match registered {
+    Some(value) => value
+    None => return
+}
+```
+
+`set` must accept `(Handler, c.Ptr(Context))` and return `c.Int` (zero when
+registration succeeds); `clear` accepts `c.Ptr(Context)` and returns `c.Int`;
+`wait` accepts `c.Ptr(Context)` and returns `Unit`. The `Context` type is a
+copyable C ABI scalar or record with no pointers or affine parts. Registration
+copies it into separately allocated owner storage, so the address stays stable
+when the owner is moved, returned, or transferred through a `take` parameter.
+Only the context pointer is passed to C; a callback target receives that
+pointer and must not retain any other scoped Alder value.
+
+Owner cleanup calls `clear`, then `wait`, then frees the context allocation.
+Exactly-once release uses the existing `using`-owner disarm path. A nonzero
+`clear` result terminates with the runtime invariant status 101: continuing
+would leave C holding a pointer to freed context. Callbacks arriving from
+foreign threads are out of scope until the ABI/thread slice, so v1 owners
+must be used where the C API invokes callbacks on the registering thread.
 
 Intentional C exports use explicit syntax:
 

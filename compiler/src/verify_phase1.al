@@ -1,5 +1,5 @@
 fn mir_vop_produces(op: U64) -> Bool {
-    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end() || op == mir_op_c_field_set() || op == mir_op_c_string_release())
+    return !(op == mir_op_store() || op == mir_op_domain_reset() || op == mir_op_domain_destroy() || op == mir_op_cleanup_disarm() || op == mir_op_cleanup_scope_run() || op == mir_op_cleanup_scope_end() || op == mir_op_table_view_end() || op == mir_op_c_field_set() || op == mir_op_c_string_release() || op == mir_op_c_callback_owner_release())
 }
 fn mir_vop_checked(op: U64) -> Bool {
     return op == mir_op_slice_to_bytes() || op == mir_op_alloc_checked() || (op >= mir_op_int_add_checked() && op <= mir_op_int_shr_checked()) || op == mir_op_slice_index_checked() || op == mir_op_slice_range_checked() || op == mir_op_array_index_checked() || op == mir_op_enum_payload_checked() || op == mir_op_vec_construct_checked() || op == mir_op_vec_grow_checked() || op == mir_op_str_byte_checked() || op == mir_op_str_concat() || op == mir_op_str_slice_checked() || op == mir_op_str_from_bytes() || op == mir_op_str_display() || op == mir_op_c_string_make_lit() || op == mir_op_c_string_make()
@@ -44,6 +44,8 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_c_zero() { return 16 }
     if op == mir_op_c_addr() { return 24 }
     if op == mir_op_c_callback_make() { return 48 }
+    if op == mir_op_c_callback_owner_register() { return 63 }
+    if op == mir_op_c_callback_owner_release() { return 22 }
     if op == mir_op_str_concat() || op == mir_op_str_slice_checked() { return 7 }
     if op == mir_op_fn_value() { return 32 }
     if op == mir_op_c_binding_call() { return 32 }
@@ -116,8 +118,8 @@ fn mir_vphase1_types(d: Domain, store: MirStore, version: U64, initial: __s0_Buf
         if at < mir_primitive_type_count() {
             if t.kind != mir_type_kind_primitive() || t.name_start != 0 || t.name_end != 0 || t.elem != 0 || t.ok_type != 0 || t.err_type != 0 || t.first_part != 0 || t.part_count != 0 || t.result_type != 0 || t.length != 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_shape(), 0, 0, 0, 0, 0, id, id, 0, t.kind, 0)) }
         } else {
-            if t.kind > mir_type_kind_c_string() || t.kind == mir_type_kind_primitive() {
-                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_c_string(), t.kind, 0))
+            if t.kind > mir_type_kind_c_callback_owner() || t.kind == mir_type_kind_primitive() {
+                out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), 0, 0, 0, 0, 0, id, id, mir_type_kind_c_callback_owner(), t.kind, 0))
             } else {
                 if t.kind == mir_type_kind_vec() && version < 4 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 4, version, 0)) }
                 if t.kind == mir_type_kind_c_raw() && version < 6 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_version_gate(), 0, 0, 0, 0, 0, id, id, 6, version, 0)) }
@@ -1054,7 +1056,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_c_callback_make() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_c_callback_make(), i.op, 0)) } else {
+        if i.op > mir_op_slice_to_bytes() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_slice_to_bytes(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false
@@ -1084,22 +1086,24 @@ scan = scan + 1 }
                     a_ok = mir_vvalue_index(store, i.function, i.a) != 0
                 }
             }
-            if !b_ok {
+            if !b_ok && i.op != mir_op_c_callback_owner_register() && i.op != mir_op_c_callback_owner_release() {
                 if i.function >= 1 && i.function <= function_count && i.b >= 1 && i.b <= v_counts[i.function] {
                     b_ok = v_pos[v_starts[i.function] + i.b - 1] != 0
                 } else {
                     b_ok = mir_vvalue_index(store, i.function, i.b) != 0
                 }
             }
-            if !c_ok {
+            if !c_ok && i.op != mir_op_c_callback_owner_register() && i.op != mir_op_c_callback_owner_release() {
                 if i.function >= 1 && i.function <= function_count && i.c >= 1 && i.c <= v_counts[i.function] {
                     c_ok = v_pos[v_starts[i.function] + i.c - 1] != 0
                 } else {
                     c_ok = mir_vvalue_index(store, i.function, i.c) != 0
                 }
             }
+            if i.op == mir_op_c_callback_owner_register() || i.op == mir_op_c_callback_owner_release() { b_ok = true
+                c_ok = true }
             if !a_ok || !b_ok || !c_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.a)) }
-            if i.place != 0 && !mir_vid_valid(i.place, __s0_buffer_len(MirPlaceRec, store.places)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) }
+            if i.place != 0 && i.op != mir_op_c_callback_owner_register() && i.op != mir_op_c_callback_owner_release() && !mir_vid_valid(i.place, __s0_buffer_len(MirPlaceRec, store.places)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) }
             if i.op == mir_op_cleanup_push() && i.place != 0 { let owner_place = __s0_buffer_get(MirPlaceRec, store.places, i.place - 1)
                 if owner_place.function != i.function || owner_place.kind != mir_place_local() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, 0, id, 0, 0, i.place)) } }
             if ((mask / 16) % 2 == 1) && !mir_vtype_exists(store, i.type_op) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_reference(), i.function, i.block, id, 0, 0, i.type_op, id, 0, 0, i.type_op)) }

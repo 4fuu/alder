@@ -39,6 +39,7 @@ fn mir_type_kind_c_ptr() -> U64 { return 23 }
 fn mir_type_kind_c_const_ptr() -> U64 { return 24 }
 fn mir_type_kind_c_named() -> U64 { return 25 }
 fn mir_type_kind_c_string() -> U64 { return 26 }
+fn mir_type_kind_c_callback_owner() -> U64 { return 27 }
 fn mir_type_unit() -> U64 { return 1 }
 fn mir_type_bool() -> U64 { return 2 }
 fn mir_type_i8() -> U64 { return 3 }
@@ -218,6 +219,11 @@ fn mir_op_c_addr() -> U64 { return 110 }
 // c.callback.make pairs one noncapturing Alder function with a bound C
 // function-pointer type. Its result is the callback type operand.
 fn mir_op_c_callback_make() -> U64 { return 111 }
+
+// c.callback.owner.register creates the retained owner value; its metadata
+// fields are documented in docs/mir.md.
+fn mir_op_c_callback_owner_register() -> U64 { return 112 }
+fn mir_op_c_callback_owner_release() -> U64 { return 114 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }

@@ -548,7 +548,14 @@ Implemented expressions include:
   recorded gap in ROADMAP.
 
 A binding block may also declare `callback type Name = "spelling" (params)
--> result` for a C function-pointer typedef. Inside `unsafe c`, a
+-> result` for a C function-pointer typedef. Only `unsafe c` may call
+`c.CallbackOwner.register(set, clear, wait, target, context)`; it returns
+`Option` of a compiler-owned affine owner, copies the C ABI context into
+stable owner storage, and its `using` cleanup clears, waits, then frees. A
+nonzero clear terminates with status 101. Callbacks from foreign threads are
+outside this surface until the ABI/thread slice.
+
+ Inside `unsafe c`, a
 `c.callback(name)` argument supplies a nonretained callback for one raw call;
 the target must be a top-level, non-generic, noncapturing function with the
 bound C ABI signature. Callback values are not first-class Alder values:
