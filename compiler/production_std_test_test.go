@@ -52,14 +52,12 @@ pub fn main() -> I32 {
     let bad: Result(U64, String) = Err("boom")
     if test.expect_err(U64, String, bad) != "boom" { return 2 }
 
-    // Affine payloads survive the named arm and are cleaned on the discarded
-    // arm: expect_ok moves the success owner out, expect_err drops an Ok owner
-    // through its cleanup.
+    // expect_ok moves an affine success owner out. expect_err's Ok arm is
+    // copyable-only because it discards the payload on a terminating path;
+    // its Err arm can still return an affine error.
     let owned: Result(Holder, String) = Ok(Holder(value: 2))
     using moved = test.expect_ok(Holder, String, owned)
     if moved.value != 2 { return 9 }
-    let unowned: Result(Holder, String) = Err("kept")
-    if test.expect_err(Holder, String, unowned) != "kept" { return 10 }
 
     let case_list = test.cases(4, 7)
     if case_list.len() != 4 { return 3 }
@@ -210,8 +208,9 @@ pub fn main() -> I32 {
 }
 
 // expect_ok displays the error on the wrong arm, so the error type must
-// implement Display. A plain enum without that impl is rejected at the call.
-func TestProductionStdTestRejectsNonDisplayError(t *testing.T) {
+// implement Display. expect_err discards the Ok payload on a terminating
+// path, where cleanup does not run, so an affine T is rejected at the call.
+func TestProductionStdTestRejections(t *testing.T) {
 	cc, err := exec.LookPath("gcc")
 	if err != nil {
 		t.Skip("gcc not available")
@@ -223,9 +222,12 @@ func TestProductionStdTestRejectsNonDisplayError(t *testing.T) {
 	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
 	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
 
-	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
-		"alder.toml": stdTestManifest,
-		"src/main.al": `module hello.main
+	cases := []struct {
+		name, source, want string
+	}{
+		{
+			name: "non-display-error",
+			source: `module hello.main
 
 import std.test
 
@@ -240,11 +242,47 @@ pub fn main() -> I32 {
     return 1
 }
 `,
-	}, "run")
-	if result.status == 0 {
-		t.Fatalf("non-Display error accepted: %+v", result)
+			want: "does not implement a trait required here",
+		},
+		{
+			name: "affine-ok-payload",
+			source: `module hello.main
+
+import std.test
+
+pub type Holder {
+    value: U64
+}
+
+impl Cleanup for Holder {
+    fn cleanup(take self) -> Unit {
+        return
+    }
+}
+
+pub fn main() -> I32 {
+    let held: Result(Holder, String) = Ok(Holder(value: 1))
+    let why = test.expect_err(Holder, String, held)
+    if why == "kept" { return 0 }
+    return 1
+}
+`,
+			want: "affine owner reaches function exit without an ownership transfer",
+		},
 	}
-	if !strings.Contains(result.stderr, "does not implement a trait required here") {
-		t.Fatalf("diagnostic = %q", result.stderr)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			result := runProductionCompilerEnv(t, exe, t.TempDir(), env, map[string]string{
+				"alder.toml":  stdTestManifest,
+				"src/main.al": tc.source,
+			}, "run")
+			if result.status == 0 {
+				t.Fatalf("%s accepted: %+v", tc.name, result)
+			}
+			if !strings.Contains(result.stderr, tc.want) {
+				t.Fatalf("%s diagnostic = %q, want %q", tc.name, result.stderr, tc.want)
+			}
+		})
 	}
 }

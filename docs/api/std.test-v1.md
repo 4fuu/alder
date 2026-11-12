@@ -115,8 +115,13 @@ requires the test runner's source map and is deferred.
   payload to the caller.
 - `expect_err` does not format the discarded `Ok` payload, so `T` needs no
   `Display` bound. `expect_ok` displays the error, so `E: type(Display)`.
-  Both take the result by `take`: an affine payload transfers to the helper,
+  Both take the result by `take`: an affine error transfers to the helper,
   and a copyable result leaves the caller's binding usable.
+- `expect_err`'s `T` must be copyable. Its `Ok` arm discards the payload on a
+  terminating path, where Alder cleanup does not run, so an affine `T` is
+  rejected at the call; use `match` directly when the success payload owns a
+  resource. `expect_ok` returns an affine `T` by transfer and has no such
+  restriction.
 - `temp_file` and `temp_dir` return affine owners built by `std.fs`; cleanup
   closes and removes them unless the caller explicitly keeps them. A setup
   failure is an invariant violation: ordinary recoverable code uses
