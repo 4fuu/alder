@@ -224,7 +224,7 @@ unreachable
 ```
 
 - Block arguments must exactly match target block parameter types.
-- A switch dispatches on an enum-like value: a declared enum, an option (`none`, `some`), or a result (`ok`, `err`). A case may bind the variant payload as a new value; the case `default` (represented as a case with an empty variant name) is allowed at most once. A switch must cover every variant of its operand type or contain a default case.
+- A switch dispatches on an enum-like value: a declared enum, an option (`none`, `some`), or a result (`ok`, `err`). A case may bind the variant payload as a new value; a payload whose type is `unit` has no value to bind and must be written without a binding. The case `default` (represented as a case with an empty variant name) is allowed at most once. A switch must cover every variant of its operand type or contain a default case.
 - `return` and `fail` both exit with a value of the function's result type; `fail` marks the failure path. A `return` without an operand returns `unit`.
 - `panic` is a MIR 2 valueless, successor-less checked-failure exit. A checked
   edge may reach it only after explicit cleanup of current-function cleanup

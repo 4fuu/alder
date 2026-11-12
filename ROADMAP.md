@@ -1556,16 +1556,11 @@ foundation at `sysroot/std/io.al`: the `Reader`, `Writer`, and `Seek` traits
 `from_errno`, `Display`, and the prelude `Error` implementation, the
 `read_exact`, `write_all`, and `read_to_end` helpers, the host-free
 `ByteCursor` and `ByteSink` streams, and the buffered `BufReader`/`BufWriter`.
-`ByteSink` is temporarily capacity-bounded (`new` reserves 4096 bytes,
-`with_capacity` selects another size, and a full sink reports a short write);
-borrowed-field provenance removes the bound. Evidence:
-`compiler/production_io_test.go` runs the installed sysroot module through the
-production driver and checks cursor advancement, short reads, end of stream,
-the default `copy_to`, the error report, line reads and refills across a
-two-byte buffer, buffered write ordering through a validating sink, the
-`ByteSink` capacity boundary, and the mutable-place rejection for a
-`let`-bound reader. The core, buffered, and capacity programs also run under
-ASan/UBSan.
+Evidence: `compiler/production_io_test.go` runs the installed sysroot module
+through the production driver and checks cursor advancement, short reads, end
+of stream, the default `copy_to`, the error report, line reads and refills
+across a two-byte buffer, buffered write ordering through a validating sink,
+and the mutable-place rejection for a `let`-bound reader.
 
 `into_source`/`into_sink` return the wrapped owner through the
 consumed-field-move rule (`take self` moves one direct field); `into_sink`
@@ -1992,28 +1987,22 @@ The following items are not part of the current implementation scope:
   already hold.
 - a mutable view formed directly from a field (`self.buffer.slice_mut(...)`):
   field loads are value copies, so a view of one would write the copy. The
-  checker rejects the shape with diagnostic 307; `BufReader`/`BufWriter` copy
-  the field to a local and are themselves caught by the interim storage rule
-  below until owner-domain provenance lands. A field-rooted mutable view needs
-  a Vec-view MIR operation over `safe_mut` storage.
-- per-mut-parameter owner-domain provenance: a `mut self` receiver or `mut`
-  parameter borrows the caller's place, but its value header is still loaded
-  and materialized in the callee's function domain. Growing a `Vec` or
-  replacing a `String`, `Bytes`, `Map`, `Set`, or relocatable aggregate through
-  such a field therefore leaves the caller pointing at storage destroyed on
-  return. Diagnostic 333 rejects the affected pushes, inserts, removes, and
-  assignments until the provenance contract lands; the functional-builder
-  rebinding pattern remains supported. The intended fix attaches the owning
-  domain to the reference itself (a hidden operand that travels through
-  delegated calls and the `mut self` receiver), uses that domain for growth
-  and replacement, carries it through `copy_to_domain`/caller-result storage,
-  and adds verifier invariants that every stored header's domain outlives the
-  borrower. The regression set must include the ASan field-receiver repro,
-  `std.io` `write_all` into `ByteSink` read back in `main`,
-  `m75-field-receiver.al`, and in-place `std.process.Command` builders. Until
-  then `std.io` buffered streams copy bytes into preallocated field storage,
-  `ByteSink` is capacity-bounded, and builders use functional updates.
-  Docs: [Memory and Resources](docs/memory-and-resources.md).
+  checker rejects the shape with diagnostic 307 and `BufReader`/`BufWriter`
+  copy the field to a local, take the view, and store it back. A field-rooted
+  mutable view needs a Vec-view MIR operation over `safe_mut` storage.
+- returning an affine `c.CString` through a `match` arm: the affine flow
+  analysis requires the owner to be transferred on every reachable path or
+  on none, and a branch that returns a `While`/`match` expression value does
+  not count as a transfer. Minimal repro:
+  `fn make(text: String) -> Result(c.CString, U64) { return match c.CString(text) { Some(value) => Ok(value) None => Err(1) } }`
+  fails with "affine owner must be transferred on every reachable path or on
+  none". `std.io` avoids it by building host paths in a `Vec(U8)` buffer.
+- a local binding that shadows a module import is still parsed as the module
+  namespace in a dotted call. With `import hello.util` and a binding named
+  `util`, `util.count()` is parsed as an associated call and the checker
+  reports diagnostic 41 (wrong argument count). Minimal repro:
+  `import hello.util` then `fn probe(util: util.Thing) -> U64 { return util.count() }`.
+  Selected imports (`import hello.util { Thing }`) are unaffected.
 
 ## LLVM Reconsideration Gate
 

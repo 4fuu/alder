@@ -1062,10 +1062,20 @@ fn lower_try_option(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     let ok_block = try lower_add_block(d, value.state, function, "bb_try_ok")
     let err_block = try lower_add_block(d, ok_block.state, function, "bb_try_err")
     let ok_type = try lower_type(d, source_state, store, err_block.state, checked.ok_type)
-    let ok_value = try mir_add_value(d, ok_type.state.mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
-    let term = try mir_add_terminator(d, ok_value.store, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))
+    // A unit payload has no value to bind: a switch case binding of unit type
+    // is invalid in MIR, so the some case carries no payload value and the
+    // try expression itself is the unit value 0.
+    let unit_ok = lower_checked_unit(store, checked.ok_type)
+    var ok_id: U64 = 0
+    var ok_mir = ok_type.state.mir
+    if !unit_ok {
+        let ok_value = try mir_add_value(d, ok_mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
+        ok_id = ok_value.id
+        ok_mir = ok_value.store
+    }
+    let term = try mir_add_terminator(d, ok_mir, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))
     var current = lower_with_mir(ok_type.state, term.store)
-    let ok_case = try lower_add_switch_case(d, current, term.id, 0, "some", ok_value.id, ok_block.id)
+    let ok_case = try lower_add_switch_case(d, current, term.id, 0, "some", ok_id, ok_block.id)
     let none_case = try lower_add_switch_case(d, ok_case.state, term.id, 1, "none", 0, err_block.id)
     current = none_case.state
     let result_use = lower_use_by_role(store, owner, 8, 0)
@@ -1080,7 +1090,7 @@ fn lower_try_option(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     let retained = try lower_retain_exit_value(d, source_state, store, constructed.state, owner, function, err_block.id, owner_result.checked_type, wrapped.id)
     current = try lower_cleanup_exits(d, source_state, store, retained.state, owner, function, err_block.id, environment, 0, 3)
     let failed = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: err_block.id, kind: mir_term_fail(), value: retained.id, target: 0, then_block: 0, else_block: 0))
-    return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_value.id))
+    return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_id))
 }
 
 fn lower_type(d: Domain, source_state: State, store: CheckStore, state: LowerState, checked_type: U64) -> Result(LowerStep, __s0_Error) {
@@ -5126,11 +5136,21 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let err_block = try lower_add_block(d, ok_block.state, function, "bb_try_err")
         let ok_type = try lower_type(d, source_state, store, err_block.state, checked.ok_type)
         let err_type = try lower_type(d, source_state, store, ok_type.state, checked.error_type)
-        let ok_value = try mir_add_value(d, err_type.state.mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
-        let err_value = try mir_add_value(d, ok_value.store, function, try lower_decimal_name(d, "try_err", expression_id), err_type.id, mir_value_def_switch_case(), source_block, 2)
+        // `try` on a Result(Unit, E) has no ok payload to bind. A switch
+        // case binding of unit type is invalid in MIR, so the ok case omits
+        // its payload and the try expression is the unit value 0.
+        let unit_ok = lower_checked_unit(store, checked.ok_type)
+        var ok_id: U64 = 0
+        var ok_mir = err_type.state.mir
+        if !unit_ok {
+            let ok_value = try mir_add_value(d, ok_mir, function, try lower_decimal_name(d, "try_ok", expression_id), ok_type.id, mir_value_def_switch_case(), source_block, 1)
+            ok_id = ok_value.id
+            ok_mir = ok_value.store
+        }
+        let err_value = try mir_add_value(d, ok_mir, function, try lower_decimal_name(d, "try_err", expression_id), err_type.id, mir_value_def_switch_case(), source_block, 2)
         let term = try mir_add_terminator(d, err_value.store, MirTermRec(function: function, block: source_block, kind: mir_term_switch(), value: value.id, target: 0, then_block: 0, else_block: 0))
         var current = lower_with_mir(err_type.state, term.store)
-        let ok_case = try lower_add_switch_case(d, current, term.id, 0, "ok", ok_value.id, ok_block.id)
+        let ok_case = try lower_add_switch_case(d, current, term.id, 0, "ok", ok_id, ok_block.id)
         let err_case = try lower_add_switch_case(d, ok_case.state, term.id, 1, "err", err_value.id, err_block.id)
         current = err_case.state
         let result_use = lower_use_by_role(store, owner, 8, 0)
@@ -5145,7 +5165,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         let retained = try lower_retain_exit_value(d, source_state, store, constructed.state, owner, function, err_block.id, owner_result.checked_type, wrapped.id)
         current = try lower_cleanup_exits(d, source_state, store, retained.state, owner, function, err_block.id, environment, 0, 3)
         let failed = try mir_add_terminator(d, current.mir, MirTermRec(function: function, block: err_block.id, kind: mir_term_fail(), value: retained.id, target: 0, then_block: 0, else_block: 0))
-        return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_value.id))
+        return Ok(LowerStep(state: lower_with_mir(current, failed.store), id: ok_id))
     }
     return Ok(LowerStep(state: lower_invalid(state), id: 0))
 }
