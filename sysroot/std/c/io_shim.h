@@ -15,8 +15,20 @@
 #ifndef IO_SHIM_H
 #define IO_SHIM_H
 
+/* A build or an earlier libc header may already have selected a feature
+ * surface. Never redefine those macros: on newer glibc, features.h predefines
+ * _POSIX_C_SOURCE, and -Werror turns a redundant define into a build failure.
+ * An existing selection of at least POSIX.1-2008 already declares everything
+ * this header uses. */
+#ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
+#ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
 
 #include <dirent.h>
 #include <errno.h>
