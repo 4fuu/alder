@@ -92,6 +92,12 @@ fresh root domain, which the wrapper destroys exactly once after normal return.
 Null context or failed root initialization returns
 `ALDER_PROGRAM_FAILURE_STATUS` deterministically.
 
+The hosted driver installs the process vector with
+`alder_host_set_args(argc, argv)` before calling `alder_program_entry`. The
+runtime stores it read-only for the rest of the process; `std.env.arguments`
+copies it into Alder-owned values. A custom C driver that does not call the
+setter exposes an empty argument list, not host pointers.
+
 ## Binding and target-ABI probes
 
 `compile --emit=bind` emits only the binding translation unit: each binding

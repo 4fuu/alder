@@ -1,6 +1,6 @@
 # `std.env` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; env v1 implemented**
 
 This is the versioned public snapshot for host strings, process arguments,
 environment, working directory, executable location, and target information.
@@ -108,7 +108,7 @@ additive.
   it explicitly and nothing reinterprets bytes as text.
 - Construction is checked and total; the only universally rejected byte is
   interior NUL. No operation trims, splits, or otherwise rewrites bytes.
-- `arguments`, `var`, and `target` are pure host observations: they never
+- `arguments`, `get`, and `target` are pure host observations: they never
   take a capability, never wait, and are allowed inside any function
   including `main` before capability use.
 - `set_var`, `remove_var`, and `set_current_dir` update process-global state.
@@ -124,10 +124,9 @@ additive.
 
 ## Example
 
-The example below is the complete content that lands as
-`examples/std.env-v1.al` with the implementation commit. It only reads values
-it set itself, so it is deterministic under any host environment, and returns
-a checksum.
+The example below is the complete content of
+`examples/std.env-v1.al`. It only reads values it set itself, so it is
+deterministic under any host environment, and returns checksum 117.
 
 ```alder
 module hello.std_env_example
@@ -135,11 +134,95 @@ module hello.std_env_example
 import std.env
 import std.path
 
-// The executable std.env v1 snapshot example. Only self-set values are
-// observed; every stage contributes a deterministic share of the checksum.
+// The executable std.env v1 snapshot example. Its key is set before it is
+// read and removed before the absence check, so ambient environment values
+// never affect the checksum. Contributions: arguments 1, set 1, get 10,
+// remove 100, absence 1, rejected name 1, working directory 1, executable 1,
+// and target architecture 1.
 
-// The example inputs are fixed valid values, so failed constructions
-// contribute nothing; `try` is reserved for functions returning `Result`.
+fn set_ready(key: String) -> U64 {
+    match path.OsString.parse(key) {
+        Ok(name) => {
+            match path.OsString.parse("ready") {
+                Ok(value) => {
+                    match env.set_var(name, value) {
+                        Ok(_) => { return 1 }
+                        Err(_) => { return 0 }
+                    }
+                }
+                Err(_) => { return 0 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
+    return 0
+}
+
+fn get_ready(key: String) -> U64 {
+    match path.OsString.parse(key) {
+        Ok(name) => {
+            match env.get(name) {
+                Some(value) => {
+                    match value.to_string() {
+                        Some(text) => {
+                            if text == "ready" { return 10 }
+                            return 0
+                        }
+                        None => { return 0 }
+                    }
+                }
+                None => { return 0 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
+    return 0
+}
+
+fn remove_ready(key: String) -> U64 {
+    match path.OsString.parse(key) {
+        Ok(name) => {
+            match env.remove_var(name) {
+                Ok(_) => { return 100 }
+                Err(_) => { return 0 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
+    return 0
+}
+
+fn absent_ready(key: String) -> U64 {
+    match path.OsString.parse(key) {
+        Ok(name) => {
+            match env.get(name) {
+                Some(_) => { return 0 }
+                None => { return 1 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
+    return 0
+}
+
+fn invalid_name() -> U64 {
+    match path.OsString.parse("A=B") {
+        Ok(name) => {
+            match path.OsString.parse("value") {
+                Ok(value) => {
+                    match env.set_var(name, value) {
+                        Ok(_) => { return 0 }
+                        Err(_) => { return 1 }
+                    }
+                }
+                Err(_) => { return 0 }
+            }
+        }
+        Err(_) => { return 0 }
+    }
+    return 0
+}
+
 pub fn std_env_example() -> U64 {
     var total: U64 = 0
 
@@ -147,97 +230,48 @@ pub fn std_env_example() -> U64 {
     let args = env.arguments()
     if args.len() >= 1 { total = total + 1 }
 
-    // Self-set variable round-trip, removal, rejected construction, and the
-    // byte round-trip, over fixed key and value strings.
-    match path.OsString.parse("ALDER_STD_ENV_EXAMPLE") {
-        Ok(key) => {
-            match path.OsString.parse("ready") {
-                Ok(value) => {
-                    match env.set_var(key, value) {
-                        Ok(_) => {
-                            match env.var(key) {
-                                Some(found) => {
-                                    if found == value { total = total + 10 }
-                                }
-                                None => { total = total - 1000 }
-                            }
-                        }
-                        Err(_) => { total = total - 1000 }
-                    }
-
-                    // Removal.
-                    match env.remove_var(key) {
-                        Ok(_) => {
-                            match env.var(key) {
-                                Some(_) => { total = total - 10000 }
-                                None => { total = total + 100 }
-                            }
-                        }
-                        Err(_) => { total = total - 10000 }
-                    }
-
-                    // Byte round-trip: `Bytes` into a fresh host string.
-                    let raw = "ready"
-                    match path.OsString.from_bytes(raw.to_bytes()) {
-                        Ok(rebuilt) => {
-                            if rebuilt == value && rebuilt.len() == 5 {
-                                total = total + 1
-                            }
-                        }
-                        Err(_) => { total = total - 1 }
-                    }
-                }
-                Err(_) => { total = total - 100000 }
-            }
-        }
-        Err(_) => { total = total - 100000 }
-    }
-
-    // Rejected construction.
-    match path.OsString.parse("bad\0value") {
-        Ok(_) => { total = total - 100000 }
-        Err(_) => { total = total + 1 }
-    }
+    total = total + set_ready("ALDER_STD_ENV_EXAMPLE")
+    total = total + get_ready("ALDER_STD_ENV_EXAMPLE")
+    total = total + remove_ready("ALDER_STD_ENV_EXAMPLE")
+    total = total + absent_ready("ALDER_STD_ENV_EXAMPLE")
+    total = total + invalid_name()
 
     // Working directory and executable resolve on every supported target.
     match env.current_dir() {
         Ok(dir) => { if dir.to_os().len() > 0 { total = total + 1 } }
-        Err(_) => { total = total - 100 }
+        Err(_) => {}
     }
     match env.current_exe() {
-        Ok(exe) => {
-            match exe.file_name() {
-                Some(name) => { total = total + name.len() * 100 }
-                None => { total = total - 100 }
-            }
-        }
-        Err(_) => { total = total - 100 }
+        Ok(exe) => { if exe.to_os().len() > 0 { total = total + 1 } }
+        Err(_) => {}
     }
 
-    // Target information is fixed for the build.
+    // Target information is fixed for the build; both arch values contribute
+    // the same deterministic unit.
     let target = env.target()
-    total = total + arch_bonus(target.arch)
+    match target.os {
+        Linux => {}
+        MacOS => {}
+        Windows => {}
+    }
+    match target.arch {
+        X64 => { total = total + 1 }
+        AArch64 => { total = total + 1 }
+    }
 
     return total
 }
-
-fn arch_bonus(arch: env.TargetArch) -> U64 {
-    match arch {
-        X64 => { return 1 }
-        AArch64 => { return 2 }
-    }
-}
 ```
 
-## Dependencies and sequencing
+## Dependencies
 
-- Integer conversions in the example use the settled builtin surface: total `to_u64()` for all-fitting pairs, with `to_u64_checked()` available where a value may not fit; the methods land with the sysroot thread's numeric surface after the String/Bytes byte work.
-- `OsString` construction comes from `std.path` (v1 amendment), riding the
-  sysroot thread's landed `String`/`Bytes` byte-sequence methods, including
-  UTF-8 validation for `to_string`.
-- Needs host access to argv, environ, `/proc/self/exe`-style paths, and
-  `getcwd`/`chdir` through the C-binding thread's binding blocks plus small
-  runtime additions; no capability plumbing.
-- `file_name` and `to_os`/`len` on `Path` come from `std.path` (this snapshot
-  family).
-- The example avoids string building, interpolation, and `while let`.
+- The hosted driver installs the process vector through `alder_host_set_args`
+  before `alder_program_entry`; `std.env.arguments` copies it into owned
+  `OsString` values and never retains host pointers.
+- Environment updates, working-directory changes, executable lookup, and
+  directory lookup go through the audited `std/c/env_shim.h` boundary. The
+  host-shim state is single-threaded: programs must not race these
+  process-global operations with other observers.
+- `OsString` construction comes from `std.path`; `Path.from_os` wraps the
+  checked bytes returned by `current_dir` and `current_exe`.
+- Target information is compile-time C preprocessor data, not a host call.

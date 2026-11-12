@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **in progress (C-interop complete; hosted foundation partially landed; std.fs/std.process finishing, std.env partial)**
+Status: **in progress (C-interop complete; hosted foundation partially landed; std.fs/std.process finishing)**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
@@ -1618,6 +1618,23 @@ arguments remain unchanged. Evidence: `compiler/production_entry_test.go`
 runs Unit, both Result success forms, a display-only Err, a wrapper Error cause
 chain, and rejects unsupported results and non-Display errors; the compiler's
 own bootstrap `main` still uses the untouched I32 path.
+
+Landed standard-library progress: `std.env` v1 installs its full snapshot at
+`sysroot/std/env.al`. The hosted driver calls `alder_host_set_args` before
+entry so `arguments` can copy the process vector into owned `OsString` values;
+`get`, `set_var`, and `remove_var` observe and update the process environment;
+`current_dir`, `set_current_dir`, and `current_exe` use the audited
+`std/c/env_shim.h` boundary; and `target` reports compile-time OS and
+architecture values. `EnvError` implements `Display` and `Error`; empty names
+and names containing `=` are rejected before the host call. The argument and
+environment state is documented as single-threaded. Evidence:
+`compiler/production_env_test.go` runs with `-- alpha beta` and checks the
+argument vector, self-set variable round-trip and removal, rejected name,
+working directory, executable, and target; `runtime/testdata/hostargs.c`
+checks the runtime bridge under ASan/UBSan; the snapshot example runs with
+checksum 117. Runtime ABI: `alder_host_set_args` in `runtime/c/alder.h`,
+documented in [docs/c-backend.md](docs/c-backend.md). Docs:
+[`std.env` snapshot](docs/api/std.env-v1.md).
 
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with

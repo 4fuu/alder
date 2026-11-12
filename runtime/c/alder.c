@@ -729,3 +729,31 @@ bool alder_table_remove(AlderTable *table, AlderTableId id) {
     table->count -= 1;
     return true;
 }
+
+/* Hosted program arguments. The driver installs the process vector once
+ * before Alder code runs; these globals are read-only afterwards and are
+ * deliberately single-threaded, matching the hosted-entry contract. A NULL
+ * vector or a nonpositive count leaves the accessors empty. */
+static int alder_host_argc;
+static char **alder_host_argv;
+
+void alder_host_set_args(int argc, char **argv) {
+    if (argc <= 0 || argv == NULL) {
+        alder_host_argc = 0;
+        alder_host_argv = NULL;
+        return;
+    }
+    alder_host_argc = argc;
+    alder_host_argv = argv;
+}
+
+int alder_host_arg_count(void) {
+    return alder_host_argc;
+}
+
+const char *alder_host_arg(int index) {
+    if (index < 0 || index >= alder_host_argc || alder_host_argv == NULL) {
+        return NULL;
+    }
+    return alder_host_argv[index];
+}

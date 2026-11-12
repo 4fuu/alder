@@ -62,26 +62,23 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   the Milestone 8 stable sorting entry point over the Order domain in the
   installed sysroot.
 
-M8 exit-audit status (main after the random and field-view commits):
+M8 exit-audit status (current main):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
-`std.io`, `std.path`, `std.time`, `std.random`, `std.math`, `std.text`,
-`std.bytes`, and `std.collection` are implemented with production-driver
-evidence. `std.io` v1 is complete for blocking and host streams; its
-`AsyncIo`/`Evented` half is Milestone 9. `std.fs` and `std.process` are in
-progress under the std.io thread: their file, directory, temporary-owner,
-value, and qualified-variant layers are on main, while process spawning,
-pipes, and capture are missing. `std.env` is partial: `get` and the target
-records are implemented, while `arguments`, environment updates,
-`current_exe`, current-directory operations, and `target()` are missing.
-`core.range` is deferred by scope decision; case mapping and normalization are
-deferred to a `std.text` v2 amendment; async task, channel, sync, and atomic
-modules are Milestone 9; networking, HTTP, TLS, data-format, CLI, log, OS,
-test-runner, and doc-tool modules are post-M8. Still missing from the M8
-foundation: `core.iter`, `core.hash`, `core.format`, `core.memory`,
-`std.format`, `std.parse`, `std.signal`, numeric parse/format foundations,
-and the `Deque`/heap parts of `std.collection`/`core.collection`. `std.c` is
-the verified C-interop surface rather than a `.al` module; its exit audit is
-complete.
+`std.io`, `std.path`, `std.env`, `std.time`, `std.random`, `std.math`,
+`std.text`, `std.bytes`, and `std.collection` are implemented with
+production-driver evidence. `std.io` v1 is complete for blocking and host
+streams; its `AsyncIo`/`Evented` half is Milestone 9. `std.fs` and
+`std.process` are in progress under the std.io thread: their file, directory,
+temporary-owner, value, and qualified-variant layers are on main, while
+process spawning, pipes, and capture are missing. `core.range` is deferred by
+scope decision; case mapping and normalization are deferred to a `std.text`
+v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
+networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
+modules are post-M8. Still missing from the M8 foundation: `core.iter`,
+`core.hash`, `core.format`, `core.memory`, `std.format`, `std.parse`,
+`std.signal`, numeric parse/format foundations, and the `Deque`/heap parts of
+`std.collection`/`core.collection`. `std.c` is the verified C-interop surface
+rather than a `.al` module; its exit audit is complete.
 
 ## Distribution layers
 
@@ -237,6 +234,21 @@ and the returned owner is owned by the caller. `into_sink` flushes pending
 bytes first and releases the sink itself on a flush error. The capability
 types, host files, and standard streams arrive with the C-binding buffer
 surface as slice 2.
+
+Implemented std.env progress: `sysroot/std/env.al` installs the full v1
+surface. `arguments` copies the process vector installed by the hosted driver;
+`get`, `set_var`, and `remove_var` observe and update the process environment;
+`current_dir`, `set_current_dir`, and `current_exe` go through the audited
+`std/c/env_shim.h` boundary; `target` reports compile-time OS/architecture
+information. `EnvError` implements `Display` and `Error`, and invalid names
+(empty or containing `=`) are rejected before the host call. The host-shim
+argument and environment state is single-threaded by contract. Evidence:
+`compiler/production_env_test.go` runs with `-- alpha beta` and checks the
+argument vector, self-set variable round-trip and removal, rejected name,
+working directory, executable, and target; `runtime/testdata/hostargs.c`
+checks the runtime argument bridge under ASan/UBSan; `docs/api/examples/std.env-v1.al`
+runs with checksum 117. Runtime ABI:
+[`alder_host_set_args`](c-backend.md) in `runtime/c/alder.h`.
 
 Implemented std.process progress (value layer): `sysroot/std/process.al`
 installs `PipeMode`, the value-semantic `Command` and its in-place

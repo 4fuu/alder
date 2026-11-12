@@ -199,6 +199,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.env-v1.al": {
+			style:   "project",
+			srcName: "std_env_example.al",
+			mainText: `module hello.main
+
+import hello.std_env_example { std_env_example }
+
+pub fn main() -> I32 {
+    if std_env_example() == 117 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 

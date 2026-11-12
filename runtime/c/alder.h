@@ -689,6 +689,20 @@ bool alder_table_lookup_mut(AlderTable *table, AlderTableId id,
 bool alder_table_remove(AlderTable *table, AlderTableId id);
 
 /* ------------------------------------------------------------------ */
+/* Hosted program arguments                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The host driver calls alder_host_set_args before alder_program_entry, once
+ * per process and before any Alder code runs. The accessors are read-only
+ * afterwards. They exist so std.env.arguments can copy the exact process
+ * vector without exposing host pointers to Alder.
+ */
+void alder_host_set_args(int argc, char **argv);
+int alder_host_arg_count(void);
+const char *alder_host_arg(int index);
+
+/* ------------------------------------------------------------------ */
 /* Diagnostics                                                         */
 /* ------------------------------------------------------------------ */
 

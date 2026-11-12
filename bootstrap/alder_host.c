@@ -1572,7 +1572,7 @@ static bool alderhost_replace(const char *from, const char *to) {
 }
 
 static int alderhost_native_build(struct AlderHostContext *context, bool *built) {
-    const char driver_text[] = "#include <stdint.h>\nextern int32_t alder_program_entry(void *);\nint main(void){int context=0;return (int)alder_program_entry(&context);}\n";
+    const char driver_text[] = "#include <stdint.h>\nextern int32_t alder_program_entry(void *);\nextern void alder_host_set_args(int, char **);\nint main(int argc, char **argv){alder_host_set_args(argc, argv);int context=0;return (int)alder_program_entry(&context);}\n";
     char *binary_temp;
     char *driver_temp;
     FILE *driver;
