@@ -73,6 +73,8 @@ locale state after return.
 `alternate` is unsupported for floats. `zero_pad` inserts zeros after the sign
 when alignment is right; otherwise `core.format.pad` applies the fill and
 width. `Sign.Plus` and `Sign.Space` prefix nonnegative values, including NaN.
+The behavior test changes the process to `de_DE.UTF-8` and skips only when the
+host cannot create it; CI and `.agents/setup` generate that locale.
 Integer kinds (`Decimal`, `HexLower`, `HexUpper`, `Binary`, `Octal`) are
 `InvalidKind`; `Default`/`General`/`Fixed`/`Scientific` are the float kinds.
 

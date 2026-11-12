@@ -1673,8 +1673,11 @@ retained and reported by `finish`. Float spelling is the audited
 numeric locale, lowercase `nan`/`inf`, signed `-0`, and a frozen exponent
 spelling. Evidence: `compiler/production_std_format_test.go` checks general,
 fixed, scientific, F32, sign, zero padding, NaN/inf, -0, `Display`, deferred
-errors, a comma-locale attempt, and ASan/UBSan; the snapshot example runs with
-checksum 1. Docs: [`std.format` snapshot](docs/api/std.format-v1.md).
+errors, and ASan/UBSan; its `de_DE.UTF-8` comma-locale test skips only when
+that locale is unavailable, and CI plus `.agents/setup` generate it. The
+AArch64 and Windows LLP64 lanes compile the std.format/env/io shims as part
+of the cross-target probe. The snapshot example runs with checksum 1. Docs:
+[`std.format` snapshot](docs/api/std.format-v1.md).
 Interpolation syntax remains specified but unimplemented and scheduled
 separately.
 

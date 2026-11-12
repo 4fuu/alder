@@ -26,6 +26,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install comma-decimal locale for formatting tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y locales
+          sudo localedef -i de_DE -f UTF-8 de_DE.UTF-8
       # Canonical Go checks from AGENTS.md and CONTRIBUTING.md.
       - name: gofmt -l .
         run: |

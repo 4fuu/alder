@@ -22,6 +22,10 @@ if ! command -v cc >/dev/null 2>&1; then
   packages+=(build-essential)
 fi
 
+if ! command -v localedef >/dev/null 2>&1 || [[ ! -f /usr/share/i18n/locales/de_DE ]]; then
+  packages+=(locales)
+fi
+
 if ((${#packages[@]} > 0)); then
   if ((EUID == 0)); then
     apt_get=(apt-get)
@@ -34,6 +38,16 @@ if ((${#packages[@]} > 0)); then
   DEBIAN_FRONTEND=noninteractive "${apt_get[@]}" install -y "${packages[@]}"
 else
   printf '%s\n' 'Required system packages are already installed.'
+fi
+
+# Formatting behavior tests use a comma-decimal locale so a locale leak cannot
+# pass silently in C. Generate it once; localedef is idempotent.
+if ! locale -a 2>/dev/null | grep -Eiq '^de_DE\.(utf8|UTF-8)$'; then
+  if ((EUID == 0)); then
+    localedef -i de_DE -f UTF-8 de_DE.UTF-8
+  else
+    sudo localedef -i de_DE -f UTF-8 de_DE.UTF-8
+  fi
 fi
 
 go_version="1.26.5"

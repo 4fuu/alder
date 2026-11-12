@@ -17,8 +17,15 @@
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
+#ifndef _XOPEN_SOURCE
+#define _XOPEN_SOURCE 700
+#endif
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
 
 #include <locale.h>
+#include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -48,8 +55,8 @@ static inline int format_f64_bits(uint64_t bits, int precision, int style,
     memcpy(&value, &bits, sizeof value);
     locale = _create_locale(LC_NUMERIC, "C");
     if (locale == NULL) { return -1; }
-    if (isnan(value)) { written = snprintf(text, sizeof text, "nan"); }
-    else if (isinf(value)) { written = snprintf(text, sizeof text, signbit(value) ? "-inf" : "inf"); }
+    if (value != value) { written = snprintf(text, sizeof text, "nan"); }
+    else if (value > DBL_MAX || value < -DBL_MAX) { written = snprintf(text, sizeof text, value < 0.0 ? "-inf" : "inf"); }
     else if (style == 0) {
         int p;
         written = -1;
@@ -87,8 +94,8 @@ static inline int format_f32_bits(uint32_t bits, int precision, int style,
     memcpy(&value, &bits, sizeof value);
     locale = _create_locale(LC_NUMERIC, "C");
     if (locale == NULL) { return -1; }
-    if (isnan(value)) { written = snprintf(text, sizeof text, "nan"); }
-    else if (isinf(value)) { written = snprintf(text, sizeof text, signbit(value) ? "-inf" : "inf"); }
+    if (value != value) { written = snprintf(text, sizeof text, "nan"); }
+    else if (value > DBL_MAX || value < -DBL_MAX) { written = snprintf(text, sizeof text, value < 0.0 ? "-inf" : "inf"); }
     else if (style == 0) {
         int p;
         written = -1;
@@ -144,8 +151,8 @@ static inline int format_f64_bits(uint64_t bits, int precision, int style,
     c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
     if (c_locale == (locale_t)0) { return -1; }
     previous = uselocale(c_locale);
-    if (isnan(value)) { written = snprintf(text, sizeof text, "nan"); }
-    else if (isinf(value)) { written = snprintf(text, sizeof text, signbit(value) ? "-inf" : "inf"); }
+    if (value != value) { written = snprintf(text, sizeof text, "nan"); }
+    else if (value > DBL_MAX || value < -DBL_MAX) { written = snprintf(text, sizeof text, value < 0.0 ? "-inf" : "inf"); }
     else if (style == 0) {
         int p;
         written = -1;
@@ -186,8 +193,8 @@ static inline int format_f32_bits(uint32_t bits, int precision, int style,
     c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
     if (c_locale == (locale_t)0) { return -1; }
     previous = uselocale(c_locale);
-    if (isnan(value)) { written = snprintf(text, sizeof text, "nan"); }
-    else if (isinf(value)) { written = snprintf(text, sizeof text, signbit(value) ? "-inf" : "inf"); }
+    if (value != value) { written = snprintf(text, sizeof text, "nan"); }
+    else if (value > DBL_MAX || value < -DBL_MAX) { written = snprintf(text, sizeof text, value < 0.0 ? "-inf" : "inf"); }
     else if (style == 0) {
         int p;
         written = -1;

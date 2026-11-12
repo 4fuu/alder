@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,9 @@ func TestProductionStdFormatRuns(t *testing.T) {
 	repoRoot, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !commaLocaleAvailable(t, cc) {
+		t.Skip("de_DE.UTF-8 numeric locale is unavailable; install locales and run locale-gen")
 	}
 	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
 	env := sysrootEnv(filepath.Join(repoRoot, "sysroot"))
@@ -133,4 +137,29 @@ pub fn main() -> I32 {
 		t.Fatalf("std.format behavior failed: %+v", result)
 	}
 	runSanitizedProject(t, cc, repoRoot, dir, "hello")
+}
+
+// commaLocaleAvailable probes the host C library for the comma-decimal
+// locale the formatting test changes to. The test must not silently pass in
+// the C locale: CI installs the locale and fails here if the probe regresses.
+func commaLocaleAvailable(t *testing.T, cc string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "locale_probe.c")
+	exe := filepath.Join(dir, "locale_probe")
+	const text = `#include <locale.h>
+int main(void) {
+    return setlocale(LC_NUMERIC, "de_DE.UTF-8") == NULL;
+}
+`
+	if err := os.WriteFile(source, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(cc, "-std=c11", "-Wall", "-Wextra", "-Werror", source, "-o", exe).CombinedOutput(); err != nil {
+		t.Fatalf("compile comma-locale probe: %v\n%s", err, out)
+	}
+	if err := exec.Command(exe).Run(); err != nil {
+		return false
+	}
+	return true
 }

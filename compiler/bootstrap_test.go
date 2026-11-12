@@ -623,6 +623,21 @@ func TestAlderBindProbeCrossTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s bind probe: %v\n%s", targetCC, err, output)
 	}
+
+	// The sysroot C shims are compiled by generated programs on every target.
+	// Compile them in the same cross-target lane so the Windows locale branch
+	// and the POSIX shim include paths are checked even though only the host
+	// runs the formatting behavior tests.
+	shims := filepath.Join(dir, "sysroot_shims.c")
+	shimText := "#include <stddef.h>\n#include \"std/c/env_shim.h\"\n#include \"std/c/format_shim.h\"\n#ifndef _WIN32\n#include \"std/c/io_shim.h\"\n#endif\nint main(void) { return 0; }\n"
+	if err := os.WriteFile(shims, []byte(shimText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shimArgs := append(strictC11Flags(), "-fsyntax-only", "-I", filepath.Join(root, "sysroot"), shims)
+	shimOutput, err := exec.Command(targetCC, shimArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s sysroot shim probe: %v\n%s", targetCC, err, shimOutput)
+	}
 }
 
 func TestCommittedSourceBootstrap(t *testing.T) {
