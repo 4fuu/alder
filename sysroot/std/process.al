@@ -4,11 +4,9 @@ import std.env { PlatformInfo }
 import std.io { ChildStatus, HostChild, HostFile, Io, IoError, PollPair, Reader, Writer }
 import std.path { OsString, Path }
 
-// The Milestone 8 process surface, value layer first. The public snapshot
-// (docs/api/std.process-v1.md) fixes the full surface; this module currently
-// installs the pure value types and builder methods. Spawning, child
-// handles, pipe ends, and output capture wait for the std.io slice 2
-// capability and host handles.
+// The Milestone 8 process surface. The public snapshot
+// (docs/api/std.process-v1.md) fixes the full surface, including the receiver
+// forms `command.spawn(io)`, `command.status(io)`, and `command.output(io)`.
 
 /// The wiring selected for one standard stream. The default is `Inherit`.
 pub enum PipeMode {
@@ -111,16 +109,16 @@ impl Command {
     }
 
     /// Spawns the child. The `Command` stays owned and reusable.
-    fn spawn(I: type(Io), io: I, command: Command) -> Result(Child(I), ProcessError) {
-        return spawn_command(io, command)
+    fn spawn(I: type(Io), self, io: I) -> Result(Child(I), ProcessError) {
+        return spawn_command(io, self)
     }
 
     /// Spawns with default wiring, waits, and returns the exit status.
-    fn status(I: type(Io), io: I, command: Command) -> Result(ExitStatus, ProcessError) {
-        if command.stdout_mode != Inherit || command.stderr_mode != Inherit {
+    fn status(I: type(Io), self, io: I) -> Result(ExitStatus, ProcessError) {
+        if self.stdout_mode != Inherit || self.stderr_mode != Inherit {
             return Err(InvalidConfiguration)
         }
-        let spawned = match spawn_command(io, command) {
+        let spawned = match spawn_command(io, self) {
             Ok(value) => value
             Err(error) => return Err(error)
         }
@@ -134,11 +132,11 @@ impl Command {
 
     /// Spawns with standard output and error piped, captures both to end of
     /// stream, waits, and returns status plus captured bytes.
-    fn output(I: type(Io), io: I, command: Command) -> Result(Output, ProcessError) {
-        if command.stdout_mode != Piped || command.stderr_mode != Piped {
+    fn output(I: type(Io), self, io: I) -> Result(Output, ProcessError) {
+        if self.stdout_mode != Piped || self.stderr_mode != Piped {
             return Err(InvalidConfiguration)
         }
-        let spawned = match spawn_command(io, command) {
+        let spawned = match spawn_command(io, self) {
             Ok(value) => value
             Err(error) => return Err(error)
         }

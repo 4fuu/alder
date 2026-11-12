@@ -468,7 +468,7 @@ Implemented std.test progress: `sysroot/std/test.al` installs the
 runner-independent slice. `fail`, `assert`, `assert_eq`, and `assert_ne` are
 thin `Unit` wrappers over `core.panic`; `expect_ok`/`expect_err` return the
 named payload and terminate with a fixed diagnostic on the wrong arm (with the
-error displayed for `expect_ok`); `temp_file`/`temp_dir` turn `std.fs` setup
+error displayed for `expect_ok`); `TempFile.new`/`TempDir.new` turn `std.fs` setup
 failures into termination and return the affine owners; and `Case`/`cases`
 draw deterministic seeds from `std.random.Rng.seeded`. Evidence:
 `compiler/production_std_test_test.go` checks the passing helpers, independently

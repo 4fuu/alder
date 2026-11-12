@@ -1,6 +1,6 @@
 # `std.fs` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot; value layer implemented**
+Status: **Milestone 8 frozen snapshot; implemented**
 
 This is the versioned public snapshot for filesystem access. It is normative
 together with the executable example
@@ -12,13 +12,12 @@ the example file cannot precede the module it imports. The module lives at
 Snapshot v1 covers the affine `File` with `Cleanup`, metadata, directory
 iteration in host order plus the byte-sorted deterministic form, copy,
 rename, remove, canonicalize, permissions query and replace, and temporary
-files and directories that clean up after themselves. The pure value layer
-(`Options` and `Permissions`) is implemented now; host handles, directory
-iteration, metadata, and temporary owners wait for the `std.io` slice 2
-capability and host handles. File and directory
-operations return `IoError` (the shared OS-layer error of `std.io`, as fixed
-by the `files.copy` design example); path-shape failures are unreachable here
-because `Path` construction is checked.
+files and directories that clean up after themselves. The full surface is
+installed on the `std.io` capability, including host handles, directory
+iteration, metadata, and the temporary owners. File and directory operations
+return `IoError` (the shared OS-layer error of `std.io`, as fixed by the
+`files.copy` design example); path-shape failures are unreachable here because
+`Path` construction is checked.
 
 ## Signatures
 
@@ -55,21 +54,17 @@ pub type File(IoType: type(io.Io)) {
     // private: io, handle (one affine io.HostFile), path
 }
 
-// Opening is a module function: the generic implementation parameter of File
-// cannot be inferred at an associated call such as `File.open`.
-impl fs {
-    /// Opens the file for reading.
-    pub fn open(I: type(io.Io), io: I, path: Path) -> Result(File(I), io.IoError)
-    /// Creates or truncates the file for writing.
-    pub fn create(I: type(io.Io), io: I, path: Path) -> Result(File(I), io.IoError)
-    /// Opens for appending, creating the file when absent.
-    pub fn append(I: type(io.Io), io: I, path: Path) -> Result(File(I), io.IoError)
-    /// Opens with explicit flags.
-    pub fn open_options(I: type(io.Io), io: I, path: Path, options: Options)
-        -> Result(File(I), io.IoError)
-}
-
 impl(IoType: type(io.Io)) File(IoType) {
+    /// Opens the file for reading. The associated call infers the capability
+    /// from `io` or from the expected result type.
+    pub fn open(io: IoType, path: Path) -> Result(File(IoType), io.IoError)
+    /// Creates or truncates the file for writing.
+    pub fn create(io: IoType, path: Path) -> Result(File(IoType), io.IoError)
+    /// Opens for appending, creating the file when absent.
+    pub fn append(io: IoType, path: Path) -> Result(File(IoType), io.IoError)
+    /// Opens with explicit flags.
+    pub fn open_options(io: IoType, path: Path, options: Options)
+        -> Result(File(IoType), io.IoError)
     /// Metadata of this file.
     pub fn metadata(mut self) -> Result(Metadata, io.IoError)
     /// Replaces the file's permission mode.
@@ -211,12 +206,11 @@ pub type TempFile(IoType: type(io.Io)) {
     // private: file, path
 }
 
-// Creation is a module function: the generic implementation parameter of
-// TempFile cannot be inferred at an associated call.
-pub fn temp_file(I: type(io.Io), io: I, prefix: String)
-    -> Result(TempFile(I), io.IoError)
-
 impl(IoType: type(io.Io)) TempFile(IoType) {
+    /// Creates a fresh temporary file. The associated call infers the
+    /// capability from `io` or from the expected result type.
+    pub fn new(io: IoType, prefix: String)
+        -> Result(TempFile(IoType), io.IoError)
     /// The file's path.
     pub fn path(self) -> Path
     /// Disarms removal and returns the open file. The file keeps its path;
@@ -236,10 +230,11 @@ pub type TempDir(IoType: type(io.Io)) {
     // private: path
 }
 
-pub fn temp_dir(I: type(io.Io), io: I, prefix: String)
-    -> Result(TempDir(I), io.IoError)
-
 impl(IoType: type(io.Io)) TempDir(IoType) {
+    /// Creates a fresh temporary directory. The associated call infers the
+    /// capability from `io` or from the expected result type.
+    pub fn new(io: IoType, prefix: String)
+        -> Result(TempDir(IoType), io.IoError)
     /// The directory's path.
     pub fn path(self) -> Path
     /// Disarms removal and returns the path.
@@ -259,16 +254,20 @@ installed at `sysroot/std/fs.al`. `File` wraps the capability, its host handle,
 and the path; `finish` moves the handle out and closes it, `keep` transfers the
 owner, and cleanup closes a still-owned handle. `Metadata.modified` uses signed
 `std.io.Timestamp` seconds, so a pre-1970 modification time round-trips.
-Opening is a module function because the generic implementation parameter is
-not inferable at an associated call. Directory iteration is installed:
+Opening is available through the associated constructors `File.open`,
+`File.create`, `File.append`, and `File.open_options`; the capability type is
+inferred from `io` or the expected result type. The module-function forms
+`fs.open`, `fs.create`, `fs.append`, and `fs.open_options` remain as
+compatibility aliases. Directory iteration is installed:
 `Entries` skips the synthetic `.` and `..` entries, `read_dir_sorted` orders by
 exact name bytes, and `remove_dir_all` unlinks symlinks instead of descending
 through them, consulting `io.lstat` whenever the host reports an unknown entry
 kind. The walk has a documented TOCTOU window: v1 has no `openat`/`unlinkat`,
 so a component replaced between the check and the unlink could redirect the
 call. Temporary owners are installed: `temp_root` reads `env.get("TMPDIR")`
-and falls back to `/tmp`; `temp_file`/`temp_dir` use 16 random bytes as a hex
-suffix and retry on `AlreadyExists`. `TempFile` stores the host handle
+and falls back to `/tmp`; `TempFile.new`/`TempDir.new` use 16 random bytes as
+a hex suffix and retry on `AlreadyExists`; the module-function `temp_file`/
+`temp_dir` forms remain as compatibility aliases. `TempFile` stores the host handle
 directly so cleanup closes and unlinks without nesting one consumed field in
 another. `TempDir` is affine because a `Cleanup` implementation marks the record as an
 owner even when its fields are copyable; copying it is a transfer. A generic

@@ -16,12 +16,6 @@ surfaces are written once against `I: type(io.Io)`. No function in this
 module invokes a shell; the argument vector is passed to the target program
 exactly as built, with no quoting or expansion anywhere in the layer.
 
-The receiver signatures below are the frozen target. Until generic associated
-receiver-call inference lands (C-interop item d), the implementation exposes
-the same functions as static associated calls taking the command value:
-`Command.output(io, command)` works, and `command.output(io)` is restored when
-(d) lands.
-
 ## Signatures
 
 ### Command
@@ -65,12 +59,12 @@ impl Command {
     pub fn stdout(mut self, mode: PipeMode) -> Unit
     pub fn stderr(mut self, mode: PipeMode) -> Unit
     /// Spawns the child. The `Command` stays owned and reusable.
-    pub fn spawn(I: type(io.Io), io: I, self) -> Result(Child(I), ProcessError)
+    pub fn spawn(I: type(io.Io), self, io: I) -> Result(Child(I), ProcessError)
     /// Spawns with default wiring, waits, and returns the exit status.
-    pub fn status(I: type(io.Io), io: I, self) -> Result(ExitStatus, ProcessError)
+    pub fn status(I: type(io.Io), self, io: I) -> Result(ExitStatus, ProcessError)
     /// Spawns with standard output and error piped, captures both to end
     /// of stream, waits, and returns status plus captured bytes.
-    pub fn output(I: type(io.Io), io: I, self) -> Result(Output, ProcessError)
+    pub fn output(I: type(io.Io), self, io: I) -> Result(Output, ProcessError)
 }
 
 pub enum PipeMode {
@@ -232,9 +226,9 @@ will use these forms when it lands.
   environment, and `PipeMode.Piped` per stream. Overrides apply in
   insertion order with later keys replacing earlier ones.
 - `spawn` never mutates the `Command`: one description can spawn many
-  children. The frozen receiver forms are the target; the current static
-  implementation passes the command by value for the same call expressions
-  until generic associated receiver-call inference lands.
+  children. The receiver forms are installed; the leading capability type
+  parameter is inferred from `io` (and from the expected result type when the
+  call is not otherwise constrained).
 - Process creation is a host operation on `std.io.Io` (`spawn`, `wait`,
   `kill`, `poll`); `std.process` never forges a host handle. `std.io` builds
   the pipe-end `HostFile`s, and `Child.take_stdin`/`take_stdout`/`take_stderr`

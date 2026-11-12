@@ -67,7 +67,7 @@ pub fn expect_err(T: type, E: type, take result: Result(T, E)) -> E {
 /// affine owner. The caller must consume it, explicitly keep it, or let its
 /// cleanup remove it.
 pub fn temp_file(I: type(Io), io: I, prefix: String) -> fs.TempFile(I) {
-    match fs.temp_file(io, prefix) {
+    match fs.TempFile.new(io, prefix) {
         Ok(value) => { return value }
         Err(error) => { panic.panic("std.test.temp_file: ".concat(error.display())) }
     }
@@ -77,7 +77,7 @@ pub fn temp_file(I: type(Io), io: I, prefix: String) -> fs.TempFile(I) {
 /// the affine owner. The caller must consume it, explicitly keep it, or let
 /// its cleanup remove the tree.
 pub fn temp_dir(I: type(Io), io: I, prefix: String) -> fs.TempDir(I) {
-    match fs.temp_dir(io, prefix) {
+    match fs.TempDir.new(io, prefix) {
         Ok(value) => { return value }
         Err(error) => { panic.panic("std.test.temp_dir: ".concat(error.display())) }
     }

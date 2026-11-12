@@ -45,19 +45,19 @@ pub type File(IoType: type(Io)) {
     path: Path
 }
 
-/// Opens the file for reading. The generic implementation parameter of
-/// `File` cannot be inferred at an associated call, so opening is a module
-/// function (`fs.open`) rather than `File.open`.
+/// Opens the file for reading. `File.open` is the canonical associated
+/// constructor; this module-function form remains for source compatibility.
 pub fn open(I: type(Io), io: I, path: Path) -> Result(File(I), IoError) {
     return open_options(io, path, Options(read: true, write: false, append: false, truncate: false, create: false, create_new: false))
 }
 
-/// Creates or truncates the file for writing.
+/// Creates or truncates the file for writing. `File.create` is canonical.
 pub fn create(I: type(Io), io: I, path: Path) -> Result(File(I), IoError) {
     return open_options(io, path, Options(read: true, write: true, append: false, truncate: true, create: true, create_new: false))
 }
 
-/// Opens for appending, creating the file when absent.
+/// Opens for appending, creating the file when absent. `File.append` is
+/// canonical.
 pub fn append(I: type(Io), io: I, path: Path) -> Result(File(I), IoError) {
     return open_options(io, path, Options(read: false, write: true, append: true, truncate: false, create: true, create_new: false))
 }
@@ -69,13 +69,35 @@ fn open_handle(I: type(Io), io: I, path: Path, options: Options) -> Result(HostF
     return io.open(path, mode)
 }
 
-/// Opens with explicit flags.
+/// Opens with explicit flags. `File.open_options` is canonical.
 pub fn open_options(I: type(Io), io: I, path: Path, options: Options) -> Result(File(I), IoError) {
     let handle = try open_handle(io, path, options)
     return Ok(File(io: io, handle: handle, path: path))
 }
 
 impl(IoType: type(Io)) File(IoType) {
+    /// Opens the file for reading. The associated call infers the capability
+    /// type from `io` (or from the expected result type).
+    fn open(io: IoType, path: Path) -> Result(File(IoType), IoError) {
+        return File.open_options(io, path, Options(read: true, write: false, append: false, truncate: false, create: false, create_new: false))
+    }
+
+    /// Creates or truncates the file for writing.
+    fn create(io: IoType, path: Path) -> Result(File(IoType), IoError) {
+        return File.open_options(io, path, Options(read: true, write: true, append: false, truncate: true, create: true, create_new: false))
+    }
+
+    /// Opens for appending, creating the file when absent.
+    fn append(io: IoType, path: Path) -> Result(File(IoType), IoError) {
+        return File.open_options(io, path, Options(read: false, write: true, append: true, truncate: false, create: true, create_new: false))
+    }
+
+    /// Opens with explicit flags.
+    fn open_options(io: IoType, path: Path, options: Options) -> Result(File(IoType), IoError) {
+        let handle = try open_handle(io, path, options)
+        return Ok(File(io: io, handle: handle, path: path))
+    }
+
     fn metadata(mut self) -> Result(Metadata, IoError) {
         let stat = try self.io.stat(self.handle)
         return Ok(metadata_of(stat))
@@ -446,6 +468,12 @@ pub fn temp_file(I: type(Io), io: I, prefix: String) -> Result(TempFile(I), IoEr
 }
 
 impl(IoType: type(Io)) TempFile(IoType) {
+    /// Creates a fresh temporary file. The associated call infers the
+    /// capability type from `io` or the expected result type.
+    fn new(io: IoType, prefix: String) -> Result(TempFile(IoType), IoError) {
+        return temp_file(io, prefix)
+    }
+
     fn path(self) -> Path {
         return self.location
     }
@@ -496,6 +524,12 @@ pub fn temp_dir(I: type(Io), io: I, prefix: String) -> Result(TempDir(I), IoErro
 }
 
 impl(IoType: type(Io)) TempDir(IoType) {
+    /// Creates a fresh temporary directory. The associated call infers the
+    /// capability type from `io` or the expected result type.
+    fn new(io: IoType, prefix: String) -> Result(TempDir(IoType), IoError) {
+        return temp_dir(io, prefix)
+    }
+
     fn path(self) -> Path {
         return self.location
     }

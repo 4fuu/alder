@@ -36,7 +36,7 @@ pub fn std_process_example(io: Blocking) -> I64 {
     command.argument(message)
     command.stdout(Piped)
     command.stderr(Piped)
-    let result = match Command.output(io, command) {
+    let result = match command.output(io) {
         Ok(value) => value
         Err(_) => return -1000000
     }
@@ -60,7 +60,7 @@ pub fn std_process_example(io: Blocking) -> I64 {
     second_command.env(key, flag)
     second_command.stdout(Piped)
     second_command.stderr(Piped)
-    let second = match Command.output(io, second_command) {
+    let second = match second_command.output(io) {
         Ok(value) => value
         Err(_) => return -1000000
     }
@@ -72,7 +72,7 @@ pub fn std_process_example(io: Blocking) -> I64 {
         None => return -1000000
     }
     let gone = Command.new(missing)
-    match Command.status(io, gone) {
+    match gone.status(io) {
         Ok(_) => { total = total - 100000 }
         Err(_) => { total = total + 1000 }
     }

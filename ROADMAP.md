@@ -1699,10 +1699,9 @@ wiring, and `output` requires both captures piped, reporting
 and `poll` are on `std.io.Io` with `HostChild`, `ChildStatus`, and `PollPair`;
 `sysroot/std/c/process_shim.h` holds the argv/environment blobs, PATH
 resolution, fork/exec, pipes, waitpid decoding, signalling, and poll. The
-frozen receiver forms are the target; the command is still passed by value to
-static associated calls for the same call expressions. Receiver-call inference
-is now available, so `std.process` can move to the frozen receiver spelling
-without a language change. Evidence:
+frozen receiver forms are installed: `command.spawn(io)`, `status`, and
+`output` infer the capability type from `io`, and the snapshot example and
+process fixtures use those spellings. Evidence:
 `compiler/production_process_v1_test.go` runs capture, bidirectional pipes,
 kill/wait, environment/working-directory delivery, invalid wiring, and
 `NotFound` through the installed sysroot and sanitizers; the snapshot example
@@ -2032,15 +2031,14 @@ compiles the compiler's own host imports under the profile.
 
 Landed since the M8 exit review: the runner-independent `std.test` library
 slice (`fail`, assertions, `expect_ok`/`expect_err`, temporary-resource
-constructors, and seeded cases) and the using-on-Result diagnostic that tells
-callers to bind the payload with `using name = try expression`. The remaining
-M8 exit items are explicit:
+constructors, and seeded cases), the using-on-Result diagnostic that tells
+callers to bind the payload with `using name = try expression`, the frozen
+receiver spellings for `std.fs` (`File.open`/`create`/`append`/`open_options`,
+`TempFile.new`, `TempDir.new`) and `std.process` (`command.spawn`/`status`/
+`output`), and affine-owner transfer through match arms. The remaining M8 exit
+items are explicit:
 
 - string interpolation from `docs/syntax.md` and `docs/language-semantics.md`;
-- generic associated-call and receiver inference plus the `std.fs` and
-  `std.process` receiver-spelling restore (the inference half landed; the
-  snapshot spellings and examples are still on their temporary static forms);
-- an affine owner returned through a match arm;
 - a final M8 exit audit that maps every remaining exit clause to evidence.
 
 ## Milestone 8.1: Standard-library completion

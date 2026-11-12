@@ -49,7 +49,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     command.argument(message)
     command.stdout(Piped)
     command.stderr(Piped)
-    let captured = try Command.output(io, command)
+    let captured = try command.output(io)
     if !captured.status.success() { return Ok(90) }
     if !is_text(captured.stdout, "alder\n") { return Ok(91) }
     if captured.stderr.len() != 0 { return Ok(92) }
@@ -62,25 +62,25 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     noisy.argument(script)
     noisy.stdout(Piped)
     noisy.stderr(Piped)
-    let noise = try Command.output(io, noisy)
+    let noise = try noisy.output(io)
     if !noise.status.success() { return Ok(93) }
     if noise.stdout.len() != 0 { return Ok(94) }
     if !is_text(noise.stderr, "err") { return Ok(95) }
 
     let truth = try os_value("/bin/true")
     let true_command = Command.new(truth)
-    let true_status = try Command.status(io, true_command)
+    let true_status = try true_command.status(io)
     if !true_status.success() { return Ok(96) }
 
     let status_cat = try os_value("/bin/cat")
     var status_cat_command = Command.new(status_cat)
     status_cat_command.stdin(Piped)
-    let status_cat_status = try Command.status(io, status_cat_command)
+    let status_cat_status = try status_cat_command.status(io)
     if !status_cat_status.success() { return Ok(118) }
 
     var bad_status = Command.new(truth)
     bad_status.stdout(Piped)
-    match Command.status(io, bad_status) {
+    match bad_status.status(io) {
         Ok(_) => { return Ok(97) }
         Err(error) => {
             match error {
@@ -91,7 +91,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     }
     var bad_output = Command.new(echo)
     bad_output.stderr(Piped)
-    match Command.output(io, bad_output) {
+    match bad_output.output(io) {
         Ok(_) => { return Ok(99) }
         Err(error) => {
             match error {
@@ -105,7 +105,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     var cat_command = Command.new(cat)
     cat_command.stdin(Piped)
     cat_command.stdout(Piped)
-    let child = try Command.spawn(io, cat_command)
+    let child = try cat_command.spawn(io)
     using child_owner = child
     let input = match child_owner.take_stdin() {
         Some(value) => value
@@ -142,7 +142,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     let delay = try os_value("5")
     var sleeping = Command.new(sleep)
     sleeping.argument(delay)
-    let sleeper = try Command.spawn(io, sleeping)
+    let sleeper = try sleeping.spawn(io)
     using sleeper_owner = sleeper
     try sleeper_owner.kill()
     let killed = try sleeper_owner.wait()
@@ -150,7 +150,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
 
     let missing = try os_value("/alder/does/not/exist")
     let missing_command = Command.new(missing)
-    match Command.spawn(io, missing_command) {
+    match missing_command.spawn(io) {
         Ok(unexpected_child) => {
             using unexpected_owner = unexpected_child
             return Ok(110)
@@ -172,7 +172,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     env_command.env(key, flag_value)
     env_command.stdout(Piped)
     env_command.stderr(Piped)
-    let env_output = try Command.output(io, env_command)
+    let env_output = try env_command.output(io)
     if !env_output.status.success() { return Ok(112) }
     if !is_text(env_output.stdout, "ok") { return Ok(113) }
 
@@ -183,7 +183,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     duplicate.env(key, flag_value)
     duplicate.stdout(Piped)
     duplicate.stderr(Piped)
-    let duplicate_output = try Command.output(io, duplicate)
+    let duplicate_output = try duplicate.output(io)
     if !duplicate_output.status.success() { return Ok(116) }
     if !is_text(duplicate_output.stdout, "ok") { return Ok(117) }
 
@@ -192,7 +192,7 @@ fn probe_main(io: Blocking) -> Result(I32, ProcessError) {
     pwd_command.working_directory(root)
     pwd_command.stdout(Piped)
     pwd_command.stderr(Piped)
-    let pwd_output = try Command.output(io, pwd_command)
+    let pwd_output = try pwd_command.output(io)
     if !pwd_output.status.success() { return Ok(114) }
     if !is_text(pwd_output.stdout, "/\n") { return Ok(115) }
 

@@ -16,7 +16,7 @@ import (
 // on-disk probe file, which the Go harness resets between runs.
 const fsFileProgram = `module hello.main
 
-import std.fs { File, Permissions, create, open }
+import std.fs { File, Permissions }
 import std.io { Blocking, IoError, Reader, Seek, SeekFrom, Writer }
 import std.path { Path }
 
@@ -29,14 +29,14 @@ fn io_path(value: String) -> Result(Path, IoError) {
 }
 
 fn close_through_using(cap: Blocking, path: Path) -> Result(Unit, IoError) {
-    using file = try open(cap, path)
+    using file = try File.open(cap, path)
     return Ok(())
 }
 
 fn probe_main(cap: Blocking) -> Result(I32, IoError) {
     let path = try io_path("/tmp/alder-fs-probe.txt")
     try close_through_using(cap, path)
-    let file: File(Blocking) = try open(cap, path)
+    let file: File(Blocking) = try File.open(cap, path)
     let info = try file.metadata()
     var code: I32 = 0
     if info.length != 2 || info.modified.unix_seconds() != -1 { code = 3 }
@@ -47,14 +47,14 @@ fn probe_main(cap: Blocking) -> Result(I32, IoError) {
     if count != 1 || one[0] != 105 { code = 5 }
     try file.finish()
     if code != 0 { return Ok(code) }
-    let made: File(Blocking) = try create(cap, path)
+    let made: File(Blocking) = try File.create(cap, path)
     let data: Array(U8, 2) = [111, 107]
     let written = try made.write(data.slice(0, 2))
     if written != 2 { code = 6 }
     try made.set_permissions(Permissions(readable: true, writable: false, executable: true))
     try made.finish()
     if code != 0 { return Ok(code) }
-    let tuned: File(Blocking) = try open(cap, path)
+    let tuned: File(Blocking) = try File.open(cap, path)
     let tuned_info = try tuned.metadata()
     if !tuned_info.permissions.executable || tuned_info.permissions.writable { code = 7 }
     try tuned.finish()
@@ -178,7 +178,7 @@ fn main() -> I32 {
 const fsTempProgram = `module hello.main
 
 import std.env
-import std.fs { metadata, temp_dir, temp_file, temp_root, write }
+import std.fs { TempDir, TempFile, metadata, temp_root, write }
 import std.io { Blocking, IoError }
 import std.path { OsString, Path }
 
@@ -191,12 +191,12 @@ fn env_key(value: String) -> Result(OsString, IoError) {
 }
 
 fn make_temp_file(cap: Blocking) -> Result(Path, IoError) {
-    using file = try temp_file(cap, "probe")
+    using file = try TempFile.new(cap, "probe")
     return Ok(file.path())
 }
 
 fn make_temp_dir(cap: Blocking) -> Result(Path, IoError) {
-    using directory = try temp_dir(cap, "dir")
+    using directory = try TempDir.new(cap, "dir")
     let path = directory.path()
     let inner_name = try env_key("inner")
     let inner = path.join(Path.from_os(inner_name))
@@ -341,7 +341,7 @@ func TestFsBorrowedOwnerReadsAllowed(t *testing.T) {
 	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
 	source := `module hello.main
 
-import std.fs { File, TempDir, open, temp_dir }
+import std.fs { File, TempDir }
 import std.io { Blocking, IoError }
 import std.path { Path }
 
@@ -354,9 +354,9 @@ fn dir_path(directory: TempDir(Blocking)) -> Path {
 }
 
 fn probe(cap: Blocking, path: Path) -> Result(I32, IoError) {
-    using file = try open(cap, path)
+    using file = try File.open(cap, path)
     forward_file(file)
-    using directory = try temp_dir(cap, "borrow")
+    using directory = try TempDir.new(cap, "borrow")
     let forwarded_dir = dir_path(directory)
     let direct_dir = directory.path()
     if forwarded_dir.to_os().to_bytes().len() != direct_dir.to_os().to_bytes().len() { return Ok(2) }
@@ -410,12 +410,12 @@ func TestFsBufReaderAffineSource(t *testing.T) {
 	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
 	source := `module hello.main
 
-import std.fs { File, open }
+import std.fs { File }
 import std.io { Blocking, BufReader, IoError, Reader }
 import std.path { Path }
 
 fn probe(cap: Blocking, path: Path) -> Result(I32, IoError) {
-    let file: File(Blocking) = try open(cap, path)
+    let file: File(Blocking) = try File.open(cap, path)
     let reader = BufReader.with_capacity(2, file)
     var one: Array(U8, 1) = [0]
     var code: I32 = 0
