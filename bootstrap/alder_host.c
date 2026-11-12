@@ -1578,8 +1578,10 @@ static int alderhost_native_build(struct AlderHostContext *context, bool *built)
     int result;
     size_t binary_size;
     size_t driver_size;
-    char *compile_argv[22];
+    char *compile_argv[24];
     char **run_argv;
+    const char *sysroot;
+    int argc_at;
     *built = false;
     if (context->project_paths[0] == NULL || context->project_paths[1] == NULL) { return -1; }
     binary_size = strlen(context->project_paths[1]) + sizeof(".alder-tmp-bin");
@@ -1592,17 +1594,25 @@ static int alderhost_native_build(struct AlderHostContext *context, bool *built)
     count = snprintf(driver_temp, driver_size, "%s.alder-driver.c", context->project_paths[0]);
     if (count < 0 || (size_t)count >= driver_size) { free(binary_temp); free(driver_temp); return -1; }
     (void)remove(binary_temp);
-    compile_argv[0] = (char *)ALDER_HOST_CC;
-    compile_argv[1] = "-std=c11"; compile_argv[2] = "-Wall"; compile_argv[3] = "-Wextra";
-    compile_argv[4] = "-Werror"; compile_argv[5] = "-pedantic"; compile_argv[6] = "-Wshadow";
-    compile_argv[7] = "-Wconversion"; compile_argv[8] = "-I"; compile_argv[9] = (char *)ALDER_HOST_RUNTIME_INCLUDE_DIR;
-    compile_argv[10] = "-I"; compile_argv[11] = (char *)ALDER_HOST_INCLUDE_DIR;
-    compile_argv[12] = context->profile != NULL && strcmp(context->profile, "release") == 0 ? "-O2" : "-O0";
-    compile_argv[13] = "-x"; compile_argv[14] = "c";
-    compile_argv[15] = context->artifact_temp != NULL ? context->artifact_temp : context->project_paths[0];
+    argc_at = 0;
+    compile_argv[argc_at++] = (char *)ALDER_HOST_CC;
+    compile_argv[argc_at++] = "-std=c11"; compile_argv[argc_at++] = "-Wall"; compile_argv[argc_at++] = "-Wextra";
+    compile_argv[argc_at++] = "-Werror"; compile_argv[argc_at++] = "-pedantic"; compile_argv[argc_at++] = "-Wshadow";
+    compile_argv[argc_at++] = "-Wconversion";
+    compile_argv[argc_at++] = "-I"; compile_argv[argc_at++] = (char *)ALDER_HOST_RUNTIME_INCLUDE_DIR;
+    compile_argv[argc_at++] = "-I"; compile_argv[argc_at++] = (char *)ALDER_HOST_INCLUDE_DIR;
+    // The selected sysroot is the one implicit include root for binding
+    // headers. It becomes a build-plan value once the build driver exists.
+    sysroot = getenv("ALDER_SYSROOT");
+    if (sysroot != NULL && sysroot[0] != '\0') {
+        compile_argv[argc_at++] = "-I"; compile_argv[argc_at++] = (char *)sysroot;
+    }
+    compile_argv[argc_at++] = context->profile != NULL && strcmp(context->profile, "release") == 0 ? "-O2" : "-O0";
+    compile_argv[argc_at++] = "-x"; compile_argv[argc_at++] = "c";
+    compile_argv[argc_at++] = context->artifact_temp != NULL ? context->artifact_temp : context->project_paths[0];
     if (context->project_target_kind == UINT64_C(2)) {
-        compile_argv[16] = "-c"; compile_argv[17] = "-o";
-        compile_argv[18] = binary_temp; compile_argv[19] = NULL;
+        compile_argv[argc_at++] = "-c"; compile_argv[argc_at++] = "-o";
+        compile_argv[argc_at++] = binary_temp; compile_argv[argc_at++] = NULL;
     } else {
         driver = fopen(driver_temp, "wb");
         if (driver == NULL || fwrite(driver_text, (size_t)1, sizeof(driver_text) - (size_t)1, driver) != sizeof(driver_text) - (size_t)1) {
@@ -1612,8 +1622,8 @@ static int alderhost_native_build(struct AlderHostContext *context, bool *built)
         if (fclose(driver) != 0) {
             (void)remove(driver_temp); free(binary_temp); free(driver_temp); return -1;
         }
-        compile_argv[16] = (char *)ALDER_HOST_RUNTIME_C; compile_argv[17] = driver_temp;
-        compile_argv[18] = "-lm"; compile_argv[19] = "-o"; compile_argv[20] = binary_temp; compile_argv[21] = NULL;
+        compile_argv[argc_at++] = (char *)ALDER_HOST_RUNTIME_C; compile_argv[argc_at++] = driver_temp;
+        compile_argv[argc_at++] = "-lm"; compile_argv[argc_at++] = "-o"; compile_argv[argc_at++] = binary_temp; compile_argv[argc_at++] = NULL;
     }
     result = alderhost_wait_argv(compile_argv);
     (void)remove(driver_temp);
