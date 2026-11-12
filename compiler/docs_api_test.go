@@ -143,6 +143,21 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.time-v1.al": {
+			style:   "project",
+			srcName: "std_time_example.al",
+			mainText: `module hello.main
+
+import std.io { Blocking }
+import hello.std_time_example { std_time_example }
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    if std_time_example(cap) == 2743 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.io-v1.al": {
 			style:   "project",
 			srcName: "std_io_example.al",

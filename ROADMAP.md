@@ -1566,6 +1566,14 @@ and the mutable-place rejection for a `let`-bound reader.
 consumed-field-move rule (`take self` moves one direct field); `into_sink`
 flushes pending bytes and releases the sink on a flush error.
 
+`std.time` v1 lands on the `std.io` capability: normalized checked
+`Duration`, monotonic `Instant` with checked differences, wall-clock
+`SystemTime` with epoch construction and proleptic-Gregorian `to_utc`
+(including pre-1970 instants), and a zero-yield `time.sleep`. Evidence:
+`compiler/production_time_test.go` checks independently computed leap-year,
+epoch, and pre-epoch vectors plus fixed duration arithmetic and host lower
+bounds; `docs/api/examples/std.time-v1.al` runs with checksum 2743.
+
 `std.io` v1 slice 2 adds the blocking capability: `Blocking` implements `Io`
 with host files (`HostFile`), directory listings (`HostDirectory`), file
 metadata, POSIX rename/remove/mkdir/realpath, clocks, sleep, randomness, and

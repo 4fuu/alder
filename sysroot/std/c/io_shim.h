@@ -33,6 +33,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +258,11 @@ static inline int io_clock_gettime(int which, long long *seconds, int32_t *nanos
 
 static inline int io_sleep(unsigned long long seconds, unsigned int nanos) {
     struct timespec request;
+    if (seconds == 0 && nanos == 0) {
+        /* A zero sleep is one scheduler yield, never a busy spin. */
+        (void)sched_yield();
+        return 0;
+    }
     request.tv_sec = (time_t)seconds;
     request.tv_nsec = (long)nanos;
     while (nanosleep(&request, &request) != 0) {

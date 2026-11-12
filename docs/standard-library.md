@@ -278,6 +278,16 @@ Required modules:
 - `std.math`: portable scalar math with documented IEEE behavior and explicit
   exceptional results.
 
+Implemented std.time progress: `sysroot/std/time.al` installs the v1 surface.
+`Duration` is normalized seconds plus nanos with checked arithmetic and a
+zero-saturating subtraction, `SystemTime.from_unix`/`unix_seconds`/`to_utc`
+use database-free proleptic-Gregorian integer conversion (including
+pre-1970 instants), and `Instant`/`SystemTime.now` plus `time.sleep` take the
+`std.io` capability. Evidence: `compiler/production_time_test.go` checks
+independently computed UTC vectors, duration arithmetic, the monotonic lower
+bound of a sleep, and a zero-duration sleep through `Blocking`; the snapshot
+example runs with a fixed checksum.
+
 Implemented std.random progress: the seeded deterministic generator half is
 installed at `sysroot/std/random.al`. `Rng` is SplitMix64 over one `U64` state
 with value semantics, `seeded`, `next_u64`, `next_u32`, and unbiased

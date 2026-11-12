@@ -104,11 +104,9 @@ impl Duration {
     pub fn as_nanos(self) -> U64
 }
 
-impl time {
-    /// Sleeps for the duration without waking early. A zero duration
-    /// yields one scheduler yield on the host, not a busy spin.
-    pub fn sleep(I: type(io.Io), io: I, duration: Duration)
-}
+/// Sleeps for the duration without waking early. A zero duration yields one
+/// scheduler yield on the host, not a busy spin.
+pub fn sleep(I: type(io.Io), io: I, duration: Duration) -> Unit
 ```
 
 Equality for `Instant`, `SystemTime`, and `Duration` is structural over their
@@ -173,7 +171,7 @@ pub fn std_time_example(io: io.Blocking) -> I64 {
     let twice = step.plus(step)
     if twice.as_millis() == 3000 { total = total + 1 }
     let trimmed = twice.saturating_sub(time.Duration.seconds(2))
-    if trimmed.as_millis() == 500 { total = total + 10 }
+    if trimmed.as_millis() == 1000 { total = total + 10 }
     let floor = time.Duration.millis(1).saturating_sub(time.Duration.seconds(2))
     if floor.is_zero() { total = total + 100 }
 
