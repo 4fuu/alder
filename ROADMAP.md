@@ -1851,6 +1851,19 @@ unsafe-only rejections. Documentation is in
 measured 139.8 s wall and 2.21 GB peak RSS against 131.0 s and 2.18 GB for the
 parent tree on the same host.
 
+Landed compile-memory progress: verification's V6 provenance tables are the
+largest per-compile scratch allocation, and cgen used to inherit them because
+they stayed in the root domain. V6 and phases 6-8 now run in a child domain;
+on a clean result it is destroyed before phases 9-10 and cgen, while a refusal
+or allocation failure re-runs those phases in the caller's domain so refusal
+diagnostics and storage errors stay byte-identical. The verifier conformance
+manifest pins a phase-6 refusal through `mir_verify_complete`, and an
+ASan/UBSan stage-1 self-compile exercises the destroyed domain before cgen.
+A cold `bootstrap/regenerate.sh` measured 112.3 s wall and 2.01 GB peak RSS
+(2,013,632 KiB), down from 2.20 GB and under the 2 GiB project target, against
+109.8 s for the parent tree on the same host; the remaining peak is
+verification itself.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

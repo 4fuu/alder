@@ -1430,6 +1430,9 @@ fn run_cases(d: Domain, initial: MirStore) -> Result(Bool, __s0_Error) {
     if !emit_verification(109, try mir_verify_module(d, try closure_env_escape_fixture(d, try mir_store_new(d), false, false), 5)) { return Ok(false) }
     if !emit_complete(110, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), true, false), 5, false)) { return Ok(false) }
     if !emit_complete(111, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), true, true), 5, false)) { return Ok(false) }
+    // Phase-6 refusal: the scratch probe fails, and the fallback re-run must
+    // report the exact same diagnostic record byte for byte.
+    if !emit_complete(113, try mir_verify_complete(d, try closure_env_escape_fixture(d, try mir_store_new(d), false, false), 5, false)) { return Ok(false) }
     // Mode 11 introduces table.insert.try, which the format-version gate
     // only accepts at version 4 or later, so this case verifies at the
     // current format version instead of the harness's usual 3.
@@ -1460,7 +1463,7 @@ func runMIRVerifierConformance(t *testing.T, exe string) {
 	want = strings.Replace(want, "E 24 1 7\nE 25 1 6\n", "V 24 2\nD 1 7 1 0 0 0 0 0 2 1 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nE 94 1 5\nC 95 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 96 0 1 0 0\nE 25 1 6\n", 1)
 	want += "C 71 0 1 0 0\nC 72 1 0 1 0\nD 1 1 0 0 0 0 0 0 0 1 99 6\nV 73 1\nD 8 58 1 1 0 0 0 0 0 0 0 4\nV 74 1\nD 8 63 1 1 0 0 0 0 0 0 0 5\nV 75 1\nD 8 63 1 1 4 0 0 0 0 0 0 5\nV 76 1\nD 8 64 1 1 4 0 0 0 0 0 0 5\nV 77 1\nD 8 60 1 1 2 0 0 0 0 0 0 4\nV 78 1\nD 8 59 1 1 2 0 0 0 0 0 0 5\nV 79 1\nD 8 65 1 1 3 0 0 0 0 0 0 6\nV 80 1\nD 9 67 1 1 1 0 1 13 0 0 0 1\nV 81 1\nD 5 42 1 1 1 0 1 0 0 0 0 1\nV 82 1\nD 5 40 1 1 1 0 0 13 0 13 13 1\nV 83 1\nD 5 47 1 1 1 0 0 13 0 7 13 1\nC 84 5 0 0 0\nD 10 68 0 0 0 0 0 0 1 0 0 1\nD 10 68 0 0 0 0 0 0 2 0 0 2\nD 10 68 0 0 0 0 0 0 3 0 0 3\nD 10 68 0 0 0 0 0 0 4 0 0 4\nD 10 68 0 0 0 0 0 0 5 0 0 5\nC 85 0 1 0 0\nC 86 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 87 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\nC 88 1 0 0 0\nD 10 69 1 1 1 0 0 15 0 0 10 15\n"
 	want += "V 89 2\nD 8 64 1 1 4 0 0 0 0 0 0 5\nD 8 64 1 1 5 0 0 0 0 0 0 5\nC 90 0 1 1 2\n"
-	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\n"
+	want += "E 91 1 5\nC 92 1 0 0 0\nD 1 5 1 0 0 0 0 0 2 0 0 1\nC 97 1 0 0 0\nD 10 74 1 1 1 0 0 13 0 0 10 13\nC 98 1 0 0 0\nD 10 74 1 1 1 0 0 18 0 0 10 18\nC 93 0 1 0 0\nC 100 0 1 0 0\nC 101 1 0 0 0\nD 5 41 2 1 1 0 0 15 0 0 15 2\nC 102 1 0 0 0\nD 5 41 2 1 2 0 0 10 0 0 10 3\nC 103 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 104 1 0 0 0\nD 5 41 2 1 5 0 0 2 0 0 2 6\nC 105 0 1 0 0\nC 106 1 0 0 0\nD 5 41 2 1 1 0 0 14 0 0 14 2\nC 107 1 0 0 0\nD 1 11 2 1 1 0 0 0 1 2147483647 0 0\nC 108 1 0 0 0\nD 1 11 2 1 2 0 0 0 2 2147483647 0 0\nV 109 2\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\nC 110 0 1 0 0\nC 111 0 1 0 0\nC 113 2 0 0 0\nD 6 52 2 1 0 2 0 0 0 0 0 8\nD 6 53 2 1 0 2 0 0 0 0 0 8\n"
 	want += "V 112 1\nD 8 66 1 1 3 0 0 0 0 0 0 5\n"
 	var baseline string
 	for i := 0; i < 3; i++ {

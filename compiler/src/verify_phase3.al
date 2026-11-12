@@ -238,6 +238,52 @@ prior = prior + 1 }
     }
     return Ok(out)
 }
+
+// Phases 6 and 8 consume V6 provenance but never expose it. The probe form
+// returns only a scalar, so the caller can free the scratch domain before it
+// returns diagnostics through the caller's own domain.
+fn mir_verify_after_provenance(d: Domain, store: MirStore, indexes: MirVIndexes, uses: MirVP4UseInventory, diagnostics0: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Result(MirVerifyOutput, __s0_Error) {
+    var diagnostics = diagnostics0
+    diagnostics = try mir_vphase6_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = cleanup.diagnostics
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase8_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
+    return Ok(MirVerifyOutput(diagnostics: diagnostics))
+}
+
+fn mir_verify_tail(d: Domain, store: MirStore, indexes: MirVIndexes, uses: MirVP4UseInventory, diagnostics0: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirVerifyOutput, __s0_Error) {
+    var diagnostics = diagnostics0
+    diagnostics = try mir_vphase9_with_uses(d, store, indexes, uses, diagnostics)
+    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
+    diagnostics = try mir_vphase10(d, store, indexes, diagnostics)
+    return Ok(MirVerifyOutput(diagnostics: diagnostics))
+}
+
+fn mir_verify_provenance_after(d: Domain, store: MirStore, indexes: MirVIndexes, uses: MirVP4UseInventory, diagnostics: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis, provenance: MirV6Analysis) -> Bool {
+    return match mir_verify_after_provenance(d, store, indexes, uses, diagnostics, cleanup, provenance) {
+        Ok(value) => __s0_buffer_len(MirVerifyDiagRec, value.diagnostics) == 0
+        Err(_) => false
+    }
+}
+
+fn mir_verify_provenance_fallback(d: Domain, store: MirStore, indexes: MirVIndexes, uses: MirVP4UseInventory, diagnostics: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis) -> Result(MirVerifyOutput, __s0_Error) {
+    let provenance = try mir_v6_compute(d, store, indexes, cleanup)
+    let checked = try mir_verify_after_provenance(d, store, indexes, uses, diagnostics, cleanup, provenance)
+    if __s0_buffer_len(MirVerifyDiagRec, checked.diagnostics) != 0 { return Ok(checked) }
+    return mir_verify_tail(d, store, indexes, uses, checked.diagnostics)
+}
+
+fn mir_verify_provenance(d: Domain, store: MirStore, indexes: MirVIndexes, uses: MirVP4UseInventory, diagnostics: __s0_Buffer(MirVerifyDiagRec), cleanup: MirV7Analysis) -> Bool {
+    let scratch = __s0_domain_create(d)
+    let clean = match mir_v6_compute(scratch, store, indexes, cleanup) {
+        Ok(provenance) => mir_verify_provenance_after(d, store, indexes, uses, diagnostics, cleanup, provenance)
+        Err(_) => false
+    }
+    __s0_domain_destroy(scratch)
+    return clean
+}
+
 fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVerifyOutput, __s0_Error) {
     var diagnostics = try __s0_buffer_new(MirVerifyDiagRec, d)
     diagnostics = try mir_vphase1(d, store, version, diagnostics)
@@ -253,15 +299,12 @@ fn mir_verify_module(d: Domain, store: MirStore, version: U64) -> Result(MirVeri
     diagnostics = try mir_vphase5(d, store, indexes, diagnostics)
     if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
     let cleanup = try mir_v7_analyze(d, store, indexes, try __s0_buffer_new(MirVerifyDiagRec, d))
-    let provenance = try mir_v6_compute(d, store, indexes, cleanup)
-    diagnostics = try mir_vphase6_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
-    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = cleanup.diagnostics
-    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase8_with(d, store, indexes, uses, diagnostics, cleanup, provenance)
-    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase9_with_uses(d, store, indexes, uses, diagnostics)
-    if __s0_buffer_len(MirVerifyDiagRec, diagnostics) != 0 { return Ok(MirVerifyOutput(diagnostics: diagnostics)) }
-    diagnostics = try mir_vphase10(d, store, indexes, diagnostics)
-    return Ok(MirVerifyOutput(diagnostics: diagnostics))
+    // V6 provenance is the largest verification table and no later phase
+    // reads it. Probe phases 6 and 8 in a child domain; on success it is
+    // destroyed before phases 9-10 and cgen. A refusal or allocation failure
+    // re-runs in the caller's domain so diagnostics and storage errors are
+    // unchanged.
+    let clean = mir_verify_provenance(d, store, indexes, uses, diagnostics, cleanup)
+    if !clean { return mir_verify_provenance_fallback(d, store, indexes, uses, diagnostics, cleanup) }
+    return mir_verify_tail(d, store, indexes, uses, diagnostics)
 }
