@@ -1579,6 +1579,25 @@ runs Unit, both Result success forms, a display-only Err, a wrapper Error cause
 chain, and rejects unsupported results and non-Display errors; the compiler's
 own bootstrap `main` still uses the untouched I32 path.
 
+Landed standard-library progress: `std.process` installs its value layer at
+`sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
+functional builders, `ExitStatus` exit/signal decomposition, `Output`, and
+`ProcessError` with `Display`/`Error`. Storage-backed builders return a new
+`Command` and callers rebind it, matching `std.text.StringBuilder`; in-place
+`Vec`/`OsString` field assignment is not safely expressible with the current
+storage plan. Enum factory constructors make stream modes and process
+categories available without qualified variant expressions. Evidence:
+`compiler/production_process_fs_test.go` runs the value layer through the
+installed sysroot. Spawning, `Child`, pipes, and capture wait for `std.io`
+slice 2. Docs: [`std.process` snapshot](docs/api/std.process-v1.md).
+
+Landed standard-library progress: `std.fs` installs its value layer at
+`sysroot/std/fs.al`: `Options.read`/`Options.write` and the portable public
+`Permissions` record. File handles, directory iteration, metadata, and
+temporary owners wait for `std.io` slice 2. Evidence:
+`compiler/production_process_fs_test.go` exercises both value modules through
+the installed sysroot. Docs: [`std.fs` snapshot](docs/api/std.fs-v1.md).
+
 Landed C-interop progress: header-only explicit shims are available through
 the ordinary binding-block syntax. A package or sysroot supplies a header of
 `static inline` C functions for bitfields, flexible arrays, fixed arrays,

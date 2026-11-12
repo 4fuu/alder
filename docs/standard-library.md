@@ -213,6 +213,17 @@ bytes first and releases the sink itself on a flush error. The capability
 types, host files, and standard streams arrive with the C-binding buffer
 surface as slice 2.
 
+Implemented std.process progress (value layer): `sysroot/std/process.al`
+installs `PipeMode`, the value-semantic `Command` and its functional
+builders, `ExitStatus` with exit/signal decomposition, `Output`, and
+`ProcessError` with `Display` and `Error`. Spawning, `Child`, pipe ends, and
+captured output wait for the `std.io` slice 2 capability and host handles.
+
+Implemented std.fs progress (value layer): `sysroot/std/fs.al` installs
+`Options.read`/`Options.write` and the portable `Permissions` record. The
+affine file, directory, metadata, whole-file, canonicalization, and temporary
+owner surfaces wait for the same slice 2 handles.
+
 The hosted `std` module graph is acyclic and fixed by the snapshots:
 `std.path` imports only `core`; `std.env` imports `std.path`; `std.io` imports
 `std.path` and `std.env`; `std.fs` and `std.process` additionally build on

@@ -1,6 +1,6 @@
 # `std.process` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; value layer implemented**
 
 This is the versioned public snapshot for child processes. It is normative
 together with the executable example
@@ -11,7 +11,9 @@ lives at `<sysroot>/std/process.al`.
 
 Snapshot v1 covers the value-semantic `Command`, the affine `Child`, pipes,
 exit status, output capture, waiting, termination, and explicit environment
-inheritance. Spawning waits on the host, so it takes the capability, and the
+inheritance. The value layer is implemented now; spawning, child handles,
+pipe ends, and output capture wait for the `std.io` slice 2 capability and
+host handles. Spawning waits on the host, so it takes the capability, and the
 surfaces are written once against `I: type(io.Io)`. No function in this
 module invokes a shell; the argument vector is passed to the target program
 exactly as built, with no quoting or expansion anywhere in the layer.
@@ -29,8 +31,8 @@ import std.path { OsString, Path }
 
 /// Value-semantic child-process description. Copying a `Command` copies the
 /// whole configuration; builder methods mutate a uniquely owned value in
-/// place and change nothing else. Validation happens at spawn time, so
-/// builders never fail.
+/// place and change nothing else. Builders return the updated value; rebind
+/// the result. Validation happens at spawn time, so builders never fail.
 pub type Command {
     // private: program, arguments, working_directory,
     //          environment_overrides, environment_cleared, pipes
@@ -42,22 +44,22 @@ impl Command {
     /// streams inherited.
     pub fn new(program: OsString) -> Command
     /// Appends one argument, passed through verbatim.
-    pub fn argument(mut self, value: OsString)
+    pub fn argument(self, value: OsString) -> Command
     /// Replaces the argument list.
-    pub fn set_arguments(mut self, values: Vec(OsString))
+    pub fn set_arguments(self, values: Vec(OsString)) -> Command
     /// Runs the child with `path` as its working directory.
-    pub fn working_directory(mut self, path: Path)
+    pub fn working_directory(self, path: Path) -> Command
     /// Adds one override applied over the inherited environment.
-    pub fn env(mut self, key: OsString, value: OsString)
+    pub fn env(self, key: OsString, value: OsString) -> Command
     /// Removes one key from the child's environment.
-    pub fn env_remove(mut self, key: OsString)
+    pub fn env_remove(self, key: OsString) -> Command
     /// Starts the child from an empty environment; later `env` overrides
     /// apply on top of the empty set.
-    pub fn clear_environment(mut self)
+    pub fn clear_environment(self) -> Command
     /// Selects the wiring of one standard stream. Default is `Inherit`.
-    pub fn stdin(mut self, mode: PipeMode)
-    pub fn stdout(mut self, mode: PipeMode)
-    pub fn stderr(mut self, mode: PipeMode)
+    pub fn stdin(self, mode: PipeMode) -> Command
+    pub fn stdout(self, mode: PipeMode) -> Command
+    pub fn stderr(self, mode: PipeMode) -> Command
     /// Spawns the child. The `Command` stays owned and reusable.
     pub fn spawn(I: type(io.Io), io: I, self) -> Result(Child(I), ProcessError)
     /// Spawns with default wiring, waits, and returns the exit status.
@@ -73,6 +75,13 @@ pub enum PipeMode {
     Inherit
     /// A new pipe connects parent and child.
     Piped
+}
+
+impl PipeMode {
+    /// The inherited mode.
+    pub fn inherit() -> PipeMode
+    /// The piped mode.
+    pub fn piped() -> PipeMode
 }
 ```
 
@@ -158,6 +167,12 @@ pub type ExitStatus {
 }
 
 impl ExitStatus {
+    /// Builds a normal-exit status. The host layer uses this constructor
+    /// when it maps a waited child.
+    pub fn from_exit(code: I32) -> ExitStatus
+    /// Builds a signal-terminated status. The signal number is the host
+    /// value surfaced verbatim.
+    pub fn from_signal(signal: I32) -> ExitStatus
     /// True when the child exited normally with code zero.
     pub fn success(self) -> Bool
     /// The exit code for a normal exit, `None` when a signal ended it.
@@ -168,9 +183,9 @@ impl ExitStatus {
 
 /// The result of `Command.output`.
 pub type Output {
-    status: ExitStatus
-    stdout: Bytes
-    stderr: Bytes
+    pub status: ExitStatus
+    pub stdout: Bytes
+    pub stderr: Bytes
 }
 
 pub enum ProcessError {
@@ -187,6 +202,19 @@ pub enum ProcessError {
     Platform(info: PlatformInfo)
 }
 
+impl ProcessError {
+    /// The program-does-not-exist category.
+    pub fn not_found() -> ProcessError
+    /// The permission-denied category.
+    pub fn permission_denied() -> ProcessError
+    /// The invalid-command-configuration category.
+    pub fn invalid_configuration() -> ProcessError
+    /// The target-unsupported category.
+    pub fn unsupported() -> ProcessError
+    /// A platform-detail category.
+    pub fn platform(info: PlatformInfo) -> ProcessError
+}
+
 impl Error for ProcessError {
     // Root error: the default `cause` is `None`.
 }
@@ -195,6 +223,20 @@ impl Error for ProcessError {
 Equality for `ExitStatus` is structural. `Display` for `ExitStatus`
 (`exited with code N` / `killed by signal N`) lands with the sysroot
 formatting snapshot and is additive.
+
+## Value-layer amendment
+
+The value layer uses functional builder updates (`self -> Command`) and
+public constructor functions for payload-less enum variants. In-place
+assignment of a `Vec` or `OsString` field from a `mut self` method is not
+safely expressible with the current storage plan: the field would retain
+storage owned by the builder call's temporary domain. Functional updates
+keep the value semantics and ownership contract unchanged; callers rebind the
+result (`command = command.argument(value)`). `PipeMode.inherit`/`piped`,
+`ExitStatus.from_exit`/`from_signal`, and the `ProcessError` category
+constructors make the same immutable values available without relying on
+qualified enum-variant expressions. The host spawn layer will use these
+constructors when it lands.
 
 ## Contracts
 
@@ -266,7 +308,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
         Err(_) => { return -1000000 }
     }
     var command = process.Command.new(program)
-    command.argument(message)
+    command = command.argument(message)
     let result = match process.Command.output(io, command) {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
@@ -276,7 +318,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
 
     // Explicit environment override path, same fixed program.
     var scripted = process.Command.new(program)
-    scripted.argument(message)
+    scripted = scripted.argument(message)
     let key = match path.OsString.parse("ALDER_STD_PROCESS_EXAMPLE") {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
@@ -285,7 +327,7 @@ pub fn std_process_example(io: io.Blocking) -> I64 {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
     }
-    scripted.env(key, flag)
+    scripted = scripted.env(key, flag)
     let second = match process.Command.output(io, scripted) {
         Ok(value) => { value }
         Err(_) => { return -1000000 }
