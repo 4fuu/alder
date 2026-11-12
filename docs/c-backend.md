@@ -107,13 +107,19 @@ initializer, no retained host context, and a foreign thread may call an export
 without entering `alder_program_entry`.
 
 `compile --emit=header` prints the matching header from the verified MIR: the
-guard word derives from the first export symbol, each binding block header
-referenced by an export signature is included once in declaration order, and
-the prototypes follow the same C ABI spellings. Export wrappers are a codegen
-feature only; they add no MIR operation, and the printed MIR carries no export
-marker because export intent is internal compiler metadata. Panics are never
-caught at the boundary, so process termination with the invariant status
-remains the only portable panic behavior across C.
+guard word is a digest of the full sorted export-symbol list, each binding
+block header referenced by an export signature is included once in declaration
+order, and the prototypes follow the same C ABI spellings. Export wrappers are
+a codegen feature only; they add no MIR operation, and the printed MIR carries
+no export marker because export intent is internal compiler metadata. Panics
+are never caught at the boundary, so process termination with the invariant
+status remains the only portable panic behavior across C.
+
+A source set with exports and no `main` is a library build: C emission skips
+only the hosted-entry phase of verification (every other V1-V9 check still
+runs), emits no `alder_program_entry`, and produces export wrappers callable
+from an ordinary C `main`. A source set with neither `main` nor an export
+keeps the missing-entry failure.
 
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C

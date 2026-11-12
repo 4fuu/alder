@@ -1795,23 +1795,27 @@ through a wrapper that creates and destroys a per-call root domain, so a
 foreign thread may call an export without entering `alder_program_entry`, and
 failed domain initialization terminates through the runtime panic. The header
 emits `<stddef.h>`, each binding header referenced by an export signature once
-in declaration order, then the prototypes under an `extern "C"` guard; the
-guard word derives from the first export symbol because MIR carries no module
-name. Header emission needs no `main`, but explicit-source `--emit=c` still
-runs hosted verification and therefore still requires an entry, so a library
-build currently supplies one. Evidence: the production qualification
+in declaration order, then the prototypes under an `extern "C"` guard whose
+word digests the full sorted export-symbol list, so declaration order and
+case-only name differences cannot collide. A source set with exports and no
+`main` is a library build: C emission skips only the hosted-entry phase of
+verification, emits no `alder_program_entry`, and leaves the export wrappers
+callable from an ordinary C `main`; a source set with neither `main` nor an
+export keeps the missing-entry failure. Evidence: the production qualification
 `compiler/production_c_export_test.go` compiles and runs scalar, by-value
 record, pointer/length, Unit, and no-argument exports from a C driver through
-the generated header under the strict warning set, checks include order,
-deduplication, unreferenced-header exclusion, and cross-process determinism
-for both outputs, and pins eight rejection shapes across 221-223 and parse 35;
-the MIR is unchanged, so the existing verifier and printer tests cover the
-lowered functions. Documentation is in [docs/c-interop.md](docs/c-interop.md)
-"Callbacks and C calling Alder", [docs/c-backend.md](docs/c-backend.md)
-"Exported functions", [docs/mir.md](docs/mir.md), and
-[docs/s0-language.md](docs/s0-language.md). A cold `bootstrap/regenerate.sh`
-measured 132.5 s wall and 2.16 GB peak RSS against 130.1 s and 2.17 GB for the
-parent tree on the same host.
+the generated header under the strict warning set, compiles and calls a
+main-less export library, checks header-guard order and case independence,
+checks include order, deduplication, unreferenced-header exclusion, and
+cross-process determinism for both outputs, and pins eight rejection shapes
+across 221-223 and parse 35 plus the no-entry failure. The MIR is unchanged,
+so the existing verifier and printer tests cover the lowered functions.
+Documentation is in [docs/c-interop.md](docs/c-interop.md) "Callbacks and C
+calling Alder", [docs/c-backend.md](docs/c-backend.md) "Exported functions",
+[docs/modules-and-builds.md](docs/modules-and-builds.md), [docs/mir.md](docs/mir.md),
+and [docs/s0-language.md](docs/s0-language.md). A cold
+`bootstrap/regenerate.sh` measured 145.6 s wall and 2.16 GB peak RSS against
+132.6 s and 2.16 GB for the parent tree on the same host.
 
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules

@@ -1106,37 +1106,136 @@ fn cgen_emit_export_prototype(d: Domain, initial: CgenWriter, store: MirStore, i
     return cgen_put(d, out, ");\n")
 }
 
-// The header guard word: the first export's symbol uppercased with every
-// other byte mapped to '_', so the guard stays unique per exported module.
-fn cgen_emit_header_guard_word(d: Domain, initial: CgenWriter, store: MirStore, function: U64) -> Result(CgenWriter, __s0_Error) {
-    if function == 0 { return cgen_put(d, initial, "H") }
-    let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
-    var writer = initial
-    var at = item.export_name_start
-    while at < item.export_name_end {
-        let byte = __s0_buffer_get(U8, store.names, at)
-        if byte >= 97 && byte <= 122 { writer = try cgen_put_byte(d, writer, byte - 32) } else { if (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) { writer = try cgen_put_byte(d, writer, byte) } else { writer = try cgen_put_byte(d, writer, 95) } }
+// Lexicographic order of two export symbols by their stored bytes. Export
+// names are unique, so equality is unreachable for two distinct functions.
+fn cgen_export_name_order(store: MirStore, left: U64, right: U64) -> I64 {
+    let left_item = __s0_buffer_get(MirFunctionRec, store.functions, left - 1)
+    let right_item = __s0_buffer_get(MirFunctionRec, store.functions, right - 1)
+    let left_len = left_item.export_name_end - left_item.export_name_start
+    let right_len = right_item.export_name_end - right_item.export_name_start
+    var at: U64 = 0
+    while at < left_len && at < right_len {
+        let left_byte = __s0_buffer_get(U8, store.names, left_item.export_name_start + at)
+        let right_byte = __s0_buffer_get(U8, store.names, right_item.export_name_start + at)
+        if left_byte < right_byte { return -1 }
+        if left_byte > right_byte { return 1 }
         at = at + 1
     }
-    return Ok(writer)
+    if left_len < right_len { return -1 }
+    if left_len > right_len { return 1 }
+    return 0
+}
+
+// Exported function IDs sorted by symbol bytes. Insertion sort keeps the
+// helper allocation-light and deterministic for the small export sets a
+// module carries; the order never depends on declaration order.
+fn cgen_sorted_export_ids(d: Domain, store: MirStore) -> Result(__s0_Buffer(U64), __s0_Error) {
+    var ids = try __s0_buffer_new(U64, d)
+    var function: U64 = 1
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        if __s0_buffer_get(MirFunctionRec, store.functions, function - 1).c_export { ids = try __s0_buffer_append(U64, d, ids, function) }
+        function = function + 1
+    }
+    var at: U64 = 1
+    while at < __s0_buffer_len(U64, ids) {
+        let key = __s0_buffer_get(U64, ids, at)
+        var slot = at
+        while slot > 0 && cgen_export_name_order(store, __s0_buffer_get(U64, ids, slot - 1), key) > 0 {
+            __s0_buffer_set(U64, ids, slot, __s0_buffer_get(U64, ids, slot - 1))
+            slot = slot - 1
+        }
+        __s0_buffer_set(U64, ids, slot, key)
+        at = at + 1
+    }
+    return Ok(ids)
+}
+
+// Modular addition for the 64-bit guard hash, below the largest portable
+// multiplication-free modulus used by the compiler's other stable hashes.
+fn cgen_guard_hash_add(left: U64, right: U64) -> U64 {
+    let modulus: U64 = 9223372036854775783
+    if left >= modulus - right { return left - (modulus - right) }
+    return left + right
+}
+
+// One polynomial-hash step: hash * 33 + byte, modulo the hash modulus.
+fn cgen_guard_hash_byte(hash: U64, byte: U8) -> U64 {
+    var doubled = hash
+    var bit: U64 = 0
+    while bit < 5 {
+        doubled = cgen_guard_hash_add(doubled, doubled)
+        bit = bit + 1
+    }
+    let shifted = cgen_guard_hash_add(doubled, hash)
+    return cgen_guard_hash_add(shifted, cgen_u8_to_u64(byte))
+}
+
+// Digest of the full sorted export symbol list. Sorting before hashing makes
+// the header guard independent of declaration order and of every case-only
+// collision that a first-symbol guard allowed.
+fn cgen_header_guard_hash(d: Domain, store: MirStore) -> Result(U64, __s0_Error) {
+    let ids = try cgen_sorted_export_ids(d, store)
+    var hash: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, ids) {
+        let item = __s0_buffer_get(MirFunctionRec, store.functions, __s0_buffer_get(U64, ids, at) - 1)
+        var name_at = item.export_name_start
+        while name_at < item.export_name_end {
+            hash = cgen_guard_hash_byte(hash, __s0_buffer_get(U8, store.names, name_at))
+            name_at = name_at + 1
+        }
+        // A zero byte cannot occur inside a C identifier, so it separates
+        // adjacent names without an extra length prefix.
+        hash = cgen_guard_hash_byte(hash, 0)
+        at = at + 1
+    }
+    return Ok(hash)
+}
+
+// One lowercase hexadecimal digit of the guard digest.
+fn cgen_put_hex_digit(d: Domain, initial: CgenWriter, digit: U64) -> Result(CgenWriter, __s0_Error) {
+    if digit == 0 { return cgen_put_byte(d, initial, 48) }
+    if digit == 1 { return cgen_put_byte(d, initial, 49) }
+    if digit == 2 { return cgen_put_byte(d, initial, 50) }
+    if digit == 3 { return cgen_put_byte(d, initial, 51) }
+    if digit == 4 { return cgen_put_byte(d, initial, 52) }
+    if digit == 5 { return cgen_put_byte(d, initial, 53) }
+    if digit == 6 { return cgen_put_byte(d, initial, 54) }
+    if digit == 7 { return cgen_put_byte(d, initial, 55) }
+    if digit == 8 { return cgen_put_byte(d, initial, 56) }
+    if digit == 9 { return cgen_put_byte(d, initial, 57) }
+    if digit == 10 { return cgen_put_byte(d, initial, 97) }
+    if digit == 11 { return cgen_put_byte(d, initial, 98) }
+    if digit == 12 { return cgen_put_byte(d, initial, 99) }
+    if digit == 13 { return cgen_put_byte(d, initial, 100) }
+    if digit == 14 { return cgen_put_byte(d, initial, 101) }
+    return cgen_put_byte(d, initial, 102)
+}
+
+// The 16-digit lowercase hexadecimal guard digest.
+fn cgen_emit_header_guard_hash(d: Domain, initial: CgenWriter, hash: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var place: U64 = 1152921504606846976
+    while place > 0 {
+        out = try cgen_put_hex_digit(d, out, (hash / place) % 16)
+        if place == 1 { return Ok(out) }
+        place = place / 16
+    }
+    return Ok(out)
 }
 
 // The deterministic C header for one module's exports: referenced binding
 // headers in declaration order, then the prototypes.
 fn cgen_generate_header(d: Domain, store: MirStore) -> Result(Bool, __s0_Error) {
     let indexes = try mir_vindex_build(d, store)
-    var first_export: U64 = 0
-    var at: U64 = 0
-    while at < __s0_buffer_len(MirFunctionRec, store.functions) {
-        if first_export == 0 && __s0_buffer_get(MirFunctionRec, store.functions, at).c_export { first_export = at + 1 }
-        at = at + 1
-    }
+    let guard_hash = try cgen_header_guard_hash(d, store)
     var out = try cgen_writer_new(d)
     out = try cgen_put(d, out, "/* Generated by the Alder C11 backend. Do not edit. */\n#ifndef ALDER_EXPORTS_")
-    out = try cgen_emit_header_guard_word(d, out, store, first_export)
+    out = try cgen_emit_header_guard_hash(d, out, guard_hash)
     out = try cgen_put(d, out, "_H\n#define ALDER_EXPORTS_")
-    out = try cgen_emit_header_guard_word(d, out, store, first_export)
+    out = try cgen_emit_header_guard_hash(d, out, guard_hash)
     out = try cgen_put(d, out, "_H\n\n#include <stddef.h>\n")
+    var at: U64 = 0
     var block: U64 = 0
     while block < __s0_buffer_len(MirBindingRec, store.bindings) {
         var referenced = false

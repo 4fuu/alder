@@ -439,14 +439,12 @@ uses, so an export can never collide with generated internal names.
 exports: `<stddef.h>` for `c.Size`/`c.PtrDiff`, one include for each binding
 block header referenced by an export signature, in declaration order and
 deduplicated, then the prototypes inside an `extern "C"` guard. The guard word
-derives from the first export symbol because MIR carries no module name; two
-headers whose first export symbols differ only by case therefore need
-distinct names. The generated C carries a non-static definition for each
-export with the same signature. Each call creates a root domain, runs the
-Alder function, destroys the domain, and returns the C-ABI result, so there is
-no global initializer
-and no per-process entry contract; a foreign thread may call an export
-directly. An export catches no invariant panic: process termination with the
+is a digest of the full sorted export-symbol list, so declaration order and
+case-only name differences cannot collide. The generated C carries a
+non-static definition for each export with the same signature. Each call
+creates a root domain, runs the Alder function, destroys the domain, and
+returns the C-ABI result, so there is no global initializer and no per-process
+entry contract; a foreign thread may call an export directly. An export catches no invariant panic: process termination with the
 runtime invariant status remains the only portable panic behavior across C.
 Thread entry and runtime-initialization host bridging stay a later milestone
 item.

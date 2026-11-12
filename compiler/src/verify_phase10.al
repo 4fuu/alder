@@ -171,6 +171,17 @@ fn mir_v10_param_type(store: MirStore, function: U64, ordinal: U64) -> U64 {
     return 0
 }
 
+// True when the module defines at least one intentional C export, which
+// makes a main-less source set a library build rather than a hosted program.
+fn mir_v10_has_export(store: MirStore) -> Bool {
+    var function: U64 = 1
+    while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
+        if __s0_buffer_get(MirFunctionRec, store.functions, function - 1).c_export { return true }
+        function = function + 1
+    }
+    return false
+}
+
 fn mir_v10_entry(d: Domain, store: MirStore, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(MirVerifyCompleteOutput, __s0_Error) {
     var out = initial
 var entry: U64 = 0
@@ -178,8 +189,14 @@ var function: U64 = 1
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
 if mir_vname_word(store, item.name_start, item.name_end, "main") { entry = function }
 function = function + 1 }
-    if entry == 0 { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_missing_entry(), 0, 0, 0, 0, 0, 0, 0, 1, 0, 0))
-return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: true, entry: 0)) }
+    if entry == 0 {
+        // A library build has no hosted entry. Only this entry phase is
+        // skipped: every earlier V1-V9 check has already run, and a source set
+        // with neither main nor an export keeps the missing-entry diagnostic.
+        if mir_v10_has_export(store) { return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: true, hosted: false, entry: 0)) }
+        out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_missing_entry(), 0, 0, 0, 0, 0, 0, 0, 1, 0, 0))
+        return Ok(MirVerifyCompleteOutput(diagnostics: out, complete: false, hosted: true, entry: 0))
+    }
     let item = __s0_buffer_get(MirFunctionRec, store.functions, entry - 1)
     if item.result_type != mir_type_i32() { out = try mir_vadd(d, out, mir_vdiag(mir_verify_phase_backend(), mir_vdiag_entry_result(), entry, 0, 0, 0, 0, item.result_type, entry, mir_type_i32(), item.result_type, entry)) }
     let count = mir_v10_param_count(store, entry)

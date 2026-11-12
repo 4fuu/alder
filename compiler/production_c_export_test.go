@@ -184,6 +184,65 @@ var cExportRejections = []struct {
 	},
 }
 
+// No-main export modules are library builds: C emission skips only the hosted
+// entry phase, emits no alder_program_entry, and the generated header and
+// wrapper are callable from an ordinary C main.
+const cExportLibraryProgram = `import c "cexport_library.h" as lib {
+    record type Value = "struct cexport_library_value" {
+        member: c.Long = "member"
+    }
+}
+
+export c fn lib_add(a: c.Long, b: c.Long) -> c.Long {
+    let sum = a.to_i64() + b.to_i64()
+    return sum.to_c_long()
+}
+`
+
+const cExportLibraryHeader = `#ifndef CEXPORT_LIBRARY_H
+#define CEXPORT_LIBRARY_H
+struct cexport_library_value {
+    long member;
+};
+#endif
+`
+
+const cExportLibraryDriver = `#include "library.h"
+
+int main(void) {
+    if (lib_add(4, 9) != 13) { return 1; }
+    return 0;
+}
+`
+
+// The guard is a digest of the full sorted export list. These three modules
+// isolate declaration-order independence and the old first-symbol uppercase
+// collision.
+const cExportGuardAB = `export c fn alpha() -> Unit { return }
+export c fn beta() -> Unit { return }
+`
+
+const cExportGuardBA = `export c fn beta() -> Unit { return }
+export c fn alpha() -> Unit { return }
+`
+
+const cExportGuardLower = `export c fn alpha() -> Unit { return }
+`
+
+const cExportGuardUpper = `export c fn Alpha() -> Unit { return }
+`
+
+func cExportGuardWord(t *testing.T, header string) string {
+	t.Helper()
+	for _, line := range strings.Split(header, "\n") {
+		if strings.HasPrefix(line, "#ifndef ALDER_EXPORTS_") && strings.HasSuffix(line, "_H") {
+			return line
+		}
+	}
+	t.Fatalf("generated header has no export guard:\n%s", header)
+	return ""
+}
+
 func TestM8CExportProductionQualification(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "" {
 		t.Parallel()
@@ -256,6 +315,61 @@ func TestM8CExportProductionQualification(t *testing.T) {
 	}
 	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, emitted.stdout, cExportDriver, 0,
 		"-I", dir)
+
+	libraryDir := t.TempDir()
+	libraryFiles := map[string]string{
+		"library.al":        cExportLibraryProgram,
+		"cexport_library.h": cExportLibraryHeader,
+	}
+	libraryC := runProductionCompilerAtRoot(t, exe, libraryDir, libraryFiles, "compile", "--emit=c", "library.al")
+	if libraryC.status != 0 || libraryC.stderr != "" {
+		t.Fatalf("library emit=c result: %+v stderr=%s", libraryC, libraryC.stderr)
+	}
+	if !strings.Contains(libraryC.stdout, "long lib_add(long alder_a0, long alder_a1)") {
+		t.Fatalf("library C has no export wrapper:\n%s", libraryC.stdout)
+	}
+	if strings.Contains(libraryC.stdout, "alder_program_entry") {
+		t.Fatalf("library C emits a hosted entry:\n%s", libraryC.stdout)
+	}
+	libraryHeader := runProductionCompilerAtRoot(t, exe, libraryDir, libraryFiles, "compile", "--emit=header", "library.al")
+	if libraryHeader.status != 0 || libraryHeader.stderr != "" {
+		t.Fatalf("library emit=header result: %+v stderr=%s", libraryHeader, libraryHeader.stderr)
+	}
+	if err := os.WriteFile(filepath.Join(libraryDir, "library.h"), []byte(libraryHeader.stdout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, libraryC.stdout, cExportLibraryDriver, 0,
+		"-I", libraryDir)
+
+	guardFiles := map[string]string{
+		"guard_ab.al":    cExportGuardAB,
+		"guard_ba.al":    cExportGuardBA,
+		"guard_lower.al": cExportGuardLower,
+		"guard_upper.al": cExportGuardUpper,
+	}
+	guardAB := runProductionCompilerAtRoot(t, exe, t.TempDir(), guardFiles, "compile", "--emit=header", "guard_ab.al")
+	guardBA := runProductionCompilerAtRoot(t, exe, t.TempDir(), guardFiles, "compile", "--emit=header", "guard_ba.al")
+	if guardAB.status != 0 || guardBA.status != 0 {
+		t.Fatalf("guard headers: ab=%+v ba=%+v", guardAB, guardBA)
+	}
+	if cExportGuardWord(t, guardAB.stdout) != cExportGuardWord(t, guardBA.stdout) {
+		t.Fatalf("export guard depends on declaration order:\n%s\n%s", guardAB.stdout, guardBA.stdout)
+	}
+	guardLower := runProductionCompilerAtRoot(t, exe, t.TempDir(), guardFiles, "compile", "--emit=header", "guard_lower.al")
+	guardUpper := runProductionCompilerAtRoot(t, exe, t.TempDir(), guardFiles, "compile", "--emit=header", "guard_upper.al")
+	if guardLower.status != 0 || guardUpper.status != 0 {
+		t.Fatalf("case guard headers: lower=%+v upper=%+v", guardLower, guardUpper)
+	}
+	if cExportGuardWord(t, guardLower.stdout) == cExportGuardWord(t, guardUpper.stdout) {
+		t.Fatalf("case-only export names share a guard:\n%s\n%s", guardLower.stdout, guardUpper.stdout)
+	}
+
+	noEntry := runProductionCompilerAtRoot(t, exe, t.TempDir(), map[string]string{
+		"noentry.al": "fn helper() -> I32 { return 0 }\n",
+	}, "compile", "--emit=c", "noentry.al")
+	if noEntry.status == 0 || !strings.Contains(noEntry.stderr, "verification refused") {
+		t.Fatalf("main-less module without exports: %+v stderr=%s", noEntry, noEntry.stderr)
+	}
 
 	for _, rejection := range cExportRejections {
 		rejection := rejection

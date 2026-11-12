@@ -315,7 +315,11 @@ supported system or managed C toolchain. The plan pins the compiler family,
 version constraints, target, flags, runtime, and linker inputs. The driver
 rejects unknown flag injection in frozen builds.
 
-Generated C can be retained with `--emit=c` for inspection. Build output uses a
+Generated C can be retained with `--emit=c` for inspection. A source set with
+`export c fn` declarations and no `main` is a library build: C emission skips
+only the hosted-entry phase of verification, emits no `alder_program_entry`,
+and leaves the export wrappers for an ordinary C caller. A source set with
+neither `main` nor an export is rejected at verification. Build output uses a
 target/profile/package layout below `build/`; atomic replacement prevents a
 failed build from corrupting a previous output. C object and native executable
 bytes need not match across different C toolchains, while generated C and the
