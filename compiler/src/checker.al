@@ -13542,8 +13542,9 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
         if !has_default { return check_token_fail(d, state, store, 121, __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1)) }
         return validate_user_requirements(d, state, parse, store, rec, item.next)
     }
-    // Receiver mode and runtime arity (no calls).
-    var want_receiver: U64 = 13
+    // Receiver mode and runtime arity (no calls). A requirement without a
+    // `self` parameter is a static method and expects no receiver.
+    var want_receiver: U64 = 0
     var want_params: U64 = 0
     var req_at = requirement.children
     while req_at != 0 {
@@ -13556,8 +13557,12 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
     }
     let method = __s0_buffer_get(SymbolRec, store.symbols, found - 1)
     let method_node = __s0_buffer_get(SyntaxRec, parse.nodes, method.node - 1)
-    if method_receiver_kind(state, parse, store, found) != want_receiver { return check_token_fail(d, state, store, 123, method_node) }
-    if use_count(store, found, 5) != want_params + 1 { return check_token_fail(d, state, store, 123, method_node) }
+    let impl_receiver = method_receiver_kind(state, parse, store, found)
+    if impl_receiver != want_receiver { return check_token_fail(d, state, store, 123, method_node) }
+    // A receiver occupies role-5 ordinal zero; a static method has none.
+    var receiver_slot: U64 = 0
+    if want_receiver != 0 { receiver_slot = 1 }
+    if use_count(store, found, 5) != want_params + receiver_slot { return check_token_fail(d, state, store, 123, method_node) }
     // The impl method declares exactly as many type parameters as the
     // requirement; they match positionally through the impl substitution.
     let want_type_arity = requirement_method_param_count(parse, requirement)
@@ -13565,7 +13570,7 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
     let method_first = requirement_method_param_first(parse, store, rec.trait_symbol, requirement)
     // Runtime parameter and result types resolve recursively in the trait's
     // scope and compare through the impl substitution.
-    let compared = try validate_requirement_params(d, state, parse, store, rec, found, requirement, requirement.children, 1, method_first, want_type_arity)
+    let compared = try validate_requirement_params(d, state, parse, store, rec, found, requirement, requirement.children, 1, want_params, method_first, want_type_arity)
     if match compared {
         CheckGood(value) => false
         CheckBad(value) => true
@@ -13603,13 +13608,19 @@ fn validate_user_requirements(d: Domain, state: State, parse: ParseStore, store:
     return validate_user_requirements(d, state, parse, with_params, rec, item.next)
 }
 
-fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, found: U64, requirement: SyntaxRec, req_at: U64, param_ordinal: U64, method_first: U64, method_count: U64) -> Result(CheckResult, __s0_Error) {
+fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store: CheckStore, rec: TraitImplRec, found: U64, requirement: SyntaxRec, req_at: U64, param_ordinal: U64, param_count: U64, method_first: U64, method_count: U64) -> Result(CheckResult, __s0_Error) {
     if req_at == 0 { return Ok(CheckGood(store)) }
     let req_item = __s0_buffer_get(SyntaxLinkRec, parse.links, req_at - 1)
     let child = __s0_buffer_get(SyntaxRec, parse.nodes, req_item.node - 1)
     if !((child.kind == 13 || child.kind == 47 || child.kind == 48) && !node_word(state, child, "self")) {
-        return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal, method_first, method_count)
+        return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal, param_count, method_first, method_count)
     }
+    // The method node's parameter links are stored last-to-first, so the
+    // impl's role-5 ordinal (self, when present, is zero) counts from the
+    // other end.
+    var receiver_slot: U64 = 0
+    if method_receiver_kind(state, parse, store, found) != 0 { receiver_slot = 1 }
+    let impl_ordinal = param_count - param_ordinal + receiver_slot
     if child.children != 0 {
         let head = __s0_buffer_get(SyntaxLinkRec, parse.links, child.children - 1)
         // Trait checking already annotated requirement types; reuse before
@@ -13628,13 +13639,13 @@ fn validate_requirement_params(d: Domain, state: State, parse: ParseStore, store
             }
             want = checked_type_for_syntax(current, rec.trait_symbol, head.node)
         }
-        let use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 5, param_ordinal) - 1)
+        let use = __s0_buffer_get(DeclTypeUseRec, current.uses, use_by_ordinal(current, found, 5, impl_ordinal) - 1)
         if !trait_impl_type_matches(current, rec.trait_symbol, want, use.checked_type, rec.first_arg, rec.arg_count, rec.self_type, method_first, method_count, found, 0) {
             return check_token_fail(d, state, current, 123, __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(SymbolRec, current.symbols, found - 1).node - 1))
         }
-        return validate_requirement_params(d, state, parse, current, rec, found, requirement, req_item.next, param_ordinal + 1, method_first, method_count)
+        return validate_requirement_params(d, state, parse, current, rec, found, requirement, req_item.next, param_ordinal + 1, param_count, method_first, method_count)
     }
-    return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal + 1, method_first, method_count)
+    return validate_requirement_params(d, state, parse, store, rec, found, requirement, req_item.next, param_ordinal + 1, param_count, method_first, method_count)
 }
 
 // Validate every trait implementation once method signatures are resolved.
