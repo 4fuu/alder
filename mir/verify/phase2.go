@@ -41,6 +41,9 @@ func phase2Types(m *mir.Module) []Error {
 		if containsKind(m, f.Result, mir.TypeDomainHandle) || containsKind(m, f.Result, mir.TypeDomainMark) {
 			errs = append(errs, Error{Loc: loc, Msg: "domain_handle and domain_mark function results are not supported until result-domain identity can be summarized"})
 		}
+		if err := ownerPairError(m, f.Params); err != "" {
+			errs = append(errs, Error{Loc: loc, Msg: err})
+		}
 		for _, l := range f.Locals {
 			if !m.ValidType(l.Type) {
 				errs = append(errs, Error{Loc: loc, Msg: fmt.Sprintf("local %%%s type out of range", l.Name)})
@@ -69,6 +72,54 @@ func FuncSigOf(f *mir.Function) mir.FuncSig {
 		params[i] = p.Type
 	}
 	return mir.FuncSig{Params: params, Result: f.Result, Env: mir.NoType}
+}
+
+// ownerPairError requires every safe_mut parameter in a storage-model
+// signature to be followed by the domain_handle that owns the borrowed place.
+// Signatures with no domain_handle parameter are outside the storage model and
+// need no owner.
+func ownerPairError(m *mir.Module, params []mir.Param) string {
+	hasDomain := false
+	for _, p := range params {
+		if m.ValidType(p.Type) && m.Types[p.Type].Kind == mir.TypeDomainHandle {
+			hasDomain = true
+		}
+	}
+	if !hasDomain {
+		return ""
+	}
+	// alder_env is the compiler-generated closure environment borrowed by a
+	// thunk. Its owner lives in the environment record, not in a caller place.
+	for i := 0; i < len(params); i++ {
+		if !m.ValidType(params[i].Type) || m.Types[params[i].Type].Kind != mir.TypeSafeMut || params[i].Name == "alder_env" {
+			continue
+		}
+		if i+1 >= len(params) || !m.ValidType(params[i+1].Type) || m.Types[params[i+1].Type].Kind != mir.TypeDomainHandle {
+			return "safe_mut parameter requires an owner domain parameter"
+		}
+	}
+	return ""
+}
+
+func ownerPairTypeError(m *mir.Module, params []mir.TypeId) string {
+	hasDomain := false
+	for _, t := range params {
+		if m.ValidType(t) && m.Types[t].Kind == mir.TypeDomainHandle {
+			hasDomain = true
+		}
+	}
+	if !hasDomain {
+		return ""
+	}
+	for i, t := range params {
+		if !m.ValidType(t) || m.Types[t].Kind != mir.TypeSafeMut {
+			continue
+		}
+		if i+1 >= len(params) || !m.ValidType(params[i+1]) || m.Types[params[i+1]].Kind != mir.TypeDomainHandle {
+			return "safe_mut parameter requires an owner domain parameter"
+		}
+	}
+	return ""
 }
 
 func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
@@ -163,6 +214,9 @@ func checkTypeEntry(m *mir.Module, id mir.TypeId, t *mir.Type) []Error {
 		checkChild(t.Err, "err payload")
 	case mir.TypeFunction:
 		errs = append(errs, checkSigTypes(m, loc, t.Sig)...)
+		if err := ownerPairTypeError(m, t.Sig.Params); err != "" {
+			errs = append(errs, Error{Loc: loc, Msg: err})
+		}
 	}
 	return errs
 }

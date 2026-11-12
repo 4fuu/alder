@@ -271,6 +271,40 @@ Required invariants:
 
 The initial verifier correlates invalidation by SSA handle derivation (see Verifier Phases). It must never accept a dangling safe reference.
 
+### Borrowed-place owner domains
+
+A `safe_mut(T)` parameter borrows the caller's place. In a function that
+carries any `domain_handle` parameter, every `safe_mut` parameter is followed
+immediately by a `domain_handle` owner parameter. Direct calls and indirect
+`call.value` calls pass the owner after the corresponding borrowed argument;
+function types used by `fn.value` and `call.value` use the same pairing.
+Delegation forwards the same owner value, so a field path of a borrowed
+receiver keeps the domain that owns the root place.
+
+The owner domain is the domain that owns the place's relocatable storage.
+The contract requires lowering to record it per local while the function is
+built: `take` parameters own a frame-local value and grow in the callee
+function domain, while a by-value parameter's storage remains in the caller's
+active domain until the callee materializes a copy; growth uses the domain of
+the value actually stored. A returned value still goes through caller-result
+copying, and a caller-result local uses the caller-result domain for a later
+growth. At a control-flow join whose incoming local owners differ, lowering
+materializes the value with `copy_to_domain` into the nearest dominating domain
+(the frame domain, or caller-result storage when the value may be returned),
+records that domain as the local's owner, and exposes the copy site through the
+D023 report. It never adds a rejection for this case.
+
+The MIR representation, parameter pairing, indirect function-type pairing, and
+C export rejection are installed and verified. Lowering-side local owner
+tracking and the join copy remain to be implemented; until then diagnostic 333
+keeps the unsafe field-replacement shapes out of source.
+
+A C export signature never carries a `safe_mut` parameter or an owner domain;
+the verifier rejects a `c_export` function with a borrowed parameter. Callback
+trampolines likewise cross the C ABI with no `mut` or owner parameter. The
+owner relation is a compiler-internal MIR contract, not a source lifetime
+annotation, and `vec(T)` still carries no domain.
+
 ## Cleanup Operations
 
 ```text

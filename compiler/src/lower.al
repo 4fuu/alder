@@ -4811,6 +4811,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         if annotation.owner != owner { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         var current = state
         var args = try __s0_buffer_new(U64, d)
+        var owners = try __s0_buffer_new(U64, d)
         var ordinal: U64 = 0
         while ordinal < expression.child_count {
             if expression.first_child == 0 || expression.first_child - 1 + ordinal >= __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
@@ -4891,7 +4892,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 child = LowerStep(state: borrowed.state, id: value.id)
             } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } } } }
             current = child.state
+            var arg_owner: U64 = 0
+            if borrow_kind == 2 && current.has_storage {
+                arg_owner = lower_domain_value(current, store, owner)
+                if arg_owner == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+            }
             args = try __s0_buffer_append(U64, d, args, child.id)
+            owners = try __s0_buffer_append(U64, d, owners, arg_owner)
             ordinal = ordinal + 1
         }
         let result_type = try lower_type(d, source_state, store, current, expression.checked_type)
@@ -4921,7 +4928,13 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 argument_ordinal = 1
             }
             while ordinal < __s0_buffer_len(U64, args) {
-                current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal + ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+                current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, __s0_buffer_get(U64, args, ordinal), mir_operand_instruction(), "")
+                argument_ordinal = argument_ordinal + 1
+                let owner_arg_value = __s0_buffer_get(U64, owners, ordinal)
+                if owner_arg_value != 0 {
+                    current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, owner_arg_value, mir_operand_instruction(), "")
+                    argument_ordinal = argument_ordinal + 1
+                }
                 ordinal = ordinal + 1
             }
             return Ok(LowerStep(state: current, id: result))
@@ -6133,6 +6146,17 @@ fn lower_function(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpan
             }
             let parameter = try mir_add_function_param(d, parameter_type.state.mir, function, param_ordinal, name, parameter_type.id)
             current = lower_with_mir(current, parameter.store)
+            // Every borrowed runtime parameter carries the domain that owns
+            // the caller's place. The placeholder owner value is supplied by
+            // the call site; lowering uses it for growth and replacement once
+            // the local-owner map lands.
+            if local.mutable == 1 && current.has_storage {
+                let owner_name = try lower_decimal_name(d, "__owner_", checked_params_seen)
+                let domain_type = try lower_domain_mir_type(d, current)
+                let owner_parameter = try mir_add_function_param(d, domain_type.state.mir, function, param_ordinal + 1, owner_name, domain_type.id)
+                current = lower_with_mir(domain_type.state, owner_parameter.store)
+                param_ordinal = param_ordinal + 1
+            }
             if local.mutable == 2 {
                 // A `take` parameter owns the incoming value, so it needs a
                 // real local place: field receivers inside the method mutate

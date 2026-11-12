@@ -105,6 +105,87 @@ var at: U64 = 0
 at = at + 1 }
     return fraction % divisor == 0
 }
+// A function that carries domain handles pairs every safe_mut parameter with
+// the owner domain parameter that follows it. Functions outside the storage
+// model have no domain parameter and need no owner.
+fn mir_v2_param_is_env(store: MirStore, indexes: MirVIndexes, function: U64, ordinal: U64) -> Bool {
+    let count = mir_vindex_param_count(indexes, function)
+    var at: U64 = 0
+    while at < count {
+        let parameter = __s0_buffer_get(MirParamRec, store.params, mir_vindex_param(indexes, function, at) - 1)
+        if parameter.kind == mir_param_function() && parameter.ordinal == ordinal { return mir_vname_word(store, parameter.name_start, parameter.name_end, "alder_env") }
+        at = at + 1
+    }
+    return false
+}
+
+fn mir_v2_owner_pairs(store: MirStore, indexes: MirVIndexes, function: U64) -> Bool {
+    let count = mir_v5_function_param_count(store, indexes, function)
+    var has_domain = false
+    var at: U64 = 0
+    while at < count {
+        let parameter_type = mir_v5_param_type(store, indexes, function, 0, mir_param_function(), at)
+        if mir_vtype_kind(store, parameter_type) == mir_type_kind_domain_handle() { has_domain = true }
+        at = at + 1
+    }
+    if !has_domain { return true }
+    at = 0
+    while at < count {
+        let parameter_type = mir_v5_param_type(store, indexes, function, 0, mir_param_function(), at)
+        if mir_vtype_kind(store, parameter_type) == mir_type_kind_safe_mut() && !mir_v2_param_is_env(store, indexes, function, at) {
+            if at + 1 >= count { return false }
+            let owner_type = mir_v5_param_type(store, indexes, function, 0, mir_param_function(), at + 1)
+            if mir_vtype_kind(store, owner_type) != mir_type_kind_domain_handle() { return false }
+        }
+        at = at + 1
+    }
+    return true
+}
+
+// Function types used by fn.value and call.value follow the same pairing, so
+// an indirect call can pass the owner domain after its safe_mut argument.
+fn mir_v2_function_type_owner_pairs(store: MirStore, indexes: MirVIndexes, type_id: U64) -> Bool {
+    let total = mir_vindex_type_part_count(indexes, type_id)
+    var has_domain = false
+    var at: U64 = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        if part.kind == mir_type_part_function_param() && mir_vtype_kind(store, part.part_type) == mir_type_kind_domain_handle() { has_domain = true }
+        at = at + 1
+    }
+    if !has_domain { return true }
+    var pending = false
+    at = 0
+    while at < total {
+        let part = __s0_buffer_get(MirTypePartRec, store.type_parts, mir_vindex_type_part(indexes, type_id, at) - 1)
+        if part.kind == mir_type_part_function_param() {
+            let part_kind = mir_vtype_kind(store, part.part_type)
+            if pending {
+                if part_kind != mir_type_kind_domain_handle() { return false }
+                pending = false
+            } else {
+                if part_kind == mir_type_kind_safe_mut() { pending = true }
+            }
+        }
+        at = at + 1
+    }
+    return !pending
+}
+
+// A C export signature is a C ABI signature. It never carries a safe_mut
+// parameter (and therefore never carries the owner domain paired with one).
+fn mir_v2_export_safe(store: MirStore, indexes: MirVIndexes, function: U64) -> Bool {
+    if !__s0_buffer_get(MirFunctionRec, store.functions, function - 1).c_export { return true }
+    let count = mir_v5_function_param_count(store, indexes, function)
+    var at: U64 = 0
+    while at < count {
+        let parameter_type = mir_v5_param_type(store, indexes, function, 0, mir_param_function(), at)
+        if mir_vtype_kind(store, parameter_type) == mir_type_kind_safe_mut() { return false }
+        at = at + 1
+    }
+    return true
+}
+
 fn mir_vdecl_type(d: Domain, store: MirStore, indexes: MirVIndexes, out: __s0_Buffer(MirVerifyDiagRec), function: U64, block: U64, declaration: U64, type_id: U64) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var result = out
     if !mir_vtype_exists(store, type_id) { return mir_vadd(d, result, mir_vdiag(mir_verify_phase_types(), mir_vdiag_bad_signature(), function, block, 0, 0, 0, type_id, declaration, 0, 0, type_id)) }
@@ -129,6 +210,7 @@ if variant_count == 0 { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_em
         if (t.kind == mir_type_kind_option() || t.kind == mir_type_kind_slice() || t.kind == mir_type_kind_safe_ref() || t.kind == mir_type_kind_safe_mut() || t.kind == mir_type_kind_raw_ptr() || t.kind == mir_type_kind_table() || t.kind == mir_type_kind_id() || t.kind == mir_type_kind_table_view() || t.kind == mir_type_kind_table_mut_view() || t.kind == mir_type_kind_array() || t.kind == mir_type_kind_vec()) && !mir_vtype_exists(store, t.elem) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.elem)) }
         if t.kind == mir_type_kind_result() && (!mir_vtype_exists(store, t.ok_type) || !mir_vtype_exists(store, t.err_type)) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_type_child(), 0, 0, 0, 0, 0, id, id, 0, 0, t.ok_type)) }
         if t.kind == mir_type_kind_function() && !mir_vtype_exists(store, t.result_type) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_signature(), 0, 0, 0, 0, 0, id, id, 0, 0, t.result_type)) }
+        if t.kind == mir_type_kind_function() && !mir_v2_function_type_owner_pairs(store, indexes, id) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_signature(), 0, 0, 0, 0, 0, id, id, 0, 0, id)) }
         at = at + 1
     }
     at = 0
@@ -186,6 +268,7 @@ at = at + 1 }
     while at < __s0_buffer_len(MirFunctionRec, store.functions) { let item = __s0_buffer_get(MirFunctionRec, store.functions, at)
 out = try mir_vdecl_type(d, store, indexes, out, at + 1, 0, at + 1, item.result_type)
 if mir_vtype_kind(store, item.result_type) == mir_type_kind_domain_handle() || mir_vtype_kind(store, item.result_type) == mir_type_kind_domain_mark() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_domain_result(), at + 1, 0, 0, 0, 0, item.result_type, at + 1, 0, 0, 0)) }
+if !mir_v2_owner_pairs(store, indexes, at + 1) || !mir_v2_export_safe(store, indexes, at + 1) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_signature(), at + 1, 0, 0, 0, 0, 0, at + 1, 0, 0, at + 1)) }
 at = at + 1 }
     at = 0
     while at < __s0_buffer_len(MirOperandRec, store.operands) { let o = __s0_buffer_get(MirOperandRec, store.operands, at)

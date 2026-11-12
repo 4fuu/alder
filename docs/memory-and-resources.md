@@ -242,17 +242,42 @@ absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.
 
-### Borrowed-field storage replacement (interim M8 restriction)
+### Borrowed-place owner domains (M8)
 
 A `mut self` receiver and a `mut` parameter are borrowed places: the caller
-owns the value, and the callee writes through a reference to it. The current
-storage plan does not carry that owner domain with the reference. A callee that
-grows a `Vec`, assigns a `String`/`Bytes`/collection header, or rebuilds a
-`Map`/`Set` through a field of such a receiver therefore allocates in the
-callee's function domain while the caller keeps a header into it; the callee
-returns, its domain is destroyed, and the caller reads freed storage.
+owns the value, and the callee writes through a reference to it. MIR carries a
+hidden owner `domain_handle` parameter after each `safe_mut` parameter. Direct
+and delegated calls pass that domain with the borrowed argument, so growth and
+relocatable storage replacement allocate in the domain that owns the caller's
+place. The MIR representation and verifier pairing are installed; lowering will
+record the owner of each local under this contract. A `take` parameter owns a
+frame-local value and grows in the callee frame, and a returned value is still
+copied to caller-result storage; a by-value parameter's storage stays in the
+caller's active domain until the callee copies it, and growth uses the domain
+of the value actually stored. A `using` owner, table view, or caller-result
+value carries its own owning domain. If control-flow paths assign different
+owners to one local, lowering copies the value with `copy_to_domain` into the
+nearest dominating domain (the frame domain, or caller-result storage when it
+may be returned), records that domain, and reports the copy site; it never
+rejects the join. There is no
+source lifetime annotation, `Vec` still carries no domain, and no ARC/GC is
+introduced. C export signatures and callback trampolines never carry a
+`safe_mut` or owner parameter because the C ABI has no `mut`.
 
-Until per-mut-parameter owner-domain provenance lands, diagnostic 333 rejects
+The interim restriction below remains until the lowering and verifier
+implementation of this owner-domain contract lands.
+
+### Borrowed-field storage replacement (interim M8 restriction)
+
+The lowering does not yet use the owner parameter for growth and replacement.
+A callee that grows a `Vec`, assigns a `String`/`Bytes`/collection header, or
+rebuilds a `Map`/`Set` through a field of such a receiver would therefore
+allocate in the callee's function domain while the caller keeps a header into
+it; the callee returns, its domain is destroyed, and the caller reads freed
+storage.
+
+Until the lowering uses the owner domain for every growth and replacement,
+diagnostic 333 rejects
 mutating collection operations and relocatable-storage assignments through a
 field rooted in a `mut self` receiver or a `mut` parameter. The rule accepts the
 shapes whose storage is static or empty today: string literals, `Vec.new`,

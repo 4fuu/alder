@@ -1288,10 +1288,23 @@ fn cgen_function_has_domain(store: MirStore, indexes: MirVIndexes, function: U64
     return mir_vtype_kind(store, cgen_function_param(store, indexes, function, 0).param_type) == mir_type_kind_domain_handle()
 }
 
+// True when the function carries a borrowed parameter. A C export must never
+// expose one: the C ABI has no `mut` and therefore no owner-domain argument.
+fn cgen_function_has_borrowed(store: MirStore, indexes: MirVIndexes, function: U64) -> Bool {
+    let count = cgen_function_param_count(store, indexes, function)
+    var at: U64 = 0
+    while at < count {
+        if mir_vtype_kind(store, cgen_function_param(store, indexes, function, at).param_type) == mir_type_kind_safe_mut() { return true }
+        at = at + 1
+    }
+    return false
+}
+
 // One C export wrapper: the source signature is the C ABI signature, the
 // internal function keeps its mangled name, and a hidden domain becomes a
 // per-call root domain destroyed before the wrapper returns.
 fn cgen_emit_one_export(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, function: U64) -> Result(CgenWriter, __s0_Error) {
+    if cgen_function_has_borrowed(store, indexes, function) { return cgen_put(d, initial, "\n#error \"C export carries a borrowed parameter\"\n") }
     let item = __s0_buffer_get(MirFunctionRec, store.functions, function - 1)
     let has_domain = cgen_function_has_domain(store, indexes, function)
     var first_param: U64 = 0

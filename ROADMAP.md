@@ -2017,9 +2017,23 @@ The following items are not part of the current implementation scope:
   already hold.
 - a mutable view formed directly from a field (`self.buffer.slice_mut(...)`):
   field loads are value copies, so a view of one would write the copy. The
-  checker rejects the shape with diagnostic 307 and `BufReader`/`BufWriter`
-  copy the field to a local, take the view, and store it back. A field-rooted
-  mutable view needs a Vec-view MIR operation over `safe_mut` storage.
+  checker rejects the shape with diagnostic 307. `BufReader`/`BufWriter` copy
+  bytes into preallocated field storage and are independent of this view
+  restriction. A field-rooted mutable view needs a Vec-view MIR operation over
+  `safe_mut` storage.
+- borrowed-field storage replacement: growing or replacing relocatable storage
+  through a field of a `mut self` receiver or `mut` parameter is rejected by
+  diagnostic 333 until the owner-domain lowering uses the caller's domain.
+  The MIR representation and verifier are installed under D005B: a
+  `domain_handle` owner parameter follows every `safe_mut` parameter, function
+  types/calls pair it, export signatures reject borrowed parameters, and C
+  export wrappers guard against one. The remaining work is the lowering-side
+  local-owner map, owner use at growth and replacement, `copy_to_domain` at
+  control-flow joins (nearest dominating domain, never a rejection), restored
+  in-place `std.process` builders, and an unbounded `ByteSink`. The regression
+  set is the ASan field-receiver repro, `write_all` into `ByteSink` read back
+  in `main`, `m75-field-receiver.al`, and in-place `Command` builders. Docs:
+  [Memory and Resources](docs/memory-and-resources.md) and D005B.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or
   on none, and a branch that returns a `While`/`match` expression value does

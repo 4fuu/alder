@@ -98,6 +98,9 @@ permits mutation through a mutable argument or receiver, while `take`
 transfers an affine value and invalidates the source on that path. Inherent
 `impl Type { ... }` blocks provide `self`, `mut self`, and `take self`
 receivers plus associated functions. They do not provide extension methods.
+The owner domain of a borrowed place is a compiler-internal MIR contract, not
+source syntax: a hidden `domain_handle` parameter follows each `safe_mut`
+parameter in MIR, and source programs never name or annotate it.
 
 The source-bootstrapped compiler additionally implements intentional C
 exports: a top-level `export c fn` declaration defines a non-static C symbol

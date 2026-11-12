@@ -439,8 +439,10 @@ mismatch is diagnostic 224, use outside a direct raw-call argument is 225, and
 a non-bare target is 227. The generated static trampoline enters the Alder
 runtime with a per-invocation root domain when the target needs storage, so the
 callback never receives a scoped Alder value, never returns an Alder `Result`,
-and cannot retain Alder storage. The C API must not retain this callback; a
-retained registration uses `c.CallbackOwner`.
+and cannot retain Alder storage. The C callback signature never carries a `mut` parameter, `safe_mut`, or an
+owner-domain parameter because the C ABI has no `mut`; the trampoline obtains
+any Alder domain it needs from the callback context. The C API must not retain
+this callback; a retained registration uses `c.CallbackOwner`.
 
 A callback retained after the initiating call requires an affine
 `c.CallbackOwner`. Registration is unsafe-only and names the raw setter,
@@ -483,7 +485,10 @@ export c fn process_bytes(
 }
 ```
 
-An export is a top-level `export c fn` declaration. Its signature uses only
+An export is a top-level `export c fn` declaration. It never carries a `mut`
+parameter, `safe_mut`, or an owner-domain parameter; the verifier rejects a
+`c_export` function with a borrowed parameter because the C ABI has no `mut`.
+Its signature uses only
 C ABI types: `c.*` raw scalars, `c.Ptr(T)`/`c.ConstPtr(T)` over a bound C type,
 and a verified bound scalar or record by value; `Unit` results map to C
 `void`. Any other signature type is diagnostic 221. Exports are non-generic,
