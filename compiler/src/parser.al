@@ -854,7 +854,11 @@ fn parse_postfix(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
             if token_punct(state, value.cursor, ".") {
                 if !expression_line_ok(state, value.cursor, depth) { return reject_parse(d, state, value.cursor, 13) }
                 let name_cursor = ParseCursor(token: value.cursor.token + 1, store: value.cursor.store)
-                if !token_ident(state, name_cursor) { return reject_parse(d, state, name_cursor, 3) }
+                // `take` is a parameter-mode keyword, but it is also the
+                // builtin Option.take method name. A member position after a
+                // dot is unambiguous, so the keyword is accepted there.
+                let member_keyword = parse_token(state, name_cursor).keyword
+                if !token_ident(state, name_cursor) && member_keyword != 24 { return reject_parse(d, state, name_cursor, 3) }
                 let name = parse_token(state, name_cursor)
                 var cursor = ParseCursor(token: name_cursor.token + 1, store: name_cursor.store)
                 cursor = try add_link(d, cursor, value.node, 0)

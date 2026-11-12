@@ -458,6 +458,12 @@ Implemented expressions include:
   `F32.to_c_float`, `F64.to_c_double`, and `F64.to_c_float_checked() ->
   Option(c.Float)`. Any other conversion name on such a receiver is rejected
   with kind 205. See [C Interoperability](c-interop.md);
+- `Option(T).take()` on a mutable place moves the current option value out and
+  stores `none` back into the same place; the payload may be affine and is
+  transferred to the returned value. `take` is a parameter-mode keyword, so a
+  member position after a dot is the only place it names a method. A `let`
+  binding is rejected as an immutable place, and a non-place receiver is
+  rejected with kind 310;
 - calls, record/variant construction, field access, index and range;
 - exhaustive `match` over enums, `Option`, and `Result`, including statement
   arms (`=> { ... }`) whose bodies may hold ordinary statements, diverging

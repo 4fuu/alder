@@ -1234,6 +1234,28 @@ fn lower_c_string_ptr(d: Domain, source_state: State, spans: __s0_Buffer(Checked
     return Ok(LowerStep(state: instr.state, id: result.id))
 }
 
+// lower_option_take lowers the Option.take builtin as a place load (which
+// moves the current payload out), a none construction of the same option
+// type, and a plain store back into the receiver place. It allocates nothing
+// and carries no owner-domain operand; the caller-owned cleanup registration
+// observes the stored None at scope exit, while the loaded payload is the
+// expression value.
+fn lower_option_take(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || annotation.place == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block)
+    let place = try lower_receiver_place(d, source_state, spans, store, receiver.state, owner, function, block, annotation.place, environment, panic_block)
+    if place.id == 0 { return Ok(LowerStep(state: lower_invalid(place.state), id: 0)) }
+    let option_type = try lower_type(d, source_state, store, place.state, expression.checked_type)
+    if option_type.id == 0 { return Ok(LowerStep(state: lower_invalid(option_type.state), id: 0)) }
+    let loaded = try lower_add_typed_result(d, option_type.state, function, block, option_type.id)
+    let load = try lower_add_instr(d, loaded.state, function, block, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
+    let none = try lower_add_typed_result(d, load.state, function, block, option_type.id)
+    let constructed = try lower_add_instr(d, none.state, function, block, mir_op_enum_construct(), none.id, 0, option_type.id, 0, 0, 0, "none")
+    let stored = try lower_add_instr(d, constructed.state, function, block, mir_op_store(), 0, place.id, 0, none.id, 0, 0, "")
+    return Ok(LowerStep(state: stored.state, id: loaded.id))
+}
+
 // lower_try_option lowers `try option_value` in a function returning
 // Option(S): the some payload becomes the expression value and the none arm
 // early-returns a freshly constructed None through the owner's result
@@ -5120,6 +5142,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
         // 968 is the sequence-surface [U8].to_bytes, numbered clear of the
         // dense families above; it shares the M7.1 sequence lowering.
         if annotation.builtin == 968 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+        if annotation.builtin == 969 { return lower_option_take(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -7645,6 +7668,14 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         if !receiver_ok { return false }
         let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
         return result.kind == 2
+    }
+    if annotation.builtin == 969 {
+        // Option.take: one Option receiver and the same Option result.
+        if expression.child_count != 1 || annotation.target != 0 { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 || annotation.checked_type != receiver_type { return false }
+        let option = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        return option.kind == 9 && option.arg_count == 1
     }
     if annotation.builtin == 968 {
         // [U8].to_bytes: one byte-view receiver child, bytes result.

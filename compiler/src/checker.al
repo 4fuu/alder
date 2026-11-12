@@ -8653,6 +8653,25 @@ fn check_int_convert_method(d: Domain, state: State, parse: ParseStore, base: Ch
 // to_string_checked validates UTF-8 and yields Option(String), none on
 // invalid input. Index and bound arguments are U64; both slice arguments are
 // required.
+// Option.take(mut self) -> Option(T) is a checker builtin: it moves the
+// current payload out and stores None back into the same place. The receiver
+// must be a mutable place; the lowering emits a load, a none construction, and
+// a plain store, so no owner-domain copy or cleanup disarm is involved.
+fn check_option_take_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
+    if receiver.kind != 9 { return expr_token_fail(d, state, base, 61, callee) }
+    // Method-call links include both the selected callee and its receiver.
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 41, call) }
+    if receiver_node.kind != 24 && receiver_node.kind != 29 && receiver_node.kind != 30 { return expr_token_fail(d, state, base, 310, receiver_node) }
+    let placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
+    if place_failed(placed) { return place_expr_failure(placed, store, base) }
+    let placed_value = place_value(placed, store)
+    if expected != 0 && !(try expression_type_equal(d, state, parse, placed_value.store, receiver_type_id, expected)) {
+        return expr_token_type_fail(d, state, placed_value.store, mismatch_kind, mismatch_node, expected, receiver_type_id)
+    }
+    return append_sequence_method(d, placed_value.store, owner, call_id, receiver_type_id, 969, receiver_expression, 0, 0, placed_value.place, site_kind, site_syntax)
+}
+
 fn check_str_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver_node: SyntaxRec, receiver_type_id: U64, receiver_expression: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type_id - 1)
     if receiver.kind != 2 && receiver.kind != 14 { return expr_token_fail(d, state, base, 61, callee) }
@@ -10034,6 +10053,9 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // to its own user Display implementation; the helper rejects
         // receivers outside the builtin domain.
         if node_word(state, callee, "display") && receiver_type.kind != 7 { return check_display_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+        // Option.take is routed before impl lookup; only Option receivers
+        // name this builtin, and the helper requires a mutable place.
+        if receiver_type.kind == 9 && node_word(state, callee, "take") { return check_option_take_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         // Byte-sequence surface (M8): String and Bytes methods. Routed before
         // the sequence-method names, which otherwise capture len and slice and
         // reject these receivers at the sequence guard.

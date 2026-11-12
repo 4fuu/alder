@@ -346,6 +346,12 @@ resource on both `Ok` and `Err`. A retryable operation instead uses `mut self`
 and leaves fallback cleanup registered. Automatic cleanup remains suitable for
 abandonment and cannot hide a recoverable result.
 
+`Option(T).take()` on a mutable place moves the current option value out and
+stores `none` into the same place. The payload may be affine; the returned
+value owns it. A cleanup registration on the enclosing owner observes the
+stored `none` at scope exit, so the taken payload is released exactly once by
+its new owner, not by the old registration.
+
 A `take self` method may move its own direct record fields out one at a time,
 by returning a field, binding it with `let`, or passing it as a `take`
 argument. A moved field is a transfer of that sub-owner, so a later read of the
