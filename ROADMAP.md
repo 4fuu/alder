@@ -1467,6 +1467,12 @@ the conversion round trips compare `dback == 3.5`, `fback == 1.25`,
 `back == 1.5`, `widened == 1.5`, and `fback == 0.5` directly instead of
 observing the checked narrowing's `some`/`none`.
 
+Open M8 language item: string interpolation is specified in
+[docs/syntax.md](docs/syntax.md) and [docs/language-semantics.md](docs/language-semantics.md)
+as `"{expr}"` evaluated through `Display` in source order, but it is not
+implemented. It is scheduled separately; `core.format`/`std.format` provide the
+explicit formatting foundation and do not replace the syntax feature.
+
 Landed language progress: float comparison and float arithmetic are in the
 S0/MIR profile under the approved IEEE-754 semantics (decision
 [D026](docs/design-decisions.md)). The checker accepts the six comparisons
@@ -1658,6 +1664,19 @@ checked in `U64`, so `i64_min()` parses without signed overflow. Evidence:
 `compiler/production_parse_int_test.go` checks both boundaries, overflow,
 signs, lone signs, empty input, whitespace, leading zeroes, and ASan/UBSan.
 Docs: [`core.num` snapshot](docs/api/core.num-v1.md).
+
+Landed standard-library progress: `std.format` installs the `Formatter` builder
+over `std.text.StringBuilder` and `core.format`. It composes text, `Display`
+values, integers, and F32/F64 into one string; the first formatting error is
+retained and reported by `finish`. Float spelling is the audited
+`std/c/format_shim.h` shortest round-trip: C `%.*g`/`%.*e` under a per-thread C
+numeric locale, lowercase `nan`/`inf`, signed `-0`, and a frozen exponent
+spelling. Evidence: `compiler/production_std_format_test.go` checks general,
+fixed, scientific, F32, sign, zero padding, NaN/inf, -0, `Display`, deferred
+errors, a comma-locale attempt, and ASan/UBSan; the snapshot example runs with
+checksum 1. Docs: [`std.format` snapshot](docs/api/std.format-v1.md).
+Interpolation syntax remains specified but unimplemented and scheduled
+separately.
 
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with

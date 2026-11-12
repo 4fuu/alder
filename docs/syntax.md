@@ -340,7 +340,9 @@ integer type when representable, and otherwise default to `I64`. The
 even if a lexer stores the token compactly. Float literals adapt to `F32` or
 `F64` and otherwise default to `F64`.
 
-String interpolation uses `Display`. An array literal `[a, b]` produces
+String interpolation uses `Display`. The interpolation form is specified but
+not implemented in the current compiler; explicit `core.format`/`std.format`
+calls are available until it lands. An array literal `[a, b]` produces
 `Array(T, 2)` after checking every element against one type. An empty array
 literal requires an expected `Array(T, 0)` type. Arrays and vectors borrow as
 `[T]` for a call; constructing an owned vector remains explicit, for example

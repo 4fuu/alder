@@ -140,7 +140,8 @@ a second semantic model:
 - `if let` for a one-pattern match, and `if` guards on `match` arms;
 - statically resolved method calls with `value.method(...)`;
 - `while let` and `for value in values` over static iterator traits;
-- string interpolation through `Display`;
+- string interpolation through `Display` (specified, not implemented in the
+  current compiler);
 - `using` for lexical resource cleanup;
 - omission of `-> Unit`.
 

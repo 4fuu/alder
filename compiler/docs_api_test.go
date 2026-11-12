@@ -212,6 +212,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.format-v1.al": {
+			style:   "project",
+			srcName: "std_format_example.al",
+			mainText: `module hello.main
+
+import hello.std_format_example { std_format_example }
+
+pub fn main() -> I32 {
+    if std_format_example() == 1 { return 0 }
+    return 1
+}
+`,
+		},
 	}
 }
 
