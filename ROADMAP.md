@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **in progress (C-interop slice complete; hosted sysroot foundation in progress)**
+Status: **in progress (C-interop complete; hosted foundation partially landed; std.fs/std.process finishing, std.env partial)**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
@@ -2110,26 +2110,11 @@ The following items are not part of the current implementation scope:
   full module-visibility pass that makes non-`pub` fields unreadable is
   deferred; the opaque-construction boundary and every `using`/affine rule
   already hold.
-- a mutable view formed directly from a field (`self.buffer.slice_mut(...)`):
-  field loads are value copies, so a view of one would write the copy. The
-  checker rejects the shape with diagnostic 307. `BufReader`/`BufWriter` copy
-  bytes into preallocated field storage and are independent of this view
-  restriction. A field-rooted mutable view needs a Vec-view MIR operation over
-  `safe_mut` storage.
-- borrowed-place owner-domain provenance: D005B is installed. A
-  `domain_handle` owner parameter follows every `safe_mut` parameter in the
-  storage model, direct and indirect calls pair it, function types carry the
-  borrowed-parameter mask, exit C exports reject borrowed parameters, and
-  lowering uses the owner for `Vec`/`Map`/`Set` growth and relocatable field
-  replacement. The local-owner map uses the frame domain for ordinary locals,
-  caller-result storage for by-value parameters, and the callee frame for
-  `take`; ASan regressions cover the former diagnostic 333 shapes, a
-  branch-local join, and an indirect `mut` call. Function types spell a
-  borrowed parameter as `fn(mut T) -> R`; `fn(take T)` and borrowed closure
-  parameters are rejected with dedicated diagnostics. Diagnostic 333 and the
-  functional-builder workaround are retired; the snapshot's in-place
-  `std.process` builders are restored. Docs:
-  [Memory and Resources](docs/memory-and-resources.md) and D005B.
+- get_mut growth of relocatable fields: a `Table` view can assign scalar
+  fields today, but table elements must be concrete copyable data, so a
+  `Vec`/`String`/`Bytes`/`OsString` field cannot live in a table. Growing such
+  a field through `get_mut` waits for tables whose elements carry relocatable
+  storage.
 - returning an affine `c.CString` through a `match` arm: the affine flow
   analysis requires the owner to be transferred on every reachable path or
   on none, and a branch that returns a `While`/`match` expression value does
