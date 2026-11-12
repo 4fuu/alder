@@ -580,7 +580,12 @@ build plan's explicit `-I` roots (fixture roots in tests, locked native or
 sysroot roots in production) plus the target toolchain's own C11 and libc
 headers, such as `stddef.h`, `time.h`, and `stdio.h` from the target sysroot.
 The compiler never adds a search path of its own and never reads an ambient
-include or library directory.
+include or library directory. The current host driver passes the selected
+sysroot as `-I` for the native build and generated C with binding blocks
+selects `_DEFAULT_SOURCE` on Linux and `_DARWIN_C_SOURCE` on Darwin; both are
+interim toolchain defaults. They
+move into the versioned build plan once the build driver exists, so a program
+never depends on the host's ambient feature-test or include selection.
 
 Binding verification is not a separate step that a build could skip: the
 generated program translation unit itself carries the binding evidence.

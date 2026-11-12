@@ -581,6 +581,8 @@ not run while an incompatible view is active, and it is deferred.
 
 ## C Interoperability
 
+Generated C that has at least one binding block selects the hosted C library surface before any include: `_DEFAULT_SOURCE` on Linux and `_DARWIN_C_SOURCE` on Darwin, when the build has not already selected them. These are the platform macros that expose the POSIX.1-2008 declarations plus the non-strict extensions (`realpath`, `getrandom`, `getentropy`, `st_mtim`) that binding shims rely on; `_POSIX_C_SOURCE` alone would hide them. The hosted binding surface (`std.io`, `std.env`, and the runtime shims) depends on the POSIX.1-2008 C library declarations, and a feature-test macro must precede every libc header. A program with no binding blocks is pure Alder code and keeps the default C11 surface with byte-identical output. Binding headers are included before the program headers (`alder.h`, `<float.h>`, `<string.h>`) so a binding header may select its own feature-test macros; the generated binding checks follow the headers with `<stddef.h>` available. The interim define moves into the versioned build plan once the build driver owns native defines.
+
 Imported headers may be included directly in generated C or accessed through generated C shims. The chosen strategy must preserve target ABI without allowing C declarations to leak into MIR semantics.
 
 The backend must distinguish:
