@@ -27,8 +27,14 @@ fn io_path(value: String) -> Result(Path, IoError) {
     return Err(IoError.InvalidInput)
 }
 
+fn close_through_using(cap: Blocking, path: Path) -> Result(Unit, IoError) {
+    using file = try open(cap, path)
+    return Ok(())
+}
+
 fn probe_main(cap: Blocking) -> Result(I32, IoError) {
     let path = try io_path("/tmp/alder-fs-probe.txt")
+    try close_through_using(cap, path)
     let file: File(Blocking) = try open(cap, path)
     let info = try file.metadata()
     var code: I32 = 0
@@ -183,6 +189,21 @@ fn env_key(value: String) -> Result(OsString, IoError) {
     return Err(IoError.InvalidInput)
 }
 
+fn make_temp_file(cap: Blocking) -> Result(Path, IoError) {
+    using file = try temp_file(cap, "probe")
+    return Ok(file.path())
+}
+
+fn make_temp_dir(cap: Blocking) -> Result(Path, IoError) {
+    using directory = try temp_dir(cap, "dir")
+    let path = directory.path()
+    let inner_name = try env_key("inner")
+    let inner = path.join(Path.from_os(inner_name))
+    let payload: Array(U8, 1) = [120]
+    try write(cap, inner, payload.slice(0, 1))
+    return Ok(path)
+}
+
 fn probe_main(cap: Blocking) -> Result(I32, IoError) {
     let root = try temp_root(cap)
     let key = try env_key("TMPDIR")
@@ -192,20 +213,12 @@ fn probe_main(cap: Blocking) -> Result(I32, IoError) {
         }
         None => { return Ok(2) }
     }
-    let file = try temp_file(cap, "probe")
-    let file_path = file.path()
-    file.cleanup()
+    let file_path = try make_temp_file(cap)
     match metadata(cap, file_path) {
         Ok(_) => { return Ok(3) }
         Err(_) => {}
     }
-    let directory = try temp_dir(cap, "dir")
-    let dir_path = directory.path()
-    let inner_name = try env_key("inner")
-    let inner = dir_path.join(Path.from_os(inner_name))
-    let payload: Array(U8, 1) = [120]
-    try write(cap, inner, payload.slice(0, 1))
-    directory.cleanup()
+    let dir_path = try make_temp_dir(cap)
     match metadata(cap, dir_path) {
         Ok(_) => { return Ok(4) }
         Err(_) => {}

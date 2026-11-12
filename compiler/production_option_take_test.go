@@ -71,9 +71,8 @@ impl Cleanup for Holder {
 fn make(n: U64) -> Res { return Res(n: n) }
 
 fn main() -> I32 {
-    let holder = Holder(slot: Some(make(7)))
+    using holder = Holder(slot: Some(make(7)))
     let taken = holder.take_it()
-    holder.cleanup()
     match taken {
         Some(item) => {
             if item.n != 7 { return 1 }
