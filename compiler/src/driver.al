@@ -491,7 +491,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 133 { return out_string("table-view match arm may contain only straight-line copy statements without fallible operations") }
     if kind == 134 { return out_string("overlapping table access: a live table view excludes this operation") }
     if kind == 135 { return out_string("match arms must be all expression bodies or all statement blocks") }
-    if kind == 136 { return out_string("using requires an affine owner implementing Cleanup") }
+    if kind == 136 {
+        if detail_a == 1 { return out_string("using requires a direct affine owner; this Result/Option carries an affine Cleanup owner, so bind it with using name = try expression") }
+        return out_string("using requires an affine owner implementing Cleanup")
+    }
     if kind == 137 { return out_string("the with-cleanup clause is private to the compiler's bootstrap sources; use Cleanup selection") }
     if kind == 140 { return out_string("Cleanup selection requires a nongeneric cleanup(take self) -> Unit method") }
     if kind == 141 { return out_string("a Vec of affine elements supports push and len only; element access would duplicate an owner") }

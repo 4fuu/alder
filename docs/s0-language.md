@@ -396,9 +396,10 @@ owner (registering the builtin release), any affine nominal type implementing
 `with cleanup_function` clause stays the bootstrap-private bridge. The
 initializer must name an owned value. A plain, `mut`, or by-value `self`
 parameter only borrows the caller's owner, so every ownership use of it is
-rejected; declare it with `take` to transfer ownership first. Read-only field
-access, `self` methods, and forwarding to another ordinary parameter remain
-available.
+rejected; declare it with `take` to transfer ownership first. A `Result` or
+`Option` carrying an affine owner is not itself an owner; write
+`using name = try expression` to extract the payload. Read-only field access,
+`self` methods, and forwarding to another ordinary parameter remain available.
 
 `break` and `continue` jump to the exit and the next iteration of the
 innermost enclosing loop; `continue` in a `for` still runs the index step, and

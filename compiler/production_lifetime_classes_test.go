@@ -281,6 +281,46 @@ func TestLifetimeUsingTakeParameterExactlyOnce(t *testing.T) {
 	compileAndRunProductionArtifactWithDriver(t, cc, root, runtimeObject, cResult.stdout, lifetimeCounterDriver, 0)
 }
 
+// TestUsingWrappedOwnerSuggestsTry keeps diagnostic 136 but names the actual
+// mistake: a Result or Option carrying an affine owner needs `try` before the
+// using registration.
+func TestUsingWrappedOwnerSuggestsTry(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	prefix := `type Res { n: U64 }
+impl Cleanup for Res {
+    fn cleanup(take self) -> Unit { return }
+}
+`
+	cases := []struct{ name, body string }{
+		{"result", "fn wrap() -> Result(Res, U64) { return Ok(Res(n: 1)) }\nfn consume() -> Unit {\n    using held = wrap()\n    return\n}\n"},
+		{"option", "fn wrap() -> Option(Res) { return Some(Res(n: 1)) }\nfn consume() -> Unit {\n    using held = wrap()\n    return\n}\n"},
+	}
+	for _, item := range cases {
+		item := item
+		t.Run(item.name, func(t *testing.T) {
+			source := prefix + item.body + "fn main() -> I32 { return 0 }\n"
+			check := runPrivateProductionCompiler(t, exe, map[string]string{"using-wrapped.al": source}, "check", "using-wrapped.al")
+			if check.status == 0 {
+				t.Fatalf("%s wrapped owner was accepted:\n%s", item.name, source)
+			}
+			if !strings.Contains(check.stderr, "using requires a direct affine owner") || !strings.Contains(check.stderr, "using name = try expression") {
+				t.Fatalf("%s diagnostic: status=%d stderr=%s", item.name, check.status, check.stderr)
+			}
+		})
+	}
+}
+
 // TestLifetimeBorrowedParameterOwnershipRejected pins every ownership use of
 // a borrowed affine parameter. A plain, mut, or by-value self parameter only
 // borrows the caller's value, so using it, moving it, passing it to take,

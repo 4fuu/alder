@@ -5050,6 +5050,15 @@ fn body_token_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: 
     return Ok(BodyBad(bad))
 }
 
+fn body_token_detail_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec, detail: U64) -> Result(BodyStep, __s0_Error) {
+    let failed = try check_token_detail_fail(d, state, store, kind, node, detail, 0, 0, 0)
+    let bad = match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    return Ok(BodyBad(bad))
+}
+
 fn body_token_type_fail(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec, expected: U64, actual: U64) -> Result(BodyStep, __s0_Error) {
     let want = diagnostic_type(store, expected)
     let got = diagnostic_type(store, actual)
@@ -6448,6 +6457,17 @@ fn checked_type_is_affine(d: Domain, state: State, parse: ParseStore, store: Che
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, checked_type, 0, 0)
     return Ok(category.category == 2)
+}
+
+// A `using` initializer that is itself a Result or Option is not an owner,
+// even when its success payload is one. The dedicated message points at the
+// missing `try`.
+fn using_wrapped_owner(d: Domain, state: State, parse: ParseStore, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 9 && checked.kind != 10 { return Ok(false) }
+    if checked.arg_count == 0 { return Ok(false) }
+    let payload = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    return checked_type_is_affine(d, state, parse, store, payload)
 }
 
 // check_mut_argument_place admits a field or index path of a mutable place as
@@ -12126,6 +12146,9 @@ fn check_using(d: Domain, state: State, parse: ParseStore, store: CheckStore, ow
             }
         }
         if !builtin_table && vec_drain == 0 {
+            // A Result or Option of an affine owner is a wrapping, not the
+            // owner itself; the initializer needs `try` before registration.
+            if (using_kind == 9 || using_kind == 10) && (try using_wrapped_owner(d, state, parse, current, initializer.checked_type)) { return body_token_detail_fail(d, state, current, 136, statement, 1) }
             // A c_string owner registers the builtin release the same way a
             // Table registers its release: no callback and no drain; the
             // lowering synthesizes the exactly-once free shell.
