@@ -149,7 +149,15 @@ Result(User, LoadError)
 Table(User)
 User.Id
 fn(User) -> String
+fn(mut User) -> String
 ```
+
+A function type may borrow a parameter: `fn(mut User) -> String` is the type
+of a function whose parameter is an exclusive call borrow. The borrowed mode is
+part of the type identity, so `fn(User) -> String` and `fn(mut User) -> String`
+never convert to one another. `take` is not spellable in a function type.
+Closure literals declare plain parameters; a borrowed parameter requires a
+named function.
 
 `Array(T, N)` is the one built-in fixed-array constructor. `N` is a
 compile-time `U64` literal or constant. Alder 1.0 does not generalize this into

@@ -282,9 +282,15 @@ than a magic closure environment.
 
 ## Function values and ABI
 
-Function and closure types use `fn(A, B) -> R`. Function values never suspend:
-a closure body, or a named function used as a value, cannot contain a
-potentially suspending call. APIs that take suspending work accept a named
+Function and closure types use `fn(A, B) -> R`. A parameter may be borrowed:
+`fn(mut T) -> R` is the type of a function that takes an exclusive call borrow.
+The mode is part of the type: a function with a `mut` parameter coerces only to
+the matching `fn(mut T) -> R`, and neither form converts to the other. `take`
+is not spellable in a function type. A closure literal declares plain
+parameters; a borrowed parameter requires a named function.
+
+Function values never suspend: a closure body, or a named function used as a
+value, cannot contain a potentially suspending call. APIs that take suspending work accept a named
 function through a compile-time parameter or a standard `Pending(T)` call; see
 [Async and Structured Concurrency](async.md). Noncapturing functions can
 coerce to a function value. Capturing closures have compiler-generated

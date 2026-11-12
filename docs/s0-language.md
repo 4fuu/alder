@@ -242,7 +242,10 @@ Closures and function values are partially implemented as Milestone 7.5
 work in progress:
 
 - `fn(A, B) -> R` is a checked function type usable in annotations,
-  parameters, results, and bindings. A named non-generic function in value
+  parameters, results, and bindings. A parameter may be borrowed with
+  `fn(mut T) -> R`; the mode is part of the type and never converts to or from
+  `fn(T) -> R`. `take` is not spellable in a function type, and a closure
+  literal declares only plain parameters. A named non-generic function in value
   position is a function reference, and a call whose callee is a
   function-typed binding is an indirect call; both lower through
   `fn.value`/`call.value` and run under the generated strict C11.

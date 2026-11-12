@@ -130,6 +130,7 @@ fn parse_type(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep
                 // A function-type parameter may be borrowed: `fn(mut T) -> R`.
                 // The checker recovers the modes from the parameter tokens.
                 let first_param = parse_token(state, cursor)
+                if first_param.kind == 1 && first_param.keyword == 24 { return reject_parse(d, state, cursor, 50) }
                 if first_param.kind == 1 && first_param.keyword == 23 {
                     cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
                 }
@@ -545,6 +546,8 @@ fn parse_closure(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
     if !token_punct(state, cursor, ")") {
         var more = true
         while more {
+            let param_head = parse_token(state, cursor)
+            if param_head.kind == 1 && (param_head.keyword == 23 || param_head.keyword == 24) { return reject_parse(d, state, cursor, 51) }
             if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
             let param = parse_token(state, cursor)
             let colon_cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)

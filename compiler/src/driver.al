@@ -193,6 +193,8 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 30 { return out_string("unsafe c block must contain a direct call or field access") }
     if kind == 31 { return out_string("a callback declaration is `callback type Name = \"spelling\" (params) -> result`") }
     if kind == 35 { return out_string("an export declaration is `export c fn name(...) -> type { ... }` at module scope") }
+    if kind == 50 { return out_string("take is not allowed in a function type; only `fn(mut T) -> R` borrows a parameter") }
+    if kind == 51 { return out_string("closure parameters cannot be mut or take; declare a named function instead") }
     return out_string("invalid source syntax")
 }
 

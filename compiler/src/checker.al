@@ -6388,7 +6388,11 @@ fn check_mut_argument_place(d: Domain, state: State, parse: ParseStore, store: C
         // immutable view stays read-only.
         if root_type.kind == 22 { access = true }
     } else { if binding.kind == 2 {
-        if binding.mutable == 1 { access = true }
+        // A scoped mutable view is itself an exclusive capability, so even a
+        // let-bound descriptor may be borrowed for the call. An ordinary
+        // copyable cursor still needs a var binding so the callee advances
+        // the caller's copy.
+        if binding.mutable == 1 || root_type.kind == 18 { access = true }
     } else {
         let declaration = __s0_buffer_get(SyntaxRec, parse.nodes, binding.syntax - 1)
         if declaration.kind == 47 || declaration.kind == 48 { access = true }

@@ -93,6 +93,22 @@ signatures and callback trampolines never carry `safe_mut`, owner, or hidden
 domain parameters because the C ABI has no `mut`; the verifier rejects a
 `c_export` function with a `safe_mut` parameter.
 
+### D005C — Function types carry borrowed parameter modes
+
+Status: **M8 implementation**
+
+A function whose parameter is `mut` has function type `fn(mut T) -> R`. The
+mode is part of type identity, not a lifetime annotation (D003): a function
+with a `mut` parameter coerces only to the matching borrowed-parameter type,
+and `fn(T) -> R` and `fn(mut T) -> R` never convert in either direction. The
+MIR function type carries the matching `safe_mut` parameter followed by the
+owner `domain_handle` in storage-model programs. `take` parameters are not
+spellable in a function type because the callee would consume a value the
+indirect call cannot transfer through the erased call site. Closure literals
+declare plain parameters; a borrowed parameter requires a named function. The
+parser reports a dedicated diagnostic for `fn(take T)` and for a `mut` or
+`take` closure parameter.
+
 ### D006 — One generic syntax
 
 Status: **Frozen 1.0**

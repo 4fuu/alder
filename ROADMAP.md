@@ -2102,7 +2102,9 @@ The following items are not part of the current implementation scope:
   replacement. The local-owner map uses the frame domain for ordinary locals,
   caller-result storage for by-value parameters, and the callee frame for
   `take`; ASan regressions cover the former diagnostic 333 shapes, a
-  branch-local join, and an indirect `mut` call. Diagnostic 333 and the
+  branch-local join, and an indirect `mut` call. Function types spell a
+  borrowed parameter as `fn(mut T) -> R`; `fn(take T)` and borrowed closure
+  parameters are rejected with dedicated diagnostics. Diagnostic 333 and the
   functional-builder workaround are retired. Remaining follow-up: restore the
   snapshot's in-place `std.process` builders and an unbounded `ByteSink` once
   the corresponding API slices land. Docs:
