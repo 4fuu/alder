@@ -102,22 +102,22 @@ pub trait Io {
     /// Opens or creates the file at `path` with the requested flags.
     fn open(self, path: Path, mode: FileMode) -> Result(HostFile, IoError)
     /// Reads up to `buffer.len()` bytes; `Ok(0)` means end of file.
-    fn read(self, file: HostFile, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
+    fn read(self, mut file: HostFile, mut buffer: MutSlice(U8)) -> Result(U64, IoError)
     /// Writes up to `data.len()` bytes from the start of `data`.
-    fn write(self, file: HostFile, data: [U8]) -> Result(U64, IoError)
+    fn write(self, mut file: HostFile, data: [U8]) -> Result(U64, IoError)
     /// Moves to `from` and returns the new absolute position.
-    fn seek(self, file: HostFile, from: SeekFrom) -> Result(U64, IoError)
+    fn seek(self, mut file: HostFile, from: SeekFrom) -> Result(U64, IoError)
     /// Closes the file, consuming the handle. Called by `File.finish` and
     /// by cleanup.
     fn close(self, take file: HostFile) -> Result(Unit, IoError)
     /// Flushes host buffers to durable storage.
-    fn sync(self, file: HostFile) -> Result(Unit, IoError)
+    fn sync(self, mut file: HostFile) -> Result(Unit, IoError)
     /// Metadata of the open file.
-    fn stat(self, file: HostFile) -> Result(FileStat, IoError)
+    fn stat(self, mut file: HostFile) -> Result(FileStat, IoError)
     /// Metadata of the file at `path`, following symlinks.
     fn stat_path(self, path: Path) -> Result(FileStat, IoError)
     /// Replaces the file's permission mode.
-    fn set_permissions(self, file: HostFile, mode: U32) -> Result(Unit, IoError)
+    fn set_permissions(self, mut file: HostFile, mode: U32) -> Result(Unit, IoError)
     /// Renames `from` to `to` in place.
     fn rename(self, from: Path, to: Path) -> Result(Unit, IoError)
     /// Removes the file (or symlink) at `path`.
@@ -131,7 +131,7 @@ pub trait Io {
     /// Opens a directory listing.
     fn open_directory(self, path: Path) -> Result(HostDirectory, IoError)
     /// Next entry of the listing in host order; `None` at the end.
-    fn read_directory(self, directory: HostDirectory)
+    fn read_directory(self, mut directory: HostDirectory)
         -> Result(Option(DirEntry), IoError)
     /// Closes the listing, consuming the handle.
     fn close_directory(self, take directory: HostDirectory)
@@ -502,10 +502,9 @@ implementations resolve without an explicit import.
 
 ## Example
 
-The example below is the complete content that lands as
-`examples/std.io-v1.al` with the implementation commit. It exercises buffering,
-exact helpers, in-memory streams, and standard error without depending on the
-filesystem, and returns a deterministic checksum.
+The example below is the complete content of `examples/std.io-v1.al`. It
+exercises buffering, exact helpers, and in-memory streams without depending on
+the filesystem, and returns a deterministic checksum.
 
 ```alder
 module hello.std_io_example
@@ -526,26 +525,37 @@ pub fn std_io_example() -> U64 {
     var done = false
     while !done {
         match reader.read_until(10) {
-            Some(line) => {
-                index = index + 1
-                var at: U64 = 0
-                while at < line.len() {
-                    total = total + line[at].to_u64()
-                    at = at + 1
+            Ok(value) => {
+                match value {
+                    Some(line) => {
+                        index = index + 1
+                        var at: U64 = 0
+                        while at < line.len() {
+                            total = total + line[at].to_u64()
+                            at = at + 1
+                        }
+                        total = total + line.len()
+                    }
+                    None => { done = true }
                 }
-                total = total + line.len()
             }
-            None => { done = true }
+            Err(_) => { done = true }
         }
     }
     total = total + index * 100
 
     // Complete writes through the exact helper into an in-memory sink.
     var sink = io.ByteSink.new()
-    let written = io.write_all(sink, "hello")
-    total = total + written
-    let copied = io.write_all(sink, "world")
-    total = total + copied
+    let hello: Array(U8, 5) = [104, 101, 108, 108, 111]
+    match io.write_all(sink, hello.slice(0, 5)) {
+        Ok(count) => { total = total + count }
+        Err(_) => {}
+    }
+    let world: Array(U8, 5) = [119, 111, 114, 108, 100]
+    match io.write_all(sink, world.slice(0, 5)) {
+        Ok(count) => { total = total + count }
+        Err(_) => {}
+    }
     let bytes = sink.into_bytes()
     var replay = io.ByteCursor.new(bytes)
     var verify: Array(U8, 10) = [104, 101, 108, 108, 111, 119, 111, 114, 108, 100]
@@ -581,7 +591,8 @@ pub fn std_io_example() -> U64 {
 - A probe on main confirmed trait default bodies calling their own trait's
   requirements, including generic methods such as `Reader.copy_to`; the
   default lands as designed and no free `io.copy` bridge is needed.
-- Needs the sysroot thread's `String` byte access for `print`/`read_line` and
-  `OsString` from `std.path` (this snapshot family).
+- `print`/`println`/`eprint`/`eprintln` and `BufReader.read_line` are
+  implemented; the text helpers copy a `String`'s bytes into a temporary
+  buffer because `Bytes` has no `[U8]` view yet.
 - The example avoids string building, interpolation, and `while let` so it
   compiles on the current S0 boundary.

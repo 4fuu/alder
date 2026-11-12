@@ -143,6 +143,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.io-v1.al": {
+			style:   "project",
+			srcName: "std_io_example.al",
+			mainText: `module hello.main
+
+import hello.std_io_example { std_io_example }
+
+pub fn main() -> I32 {
+    if std_io_example() == 11791 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.math-v1.al": {
 			style:   "project",
 			srcName: "std_math_example.al",

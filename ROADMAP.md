@@ -1565,7 +1565,19 @@ and the mutable-place rejection for a `let`-bound reader.
 `into_source`/`into_sink` return the wrapped owner through the
 consumed-field-move rule (`take self` moves one direct field); `into_sink`
 flushes pending bytes and releases the sink on a flush error.
-The capability types, host files, and standard streams remain slice 2. Docs:
+
+`std.io` v1 slice 2 adds the blocking capability: `Blocking` implements `Io`
+with host files (`HostFile`), directory listings (`HostDirectory`), file
+metadata, POSIX rename/remove/mkdir/realpath, clocks, sleep, randomness, and
+standard streams. `Stdin`, `Stdout`, and `Stderr` are copyable non-owning
+views of descriptors 0-2, and `print`/`println`/`eprint`/`eprintln` write
+best-effort text through the capability. The POSIX surface lives behind the
+header-only shim `sysroot/std/c/io_shim.h`; host paths are NUL-terminated byte
+buffers built with an interior-NUL check, and a `DIR*` crosses as an opaque
+integer token. Evidence: `compiler/production_io_host_test.go` opens, writes,
+seeks, reads, stats, closes, and removes a real file through `Blocking`;
+`compiler/production_io_streams_test.go` pins standard-stream output and the
+text helpers; `compiler/docs_api_test.go` runs the snapshot example. Docs:
 [Standard Library](docs/standard-library.md) and the frozen
 [`std.io` snapshot](docs/api/std.io-v1.md).
 Landed language and runtime progress: hosted binaries accept `Unit`, `I32`,

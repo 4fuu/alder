@@ -965,3 +965,126 @@ fn zero_bytes(capacity: U64) -> Vec(U8) {
     }
     return out
 }
+
+// Standard streams and text helpers. The standard descriptors are owned by
+// the process, so these values are copyable non-owning views that never close
+// their descriptor or create a second owner.
+pub type Stdin(IoType: type(Io)) {
+    io: IoType
+}
+
+pub type Stdout(IoType: type(Io)) {
+    io: IoType
+}
+
+pub type Stderr(IoType: type(Io)) {
+    io: IoType
+}
+
+impl(IoType: type(Io)) Reader for Stdin(IoType) {
+    fn read(mut self, mut buffer: MutSlice(U8)) -> Result(U64, IoError) {
+        return self.io.read_stdin(buffer)
+    }
+}
+
+impl(IoType: type(Io)) Writer for Stdout(IoType) {
+    fn write(mut self, data: [U8]) -> Result(U64, IoError) {
+        return self.io.write_stdout(data)
+    }
+
+    fn flush(mut self) -> Result(Unit, IoError) {
+        return Ok(())
+    }
+}
+
+impl(IoType: type(Io)) Writer for Stderr(IoType) {
+    fn write(mut self, data: [U8]) -> Result(U64, IoError) {
+        return self.io.write_stderr(data)
+    }
+
+    fn flush(mut self) -> Result(Unit, IoError) {
+        return Ok(())
+    }
+}
+
+pub fn stdin(I: type(Io), io: I) -> Stdin(I) {
+    return Stdin(io: io)
+}
+
+pub fn stdout(I: type(Io), io: I) -> Stdout(I) {
+    return Stdout(io: io)
+}
+
+pub fn stderr(I: type(Io), io: I) -> Stderr(I) {
+    return Stderr(io: io)
+}
+
+fn text_bytes(text: String) -> Vec(U8) {
+    let data = text.to_bytes()
+    var out: Vec(U8) = Vec.new(U8)
+    var at: U64 = 0
+    while at < data.len() {
+        out.push(data.byte(at))
+        at = at + 1
+    }
+    return out
+}
+
+// Text helpers write until the descriptor accepts every byte or a write
+// fails. The contract is best-effort: standard streams report errors only
+// through the observing `Io` methods, never through these functions.
+fn write_stdout_all(I: type(Io), io: I, data: [U8]) -> Unit {
+    var at: U64 = 0
+    while at < data.len() {
+        match io.write_stdout(data.slice(at, data.len())) {
+            Ok(count) => {
+                if count == 0 { return }
+                at = at + count
+            }
+            Err(_) => { return }
+        }
+    }
+    return
+}
+
+fn write_stderr_all(I: type(Io), io: I, data: [U8]) -> Unit {
+    var at: U64 = 0
+    while at < data.len() {
+        match io.write_stderr(data.slice(at, data.len())) {
+            Ok(count) => {
+                if count == 0 { return }
+                at = at + count
+            }
+            Err(_) => { return }
+        }
+    }
+    return
+}
+
+pub fn print(I: type(Io), io: I, text: String) -> Unit {
+    let bytes = text_bytes(text)
+    write_stdout_all(io, bytes.slice(0, bytes.len()))
+    return
+}
+
+pub fn println(I: type(Io), io: I, text: String) -> Unit {
+    let bytes = text_bytes(text)
+    write_stdout_all(io, bytes.slice(0, bytes.len()))
+    let newline: Array(U8, 1) = [10]
+    write_stdout_all(io, newline.slice(0, 1))
+    return
+}
+
+pub fn eprint(I: type(Io), io: I, text: String) -> Unit {
+    let bytes = text_bytes(text)
+    write_stderr_all(io, bytes.slice(0, bytes.len()))
+    return
+}
+
+pub fn eprintln(I: type(Io), io: I, text: String) -> Unit {
+    let bytes = text_bytes(text)
+    write_stderr_all(io, bytes.slice(0, bytes.len()))
+    let newline: Array(U8, 1) = [10]
+    write_stderr_all(io, newline.slice(0, 1))
+    return
+}
