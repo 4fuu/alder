@@ -43,6 +43,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_slice_to_bytes() { return 3 }
     if op == mir_op_c_zero() { return 16 }
     if op == mir_op_c_addr() { return 24 }
+    if op == mir_op_c_callback_make() { return 48 }
     if op == mir_op_str_concat() || op == mir_op_str_slice_checked() { return 7 }
     if op == mir_op_fn_value() { return 32 }
     if op == mir_op_c_binding_call() { return 32 }
@@ -1053,7 +1054,7 @@ scan = scan + 1 }
         }
         if !mir_vfunction_exists(store, i.function) || !block_ok { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_owner(), i.function, i.block, id, 0, 0, 0, id, 0, 0, 0)) }
         if i.ordinal != expected { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_ordinal(), i.function, i.block, id, 0, 0, 0, id, expected, i.ordinal, 0)) }
-        if i.op > mir_op_slice_to_bytes() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_slice_to_bytes(), i.op, 0)) } else {
+        if i.op > mir_op_c_callback_make() { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_kind(), i.function, i.block, id, 0, 0, 0, id, mir_op_c_callback_make(), i.op, 0)) } else {
             let produces = mir_vop_produces(i.op)
             let has_result = i.result != 0
             var droppable = false
@@ -1489,7 +1490,7 @@ fn mir_vc_type_shape_ok(store: MirStore, t: MirTypeRec) -> Bool {
         return t.elem != 0 && t.elem <= __s0_buffer_len(MirTypeRec, store.types) && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.length == 0 && t.name_start == 0 && t.name_end == 0 && t.c_name_start == 0 && t.c_name_end == 0 && t.c_class == mir_c_class_scalar()
     }
     let c_name_ok = t.c_name_start < t.c_name_end && t.c_name_end <= __s0_buffer_len(U8, store.names)
-    let shape = t.elem == 0 && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.length == 0 && c_name_ok && t.c_class <= mir_c_class_record()
+    let shape = t.elem == 0 && t.ok_type == 0 && t.err_type == 0 && t.first_part == 0 && t.part_count == 0 && t.result_type == 0 && t.length == 0 && c_name_ok && t.c_class <= mir_c_class_callback()
     return shape
 }
 

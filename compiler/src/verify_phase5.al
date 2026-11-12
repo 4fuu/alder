@@ -195,6 +195,15 @@ fn mir_v5_c_addr_place(d: Domain, store: MirStore, indexes: MirVIndexes, out: __
     return Ok(result)
 }
 
+// c.callback.make yields its callback type operand, which must be a
+// callback-class c_named type, when the target names a function.
+fn mir_v5_c_callback_result(store: MirStore, x: MirInstrRec) -> MirVTypeResult {
+    if x.target == 0 || x.target > __s0_buffer_len(MirFunctionRec, store.functions) { return MirVTypeResult(valid: false, type_id: 0) }
+    if x.type_op == 0 || x.type_op > __s0_buffer_len(MirTypeRec, store.types) { return MirVTypeResult(valid: false, type_id: 0) }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, x.type_op - 1)
+    return MirVTypeResult(valid: rec.kind == mir_type_kind_c_named() && rec.c_class == mir_c_class_callback(), type_id: x.type_op)
+}
+
 fn mir_v5_c_buffer_result(store: MirStore, x: MirInstrRec, ta: U64) -> MirVTypeResult {
     let operand = mir_v5_c_buffer_operand_kind(store, ta)
     if operand == 0 { return MirVTypeResult(valid: false, type_id: 0) }
@@ -555,6 +564,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
     if x.op == mir_op_c_zero() { return mir_v5_c_zero_result(store, x) }
     if x.op == mir_op_c_addr() { return mir_v5_c_addr_result(store, indexes, x) }
+    if x.op == mir_op_c_callback_make() { return mir_v5_c_callback_result(store, x) }
     if x.op == mir_op_slice_len() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0, type_id: mir_type_u64()) }
     if x.op == mir_op_slice_to_bytes() { return MirVTypeResult(valid: ta == mir_v5_find_kind(indexes, mir_type_kind_domain_handle()) && mir_v5_elem(store, tb) == mir_type_u8(), type_id: mir_v5_find_kind(indexes, mir_type_kind_bytes())) }
     if x.op == mir_op_slice_index_checked() { return MirVTypeResult(valid: mir_v5_elem(store, ta) != 0 && tb == mir_type_u64(), type_id: mir_v5_find_unary(indexes, mir_type_kind_safe_mut(), mir_v5_elem(store, ta))) }

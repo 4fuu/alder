@@ -288,6 +288,15 @@ fn cgen_emit_binding_checks(d: Domain, initial: CgenWriter, store: MirStore, blo
             out = try cgen_binding_what(d, out, store, block, t.name_start, t.name_end, t.c_name_start, t.c_name_end)
             out = try cgen_put(d, out, ": scalar binding spelling must resolve to a complete type\");\n")
         }
+        if t.c_class == mir_c_class_callback() {
+            out = try cgen_put(d, out, "_Static_assert(sizeof(alder_bind_")
+            out = try cgen_put_u64(d, out, block_at)
+            out = try cgen_put(d, out, "_t")
+            out = try cgen_put_u64(d, out, ti)
+            out = try cgen_put(d, out, ") == sizeof(void (*)(void)), \"")
+            out = try cgen_binding_what(d, out, store, block, t.name_start, t.name_end, t.c_name_start, t.c_name_end)
+            out = try cgen_put(d, out, ": callback binding spelling must resolve to a function-pointer type\");\n")
+        }
         if t.c_class == mir_c_class_record() {
             out = try cgen_put(d, out, "_Static_assert(_Alignof(alder_bind_")
             out = try cgen_put_u64(d, out, block_at)
@@ -1390,6 +1399,7 @@ fn cgen_build(d: Domain, store: MirStore, indexes: MirVIndexes, verified: MirVer
     out = try cgen_emit_env_retain_helpers(d, out, store, indexes)
     let fn_value_sites = try cgen_fn_value_sites(d, store, indexes)
     out = try cgen_emit_fn_value_wrappers(d, out, store, indexes, fn_value_sites)
+    out = try cgen_emit_callback_trampolines(d, out, store, indexes)
     out = try cgen_emit_bodies(d, out, store)
     out = try cgen_emit_exports(d, out, store, indexes)
     if verified.hosted { out = try cgen_emit_host_entry(d, out, store, indexes, verified.entry) }

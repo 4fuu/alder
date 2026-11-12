@@ -547,6 +547,14 @@ Implemented expressions include:
   unforgeable. Field *reads* remain unrestricted in S0; read privacy is a
   recorded gap in ROADMAP.
 
+A binding block may also declare `callback type Name = "spelling" (params)
+-> result` for a C function-pointer typedef. Inside `unsafe c`, a
+`c.callback(name)` argument supplies a nonretained callback for one raw call;
+the target must be a top-level, non-generic, noncapturing function with the
+bound C ABI signature. Callback values are not first-class Alder values:
+outside that argument, `c.callback` is diagnostic 225, a target mismatch is
+224, and a non-bare target is 227.
+
 Closures, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0 standard
 library are absent.
 

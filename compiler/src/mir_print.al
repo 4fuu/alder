@@ -762,7 +762,7 @@ fn mir_validate_c_type(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirTyp
     if rec.kind == mir_type_kind_c_ptr() || rec.kind == mir_type_kind_c_const_ptr() {
         return mir_type_valid(store, rec.elem) && rec.ok_type == 0 && rec.err_type == 0 && rec.first_part == 0 && rec.part_count == 0 && rec.result_type == 0 && rec.length == 0 && rec.name_start == 0 && rec.name_end == 0 && rec.c_name_start == 0 && rec.c_name_end == 0 && rec.c_class == mir_c_class_scalar()
     }
-    if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_name_range_valid(store, rec.c_name_start, rec.c_name_end) || rec.c_name_start == rec.c_name_end || rec.c_class > mir_c_class_record() || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
+    if !mir_name_valid(store, rec.name_start, rec.name_end, true) || !mir_name_range_valid(store, rec.c_name_start, rec.c_name_end) || rec.c_name_start == rec.c_name_end || rec.c_class > mir_c_class_callback() || rec.elem != 0 || rec.ok_type != 0 || rec.err_type != 0 || rec.first_part != 0 || rec.part_count != 0 || rec.result_type != 0 || rec.length != 0 { return false }
     if rec.c_class == mir_c_class_scalar() && mir_type_part_count_at(idx, store, id, mir_type_part_c_field()) != 0 { return false }
     if rec.c_class == mir_c_class_record() && !mir_type_part_group_valid(idx, store, id, mir_type_part_c_field()) { return false }
     return true
@@ -1266,6 +1266,7 @@ fn mir_validate_instruction_refs(idx: MirPrintIndex, store: MirStore, id: U64, r
         if !mir_import_valid(store, rec.target) { return false }
     }
     if rec.op == mir_op_c_binding_call() && !mir_binding_fn_valid(store, rec.target) { return false }
+    if rec.op == mir_op_c_callback_make() && !mir_function_valid(store, rec.target) { return false }
     if rec.op == mir_op_c_is_null() && rec.target != 0 { return false }
     if rec.op == mir_op_const_get() || rec.op == mir_op_enum_payload_checked() || rec.op == mir_op_enum_construct() {
         if !mir_name_valid(store, rec.name_start, rec.name_end, true) { return false }
@@ -1948,6 +1949,7 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 108 { return out_string("slice.to_bytes") }
     if op == 109 { return out_string("c.zero") }
     if op == 110 { return out_string("c.addr") }
+    if op == 111 { return out_string("c.callback.make") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -2136,6 +2138,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_c_addr() {
         if !out(32) || !mir_out_place(idx, store, rec.function, rec.place) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+    }
+    if rec.op == mir_op_c_callback_make() {
+        if !out_string(" @") || !mir_out_function_name(store, rec.target) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
     }
     if rec.op == mir_op_c_string_make_lit() || rec.op == mir_op_c_string_make() {
         if !mir_out_fail_edge(idx, store, id, rec) { return false }
@@ -2466,6 +2471,7 @@ fn mir_out_binding_type_member(idx: MirPrintIndex, store: MirStore, type_id: U64
     if rec.c_class == mir_c_class_scalar() && !out_string("scalar ") { return false }
     if rec.c_class == mir_c_class_opaque() && !out_string("opaque ") { return false }
     if rec.c_class == mir_c_class_record() && !out_string("record ") { return false }
+    if rec.c_class == mir_c_class_callback() && !out_string("callback ") { return false }
     if !out_string("@") || !mir_out_name(store, rec.name_start, rec.name_end) || !out_string(" = ") || !mir_out_quoted(store, rec.c_name_start, rec.c_name_end) { return false }
     if rec.c_class != mir_c_class_record() { return out(10) }
     if !out_string(" {") { return false }

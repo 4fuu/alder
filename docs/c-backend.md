@@ -121,6 +121,17 @@ runs), emits no `alder_program_entry`, and produces export wrappers callable
 from an ordinary C `main`. A source set with neither `main` nor an export
 keeps the missing-entry failure.
 
+## Callback trampolines
+
+Each `c.callback.make` site emits one static C trampoline named from its
+target function and callback type IDs. The trampoline has the target's C ABI
+signature, creates a fresh root domain when the target carries the hidden
+domain parameter, calls the internal static function, destroys the domain,
+and returns the C result. A failed domain initialization panics. A generated
+`_Static_assert(_Generic(...))` pins the trampoline against the binding's
+function-pointer typedef. The trampoline is storage for one raw-call argument:
+no function-pointer value is stored in Alder locals, records, or collections.
+
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C
 is linked as a separate translation unit and does not depend on the Go runtime.

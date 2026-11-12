@@ -251,7 +251,7 @@ fn cgen_supported(store: MirStore, indexes: MirVIndexes) -> Bool {
     var at: U64 = 0
     while at < __s0_buffer_len(MirInstrRec, store.instructions) {
         let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
-        if item.op > mir_op_slice_to_bytes() { return false }
+        if item.op > mir_op_c_callback_make() { return false }
         if item.op == mir_op_copy_to_domain() && !cgen_copy_supported(store, cgen_value_type(store, indexes, item.function, item.b)) { return false }
         at = at + 1
     }
@@ -2346,6 +2346,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_addr() { return cgen_emit_c_addr(d, out, store, indexes, instruction, item) }
+    if item.op == mir_op_c_callback_make() { return cgen_emit_c_callback_make(d, out, store, item) }
     if item.op == mir_op_c_field_get() || item.op == mir_op_c_field_set() { return cgen_emit_c_field_access(d, out, store, indexes, instruction, item) }
     return Ok(out)
 }
@@ -2555,6 +2556,116 @@ fn cgen_emit_bodies(d: Domain, initial: CgenWriter, store: MirStore) -> Result(C
     while function <= __s0_buffer_len(MirFunctionRec, store.functions) {
         out = try cgen_emit_function_body(d, out, store, indexes, function)
         function = function + 1
+    }
+    return Ok(out)
+}
+
+// The C name of one callback trampoline. The pair of stable numeric IDs is
+// unique per target function and callback binding type.
+fn cgen_callback_name(d: Domain, initial: CgenWriter, target: U64, callback_type: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "alder_callback_")
+    out = try cgen_put_u64(d, out, target)
+    out = try cgen_put(d, out, "_")
+    return cgen_put_u64(d, out, callback_type)
+}
+
+// A c.callback.make value is the address of the generated trampoline.
+fn cgen_emit_c_callback_make(d: Domain, initial: CgenWriter, store: MirStore, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = ")
+    out = try cgen_callback_name(d, out, item.target, item.type_op)
+    return cgen_put(d, out, ";\n")
+}
+
+// True when an earlier instruction already emitted the same trampoline.
+fn cgen_callback_earlier(store: MirStore, instruction: U64, target: U64, callback_type: U64) -> Bool {
+    var at: U64 = 0
+    while at + 1 < instruction {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_c_callback_make() && item.target == target && item.type_op == callback_type { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// One static trampoline entering the Alder runtime for a foreign C caller.
+// The target is noncapturing, so its C signature is the callback signature;
+// a target with storage receives a fresh per-invocation root domain.
+fn cgen_emit_one_callback_trampoline(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, target: U64, callback_type: U64) -> Result(CgenWriter, __s0_Error) {
+    let item = __s0_buffer_get(MirFunctionRec, store.functions, target - 1)
+    let has_domain = cgen_function_has_domain(store, indexes, target)
+    var out = try cgen_put(d, initial, "\nstatic ")
+    if item.result_type == mir_type_unit() {
+        out = try cgen_put(d, out, "void ")
+    } else {
+        out = try cgen_put_type(d, out, store, item.result_type)
+        out = try cgen_put(d, out, " ")
+    }
+    out = try cgen_callback_name(d, out, target, callback_type)
+    out = try cgen_put(d, out, "(")
+    var first_param: U64 = 0
+    if has_domain { first_param = 1 }
+    let total = cgen_function_param_count(store, indexes, target)
+    var ordinal = first_param
+    var wrote = false
+    while ordinal < total {
+        let parameter = cgen_function_param(store, indexes, target, ordinal)
+        if wrote { out = try cgen_put(d, out, ", ") }
+        out = try cgen_put_type(d, out, store, parameter.param_type)
+        out = try cgen_put(d, out, " alder_a")
+        out = try cgen_put_u64(d, out, ordinal - first_param)
+        wrote = true
+        ordinal = ordinal + 1
+    }
+    if !wrote { out = try cgen_put(d, out, "void") }
+    out = try cgen_put(d, out, ") {\n")
+    if has_domain { out = try cgen_put(d, out, "  AlderDomain alder_root = {0};\n  if (!alder_domain_init(&alder_root, NULL)) { alder_runtime_panic(\"callback domain initialization failed\"); }\n") }
+    if item.result_type != mir_type_unit() {
+        out = try cgen_put(d, out, "  ")
+        out = try cgen_put_type(d, out, store, item.result_type)
+        out = try cgen_put(d, out, " alder_callback_result = ")
+    } else {
+        out = try cgen_put(d, out, "  ")
+    }
+    out = try cgen_emit_function_name(d, out, store, target)
+    out = try cgen_put(d, out, "(")
+    var first_argument = true
+    if has_domain {
+        out = try cgen_put(d, out, "&alder_root")
+        first_argument = false
+    }
+    ordinal = first_param
+    while ordinal < total {
+        if !first_argument { out = try cgen_put(d, out, ", ") }
+        out = try cgen_put(d, out, "alder_a")
+        out = try cgen_put_u64(d, out, ordinal - first_param)
+        first_argument = false
+        ordinal = ordinal + 1
+    }
+    out = try cgen_put(d, out, ");\n")
+    if has_domain { out = try cgen_put(d, out, "  alder_domain_destroy(&alder_root);\n") }
+    if item.result_type != mir_type_unit() { out = try cgen_put(d, out, "  return alder_callback_result;\n") }
+    out = try cgen_put(d, out, "}\n")
+    let callback_rec = __s0_buffer_get(MirTypeRec, store.types, callback_type - 1)
+    out = try cgen_put(d, out, "_Static_assert(_Generic(&")
+    out = try cgen_callback_name(d, out, target, callback_type)
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_name(d, out, store, callback_rec.c_name_start, callback_rec.c_name_end)
+    out = try cgen_put(d, out, ": 1, default: 0), \"callback binding spelling does not match the Alder target signature\");\n")
+    return Ok(out)
+}
+
+// Every distinct c.callback.make site's trampoline, in first-use order.
+fn cgen_emit_callback_trampolines(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirInstrRec, store.instructions) {
+        let item = __s0_buffer_get(MirInstrRec, store.instructions, at)
+        if item.op == mir_op_c_callback_make() && !cgen_callback_earlier(store, at, item.target, item.type_op) {
+            out = try cgen_emit_one_callback_trampoline(d, out, store, indexes, item.target, item.type_op)
+        }
+        at = at + 1
     }
     return Ok(out)
 }

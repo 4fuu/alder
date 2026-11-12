@@ -1887,6 +1887,28 @@ fn lower_c_addr_argument(d: Domain, source_state: State, spans: __s0_Buffer(Chec
     return Ok(LowerCAddrRec(matched: true, state: instr.state, id: value.id))
 }
 
+type LowerCCallbackRec {
+    matched: Bool
+    state: LowerState
+    id: U64
+}
+
+// c.callback(name) is a direct raw-call argument: the target function's MIR
+// ID and the declared callback type ride on one c.callback.make instruction,
+// whose C value is the generated trampoline address.
+fn lower_c_callback_argument(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, child_id: U64, environment: U64, panic_block: U64) -> Result(LowerCCallbackRec, __s0_Error) {
+    if child_id == 0 || child_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerCCallbackRec(matched: false, state: state, id: 0)) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+    if expression.kind != 38 || expression.parameter_use == 0 { return Ok(LowerCCallbackRec(matched: false, state: state, id: 0)) }
+    let target = lower_owner_lookup(state.owners, expression.parameter_use)
+    if target == 0 { return Ok(LowerCCallbackRec(matched: true, state: lower_invalid(state), id: 0)) }
+    let callback_type = try lower_type(d, source_state, store, state, expression.checked_type)
+    if !callback_type.state.valid { return Ok(LowerCCallbackRec(matched: true, state: callback_type.state, id: 0)) }
+    let value = try lower_add_result(d, callback_type.state, function, block, expression.checked_type, source_state, store)
+    let instr = try lower_add_instr(d, value.state, function, block, mir_op_c_callback_make(), value.id, 0, callback_type.id, 0, 0, target, "")
+    return Ok(LowerCCallbackRec(matched: true, state: instr.state, id: value.id))
+}
+
 // An unsafe binding call expression is valid when the call carries no extra
 // flags and its argument count equals the member's parameter field count;
 // per-argument types ride on the checker and the MIR verifier's signature
@@ -4697,11 +4719,15 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                     }
                 }
             }
+            var callback_argument = LowerCCallbackRec(matched: false, state: current, id: 0)
+            if annotation.kind == 7 && child_id != 0 { callback_argument = try lower_c_callback_argument(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
             var addr_argument = LowerCAddrRec(matched: false, state: current, id: 0)
-            if annotation.kind == 7 && child_id != 0 { addr_argument = try lower_c_addr_argument(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
+            if !callback_argument.matched && annotation.kind == 7 && child_id != 0 { addr_argument = try lower_c_addr_argument(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) }
             var buffer_argument = LowerCBufferRec(matched: false, state: current, id: 0)
-            if !addr_argument.matched && annotation.kind == 7 && child_id != 0 { buffer_argument = try lower_c_buffer_argument(d, source_state, spans, store, current, owner, function, block, annotation, ordinal, child_id, checked_child.checked_type, environment, panic_block) }
-            if addr_argument.matched {
+            if !callback_argument.matched && !addr_argument.matched && annotation.kind == 7 && child_id != 0 { buffer_argument = try lower_c_buffer_argument(d, source_state, spans, store, current, owner, function, block, annotation, ordinal, child_id, checked_child.checked_type, environment, panic_block) }
+            if callback_argument.matched {
+                child = LowerStep(state: callback_argument.state, id: callback_argument.id)
+            } else { if addr_argument.matched {
                 child = LowerStep(state: addr_argument.state, id: addr_argument.id)
             } else { if buffer_argument.matched {
                 child = LowerStep(state: buffer_argument.state, id: buffer_argument.id)
@@ -4733,7 +4759,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
                 let value = try mir_add_value(d, reference.store, function, try lower_result_name(d, reference.store, function, ""), reference.type_id, mir_value_def_instruction(), block, lower_instruction_ordinal(reference.store, function, block) + 1)
                 let borrowed = try lower_add_instr(d, lower_with_mir(ordinary.state, value.store), function, block, borrow_op, value.id, borrowed_place.place, 0, 0, 0, 0, "")
                 child = LowerStep(state: borrowed.state, id: value.id)
-            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } } }
+            } else { child = try lower_expression(d, source_state, spans, store, current, owner, function, block, child_id, environment, panic_block) } } } } }
             current = child.state
             args = try __s0_buffer_append(U64, d, args, child.id)
             ordinal = ordinal + 1
@@ -5123,6 +5149,7 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 30 { return lower_c_string_make(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 31 { return lower_c_string_ptr(d, source_state, spans, store, state, owner, function, block, expression_id, expression, environment, panic_block) }
     if expression.kind == 32 { return lower_c_zero(d, source_state, spans, store, state, owner, function, block, expression) }
+    if expression.kind == 38 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     if expression.kind == 34 || expression.kind == 35 { return lower_c_pointer_field(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
     if expression.kind == 36 || expression.kind == 37 { return lower_c_memory(d, source_state, spans, store, state, owner, function, block, expression, environment, panic_block) }
     if expression.kind == 13 {

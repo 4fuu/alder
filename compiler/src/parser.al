@@ -1517,6 +1517,7 @@ fn parse_c_binding_member(d: Domain, state: State, initial: ParseCursor) -> Resu
     if token_text(state, word, "scalar") { return parse_c_type_member(d, state, initial, 0) }
     if token_text(state, word, "opaque") { return parse_c_type_member(d, state, initial, 1) }
     if token_text(state, word, "record") { return parse_c_type_member(d, state, initial, 2) }
+    if token_text(state, word, "callback") { return parse_c_callback_member(d, state, initial) }
     if token_text(state, word, "raw") { return parse_c_fn_member(d, state, initial) }
     if token_text(state, word, "const") { return parse_c_const_member(d, state, initial) }
     return reject_parse(d, state, initial, 21)
@@ -1657,6 +1658,68 @@ fn parse_c_fn_member(d: Domain, state: State, initial: ParseCursor) -> Result(Pa
     cursor = result_link
     let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
     let node = try add_syntax(d, cursor, 63, name_token, raw_token.source, raw_token.start, end, name.start, name.end, children)
+    return Ok(Parsed(node))
+}
+
+// `callback type Name = "spelling" (parameter: Type, ...) -> Result` binds a
+// C function-pointer typedef. The spelling is the chain tail and the result is
+// the chain head, so the shared binding-spelling and backward child walks
+// apply unchanged.
+fn parse_c_callback_member(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    let callback_token = parse_token(state, initial)
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    if !(parse_token(state, cursor).kind == 1 && parse_token(state, cursor).keyword == 2) { return reject_parse(d, state, cursor, 31) }
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+    let name = parse_token(state, cursor)
+    let name_token = cursor.token + 1
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    if !token_punct(state, cursor, "=") { return reject_parse(d, state, cursor, 8) }
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    let spelling = try parse_c_spelling(d, state, cursor)
+    if parse_step_bad(spelling) { return Ok(spelling) }
+    let spelling_value = parse_step_value(spelling)
+    let spelling_link = try add_link(d, spelling_value.cursor, spelling_value.node, 0)
+    var children: U64 = __s0_buffer_len(SyntaxLinkRec, spelling_link.store.links)
+    cursor = spelling_link
+    if !token_punct(state, cursor, "(") { return reject_parse(d, state, cursor, 11) }
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    if !token_punct(state, cursor, ")") {
+        var more = true
+        while more {
+            if !token_ident(state, cursor) { return reject_parse(d, state, cursor, 3) }
+            let param = parse_token(state, cursor)
+            let param_token = cursor.token + 1
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            if !token_punct(state, cursor, ":") { return reject_parse(d, state, cursor, 8) }
+            cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+            let type_step = try parse_type(d, state, cursor)
+            if parse_step_bad(type_step) { return Ok(type_step) }
+            let value = parse_step_value(type_step)
+            let type_cursor = try add_link(d, value.cursor, value.node, 0)
+            let param_node = try add_syntax(d, type_cursor, 13, param_token, param.source, param.start, param.end, param.start, param.end, __s0_buffer_len(SyntaxLinkRec, type_cursor.store.links))
+            let param_link = try add_link(d, param_node.cursor, param_node.node, children)
+            children = __s0_buffer_len(SyntaxLinkRec, param_link.store.links)
+            cursor = param_link
+            if token_punct(state, cursor, ",") {
+                cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+                if token_punct(state, cursor, ")") { more = false }
+            } else { more = false }
+        }
+    }
+    let close = try expect_punct(d, state, cursor, ")")
+    if parse_step_bad(close) { return Ok(close) }
+    cursor = parse_step_cursor(close)
+    if !token_punct(state, cursor, "->") { return reject_parse(d, state, cursor, 14) }
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    let result = try parse_type(d, state, cursor)
+    if parse_step_bad(result) { return Ok(result) }
+    let result_value = parse_step_value(result)
+    let result_link = try add_link(d, result_value.cursor, result_value.node, children)
+    children = __s0_buffer_len(SyntaxLinkRec, result_link.store.links)
+    cursor = result_link
+    let end = parse_token(state, ParseCursor(token: cursor.token - 1, store: cursor.store)).end
+    let node = try add_syntax(d, cursor, 66, name_token, callback_token.source, callback_token.start, end, name.start, name.end, children)
     return Ok(Parsed(node))
 }
 

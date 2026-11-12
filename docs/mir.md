@@ -619,6 +619,22 @@ place that is not rooted at a local, and a read-only place for `c_ptr`.
 Nullity, alignment, and lifetime are the unsafe caller's obligation: the
 operation emits no null check.
 
+## C Callback Values
+
+MIR 6 exposes one nonretained callback construction as operation 111:
+
+```text
+c.callback.make @function, callback_type -> callback
+```
+
+The target is a function ID and the type operand is a callback-class
+`c_named` type whose C spelling is a function-pointer typedef. The result is
+the callback value passed as one raw-call argument; it is never stored. The
+verifier requires a valid target function and a callback-class `c_named`
+result. The C backend emits a static trampoline for each distinct pair and
+uses its address as the value. Bindings print callback members as
+`c_type callback @Name = "spelling"`.
+
 ## Text Display
 
 MIR 6 exposes the Display domain's formatting as operation 102, produced

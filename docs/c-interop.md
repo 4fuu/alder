@@ -401,9 +401,46 @@ checked by the binding probe when their value and type are representable.
 ## Callbacks and C calling Alder
 
 Nonretained callbacks use a verified C function-pointer type plus explicit
-context pointer. A generated static trampoline checks/decodes the context and
-enters the Alder runtime. The callback cannot retain a scoped Alder value or
-propagate an Alder `Result` through an incompatible C signature.
+context pointer:
+
+```alder
+import c "event.h" as ev {
+    callback type Handler = "event_handler" (
+        event: c.ConstPtr(c.UChar),
+        length: c.Size,
+        context: c.Ptr(c.UChar),
+    ) -> c.Int
+
+    raw fn set_handler = "set_handler"(
+        handler: Handler,
+        context: c.Ptr(c.UChar),
+    ) -> c.Int
+}
+
+fn on_event(
+    event: c.ConstPtr(c.UChar),
+    length: c.Size,
+    context: c.Ptr(c.UChar),
+) -> c.Int {
+    // validate, copy, and call safe Alder code
+}
+
+unsafe c {
+    ev.set_handler(c.callback(on_event), c.addr(state))
+}
+```
+
+The binding spelling must name a C function-pointer typedef. Its signature
+uses C ABI types only and `Unit` results map to `void`. `c.callback(name)` is
+admitted only as a direct raw-call argument, typed by the declared callback
+parameter; the target must be a top-level, non-generic, noncapturing function
+with exactly that signature, plain parameters, and a C ABI result. A target
+mismatch is diagnostic 224, use outside a direct raw-call argument is 225, and
+a non-bare target is 227. The generated static trampoline enters the Alder
+runtime with a per-invocation root domain when the target needs storage, so the
+callback never receives a scoped Alder value, never returns an Alder `Result`,
+and cannot retain Alder storage. The C API must not retain this callback; a
+retained registration uses `c.CallbackOwner`.
 
 A callback retained after the initiating call requires an affine
 `c.CallbackOwner` containing the registration, context storage, target

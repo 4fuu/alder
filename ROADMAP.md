@@ -1821,6 +1821,27 @@ and [docs/s0-language.md](docs/s0-language.md). A cold
 `bootstrap/regenerate.sh` measured 145.6 s wall and 2.16 GB peak RSS against
 132.6 s and 2.16 GB for the parent tree on the same host.
 
+Landed C-interop progress: nonretained C callbacks. A binding block can
+declare `callback type Name = "spelling" (params) -> result` for a C
+function-pointer typedef restricted to C ABI types. Inside `unsafe c`,
+`c.callback(target)` supplies the callback directly to one raw call; the
+target must be a top-level, non-generic, noncapturing function with the bound
+signature, and callback pointers never become ordinary Alder values
+(diagnostics 224-227, parse 31). MIR 111 `c.callback.make` carries the target
+function and callback type; cgen emits a static trampoline that creates a
+per-invocation root domain when needed, enters the runtime, and pins the
+trampoline against the binding typedef with `_Generic`. The C API must not
+retain the callback. Evidence: `compiler/production_c_callback_test.go`
+compiles and runs a synchronous C callback under the strict warning set,
+checks the trampoline shape and cross-process determinism, and pins target
+mismatch and unsafe-only rejections. Documentation is in
+[docs/c-interop.md](docs/c-interop.md) "Callbacks and C calling Alder",
+[docs/c-backend.md](docs/c-backend.md) "Callback trampolines",
+[docs/mir.md](docs/mir.md) "C Callback Values", and
+[docs/s0-language.md](docs/s0-language.md). A cold `bootstrap/regenerate.sh`
+measured 136.3 s wall and 2.17 GB peak RSS against 136.1 s and 2.15 GB for the
+parent tree on the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

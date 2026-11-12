@@ -69,6 +69,7 @@ fn mir_type_part_c_field() -> U64 { return 5 }
 fn mir_c_class_scalar() -> U64 { return 0 }
 fn mir_c_class_opaque() -> U64 { return 1 }
 fn mir_c_class_record() -> U64 { return 2 }
+fn mir_c_class_callback() -> U64 { return 3 }
 
 // C scalar ids for TypeCRaw payloads, matching mir/types.go order.
 fn mir_c_scalar_count() -> U64 { return 15 }
@@ -213,6 +214,10 @@ fn mir_op_c_zero() -> U64 { return 109 }
 // The address of a local place as a declared C pointer type for one raw call
 // argument; type_op names c_ptr or c_const_ptr over the place's own type.
 fn mir_op_c_addr() -> U64 { return 110 }
+
+// c.callback.make pairs one noncapturing Alder function with a bound C
+// function-pointer type. Its result is the callback type operand.
+fn mir_op_c_callback_make() -> U64 { return 111 }
 
 fn mir_term_jump() -> U64 { return 0 }
 fn mir_term_branch() -> U64 { return 1 }
