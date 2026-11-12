@@ -1545,6 +1545,19 @@ fn resolve_trait_arg_links(d: Domain, state: State, parse: ParseStore, store: Ch
     return Ok(TraitRefGood(TraitRefStoreRec(store: with_args, reference: TraitRefRec(builtin: 0, symbol: 0, first_arg: prior.first_arg, arg_count: prior.arg_count + 1))))
 }
 
+// True when a kind-12 function node was parsed through `export c fn`: the
+// two export tokens immediately precede the `fn` token the parser recorded.
+fn function_exported_tokens(state: State, node: SyntaxRec) -> Bool {
+    if node.kind != 12 || node.token < 3 { return false }
+    if node.token > __s0_buffer_len(TokenRec, state.tokens) { return false }
+    let export_token = __s0_buffer_get(TokenRec, state.tokens, node.token - 3)
+    if export_token.kind != 1 || export_token.keyword != 32 { return false }
+    let c_token = __s0_buffer_get(TokenRec, state.tokens, node.token - 2)
+    if c_token.kind != 1 { return false }
+    let source = __s0_buffer_get(SourceRec, state.sources, c_token.source)
+    return source_word(state, source, c_token.start, c_token.end, "c")
+}
+
 fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {
     let imports = try validate_import_bindings(d, state, parse, initial)
     if match imports {
@@ -1606,7 +1619,7 @@ fn collect_symbols(d: Domain, state: State, parse: ParseStore, initial: CheckSto
         let symbol_id = __s0_buffer_len(SymbolRec, store.symbols) + 1
         var declaration: U64 = 0
         if node.kind == 12 && symbol_arity(parse, node) == 0 { declaration = symbol_id }
-        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: inherent_owner, module_source: module_source, public: public)
+        let symbol = SymbolRec(kind: node.kind, node: node_id, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: symbol_arity(parse, node), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: inherent_owner, module_source: module_source, public: public, c_export: node.kind == 12 && function_exported_tokens(state, node))
         let symbols = try __s0_buffer_append(SymbolRec, d, store.symbols, symbol)
         store = CheckStore(symbols: symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: store.expressions, call_annotations: store.call_annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
         root_at = root_at + 1
@@ -1675,7 +1688,7 @@ fn synthesize_default_method_links(d: Domain, state: State, parse: ParseStore, s
                 let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
                 var declaration: U64 = 0
                 if symbol_arity(parse, requirement) == 0 { declaration = symbol_id }
-                let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: item.node, source: requirement.source, name_start: requirement.name_start, name_end: requirement.name_end, type_arity: symbol_arity(parse, requirement), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: impl_root, module_source: 0, public: false))
+                let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: item.node, source: requirement.source, name_start: requirement.name_start, name_end: requirement.name_end, type_arity: symbol_arity(parse, requirement), declaration: declaration, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: impl_root, module_source: 0, public: false, c_export: false))
                 current = CheckStore(symbols: symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
             }
         }
@@ -1717,14 +1730,14 @@ fn regroup_impl_method_symbols(d: Domain, state: State, parse: ParseStore, store
                 let moved = __s0_buffer_get(SymbolRec, store.symbols, moved_at)
                 if moved.inherent_owner == item.inherent_owner && __s0_buffer_get(SyntaxRec, parse.nodes, moved.node - 1).kind == 51 {
                     var moved_record = moved
-                    if moved_record.declaration != 0 { moved_record = SymbolRec(kind: moved_record.kind, node: moved_record.node, source: moved_record.source, name_start: moved_record.name_start, name_end: moved_record.name_end, type_arity: moved_record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: moved_record.first_instance_arg, instance_arg_count: moved_record.instance_arg_count, discovery_parent: moved_record.discovery_parent, inherent_owner: moved_record.inherent_owner, module_source: moved_record.module_source, public: moved_record.public) }
+                    if moved_record.declaration != 0 { moved_record = SymbolRec(kind: moved_record.kind, node: moved_record.node, source: moved_record.source, name_start: moved_record.name_start, name_end: moved_record.name_end, type_arity: moved_record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: moved_record.first_instance_arg, instance_arg_count: moved_record.instance_arg_count, discovery_parent: moved_record.discovery_parent, inherent_owner: moved_record.inherent_owner, module_source: moved_record.module_source, public: moved_record.public, c_export: moved_record.c_export) }
                     reordered = try __s0_buffer_append(SymbolRec, d, reordered, moved_record)
                 }
                 moved_at = moved_at - 1
             }
         }
         var record = item
-        if record.declaration == at + 1 { record = SymbolRec(kind: record.kind, node: record.node, source: record.source, name_start: record.name_start, name_end: record.name_end, type_arity: record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: record.first_instance_arg, instance_arg_count: record.instance_arg_count, discovery_parent: record.discovery_parent, inherent_owner: record.inherent_owner, module_source: record.module_source, public: record.public) }
+        if record.declaration == at + 1 { record = SymbolRec(kind: record.kind, node: record.node, source: record.source, name_start: record.name_start, name_end: record.name_end, type_arity: record.type_arity, declaration: __s0_buffer_len(SymbolRec, reordered) + 1, first_instance_arg: record.first_instance_arg, instance_arg_count: record.instance_arg_count, discovery_parent: record.discovery_parent, inherent_owner: record.inherent_owner, module_source: record.module_source, public: record.public, c_export: record.c_export) }
         reordered = try __s0_buffer_append(SymbolRec, d, reordered, record)
         at = at + 1
         }
@@ -2285,6 +2298,133 @@ fn binding_spelling_valid(state: State, spelling: BindingSpellingRec) -> Bool {
     if binding_spelling_word(state, spelling, "volatile") { return false }
     if binding_spelling_word(state, spelling, "while") { return false }
     return true
+}
+
+// The C spelling a binding member stored on its record, rebuilt for
+// comparisons against a declaration name.
+fn binding_member_spelling_rec(member: BindingMemberRec) -> BindingSpellingRec {
+    return BindingSpellingRec(valid: true, from_values: member.spelling_values, source: member.spelling_source, start: member.spelling_start, end: member.spelling_end)
+}
+
+// True when a C spelling equals one Alder declaration name byte for byte.
+fn binding_spelling_matches_name(state: State, spelling: BindingSpellingRec, source: U64, start: U64, end: U64) -> Bool {
+    if !spelling.valid || spelling.end - spelling.start != end - start { return false }
+    let text = __s0_buffer_get(SourceRec, state.sources, source)
+    var at: U64 = 0
+    while at < end - start {
+        if binding_spelling_byte(state, spelling, at) != text_byte(state, text, start + at) { return false }
+        at = at + 1
+    }
+    return true
+}
+
+
+// True when the owner symbol is an `export c fn` declaration, whose
+// by-value opaque rejection is diagnosed as a non-C-ABI signature type.
+fn c_export_owner_symbol(store: CheckStore, owner: U64) -> Bool {
+    if owner == 0 || owner > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    return __s0_buffer_get(SymbolRec, store.symbols, owner - 1).c_export
+}
+
+// The by-value record or scalar member class behind a c_named checked type.
+// A missing or non-type member reports opaque so callers stay conservative.
+fn c_export_named_class(store: CheckStore, kind_target: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+        let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+        if member.member_kind == 1 && member.member_node == kind_target { return member.class }
+        at = at + 1
+    }
+    return 1
+}
+
+// A C ABI pointee may be a raw scalar, another C pointer, or any named member
+// (opaque names are legal behind pointers).
+fn c_export_pointee_ok(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if rec.kind == 26 || rec.kind == 29 { return true }
+    if rec.kind != 27 && rec.kind != 28 { return false }
+    if rec.arg_count != 1 { return false }
+    return c_export_pointee_ok(store, __s0_buffer_get(U64, store.type_args, rec.first_arg - 1))
+}
+
+// An export value type: a raw C scalar, a C pointer, or a by-value named
+// scalar or record. Unit is admitted separately for results only.
+fn c_export_value_ok(store: CheckStore, checked_type: U64) -> Bool {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return false }
+    let rec = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if rec.kind == 26 { return true }
+    if rec.kind == 27 || rec.kind == 28 {
+        if rec.arg_count != 1 { return false }
+        return c_export_pointee_ok(store, __s0_buffer_get(U64, store.type_args, rec.first_arg - 1))
+    }
+    if rec.kind == 29 {
+        let class = c_export_named_class(store, rec.target)
+        return class == 0 || class == 2
+    }
+    return false
+}
+
+// True when a raw fn C spelling equals the prospective export symbol.
+fn c_export_symbol_collides(state: State, store: CheckStore, source: U64, start: U64, end: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(BindingMemberRec, store.bindings.members) {
+        let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, at)
+        if member.member_kind == 2 && binding_spelling_matches_name(state, binding_member_spelling_rec(member), source, start, end) { return true }
+        at = at + 1
+    }
+    return false
+}
+
+// check_export_signature validates one `export c fn`: a C-safe symbol, no
+// generics or receiver, plain runtime parameters, C ABI parameter and result
+// types, and no collision with a raw fn's C spelling.
+fn check_export_signature(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64) -> Result(CheckResult, __s0_Error) {
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1)
+    let spelling = BindingSpellingRec(valid: true, from_values: false, source: symbol.source, start: symbol.name_start, end: symbol.name_end)
+    if !binding_spelling_valid(state, spelling) { return check_token_fail(d, state, store, 222, node) }
+    if symbol.type_arity != 0 || symbol.inherent_owner != 0 || node_word(state, node, "main") { return check_token_fail(d, state, store, 222, node) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.owner == owner {
+            if use.role == 5 {
+                let parameter_node = __s0_buffer_get(SyntaxRec, parse.nodes, use.node - 1)
+                if parameter_node.kind != 13 { return check_token_fail(d, state, store, 222, node) }
+                if !c_export_value_ok(store, use.checked_type) { return check_token_fail(d, state, store, 221, parameter_node) }
+            }
+            if use.role == 6 {
+                var unit_result = false
+                if use.checked_type != 0 && use.checked_type <= __s0_buffer_len(CheckedTypeRec, store.types) {
+                    let result = __s0_buffer_get(CheckedTypeRec, store.types, use.checked_type - 1)
+                    unit_result = result.kind == 1 && result.target == 12
+                }
+                if !unit_result && !c_export_value_ok(store, use.checked_type) { return check_token_fail(d, state, store, 221, node) }
+            }
+        }
+        at = at + 1
+    }
+    if c_export_symbol_collides(state, store, symbol.source, symbol.name_start, symbol.name_end) { return check_token_fail(d, state, store, 223, node) }
+    return Ok(CheckGood(store))
+}
+
+// check_export_signatures runs after function signatures are checked, so
+// every parameter and result use carries its checked type.
+fn check_export_signatures(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var current = store
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, current.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, current.symbols, at)
+        if symbol.c_export && symbol.kind == 12 {
+            let checked = try check_export_signature(d, state, parse, current, at + 1)
+            current = check_result_store(checked)
+            if check_result_bad(checked) { return Ok(checked) }
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(current))
 }
 
 // The raw C scalar vocabulary in c.X position, matching the MIR CScalar ids.
@@ -3693,7 +3833,7 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
     let own_args = try append_instance_args(d, store, declaration, bindings, 0)
     let with_args = try append_impl_instance_args(d, own_args, declaration, bindings)
     let instance = __s0_buffer_len(SymbolRec, with_args.symbols) + 1
-    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: instance_arg_total(with_args, declaration), discovery_parent: parent, inherent_owner: declared.inherent_owner, module_source: declared.module_source, public: declared.public))
+    let symbols = try __s0_buffer_append(SymbolRec, d, with_args.symbols, SymbolRec(kind: 13, node: declared.node, source: declared.source, name_start: declared.name_start, name_end: declared.name_end, type_arity: 0, declaration: declaration, first_instance_arg: first, instance_arg_count: instance_arg_total(with_args, declaration), discovery_parent: parent, inherent_owner: declared.inherent_owner, module_source: declared.module_source, public: declared.public, c_export: declared.c_export))
     let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, indexes: with_args.indexes, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics, traits: with_args.traits, closures: with_args.closures, interp: with_args.interp, bindings: with_args.bindings)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
@@ -3822,6 +3962,72 @@ fn synthesized_default_trait_arg(state: State, parse: ParseStore, store: CheckSt
     return 0
 }
 
+// Ordinary type-position resolution of the C binding vocabulary: `c.Int`
+// and the other raw scalars, `c.Ptr(T)`/`c.ConstPtr(T)`, and bare or
+// alias-qualified binding type members. Export signatures need these spellings
+// and they stay inert values elsewhere: no safe operation consumes them off
+// the C boundary. A pointee admits opaque members, which are legal only
+// behind pointers.
+// Type-position resolution of one C scalar name (`c.Int`) or binding member
+// name (bare or alias-qualified), appended as a checked type for the node.
+fn resolve_c_binding_type_name(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec, node_id: U64, pointee: Bool) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    if node.kind != 4 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let dot = binding_name_dot(state, node)
+    var scalar: U64 = 15
+    var member_index: U64 = 0
+    if dot == 0 {
+        member_index = c_zero_member_named(state, parse, store, node.source, node.name_start, node.name_end)
+    } else {
+        let text = __s0_buffer_get(SourceRec, state.sources, node.source)
+        if source_word(state, text, node.name_start, dot, "c") {
+            scalar = binding_scalar_id(state, text, dot + 1, node.name_end)
+        } else {
+            member_index = c_zero_member_aliased(state, parse, store, node.source, node.name_start, dot, node.source, dot + 1, node.name_end)
+        }
+    }
+    if scalar != 15 {
+        let appended = try append_checked_type(d, store, owner, 26, node_id, scalar, 0, 0)
+        return Ok(BindingCheckedTypeRec(store: appended, id: checked_type_for_syntax(appended, owner, node_id)))
+    }
+    if member_index == 0 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let member = __s0_buffer_get(BindingMemberRec, store.bindings.members, member_index - 1)
+    // An opaque member exists only behind a C pointer. An export keeps it
+    // resolved so the signature check reports the C ABI rule (221).
+    if !pointee && member.class == 1 && !c_export_owner_symbol(store, owner) { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let appended = try append_checked_type(d, store, owner, 29, node_id, member.member_node, 0, 0)
+    return Ok(BindingCheckedTypeRec(store: appended, id: checked_type_for_syntax(appended, owner, node_id)))
+}
+
+fn resolve_c_element_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(BindingCheckedTypeRec, __s0_Error) {
+    if node_id == 0 || node_id > __s0_buffer_len(SyntaxRec, parse.nodes) { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
+    if node.kind == 4 { return resolve_c_binding_type_name(d, state, parse, store, owner, node, node_id, true) }
+    if node.kind != 6 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let const_pointer = binding_applied_head_is_c(state, node, "ConstPtr")
+    if !const_pointer && !binding_applied_head_is_c(state, node, "Ptr") { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    if type_arg_count(parse, node.children) != 1 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+    let element = try resolve_c_element_type(d, state, parse, store, owner, link.node)
+    if element.id == 0 { return Ok(BindingCheckedTypeRec(store: store, id: 0)) }
+    let slot = try binding_type_args_slot(d, element.store, element.id)
+    var kind: U64 = 27
+    if const_pointer { kind = 28 }
+    let appended = try append_checked_type(d, slot.store, owner, kind, node_id, 0, slot.index, 1)
+    return Ok(BindingCheckedTypeRec(store: appended, id: checked_type_for_syntax(appended, owner, node_id)))
+}
+
+fn resolve_c_pointer_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node: SyntaxRec, node_id: U64) -> Result(CheckResult, __s0_Error) {
+    if type_arg_count(parse, node.children) != 1 { return check_fail(d, store, 5, node, 0, 0, 0) }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, node.children - 1)
+    let element = try resolve_c_element_type(d, state, parse, store, owner, link.node)
+    if element.id == 0 { return check_fail(d, element.store, 4, __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1), 0, 0, 0) }
+    let slot = try binding_type_args_slot(d, element.store, element.id)
+    var kind: U64 = 27
+    if binding_applied_head_is_c(state, node, "ConstPtr") { kind = 28 }
+    let appended = try append_checked_type(d, slot.store, owner, kind, node_id, 0, slot.index, 1)
+    return Ok(CheckGood(appended))
+}
+
 fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Result(CheckResult, __s0_Error) {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     let boundary = declaration_boundary(store, owner)
@@ -3929,6 +4135,8 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         if substituted != 0 { return Ok(CheckGood(try annotate_checked_type(d, store, owner, node_id, substituted))) }
         let symbol = find_declared_type(state, parse, store, node)
         if symbol == 0 {
+            let c_type = try resolve_c_binding_type_name(d, state, parse, store, owner, node, node_id, false)
+            if c_type.id != 0 { return Ok(CheckGood(c_type.store)) }
             if trait_symbol_named(state, parse, store, node) != 0 { return check_fail(d, store, 114, node, 0, 0, 0) }
             return check_fail(d, store, 4, node, 0, 0, 0)
         }
@@ -3936,6 +4144,9 @@ fn resolve_type(d: Domain, state: State, parse: ParseStore, store: CheckStore, o
         let appended = try append_checked_type(d, store, owner, 7, node_id, symbol, 0, 0)
         let checked_id = checked_type_for_syntax(appended, owner, node_id)
         return validate_concrete_type(d, state, parse, appended, checked_id, 0, syntax_diag_node(state, parse, node_id), boundary)
+    }
+    if node.kind == 6 && (binding_applied_head_is_c(state, node, "Ptr") || binding_applied_head_is_c(state, node, "ConstPtr")) {
+        return resolve_c_pointer_type(d, state, parse, store, owner, node, node_id)
     }
     if node.kind == 6 && node_word(state, node, "Array") {
         if type_arg_count(parse, node.children) != 2 { return check_fail(d, store, 5, node, 0, 0, 0) }
@@ -6984,7 +7195,7 @@ fn check_closure_expression(d: Domain, state: State, parse: ParseStore, base: Ch
     let closure_syntax = closure_syntax_id(parse, node)
     if closure_syntax == 0 { return expr_token_fail(d, state, base, 147, node) }
     let symbol_id = __s0_buffer_len(SymbolRec, current.symbols) + 1
-    let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: closure_syntax, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: 0, declaration: symbol_id, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: 0, module_source: 0, public: false))
+    let symbols = try __s0_buffer_append(SymbolRec, d, current.symbols, SymbolRec(kind: 12, node: closure_syntax, source: node.source, name_start: node.name_start, name_end: node.name_end, type_arity: 0, declaration: symbol_id, first_instance_arg: 0, instance_arg_count: 0, discovery_parent: 0, inherent_owner: 0, module_source: 0, public: false, c_export: false))
     current = CheckStore(symbols: symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
     let site_index = __s0_buffer_len(ClosureSiteRec, current.closures.sites) + 1
     // Parameter uses: declared parameters, then captures in first-reference
@@ -11987,7 +12198,16 @@ fn check_declarations(d: Domain, state: State, parse: ParseStore, initial: Check
         CheckGood(value) => false
         CheckBad(value) => true
     } { return Ok(functions) }
-    let trait_impls_valid = try validate_trait_impls(d, state, parse, after_functions)
+    let exports_checked = try check_export_signatures(d, state, parse, after_functions)
+    let after_exports = match exports_checked {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    }
+    if match exports_checked {
+        CheckGood(value) => false
+        CheckBad(value) => true
+    } { return Ok(exports_checked) }
+    let trait_impls_valid = try validate_trait_impls(d, state, parse, after_exports)
     let after_trait_impls = match trait_impls_valid {
         CheckGood(value) => value
         CheckBad(value) => value

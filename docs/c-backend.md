@@ -85,11 +85,35 @@ diagnostic. Entry parameters remain the existing forms; argument-slice support
 is outside this adapter. The generated MIR entry contract stays `I32`.
 
 Program output exports exactly `int32_t alder_program_entry(void
-*host_context)`; all Alder functions remain static and ID-named. The opaque,
-invocation-scoped context must be non-null. A domain-taking entry receives a
+*host_context)` in addition to any `export c fn` definitions; all other Alder
+functions remain static and ID-named under the reserved `alder_` prefix. The
+opaque, invocation-scoped context must be non-null. A domain-taking entry receives a
 fresh root domain, which the wrapper destroys exactly once after normal return.
 Null context or failed root initialization returns
 `ALDER_PROGRAM_FAILURE_STATUS` deterministically.
+
+## Exported functions
+
+An `export c fn` declaration emits a non-static C definition whose symbol is
+the Alder name and whose signature is the C ABI signature printed by
+`cgen_put_type`: `c.*` scalars, `c_ptr`/`c_const_ptr` values, and verified
+bound records by value; a `Unit` result emits `void`. Parameters are named
+`alder_a<N>` positionally. When the lowered function takes the hidden domain
+parameter, the export wrapper creates a root `AlderDomain`, calls the internal
+static function, destroys the domain, and returns the result; failed domain
+initialization terminates through `alder_runtime_panic`. A function without
+storage is called directly. Every call is self-contained: there is no global
+initializer, no retained host context, and a foreign thread may call an export
+without entering `alder_program_entry`.
+
+`compile --emit=header` prints the matching header from the verified MIR: the
+guard word derives from the first export symbol, each binding block header
+referenced by an export signature is included once in declaration order, and
+the prototypes follow the same C ABI spellings. Export wrappers are a codegen
+feature only; they add no MIR operation, and the printed MIR carries no export
+marker because export intent is internal compiler metadata. Panics are never
+caught at the boundary, so process termination with the invariant status
+remains the only portable panic behavior across C.
 
 The separate `bootstrap/alder_host.c` hosted shim owns the private context
 layout and calls the stable prototype in `bootstrap/alder_host.h`; generated C

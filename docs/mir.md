@@ -374,8 +374,10 @@ Both binary operands share one integer type and the result carries that type;
 `int.not` is the unary complement of its integer operand. All four operate on
 the type's fixed-width two's-complement representation and none carries a
 failure edge. The verifier rejects mismatched operand types, non-integer
-operands, and a failure edge attached to any of them. Numbers 99-102 stay
-reserved for the staged CString slice.
+operands, and a failure edge attached to any of them. The CString slice
+claims 98-101 and `str.display` is 102, so the bitwise family starts at 103;
+later slices take new numbers from their reserved ranges instead of
+renumbering these operations.
 
 ## Float Arithmetic
 
@@ -722,6 +724,12 @@ ffi.call.unsafe import(arguments...) -> result
 ```
 
 Imported declarations currently record the import name (also the C symbol) and a concrete signature. The C backend accepts only backend-safe C identifiers: C keywords, generated/runtime prefixes, names beginning with `_`, macro-style uppercase names, header tokens such as `bool` and `offsetof`, functions declared by always-included headers, `main`, and names ending in the reserved typedef suffix `_t` are rejected. The accepted name is emitted unchanged, never sanitized into a potentially colliding symbol. Retention, const, and cleanup claims for foreign pointers are deferred to a later MIR version; until then, safe wrappers carry that responsibility.
+
+A source-level `export c fn` adds no MIR operation and no textual marker. The
+lowered function keeps its ordinary ID-derived name; the compiler records its
+source symbol and export intent as function metadata, and the C backend uses
+that metadata to emit a non-static wrapper under the Alder name. Verification
+and the printed MIR contract are therefore unchanged by exports.
 
 MIR verification cannot prove arbitrary foreign behavior. It verifies only that unsafe entry is explicit and that safe wrapper claims are internally consistent.
 

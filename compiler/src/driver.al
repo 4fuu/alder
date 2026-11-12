@@ -191,6 +191,7 @@ fn driver_out_parse_message(kind: U64) -> Bool {
     if kind == 23 { return out_string("C binding record fields must be separated by a physical line break") }
     if kind == 24 { return out_string("trait constraints are written on the type parameter: `Name: type(Trait, ...)`; there is no `where` clause") }
     if kind == 30 { return out_string("unsafe c block must contain a direct call or field access") }
+    if kind == 35 { return out_string("an export declaration is `export c fn name(...) -> type { ... }` at module scope") }
     return out_string("invalid source syntax")
 }
 
@@ -287,6 +288,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 218 { return out_string("c.load and c.store require a C pointer to a by-value C type") }
     if kind == 219 { return out_string("a write through a c.ConstPtr is not allowed") }
     if kind == 220 { return out_string("c.store value does not match the C pointer pointee") }
+    if kind == 221 { return out_string("an export signature type is not a C ABI type") }
+    if kind == 222 { return out_string("an export must be a non-generic, receiver-free function with a C-safe symbol name other than main") }
+    if kind == 223 { return out_string("an export symbol collides with a raw fn C spelling") }
     if kind == 1 {
         if driver_same_declaration_kind(detail_a, detail_b) {
             if detail_a == 1 { if !out_string("duplicate import name ") { return false } }

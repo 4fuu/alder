@@ -1762,6 +1762,38 @@ the printed form reparses. A cold `bootstrap/regenerate.sh` measured 132.7 s
 wall and 2.09 GB peak RSS against 137.4 s and 2.08 GB for the parent tree on
 the same host.
 
+Landed C-interop progress: intentional C exports and `compile --emit=header`.
+A top-level `export c fn` declaration defines a non-static C symbol named by
+the Alder function. Its signature is restricted to C ABI types (`c.*` raw
+scalars, `c.Ptr`/`c.ConstPtr` over a bound C type, and a verified bound scalar
+or record by value), with `Unit` mapping to C `void`; any other signature type
+is diagnostic 221. A generic or receiver-bearing declaration, a reserved or
+otherwise invalid symbol, and an export named `main` are 222, and an export
+whose symbol equals a raw fn's C spelling is 223; the reserved
+`alder_`/`ALDER_`/`Alder` prefixes keep every export clear of generated
+internal names. The generated C calls the ordinary static Alder function
+through a wrapper that creates and destroys a per-call root domain, so a
+foreign thread may call an export without entering `alder_program_entry`, and
+failed domain initialization terminates through the runtime panic. The header
+emits `<stddef.h>`, each binding header referenced by an export signature once
+in declaration order, then the prototypes under an `extern "C"` guard; the
+guard word derives from the first export symbol because MIR carries no module
+name. Header emission needs no `main`, but explicit-source `--emit=c` still
+runs hosted verification and therefore still requires an entry, so a library
+build currently supplies one. Evidence: the production qualification
+`compiler/production_c_export_test.go` compiles and runs scalar, by-value
+record, pointer/length, Unit, and no-argument exports from a C driver through
+the generated header under the strict warning set, checks include order,
+deduplication, unreferenced-header exclusion, and cross-process determinism
+for both outputs, and pins eight rejection shapes across 221-223 and parse 35;
+the MIR is unchanged, so the existing verifier and printer tests cover the
+lowered functions. Documentation is in [docs/c-interop.md](docs/c-interop.md)
+"Callbacks and C calling Alder", [docs/c-backend.md](docs/c-backend.md)
+"Exported functions", [docs/mir.md](docs/mir.md), and
+[docs/s0-language.md](docs/s0-language.md). A cold `bootstrap/regenerate.sh`
+measured 132.5 s wall and 2.16 GB peak RSS against 130.1 s and 2.17 GB for the
+parent tree on the same host.
+
 Landed C-interop progress: the narrow S0 C bridge (`import c name:
 fn(...) -> T`) no longer appears on the public surface. Ordinary modules
 reject the form at the checker with the stable bootstrap-private diagnostic

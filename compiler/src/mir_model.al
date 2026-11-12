@@ -304,6 +304,11 @@ type MirFunctionRec {
     name_start: U64
     name_end: U64
     result_type: U64
+    // A C export keeps its source-level symbol name here even when the MIR
+    // function name carries a module-uniqueness suffix.
+    c_export: Bool
+    export_name_start: U64
+    export_name_end: U64
 }
 
 // value is the owning function's external logical Value ID. Function

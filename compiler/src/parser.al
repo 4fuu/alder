@@ -1319,6 +1319,19 @@ fn parse_function(d: Domain, state: State, initial: ParseCursor) -> Result(Parse
     return parse_function_owned(d, state, initial, 0)
 }
 
+// `export c fn name(...) -> T { ... }` is the C export surface. The parsed
+// node is the ordinary kind-12 function declaration, so symbols, signatures,
+// bodies, lowering, and verification treat it like any other function; the
+// two export tokens stay in the token stream and the symbol pass records the
+// exported flag from them.
+fn parse_export_c_fn(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
+    var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+    if !token_ident(state, cursor) || !token_text(state, parse_token(state, cursor), "c") { return reject_parse(d, state, cursor, 35) }
+    cursor = ParseCursor(token: cursor.token + 1, store: cursor.store)
+    if parse_token(state, cursor).keyword != 4 { return reject_parse(d, state, cursor, 35) }
+    return parse_function(d, state, cursor)
+}
+
 fn parse_impl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
     var cursor = ParseCursor(token: initial.token + 1, store: initial.store)
@@ -1733,6 +1746,7 @@ fn parse_public_decl(d: Domain, state: State, initial: ParseCursor) -> Result(Pa
 
 fn parse_decl(d: Domain, state: State, initial: ParseCursor) -> Result(ParseStep, __s0_Error) {
     let start = parse_token(state, initial)
+    if start.keyword == 32 { return parse_export_c_fn(d, state, initial) }
     if start.keyword == 20 { return parse_module_decl(d, state, initial) }
     if start.keyword == 21 { return parse_public_decl(d, state, initial) }
     if start.keyword == 25 { return parse_impl(d, state, initial) }

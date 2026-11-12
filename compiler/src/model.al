@@ -149,6 +149,9 @@ type SymbolRec {
     // explicit-source mode and source+1 for declarations in a module file.
     module_source: U64
     public: Bool
+    // True for a top-level `export c fn` declaration: the C symbol is the
+    // Alder name and the signature is restricted to C ABI types.
+    c_export: Bool
 }
 
 type TypeParamRec {

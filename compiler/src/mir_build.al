@@ -238,6 +238,17 @@ fn mir_add_import_param(d: Domain, store: MirStore, import_id: U64, ordinal: U64
     return Ok(step.store)
 }
 
+// Mark one function as a C export and append its source-level symbol name.
+fn mir_mark_function_exported(d: Domain, store: MirStore, function: U64, name: __s0_String) -> Result(MirBuildStep, __s0_Error) {
+    let named = try mir_append_name(d, store, name)
+    var current = named.store
+    if function == 0 || function > __s0_buffer_len(MirFunctionRec, current.functions) { return Ok(MirBuildStep(store: current, id: 0)) }
+    let item = __s0_buffer_get(MirFunctionRec, current.functions, function - 1)
+    let rec = MirFunctionRec(name_start: item.name_start, name_end: item.name_end, result_type: item.result_type, c_export: true, export_name_start: named.start, export_name_end: named.end)
+    __s0_buffer_set(MirFunctionRec, current.functions, function - 1, rec)
+    return Ok(MirBuildStep(store: current, id: function))
+}
+
 fn mir_add_const(d: Domain, store: MirStore, name: __s0_String, const_type: U64, kind: U64, bool_value: U64, int_value: I64, float_bits: U64, text: __s0_String) -> Result(MirBuildStep, __s0_Error) {
     let named = try mir_append_name(d, store, name)
     let value = try mir_append_name(d, named.store, text)
@@ -248,7 +259,7 @@ fn mir_add_const(d: Domain, store: MirStore, name: __s0_String, const_type: U64,
 
 fn mir_add_function(d: Domain, store: MirStore, name: __s0_String, result_type: U64) -> Result(MirBuildStep, __s0_Error) {
     let named = try mir_append_name(d, store, name)
-    let items = try __s0_buffer_append(MirFunctionRec, d, named.store.functions, MirFunctionRec(name_start: named.start, name_end: named.end, result_type: result_type))
+    let items = try __s0_buffer_append(MirFunctionRec, d, named.store.functions, MirFunctionRec(name_start: named.start, name_end: named.end, result_type: result_type, c_export: false, export_name_start: 0, export_name_end: 0))
     return Ok(MirBuildStep(store: mir_with_functions(named.store, items), id: __s0_buffer_len(MirFunctionRec, items)))
 }
 

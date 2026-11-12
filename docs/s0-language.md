@@ -74,6 +74,13 @@ fn identity(T: type, value: T) -> T {
     return value
 }
 
+export c fn process_bytes(
+    data: c.ConstPtr(c.UChar),
+    length: c.Size,
+) -> c.Int {
+    return c.Zero(c.Int)
+}
+
 impl Counter {
     fn get(self) -> U64 {
         return self.value
@@ -91,6 +98,18 @@ permits mutation through a mutable argument or receiver, while `take`
 transfers an affine value and invalidates the source on that path. Inherent
 `impl Type { ... }` blocks provide `self`, `mut self`, and `take self`
 receivers plus associated functions. They do not provide extension methods.
+
+The source-bootstrapped compiler additionally implements intentional C
+exports: a top-level `export c fn` declaration defines a non-static C symbol
+named by the Alder function. Its signature is restricted to C ABI types:
+`c.*` raw scalars, `c.Ptr(T)`/`c.ConstPtr(T)` over a bound C type, and a
+verified bound scalar or record by value; a `Unit` result maps to C `void`
+and is written as `Unit` in source. Any other signature type is diagnostic
+221; a generic, receiver-bearing, or otherwise invalid signature, a reserved
+or invalid C symbol, and an export named `main` are 222; and an export whose
+symbol equals a raw `import c` fn's C spelling is 223. The Go Stage 0
+frontend does not parse this form. `compile --emit=header` prints the
+matching deterministic header after verification.
 
 Milestone 7.5 adds the static trait surface of
 [Traits and Closures](traits-and-closures.md) up to constraint gating:
@@ -627,9 +646,10 @@ import c note: fn(I64) -> Unit
 ```
 
 Parameters/results are restricted to primitives and `Ptr(primitive)`. A symbol
-is callable only as one direct root call inside `unsafe c`. S0 does not read
-headers, describe records, verify ownership/retention, export Alder functions,
-or support retained callbacks. See [C Interoperability](c-interop.md).
+is callable only as one direct root call inside `unsafe c`. That one-symbol
+form does not read headers, describe records, verify ownership/retention, or
+support retained callbacks; exports and retained-callback contracts are the
+broader C interop surface described in [C Interoperability](c-interop.md).
 
 ## Current Alder-written port boundary
 

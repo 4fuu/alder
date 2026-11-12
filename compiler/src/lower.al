@@ -1686,8 +1686,13 @@ fn lower_declarations(d: Domain, source_state: State, store: CheckStore, state: 
             }
             if symbol.kind == 13 || symbol.inherent_owner != 0 || (symbol.module_source != 0 && !entry) { name = try lower_decimal_name(d, base, owner) }
             if lower_closure_site_for(store, owner) != 0 { name = try lower_decimal_name(d, "closure", owner) }
-            let function = try mir_add_function(d, current.mir, name, result_type.id)
+            var function = try mir_add_function(d, current.mir, name, result_type.id)
             current = lower_with_mir(current, function.store)
+            if symbol.c_export && symbol.kind == 12 {
+                let exported = try mir_mark_function_exported(d, current.mir, function.id, base)
+                function = MirBuildStep(store: exported.store, id: function.id)
+                current = lower_with_mir(current, function.store)
+            }
             // A capturing closure's thunk receives its domain inside the
             // environment record; a bare thunk takes the caller's domain as
             // its leading parameter, like a named function value.

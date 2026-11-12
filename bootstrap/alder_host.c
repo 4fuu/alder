@@ -1050,9 +1050,11 @@ static int alderhost_parse_request(int argc, char **argv,
     if (context->command != UINT64_C(1)) {
         if (strcmp(emit, "mir") == 0) {
             context->command = UINT64_C(2);
+        } else if (strcmp(emit, "header") == 0) {
+            context->command = UINT64_C(4);
         } else if (strcmp(emit, "c") != 0) {
             return alderhost_fail(context->command, context->json, 2, "request",
-                                  "emit must be mir or c");
+                                  "emit must be mir, c, or header");
         }
     }
     for (i = 0; i < (int)source_count; i++) {

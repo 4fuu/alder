@@ -33,6 +33,19 @@ fn finish_verify(d: Domain, state: State, store: CheckStore, mir: MirStore, resu
         if !driver_artifact_finish() { return driver_failure(3, "io", "cannot write compiler output") }
         return 0
     }
+    if driver_command() == 4 {
+        if !driver_artifact_start("header") { return driver_failure(3, "io", "cannot write compiler output") }
+        let generated = match cgen_generate_header(d, mir) {
+            Err(error) => false
+            Ok(value) => value
+        }
+        if !generated {
+            if driver_output_failed() { return driver_failure(3, "io", "cannot write compiler output") }
+            return driver_internal_error()
+        }
+        if !driver_artifact_finish() { return driver_failure(3, "io", "cannot write compiler output") }
+        return 0
+    }
     if !driver_artifact_start("c") { return driver_failure(3, "io", "cannot write compiler output") }
     return run_cgen(d, mir, result)
 }

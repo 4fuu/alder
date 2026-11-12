@@ -2,8 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, and header-only explicit shims, while exports, general ownership/retention wrappers, callbacks, and out-of-line C shims are not implemented yet**
-
+Availability: **S0 supports only direct primitive/pointer symbol imports; Milestone 8 is installing the binding model: binding blocks, raw types, raw fn, unsafe calls, `c.is_null`, probe emission, the errno/strerror shims, the checked scalar conversions, by-value verified records, `unsafe c` field access, `c.CString` ownership, call-scoped buffer borrows, zero-initialized values with local out-parameter addresses, pointer member access with whole-value `c.load`/`c.store`, header-only explicit shims, and `export c fn` C exports with generated headers are checked end to end, while general ownership/retention wrappers, callbacks, and out-of-line C shims are not implemented yet**
 Alder treats C as an explicit trusted boundary. C headers remain authoritative
 for spelling and ABI. Alder binding descriptions provide the exact type names
 and declarations needed for checking and deterministic code generation. Safe
@@ -416,7 +415,7 @@ unsafe.
 Intentional C exports use explicit syntax:
 
 ```alder
-export c fn alder_process(
+export c fn process_bytes(
     data: c.ConstPtr(c.UChar),
     length: c.Size,
 ) -> c.Int {
@@ -424,10 +423,33 @@ export c fn alder_process(
 }
 ```
 
-Only C ABI types and verified bound records appear in an export signature.
-An export catches no invariant panic; process termination is the only portable
-panic behavior across C. The generated header and symbol name are deterministic.
-Thread entry and runtime initialization are supplied by the host bridge.
+An export is a top-level `export c fn` declaration. Its signature uses only
+C ABI types: `c.*` raw scalars, `c.Ptr(T)`/`c.ConstPtr(T)` over a bound C type,
+and a verified bound scalar or record by value; `Unit` results map to C
+`void`. Any other signature type is diagnostic 221. Exports are non-generic,
+receiver-free functions with plain parameters, and the Alder name is the C
+symbol under the binding name policy; a reserved or otherwise invalid symbol,
+a generic or receiver-bearing export, and an export named `main` are
+diagnostic 222, and an export whose symbol equals a raw fn's C spelling is
+223. The policy reserves
+the `alder_`/`ALDER_`/`Alder` prefixes that every compiler-generated C name
+uses, so an export can never collide with generated internal names.
+
+`compile --emit=header` prints the deterministic header for the module's
+exports: `<stddef.h>` for `c.Size`/`c.PtrDiff`, one include for each binding
+block header referenced by an export signature, in declaration order and
+deduplicated, then the prototypes inside an `extern "C"` guard. The guard word
+derives from the first export symbol because MIR carries no module name; two
+headers whose first export symbols differ only by case therefore need
+distinct names. The generated C carries a non-static definition for each
+export with the same signature. Each call creates a root domain, runs the
+Alder function, destroys the domain, and returns the C-ABI result, so there is
+no global initializer
+and no per-process entry contract; a foreign thread may call an export
+directly. An export catches no invariant panic: process termination with the
+runtime invariant status remains the only portable panic behavior across C.
+Thread entry and runtime-initialization host bridging stay a later milestone
+item.
 
 ## Concurrency and thread safety
 
