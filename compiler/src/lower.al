@@ -3303,11 +3303,30 @@ fn lower_mut_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(C
     return Ok(LowerArgumentPlaceRec(state: indexed.state, place: indexed.id, root: base.root))
 }
 
+// A by-value binding is an SSA value with no place: a function parameter or
+// a match-case payload. A `mut` argument needs a mutable place, so
+// materialize a local once and rebind the name to it. Rebinding keeps later
+// reads and writes on the same storage the callee borrows; a deref of the SSA
+// value would point at the value, not a reference.
+fn lower_mut_binding_place(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, expression: CheckedExprRec, mapped: LowerBindingMapRec) -> Result(LowerArgumentPlaceRec, __s0_Error) {
+    let typ = try lower_type(d, source_state, store, state, expression.checked_type)
+    if typ.id == 0 { return Ok(LowerArgumentPlaceRec(state: lower_invalid(typ.state), place: 0, root: 0)) }
+    let slot_name = try lower_decimal_name(d, "__alder_mut_binding_", lower_local_count(typ.state.mir, function))
+    let slot = try mir_add_local(d, typ.state.mir, function, lower_local_count(typ.state.mir, function), slot_name, typ.id)
+    let place = try mir_add_place(d, slot.store, MirPlaceRec(function: function, kind: mir_place_local(), local: slot.id, base: 0, field_start: 0, field_end: 0, deref_value: 0))
+    let stored = try lower_add_instr(d, lower_with_mir(typ.state, place.store), function, block, mir_op_store(), 0, place.id, 0, mapped.mir_id, 0, 0, "")
+    let rebind = try __s0_buffer_append(LowerBindingMapRec, d, stored.state.bindings, LowerBindingMapRec(binding: mapped.binding, mir_id: slot.id, parameter: 0, initial: 0))
+    return Ok(LowerArgumentPlaceRec(state: lower_with_bindings(stored.state, rebind), place: place.id, root: expression.parameter_use))
+}
+
 fn lower_argument_place(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, environment: U64, panic_block: U64, borrow_kind: U64) -> Result(LowerArgumentPlaceRec, __s0_Error) {
     let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
     if borrow_kind == 2 && (expression.kind == 21 || expression.kind == 19) { return lower_mut_argument_place(d, source_state, spans, store, state, owner, function, block, expression_id, environment, panic_block) }
     let mapped = lower_binding_lookup(state, expression.parameter_use)
     let named = expression.kind == 1 || expression.kind == 5
+    if borrow_kind == 2 && named && mapped.binding != 0 && mapped.parameter == 1 {
+        return lower_mut_binding_place(d, source_state, store, state, function, block, expression, mapped)
+    }
     let plain = named && mapped.binding != 0 && mapped.parameter != 1
     // A mut parameter may borrow a whole local, a field place (handled
     // above), or a forwarded mut parameter's deref; a newly formed view is

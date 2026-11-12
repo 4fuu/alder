@@ -68,6 +68,15 @@ impl Cleanup for Holder {
     }
 }
 
+fn take_param(mut holder: Holder) -> Option(Res) {
+    return holder.slot.take()
+}
+
+fn bump(mut item: Res) -> Unit {
+    item.n = item.n + 1
+    return
+}
+
 fn make(n: U64) -> Res { return Res(n: n) }
 
 fn main() -> I32 {
@@ -75,10 +84,20 @@ fn main() -> I32 {
     let taken = holder.take_it()
     match taken {
         Some(item) => {
-            if item.n != 7 { return 1 }
+            bump(item)
+            if item.n != 8 { return 1 }
             item.cleanup()
         }
         None => { return 2 }
+    }
+    using holder2 = Holder(slot: Some(make(2)))
+    let taken2 = take_param(holder2)
+    match taken2 {
+        Some(item) => {
+            if item.n != 2 { return 3 }
+            item.cleanup()
+        }
+        None => { return 4 }
     }
     return 0
 }
@@ -91,7 +110,7 @@ void counter(uint64_t v) { g_count += v; }
 int main(void) {
     int context = 0;
     int result = (int)alder_program_entry(&context);
-    if (g_count != 7) { return 98; }
+    if (g_count != 10) { return 98; }
     return result;
 }
 `
@@ -135,6 +154,9 @@ func TestOptionTakeProduction(t *testing.T) {
 	if !strings.Contains(mirText.stdout, "enum.construct") || !strings.Contains(mirText.stdout, "none") {
 		t.Fatalf("option take MIR does not construct none:\n%s", mirText.stdout)
 	}
+	if !strings.Contains(mirText.stdout, "borrow_mut local %__alder_mut_binding_") {
+		t.Fatalf("option take MIR does not materialize the match binding for the mut argument:\n%s", mirText.stdout)
+	}
 }
 
 func TestOptionTakeRejections(t *testing.T) {
@@ -153,6 +175,7 @@ func TestOptionTakeRejections(t *testing.T) {
 	}{
 		{"fn main() -> I32 {\n    let slot: Option(U64) = Some(1)\n    let taken = slot.take()\n    return 0\n}\n", "cannot assign to immutable binding"},
 		{"fn pick() -> Option(U64) { return Some(1) }\nfn main() -> I32 {\n    let taken = pick().take()\n    return 0\n}\n", "Option.take requires a mutable place receiver"},
+		{"type Res {\n    n: U64\n}\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn bump(mut item: Res) -> Unit { item.n = item.n + 1\n    return }\nfn forward(item: Res) -> Unit {\n    bump(item)\n    return\n}\nfn main() -> I32 { return 0 }\n", "argument does not provide the parameter's required exclusive or owning access"},
 	}
 	for _, tc := range cases {
 		result := runPrivateProductionCompiler(t, exe, map[string]string{"reject.al": tc.text}, "check", "reject.al")
