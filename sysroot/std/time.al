@@ -196,3 +196,71 @@ pub fn sleep(I: type(Io), io: I, duration: Duration) -> Unit {
     io.sleep(duration.seconds, duration.nanos)
     return
 }
+
+/// A one-shot deadline on the monotonic clock. A `Timer` is a value, so
+/// `wait` can be called more than once; each call waits until the same
+/// deadline has passed.
+pub type Timer {
+    deadline: Instant
+}
+
+impl Timer {
+    /// A timer that expires at `deadline`.
+    fn at(deadline: Instant) -> Timer {
+        return Timer(deadline: deadline)
+    }
+
+    /// A timer that expires after `delay` from now.
+    fn after(I: type(Io), io: I, delay: Duration) -> Timer {
+        return Timer(deadline: shifted(Instant.now(io), delay))
+    }
+
+    /// The monotonic deadline this timer waits for.
+    fn deadline(self) -> Instant {
+        return self.deadline
+    }
+
+    /// The time left before the deadline; zero once it has passed.
+    fn remaining(I: type(Io), self, io: I) -> Duration {
+        match self.deadline.checked_duration_since(Instant.now(io)) {
+            Some(left) => { return left }
+            None => { return Duration.zero() }
+        }
+        return Duration.zero()
+    }
+
+    /// True when the deadline has passed.
+    fn expired(I: type(Io), self, io: I) -> Bool {
+        return self.remaining(io).is_zero()
+    }
+
+    /// Sleeps until the deadline. `sleep` never wakes early, so one remaining
+    /// interval reaches the deadline; an expired timer returns immediately.
+    fn wait(I: type(Io), self, io: I) -> Unit {
+        let left = self.remaining(io)
+        if left.is_zero() {
+            return
+        }
+        sleep(io, left)
+        return
+    }
+}
+
+/// Moves `instant` forward by `delta` on the monotonic clock.
+fn shifted(instant: Instant, delta: Duration) -> Instant {
+    let nanos = instant.value.nanos + delta.nanos
+    var seconds = instant.value.seconds
+    var kept = nanos
+    if nanos >= 1000000000 {
+        seconds = seconds + 1
+        kept = nanos - 1000000000
+    }
+    return Instant(value: Timestamp(seconds: seconds + delta.seconds.to_i64_wrapping(), nanos: kept))
+}
+
+/// Sleeps until `deadline` on the monotonic clock.
+pub fn sleep_until(I: type(Io), io: I, deadline: Instant) -> Unit {
+    let timer = Timer.at(deadline)
+    timer.wait(io)
+    return
+}

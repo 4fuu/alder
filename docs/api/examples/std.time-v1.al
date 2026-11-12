@@ -38,6 +38,11 @@ pub fn std_time_example(io: io.Blocking) -> I64 {
     let waited = finished.duration_since(started)
     if waited.as_millis() >= 5 { total = total + 1 }
 
+    // A timer waits until its monotonic deadline and then reports expired.
+    let timer = time.Timer.after(io, time.Duration.millis(2))
+    timer.wait(io)
+    if timer.expired(io) { total = total + 1000 }
+
     // Wall-clock access exists and round-trips through its fixed
     // constructor accessors.
     if time.SystemTime.from_unix(0, 0).unix_seconds() == 0 { total = total + 1 }

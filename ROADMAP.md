@@ -1589,16 +1589,20 @@ kinds. The documented TOCTOU window remains because v1 has no
 `openat`/`unlinkat`. Temporary owners are installed: `temp_root` reads
 `TMPDIR` through the new `std.env.get`, and `temp_file`/`temp_dir` derive a
 unique hex suffix from `io.random_bytes`, retrying on `AlreadyExists`.
-`TempFile` stores the host handle directly (cleanup closes and unlinks) and
-`TempDir` carries an affine token so exactly one owner removes the tree.
+`TempFile` stores the host handle directly (cleanup closes and unlinks), and
+`TempDir` is affine through its `Cleanup` impl so exactly one owner removes
+the tree.
 
 `std.time` v1 lands on the `std.io` capability: normalized checked
 `Duration`, monotonic `Instant` with checked differences, wall-clock
 `SystemTime` with epoch construction and proleptic-Gregorian `to_utc`
-(including pre-1970 instants), and a zero-yield `time.sleep`. Evidence:
-`compiler/production_time_test.go` checks independently computed leap-year,
-epoch, and pre-epoch vectors plus fixed duration arithmetic and host lower
-bounds; `docs/api/examples/std.time-v1.al` runs with checksum 2743.
+(including pre-1970 instants), a zero-yield `time.sleep`, and one-shot
+`Timer` deadlines with `sleep_until`. A timer computes the remaining
+monotonic interval and sleeps once; it needs no new host descriptor.
+Evidence: `compiler/production_time_test.go` checks independently computed
+leap-year, epoch, and pre-epoch vectors plus fixed duration arithmetic,
+timer expiry and waiting, and host lower bounds;
+`docs/api/examples/std.time-v1.al` runs with checksum 3743.
 
 `std.io` v1 slice 2 adds the blocking capability: `Blocking` implements `Io`
 with host files (`HostFile`), directory listings (`HostDirectory`), file

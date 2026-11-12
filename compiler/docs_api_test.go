@@ -153,7 +153,7 @@ import hello.std_time_example { std_time_example }
 
 pub fn main() -> I32 {
     let cap = Blocking()
-    if std_time_example(cap) == 2743 { return 0 }
+    if std_time_example(cap) == 3743 { return 0 }
     return 1
 }
 `,

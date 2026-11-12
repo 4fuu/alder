@@ -85,6 +85,19 @@ fn main() -> I32 {
     if finished.checked_duration_since(started) == None { return 31 }
     zero_sleep(cap)
 
+    // A timer waits for its monotonic deadline and then reports expired.
+    let timer = time.Timer.after(cap, time.Duration.millis(3))
+    if timer.expired(cap) { return 35 }
+    let timer_started = time.Instant.now(cap)
+    timer.wait(cap)
+    let timer_finished = time.Instant.now(cap)
+    if timer_finished.duration_since(timer_started).as_millis() < 3 { return 36 }
+    if !timer.expired(cap) { return 37 }
+    if !timer.remaining(cap).is_zero() { return 38 }
+    time.sleep_until(cap, timer.deadline())
+    let immediate = time.Timer.at(time.Instant.now(cap))
+    if !immediate.expired(cap) { return 39 }
+
     let wall = time.SystemTime.now(cap)
     if wall.unix_seconds() < 1700000000 { return 32 }
     if wall.to_utc().year < 2023 { return 33 }

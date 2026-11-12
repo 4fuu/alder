@@ -10,8 +10,8 @@ modules, so the example file cannot precede the module it imports. The module
 lives at `<sysroot>/std/time.al`.
 
 Snapshot v1 covers monotonic `Instant`, wall-clock `SystemTime`, checked
-`Duration`, capability-mediated `sleep`, and timezone-independent UTC civil
-conversion. Calendar and timezone databases are versioned distribution data
+`Duration`, capability-mediated `sleep`, one-shot `Timer` deadlines, and
+timezone-independent UTC civil conversion. Calendar and timezone databases are versioned distribution data
 and stay outside v1; `to_utc` is pure integer civil math and needs no
 database. Reading a clock or sleeping waits on the host, so both take the
 capability, and the wrappers are written once against `I: type(io.Io)`.
@@ -107,6 +107,31 @@ impl Duration {
 /// Sleeps for the duration without waking early. A zero duration yields one
 /// scheduler yield on the host, not a busy spin.
 pub fn sleep(I: type(io.Io), io: I, duration: Duration) -> Unit
+
+/// A one-shot deadline on the monotonic clock. A `Timer` is a value, so
+/// `wait` can be called more than once; each call waits for the same
+/// deadline.
+pub type Timer {
+    // private: deadline
+}
+
+impl Timer {
+    /// A timer that expires at `deadline`.
+    pub fn at(deadline: Instant) -> Timer
+    /// A timer that expires after `delay` from now.
+    pub fn after(I: type(io.Io), io: I, delay: Duration) -> Timer
+    /// The monotonic deadline this timer waits for.
+    pub fn deadline(self) -> Instant
+    /// The time left before the deadline; zero once it has passed.
+    pub fn remaining(I: type(io.Io), self, io: I) -> Duration
+    /// True when the deadline has passed.
+    pub fn expired(I: type(io.Io), self, io: I) -> Bool
+    /// Sleeps until the deadline. An expired timer returns immediately.
+    pub fn wait(I: type(io.Io), self, io: I) -> Unit
+}
+
+/// Sleeps until `deadline` on the monotonic clock.
+pub fn sleep_until(I: type(io.Io), io: I, deadline: Instant) -> Unit
 ```
 
 Equality for `Instant`, `SystemTime`, and `Duration` is structural over their
@@ -131,6 +156,13 @@ invariant violations terminate as documented.
   Gregorian), needs no database, and never reads the host.
 - `sleep` never wakes early; shortening a sleep is caller policy (v1 provides
   no early-wake form; cancellation-aware waiting arrives with Milestone 9).
+- `Timer` is a value over a monotonic deadline. `wait` computes the remaining
+  interval and sleeps once; `sleep` never wakes early, so it reaches the
+  deadline without a busy loop. An expired timer returns immediately.
+  `Timer` uses the existing clock and sleep capability methods; no separate
+  host timer descriptor or additional `Io` operation is involved.
+- `sleep_until` is `Timer.at(deadline).wait` without a new capability
+  operation; callers that need a relative delay use `Timer.after`.
 - Tests read the monotonic clock only for lower bounds (a sleep of at least
   the requested span), so timing jitter cannot change a checksum.
 
@@ -182,12 +214,18 @@ pub fn std_time_example(io: io.Blocking) -> I64 {
     let waited = finished.duration_since(started)
     if waited.as_millis() >= 5 { total = total + 1 }
 
+    // A timer waits until its monotonic deadline and then reports expired.
+    let timer = time.Timer.after(io, time.Duration.millis(2))
+    timer.wait(io)
+    if timer.expired(io) { total = total + 1000 }
+
     // Wall-clock access exists and round-trips through its fixed
     // constructor accessors.
     if time.SystemTime.from_unix(0, 0).unix_seconds() == 0 { total = total + 1 }
 
     return total
 }
+
 ```
 
 ## Dependencies and sequencing

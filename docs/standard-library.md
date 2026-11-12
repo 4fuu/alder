@@ -340,10 +340,14 @@ Implemented std.time progress: `sysroot/std/time.al` installs the v1 surface.
 zero-saturating subtraction, `SystemTime.from_unix`/`unix_seconds`/`to_utc`
 use database-free proleptic-Gregorian integer conversion (including
 pre-1970 instants), and `Instant`/`SystemTime.now` plus `time.sleep` take the
-`std.io` capability. Evidence: `compiler/production_time_test.go` checks
-independently computed UTC vectors, duration arithmetic, the monotonic lower
-bound of a sleep, and a zero-duration sleep through `Blocking`; the snapshot
-example runs with a fixed checksum.
+`std.io` capability. `Timer.at`/`Timer.after` provide one-shot monotonic
+deadlines with `deadline`/`remaining`/`expired`/`wait`, and `sleep_until`
+waits for an `Instant`; a timer needs no additional host descriptor, only the
+existing clock and sleep capability methods. Evidence:
+`compiler/production_time_test.go` checks independently computed UTC vectors,
+duration arithmetic, the monotonic lower bound of a sleep, timer expiry and
+waiting, and a zero-duration sleep through `Blocking`; the snapshot example
+runs with a fixed checksum.
 
 Implemented std.random: both halves are installed at `sysroot/std/random.al`.
 The OS forms `fill`, `u64`, `u32`, `range_u64`, and `range_u32` take the
