@@ -675,6 +675,20 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
 // the answer to keep the dotted base out of the call's runtime arguments,
 // so the qualified form `bytes.BytesBuilder.new()` behaves exactly like
 // the two-segment form `BytesBuilder.new()`.
+// Whether an import root binds selected names instead of a module namespace.
+// A selected import (`import a.b { Name }`) binds no namespace, so a dotted
+// call whose base happens to share the module's final component is a method
+// call on that binding, not an associated call through the module.
+fn import_root_has_selected(state: State, parse: ParseStore, root: SyntaxRec) -> Bool {
+    var link = root.children
+    while link != 0 {
+        let item = __s0_buffer_get(SyntaxLinkRec, parse.links, link - 1)
+        if __s0_buffer_get(SyntaxRec, parse.nodes, item.node - 1).kind == 43 { return true }
+        link = item.next
+    }
+    return false
+}
+
 fn dotted_callee_associated(state: State, cursor: ParseCursor, callee: SyntaxRec) -> Bool {
     var base = callee
     while base.kind == 29 && base.children != 0 {
@@ -688,7 +702,7 @@ fn dotted_callee_associated(state: State, cursor: ParseCursor, callee: SyntaxRec
     var root_at: U64 = 0
     while root_at < __s0_buffer_len(U64, cursor.store.roots) {
         let root = __s0_buffer_get(SyntaxRec, cursor.store.nodes, __s0_buffer_get(U64, cursor.store.roots, root_at) - 1)
-        if root.source == base.source && (root.kind == 41 || root.kind == 42) {
+        if root.source == base.source && (root.kind == 41 || root.kind == 42) && !import_root_has_selected(state, cursor.store, root) {
             var candidate_start = root.name_start
             var candidate_end = root.name_end
             var path_at = root.name_start
