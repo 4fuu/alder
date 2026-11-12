@@ -1,9 +1,11 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -622,5 +624,48 @@ func TestM8BindingProjectLoader(t *testing.T) {
 		if result.status != 0 || result.stderr != "" || result.stdout != "" {
 			t.Fatalf("%s: project check failed: %+v stderr=%s", tc.name, result, result.stderr)
 		}
+	}
+}
+
+// TestM8LongUnsafeFunctionUsesBoundedStackRegression pins the flat
+// statement-list walk. check_body_event used to recurse once per statement;
+// with its checked-store locals that is tens of kilobytes per call, and a
+// function with many unsafe-c calls exhausted the default stack. The test
+// links the shared compiler objects without ALDER_HOST_LARGE_STACK and runs a
+// hundred-statement checker walk under a 4 MiB stack, so a recurrence is a
+// crash, not a diagnostic.
+func TestM8LongUnsafeFunctionUsesBoundedStackRegression(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the regression uses the Linux sh ulimit command")
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, _, _ := getSharedProductionBuild(t, cc, root)
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "alder-no-large-stack")
+	linkGeneratedObjects(t, cc, root, objects, filepath.Join(root, "bootstrap", "alder_host.c"), exe)
+
+	var source strings.Builder
+	source.WriteString("module long.main\n\nimport c \"long.h\" as cfx {\n")
+	source.WriteString("    raw fn five = \"cfx_five\"() -> c.Int\n}\n\n")
+	source.WriteString("fn main() -> I32 {\n")
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&source, "    let value%d = unsafe c { cfx.five() }\n", i)
+	}
+	source.WriteString("    return 0\n}\n")
+	if err := os.WriteFile(filepath.Join(dir, "long.al"), []byte(source.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	command := exec.Command("sh", "-c", `ulimit -s 4096; exec "$0" check long.al`, exe)
+	command.Dir = dir
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("100-statement checker walk exceeded the default stack: %v\n%s", err, output)
 	}
 }

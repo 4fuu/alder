@@ -11240,8 +11240,56 @@ fn body_event_stopped(step: BodyStep) -> Bool {
     }
 }
 
-// The sole semantic control traversal is directly self-recursive. It never
-// carries CheckStore across a loop backedge and no helper calls back into it.
+// Flat statement lists are the common long-function shape. Walking the
+// kind-2 chain iteratively keeps one CheckStore-sized frame instead of one
+// frame per statement; nested blocks, conditions, and loops still recurse
+// through check_body_event. The chain is stored newest-first, so the
+// iteration below runs in source order.
+fn check_body_sequence(d: Domain, state: State, parse: ParseStore, events: __s0_Buffer(BodyEventRec), store: CheckStore, owner: U64, event_id: U64, in_loop: Bool) -> Result(BodyStep, __s0_Error) {
+    var statements = try __s0_buffer_new(U64, d)
+    var cursor = event_id
+    var scanning = true
+    while cursor != 0 && scanning {
+        let cell = __s0_buffer_get(BodyEventRec, events, cursor - 1)
+        if cell.kind == 2 {
+            statements = try __s0_buffer_append(U64, d, statements, cell.second)
+            cursor = cell.first
+        } else {
+            scanning = false
+        }
+    }
+    var current = store
+    var semantic: U64 = 0
+    var guaranteed = false
+    if cursor != 0 {
+        let prefix = try check_body_event(d, state, parse, events, store, owner, cursor, in_loop, false)
+        if body_event_stopped(prefix) { return Ok(prefix) }
+        let prior = body_event_value(prefix, store)
+        current = prior.store
+        semantic = prior.semantic
+        guaranteed = prior.guaranteed_return
+    }
+    var at = __s0_buffer_len(U64, statements)
+    while at > 0 {
+        at = at - 1
+        let statement_event = __s0_buffer_get(BodyEventRec, events, __s0_buffer_get(U64, statements, at) - 1)
+        let statement = __s0_buffer_get(SyntaxRec, parse.nodes, statement_event.syntax - 1)
+        if guaranteed { return body_token_fail(d, state, current, 68, statement) }
+        let checked = try check_body_event(d, state, parse, events, current, owner, __s0_buffer_get(U64, statements, at), in_loop, false)
+        if body_event_stopped(checked) { return Ok(checked) }
+        let value = body_event_value(checked, current)
+        let links = try __s0_buffer_append(CheckedStatementLinkRec, d, value.store.control.statement_links, CheckedStatementLinkRec(statement: value.semantic, next: semantic))
+        current = with_control(value.store, CheckedControlStore(blocks: value.store.control.blocks, statement_links: links, statements: value.store.control.statements, places: value.store.control.places, matches: value.store.control.matches, match_arms: value.store.control.match_arms, tries: value.store.control.tries, cleanups: value.store.control.cleanups, table_views: value.store.control.table_views))
+        semantic = __s0_buffer_len(CheckedStatementLinkRec, links)
+        guaranteed = value.guaranteed_return
+    }
+    return Ok(BodyGood(BodyValueRec(store: current, environment: current_environment(current, owner), semantic: semantic, guaranteed_return: guaranteed)))
+}
+
+// The sole semantic control traversal is self-recursive only through nested
+// blocks, conditions, and loops. It never carries CheckStore across a loop
+// backedge and no helper calls back into it except through check_body_sequence,
+// which flattens statement lists.
 fn check_body_event(d: Domain, state: State, parse: ParseStore, events: __s0_Buffer(BodyEventRec), store: CheckStore, owner: U64, event_id: U64, in_loop: Bool, restore: Bool) -> Result(BodyStep, __s0_Error) {
     if event_id == 0 { return Ok(BodyGood(BodyValueRec(store: store, environment: current_environment(store, owner), semantic: 0, guaranteed_return: false))) }
     let event = __s0_buffer_get(BodyEventRec, events, event_id - 1)
@@ -11258,18 +11306,7 @@ fn check_body_event(d: Domain, state: State, parse: ParseStore, events: __s0_Buf
         if restore { current = try restore_environment(d, current, owner, entry) }
         return Ok(BodyGood(BodyValueRec(store: current, environment: current_environment(current, owner), semantic: __s0_buffer_len(CheckedBlockRec, blocks), guaranteed_return: value.guaranteed_return)))
     }
-    if event.kind == 2 {
-        let before = try check_body_event(d, state, parse, events, store, owner, event.first, in_loop, false)
-        if body_event_stopped(before) { return Ok(before) }
-        let prior = body_event_value(before, store)
-        if prior.guaranteed_return { return body_token_fail(d, state, prior.store, 68, statement) }
-        let checked = try check_body_event(d, state, parse, events, prior.store, owner, event.second, in_loop, false)
-        if body_event_stopped(checked) { return Ok(checked) }
-        let value = body_event_value(checked, prior.store)
-        let links = try __s0_buffer_append(CheckedStatementLinkRec, d, value.store.control.statement_links, CheckedStatementLinkRec(statement: value.semantic, next: prior.semantic))
-        let current = with_control(value.store, CheckedControlStore(blocks: value.store.control.blocks, statement_links: links, statements: value.store.control.statements, places: value.store.control.places, matches: value.store.control.matches, match_arms: value.store.control.match_arms, tries: value.store.control.tries, cleanups: value.store.control.cleanups, table_views: value.store.control.table_views))
-        return Ok(BodyGood(BodyValueRec(store: current, environment: current_environment(current, owner), semantic: __s0_buffer_len(CheckedStatementLinkRec, links), guaranteed_return: value.guaranteed_return)))
-    }
+    if event.kind == 2 { return check_body_sequence(d, state, parse, events, store, owner, event_id, in_loop) }
     let environment = current_environment(store, owner)
     if event.kind == 3 {
         if statement.kind == 15 || statement.kind == 16 { return check_binding(d, state, parse, store, owner, statement, event.syntax, environment, in_loop) }
