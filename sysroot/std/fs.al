@@ -423,7 +423,6 @@ pub type TempFile(IoType: type(Io)) {
     io: IoType
     handle: HostFile
     location: Path
-    marker: OwnedMarker
 }
 
 pub fn temp_file(I: type(Io), io: I, prefix: String) -> Result(TempFile(I), IoError) {
@@ -433,7 +432,7 @@ pub fn temp_file(I: type(Io), io: I, prefix: String) -> Result(TempFile(I), IoEr
         let path = try temp_path(io, root, prefix)
         let made = open_handle(io, path, Options(read: true, write: true, append: false, truncate: false, create: false, create_new: true))
         match made {
-            Ok(handle) => { return Ok(TempFile(io: io, handle: handle, location: path, marker: OwnedMarker(armed: true))) }
+            Ok(handle) => { return Ok(TempFile(io: io, handle: handle, location: path)) }
             Err(error) => {
                 match error {
                     AlreadyExists => {}
@@ -455,8 +454,6 @@ impl(IoType: type(Io)) TempFile(IoType) {
         let handle = self.handle
         let io = self.io
         let location = self.location
-        let marker = self.marker
-        marker.cleanup()
         return File(io: io, handle: handle, path: location)
     }
 }
@@ -466,33 +463,16 @@ impl(IoType: type(Io)) Cleanup for TempFile(IoType) {
         let handle = self.handle
         let closed = self.io.close(handle)
         let removed = remove_file(self.io, self.location)
-        let marker = self.marker
-        marker.cleanup()
         return
     }
 }
 
-
-/// Private affine token. A record containing it is affine, so exactly one
-/// owner removes a temporary directory; cleanup releases the token too.
-pub type OwnedMarker {
-    armed: Bool
-}
-
-impl Cleanup for OwnedMarker {
-    fn cleanup(take self) -> Unit {
-        return
-    }
-}
 
 /// One exclusive temporary directory. Affine: cleanup removes the tree,
 /// unlinking symbolic links without following them.
 pub type TempDir(IoType: type(Io)) {
     io: IoType
     location: Path
-    // Keeps the type affine: exactly one owner removes the tree through keep
-    // or cleanup.
-    marker: OwnedMarker
 }
 
 pub fn temp_dir(I: type(Io), io: I, prefix: String) -> Result(TempDir(I), IoError) {
@@ -502,7 +482,7 @@ pub fn temp_dir(I: type(Io), io: I, prefix: String) -> Result(TempDir(I), IoErro
         let path = try temp_path(io, root, prefix)
         let made = make_dir(io, path)
         match made {
-            Ok(_) => { return Ok(TempDir(io: io, location: path, marker: OwnedMarker(armed: true))) }
+            Ok(_) => { return Ok(TempDir(io: io, location: path)) }
             Err(error) => {
                 match error {
                     AlreadyExists => {}
@@ -527,8 +507,6 @@ impl(IoType: type(Io)) TempDir(IoType) {
 
 impl(IoType: type(Io)) Cleanup for TempDir(IoType) {
     fn cleanup(take self) -> Unit {
-        let marker = self.marker
-        marker.cleanup()
         let removed = remove_dir_all(self.io, self.location)
         return
     }

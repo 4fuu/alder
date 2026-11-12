@@ -270,10 +270,9 @@ call. Temporary owners are installed: `temp_root` reads `env.get("TMPDIR")`
 and falls back to `/tmp`; `temp_file`/`temp_dir` use 16 random bytes as a hex
 suffix and retry on `AlreadyExists`. `TempFile` stores the host handle
 directly so cleanup closes and unlinks without nesting one consumed field in
-another. `TempDir` contains only copyable fields (the capability and a path),
-and a `Cleanup` implementation does not by itself make a record affine, so it
-carries a public interim token to keep exactly one owner; the token disappears
-when structural affinity is revisited. Both expose `keep` as the observing
+another. `TempDir` is affine because a `Cleanup` implementation marks the record as an
+owner even when its fields are copyable; copying it is a transfer. A generic
+temporary type does not need an extra token. Both expose `keep` as the observing
 release. Fixtures use the canonical `using owner = try ...` form. The snapshot spells
 environment lookup `env.get` because `var` is a language keyword and cannot
 follow a module qualifier.
