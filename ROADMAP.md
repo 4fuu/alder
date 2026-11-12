@@ -1636,6 +1636,19 @@ checksum 117. Runtime ABI: `alder_host_set_args` in `runtime/c/alder.h`,
 documented in [docs/c-backend.md](docs/c-backend.md). Docs:
 [`std.env` snapshot](docs/api/std.env-v1.md).
 
+Landed standard-library progress: `core.format` v1 installs the pure-Alder
+specification, scalar-width padding, and integer rendering at
+`sysroot/core/format.al`. Width counts Unicode scalar values, not bytes;
+`pad` aligns text by UTF-8 leading bytes and `format_i64`/`format_u64` cover
+decimal, hex, binary, octal, alternate prefixes, signs, and zero padding.
+The integer renderers reject float kinds and precision with explicit errors;
+`I64.min` renders without signed overflow. Evidence:
+`compiler/production_format_test.go` checks signs, bases, alternate prefixes,
+Unicode centering, zero padding, invalid fill, rejected precision/kind, and
+`I64.min` under ASan/UBSan. Docs:
+[`core.format` snapshot](docs/api/core.format-v1.md). Float rendering remains
+in `std.format` and interpolation syntax remains specified but not implemented.
+
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
 in-place builders, `ExitStatus` exit/signal decomposition, `Output`, and

@@ -33,6 +33,9 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`core.error` public snapshot v1](api/core.error-v1.md), covering the
   Milestone 8 prelude `Error` trait, default `cause`, and `ErrorReport`
   flattening surface;
+- [`core.format` public snapshot v1](api/core.format-v1.md), covering the
+  Milestone 8 pure-Alder format specs, scalar-width padding, and integer
+  rendering surface;
 - [`std.io` public snapshot v1](api/std.io-v1.md), covering the Milestone 8
   hosted capability layer (`Io`, `BlockingIo`, `Blocking`, `Reader`,
   `Writer`, `Seek`, buffers, standard streams, exact helpers, `IoError`, and
@@ -64,10 +67,10 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 
 M8 exit-audit status (current main):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
-`std.io`, `std.path`, `std.env`, `std.time`, `std.random`, `std.math`,
-`std.text`, `std.bytes`, and `std.collection` are implemented with
-production-driver evidence. `std.io` v1 is complete for blocking and host
-streams; its `AsyncIo`/`Evented` half is Milestone 9. `std.fs` and
+`core.format`, `std.io`, `std.path`, `std.env`, `std.time`, `std.random`,
+`std.math`, `std.text`, `std.bytes`, and `std.collection` are implemented
+with production-driver evidence. `std.io` v1 is complete for blocking and
+host streams; its `AsyncIo`/`Evented` half is Milestone 9. `std.fs` and
 `std.process` are in progress under the std.io thread: their file, directory,
 temporary-owner, value, and qualified-variant layers are on main, while
 process spawning, pipes, and capture are missing. `core.range` is deferred by
@@ -75,8 +78,8 @@ scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
 modules are post-M8. Still missing from the M8 foundation: `core.iter`,
-`core.hash`, `core.format`, `core.memory`, `std.format`, `std.parse`,
-`std.signal`, numeric parse/format foundations, and the `Deque`/heap parts of
+`core.hash`, `core.memory`, `std.format`, `std.parse`, `std.signal`, numeric
+parse/format foundations, and the `Deque`/heap parts of
 `std.collection`/`core.collection`. `std.c` is the verified C-interop surface
 rather than a `.al` module; its exit audit is complete.
 
