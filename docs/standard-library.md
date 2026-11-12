@@ -198,9 +198,8 @@ Implemented std.io progress (slice 1): `sysroot/std/io.al` provides the
 `ByteCursor` and `ByteSink` streams, and the buffered `BufReader`/`BufWriter`
 over generic readers and writers. `BufReader` serves reads from its window and
 refills from the source; `BufWriter` buffers small writes, flushes on
-overflow or demand, and its cleanup flushes the state captured at `using`
-registration (S0 registrations capture the owner, so a writer registered
-before its last writes must be flushed explicitly).
+overflow or demand, and its cleanup flushes the value the registered
+binding holds at scope exit, including writes performed after `using`.
 Evidence: `compiler/production_io_test.go` runs the installed module through
 the production driver and checks cursor advancement, end-of-stream, the
 `copy_to` default body, the error category report, line reads across a small

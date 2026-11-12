@@ -1564,7 +1564,8 @@ and the mutable-place rejection for a `let`-bound reader.
 
 `into_source`/`into_sink` are pending the checker rule that a moved affine
 field of a taken owner is an ownership transfer; the snapshot records the gap
-and the buffered types work through `flush` plus `using`/`Cleanup` meanwhile.
+and buffered writes reach the sink through `flush` or scope-exit cleanup
+meanwhile.
 The capability types, host files, and standard streams remain slice 2. Docs:
 [Standard Library](docs/standard-library.md) and the frozen
 [`std.io` snapshot](docs/api/std.io-v1.md).
