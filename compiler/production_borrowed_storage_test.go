@@ -279,7 +279,7 @@ int main(void) { int context = 0; return (int)alder_program_entry(&context); }
 	}
 	args := append(append([]string{}, strictC11Flags()...), sanitizer...)
 	args = append(args, "-I", filepath.Join(root, "runtime", "c"), "-I", filepath.Join(root, "bootstrap"),
-		cfile, driver, runtimeObject, "-o", exe)
+		"-I", filepath.Join(root, "sysroot"), cfile, driver, runtimeObject, "-o", exe)
 	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
 		t.Fatalf("sanitized generated compile: %v\n%s", err, output)
 	}
