@@ -23,10 +23,13 @@ Current implementation work is limited to:
   in `docs/c-interop.md`, the installed sysroot with `core`/`std` module
   resolution, and the provider-free hosted standard-library foundation listed
   in that milestone;
+- Roadmap Milestone 8.1: standard-library completion (core.memory, core.hash,
+  Deque/heaps, core.iter, std.parse, std.signal triage) as listed in
+  ROADMAP.md;
 - design and bootstrap infrastructure directly supporting those goals.
 
 The full Alder 1.0 product is a frozen documentation target. Do not implement
-async (Milestone 9), the remaining standard library beyond Milestone 8
+async (Milestone 9), the remaining standard library beyond Milestones 8 and 8.1
 (networking, HTTP/TLS, data formats), package, xmake-provider, or tooling
 milestones ahead of their roadmap gate unless an explicit scope decision
 changes the sequence.

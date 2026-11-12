@@ -1412,7 +1412,7 @@ self-compile memory density is tracked separately.
 
 ## Milestone 8: Verified C Bindings and Hosted Standard-Library Foundation
 
-Status: **in progress (C-interop complete; hosted foundation partially landed; std.process v1 landed)**
+Status: **in progress (C-interop complete; hosted foundation largely landed; std.process v1 and the std.test library slice landed)**
 
 Implement target-aware `import c` binding blocks, raw C types, header/toolchain
 probes, by-value verified records, explicit shims, safe ownership/retention
@@ -2029,6 +2029,43 @@ the `direct-c-import` rejection case in
 in the checker conformance runner (all existing narrow-import fixtures still
 pass under `--bootstrap-private`), and the bootstrap fixed point, which
 compiles the compiler's own host imports under the profile.
+
+Landed since the M8 exit review: the runner-independent `std.test` library
+slice (`fail`, assertions, `expect_ok`/`expect_err`, temporary-resource
+constructors, and seeded cases) and the using-on-Result diagnostic that tells
+callers to bind the payload with `using name = try expression`. The remaining
+M8 exit items are explicit:
+
+- string interpolation from `docs/syntax.md` and `docs/language-semantics.md`;
+- generic associated-call and receiver inference plus the `std.fs` and
+  `std.process` receiver-spelling restore (the inference half landed; the
+  snapshot spellings and examples are still on their temporary static forms);
+- an affine owner returned through a match arm;
+- a final M8 exit audit that maps every remaining exit clause to evidence.
+
+## Milestone 8.1: Standard-library completion
+
+Status: **next after Milestone 8 closes; no further scope gate**
+
+A 2026-11 scope decision moves the modules that Milestone 8 does not name out
+of its exit and into this immediate follow-on. Milestone 8.1 starts as soon as
+Milestone 8 closes. The modules land in dependency order:
+
+1. `core.memory`: size and alignment queries;
+2. `core.hash`: the stable hashing contract and the hash builders that hash
+   containers need;
+3. `Deque` and heaps: the remaining `core.collection`/`std.collection` value
+   types; heaps use the `Order` domain;
+4. `core.iter`: static iterator traits and adapters; it begins with a design
+   note on how `for`-in relates to the static iterator traits;
+5. `std.parse`: structured parsing with byte ranges, building on `core.num`
+   parsing;
+6. `std.signal`: triage first; anything that needs async or cancellation moves
+   to Milestone 9.
+
+Exit requires each listed module's frozen snapshot, installed implementation,
+and production-driver evidence. The `std.signal` triage records exactly which
+pieces stay in 8.1 and which move to Milestone 9.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 
