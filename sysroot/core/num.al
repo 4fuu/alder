@@ -153,3 +153,79 @@ pub fn i64_abs_wrapping(value: I64) -> I64 {
     }
     return value
 }
+
+/// Failure categories for exact decimal integer parsing.
+pub enum ParseIntError {
+    /// The input was empty.
+    Empty
+    /// A byte was not an ASCII decimal digit, or a sign had no digits after it.
+    InvalidDigit
+    /// A minus sign was used with an unsigned target.
+    MinusOnUnsigned
+    /// The magnitude does not fit the target type.
+    Overflow
+}
+
+fn scan_magnitude(data: Bytes, start: U64, limit: U64) -> Result(U64, ParseIntError) {
+    var value: U64 = 0
+    var at = start
+    while at < data.len() {
+        let byte = data.byte(at)
+        if byte < 48 || byte > 57 { return Err(ParseIntError.InvalidDigit) }
+        let digit = (byte - 48).to_u64()
+        let scaled = value.mul_checked(10)
+        var scaled_value: U64 = 0
+        match scaled {
+            Some(next) => { scaled_value = next }
+            None => { return Err(ParseIntError.Overflow) }
+        }
+        let added = scaled_value.add_checked(digit)
+        var next_value: U64 = 0
+        match added {
+            Some(next) => { next_value = next }
+            None => { return Err(ParseIntError.Overflow) }
+        }
+        if next_value > limit { return Err(ParseIntError.Overflow) }
+        value = next_value
+        at = at + 1
+    }
+    if at == start { return Err(ParseIntError.InvalidDigit) }
+    return Ok(value)
+}
+
+/// Parses an unsigned decimal integer. Whitespace is not accepted; one
+/// optional leading `+` is.
+pub fn parse_u64(text: String) -> Result(U64, ParseIntError) {
+    let data = text.to_bytes()
+    if data.len() == 0 { return Err(ParseIntError.Empty) }
+    let first = data.byte(0)
+    var start: U64 = 0
+    if first == 43 { start = 1 }
+    if first == 45 { return Err(ParseIntError.MinusOnUnsigned) }
+    if start == data.len() { return Err(ParseIntError.InvalidDigit) }
+    return scan_magnitude(data, start, u64_max())
+}
+
+/// Parses a signed decimal integer. Whitespace is not accepted; one optional
+/// leading `+` or `-` is.
+pub fn parse_i64(text: String) -> Result(I64, ParseIntError) {
+    let data = text.to_bytes()
+    if data.len() == 0 { return Err(ParseIntError.Empty) }
+    let first = data.byte(0)
+    var negative = false
+    var start: U64 = 0
+    if first == 43 { start = 1 }
+    if first == 45 {
+        negative = true
+        start = 1
+    }
+    if start == data.len() { return Err(ParseIntError.InvalidDigit) }
+    var limit = u64_max() / 2
+    if negative { limit = limit + 1 }
+    let magnitude = try scan_magnitude(data, start, limit)
+    if negative {
+        let zero: U64 = 0
+        return Ok(zero.sub_wrapping(magnitude).to_i64_wrapping())
+    }
+    return Ok(magnitude.to_i64_wrapping())
+}

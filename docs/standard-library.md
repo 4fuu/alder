@@ -78,8 +78,8 @@ scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
 modules are post-M8. Still missing from the M8 foundation: `core.iter`,
-`core.hash`, `core.memory`, `std.format`, `std.parse`, `std.signal`, numeric
-parse/format foundations, and the `Deque`/heap parts of
+`core.hash`, `core.memory`, `std.format`, `std.parse`, `std.signal`, and the
+`Deque`/heap parts of
 `std.collection`/`core.collection`. `std.c` is the verified C-interop surface
 rather than a `.al` module; its exit audit is complete.
 

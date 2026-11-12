@@ -1,6 +1,6 @@
 # `core.num` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; limits, absolute values, and decimal parsing implemented**
 
 This is the versioned public snapshot for the integer foundation helpers in
 the installed sysroot. It is normative together with the executable example in
@@ -37,6 +37,16 @@ pub fn i8_abs_wrapping(value: I8) -> I8
 pub fn i16_abs_wrapping(value: I16) -> I16
 pub fn i32_abs_wrapping(value: I32) -> I32
 pub fn i64_abs_wrapping(value: I64) -> I64
+
+pub enum ParseIntError {
+    Empty
+    InvalidDigit
+    MinusOnUnsigned
+    Overflow
+}
+
+pub fn parse_i64(text: String) -> Result(I64, ParseIntError)
+pub fn parse_u64(text: String) -> Result(U64, ParseIntError)
 ```
 
 ## Contracts
@@ -53,6 +63,14 @@ pub fn i64_abs_wrapping(value: I64) -> I64
   values, same result, no hidden state, no OS access.
 - These are plain leading-type-parameter-free functions; the integer types are
   concrete prelude names.
+- `parse_i64` and `parse_u64` accept exact decimal text only: no whitespace,
+  one optional leading `+`, and `-` only for `parse_i64`. A lone sign is
+  `InvalidDigit`; empty input is `Empty`; a minus sign on an unsigned target
+  is `MinusOnUnsigned`; a magnitude that does not fit is `Overflow`.
+- Parsing accumulates in `U64` with checked multiplication and addition, so
+  `parse_i64("-9223372036854775808")` returns `i64_min()` without signed
+  overflow. Narrower widths use the builtin checked conversion methods after
+  the canonical parse.
 
 ## Integer conversion methods (builtin surface)
 
@@ -82,8 +100,8 @@ wrapping round trips from signed to unsigned, `2^63` at the
 
 - Checked division and remainder pairs, saturating division, and the
   min/max/clamp family arrive with the `Order`-constrained generic snapshot.
-- The parse and format foundations need the `String` and `Bytes` byte
-  surface; they land with the text modules.
+- The format foundations live in [`core.format`](core.format-v1.md); float
+  parsing and structured `std.parse` remain later milestones.
 
 The checked, saturating, and wrapping arithmetic methods themselves
 (`add_checked`, `sub_checked`, `mul_checked`, and friends) are builtin

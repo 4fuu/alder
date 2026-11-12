@@ -1649,6 +1649,16 @@ Unicode centering, zero padding, invalid fill, rejected precision/kind, and
 [`core.format` snapshot](docs/api/core.format-v1.md). Float rendering remains
 in `std.format` and interpolation syntax remains specified but not implemented.
 
+Landed standard-library progress: `core.num` adds exact decimal
+`parse_i64`/`parse_u64` and `ParseIntError` to the installed limits and
+absolute-value helpers. The parse accepts no whitespace, one optional leading
+`+`, and `-` only for signed targets; empty input, a lone sign, an invalid
+digit, a minus on unsigned, and overflow are distinct errors. Accumulation is
+checked in `U64`, so `i64_min()` parses without signed overflow. Evidence:
+`compiler/production_parse_int_test.go` checks both boundaries, overflow,
+signs, lone signs, empty input, whitespace, leading zeroes, and ASan/UBSan.
+Docs: [`core.num` snapshot](docs/api/core.num-v1.md).
+
 Landed standard-library progress: `std.process` installs its value layer at
 `sysroot/std/process.al`: `PipeMode`, the value-semantic `Command` with
 in-place builders, `ExitStatus` exit/signal decomposition, `Output`, and
