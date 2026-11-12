@@ -75,9 +75,12 @@ includes:
 
 An affine value has one owning binding. It cannot be copied, implicitly
 dropped, or overwritten. An ordinary parameter borrows it for the duration of
-the call; `mut` grants exclusive call access; `take` on a parameter transfers
-ownership. A call to a `take` parameter consumes the caller's binding based on
-the callee's visible signature. Returning an owner transfers it to the caller.
+the call; `mut` grants exclusive call access. `take` on a parameter transfers
+an affine argument and consumes the caller's binding. When the parameter type
+is copyable, `take` is an ordinary copy and the caller's binding stays usable.
+A type parameter takes the behavior of its concrete instantiation during
+monomorphization, so one signature can construct from either an affine or a
+copyable source. Returning an owner transfers it to the caller.
 
 This is deliberately not a general move-oriented object model. Ownership is
 visible only at resource and identity boundaries. In the M7.5 composition

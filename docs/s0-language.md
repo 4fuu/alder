@@ -94,8 +94,11 @@ all type arguments and infers them from runtime arguments/expected result, or
 supplies all of them. Monomorphization completes before MIR.
 
 Function parameters use ordinary copy/borrow semantics by default. `mut`
-permits mutation through a mutable argument or receiver, while `take`
-transfers an affine value and invalidates the source on that path. Inherent
+permits mutation through a mutable argument or receiver. `take` transfers an
+affine value and invalidates the source on that path; for a copyable value it
+is an ordinary copy and the caller's binding stays usable. Monomorphization
+selects the behavior for a generic type parameter, so a take signature works
+for both copyable and affine instantiations. Inherent
 `impl Type { ... }` blocks provide `self`, `mut self`, and `take self`
 receivers plus associated functions. They do not provide extension methods.
 The owner domain of a borrowed place is a compiler-internal MIR contract, not

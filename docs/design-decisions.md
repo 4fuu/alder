@@ -84,8 +84,9 @@ owners, the lowering copies the value with `copy_to_domain` into the nearest
 dominating domain (the frame domain, or caller-result storage when the value
 may be returned), records that domain as the local's owner, and exposes the
 copy site through the D023 report; it does not add a rejection. A `take`
-parameter owns its incoming value in the callee frame; growth uses the callee
-function domain and a returned value still goes through caller-result copying.
+parameter owns its incoming affine value in the callee frame; a copyable take
+parameter receives an ordinary copy. Growth uses the callee function domain and
+a returned value still goes through caller-result copying.
 A by-value parameter's relocatable storage lives in the caller's active
 domain; a later borrowed growth uses that domain unless the callee materializes
 a copy in its frame, in which case the copy's domain is used. `export c fn`

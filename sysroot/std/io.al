@@ -930,11 +930,11 @@ pub type BufReader(Source: type(Reader)) {
 }
 
 impl(Source: type(Reader)) BufReader(Source) {
-    fn new(source: Source) -> BufReader(Source) {
+    fn new(take source: Source) -> BufReader(Source) {
         return BufReader(Source)(source: source, buffer: zero_bytes(4096), position: 0, length: 0)
     }
 
-    fn with_capacity(capacity: U64, source: Source) -> BufReader(Source) {
+    fn with_capacity(capacity: U64, take source: Source) -> BufReader(Source) {
         var room = capacity
         if room == 0 { room = 1 }
         return BufReader(Source)(source: source, buffer: zero_bytes(room), position: 0, length: 0)

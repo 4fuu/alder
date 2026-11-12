@@ -286,8 +286,8 @@ pub type BufReader(Source: type(Reader)) {
 }
 
 impl(Source: type(Reader)) BufReader(Source) {
-    fn new(source: Source) -> BufReader(Source)
-    fn with_capacity(capacity: U64, source: Source) -> BufReader(Source)
+    fn new(take source: Source) -> BufReader(Source)
+    fn with_capacity(capacity: U64, take source: Source) -> BufReader(Source)
     fn read_line(mut self) -> Result(Option(String), IoError)
     fn read_until(mut self, delimiter: U8) -> Result(Option(Vec(U8)), IoError)
 }
@@ -338,10 +338,9 @@ pending buffered bytes unread. Both move one direct field out of the taken
 wrapper; its `Vec(U8)` window owns no element cleanup, so no other field needs
 releasing. A `BufReader(ByteCursor)` over a copyable source is copyable, so
 `take self` is rejected for that instantiation by the `take`-on-affine rule.
-Constructing a `BufReader` over an affine `Reader` is currently rejected: the
-constructor's plain `source` parameter may not become the reader's stored
-owner. A conditional take-if-affine parameter form is deferred, so
-`into_source` currently has no constructible affine instance.
+The constructors take `source` by transfer: a copyable source is copied and
+the caller keeps it, while an affine source such as `File(I)` transfers into
+the reader and is recovered with `into_source`.
 
 ### Standard streams and text helpers
 

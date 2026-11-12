@@ -36,10 +36,11 @@ one owning binding and cannot be copied. Implementing the compiler-recognized
 `Cleanup` trait also makes a type affine.
 
 Passing an owner to an ordinary parameter borrows it only for that call.
-`mut` grants exclusive call access. `take` transfers ownership. Returning an
-owner transfers it to the caller. An owner must be returned, transferred,
-explicitly consumed, or cleaned by `using`; silently dropping or overwriting it
-is rejected. A plain, `mut`, or by-value `self` parameter only borrows the
+`mut` grants exclusive call access. `take` transfers ownership of an affine
+value and copies a copyable one, leaving the caller's binding usable in the
+copyable case. Returning an owner transfers it to the caller. An owner must be
+returned, transferred, explicitly consumed, or cleaned by `using`; silently
+dropping or overwriting it is rejected. A plain, `mut`, or by-value `self` parameter only borrows the
 caller's owner. Every ownership use of that borrowed value is rejected: a
 `using` registration, moving it into a `let`/`var`, passing it to a `take`
 parameter or `take self` method, returning it, storing or assigning it into an

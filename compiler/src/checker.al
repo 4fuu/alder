@@ -4515,7 +4515,7 @@ fn check_type_links(d: Domain, state: State, parse: ParseStore, store: CheckStor
             let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
             let category = try interpreted_type_category(d, state, parse, next, empty, no_ancestry, checked_type_for_syntax(next, owner, syntax), 0, 0)
             if category.category != 0 {
-                if child.kind == 48 && category.category != 2 { return check_token_fail(d, state, next, 90, diag_node) }
+                if child.kind == 48 && category.category == 3 { return check_token_fail(d, state, next, 90, diag_node) }
             }
             // `mut` stays an exclusive call borrow: an affine value, a scoped
             // capability, or a copyable cursor reached through a type
@@ -6440,8 +6440,15 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
     let empty = try __s0_buffer_new(TypeBindingRec, d)
     let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
     let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, parameter.checked_type, 0, 0)
-    if parameter_node.kind == 48 && category.category != 2 { return expr_token_fail(d, state, base, 90, arg) }
-    if parameter_node.kind == 48 && borrowed_parameter_root(parse, store, expression_id) != 0 { return expr_token_fail(d, state, base, 345, arg) }
+    if parameter_node.kind == 48 {
+        if category.category == 3 { return expr_token_fail(d, state, base, 90, arg) }
+        // A take parameter transfers an affine owner and copies a copyable
+        // value. The copyable path leaves the caller's binding usable and
+        // does not need an owned place, so it behaves like an ordinary
+        // argument after the mode check.
+        if category.category != 2 { return expr_draft(store, 0, 0) }
+        if borrowed_parameter_root(parse, store, expression_id) != 0 { return expr_token_fail(d, state, base, 345, arg) }
+    }
     // A mut cursor parameter borrows the caller's binding exclusively, so
     // the argument must be a mutable place: a var binding, an owner, another
     // mut parameter forwarding the cursor, or a field path of one of those.
@@ -12627,7 +12634,12 @@ fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStor
         let local = __s0_buffer_get(LocalRec, after.locals, local_at)
         var owned = false
         var initial_state: U64 = 0
-        if local.owner == owner && local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 { owned = true }
+        if local.owner == owner && local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 {
+            let empty = try __s0_buffer_new(TypeBindingRec, d)
+            let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
+            let category = try interpreted_type_category(d, state, parse, after, empty, no_ancestry, local.checked_type, 0, 0)
+            if category.category == 2 { owned = true }
+        }
         var cleanup_registered = false
         if local.owner == owner {
             // A registered owner stays in owner flow: use after transfer and

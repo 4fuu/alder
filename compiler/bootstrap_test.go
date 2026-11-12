@@ -682,7 +682,7 @@ func TestCommittedSourceBootstrap(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bootstrap)
-	if got, want := fmt.Sprintf("%x", digest), "eaa09410e59007c72f7840540d7745f793cf697fdac897320f1105ea46941ff6"; got != want {
+	if got, want := fmt.Sprintf("%x", digest), "d580e3b4a99150f76784c385c3fdbef51cbd14639001d6c026e64ae737509954"; got != want {
 		t.Fatalf("bootstrap/alder.c digest = %s, want %s", got, want)
 	}
 	// The shared splitter feeds both the stage-0 build in regenerate.sh and

@@ -275,10 +275,12 @@ Alder 1.0 deliberately rejects:
   owner.
 
 An API that needs ownership transfer accepts a named function plus explicit
-arguments, or an affine callable object with a visible `take` parameter. This
-keeps rare resource transfer explicit instead of adding routine per-expression
-move syntax. Shared mutation uses a task-group channel, lock, or atomic rather
-than a magic closure environment.
+arguments, or an affine callable object with a visible `take` parameter. A
+`take` parameter copies a copyable value and transfers an affine one, so a
+generic constructor can accept either. This keeps rare resource transfer
+explicit instead of adding routine per-expression move syntax. Shared mutation
+uses a task-group channel, lock, or atomic rather than a magic closure
+environment.
 
 ## Function values and ABI
 

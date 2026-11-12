@@ -283,10 +283,11 @@ receiver keeps the domain that owns the root place.
 
 The owner domain is the domain that owns the place's relocatable storage.
 Lowering records it per checked local: a `mut` parameter or `mut self` receiver
-uses the hidden owner value; a `take` parameter owns a frame-local value and
-grows in the callee function domain; a by-value parameter's storage remains in
-the caller's active domain until the callee materializes a copy; and an ordinary
-local uses the frame domain. Growth uses the owner of the value actually
+uses the hidden owner value; a take parameter of an affine type owns a
+frame-local value and grows in the callee function domain, while a copyable
+take parameter receives an ordinary copy; a by-value parameter's storage
+remains in the caller's active domain until the callee materializes a copy; and
+an ordinary local uses the frame domain. Growth uses the owner of the value actually
 stored, and replacing a relocatable field through a borrowed place copies the
 value into that place's owner with `copy_to_domain` before the store. A returned
 value still goes through caller-result copying, and a caller-result local uses

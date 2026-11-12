@@ -389,6 +389,70 @@ pub fn main() -> I32 {
 	runSanitizedProject(t, cc, root, dir, "hello")
 }
 
+// TestFsBufReaderAffineSource pins take semantics for a generic constructor
+// instantiated with an affine owner: BufReader takes the File, reads through
+// it, and returns the source through into_source so exactly one File cleanup
+// runs. The sanitizer rerun checks that no second close occurs.
+func TestFsBufReaderAffineSource(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	manifest := "manifest = 1\nedition = \"1\"\n[package]\nname = \"hello\"\nversion = \"0.1.0\"\n[targets.hello]\nkind = \"bin\"\nroot = \"src/main.al\"\n"
+	source := `module hello.main
+
+import std.fs { File, open }
+import std.io { Blocking, BufReader, IoError, Reader }
+import std.path { Path }
+
+fn probe(cap: Blocking, path: Path) -> Result(I32, IoError) {
+    let file: File(Blocking) = try open(cap, path)
+    let reader = BufReader.with_capacity(2, file)
+    var one: Array(U8, 1) = [0]
+    match reader.read(one.slice_mut(0, 1)) {
+        Ok(n) => { if n != 1 || one[0] != 104 { return Ok(1) } }
+        Err(_) => { return Ok(2) }
+    }
+    let source = reader.into_source()
+    using kept = source
+    return Ok(0)
+}
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    match Path.parse("/tmp/alder-fs-probe.txt") {
+        Ok(path) => {
+            match probe(cap, path) {
+                Ok(code) => { return code }
+                Err(_) => { return 90 }
+            }
+        }
+        Err(_) => { return 91 }
+    }
+    return 92
+}
+`
+	resetFsProbeFile(t)
+	dir := t.TempDir()
+	run := runProductionCompilerEnv(t, exe, dir, env, map[string]string{
+		"alder.toml":  manifest,
+		"src/main.al": source,
+	}, "run")
+	if run != (productionResult{}) {
+		t.Fatalf("BufReader affine source: %+v stderr=%s", run, run.stderr)
+	}
+	runSanitizedProject(t, cc, root, dir, "hello")
+}
+
 func TestFsProductionFileAndValues(t *testing.T) {
 	cc, err := exec.LookPath("gcc")
 	if err != nil {

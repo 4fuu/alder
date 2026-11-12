@@ -254,6 +254,27 @@ fn buffered_reads() -> I32 {
     return 0
 }
 
+fn buffered_cursor_copy() -> I32 {
+    var cursor = io.ByteCursor.new("xy")
+    var first: Array(U8, 1) = [0]
+    match cursor.read(first.slice_mut(0, 1)) {
+        Ok(n) => { if n != 1 || first[0] != 120 { return 1 } }
+        Err(_) => { return 2 }
+    }
+    var reader = io.BufReader.with_capacity(1, cursor)
+    var second: Array(U8, 1) = [0]
+    match cursor.read(second.slice_mut(0, 1)) {
+        Ok(n) => { if n != 1 || second[0] != 121 { return 3 } }
+        Err(_) => { return 4 }
+    }
+    var third: Array(U8, 1) = [0]
+    match reader.read(third.slice_mut(0, 1)) {
+        Ok(n) => { if n != 1 || third[0] != 121 { return 5 } }
+        Err(_) => { return 6 }
+    }
+    return 0
+}
+
 fn buffered_writes() -> I32 {
     let sink = Checker(total: 0, failure: 0, expected: 7)
     using held = io.BufWriter.with_capacity(4, sink)
@@ -295,6 +316,8 @@ fn buffered_into_sink() -> I32 {
 fn main() -> I32 {
     let reads = buffered_reads()
     if reads != 0 { return reads }
+    let copied = buffered_cursor_copy()
+    if copied != 0 { return copied }
     let writes = buffered_writes()
     if writes != 0 { return writes }
     let consumed = buffered_into_sink()
