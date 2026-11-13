@@ -357,3 +357,82 @@ pub fn main() -> I32 {
 		t.Fatalf("iterator constraint inference: %+v stderr=%s", result, result.stderr)
 	}
 }
+
+// A parameter or local named iter shadows the core.iter import namespace.
+// Before the parser scoped bindings per source, an earlier source's bindings
+// filled the visible prefix and the new binding was invisible, so iter.next()
+// parsed as an associated module call and failed with the wrong arity. The
+// same name must work in the entry module and in an imported module, while a
+// receiver that does not implement Iterator(U64) is still rejected.
+func TestProductionImportNamespaceShadowing(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(intoIteratorSysroot(t, repoRoot))
+	files := map[string]string{
+		"alder.toml": intoIteratorManifest(),
+		"src/iteruser.al": `module hello.iteruser
+
+import core.iter
+
+pub fn first_of(I: type(Iterator(U64)), mut iter: I) -> Option(U64) {
+    return iter.next()
+}
+`,
+		"src/main.al": `module hello.main
+
+import core.iter
+import hello.iteruser
+
+fn local_first(I: type(Iterator(U64)), mut iter: I) -> Option(U64) {
+    return iter.next()
+}
+
+pub fn main() -> I32 {
+    var values = Vec.new(U64)
+    values.push(1)
+    var local = values.into_iterator()
+    if local_first(local) != Some(1) { return 1 }
+
+    var remote_values = Vec.new(U64)
+    remote_values.push(2)
+    var remote = remote_values.into_iterator()
+    if iteruser.first_of(remote) != Some(2) { return 2 }
+    return 0
+}
+`,
+	}
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+	if result.status != 0 || result.stderr != "" {
+		t.Fatalf("import namespace shadowing: %+v stderr=%s", result, result.stderr)
+	}
+
+	rejected := map[string]string{
+		"alder.toml": intoIteratorManifest(),
+		"src/main.al": `module hello.main
+
+fn first_of(I: type(Iterator(U64)), mut iter: I) -> Option(U64) {
+    return iter.next()
+}
+
+pub fn main() -> I32 {
+    var number: U64 = 5
+    let value = first_of(number)
+    return 0
+}
+`,
+	}
+	bad := runProductionCompilerEnv(t, exe, t.TempDir(), env, rejected, "check")
+	if bad.status == 0 {
+		t.Fatalf("non-iterator receiver accepted: %+v", bad)
+	}
+	if !strings.Contains(bad.stderr, "does not implement a trait required here") {
+		t.Fatalf("non-iterator receiver diagnostic = %q", bad.stderr)
+	}
+}

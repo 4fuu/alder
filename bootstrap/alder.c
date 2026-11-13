@@ -638142,32 +638142,42 @@ static ALDER_MAYBE_UNUSED AlderTy497 alder_fn_parse_sources_1553(AlderDomain * a
   ALDER_MAYBE_UNUSED AlderTy497 alder_v26;
   ALDER_MAYBE_UNUSED AlderTy198 alder_v27;
   ALDER_MAYBE_UNUSED AlderTy105 alder_v28;
-  ALDER_MAYBE_UNUSED AlderTy105 alder_v29;
-  ALDER_MAYBE_UNUSED AlderTy111 alder_v30;
-  ALDER_MAYBE_UNUSED AlderTy494 alder_v31;
-  ALDER_MAYBE_UNUSED AlderTy199 alder_v32;
-  ALDER_MAYBE_UNUSED AlderTy244 alder_v33;
-  ALDER_MAYBE_UNUSED AlderTy497 alder_v34;
-  ALDER_MAYBE_UNUSED AlderTy199 alder_v35;
-  ALDER_MAYBE_UNUSED bool alder_v36;
-  ALDER_MAYBE_UNUSED AlderTy105 alder_v37;
-  ALDER_MAYBE_UNUSED AlderTy199 alder_v38;
-  ALDER_MAYBE_UNUSED AlderTy111 alder_v39;
-  ALDER_MAYBE_UNUSED AlderTy110 alder_v40;
-  ALDER_MAYBE_UNUSED AlderTy113 alder_v41;
-  ALDER_MAYBE_UNUSED AlderTy200 alder_v42;
-  ALDER_MAYBE_UNUSED AlderTy497 alder_v43;
-  ALDER_MAYBE_UNUSED AlderTy199 alder_v44;
-  ALDER_MAYBE_UNUSED AlderTy111 alder_v45;
-  ALDER_MAYBE_UNUSED uint64_t alder_v46;
-  ALDER_MAYBE_UNUSED uint64_t alder_v47;
-  ALDER_MAYBE_UNUSED uint64_t alder_v48;
-  ALDER_MAYBE_UNUSED AlderTy105 alder_v49;
-  ALDER_MAYBE_UNUSED AlderTy111 alder_v50;
-  ALDER_MAYBE_UNUSED AlderTy110 alder_v51;
-  ALDER_MAYBE_UNUSED AlderTy113 alder_v52;
-  ALDER_MAYBE_UNUSED AlderTy200 alder_v53;
-  ALDER_MAYBE_UNUSED AlderTy497 alder_v54;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v29;
+  ALDER_MAYBE_UNUSED uint64_t alder_v30;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v31;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_v32;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v33;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_v34;
+  ALDER_MAYBE_UNUSED AlderTy380 alder_v35;
+  ALDER_MAYBE_UNUSED uint64_t alder_v36;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_v37;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v38;
+  ALDER_MAYBE_UNUSED AlderTy105 alder_v39;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v40;
+  ALDER_MAYBE_UNUSED AlderTy494 alder_v41;
+  ALDER_MAYBE_UNUSED AlderTy199 alder_v42;
+  ALDER_MAYBE_UNUSED AlderTy244 alder_v43;
+  ALDER_MAYBE_UNUSED AlderTy497 alder_v44;
+  ALDER_MAYBE_UNUSED AlderTy199 alder_v45;
+  ALDER_MAYBE_UNUSED bool alder_v46;
+  ALDER_MAYBE_UNUSED AlderTy105 alder_v47;
+  ALDER_MAYBE_UNUSED AlderTy199 alder_v48;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v49;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_v50;
+  ALDER_MAYBE_UNUSED AlderTy113 alder_v51;
+  ALDER_MAYBE_UNUSED AlderTy200 alder_v52;
+  ALDER_MAYBE_UNUSED AlderTy497 alder_v53;
+  ALDER_MAYBE_UNUSED AlderTy199 alder_v54;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v55;
+  ALDER_MAYBE_UNUSED uint64_t alder_v56;
+  ALDER_MAYBE_UNUSED uint64_t alder_v57;
+  ALDER_MAYBE_UNUSED uint64_t alder_v58;
+  ALDER_MAYBE_UNUSED AlderTy105 alder_v59;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_v60;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_v61;
+  ALDER_MAYBE_UNUSED AlderTy113 alder_v62;
+  ALDER_MAYBE_UNUSED AlderTy200 alder_v63;
+  ALDER_MAYBE_UNUSED AlderTy497 alder_v64;
   ALDER_MAYBE_UNUSED AlderTy105 alder_l0;
   ALDER_MAYBE_UNUSED AlderTy111 alder_l1;
   ALDER_MAYBE_UNUSED uint64_t alder_l2;
@@ -638178,6 +638188,10 @@ static ALDER_MAYBE_UNUSED AlderTy497 alder_fn_parse_sources_1553(AlderDomain * a
   ALDER_MAYBE_UNUSED AlderTy111 alder_l7;
   ALDER_MAYBE_UNUSED AlderTy111 alder_l8;
   ALDER_MAYBE_UNUSED AlderTy111 alder_l9;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_l10;
+  ALDER_MAYBE_UNUSED AlderTy110 alder_l11;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_l12;
+  ALDER_MAYBE_UNUSED AlderTy111 alder_l13;
   (void)alder_v0;
   (void)alder_v1;
   (void)alder_v2;
@@ -638213,17 +638227,17 @@ alder_b3: ALDER_MAYBE_UNUSED ;
     { goto alder_b6; }
   }
 alder_b4: ALDER_MAYBE_UNUSED ;
-  alder_v49 = alder_l0;
-  alder_v50 = alder_l1;
-  alder_l9 = alder_v50;
-  alder_v51 = alder_l9.alder_f1;
-  alder_v52.alder_f0 = alder_v49;
-  alder_v52.alder_f1 = alder_v51;
-  alder_v53.alder_tag = (uint32_t)0;
-  alder_v53.alder_u.alder_p0 = alder_v52;
-  alder_v54.alder_tag = (uint32_t)0;
-  alder_v54.alder_u.alder_p0 = alder_v53;
-  return alder_v54;
+  alder_v59 = alder_l0;
+  alder_v60 = alder_l1;
+  alder_l13 = alder_v60;
+  alder_v61 = alder_l13.alder_f1;
+  alder_v62.alder_f0 = alder_v59;
+  alder_v62.alder_f1 = alder_v61;
+  alder_v63.alder_tag = (uint32_t)0;
+  alder_v63.alder_u.alder_p0 = alder_v62;
+  alder_v64.alder_tag = (uint32_t)0;
+  alder_v64.alder_u.alder_p0 = alder_v63;
+  return alder_v64;
 alder_b5: ALDER_MAYBE_UNUSED ;
   alder_l3 = alder_v14;
   alder_v17 = alder_l3;
@@ -638254,49 +638268,65 @@ alder_b9: ALDER_MAYBE_UNUSED ;
   alder_v27 = alder_l3;
   alder_v28 = alder_fn_lex_result_state_829(alder_v27);
   alder_l0 = alder_v28;
-  alder_v29 = alder_l0;
-  alder_v30 = alder_l1;
-  alder_v31 = alder_fn_parse_source_tokens_1552(alder_v0, alder_v29, alder_v30);
-  switch (alder_v31.alder_tag) {
+  alder_v29 = alder_l1;
+  alder_l8 = alder_v29;
+  alder_v30 = alder_l8.alder_f0;
+  alder_v31 = alder_l1;
+  alder_l9 = alder_v31;
+  alder_v32 = alder_l9.alder_f1;
+  alder_v33 = alder_l1;
+  alder_l10 = alder_v33;
+  alder_v34 = alder_l10.alder_f1;
+  alder_l11 = alder_v34;
+  alder_v35 = alder_l11.alder_f4;
+  alder_v36 = alder_fn_buffer_len_185_2522(alder_v35);
+  alder_v37 = alder_fn_parse_restore_bindings_1504(alder_v32, alder_v36);
+  alder_v38.alder_f0 = alder_v30;
+  alder_v38.alder_f1 = alder_v37;
+  alder_l1 = alder_v38;
+  alder_v39 = alder_l0;
+  alder_v40 = alder_l1;
+  alder_v41 = alder_fn_parse_source_tokens_1552(alder_v0, alder_v39, alder_v40);
+  switch (alder_v41.alder_tag) {
   case (uint32_t)0:
-    alder_v32 = alder_v31.alder_u.alder_p0;
+    alder_v42 = alder_v41.alder_u.alder_p0;
     { goto alder_b10; }
   case (uint32_t)1:
-    alder_v33 = alder_v31.alder_u.alder_p1;
+    alder_v43 = alder_v41.alder_u.alder_p1;
     { goto alder_b11; }
   }
 alder_b10: ALDER_MAYBE_UNUSED ;
-  alder_l5 = alder_v32;
-  alder_v35 = alder_l5;
-  alder_v36 = alder_fn_parse_step_bad_1491(alder_v35);
-  if (alder_v36) { goto alder_b12; } else { goto alder_b13; }
+  alder_l5 = alder_v42;
+  alder_v45 = alder_l5;
+  alder_v46 = alder_fn_parse_step_bad_1491(alder_v45);
+  if (alder_v46) { goto alder_b12; } else { goto alder_b13; }
 alder_b11: ALDER_MAYBE_UNUSED ;
-  alder_v34.alder_tag = (uint32_t)1;
-  alder_v34.alder_u.alder_p1 = alder_v33;
-  return alder_v34;
+  alder_v44.alder_tag = (uint32_t)1;
+  alder_v44.alder_u.alder_p1 = alder_v43;
+  return alder_v44;
 alder_b12: ALDER_MAYBE_UNUSED ;
-  alder_v37 = alder_l0;
-  alder_v38 = alder_l5;
-  alder_v39 = alder_fn_parse_step_cursor_1493(alder_v38);
-  alder_l8 = alder_v39;
-  alder_v40 = alder_l8.alder_f1;
-  alder_v41.alder_f0 = alder_v37;
-  alder_v41.alder_f1 = alder_v40;
-  alder_v42.alder_tag = (uint32_t)1;
-  alder_v42.alder_u.alder_p1 = alder_v41;
-  alder_v43.alder_tag = (uint32_t)0;
-  alder_v43.alder_u.alder_p0 = alder_v42;
-  return alder_v43;
+  alder_v47 = alder_l0;
+  alder_v48 = alder_l5;
+  alder_v49 = alder_fn_parse_step_cursor_1493(alder_v48);
+  alder_l12 = alder_v49;
+  alder_v50 = alder_l12.alder_f1;
+  alder_v51.alder_f0 = alder_v47;
+  alder_v51.alder_f1 = alder_v50;
+  alder_v52.alder_tag = (uint32_t)1;
+  alder_v52.alder_u.alder_p1 = alder_v51;
+  alder_v53.alder_tag = (uint32_t)0;
+  alder_v53.alder_u.alder_p0 = alder_v52;
+  return alder_v53;
 alder_b13: ALDER_MAYBE_UNUSED ;
   { goto alder_b14; }
 alder_b14: ALDER_MAYBE_UNUSED ;
-  alder_v44 = alder_l5;
-  alder_v45 = alder_fn_parse_step_cursor_1493(alder_v44);
-  alder_l1 = alder_v45;
-  alder_v46 = alder_l2;
-  alder_v47 = alder_const_35888;
-  if (!alder_u64_add_checked(alder_v46, alder_v47, &alder_v48)) { goto alder_b1; }
-  alder_l2 = alder_v48;
+  alder_v54 = alder_l5;
+  alder_v55 = alder_fn_parse_step_cursor_1493(alder_v54);
+  alder_l1 = alder_v55;
+  alder_v56 = alder_l2;
+  alder_v57 = alder_const_35888;
+  if (!alder_u64_add_checked(alder_v56, alder_v57, &alder_v58)) { goto alder_b1; }
+  alder_l2 = alder_v58;
   { goto alder_b2; }
 }
 
@@ -724431,7 +724461,7 @@ alder_b8: ALDER_MAYBE_UNUSED ;
 }
 
 static ALDER_MAYBE_UNUSED bool alder_fn_mir_verify_provenance_1869(AlderDomain * alder_v0, AlderTy60 alder_v1, AlderTy210 alder_v2, AlderTy223 alder_v3, AlderTy407 alder_v4, AlderTy238 alder_v5) {
-  AlderDomain alder_domain_213538 = {0};
+  AlderDomain alder_domain_213553 = {0};
   ALDER_MAYBE_UNUSED AlderDomain * alder_v6;
   ALDER_MAYBE_UNUSED AlderDomain * alder_v7;
   ALDER_MAYBE_UNUSED AlderTy517 alder_v8;
@@ -724453,8 +724483,8 @@ static ALDER_MAYBE_UNUSED bool alder_fn_mir_verify_provenance_1869(AlderDomain *
   (void)alder_v4;
   (void)alder_v5;
 
-  if (!alder_domain_init(&alder_domain_213538, alder_v0)) { alder_runtime_panic("domain.create failed"); }
-  alder_v6 = &alder_domain_213538;
+  if (!alder_domain_init(&alder_domain_213553, alder_v0)) { alder_runtime_panic("domain.create failed"); }
+  alder_v6 = &alder_domain_213553;
   alder_l0 = alder_v6;
   alder_v7 = alder_l0;
   alder_v8 = alder_fn_mir_v6_compute_2003(alder_v7, alder_v1, alder_v2, alder_v5);

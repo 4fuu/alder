@@ -2138,6 +2138,13 @@ fn parse_sources(d: Domain, initial: State, store: ParseStore) -> Result(ParseRe
             return Ok(ParseLexBad(ParseOutput(state: failed, store: cursor.store)))
         }
         state = lex_result_state(lexed)
+        // Bindings are append-only across sources so their source ids stay
+        // comparable, but a source's lexical scope starts after every binding
+        // parsed from an earlier source. Starting the visible prefix at the
+        // buffer end keeps an earlier module's locals from hiding this
+        // source's parameters and locals that share a name with an import
+        // namespace (`iter.next()` where `iter: I` shadows `core.iter`).
+        cursor = ParseCursor(token: cursor.token, store: parse_restore_bindings(cursor.store, __s0_buffer_len(ParseBindingRec, cursor.store.bindings)))
         let parsed = try parse_source_tokens(d, state, cursor)
         if parse_step_bad(parsed) {
             return Ok(ParseBad(ParseOutput(state: state, store: parse_step_cursor(parsed).store)))
