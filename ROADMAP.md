@@ -2165,14 +2165,18 @@ stores two `Vec` halves and supports copyable and affine elements; its
 conditional `Cleanup` implementation drains both halves, and `peek_*` remains
 available only for copyable elements. `BinaryHeap(T: Order)` is a min-heap by
 default and a max-heap through `BinaryHeap.max()`, with O(log n) sift-up and
-sift-down and a copyable scalar element domain. The checker now treats a
+sift-down and the copyable `Order` domain, including `String` and `Bytes`. The
+sift loops read in-bounds heap slots with direct field indexing rather than
+`Vec.get`, so a storage-bearing element does not create an `Option(T)` block
+parameter over a copied `self.items` loop temporary. The checker now treats a
 nominal application as affine only when a `Cleanup` implementation applies to
 its concrete arguments, so `Deque(U64)` stays copyable while a `Deque` over a
 `Cleanup` owner is an owner. The `Vec.pop` primitive moves affine elements out
 through an owning local or an owning field/`mut self` chain; indexed assignment
 for copyable vectors already uses the mutable-slice path. Evidence:
 `compiler/production_collection_test.go` runs copyable deque and min/max heap
-behavior, affine deque cleanup exactly once under ASan/UBSan, and rejects
+behavior, String and Bytes min/max heaps with asymmetric values under
+ASan/UBSan, affine deque cleanup exactly once under ASan/UBSan, and rejects
 `using` a copyable deque, peeking an affine deque, and a heap without `Order`;
 `compiler/production_vec_pop_test.go` covers copyable and affine pop plus the
 registered-owner rejection; `compiler/docs_api_test.go` runs the amended

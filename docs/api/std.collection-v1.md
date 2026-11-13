@@ -91,8 +91,8 @@ impl(T: type(Order)) BinaryHeap(T) {
 - `BinaryHeap(T)` is a min-heap by default and a max-heap through
   `BinaryHeap.max()`. It stores a complete tree over `Vec(T)`, with O(log n)
   sift-up and sift-down on push and pop and O(1) `peek`. `pop` returns `None`
-  when the heap is empty. `T` is restricted to the scalar `Order` domain in
-  v1, so the element type is copyable by construction. Equal values may be
+  when the heap is empty. `T` must be in the copyable `Order` domain: `Bool`,
+  the unsigned integers, `String`, or `Bytes` in v1. Equal values may be
   popped in any order; the heap does not promise stable ordering.
 - Every function is total against its input: it rejects no valid value and
   reads nothing but its arguments. Memory allocation and checked arithmetic

@@ -123,6 +123,33 @@ fn main() -> I32 {
 	}
 }
 
+func TestProductionCollectionStringBytesHeaps(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	collection, err := os.ReadFile(filepath.Join(root, "sysroot", "std", "collection.al"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeObject := buildRuntimeObject(t, cc, root)
+	files := map[string]string{
+		"std/collection.al": string(collection),
+		"main.al":           collectionStringBytesHeapProgram,
+	}
+	generated := runProductionCompiler(t, exe, files, "compile", "--emit=c", "main.al", "std/collection.al")
+	if generated.status != 0 || generated.stderr != "" {
+		t.Fatalf("String/Bytes heap compile: %+v stderr=%s", generated, generated.stderr)
+	}
+	compileAndRunProductionArtifact(t, cc, root, runtimeObject, generated.stdout, 0)
+	runSanitizedGeneratedProgram(t, cc, root, generated.stdout)
+}
+
 // runSanitizedCollectionArtifact rebuilds the generated program and the
 // runtime under ASan/UBSan. The counter driver still proves exactly-once
 // cleanup; the sanitizers catch a double free or use-after-free that a count
@@ -264,6 +291,125 @@ pub fn main() -> I32 {
         }
     }
     if previous != 1 { return 38 }
+    return 0
+}
+`
+
+const collectionStringBytesHeapProgram = `import std.collection { BinaryHeap }
+
+pub fn main() -> I32 {
+    var min_heap: BinaryHeap(String) = BinaryHeap.new()
+    min_heap.push("delta")
+    min_heap.push("alpha")
+    min_heap.push("charlie")
+    min_heap.push("bravo")
+    match min_heap.peek() {
+        Some(value) => { if value != "alpha" { return 1 } }
+        None => { return 2 }
+    }
+    match min_heap.pop() {
+        Some(value) => { if value != "alpha" { return 3 } }
+        None => { return 4 }
+    }
+    match min_heap.pop() {
+        Some(value) => { if value != "bravo" { return 5 } }
+        None => { return 6 }
+    }
+    match min_heap.pop() {
+        Some(value) => { if value != "charlie" { return 7 } }
+        None => { return 8 }
+    }
+    match min_heap.pop() {
+        Some(value) => { if value != "delta" { return 9 } }
+        None => { return 10 }
+    }
+    match min_heap.pop() {
+        Some(_) => { return 11 }
+        None => {}
+    }
+
+    var max_heap: BinaryHeap(String) = BinaryHeap.max()
+    max_heap.push("delta")
+    max_heap.push("alpha")
+    max_heap.push("charlie")
+    max_heap.push("bravo")
+    match max_heap.peek() {
+        Some(value) => { if value != "delta" { return 12 } }
+        None => { return 13 }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != "delta" { return 14 } }
+        None => { return 15 }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != "charlie" { return 16 } }
+        None => { return 17 }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != "bravo" { return 18 } }
+        None => { return 19 }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != "alpha" { return 20 } }
+        None => { return 21 }
+    }
+
+    let low: Bytes = "\x00\xfe"
+    let middle: Bytes = "\x01\xff"
+    let high: Bytes = "\x02"
+    let top: Bytes = "\x7f"
+
+    var min_bytes: BinaryHeap(Bytes) = BinaryHeap.new()
+    min_bytes.push(high)
+    min_bytes.push(low)
+    min_bytes.push(top)
+    min_bytes.push(middle)
+    match min_bytes.peek() {
+        Some(value) => { if value != low { return 22 } }
+        None => { return 23 }
+    }
+    match min_bytes.pop() {
+        Some(value) => { if value != low { return 24 } }
+        None => { return 25 }
+    }
+    match min_bytes.pop() {
+        Some(value) => { if value != middle { return 26 } }
+        None => { return 27 }
+    }
+    match min_bytes.pop() {
+        Some(value) => { if value != high { return 28 } }
+        None => { return 29 }
+    }
+    match min_bytes.pop() {
+        Some(value) => { if value != top { return 30 } }
+        None => { return 31 }
+    }
+
+    var max_bytes: BinaryHeap(Bytes) = BinaryHeap.max()
+    max_bytes.push(high)
+    max_bytes.push(low)
+    max_bytes.push(top)
+    max_bytes.push(middle)
+    match max_bytes.peek() {
+        Some(value) => { if value != top { return 32 } }
+        None => { return 33 }
+    }
+    match max_bytes.pop() {
+        Some(value) => { if value != top { return 34 } }
+        None => { return 35 }
+    }
+    match max_bytes.pop() {
+        Some(value) => { if value != high { return 36 } }
+        None => { return 37 }
+    }
+    match max_bytes.pop() {
+        Some(value) => { if value != middle { return 38 } }
+        None => { return 39 }
+    }
+    match max_bytes.pop() {
+        Some(value) => { if value != low { return 40 } }
+        None => { return 41 }
+    }
     return 0
 }
 `

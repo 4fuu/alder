@@ -259,14 +259,12 @@ impl(T: type(Order)) BinaryHeap(T) {
         var at = start
         while at > 0 {
             let parent = (at - 1) / 2
-            let parent_value = match self.items.get(parent) {
-                Some(value) => value
-                None => return
-            }
-            let child_value = match self.items.get(at) {
-                Some(value) => value
-                None => return
-            }
+            // The parent and child indices are in range by the loop guard and
+            // the heap length. Direct indexing reads the field place without
+            // copying the whole vector into a loop-local temporary; Vec.get
+            // would create an Option(T) block parameter in the loop body.
+            let parent_value = self.items[parent]
+            let child_value = self.items[at]
             if self.before(parent_value, child_value) { return }
             self.items[parent] = child_value
             self.items[at] = parent_value
@@ -285,24 +283,12 @@ impl(T: type(Order)) BinaryHeap(T) {
             var best = left
             let right = left + 1
             if right < count {
-                let left_value = match self.items.get(left) {
-                    Some(value) => value
-                    None => return
-                }
-                let right_value = match self.items.get(right) {
-                    Some(value) => value
-                    None => return
-                }
+                let left_value = self.items[left]
+                let right_value = self.items[right]
                 if self.before(right_value, left_value) { best = right }
             }
-            let current = match self.items.get(at) {
-                Some(value) => value
-                None => return
-            }
-            let candidate = match self.items.get(best) {
-                Some(value) => value
-                None => return
-            }
+            let current = self.items[at]
+            let candidate = self.items[best]
             if self.before(current, candidate) { return }
             self.items[at] = candidate
             self.items[best] = current
