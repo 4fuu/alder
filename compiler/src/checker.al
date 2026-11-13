@@ -1210,6 +1210,21 @@ fn source_path_is(state: State, source: U64, word: __s0_String) -> Bool {
     return true
 }
 
+// A sysroot import may carry the installed root as a path prefix, so the
+// module identity is a path suffix rather than an exact logical path.
+fn source_path_suffix_is(state: State, source: U64, word: __s0_String) -> Bool {
+    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let length = rec.path_end - rec.path_start
+    if length < len(word) { return false }
+    let offset = length - len(word)
+    var at: U64 = 0
+    while at < len(word) {
+        if __s0_buffer_get(U8, state.paths, rec.path_start + offset + at) != word[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
 // core.error is prelude-loaded from the installed sysroot. Its declarations
 // use the ordinary trait and record machinery, but the reserved prelude name
 // Error and global name lookup must admit this one source path.
@@ -10226,6 +10241,10 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_draft.deferred { return expr_deferred(base) }
         let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
+        // IntoIterator surface (M8.1): builtin sequence receivers materialize
+        // the matching core.iter snapshot iterator. Nominal receivers keep
+        // their own trait or inherent into_iterator method.
+        if receiver_type.kind != 7 && node_word(state, callee, "into_iterator") { return check_into_iterator_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_draft, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 19 { return check_table_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         // Order surface (M8): the builtin less method on scalar receivers.
@@ -10855,6 +10874,87 @@ fn append_interpolation_expression(d: Domain, store: CheckStore, owner: U64, syn
 }
 
 fn append_display_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0))
+    let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
+    let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 8, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+// The core.iter module owns the snapshot iterator types. The builtin
+// IntoIterator surface materializes the matching constructor from that module;
+// the user must import core.iter so its declarations join the module graph.
+fn core_iter_module_source(state: State) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SourceRec, state.sources) {
+        if source_path_suffix_is(state, at, "core/iter.al") { return at }
+        at = at + 1
+    }
+    return 0
+}
+
+fn source_find_word(state: State, source: U64, word: __s0_String) -> U64 {
+    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let length = rec.text_end - rec.text_start
+    if length < len(word) { return 0 }
+    var at: U64 = 0
+    while at + len(word) <= length {
+        if source_word(state, rec, at, at + len(word), word) { return at }
+        at = at + 1
+    }
+    return 0
+}
+
+fn core_iter_function_symbol(state: State, parse: ParseStore, store: CheckStore, word: __s0_String) -> U64 {
+    let module_source = core_iter_module_source(state)
+    if module_source == 0 { return 0 }
+    let start = source_find_word(state, module_source, word)
+    if start == 0 { return 0 }
+    return exported_symbol_named(state, parse, store, module_source + 1, module_source, start, start + len(word))
+}
+
+// A builtin IntoIterator call on a slice or Vec. The checker resolves the
+// module's constructor as an ordinary generic call, so no new MIR operation
+// or cgen case enters the pipeline.
+fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver: ExprDraftRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 336, call) }
+    let receiver_type = __s0_buffer_get(CheckedTypeRec, store.types, receiver.checked_type - 1)
+    if receiver_type.kind != 8 && receiver_type.kind != 17 { return expr_token_fail(d, state, base, 335, callee) }
+    if receiver_type.arg_count != 1 { return expr_token_fail(d, state, base, 335, callee) }
+    var word: __s0_String = "slice_iter"
+    if receiver_type.kind == 17 { word = "vec_iter" }
+    let declaration = core_iter_function_symbol(state, parse, store, word)
+    if declaration == 0 { return expr_token_fail(d, state, base, 334, callee) }
+    var param_at: U64 = 0
+    var at: U64 = 0
+    var scanning_param = true
+    while scanning_param && at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration {
+            param_at = at + 1
+            scanning_param = false
+        } else {
+            at = at + 1
+        }
+    }
+    if param_at == 0 { return expr_token_fail(d, state, base, 334, callee) }
+    let element = __s0_buffer_get(U64, store.type_args, receiver_type.first_arg - 1)
+    var bindings = try __s0_buffer_new(InferenceBindingRec, d)
+    bindings = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: param_at, checked_type: element))
+    let instantiated = try instantiate_function(d, state, parse, store, declaration, bindings, owner, call)
+    let instance = match instantiated {
+        InstanceGood(value) => value
+        InstanceBad(value) => InstanceValueRec(store: value, instance: 0)
+    }
+    if instance.instance == 0 { return Ok(ExprBad(instance.store)) }
+    let result_use = use_by_ordinal(instance.store, instance.instance, 6, 0)
+    if result_use == 0 { return expr_token_fail(d, state, base, 334, callee) }
+    let result_type = __s0_buffer_get(DeclTypeUseRec, instance.store.uses, result_use - 1).checked_type
+    if expected != 0 && !(try expression_type_equal(d, state, parse, instance.store, result_type, expected)) { return expr_token_type_fail(d, state, instance.store, mismatch_kind, mismatch_node, expected, result_type) }
+    return append_into_iterator_call(d, instance.store, owner, call_id, result_type, instance.instance, receiver.expression, site_kind, site_syntax)
+}
+
+fn append_into_iterator_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0))
     let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
     let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
