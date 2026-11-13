@@ -281,25 +281,51 @@ installed, are deterministic package errors; the line changes only when the
 sysroot content in the closure changes, so plans stay reproducible offline
 across hosts and working directories.
 
-## xmake/xrepo native provider
+## xmake/xrepo native executor and provider
 
-Managed xmake/xrepo is the default provider for third-party C and C++
-dependencies, but it is not Alder's build system of record.
+Managed, version-pinned xmake is the default replaceable external native build
+executor; xrepo provides third-party C/C++ dependencies. Alder translates its
+authoritative build plan into controlled xmake inputs and invokes the pinned
+executable through its CLI and documented rule/toolchain extension interfaces.
+Generated C can use ordinary C targets. The integration does not embed the
+xmake engine, call private Lua internals, or fork its build implementation.
 
-For every locked native package, Alder records:
+xmake executes C compilation, archiving, linking, and native parallel and
+incremental work below the plan boundary. Alder retains language semantics,
+module closure, type checking, generic inference/monomorphization, MIR and C
+generation, diagnostics, package/dependency identity, `alder.lock`, semantic
+cache keys, and the shared graph consumed by CLI and IDE tools. A per-file
+xmake rule must not substitute for Alder's module closure or specialization.
+Native dependency checks must cover all plan inputs; xmake's cache is not the
+authority for Alder semantic validity.
 
-- xmake binary version and digest;
-- xrepo recipe repository commit, recipe path, and digest;
-- upstream source URLs and content digests;
-- package version, target, configs, patches, and toolchain identity;
-- produced headers/libraries and their content digests;
-- license/provenance metadata.
+For locked native builds, Alder records and verifies:
 
-`alder fetch` may invoke the provider with network access to populate immutable
-sources. `alder build --offline` invokes only an already-pinned provider and
-cached inputs. Reproducible/frozen mode disables implicit system-package
-fallback. Recipes are executable native build code and are therefore an
-explicit trusted dependency, not declarative safe Alder.
+- the xmake/xrepo distribution version and content digests, including shipped
+  scripts, and the Alder glue identity;
+- recipe repository commits, recipe paths and digests, including transitive
+  dependencies and build-time tools;
+- exact package versions, upstream source URLs and content digests, patches,
+  and configuration values;
+- separate host and target identities, C/C++ compiler, archiver, linker,
+  toolchain/SDK identities, flags, and admitted environment inputs;
+- produced headers, objects, archives/libraries, and final outputs with their
+  content digests and license/provenance metadata.
+
+Pinning only the executable or adopting `xmake-requires.lock` does not satisfy
+`alder.lock`. Provider lock/cache data is subordinate to Alder's versioned plan
+and must be checked against it. Managed configuration, repositories, and caches
+are isolated from ambient user xmake state; unrecorded toolchain discovery,
+automatic upgrades, and system-package fallback are forbidden in frozen mode.
+
+Only explicit `add`, `fetch`, or `update` operations may access the network.
+`alder fetch` populates pinned source and build-tool inputs. Build commands
+never fetch implicitly; missing inputs produce an actionable error rather than
+an install or download. Offline builds use only the installed distribution and
+cached inputs. Frozen builds additionally forbid lock, cache, and native-plan
+mutation; required writable provider state must already be prepared or the
+operation fails without weakening that contract. Recipes can execute native
+tools and arbitrary build code: they are trusted dependencies, not a sandbox.
 
 A native package may instead use:
 
@@ -310,8 +336,37 @@ A native package may instead use:
 - another future provider implementing the same locked build-plan contract.
 
 Users normally run `alder build`; direct xmake knowledge is optional. The
-Alder compiler bootstrap, runtime, and standard library have provider-free
-source build descriptions and do not require xmake.
+Alder compiler bootstrap, runtime, and standard library retain source build
+paths that require no xmake at build or run time. Selecting a dependency
+provider does not transfer Alder semantics to that provider or remove these
+independent paths.
+
+### Integration status and acceptance
+
+This executor/provider integration is planned for Milestone 13, not implemented
+or qualified. No concrete xmake release is selected yet. The selected version
+must demonstrate the required CLI/extension behavior; documentation or engine
+entry points alone are not compatibility evidence.
+
+Acceptance requires clean, network-denied offline builds and frozen rebuilds
+with unchanged lock/cache/plan state; explicit rejection of missing or corrupt
+inputs, ambient configuration, and system-provider drift; complete transitive
+provenance; and correct native invalidation after source, generated-header,
+glue, configuration, or toolchain changes. Repeatability of locked native
+artifacts must be tested with identical pinned inputs/toolchains, separately
+from cross-toolchain semantic determinism.
+
+Qualify all 1.0 host/target families from [Alder 1.0](alder-1.0.md), including
+cross-target builds that keep host build tools separate from target artifacts
+and never execute target programs on the host. Verify target ABI, Windows CRT,
+static/shared dependencies, and link ordering. Generated and handwritten Alder
+C must retain the strict C11 warning/undefined-behavior policy, including
+`-ffp-contract=off` where applicable, without provider-added flags weakening it;
+third-party C/C++ recipes retain their own language requirements. Check the
+actual compiler/linker commands and run target programs on suitable target
+hosts. Also require unchanged semantic plans/generated C through the
+alternate/source path and successful bootstrap/runtime/stdlib builds without
+xmake. These are future gates, not claims about current support.
 
 ## C toolchain and outputs
 

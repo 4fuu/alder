@@ -209,13 +209,24 @@ Local workspaces and exact-revision Git dependencies use an authoritative
 content-verified `alder.lock`, immutable cache, and locked/offline/frozen modes.
 Registry/publishing/general semver solving are deferred.
 
-### D016 — xmake is a native provider, not Alder's semantic build system
+### D016 — xmake executes native builds below Alder's semantic build plan
 
-Status: **Frozen 1.0**
+Status: **Frozen 1.0** (amended 2026-11: external native executor and provider)
 
-Alder owns package identity and the deterministic build plan. Managed pinned
-xmake/xrepo is the default replaceable C/C++ dependency provider. The bootstrap
-and standard library do not require it.
+Alder owns language semantics, module closure, package/dependency identity,
+`alder.lock`, semantic cache keys, diagnostics, and the deterministic build
+plan shared by its tools. Managed pinned xmake executes native C compilation,
+archiving, linking, and parallel/incremental work through an external CLI and
+documented rule/toolchain glue; xrepo provides C/C++ dependencies. Do not embed
+the engine or depend on private internals. The bootstrap, runtime, and standard
+library retain build paths requiring no xmake.
+
+The distribution/scripts/glue, recipes and transitive inputs, toolchains/SDKs,
+configuration, and artifacts must be content-verified under Alder's plan.
+xmake's own locks and caches do not replace Alder's locked/offline/frozen
+contract. Version selection and offline, cross-target, strict C11, and
+provider-equivalence qualification remain unverified Milestone 13 work; see
+[Modules and Builds](modules-and-builds.md#integration-status-and-acceptance).
 
 ### D017 — Batteries included in the toolchain sysroot
 

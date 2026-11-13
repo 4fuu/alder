@@ -69,8 +69,9 @@ One Alder installation includes, without a network fetch:
 - the formatter, test runner, documentation generator, semantic query
   commands, offline language specification, package commands, and baseline
   language server;
-- the managed pinned xmake/xrepo native provider and recipe snapshot, as a
-  replaceable component not used by the compiler bootstrap or standard library;
+- the managed pinned xmake/xrepo external native executor/provider and recipe
+  snapshot, with xmake-free compiler bootstrap, runtime, and standard-library
+  build paths;
 - project templates and C binding templates;
 - a source bootstrap artifact and regeneration instructions;
 - licenses and source provenance for all bundled native components.
@@ -87,8 +88,9 @@ alder build --release
 ```
 
 The same driver owns Alder module resolution, lockfiles, generated C, native
-provider plans, linking, and diagnostics. Users do not need to invoke xmake or
-a C compiler directly for an ordinary project.
+build/provider plans, link inputs, and diagnostics. It delegates native build
+execution to controlled external xmake invocations. Users do not need to invoke
+xmake or a C compiler directly for an ordinary project.
 
 ## Packages and native dependencies
 
@@ -97,11 +99,21 @@ dependencies with an authoritative `alder.lock`. Locked and offline builds are
 first-class. A public registry, publishing service, and general semantic-version
 solver are not required for 1.0.
 
-Managed, version-pinned xmake/xrepo is the default replaceable provider for
-third-party C and C++ packages. It is below Alder's build-plan boundary:
-xmake does not define Alder modules, package identity, or lockfile semantics.
-The compiler bootstrap and standard library do not require xmake at build or
-run time. See [Modules and Builds](modules-and-builds.md).
+Managed, version-pinned xmake is the default replaceable external executor for
+native compilation, archiving, linking, and parallel/incremental builds; xrepo
+provides third-party C/C++ packages. Integration uses the CLI and documented
+rule/toolchain glue, not an embedded engine or private implementation. Alder
+retains language semantics, module closure, dependency identity, `alder.lock`,
+semantic cache keys, and the shared tool query graph.
+
+The release must verify the full distribution, recipes, transitive sources and
+build tools, patches, configurations, host/target toolchains and SDKs, and
+outputs. It must qualify network-denied offline and immutable frozen rebuilds,
+cross-target execution boundaries, strict C11 for Alder-generated/handwritten C,
+and alternate-provider equivalence. The compiler bootstrap, runtime, and
+standard library retain paths requiring no xmake at build or run time.
+Concrete xmake version selection and integration qualification remain pending;
+see [Modules and Builds](modules-and-builds.md).
 
 ## Supported targets
 

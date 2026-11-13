@@ -198,7 +198,7 @@ as `defer`.
 | C binding blocks, exports, callbacks, and safe wrappers | Required for 1.0 | S0 direct-symbol import is bootstrap-only |
 | Source modules, `pub`, manifests, and deterministic build plans | Required for 1.0 | Not implemented; S0 uses one explicit global source set |
 | Exact-revision Git packages and lockfile | Required for 1.0 | Not implemented |
-| Managed xmake/xrepo native provider | Required default integration for 1.0 | Not implemented; bootstrap and std remain provider-free |
+| Managed xmake/xrepo external native executor/provider | Required default integration for 1.0; CLI and documented glue, no embedded engine | Not implemented or qualified; version selection pending; bootstrap/runtime/std retain xmake-free paths |
 | Batteries-included `core`/`std` | Required for 1.0 | Only private runtime/bootstrap facilities exist |
 | Formatter, test/doc tools, baseline LSP | Required distribution tools for 1.0 | Not implemented except narrow bootstrap CLI/service pieces |
 

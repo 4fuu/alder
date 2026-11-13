@@ -2344,21 +2344,42 @@ rejection, cache corruption detection, frozen offline builds, and hostile or
 malformed repository tests. Registries, publishing, general semver solving,
 submodules, Git LFS, and arbitrary lifecycle scripts remain outside 1.0.
 
-## Milestone 13: Managed Native Provider
+## Milestone 13: Managed External Native Executor and Provider
 
 Status: **required default integration before Alder 1.0**
 
-Provide managed, version-pinned xmake/xrepo as the default replaceable C/C++
-provider below Alder's authoritative package/build-plan boundary. Pin the
-xmake binary, recipe repository/file, sources, patches, configs, target,
-toolchain, outputs, licenses, and hashes; separate network fetch from offline
-build; disable implicit system packages in frozen mode; and treat recipes as
-trusted executable native code.
+Provide managed, version-pinned xmake as the default replaceable external
+native executor for C compilation, archiving, linking, and parallel/incremental
+work, with xrepo as the C/C++ dependency provider. Translate Alder's plan through
+CLI and documented rule/toolchain glue, without embedding the engine, using
+private internals, or forking the build implementation. Alder retains language
+semantics, module closure and specialization, dependency identity, `alder.lock`,
+semantic cache keys, diagnostics, and the shared CLI/IDE graph.
 
-Exit requires repeatable locked native plans and artifacts with a pinned
-toolchain, offline rebuild, provenance output, system-provider drift reporting,
-and identical Alder semantics through an alternate/source provider. The
-compiler bootstrap and standard library must not require xmake.
+Pin and verify the distribution and scripts, glue, recipe repositories/files,
+transitive sources and build tools, patches, configs, host/target toolchains
+and SDKs, outputs, licenses, and hashes. Isolate managed provider state from
+ambient user configuration; keep network access in explicit fetch/update/add
+operations, reject implicit downloads and frozen system-package fallback, and
+treat recipes as trusted executable native code rather than a sandbox.
+
+Exit requires repeatable locked native plans/artifacts with identical pinned
+inputs/toolchains, complete provenance, missing/corrupt-input rejection,
+network-denied offline builds, and frozen rebuilds with unchanged lock/cache/
+native-plan state. Verify invalidation for all native inputs and tool/glue
+changes. Qualify the 1.0 target families, host-versus-target build tools,
+Windows CRT/ABI and link ordering, and strict C11/undefined-behavior flags for
+Alder-generated and handwritten C without imposing C11 on third-party C++.
+Inspect actual commands and run outputs on suitable target hosts. Require
+identical Alder semantic plans/generated C through an alternate/source path,
+system-provider drift reporting, and bootstrap/runtime/stdlib builds without
+xmake. Detailed gates belong to [Modules and Builds](docs/modules-and-builds.md#integration-status-and-acceptance).
+
+No concrete xmake release has been selected and no executor/provider integration
+has been qualified. Version choice and compatibility/offline feasibility must
+be demonstrated at this gate. This plan does not advance implementation ahead
+of the current Milestone 8/8.1 scope or replace the remaining 1.0 language,
+async, standard-library, and tooling gates.
 
 ## Milestone 14: Alder 1.0 Qualification
 
