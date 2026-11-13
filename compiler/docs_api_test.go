@@ -236,6 +236,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.signal-v1.al": {
+			style:   "project",
+			srcName: "std_signal_example.al",
+			mainText: `module hello.main
+
+import hello.std_signal_example { std_signal_example }
+
+pub fn main() -> I32 {
+    if std_signal_example() == 1 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.random-v1.al": {
 			style:   "project",
 			srcName: "std_random_example.al",

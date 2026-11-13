@@ -67,6 +67,9 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`std.parse` public snapshot v1](api/std.parse-v1.md), covering the
   Milestone 8.1 byte cursor, half-open spans, positioned errors, and scalar
   token parsers;
+- [`std.signal` public snapshot v1](api/std.signal-v1.md), covering the
+  Milestone 8.1 one-shot blocking termination/interrupt wait and the
+  target-specific `Signal.Target` extension;
 - [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
   the Milestone 8 stable sorting entry point and the Milestone 8.1 `Deque(T)`
   and `BinaryHeap(T)` value types in the installed sysroot.
@@ -216,6 +219,20 @@ typed/streaming parsers, quoted or escaped strings, key/value record grammars,
 Unicode whitespace or identifiers, floating-point/date/time/IP parsing, and a
 `Parser` trait or combinator objects.
 
+Implemented std.signal progress: `sysroot/std/signal.al` provides the one-shot
+blocking `wait(io, signal, timeout_ms)` surface in
+[`api/std.signal-v1.md`](api/std.signal-v1.md). `Signal` covers interrupt,
+terminate, hangup, quit, user signals, and the POSIX-only `Target(number)`
+extension; Windows maps only interrupt/terminate to console control events.
+The call installs a temporary host disposition, waits through
+`std.io.Io.wait_signal`, restores the original disposition, and returns
+`Some(signal)` or `None` on timeout. **Between waits the original disposition
+is active, so a signal arriving outside a wait gets the default action.**
+`sysroot/std/c/signal_shim.h` is the header-only POSIX self-pipe and Windows
+console-event implementation. Persistent subscriptions, Evented/task delivery,
+cancellation-safe teardown, realtime signals, and Windows close/logoff/shutdown
+events are M9 work. No checker, MIR, runtime, or cgen case is added.
+
 ## Text and bytes
 
 Required modules:
@@ -356,8 +373,9 @@ Required modules:
 - `std.process`: value-semantic `Command`, affine `Child`, pipes, exit status,
   output capture, wait, cancellation-aware termination, and explicit
   environment inheritance;
-- `std.signal`: portable termination/interrupt subscriptions plus
-  target-specific extensions behind capability checks.
+- `std.signal`: one-shot blocking termination/interrupt wait in M8.1, with
+  persistent subscriptions, evented/task delivery, and target-specific
+  extensions in M9 (Windows console events and POSIX realtime signals).
 
 No API invokes a shell unless its name explicitly says `shell`. The default
 process API passes an argument vector directly and never performs hidden

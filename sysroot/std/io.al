@@ -66,6 +66,10 @@ import c "std/c/process_shim.h" as proc {
     raw fn poll_pair = "io_poll_pair_wait"(first_fd: c.Int, second_fd: c.Int, timeout_ms: c.Int, out: c.Ptr(PollPairRaw)) -> c.Int
 }
 
+import c "std/c/signal_shim.h" as sig {
+    raw fn wait_signal = "io_signal_wait"(signal_number: c.Int, timeout_ms: c.Int, delivered: c.Ptr(c.Int)) -> c.Int
+}
+
 // The Milestone 8 std.io v1 stream foundation, slice 1: the `Reader`,
 // `Writer`, and `Seek` traits, the portable error category, the exact
 // transfer helpers, and two host-free in-memory streams. Everything here is
@@ -356,6 +360,11 @@ pub trait Io {
     /// hangup and error states, so a caller always reaches a read that
     /// observes end of stream.
     fn poll(self, mut first: HostFile, mut second: HostFile, timeout_ms: I32) -> Result(PollPair, IoError)
+    /// Waits for one host signal number. A negative timeout waits forever.
+    /// The previous disposition is restored before this returns. `true`
+    /// means the signal arrived; `false` means the timeout expired. Invalid
+    /// or undeliverable signals report `InvalidInput` or `Unsupported`.
+    fn wait_signal(self, signal: I32, timeout_ms: I32) -> Result(Bool, IoError)
     /// Sleeps without observing an earlier wakeup.
     fn sleep(self, seconds: U64, nanos: U32) -> Unit
     /// Reads the monotonic clock.
@@ -699,6 +708,13 @@ impl Io for Blocking {
         let first_ready = unsafe c { raw.first_ready }
         let second_ready = unsafe c { raw.second_ready }
         return Ok(PollPair(first_ready: first_ready.to_i32() != 0, second_ready: second_ready.to_i32() != 0))
+    }
+
+    fn wait_signal(self, signal: I32, timeout_ms: I32) -> Result(Bool, IoError) {
+        var delivered = c.Zero(c.Int)
+        let rc = unsafe c { sig.wait_signal(signal.to_c_int(), timeout_ms.to_c_int(), c.addr(delivered)) }
+        if rc.to_i32() != 0 { return Err(IoError.last()) }
+        return Ok(delivered.to_i32() != 0)
     }
 
     fn sleep(self, seconds: U64, nanos: U32) -> Unit {

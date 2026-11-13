@@ -2078,7 +2078,8 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory`, `core.hash`, `std.parse`, and `Deque`/heaps landed; no further scope gate)**
+Status: **in progress (`core.memory`, `core.hash`, `std.parse`, `std.signal`, and `Deque`/heaps landed; no further scope gate)**
+
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
 The modules land in dependency order:
@@ -2093,11 +2094,12 @@ The modules land in dependency order:
 5. `std.parse`: structured parsing with byte ranges, building on `core.num`
    parsing (landed; see below);
 6. `std.signal`: triage first; anything that needs async or cancellation moves
-   to Milestone 9.
+   to Milestone 9 (landed; see below).
 
 Exit requires each listed module's frozen snapshot, installed implementation,
 and production-driver evidence. The `std.signal` triage records exactly which
-pieces stay in 8.1 and which move to Milestone 9.
+pieces stay in 8.1 and which move to Milestone 9; the 8.1 one-shot wait and its
+M9 subscription deferrals are recorded below.
 
 Landed M8.1 progress: `core.hash` provides the SipHash-1-3 structural hash
 over the synthesized Eq/Hash domain ([snapshot](docs/api/core.hash-v1.md)).
@@ -2174,6 +2176,32 @@ behavior, affine deque cleanup exactly once under ASan/UBSan, and rejects
 `compiler/production_vec_pop_test.go` covers copyable and affine pop plus the
 registered-owner rejection; `compiler/docs_api_test.go` runs the amended
 snapshot example with checksum 255.
+
+Landed M8.1 progress: `std.signal` provides the one-shot blocking
+`wait(io, signal, timeout_ms)` surface ([snapshot](docs/api/std.signal-v1.md)).
+`Signal` has interrupt/terminate/hangup/quit/user names plus the POSIX
+`Target(number)` extension; Windows maps interrupt/terminate to console control
+events. `std.io.Io.wait_signal` installs one temporary host disposition, waits
+for the signal or timeout, restores the previous disposition, and returns
+`true`/`false`; `std.signal` maps that to `Some(signal)`/`None` and converts
+host categories to `SignalError`. **Between waits the original disposition is
+active, so a signal arriving outside a wait gets the default action.**
+`sysroot/std/c/signal_shim.h` is the header-only POSIX self-pipe and Windows
+console-event implementation. Evidence: `compiler/production_std_signal_test.go`
+builds a child executable, sends real `SIGTERM`, checks the zero-timeout
+`None` path and a second wait, sends real `SIGUSR1` through `Signal.Target`, and
+verifies default termination after disposition restoration;
+`compiler/docs_api_test.go` runs the snapshot example; `compiler/io_shim_test.go`
+strict-compiles the shim on the host and the Linux AArch64 and Windows LLP64
+cross compilers. No checker, MIR, lowering, verifier, or cgen case is added.
+
+`std.signal` v1 deferred notes: persistent `Subscription(I)` owners, multiple
+signals or signal sets per subscription, repeated `poll`/`wait` without
+reinstalling, `AsyncIo`/`Evented` delivery and task wakeups, cancellation-safe
+teardown, Windows close/logoff/shutdown console events, POSIX realtime signals
+and `sigqueue`, `SIGCHLD` integration with process/task waiting, and
+cancellation-aware process termination built on the same subscription
+machinery. These are M9 work, not gaps in the one-shot v1 contract.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 
