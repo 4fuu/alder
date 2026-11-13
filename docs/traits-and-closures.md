@@ -197,6 +197,16 @@ with arguments is applied as usual: `I: type(Iterator(T))`. A constraint may
 name any type parameter of the same list, before or after it. There is no
 `where` clause and no `+` between traits.
 
+When a call leaves a constrained parameter unbound, the checker matches the
+concrete receiver against the unique implementation and seeds the constraint's
+parameters from that implementation's trait arguments. For example,
+`count(map(f, values.into_iterator()))` learns the map item type from
+`VecIter(T): Iterator(T)`; a compound argument such as
+`Iterator(Indexed(T))` is matched structurally, so `T` becomes
+`Indexed(U64)` and not `U64`. Seeded parameters participate in the normal
+call-instantiation check, so an ambiguous or unsatisfied constraint is still
+rejected.
+
 The spelling follows one rule: lowercase keywords form a kind of type and take
 their parts in parentheses (`fn(A) -> R`, `type(Order)`); capitalized names are
 nominal types and traits applied with `Name(...)`.

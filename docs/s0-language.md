@@ -168,7 +168,10 @@ Milestone 7.5 adds the static trait surface of
   with the syntax diagnostic `SYN0001` kind 24. Constraint arguments resolve
   in the declaration's scope across the whole parameter list, so a
   constraint may name a parameter declared before or after it
-  (`IntoIterator(IteratorType, Item)` keeps that order).
+  (`IntoIterator(IteratorType, Item)` keeps that order). A call that leaves a
+  constrained parameter unbound seeds it from the matching implementation's
+  trait arguments, including compound arguments such as
+  `Iterator(Indexed(T))`.
 - The builtin standard traits `Eq`, `Hash`, `Order`, `Display`,
   `Iterator(Item)`, `IntoIterator(IteratorType, Item)`, and `Cleanup` exist
   without source declarations. `Error` is a prelude trait with a defaulted

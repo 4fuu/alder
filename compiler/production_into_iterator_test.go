@@ -81,6 +81,52 @@ impl(T: type) Iterator(T) for VecIter(T) {
         return self.values.get(index)
     }
 }
+
+pub type MapIter(I: type, T: type, U: type) {
+    inner: I
+    f: fn(T) -> U
+}
+
+pub fn map(I: type(Iterator(T)), T: type, U: type, f: fn(T) -> U, iterator: I) -> MapIter(I, T, U) {
+    return MapIter(inner: iterator, f: f)
+}
+
+impl(I: type(Iterator(T)), T: type, U: type) Iterator(U) for MapIter(I, T, U) {
+    fn next(mut self) -> Option(U) {
+        match self.inner.next() {
+            Some(value) => {
+                let transform = self.f
+                return Some(transform(value))
+            }
+            None => { return None }
+        }
+        return None
+    }
+}
+
+pub fn count(I: type(Iterator(T)), T: type, mut iterator: I) -> U64 {
+    var total: U64 = 0
+    var running = true
+    while running {
+        match iterator.next() {
+            Some(_) => { total = total + 1 }
+            None => { running = false }
+        }
+    }
+    return total
+}
+
+pub fn to_vec(I: type(Iterator(T)), T: type, mut iterator: I) -> Vec(T) {
+    var values = Vec.new(T)
+    var running = true
+    while running {
+        match iterator.next() {
+            Some(value) => { values.push(value) }
+            None => { running = false }
+        }
+    }
+    return values
+}
 `
 
 // intoIteratorSysroot copies the installed sysroot and adds the fixture
@@ -250,5 +296,64 @@ pub fn main() -> I32 {
 				t.Fatalf("%s diagnostic = %q, want %q", tc.name, result.stderr, tc.want)
 			}
 		})
+	}
+}
+
+// A constraint's parameters are seeded from the implementation that matches
+// the receiver, so count(map(f, it)) infers the map item type from the
+// iterator implementation alone. The impl's trait argument is a compound
+// application (Iterator(Indexed(T))), which the same match has to accept.
+func TestProductionIteratorConstraintInference(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	repoRoot, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, repoRoot)
+	env := sysrootEnv(intoIteratorSysroot(t, repoRoot))
+	files := map[string]string{
+		"alder.toml": intoIteratorManifest(),
+		"src/main.al": `module hello.main
+
+import core.iter
+
+type Indexed(T: type) {
+    value: T
+}
+
+type IndexedIter(T: type) {
+    value: T
+    done: Bool
+}
+
+impl(T: type) Iterator(Indexed(T)) for IndexedIter(T) {
+    fn next(mut self) -> Option(Indexed(T)) {
+        if self.done { return None }
+        self.done = true
+        return Some(Indexed(value: self.value))
+    }
+}
+
+pub fn main() -> I32 {
+    var values = Vec.new(U64)
+    values.push(1)
+    values.push(2)
+    var mapped = iter.map(fn(x: U64) => x + 1, values.into_iterator())
+    if iter.count(mapped) != 2 { return 1 }
+
+    var indexed = IndexedIter(U64)(value: 7, done: false)
+    let items = iter.to_vec(indexed)
+    if items.len() != 1 { return 2 }
+    if items[0].value != 7 { return 3 }
+    return 0
+}
+`,
+	}
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, files, "run")
+	if result.status != 0 || result.stderr != "" {
+		t.Fatalf("iterator constraint inference: %+v stderr=%s", result, result.stderr)
 	}
 }
