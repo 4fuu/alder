@@ -229,6 +229,56 @@ pub fn main() -> I32 {
 			sanitized: true,
 		},
 		{
+			name: "receivers",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var numbers: Array(U64, 3) = [3, 1, 2]
+    var array_cursor = numbers.into_iterator()
+    let from_array = iter.to_vec(array_cursor)
+    if from_array.len() != 3 { return 1 }
+    if from_array[0] != 3 || from_array[1] != 1 || from_array[2] != 2 { return 2 }
+
+    var mutable_numbers: Array(U64, 3) = [4, 5, 6]
+    var view = mutable_numbers.slice_mut(0, 3)
+    var mut_cursor = view.into_iterator()
+    let from_mut = iter.to_vec(mut_cursor)
+    if from_mut.len() != 3 { return 3 }
+    if from_mut[0] != 4 || from_mut[1] != 5 || from_mut[2] != 6 { return 4 }
+
+    let bytes: Bytes = "\x00\x7f\xff"
+    var bytes_cursor = bytes.into_iterator()
+    let from_bytes = iter.to_vec(bytes_cursor)
+    if from_bytes.len() != 3 { return 5 }
+    if from_bytes[0] != 0 || from_bytes[1] != 127 || from_bytes[2] != 255 { return 6 }
+
+    var map = Map.new(U64, U64)
+    if !map.insert(7, 70) { return 7 }
+    if !map.insert(9, 90) { return 8 }
+    if !map.insert(11, 110) { return 9 }
+    if map.insert(9, 95) { return 10 }
+    var map_cursor = map.into_iterator()
+    let entries = iter.to_vec(map_cursor)
+    if entries.len() != 3 { return 11 }
+    if entries[0].first != 7 || entries[0].second != 70 { return 12 }
+    if entries[1].first != 9 || entries[1].second != 95 { return 13 }
+    if entries[2].first != 11 || entries[2].second != 110 { return 14 }
+
+    var set = Set.new(U64)
+    if !set.insert(3) { return 15 }
+    if !set.insert(5) { return 16 }
+    if !set.insert(7) { return 17 }
+    var set_cursor = set.into_iterator()
+    let items = iter.to_vec(set_cursor)
+    if items.len() != 3 { return 18 }
+    if items[0] != 3 || items[1] != 5 || items[2] != 7 { return 19 }
+    return 0
+}
+`,
+		},
+		{
 			name: "view-materialization",
 			source: `module hello.main
 
@@ -405,7 +455,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			want: "into_iterator is available on slices and Vec",
+			want: "into_iterator is available on arrays, immutable slices, read-only MutSlice, Bytes, Vec, Map, and Set",
 		},
 		{
 			name: "scoped-view-capture",
@@ -448,6 +498,51 @@ pub fn main() -> I32 {
 }
 `,
 			want: "affine",
+		},
+		{
+			name: "map-storage-key",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var map = Map.new(String, U64)
+    map.insert("a", 1)
+    let it = map.into_iterator()
+    return 0
+}
+`,
+			want: "checker diagnostic 129",
+		},
+		{
+			name: "map-storage-value",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var map = Map.new(U64, String)
+    map.insert(1, "a")
+    let it = map.into_iterator()
+    return 0
+}
+`,
+			want: "checker diagnostic 129",
+		},
+		{
+			name: "set-storage-element",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var set = Set.new(String)
+    set.insert("a")
+    let it = set.into_iterator()
+    return 0
+}
+`,
+			want: "checker diagnostic 129",
 		},
 	}
 	for _, tc := range cases {

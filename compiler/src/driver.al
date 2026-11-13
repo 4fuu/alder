@@ -357,8 +357,9 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 338 { return out_string("into_iterator could not resolve the core.iter constructor") }
     if kind == 339 { return out_string("into_iterator could not read the resolved iterator result type") }
     if kind == 340 { return out_string("into_iterator could not read the core.iter constructor type parameter") }
-    if kind == 341 { return out_string("into_iterator is available on slices and Vec; convert arrays, Bytes, Map, and Set with slice, keys, values, or items first") }
+    if kind == 341 { return out_string("into_iterator is available on arrays, immutable slices, read-only MutSlice, Bytes, Vec, Map, and Set") }
     if kind == 342 { return out_string("into_iterator takes no arguments") }
+    if kind == 343 { return out_string("the compiler could not resolve a call parameter type") }
     // 333 retired with borrowed-place owner-domain provenance (D005B).
     if kind == 330 {
         if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" requires same-type integer operands: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }

@@ -93,6 +93,54 @@ impl(T: type) Iterator(T) for VecIter(T) {
     }
 }
 
+/// A copied byte snapshot, advanced by `next`.
+pub type BytesIter {
+    data: Bytes
+    at: U64
+}
+
+/// Wraps a Bytes value in a byte iterator. The bytes are copied into the
+/// iterator value, so later changes to the source value do not affect it.
+pub fn bytes_iter(data: Bytes) -> BytesIter {
+    return BytesIter(data: data, at: 0)
+}
+
+impl Iterator(U8) for BytesIter {
+    fn next(mut self) -> Option(U8) {
+        if self.at >= self.data.len() { return None }
+        let index = self.at
+        self.at = self.at + 1
+        return Some(self.data.byte(index))
+    }
+}
+
+/// Copies a read-only MutSlice into a Vec-backed iterator. Exclusive
+/// MutSlice/IterMut iteration is not part of this snapshot.
+pub fn mut_slice_iter(T: type, values: MutSlice(T)) -> VecIter(T) {
+    var copied = Vec.new(T)
+    var at: U64 = 0
+    while at < values.len() {
+        match values.get(at) {
+            Some(value) => { copied.push(value) }
+            None => {}
+        }
+        at = at + 1
+    }
+    return vec_iter(T, copied)
+}
+
+/// Iterates a Set in insertion order.
+pub fn set_iter(T: type, value: Set(T)) -> VecIter(T) {
+    return vec_iter(T, value.items())
+}
+
+/// Iterates a Map in insertion order as Pair(key, value).
+pub fn map_iter(K: type, V: type, value: Map(K, V)) -> ZipIter(VecIter(K), VecIter(V), K, V) {
+    let keys = value.keys()
+    let values = value.values()
+    return zip(VecIter(K), VecIter(V), K, V, vec_iter(K, keys), vec_iter(V, values))
+}
+
 /// One value with its zero-based position in an enumeration.
 pub type Indexed(T: type) {
     pub index: U64

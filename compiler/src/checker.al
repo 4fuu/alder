@@ -6743,7 +6743,11 @@ fn check_existing_call_modes(d: Domain, state: State, parse: ParseStore, base: C
     let arg = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
     let expression = expression_for_syntax(store, owner, link.node)
     if expression == 0 { return expr_deferred(base) }
-    let parameter_id = use_by_ordinal(store, target, 7, ordinal)
+    // An instantiated function carries role-7 parameters; a non-generic
+    // declaration needs no instance record and keeps its role-5 parameters.
+    var parameter_id = use_by_ordinal(store, target, 7, ordinal)
+    if parameter_id == 0 { parameter_id = use_by_ordinal(store, target, 5, ordinal) }
+    if parameter_id == 0 || parameter_id > __s0_buffer_len(DeclTypeUseRec, store.uses) { return expr_token_fail(d, state, base, 343, arg) }
     let parameter = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_id - 1)
     if ordinal + 1 < count && call_argument_requires_final(store, parameter.checked_type, expression) { return expr_token_fail(d, state, base, 104, arg) }
     let checked = try check_call_argument_mode(d, state, parse, base, store, owner, arg, parameter, expression)
@@ -11054,6 +11058,45 @@ fn core_iter_import_target(state: State, parse: ParseStore) -> U64 {
     return 0
 }
 
+// The constructor and receiver type arguments for one builtin IntoIterator
+// receiver. Empty word means an unsupported receiver kind. Arrays and immutable
+// slices borrow as SliceIter; Vec keeps VecIter; read-only MutSlice copies into
+// a Vec snapshot; Bytes yields U8; Map yields Pair(K, V); Set yields T.
+type CoreIterCtorRec {
+    word: __s0_String
+    type_count: U64
+    first: U64
+    second: U64
+}
+
+fn core_iter_ctor_for(store: CheckStore, receiver: CheckedTypeRec) -> CoreIterCtorRec {
+    if receiver.kind == 8 || receiver.kind == 15 {
+        if receiver.arg_count != 1 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "slice_iter", type_count: 1, first: __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1), second: 0)
+    }
+    if receiver.kind == 17 {
+        if receiver.arg_count != 1 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "vec_iter", type_count: 1, first: __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1), second: 0)
+    }
+    if receiver.kind == 18 {
+        if receiver.arg_count != 1 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "mut_slice_iter", type_count: 1, first: __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1), second: 0)
+    }
+    if receiver.kind == 14 {
+        if receiver.arg_count != 0 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "bytes_iter", type_count: 0, first: 0, second: 0)
+    }
+    if receiver.kind == 23 {
+        if receiver.arg_count != 2 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "map_iter", type_count: 2, first: __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1), second: __s0_buffer_get(U64, store.type_args, receiver.first_arg))
+    }
+    if receiver.kind == 24 {
+        if receiver.arg_count != 1 { return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0) }
+        return CoreIterCtorRec(word: "set_iter", type_count: 1, first: __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1), second: 0)
+    }
+    return CoreIterCtorRec(word: "", type_count: 0, first: 0, second: 0)
+}
+
 fn core_iter_function_symbol(state: State, parse: ParseStore, store: CheckStore, word: __s0_String) -> U64 {
     let target = core_iter_import_target(state, parse)
     if target == 0 { return 0 }
@@ -11066,34 +11109,33 @@ fn core_iter_function_symbol(state: State, parse: ParseStore, store: CheckStore,
     return 0
 }
 
-// A builtin IntoIterator call on a slice or Vec. The checker resolves the
-// module's constructor as an ordinary generic call, so no new MIR operation
-// or cgen case enters the pipeline.
+// A builtin IntoIterator call on one of the supported sequence receivers. The
+// checker resolves the module's constructor as an ordinary generic call, so no
+// new MIR operation or cgen case enters the pipeline.
 fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver: ExprDraftRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 342, call) }
     let receiver_type = __s0_buffer_get(CheckedTypeRec, store.types, receiver.checked_type - 1)
-    if receiver_type.kind != 8 && receiver_type.kind != 17 { return expr_token_fail(d, state, base, 341, callee) }
-    if receiver_type.arg_count != 1 { return expr_token_fail(d, state, base, 341, callee) }
-    var word: __s0_String = "slice_iter"
-    if receiver_type.kind == 17 { word = "vec_iter" }
+    let ctor = core_iter_ctor_for(store, receiver_type)
+    if len(ctor.word) == 0 { return expr_token_fail(d, state, base, 341, callee) }
     if core_iter_import_target(state, parse) == 0 { return expr_token_fail(d, state, base, 337, callee) }
-    let declaration = core_iter_function_symbol(state, parse, store, word)
+    let declaration = core_iter_function_symbol(state, parse, store, ctor.word)
     if declaration == 0 { return expr_token_fail(d, state, base, 338, callee) }
-    var param_at: U64 = 0
-    var at: U64 = 0
-    var scanning_param = true
-    while scanning_param && at < __s0_buffer_len(TypeParamRec, store.type_params) {
-        if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration {
-            param_at = at + 1
-            scanning_param = false
-        } else {
-            at = at + 1
-        }
-    }
-    if param_at == 0 { return expr_token_fail(d, state, base, 340, callee) }
-    let element = __s0_buffer_get(U64, store.type_args, receiver_type.first_arg - 1)
     var bindings = try __s0_buffer_new(InferenceBindingRec, d)
-    bindings = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: param_at, checked_type: element))
+    var bound: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let parameter = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if parameter.owner == declaration {
+            var argument: U64 = 0
+            if bound == 0 { argument = ctor.first }
+            if bound == 1 { argument = ctor.second }
+            if argument == 0 { return expr_token_fail(d, state, base, 340, callee) }
+            bindings = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: at + 1, checked_type: argument))
+            bound = bound + 1
+        }
+        at = at + 1
+    }
+    if bound != ctor.type_count { return expr_token_fail(d, state, base, 340, callee) }
     let instantiated = try instantiate_function(d, state, parse, store, declaration, bindings, owner, call)
     let instance = match instantiated {
         InstanceGood(value) => value
