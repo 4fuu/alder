@@ -353,6 +353,12 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 39 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" must be called") }
     if kind == 331 { return out_string("unit value statement has no effect; only a Unit-result call may stand alone") }
+    if kind == 337 { return out_string("into_iterator requires the core.iter module: add import core.iter") }
+    if kind == 338 { return out_string("into_iterator could not resolve the core.iter constructor") }
+    if kind == 339 { return out_string("into_iterator could not read the resolved iterator result type") }
+    if kind == 340 { return out_string("into_iterator could not read the core.iter constructor type parameter") }
+    if kind == 341 { return out_string("into_iterator is available on slices and Vec; convert arrays, Bytes, Map, and Set with slice, keys, values, or items first") }
+    if kind == 342 { return out_string("into_iterator takes no arguments") }
     // 333 retired with borrowed-place owner-domain provenance (D005B).
     if kind == 330 {
         if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" requires same-type integer operands: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }

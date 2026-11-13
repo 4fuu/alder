@@ -1286,6 +1286,21 @@ fn source_path_is(state: State, source: U64, word: __s0_String) -> Bool {
     return true
 }
 
+// A sysroot import may carry the installed root as a path prefix, so the
+// module identity is a path suffix rather than an exact logical path.
+fn source_path_suffix_is(state: State, source: U64, word: __s0_String) -> Bool {
+    let rec = __s0_buffer_get(SourceRec, state.sources, source)
+    let length = rec.path_end - rec.path_start
+    if length < len(word) { return false }
+    let offset = length - len(word)
+    var at: U64 = 0
+    while at < len(word) {
+        if __s0_buffer_get(U8, state.paths, rec.path_start + offset + at) != word[at] { return false }
+        at = at + 1
+    }
+    return true
+}
+
 // core.error is prelude-loaded from the installed sysroot. Its declarations
 // use the ordinary trait and record machinery, but the reserved prelude name
 // Error and global name lookup must admit this one source path.
@@ -6890,7 +6905,7 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
     return Ok(CallInferenceGood(CallInferenceRec(store: final_store, bindings: inferred)))
 }
 
-fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, receiver_at: U64, ordinal: U64, count: U64, bindings: __s0_Buffer(InferenceBindingRec), in_loop: Bool) -> Result(CallInferenceOutcome, __s0_Error) {
+fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, receiver_at: U64, ordinal: U64, count: U64, parameter_start: U64, bindings: __s0_Buffer(InferenceBindingRec), in_loop: Bool) -> Result(CallInferenceOutcome, __s0_Error) {
     if ordinal == count { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
     var arg_ordinal = runtime_start + ordinal + 1
     if receiver_at != 0 {
@@ -6905,7 +6920,7 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
             CheckBad(value) => value
         }))
     }
-    let parameter_id = use_by_ordinal(store, target, 5, ordinal)
+    let parameter_id = use_by_ordinal(store, target, 5, parameter_start + ordinal)
     let pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_id - 1).checked_type
     if !pattern_bound(store, pattern, bindings) {
         let variant = try infer_unary_variant_argument(d, state, parse, base, store, owner, arg, arg_link.node, pattern, bindings, in_loop)
@@ -6924,7 +6939,7 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
                 CallInferenceBad(value) => bindings
                 CallInferenceDefer => bindings
             }
-            return infer_call_arguments(d, state, parse, base, variant_store, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, inferred, in_loop)
+            return infer_call_arguments(d, state, parse, base, variant_store, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, parameter_start, inferred, in_loop)
         }
         if match variant {
             CallInferenceGood(value) => false
@@ -6971,7 +6986,7 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
             }))
         }
     }
-    return infer_call_arguments(d, state, parse, base, after, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, inferred, in_loop)
+    return infer_call_arguments(d, state, parse, base, after, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, parameter_start, inferred, in_loop)
 }
 
 fn explicit_function_bindings(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, declaration: U64, application: SyntaxRec, ordinal: U64, param_at: U64, first_link: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(CallInferenceOutcome, __s0_Error) {
@@ -7026,7 +7041,7 @@ fn check_explicit_function_call(d: Domain, state: State, parse: ParseStore, base
         CallInferenceBad(value) => seed
         CallInferenceDefer => seed
     }
-    let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied + receivers, receivers, 0, argument_count + receivers, bindings, in_loop)
+    let arguments = try infer_call_arguments(d, state, parse, base, with_types, owner, call, target, supplied + receivers, receivers, 0, argument_count + receivers, 0, bindings, in_loop)
     let current = match arguments {
         CallInferenceGood(value) => value.store
         CallInferenceBad(value) => value
@@ -7933,7 +7948,7 @@ fn check_function_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
                 }
             }
         }
-        let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, bindings, in_loop)
+        let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, 0, bindings, in_loop)
         let current = match inferred {
             CallInferenceGood(value) => value.store
             CallInferenceBad(value) => value
@@ -10326,6 +10341,10 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_draft.deferred { return expr_deferred(base) }
         let receiver_type = __s0_buffer_get(CheckedTypeRec, current.types, receiver_draft.checked_type - 1)
+        // IntoIterator surface (M8.1): builtin sequence receivers materialize
+        // the matching core.iter snapshot iterator. Nominal receivers keep
+        // their own trait or inherent into_iterator method.
+        if receiver_type.kind != 7 && node_word(state, callee, "into_iterator") { return check_into_iterator_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_draft, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 19 { return check_table_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if receiver_type.kind == 23 || receiver_type.kind == 24 { return check_ordered_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         // Order surface (M8): the builtin less method on scalar receivers.
@@ -10379,13 +10398,13 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         }
         if receiver_type.kind != 7 { return expr_token_fail(d, state, base, 61, callee) }
         let target = inherent_symbol_named(state, parse, current, callee, receiver_type.target, true)
-        if impl_method_has_impl_params(current, target) { return check_inherent_method_call(d, state, parse, base, store, owner, call, call_id, target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+        if impl_method_has_impl_params(current, target) { return check_inherent_method_call(d, state, parse, base, current, owner, call, call_id, target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
         if target == 0 {
             // Static trait dispatch: inherent methods win, then the unique
             // trait implementation providing this method name resolves.
             let trait_method = trait_receiver_method(state, parse, current, receiver_type, callee)
             if trait_method.ambiguous { return expr_token_fail(d, state, base, 119, callee) }
-            if trait_method.target != 0 { return check_trait_method_call(d, state, parse, base, store, owner, call, call_id, trait_method.target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
+            if trait_method.target != 0 { return check_trait_method_call(d, state, parse, base, store, current, owner, call, call_id, trait_method.target, receiver_draft.checked_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
             if trait_impl_for_builtin_type(current, 1, receiver_draft.checked_type) != 0 || trait_impl_for_builtin_type(current, 2, receiver_draft.checked_type) != 0 {
                 if node_word(state, callee, "eq") || node_word(state, callee, "hash") { return expr_token_fail(d, state, base, 126, callee) }
             }
@@ -10959,6 +10978,96 @@ fn append_display_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, ch
     let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
     let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 8, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+// The core.iter module owns the snapshot iterator types. The builtin
+// IntoIterator surface materializes the matching constructor from that module.
+// The import node is the same route a direct iter.slice_iter call uses: its
+// target source identifies the module, and its public symbols are scanned by
+// name. The user must import core.iter so the module joins the graph.
+fn core_iter_import_target(state: State, parse: ParseStore) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, at) - 1)
+        if root.kind == 41 || root.kind == 42 {
+            let target = import_target_source(state, parse, root)
+            if target != 0 && source_path_suffix_is(state, target - 1, "core/iter.al") { return target }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+fn core_iter_function_symbol(state: State, parse: ParseStore, store: CheckStore, word: __s0_String) -> U64 {
+    let target = core_iter_import_target(state, parse)
+    if target == 0 { return 0 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.module_source == target && symbol.public && symbol_name_matches_word(state, symbol, word) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+// A builtin IntoIterator call on a slice or Vec. The checker resolves the
+// module's constructor as an ordinary generic call, so no new MIR operation
+// or cgen case enters the pipeline.
+fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, callee: SyntaxRec, receiver: ExprDraftRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 342, call) }
+    let receiver_type = __s0_buffer_get(CheckedTypeRec, store.types, receiver.checked_type - 1)
+    if receiver_type.kind != 8 && receiver_type.kind != 17 { return expr_token_fail(d, state, base, 341, callee) }
+    if receiver_type.arg_count != 1 { return expr_token_fail(d, state, base, 341, callee) }
+    var word: __s0_String = "slice_iter"
+    if receiver_type.kind == 17 { word = "vec_iter" }
+    if core_iter_import_target(state, parse) == 0 { return expr_token_fail(d, state, base, 337, callee) }
+    let declaration = core_iter_function_symbol(state, parse, store, word)
+    if declaration == 0 { return expr_token_fail(d, state, base, 338, callee) }
+    var param_at: U64 = 0
+    var at: U64 = 0
+    var scanning_param = true
+    while scanning_param && at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration {
+            param_at = at + 1
+            scanning_param = false
+        } else {
+            at = at + 1
+        }
+    }
+    if param_at == 0 { return expr_token_fail(d, state, base, 340, callee) }
+    let element = __s0_buffer_get(U64, store.type_args, receiver_type.first_arg - 1)
+    var bindings = try __s0_buffer_new(InferenceBindingRec, d)
+    bindings = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: param_at, checked_type: element))
+    let instantiated = try instantiate_function(d, state, parse, store, declaration, bindings, owner, call)
+    let instance = match instantiated {
+        InstanceGood(value) => value
+        InstanceBad(value) => InstanceValueRec(store: value, instance: 0)
+    }
+    if instance.instance == 0 { return Ok(ExprBad(instance.store)) }
+    let modes = try check_existing_call_modes(d, state, parse, base, instance.store, owner, call, instance.instance, 0, 1, 0, 1)
+    let checked_instance = match modes {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match modes {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(checked_instance)) }
+    var result_use = use_by_ordinal(checked_instance, instance.instance, 8, 0)
+    if result_use == 0 { result_use = use_by_ordinal(checked_instance, instance.instance, 6, 0) }
+    if result_use == 0 { return expr_token_fail(d, state, base, 339, callee) }
+    let result_type = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, result_use - 1).checked_type
+    if expected != 0 && !(try expression_type_equal(d, state, parse, checked_instance, result_type, expected)) { return expr_token_type_fail(d, state, checked_instance, mismatch_kind, mismatch_node, expected, result_type) }
+    return append_into_iterator_builtin(d, checked_instance, owner, call_id, result_type, instance.instance, receiver.expression, site_kind, site_syntax)
+}
+
+fn append_into_iterator_builtin(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: checked_type, variant_use: 0, builtin: 1002, place: 0))
+    let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
+    let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 18, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
     let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
@@ -14436,11 +14545,11 @@ fn generic_impl_for_method(store: CheckStore, root_id: U64) -> TraitImplRec {
 // and the call then proceeds exactly like a generic function call
 // (inference, instance creation, mode checks). Methods of non-generic
 // implementations keep the plain path.
-fn check_trait_method_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, receiver_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+fn check_trait_method_call(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, receiver_store: CheckStore, owner: U64, call: SyntaxRec, call_id: U64, target: U64, receiver_type: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
     let method = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
     let found = generic_impl_for_method(store, method.inherent_owner)
     if found.first_method == 0 || impl_param_count_for(store, found.first_method) == 0 { return check_function_call(d, state, parse, base, store, owner, call, call_id, target, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
-    return check_impl_method_call(d, state, parse, base, store, owner, call, call_id, target, found.self_type, receiver_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
+    return check_impl_method_call(d, state, parse, base, receiver_store, owner, call, call_id, target, found.self_type, receiver_type, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
 }
 
 // An inherent method of a generic implementation is instantiated from its own
@@ -14473,6 +14582,7 @@ fn check_impl_method_call(d: Domain, state: State, parse: ParseStore, base: Chec
         if method.type_arity == 0 { return expr_token_fail(d, state, base, 56, call) }
         return check_explicit_function_call(d, state, parse, base, store, owner, call, call_id, target, explicit_count, bindings, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
     }
+    let receivers = call_receiver_links(state, parse, store, call)
     let argument_count = call_link_count(parse, call) - 1
     let parameter_count = use_count(store, target, 5)
     if argument_count != parameter_count { return expr_token_fail(d, state, base, 41, call) }
@@ -14489,7 +14599,9 @@ fn check_impl_method_call(d: Domain, state: State, parse: ParseStore, base: Chec
             UnifyConflict => true
         } { return expr_token_fail(d, state, base, 58, call) }
     }
-    let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, 0, 0, 0, argument_count, bindings, in_loop)
+    // The receiver link was checked by the caller before dispatch; only the
+    // explicit arguments are checked against their parameter patterns here.
+    let inferred = try infer_call_arguments(d, state, parse, base, store, owner, call, target, receivers, 0, 0, argument_count - receivers, receivers, bindings, in_loop)
     let current = match inferred {
         CallInferenceGood(value) => value.store
         CallInferenceBad(value) => value

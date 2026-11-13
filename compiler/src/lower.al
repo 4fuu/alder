@@ -5296,9 +5296,10 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1001 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1002 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin == 1002 { return lower_into_iterator_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 1000 { return lower_order_less_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
-        if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+    if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         // 968 is the sequence-surface [U8].to_bytes, numbered clear of the
         // dense families above; it shares the M7.1 sequence lowering.
         if annotation.builtin == 968 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -7789,6 +7790,39 @@ fn lower_interpolation_expression(d: Domain, source_state: State, spans: __s0_Bu
 // integers; Bool stays raw) and formats through the checked str.display
 // instruction: domain in slot a, the value in slot b, with the allocation
 // failure edge to the panic block.
+// The builtin IntoIterator surface materializes the core.iter constructor
+// as an ordinary call. The checker records the constructor instance in the
+// annotation target and the receiver as the single child; this helper emits
+// the same call shape the direct-call path uses, including the caller domain
+// operand when the constructor owns storage.
+fn lower_into_iterator_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block)
+    if !receiver.state.valid { return Ok(receiver) }
+    let result_type = try lower_type(d, source_state, store, receiver.state, expression.checked_type)
+    var current = result_type.state
+    var result: U64 = 0
+    if result_type.id != mir_type_unit() {
+        let value = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+        current = value.state
+        result = value.id
+    }
+    let target = lower_owner_lookup(current.owners, annotation.target)
+    if target == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let instr = try lower_add_instr(d, current, function, block, mir_op_call(), result, 0, 0, 0, 0, target, "")
+    current = instr.state
+    var argument_ordinal: U64 = 0
+    if current.has_storage && !lower_owner_aliases_domain(source_state, store, annotation.target) {
+        let domain = lower_domain_value(current, store, owner)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        current = try lower_add_instr_operand(d, current, instr.id, 0, domain, mir_operand_instruction(), "")
+        argument_ordinal = 1
+    }
+    current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, receiver.id, mir_operand_instruction(), "")
+    return Ok(LowerStep(state: current, id: result))
+}
+
 fn lower_display_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
@@ -7885,7 +7919,7 @@ fn lower_model_c_convert_ok(store: CheckStore, annotation: CallAnnotationRec, ex
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1001 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1002 { return false }
     if annotation.builtin == 972 {
         if expression.child_count != 1 || annotation.target != 0 { return false }
         let receiver_type = lower_builtin_child_type(store, expression, 0)
@@ -7909,6 +7943,18 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
             return result.kind == 1 && result.target == 1
         }
         return false
+    }
+    if annotation.builtin == 1002 {
+        // IntoIterator surface: one builtin sequence receiver and the
+        // core.iter constructor instance recorded in the target.
+        if expression.child_count != 1 || annotation.target == 0 || annotation.target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 { return false }
+        let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if receiver.kind != 8 && receiver.kind != 17 { return false }
+        let constructor = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+        if constructor.kind != 13 { return false }
+        return lower_type_concrete(store, annotation.checked_type)
     }
     if annotation.builtin == 1001 {
         // M8 Display surface: a builtin-domain receiver, no argument, and
@@ -8591,7 +8637,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1001 { return false } }
+            else { if item.builtin == 1002 && item.target != 0 { } else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1002 { return false } } }
             at = at + 1
         } else {
         if item.kind == 8 {
