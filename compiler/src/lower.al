@@ -8019,6 +8019,9 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
         if !lower_into_iterator_receiver_type_ok(receiver) { return false }
         let constructor = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+        // A generic constructor is an instantiated kind-13 symbol. A
+        // zero-type-parameter constructor such as bytes_iter needs no instance
+        // record and remains its kind-12 declaration symbol.
         if constructor.kind != 12 && constructor.kind != 13 { return false }
         return lower_type_concrete(store, annotation.checked_type)
     }

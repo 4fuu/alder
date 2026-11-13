@@ -6744,9 +6744,15 @@ fn check_existing_call_modes(d: Domain, state: State, parse: ParseStore, base: C
     let expression = expression_for_syntax(store, owner, link.node)
     if expression == 0 { return expr_deferred(base) }
     // An instantiated function carries role-7 parameters; a non-generic
-    // declaration needs no instance record and keeps its role-5 parameters.
-    var parameter_id = use_by_ordinal(store, target, 7, ordinal)
-    if parameter_id == 0 { parameter_id = use_by_ordinal(store, target, 5, ordinal) }
+    // declaration (such as bytes_iter) needs no instance record and keeps its
+    // role-5 parameters. Select the role from the resolved symbol kind, the
+    // same contract the parameter bindings use, instead of probing one role
+    // and falling back.
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return expr_token_fail(d, state, base, 343, arg) }
+    let target_symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    var parameter_role: U64 = 5
+    if target_symbol.kind == 13 { parameter_role = 7 }
+    let parameter_id = use_by_ordinal(store, target, parameter_role, ordinal)
     if parameter_id == 0 || parameter_id > __s0_buffer_len(DeclTypeUseRec, store.uses) { return expr_token_fail(d, state, base, 343, arg) }
     let parameter = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_id - 1)
     if ordinal + 1 < count && call_argument_requires_final(store, parameter.checked_type, expression) { return expr_token_fail(d, state, base, 104, arg) }
