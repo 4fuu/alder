@@ -239,10 +239,13 @@ provenance instead of passing through `copy_to_domain`. M7.3 slice 3
 generalizes direct immutable-view results to ordinary aggregates: a record,
 enum, `Option`, `Result`, or array result whose scoped parts are all
 immutable slices is admitted when every scoped leaf is materializable, and
-its view parts are recursively materialized into caller-result storage.
-Mutable views and view-holding aggregates stay non-escaping at bindings,
-arguments, match scrutinees, and cleanup initializers, so their exclusivity,
-overlap, and invalidation checks are unchanged. Domains remain
+its view parts are recursively materialized into caller-result storage. A
+local may bind such an aggregate when every view is rooted in a borrowed
+parameter or in a call result whose own return was checked; a view rooted in
+a local or a `take` parameter stays rejected because its storage dies with
+the callee. Mutable views, aggregate arguments, match scrutinees, and cleanup
+initializers remain non-escaping, so their exclusivity, overlap, and
+invalidation checks are unchanged. Domains remain
 absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.

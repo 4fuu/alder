@@ -986,6 +986,62 @@ fn checked_type_views_materializable(d: Domain, state: State, parse: ParseStore,
     return Ok(true)
 }
 
+// Whether a view expression is rooted in a borrowed parameter. Such a view
+// points into caller-owned storage and may appear in a value that escapes the
+// callee; a view rooted in a local or a take parameter may not.
+fn checked_view_root_parameter(parse: ParseStore, store: CheckStore, expression_id: U64) -> Bool {
+    let root = mut_argument_place_root(store, expression_id)
+    if root == 0 || root > __s0_buffer_len(LocalRec, store.locals) { return false }
+    return binding_is_borrowed_parameter(parse, __s0_buffer_get(LocalRec, store.locals, root - 1))
+}
+
+// M7.3 slice 3 origin check: every scoped leaf in an aggregate expression must
+// be an immutable view rooted in a borrowed parameter, or in a call result
+// whose own return was checked. A view of a local or a take parameter would
+// outlive its storage when the aggregate is bound across a call boundary or
+// returned, so it stays rejected even though the type is materializable.
+fn checked_aggregate_view_origin_ok(d: Domain, state: State, parse: ParseStore, store: CheckStore, expression_id: U64, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if depth > 32 { return Ok(false) }
+    if !(try checked_type_contains_scoped(d, state, parse, store, checked_type)) { return Ok(true) }
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind == 1 || expression.kind == 5 {
+        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(false) }
+        return Ok(binding_is_borrowed_parameter(parse, __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)))
+    }
+    if expression.kind == 18 {
+        // A slice, subview, or other view-forming builtin is safe only when
+        // its receiver is caller storage. A view of a temporary call result
+        // or a local would not survive the callee.
+        if expression.child_count == 0 || expression.first_child == 0 { return Ok(false) }
+        let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        return Ok(checked_view_root_parameter(parse, store, receiver_id))
+    }
+    if expression.kind == 21 {
+        if expression.child_count != 1 || expression.first_child == 0 { return Ok(false) }
+        let base_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+        let base = __s0_buffer_get(CheckedExprRec, store.expressions, base_id - 1)
+        if base.kind == 8 || base.kind == 9 || base.kind == 10 || base.kind == 14 || base.kind == 15 || base.kind == 16 || base.kind == 17 {
+            return checked_aggregate_view_origin_ok(d, state, parse, store, base_id, base.checked_type, depth + 1)
+        }
+        return Ok(checked_view_root_parameter(parse, store, expression_id))
+    }
+    // A direct call returns a value whose own return path enforced this rule.
+    if expression.kind == 8 { return Ok(true) }
+    if expression.kind == 9 || expression.kind == 10 || expression.kind == 14 || expression.kind == 15 || expression.kind == 16 || expression.kind == 17 || expression.kind == 23 {
+        var child: U64 = 0
+        while child < expression.child_count {
+            if expression.first_child == 0 || expression.first_child - 1 + child > __s0_buffer_len(CheckedExprChildRec, store.expression_children) { return Ok(false) }
+            let child_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + child).expression
+            let child_expression = __s0_buffer_get(CheckedExprRec, store.expressions, child_id - 1)
+            if !(try checked_aggregate_view_origin_ok(d, state, parse, store, child_id, child_expression.checked_type, depth + 1)) { return Ok(false) }
+            child = child + 1
+        }
+        return Ok(true)
+    }
+    return Ok(false)
+}
+
 fn primitive_map_key(state: State, parse: ParseStore, checked: CheckedTypeRec) -> Bool {
     return checked.kind == 1 && (checked.target == 1 || (checked.target >= 6 && checked.target <= 9))
 }
@@ -11973,7 +12029,15 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
         let call = __s0_buffer_get(CallAnnotationRec, ostore.call_annotations, initializer.annotation - 1)
         if call.builtin != 24 && call.builtin != 25 { return body_token_fail(d, state, ostore, 104, statement) }
     }
-    if category.contains_scoped && annotation.kind != 8 && annotation.kind != 18 { return body_token_fail(d, state, ostore, 104, statement) }
+    if category.contains_scoped && annotation.kind != 8 && annotation.kind != 18 {
+        var record_binding = false
+        if annotation.kind == 7 && annotation.target != 0 && annotation.target <= __s0_buffer_len(SymbolRec, ostore.symbols) {
+            record_binding = __s0_buffer_get(SymbolRec, ostore.symbols, annotation.target - 1).kind == 2
+        }
+        if !record_binding { return body_token_fail(d, state, ostore, 104, statement) }
+        if !(try checked_type_views_materializable(d, state, parse, ostore, annotated)) { return body_token_fail(d, state, ostore, 104, statement) }
+        if !(try checked_aggregate_view_origin_ok(d, state, parse, ostore, draft.expression, annotated, 0)) { return body_token_fail(d, state, ostore, 104, statement) }
+    }
     if category.category == 2 {
         if borrowed_parameter_root(parse, ostore, draft.expression) != 0 { return body_token_fail(d, state, ostore, 345, init) }
         if statement.kind == 16 { return body_token_fail(d, state, ostore, 95, statement) }
@@ -12099,6 +12163,7 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
         // views and aggregates with unprovable capability leaves stay
         // rejected.
         if category.contains_scoped && !(try checked_type_views_materializable(d, state, parse, current, result_use.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
+        if category.contains_scoped && !(try checked_aggregate_view_origin_ok(d, state, parse, current, expression, result_use.checked_type, 0)) { return body_token_fail(d, state, current, 104, statement) }
         let returned = __s0_buffer_get(CheckedExprRec, current.expressions, expression - 1)
         if returned.kind == 21 {
             // Returning an affine field of the taken owner is a field move,

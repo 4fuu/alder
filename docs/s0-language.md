@@ -373,10 +373,12 @@ view results whose scoped leaves are not all immutable slices, infinite value
 recursion, unsupported map keys/values,
 unsupported C signatures, and specialization-expanding polymorphic recursion.
 Ordinary aggregates may declare immutable-view fields and return them: M7.3
-lowering materializes such results into caller-result storage, while local
-bindings, arguments, match scrutinees, and cleanup initializers still reject
-view-holding aggregates. The exact restrictions are pinned by `frontend`
-acceptance/rejection tests and
+lowering materializes such results into caller-result storage. A local may
+bind a returned record when every view is rooted in a borrowed parameter or a
+checked call result; mutable views, views rooted in the callee's locals or
+`take` parameters, aggregate arguments, match scrutinees, and cleanup
+initializers still reject view-holding aggregates. The exact restrictions are
+pinned by `frontend` acceptance/rejection tests and
 the active Alder checker conformance harness.
 
 ## Statements and expressions
