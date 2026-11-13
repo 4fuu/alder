@@ -361,7 +361,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	}
 	if in.Op.ProducesResult() {
 		if in.Result == mir.NoValue {
-			if !droppableResult(m, in) {
+			if !droppableResult(m, f, in) {
 				errs = append(errs, Error{Loc: loc, Msg: "operation produces a value but binds no result"})
 			}
 		}
@@ -803,8 +803,9 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 }
 
 // droppableResult reports whether a producing but unbound instruction is
-// allowed: a call or FFI call whose callee or import result type is unit.
-func droppableResult(m *mir.Module, in *mir.Instr) bool {
+// allowed: a call or FFI call whose callee or import result type is unit, or
+// an indirect call whose function value has a unit result type.
+func droppableResult(m *mir.Module, f *mir.Function, in *mir.Instr) bool {
 	switch in.Op {
 	case mir.OpCall:
 		return int(in.Callee) < len(m.Functions) && m.Functions[in.Callee] != nil && m.Functions[in.Callee].Result == mir.TypeUnit
@@ -813,6 +814,9 @@ func droppableResult(m *mir.Module, in *mir.Instr) bool {
 	case mir.OpCBindingCall:
 		_, fn, ok := m.BindingFuncAt(in.CBinding)
 		return ok && fn.Sig.Result == mir.TypeUnit
+	case mir.OpCallValue:
+		ft, ok := f.ValueType(in.A)
+		return ok && m.ValidType(ft) && m.Types[ft].Kind == mir.TypeFunction && m.Types[ft].Sig.Result == mir.TypeUnit
 	}
 	return false
 }

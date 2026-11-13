@@ -921,6 +921,25 @@ if steps > place_total { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_b
     }
     return Ok(out)
 }
+// An indirect call whose function value has a unit result is as droppable as
+// a direct unit call: cgen emits the call without assigning a result. MIR
+// value IDs are function-local, so resolve the callee through its owning
+// function and ordinal before reading the erased function type.
+fn mir_vcall_value_droppable(store: MirStore, instruction: MirInstrRec) -> Bool {
+    if instruction.op != mir_op_call_value() || instruction.a == 0 { return false }
+    var at: U64 = 0
+    while at < __s0_buffer_len(MirValueRec, store.values) {
+        let callee = __s0_buffer_get(MirValueRec, store.values, at)
+        if callee.function == instruction.function && callee.ordinal + 1 == instruction.a {
+            if callee.value_type == 0 || callee.value_type > __s0_buffer_len(MirTypeRec, store.types) { return false }
+            let callee_type = __s0_buffer_get(MirTypeRec, store.types, callee.value_type - 1)
+            return callee_type.kind == mir_type_kind_function() && callee_type.result_type == mir_type_unit()
+        }
+        at = at + 1
+    }
+    return false
+}
+
 fn mir_vphase1_instructions(d: Domain, store: MirStore, version: U64, initial: __s0_Buffer(MirVerifyDiagRec)) -> Result(__s0_Buffer(MirVerifyDiagRec), __s0_Error) {
     var out = initial
     let phase = mir_verify_phase_integrity()
@@ -1064,6 +1083,7 @@ scan = scan + 1 }
             if i.op == mir_op_call() && mir_vid_valid(i.target, function_count) && __s0_buffer_get(MirFunctionRec, store.functions, i.target - 1).result_type == mir_type_unit() { droppable = true }
             if i.op == mir_op_ffi_call_unsafe() && mir_vid_valid(i.target, __s0_buffer_len(MirImportRec, store.imports)) && __s0_buffer_get(MirImportRec, store.imports, i.target - 1).result_type == mir_type_unit() { droppable = true }
             if i.op == mir_op_c_binding_call() && mir_vid_valid(i.target, __s0_buffer_len(MirBindingFnRec, store.binding_funcs)) && __s0_buffer_get(MirBindingFnRec, store.binding_funcs, i.target - 1).result_type == mir_type_unit() { droppable = true }
+            if mir_vcall_value_droppable(store, i) { droppable = true }
             if (produces && !has_result && !droppable) || (!produces && has_result) { out = try mir_vadd(d, out, mir_vdiag(phase, mir_vdiag_bad_result(), i.function, i.block, id, 0, 0, 0, id, 0, i.result, 0)) }
             let fail_count = fail_counts[id]
             let checked = mir_vop_checked(i.op)

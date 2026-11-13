@@ -995,6 +995,18 @@ fn checked_view_root_parameter(parse: ParseStore, store: CheckStore, expression_
     return binding_is_borrowed_parameter(parse, __s0_buffer_get(LocalRec, store.locals, root - 1))
 }
 
+// A checked expression that lowers as an ordinary call returns a value whose
+// own return path applied the aggregate-view origin rule. The IntoIterator
+// builtin is one of those calls: it materializes the module constructor and
+// lowers with the same call shape, so a view-bearing result is a checked call
+// result rather than a view formed directly in the caller.
+fn checked_expression_is_call_result(store: CheckStore, expression: CheckedExprRec) -> Bool {
+    if expression.kind == 8 { return true }
+    if expression.kind != 18 || expression.annotation == 0 { return false }
+    let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+    return annotation.kind == 5 && annotation.builtin == 1002
+}
+
 // M7.3 slice 3 origin check: every scoped leaf in an aggregate expression must
 // be an immutable view rooted in a borrowed parameter, or in a call result
 // whose own return was checked. A view of a local or a take parameter would
@@ -1009,6 +1021,8 @@ fn checked_aggregate_view_origin_ok(d: Domain, state: State, parse: ParseStore, 
         if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(false) }
         return Ok(binding_is_borrowed_parameter(parse, __s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1)))
     }
+    // A direct call returns a value whose own return path enforced this rule.
+    if checked_expression_is_call_result(store, expression) { return Ok(true) }
     if expression.kind == 18 {
         // A slice, subview, or other view-forming builtin is safe only when
         // its receiver is caller storage. A view of a temporary call result
@@ -1027,7 +1041,6 @@ fn checked_aggregate_view_origin_ok(d: Domain, state: State, parse: ParseStore, 
         return Ok(checked_view_root_parameter(parse, store, expression_id))
     }
     // A direct call returns a value whose own return path enforced this rule.
-    if expression.kind == 8 { return Ok(true) }
     if expression.kind == 9 || expression.kind == 10 || expression.kind == 14 || expression.kind == 15 || expression.kind == 16 || expression.kind == 17 || expression.kind == 23 {
         var child: U64 = 0
         while child < expression.child_count {

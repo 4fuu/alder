@@ -88,12 +88,12 @@ tooling-milestone work. `core.range` is deferred by
 scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
-modules are post-M8. The remaining `core.iter`, `core.hash`,
-`std.parse`, and `std.signal` items belong to
+modules are post-M8. The `core.memory`, `core.hash`, `core.iter`,
+`std.parse`, `std.signal`, and `Deque`/heap additions are landed under
 [Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion), the
-immediate follow-on to M8. `core.memory` and the `Deque`/heap collection
-additions have already landed there. `std.c` is the verified C-interop surface
-rather than a `.al` module; its exit audit is complete.
+immediate follow-on to M8; the independent audit remains open. `std.c` is the
+verified C-interop surface rather than a `.al` module; its exit audit is
+complete.
 
 The M8 exit audit maps every ROADMAP M8 exit criterion and named area to a
 production-driver test. Live affine owners on a terminating
@@ -146,7 +146,8 @@ Required `core` areas:
   exclusive mutable operations;
 - `core.collection`: fundamental `Vec`, insertion-ordered `Map`/`Set`, and
   their checked/fallible capacity operations;
-- `core.iter`: static iterator traits and common lazy adapters;
+- `core.iter`: static iterator traits and common lazy adapters
+  ([snapshot](api/core.iter-v1.md));
 - `core.hash`: stable hashing contract plus process-randomized builders for
   attack-facing maps;
 - `core.format`: `Display`, formatting arguments, and the text rules used by
@@ -249,6 +250,35 @@ Required modules:
 `String` indexing is never integer indexing. Byte equality/hashing does not
 implicitly normalize Unicode. Unicode tables are toolchain-versioned and their
 version is reported by the library.
+
+## Iteration
+
+`core.iter` v1 installs the static iterator traits and the common lazy
+adapters; its public contract is the
+[`core.iter` v1 snapshot](api/core.iter-v1.md). `Iterator(Item)` and
+`IntoIterator(IteratorType, Item)` are builtin static traits: there are no
+trait objects, associated types, or runtime dispatch metadata. Immutable
+slices and `Vec(T)` expose the builtin `.into_iterator()` constructor; the
+installed `SliceIter(T)` and `VecIter(T)` values hold immutable `[T]` views,
+not owned vector copies. Construction materializes the view into caller-result
+storage, copying O(n) elements and storage; later source mutation does not
+affect the iterator. Each lazy adapter constructor returns a view-bearing
+aggregate and may materialize its inner iterator again, so construction of a
+chain can copy O(k·n) elements even though iteration itself is lazy. The
+adapters are `map`, `filter`, `filter_map`,
+`enumerate` over `Indexed(T)`, `take_count`, `skip`, `chain`, and `zip` over
+`Pair(A, B)`, with `zip` stopping at the shorter input. The terminals are
+`to_vec`, `fold`, `for_each`, `count`, `any`, `all`, `find`, and `position`.
+Terminals consume a mutable cursor.
+
+`for value in sequence` remains the builtin array/slice/`Vec` fast path. This
+snapshot does not desugar `for` through `IntoIterator`; that frontend work,
+`String` scalar iteration, exclusive `MutSlice`/`IterMut` iteration,
+double-ended iteration, and a `collect`/`FromIterator` protocol beyond `to_vec`
+are later additions. The installed module is
+[`core.iter`](api/core.iter-v1.md); the production-driver evidence and deferred
+list are recorded in
+[Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion).
 
 ## Collections and identity
 

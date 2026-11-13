@@ -637,6 +637,31 @@ bb0:
 	}
 	if errs := Module(mustParse(t, `mir 5
 
+fn @ignore(%x: u64) {
+bb0:
+  return
+}
+
+fn @apply(%f: function(fn(u64) -> unit), %x: u64) {
+bb0:
+  call.value %f(%x)
+  return
+}
+`)); len(errs) != 0 {
+		t.Fatalf("unit call.value without a result rejected: %s", Errors(errs).String())
+	}
+	if _, err := mir.Parse(`mir 5
+
+fn @apply(%f: function(fn(u64) -> u64), %x: u64) {
+bb0:
+  call.value %f(%x)
+  return
+}
+`); err == nil || !strings.Contains(err.Error(), "produces a value; bind it") {
+		t.Fatalf("non-unit call.value without a result not rejected: %v", err)
+	}
+	if errs := Module(mustParse(t, `mir 5
+
 fn @apply(%f: function(fn(u64) -> u64), %x: i64) -> u64 {
 bb0:
   %r = call.value %f(%x)

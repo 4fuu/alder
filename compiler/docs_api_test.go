@@ -130,6 +130,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.iter-v1.al": {
+			style:   "project",
+			srcName: "core_iter_example.al",
+			mainText: `module hello.main
+
+import hello.core_iter_example { core_iter_example }
+
+pub fn main() -> I32 {
+    if core_iter_example() == 99 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.text-v1.al": {
 			style:   "project",
 			srcName: "std_text_example.al",

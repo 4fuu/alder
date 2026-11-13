@@ -984,7 +984,8 @@ func (p *parser) parseInstrUnbound() error {
 }
 
 // mayDropResult reports whether a producing operation may be left unbound:
-// calls and FFI calls whose callee or import result type is unit.
+// calls and FFI calls whose callee or import result type is unit, and an
+// indirect call whose function value has a unit result type.
 func (p *parser) mayDropResult(in *Instr) bool {
 	switch in.Op {
 	case OpCall:
@@ -999,6 +1000,11 @@ func (p *parser) mayDropResult(in *Instr) bool {
 		_, fn, ok := p.m.BindingFuncAt(in.CBinding)
 		if ok {
 			return fn.Sig.Result == TypeUnit
+		}
+	case OpCallValue:
+		ft, ok := p.fn.ValueType(in.A)
+		if ok && p.m.ValidType(ft) && p.m.Types[ft].Kind == TypeFunction {
+			return p.m.Types[ft].Sig.Result == TypeUnit
 		}
 	}
 	return false
