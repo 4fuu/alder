@@ -4533,7 +4533,7 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     }
     var active = block
     var receiver = LowerStep(state: state, id: 0)
-    if annotation.builtin == 21 && annotation.place != 0 && lower_place_root_mut_self(store, annotation.place) {
+    if annotation.builtin == 21 && annotation.place != 0 && lower_place_root_mut(store, annotation.place) {
         // Push also mutates the receiver place directly. A value copy of a
         // field vector would collapse capacity to length, forcing every
         // mut-self push to reallocate and copy the whole vector.
@@ -5915,14 +5915,17 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     return lower_index_place(d, source_state, spans, store, current, owner, function, block, base, base_type, checked.index, checked.root, base_is_local, environment, panic_block)
 }
 
-// Whether a receiver place is rooted in a `mut self` receiver. Reading such
-// a field through the place keeps its storage in the caller's owner domain;
-// other field and element roots keep the established value-copy path.
-fn lower_place_root_mut_self(store: CheckStore, place: U64) -> Bool {
+// Whether a receiver place is rooted in a mutable borrowed owner (`mut self`
+// or a `mut` parameter). Reading such a field through the place keeps its
+// storage in the caller's owner domain; ordinary locals and element roots keep
+// the established value-copy path. `mutable` is 1 for the mutable mode and 2
+// for the take mode, whose value is owned by the callee frame.
+fn lower_place_root_mut(store: CheckStore, place: U64) -> Bool {
     if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
     let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
     if checked.root == 0 || checked.root > __s0_buffer_len(LocalRec, store.locals) { return false }
-    return __s0_buffer_get(LocalRec, store.locals, checked.root - 1).mutable == 2
+    let binding = __s0_buffer_get(LocalRec, store.locals, checked.root - 1)
+    return binding.kind == 1 && binding.mutable == 1
 }
 
 // The place a mutating collection operation writes its rebuilt header back
