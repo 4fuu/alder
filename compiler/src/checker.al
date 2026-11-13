@@ -1042,6 +1042,26 @@ fn checked_aggregate_view_origin_ok(d: Domain, state: State, parse: ParseStore, 
     return Ok(false)
 }
 
+// A match scrutinee may be a view-bearing Option/Result only when its scoped
+// leaves are materializable and the scrutinee is a call result or an ordinary
+// local that the binding path already admitted. A view-bearing parameter stays
+// rejected because no aggregate argument can safely carry a scoped view into
+// the callee.
+fn checked_aggregate_match_scrutinee_ok(d: Domain, state: State, parse: ParseStore, store: CheckStore, expression_id: U64, checked_type: U64) -> Result(Bool, __s0_Error) {
+    if !(try checked_type_contains_scoped(d, state, parse, store, checked_type)) { return Ok(true) }
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
+    let scrutinee_type = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if scrutinee_type.kind != 9 && scrutinee_type.kind != 10 { return Ok(false) }
+    if !(try checked_type_views_materializable(d, state, parse, store, checked_type)) { return Ok(false) }
+    if expression_id == 0 || expression_id > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(false) }
+    let expression = __s0_buffer_get(CheckedExprRec, store.expressions, expression_id - 1)
+    if expression.kind == 1 || expression.kind == 5 {
+        if expression.parameter_use == 0 || expression.parameter_use > __s0_buffer_len(LocalRec, store.locals) { return Ok(false) }
+        return Ok(__s0_buffer_get(LocalRec, store.locals, expression.parameter_use - 1).kind == 2)
+    }
+    return checked_aggregate_view_origin_ok(d, state, parse, store, expression_id, checked_type, 0)
+}
+
 fn primitive_map_key(state: State, parse: ParseStore, checked: CheckedTypeRec) -> Bool {
     return checked.kind == 1 && (checked.target == 1 || (checked.target >= 6 && checked.target <= 9))
 }
@@ -11442,10 +11462,11 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
             }
         }
         if !table_lookup {
-            // Match arm payload bindings are not tracked as active views, so a
-            // scrutinee type containing a scoped view can never be matched, even
-            // when every view is immutable.
-            if try checked_type_contains_scoped(d, state, parse, current, scrutinee.checked_type) { return expr_token_fail(d, state, base, 104, expression) }
+            // A table lookup has its own view region. An ordinary Option or
+            // Result over an immutable-view aggregate is admitted when every
+            // leaf is materializable and the scrutinee is a call result or an
+            // already-checked local; a view-bearing parameter stays rejected.
+            if !(try checked_aggregate_match_scrutinee_ok(d, state, parse, current, scrutinee.expression, scrutinee.checked_type)) { return expr_token_fail(d, state, base, 104, expression) }
         }
         if arm_head.next == 0 { return expr_token_fail(d, state, base, 78, expression) }
         let drafts = try __s0_buffer_new(MatchArmDraftRec, d)
@@ -12030,11 +12051,11 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
         if call.builtin != 24 && call.builtin != 25 { return body_token_fail(d, state, ostore, 104, statement) }
     }
     if category.contains_scoped && annotation.kind != 8 && annotation.kind != 18 {
-        var record_binding = false
+        var view_binding = annotation.kind == 9 || annotation.kind == 10
         if annotation.kind == 7 && annotation.target != 0 && annotation.target <= __s0_buffer_len(SymbolRec, ostore.symbols) {
-            record_binding = __s0_buffer_get(SymbolRec, ostore.symbols, annotation.target - 1).kind == 2
+            view_binding = __s0_buffer_get(SymbolRec, ostore.symbols, annotation.target - 1).kind == 2
         }
-        if !record_binding { return body_token_fail(d, state, ostore, 104, statement) }
+        if !view_binding { return body_token_fail(d, state, ostore, 104, statement) }
         if !(try checked_type_views_materializable(d, state, parse, ostore, annotated)) { return body_token_fail(d, state, ostore, 104, statement) }
         if !(try checked_aggregate_view_origin_ok(d, state, parse, ostore, draft.expression, annotated, 0)) { return body_token_fail(d, state, ostore, 104, statement) }
     }

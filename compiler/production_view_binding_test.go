@@ -39,6 +39,12 @@ fn make_view(T: type, values: Vec(T)) -> ViewHolder(T) {
     let count = values.len()
     return ViewHolder(view: values.slice(0, count), at: 0)
 }
+fn maybe_holder(items: [U64]) -> Option(Holder) {
+    return Some(Holder(items: items, index: 1))
+}
+fn result_holder(items: [U64]) -> Result(Holder, U64) {
+    return Ok(Holder(items: items, index: 2))
+}
 fn main() -> I32 {
     let data: Array(U64, 3) = [3, 4, 5]
     let view = data.slice(0, 3)
@@ -53,6 +59,23 @@ fn main() -> I32 {
     if view_holder.at != 0 { return 3 }
     if view_holder.view.len() != 2 { return 4 }
     if view_holder.view[1] != 9 { return 5 }
+
+    let maybe = maybe_holder(data.slice(0, 2))
+    match maybe {
+        Some(inner) => {
+            if inner.index != 1 { return 6 }
+            if inner.items[1] != 4 { return 7 }
+        }
+        None => { return 8 }
+    }
+    let result = result_holder(data.slice(1, 3))
+    match result {
+        Ok(inner) => {
+            if inner.index != 2 { return 9 }
+            if inner.items[0] != 4 { return 10 }
+        }
+        Err(_) => { return 11 }
+    }
     return 0
 }
 `
@@ -80,6 +103,19 @@ fn main() -> I32 {
 fn main() -> I32 {
     let local: Array(U64, 2) = [1, 2]
     let holder = Holder(items: local.slice(0, 1), index: 0)
+    return 0
+}
+`,
+		},
+		{
+			"local-view-option-binding",
+			`type Holder {
+    items: [U64]
+    index: U64
+}
+fn main() -> I32 {
+    let local: Array(U64, 2) = [1, 2]
+    let maybe: Option(Holder) = Some(Holder(items: local.slice(0, 1), index: 0))
     return 0
 }
 `,
