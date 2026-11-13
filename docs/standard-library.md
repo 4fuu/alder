@@ -20,6 +20,14 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   insertion-ordered `Map(K, V)` and `Set(T)` builtin surfaces;
 - [`core.slice` public snapshot v1](api/core.slice-v1.md), covering the
   Milestone 7.1 immutable and mutable view surface;
+- [`core.memory` public snapshot v1](api/core.memory-v1.md), covering the
+  Milestone 8.1 `size_of(T)`/`align_of(T)` layout queries, including fixed
+  arrays and the one-element C representation of a zero-length array;
+- [`core.hash` public snapshot v1](api/core.hash-v1.md), covering the
+  Milestone 8.1 SipHash-1-3 structural hash and `RandomState` key surface;
+- [`core.iter` public snapshot v1](api/core.iter-v1.md), covering the
+  Milestone 8.1 static iterator traits, builtin `.into_iterator()` receivers,
+  lazy adapters, terminals, and materialized snapshot semantics;
 - [`core.option` public snapshot v1](api/core.option-v1.md), covering the
   Milestone 8 `Option(T)` helper surface in the installed sysroot;
 - [`core.result` public snapshot v1](api/core.result-v1.md), covering the
@@ -88,12 +96,20 @@ tooling-milestone work. `core.range` is deferred by
 scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
-modules are post-M8. The `core.memory`, `core.hash`, `core.iter`,
-`std.parse`, `std.signal`, and `Deque`/heap additions are landed under
-[Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion), the
-immediate follow-on to M8; the independent audit remains open. `std.c` is the
-verified C-interop surface rather than a `.al` module; its exit audit is
-complete.
+modules are post-M8. `std.c` is the verified C-interop surface rather than a
+`.al` module; its exit audit is complete.
+
+M8.1 exit-audit status (complete):
+`core.memory`, `core.hash`, `core.iter`, `std.parse`, `std.signal`, and the
+`Deque`/`BinaryHeap` additions have frozen snapshots, installed sysroot
+implementations, and production-driver evidence under
+[Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion).
+The independent audit and implementation-head CI are green at `d7f36cf`.
+`core.iter` accepts arrays, immutable slices, read-only `MutSlice`, `Bytes`,
+`Vec`, insertion-ordered `Map` as `Pair(K, V)`, and insertion-ordered `Set`;
+`String` scalar iteration and exclusive `MutSlice`/`IterMut` remain
+deferred, and Map/Set iteration keeps the documented diagnostic-129
+storage-backed-part boundary.
 
 The M8 exit audit maps every ROADMAP M8 exit criterion and named area to a
 production-driver test. Live affine owners on a terminating

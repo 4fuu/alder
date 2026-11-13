@@ -2078,11 +2078,11 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory`, `core.hash`, `core.iter`, `std.parse`, `std.signal`, and `Deque`/heaps landed; no further scope gate)**
+Status: **complete (`core.memory`, `core.hash`, `core.iter`, `std.parse`, `std.signal`, and `Deque`/heaps landed; independent audit and implementation-head CI green at `d7f36cf`)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
-of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
-The modules land in dependency order:
+of its exit and into this immediate follow-on. Milestone 8.1 is complete.
+The modules landed in dependency order:
 
 1. `core.memory`: size and alignment queries (landed; see below);
 2. `core.hash`: the stable hashing contract and the hash builders that hash
@@ -2129,11 +2129,14 @@ checker resolves the one type argument per instance, lowering emits MIR 113
 and alignment 1. The implementation adds no Alder layout engine and no
 allocation surface; diagnostic 346 rejects a non-type argument, wrong arity,
 or unresolved type. Evidence: `compiler/production_memory_test.go` runs the
-primitive, record, enum, string, bytes, option, result, Unit, and generic
-instances and pins the C `sizeof`/`_Alignof` output plus three rejections;
-`mir/verify/type_query_ops_test.go` pins the MIR spelling, round trip, and
-out-of-range rejection; `cgen/type_query_test.go` pins the C emission; and
-`compiler/docs_api_test.go` runs the snapshot example.
+primitive, record, enum, string, bytes, direct/zero-length/nested/generic array,
+option, result, Unit, and generic instances and pins the C
+`sizeof`/`_Alignof` output plus invalid-element, invalid-length, and wrong-arity
+rejections; `mir/verify/type_query_ops_test.go` pins the MIR spelling, round
+trip, and out-of-range rejection; `cgen/type_query_test.go` pins the C
+emission; and `compiler/docs_api_test.go` runs the snapshot example.
+Zero-length arrays use the existing one-element C representation, not a new
+Alder layout rule.
 
 Landed M8.1 progress: `std.parse` provides the byte-oriented parsing
 foundation ([snapshot](docs/api/std.parse-v1.md)): `Cursor` over owned
@@ -2235,10 +2238,14 @@ active, so a signal arriving outside a wait gets the default action.**
 console-event implementation. Evidence: `compiler/production_std_signal_test.go`
 builds a child executable, sends real `SIGTERM`, checks the zero-timeout
 `None` path and a second wait, sends real `SIGUSR1` through `Signal.Target`, and
-verifies default termination after disposition restoration;
-`compiler/docs_api_test.go` runs the snapshot example; `compiler/io_shim_test.go`
-strict-compiles the shim on the host and the Linux AArch64 and Windows LLP64
-cross compilers. No checker, MIR, lowering, verifier, or cgen case is added.
+verifies default termination after disposition restoration. The real-term test
+synchronizes on a test-only shim readiness byte written immediately after the
+handler and self-pipe are installed, so repeated runs do not race the
+installation; it does not change the production shim or the public one-shot
+contract. `compiler/docs_api_test.go` runs the snapshot example;
+`compiler/io_shim_test.go` strict-compiles the shim on the host and the Linux
+AArch64 and Windows LLP64 cross compilers. No checker, MIR, lowering, verifier,
+or cgen case is added.
 
 `std.signal` v1 deferred notes: persistent `Subscription(I)` owners, multiple
 signals or signal sets per subscription, repeated `poll`/`wait` without
@@ -2247,6 +2254,21 @@ teardown, Windows close/logoff/shutdown console events, POSIX realtime signals
 and `sigqueue`, `SIGCHLD` integration with process/task waiting, and
 cancellation-aware process termination built on the same subscription
 machinery. These are M9 work, not gaps in the one-shot v1 contract.
+
+M8.1 closure evidence: the implementation head is
+`d7f36cf5ecdf5b11ba90afe1d295e4a4cc8119ba` (tree
+`492636318899d37e309eb8830895af1b80d538a0`). On that exact tree the full
+`./check --bootstrap` gate passes all canonical checks, including the source
+bootstrap fixed point with `bootstrap/alder.c` SHA-256
+`c965679b67fd5d39bf0cdb6e513fc5270a332089e1569dbd5b4fe8909013dfba`, and CI is
+green in all five lanes. The independent audit covers every module snapshot,
+the `core.iter` receiver expansion (arrays, immutable slices, read-only
+`MutSlice`, `Bytes`, `Vec`, insertion-ordered `Map` as `Pair(K, V)`, and
+insertion-ordered `Set`), materialized snapshot semantics, the diagnostic-129
+Map/Set storage boundary, the deterministic `std.signal` handshake, and the
+frozen bootstrap artifact. The closure change updates this roadmap and
+`docs/standard-library.md` only; implementation files are frozen at the head
+above.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 
