@@ -279,7 +279,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			want: "into_iterator is available on slices and Vec",
+			want: "into_iterator is available on arrays, immutable slices, read-only MutSlice, Bytes, Vec, Map, and Set",
 		},
 	}
 	for _, tc := range cases {

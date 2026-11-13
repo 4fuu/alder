@@ -27,6 +27,11 @@ type VecIter(T: type) {
     at: U64
 }
 
+type BytesIter {
+    data: Bytes
+    at: U64
+}
+
 type Indexed(T: type) {
     pub index: U64
     pub value: T
@@ -39,6 +44,10 @@ type Pair(A: type, B: type) {
 
 pub fn slice_iter(T: type, values: [T]) -> SliceIter(T)
 pub fn vec_iter(T: type, values: Vec(T)) -> VecIter(T)
+pub fn bytes_iter(data: Bytes) -> BytesIter
+pub fn mut_slice_iter(T: type, values: MutSlice(T)) -> VecIter(T)
+pub fn set_iter(T: type, value: Set(T)) -> VecIter(T)
+pub fn map_iter(K: type, V: type, value: Map(K, V)) -> ZipIter(VecIter(K), VecIter(V), K, V)
 
 impl SliceIter(T) {
     pub fn to_vec(self) -> Vec(T)
@@ -54,6 +63,10 @@ impl Iterator(T) for SliceIter(T) {
 
 impl Iterator(T) for VecIter(T) {
     pub fn next(mut self) -> Option(T)
+}
+
+impl Iterator(U8) for BytesIter {
+    pub fn next(mut self) -> Option(U8)
 }
 
 type MapIter(I: type, T: type, U: type)
@@ -92,18 +105,58 @@ zero-based position and value; `Pair(A, B)` carries the two `zip` values.
 
 ## `IntoIterator` and construction
 
-The checker materializes the builtin `.into_iterator()` surface for immutable
-slices and `Vec(T)` as `slice_iter(T, value)` and `vec_iter(T, value)`
-respectively. The module must be imported. Nominal receivers keep their own
-inherent or trait `into_iterator` method; a user `impl IntoIterator(...)` is
-ordinary static dispatch.
+The checker materializes the builtin `.into_iterator()` surface for these
+receivers, in this item shape:
+
+| Receiver | Item | Constructor |
+|---|---|---|
+| `Array(T, N)` | `T`, source order | `slice_iter(T, value)` |
+| `[T]` | `T`, source order | `slice_iter(T, value)` |
+| read-only `MutSlice(T)` | `T`, source order | `mut_slice_iter(T, value)` |
+| `Bytes` | `U8`, byte order | `bytes_iter(value)` |
+| `Vec(T)` | `T`, source order | `vec_iter(T, value)` |
+| `Map(K, V)` | `Pair(K, V)`, insertion order; `first` is the key, `second` the value | `map_iter(K, V, value)` |
+| `Set(T)` | `T`, insertion order | `set_iter(T, value)` |
+
+The module must be imported. Nominal receivers keep their own inherent or
+trait `into_iterator` method; a user `impl IntoIterator(...)` is ordinary
+static dispatch.
 
 `SliceIter` and `VecIter` store an immutable `[T]` view, not an owned `Vec`.
-Constructing either value materializes the input view into caller-result
-storage. That copies O(n) elements and allocates O(n) caller-result storage:
-constructing an iterator is **not** zero-copy and not O(1) borrowing. Later
-source mutation does not affect the iterator; the iterator observes the input
-as it was at construction.
+`BytesIter` stores a copied `Bytes` value. Constructing any of these
+iterators materializes the input into caller-result storage. That copies
+O(n) elements and allocates O(n) caller-result storage: constructing an
+iterator is **not** zero-copy and not O(1) borrowing. Later source mutation
+does not affect the iterator; the iterator observes the input as it was at
+construction.
+
+The receiver-specific construction cost is:
+
+- an array or immutable slice materializes one `[T]` view;
+- a read-only `MutSlice` copies its elements through `get` into a fresh
+  `Vec`, then materializes that vector as a `VecIter` view (O(n) elements and
+  two materialization steps);
+- `Bytes` copies the byte value into `BytesIter`;
+- `Vec` materializes its view;
+- `Map` takes independent `keys()` and `values()` snapshots and zips them, so
+  it allocates and copies both sequences; insertion order and the
+  replacement-keeps-position rule are preserved;
+- `Set` takes an `items()` snapshot and materializes it as a `VecIter`.
+
+The read-only `MutSlice` surface yields copied `T` values. It does not expose
+mutable element views; exclusive `MutSlice`/`IterMut` iteration remains
+deferred. A `MutSlice` receiver is still subject to the ordinary mutable-view
+place rules: the builtin constructor borrows it mutably and does not retain the
+view.
+
+`Map` and `Set` iteration currently requires keys, values, and elements
+without storage-backed parts. The existing `keys`, `values`, and `items`
+snapshot APIs reject `String`, `Bytes`, `Vec`, and other storage-backed parts
+with diagnostic 129, and `map_iter`/`set_iter` inherit that boundary. This is
+the same temporary collection restriction documented in the
+[`core.collection` v1 snapshot](core.collection-v1.md), not a weakening of the
+long-term structural domain. Copyable scalar and record/enum domains iterate
+normally.
 
 Each adapter constructor returns a view-bearing aggregate and therefore
 applies the same return materialization to its inner iterator, copying the
@@ -166,10 +219,11 @@ shorthands for the same collection rule.
 
 The following are outside snapshot v1 and recorded in the Milestone 8.1
 roadmap: `for`/`IntoIterator` desugaring; `String` scalar iteration; exclusive
-`MutSlice`/`IterMut` iteration; double-ended iteration and reversal; a
-`collect`/`FromIterator` protocol beyond the installed `to_vec`; adapters
-outside the list above; trait objects; associated types; and any lazy adapter
-that requires a new checker, lowering, or MIR operation.
+`MutSlice`/`IterMut` iteration (read-only `MutSlice` iteration is installed
+above); double-ended iteration and reversal; a `collect`/`FromIterator`
+protocol beyond the installed `to_vec`; adapters outside the list above; trait
+objects; associated types; and any lazy adapter that requires a new checker,
+lowering, or MIR operation.
 
 The [standard library guide](../standard-library.md#iteration) records the
 same boundary and the deferred surface.

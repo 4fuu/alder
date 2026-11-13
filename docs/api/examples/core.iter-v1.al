@@ -20,6 +20,45 @@ pub fn core_iter_example() -> U64 {
         None => { return 1 }
     }
 
+    var array_values: Array(U64, 3) = [2, 4, 6]
+    var array_cursor = array_values.into_iterator()
+    let array_copy = iter.to_vec(array_cursor)
+    if array_copy.len() != 3 { return 12 }
+    total = total + array_copy[0] + array_copy[2]
+
+    var mutable_values: Array(U64, 3) = [1, 3, 5]
+    var mutable_view = mutable_values.slice_mut(0, 3)
+    var mutable_cursor = mutable_view.into_iterator()
+    let mutable_copy = iter.to_vec(mutable_cursor)
+    if mutable_copy.len() != 3 { return 13 }
+    total = total + mutable_copy[1]
+
+    let byte_values: Bytes = "\x01\x02\x03"
+    var byte_cursor = byte_values.into_iterator()
+    let byte_copy = iter.to_vec(byte_cursor)
+    if byte_copy.len() != 3 { return 14 }
+    if byte_copy[0] != 1 || byte_copy[1] != 2 || byte_copy[2] != 3 { return 15 }
+    total = total + 6
+
+    var map = Map.new(U64, U64)
+    if !map.insert(2, 20) { return 16 }
+    if !map.insert(4, 40) { return 17 }
+    var map_cursor = map.into_iterator()
+    let entries = iter.to_vec(map_cursor)
+    if entries.len() != 2 { return 18 }
+    if entries[0].first != 2 || entries[0].second != 20 { return 19 }
+    if entries[1].first != 4 || entries[1].second != 40 { return 20 }
+    total = total + entries[0].first + entries[1].second
+
+    var set = Set.new(U64)
+    if !set.insert(8) { return 21 }
+    if !set.insert(9) { return 22 }
+    var set_cursor = set.into_iterator()
+    let set_items = iter.to_vec(set_cursor)
+    if set_items.len() != 2 { return 23 }
+    if set_items[0] != 8 || set_items[1] != 9 { return 24 }
+    total = total + set_items[0] + set_items[1]
+
     let offset: U64 = 10
     var mapped = iter.map(values.into_iterator(), fn(x: U64) => x + offset)
     let mapped_values = iter.to_vec(mapped)

@@ -257,15 +257,23 @@ version is reported by the library.
 adapters; its public contract is the
 [`core.iter` v1 snapshot](api/core.iter-v1.md). `Iterator(Item)` and
 `IntoIterator(IteratorType, Item)` are builtin static traits: there are no
-trait objects, associated types, or runtime dispatch metadata. Immutable
-slices and `Vec(T)` expose the builtin `.into_iterator()` constructor; the
-installed `SliceIter(T)` and `VecIter(T)` values hold immutable `[T]` views,
-not owned vector copies. Construction materializes the view into caller-result
-storage, copying O(n) elements and storage; later source mutation does not
-affect the iterator. Each lazy adapter constructor returns a view-bearing
-aggregate and may materialize its inner iterator again, so construction of a
-chain can copy O(k·n) elements even though iteration itself is lazy. The
-adapters are `map`, `filter`, `filter_map`,
+trait objects, associated types, or runtime dispatch metadata. The builtin
+`.into_iterator()` surface accepts `Array(T, N)`, `[T]`, read-only
+`MutSlice(T)`, `Bytes`, `Vec(T)`, `Map(K, V)`, and `Set(T)`. Arrays, slices,
+and `Vec(T)` yield `T`; `MutSlice(T)` yields copied `T`; `Bytes` yields `U8`
+in byte order; `Map(K, V)` yields `Pair(K, V)` in insertion order; and
+`Set(T)` yields `T` in insertion order. The installed `SliceIter(T)` and
+`VecIter(T)` values hold immutable `[T]` views, not owned vector copies;
+`BytesIter` holds a copied `Bytes`. Construction materializes the input into
+caller-result storage, copying O(n) elements and storage; later source
+mutation does not affect the iterator. A read-only `MutSlice` is first copied
+into a fresh `Vec`; `Map` takes `keys()`/`values()` snapshots; `Set` takes an
+`items()` snapshot. `Map`/`Set` iteration therefore inherits the temporary
+diagnostic-129 restriction on storage-backed keys, values, and elements that
+the collection snapshots already have. Each lazy adapter constructor returns
+a view-bearing aggregate and may materialize its inner iterator again, so
+construction of a chain can copy O(k·n) elements even though iteration itself
+is lazy. The adapters are `map`, `filter`, `filter_map`,
 `enumerate` over `Indexed(T)`, `take_count`, `skip`, `chain`, and `zip` over
 `Pair(A, B)`, with `zip` stopping at the shorter input. The terminals are
 `to_vec`, `fold`, `for_each`, `count`, `any`, `all`, `find`, and `position`.

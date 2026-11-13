@@ -229,6 +229,111 @@ pub fn main() -> I32 {
 			sanitized: true,
 		},
 		{
+			name: "receiver-array",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var numbers: Array(U64, 4) = [9, 4, 7, 1]
+    var cursor = numbers.into_iterator()
+    numbers = [100, 200, 300, 400]
+    let values = iter.to_vec(cursor)
+    if values.len() != 4 { return 1 }
+    if values[0] != 9 || values[1] != 4 || values[2] != 7 || values[3] != 1 { return 2 }
+    return 0
+}
+`,
+			sanitized: true,
+		},
+		{
+			name: "receiver-mut-slice",
+			source: `module hello.main
+
+import core.iter
+
+fn total_of(values: MutSlice(U64)) -> U64 {
+    var cursor = values.into_iterator()
+    return iter.fold(cursor, 0, fn(acc: U64, x: U64) => acc + x)
+}
+
+pub fn main() -> I32 {
+    var numbers: Array(U64, 3) = [4, 5, 6]
+    var view = numbers.slice_mut(0, 3)
+    var cursor = view.into_iterator()
+    view[0] = 40
+    let values = iter.to_vec(cursor)
+    if values.len() != 3 { return 1 }
+    if values[0] != 4 || values[1] != 5 || values[2] != 6 { return 2 }
+    if total_of(view) != 51 { return 3 }
+    return 0
+}
+`,
+			sanitized: true,
+		},
+		{
+			name: "receiver-bytes",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    let data: Bytes = "\x00\x7f\xff"
+    var cursor = data.into_iterator()
+    let values = iter.to_vec(cursor)
+    if values.len() != 3 { return 1 }
+    if values[0] != 0 || values[1] != 127 || values[2] != 255 { return 2 }
+    return 0
+}
+`,
+			sanitized: true,
+		},
+		{
+			name: "receiver-map",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var map = Map.new(U64, U64)
+    if !map.insert(7, 70) { return 1 }
+    if !map.insert(9, 90) { return 2 }
+    if !map.insert(11, 110) { return 3 }
+    if map.insert(9, 95) { return 4 }
+    var cursor = map.into_iterator()
+    if !map.insert(13, 130) { return 5 }
+    let entries = iter.to_vec(cursor)
+    if entries.len() != 3 { return 6 }
+    if entries[0].first != 7 || entries[0].second != 70 { return 7 }
+    if entries[1].first != 9 || entries[1].second != 95 { return 8 }
+    if entries[2].first != 11 || entries[2].second != 110 { return 9 }
+    return 0
+}
+`,
+			sanitized: true,
+		},
+		{
+			name: "receiver-set",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var set = Set.new(U64)
+    if !set.insert(3) { return 1 }
+    if !set.insert(5) { return 2 }
+    if !set.insert(7) { return 3 }
+    var cursor = set.into_iterator()
+    if !set.insert(9) { return 4 }
+    let items = iter.to_vec(cursor)
+    if items.len() != 3 { return 5 }
+    if items[0] != 3 || items[1] != 5 || items[2] != 7 { return 6 }
+    return 0
+}
+`,
+			sanitized: true,
+		},
+		{
 			name: "view-materialization",
 			source: `module hello.main
 
@@ -405,7 +510,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			want: "into_iterator is available on slices and Vec",
+			want: "into_iterator is available on arrays, immutable slices, read-only MutSlice, Bytes, Vec, Map, and Set",
 		},
 		{
 			name: "scoped-view-capture",
@@ -448,6 +553,51 @@ pub fn main() -> I32 {
 }
 `,
 			want: "affine",
+		},
+		{
+			name: "map-storage-key",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var map = Map.new(String, U64)
+    map.insert("a", 1)
+    let it = map.into_iterator()
+    return 0
+}
+`,
+			want: "cannot move values with storage-backed parts yet: String",
+		},
+		{
+			name: "map-storage-value",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var map = Map.new(U64, String)
+    map.insert(1, "a")
+    let it = map.into_iterator()
+    return 0
+}
+`,
+			want: "cannot move values with storage-backed parts yet: String",
+		},
+		{
+			name: "set-storage-element",
+			source: `module hello.main
+
+import core.iter
+
+pub fn main() -> I32 {
+    var set = Set.new(String)
+    set.insert("a")
+    let it = set.into_iterator()
+    return 0
+}
+`,
+			want: "cannot move values with storage-backed parts yet: String",
 		},
 	}
 	for _, tc := range cases {

@@ -7790,6 +7790,69 @@ fn lower_interpolation_expression(d: Domain, source_state: State, spans: __s0_Bu
 // integers; Bool stays raw) and formats through the checked str.display
 // instruction: domain in slot a, the value in slot b, with the allocation
 // failure edge to the panic block.
+// The builtin IntoIterator receiver. An array argument borrows as [T] at the
+// constructor's slice parameter with the existing array.as_slice operation.
+// A constructor parameter declared mutable (the read-only MutSlice surface)
+// takes the same borrow_mut place and owner-domain operand as an ordinary
+// call; every other supported receiver lowers as its ordinary value.
+type LowerIntoIteratorReceiverRec {
+    state: LowerState
+    id: U64
+    owner: U64
+}
+
+fn lower_into_iterator_receiver(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, target: U64, receiver_id: U64, environment: U64, panic_block: U64) -> Result(LowerIntoIteratorReceiverRec, __s0_Error) {
+    let receiver_expression = __s0_buffer_get(CheckedExprRec, store.expressions, receiver_id - 1)
+    let receiver_type = __s0_buffer_get(CheckedTypeRec, store.types, receiver_expression.checked_type - 1)
+    if receiver_type.kind == 15 {
+        let view = try lower_array_view(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block, false)
+        return Ok(LowerIntoIteratorReceiverRec(state: view.state, id: view.id, owner: 0))
+    }
+    let parameter_binding = lower_closure_param_local(store, state.local_index, target, 0)
+    if parameter_binding != 0 {
+        let parameter = __s0_buffer_get(LocalRec, store.locals, parameter_binding - 1)
+        if parameter.mutable == 1 {
+            let borrowed_place = try lower_argument_place(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block, 2)
+            if !borrowed_place.state.valid { return Ok(LowerIntoIteratorReceiverRec(state: borrowed_place.state, id: 0, owner: 0)) }
+            let borrow_state = borrowed_place.state
+            let ordinary = try lower_type(d, source_state, store, borrow_state, receiver_expression.checked_type)
+            let empty = try __s0_buffer_new(U64, d)
+            let reference = try mir_intern_type(d, ordinary.state.mir, mir_type_kind_safe_mut(), ordinary.id, 0, 0, empty, 0)
+            let value = try lower_add_typed_result(d, lower_with_mir(ordinary.state, reference.store), function, block, reference.type_id)
+            let borrow = try lower_add_instr(d, value.state, function, block, mir_op_borrow_mut(), value.id, borrowed_place.place, 0, 0, 0, 0, "")
+            var arg_owner: U64 = 0
+            if state.has_storage {
+                arg_owner = lower_binding_owner_domain(borrow.state, store, owner, borrowed_place.root)
+                if arg_owner == 0 { return Ok(LowerIntoIteratorReceiverRec(state: lower_invalid(borrow.state), id: 0, owner: 0)) }
+            }
+            return Ok(LowerIntoIteratorReceiverRec(state: borrow.state, id: value.id, owner: arg_owner))
+        }
+    }
+    let plain = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block)
+    return Ok(LowerIntoIteratorReceiverRec(state: plain.state, id: plain.id, owner: 0))
+}
+
+// The receiver kinds admitted by the builtin IntoIterator surface, kept in
+// step with the checker's constructor selection: immutable slice, Bytes, and
+// Vec take one binding; Array and read-only MutSlice one element type; Map
+// two; Set one. Zero means an unsupported receiver kind.
+fn lower_into_iterator_type_arg_count(kind: U64) -> U64 {
+    if kind == 8 { return 1 }
+    if kind == 14 { return 0 }
+    if kind == 15 { return 1 }
+    if kind == 17 { return 1 }
+    if kind == 18 { return 1 }
+    if kind == 23 { return 2 }
+    if kind == 24 { return 1 }
+    return 0
+}
+
+fn lower_into_iterator_receiver_type_ok(receiver: CheckedTypeRec) -> Bool {
+    let expected = lower_into_iterator_type_arg_count(receiver.kind)
+    if receiver.kind == 14 { return receiver.arg_count == 0 }
+    return expected != 0 && receiver.arg_count == expected
+}
+
 // The builtin IntoIterator surface materializes the core.iter constructor
 // as an ordinary call. The checker records the constructor instance in the
 // annotation target and the receiver as the single child; this helper emits
@@ -7798,8 +7861,8 @@ fn lower_interpolation_expression(d: Domain, source_state: State, spans: __s0_Bu
 fn lower_into_iterator_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
-    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block)
-    if !receiver.state.valid { return Ok(receiver) }
+    let receiver = try lower_into_iterator_receiver(d, source_state, spans, store, state, owner, function, block, annotation.target, receiver_id, environment, panic_block)
+    if !receiver.state.valid || receiver.id == 0 { return Ok(LowerStep(state: lower_invalid(receiver.state), id: 0)) }
     let result_type = try lower_type(d, source_state, store, receiver.state, expression.checked_type)
     var current = result_type.state
     var result: U64 = 0
@@ -7820,6 +7883,8 @@ fn lower_into_iterator_builtin(d: Domain, source_state: State, spans: __s0_Buffe
         argument_ordinal = 1
     }
     current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, receiver.id, mir_operand_instruction(), "")
+    argument_ordinal = argument_ordinal + 1
+    if receiver.owner != 0 { current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, receiver.owner, mir_operand_instruction(), "") }
     return Ok(LowerStep(state: current, id: result))
 }
 
@@ -7948,12 +8013,13 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
         // IntoIterator surface: one builtin sequence receiver and the
         // core.iter constructor instance recorded in the target.
         if expression.child_count != 1 || annotation.target == 0 || annotation.target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+        if annotation.variant_use != 0 || annotation.place != 0 { return false }
         let receiver_type = lower_builtin_child_type(store, expression, 0)
         if receiver_type == 0 { return false }
         let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
-        if receiver.kind != 8 && receiver.kind != 17 { return false }
+        if !lower_into_iterator_receiver_type_ok(receiver) { return false }
         let constructor = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
-        if constructor.kind != 13 { return false }
+        if constructor.kind != 12 && constructor.kind != 13 { return false }
         return lower_type_concrete(store, annotation.checked_type)
     }
     if annotation.builtin == 1001 {

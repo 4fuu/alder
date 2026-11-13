@@ -138,7 +138,7 @@ pub fn main() -> I32 {
 import hello.core_iter_example { core_iter_example }
 
 pub fn main() -> I32 {
-    if core_iter_example() == 99 { return 0 }
+    if core_iter_example() == 175 { return 0 }
     return 1
 }
 `,

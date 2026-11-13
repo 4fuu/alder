@@ -2184,28 +2184,37 @@ snapshot example with checksum 255.
 
 Landed M8.1 progress: `core.iter` installs the static iterator layer
 ([snapshot](docs/api/core.iter-v1.md)). `SliceIter(T)` and `VecIter(T)` hold
-immutable `[T]` views rather than owned vectors; the builtin
-`.into_iterator()` surface materializes the matching constructor for immutable
-slices and `Vec(T)`, and nominal types keep ordinary static `IntoIterator`
-dispatch. The lazy adapters are `map`, `filter`, `filter_map`,
-`enumerate(Indexed(T))`, `take_count`, `skip`, `chain`, and
-`zip(Pair(A,B))`; `zip` terminates at the shorter input in either direction.
-The terminals are `to_vec`, `fold`, `for_each`, `count`, `any`, `all`, `find`,
-and `position`; terminals consume a mutable cursor. `for` remains the builtin
-array/slice/`Vec` fast path and is not desugared through `IntoIterator`.
-M7.3 aggregate-view materialization copies O(n) elements and storage when an
-iterator is constructed; each adapter constructor may materialize its inner
-view again, so a chain can copy O(k·n) elements during construction. Iteration
+immutable `[T]` views rather than owned vectors; `BytesIter` holds a copied
+`Bytes`. The builtin `.into_iterator()` surface materializes the matching
+constructor for arrays, immutable slices, read-only `MutSlice(T)`, `Bytes`,
+`Vec(T)`, `Map(K, V)`, and `Set(T)`, and nominal types keep ordinary static
+`IntoIterator` dispatch. Array/slice/`Vec` receivers yield `T`; read-only
+`MutSlice` yields copied `T`; `Bytes` yields `U8` in byte order; `Map` yields
+`Pair(K, V)` in insertion order; `Set` yields `T` in insertion order. `Map`
+uses independent `keys()`/`values()` snapshots and `Set` uses an `items()`
+snapshot, so both inherit the existing diagnostic-129 restriction on
+storage-backed keys, values, and elements. The lazy adapters are `map`,
+`filter`, `filter_map`, `enumerate(Indexed(T))`, `take_count`, `skip`,
+`chain`, and `zip(Pair(A,B))`; `zip` terminates at the shorter input in either
+direction. The terminals are `to_vec`, `fold`, `for_each`, `count`, `any`,
+`all`, `find`, and `position`; terminals consume a mutable cursor. `for`
+remains the builtin array/slice/`Vec` fast path and is not desugared through
+`IntoIterator`. M7.3 aggregate-view materialization copies O(n) elements and
+storage when an iterator is constructed; a read-only `MutSlice` first copies
+into a `Vec`, while each adapter constructor may materialize its inner view
+again, so a chain can copy O(k·n) elements during construction. Iteration
 itself remains lazy, and source mutation after construction does not affect
 the iterator. A Unit-returning indirect call is now droppable in MIR like a
 direct Unit call, which `for_each` requires. Evidence:
-`compiler/production_iter_test.go` runs
-the builtin constructors, every adapter, both shorter-input `zip` directions,
-every terminal, generic `Iterator` cursor functions whose receiver is named
-`iter`, view materialization, and copyable/affine rejection cases; the adapter
-and terminal programs rerun under ASan/UBSan; `mir/verify/verify_test.go` pins
-the Unit `call.value` result rule; `compiler/docs_api_test.go` runs the snapshot
-example with checksum 99.
+`compiler/production_iter_test.go` runs the builtin constructors, one
+sanitized regression per approved receiver (array, read-only `MutSlice`,
+`Bytes`, `Map`, and `Set`), every adapter, both shorter-input `zip`
+directions, every terminal, generic `Iterator` cursor functions whose receiver
+is named `iter`, view materialization, and copyable/affine/storage rejection
+cases; the adapter and terminal programs rerun under ASan/UBSan;
+`mir/verify/verify_test.go` pins the Unit `call.value` result rule;
+`compiler/docs_api_test.go` runs the extended snapshot example with checksum
+175.
 
 `core.iter` v1 deferred notes: `for`/`IntoIterator` desugaring, `String` scalar
 iteration, exclusive `MutSlice`/`IterMut` iteration, double-ended iteration and
