@@ -8261,6 +8261,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         arity = 1 }
     if node_word(state, callee, "get") { builtin = 22
         arity = 1 }
+    if node_word(state, callee, "pop") { builtin = 972 }
     if node_word(state, callee, "slice") { builtin = 23
         arity = 2 }
     if node_word(state, callee, "slice_mut") { builtin = 24
@@ -8270,7 +8271,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if node_word(state, callee, "to_bytes") { builtin = 968 }
     // Method-call links include both the selected callee and its receiver.
     if builtin == 0 || call_link_count(parse, call) != arity + 2 { return expr_token_fail(d, state, base, 41, call) }
-    if builtin == 21 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
+    if (builtin == 21 || builtin == 972) && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 23 && sequence.kind == 18 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 24 && sequence.kind != 15 && sequence.kind != 17 { return expr_token_fail(d, state, base, 61, callee) }
     if builtin == 25 && sequence.kind != 18 { return expr_token_fail(d, state, base, 61, callee) }
@@ -8294,7 +8295,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     if affine_elements && (builtin == 22 || builtin == 23 || builtin == 24 || builtin == 25) { return expr_token_fail(d, state, base, 141, callee) }
     var gate_store = store
     var receiver_place: U64 = 0
-    if builtin == 21 || builtin == 24 {
+    if builtin == 21 || builtin == 24 || builtin == 972 {
         if receiver_node.kind == 24 {
             let local_id = local_lookup(store, owner, receiver_node, state)
             if local_id == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
@@ -8307,7 +8308,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             // binding has no slot to write a grown header back to, so both
             // stay immutable: grow a plain binding first, then register or
             // transfer the whole vector.
-            if affine_elements && builtin == 21 {
+            if affine_elements && (builtin == 21 || builtin == 972) {
                 may_mutate = local.kind == 2
                 owning = may_mutate
                 if may_mutate && cleanup_binding_registered(store, owner, local_id) { return expr_token_fail(d, state, base, 142, receiver_node) }
@@ -8326,9 +8327,20 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
             receiver_place = placed_value.place
         } else {
             // A field or element receiver is the place the grown header is
-            // written back through. A vector of affine elements keeps its
-            // whole-binding rule: the registration captures one header.
-            if affine_elements { return expr_token_fail(d, state, base, 101, receiver_node) }
+            // written back through. An affine-element vector may sit in an
+            // owning local's field (a Deque half, for example); the root
+            // binding must be owning or an exclusive self/mut receiver, and
+            // a registered root is immutable because the registration
+            // captured the old header.
+            if affine_elements {
+                let root = field_chain_root_local(store, owner, state, parse, receiver_node)
+                if root == 0 { return expr_token_fail(d, state, base, 101, receiver_node) }
+                let local = __s0_buffer_get(LocalRec, store.locals, root - 1)
+                var owning_root = local.kind == 2 || local.mutable == 1
+                if local.kind == 1 && __s0_buffer_get(SyntaxRec, parse.nodes, local.syntax - 1).kind == 48 { owning_root = true }
+                if !owning_root { return expr_token_fail(d, state, base, 101, receiver_node) }
+                if cleanup_binding_registered(store, owner, root) { return expr_token_fail(d, state, base, 142, receiver_node) }
+            }
             let placed = try check_receiver_place(d, state, parse, store, owner, receiver_node, checked_expression_syntax(store, receiver_expression), in_loop)
             if place_failed(placed) { return place_expr_failure(placed, store, base) }
             let placed_value = place_value(placed, store)
@@ -8337,7 +8349,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
         }
     }
     var mode: U64 = 1
-    if builtin == 21 { mode = 2 }
+    if builtin == 21 || builtin == 972 { mode = 2 }
     if builtin == 23 { mode = 3 }
     if builtin == 24 || builtin == 25 { mode = 4 }
     var access_root: U64 = 0
@@ -8400,7 +8412,7 @@ fn check_sequence_method(d: Domain, state: State, parse: ParseStore, base: Check
     }
     var result = u64_type
     if builtin == 21 { result = canonical_type_id(current, 1, 12, 0, 0) }
-    if builtin == 22 { let made = try canonical_application(d, current, owner, 9, element, 0, 1)
+    if builtin == 22 || builtin == 972 { let made = try canonical_application(d, current, owner, 9, element, 0, 1)
         current = made.store
         result = made.checked_type }
     if builtin == 23 { let made = try canonical_application(d, current, owner, 8, element, 0, 1)
@@ -10263,7 +10275,7 @@ fn check_ordinary_call(d: Domain, state: State, parse: ParseStore, base: CheckSt
         // Sequence methods capture their names only on the receiver kinds
         // that own the builtins; every other receiver falls through to impl
         // lookup, so a user type may provide its own len or slice method.
-        if (receiver_type.kind == 8 || receiver_type.kind == 15 || receiver_type.kind == 17 || receiver_type.kind == 18) && (node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") || node_word(state, callee, "to_bytes")) {
+        if (receiver_type.kind == 8 || receiver_type.kind == 15 || receiver_type.kind == 17 || receiver_type.kind == 18) && (node_word(state, callee, "len") || node_word(state, callee, "push") || node_word(state, callee, "get") || node_word(state, callee, "pop") || node_word(state, callee, "slice") || node_word(state, callee, "slice_mut") || node_word(state, callee, "subview") || node_word(state, callee, "to_bytes")) {
             return check_sequence_method(d, state, parse, base, current, owner, call, call_id, callee, receiver_node, receiver_draft.checked_type, receiver_draft.expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop)
         }
         if receiver_type.kind == 1 && receiver_type.target >= 2 && receiver_type.target <= 9 && (node_word(state, callee, "add_checked") || node_word(state, callee, "sub_checked") || node_word(state, callee, "mul_checked") || node_word(state, callee, "add_saturating") || node_word(state, callee, "sub_saturating") || node_word(state, callee, "mul_saturating") || node_word(state, callee, "add_wrapping") || node_word(state, callee, "sub_wrapping") || node_word(state, callee, "mul_wrapping")) {

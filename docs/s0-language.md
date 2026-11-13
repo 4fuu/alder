@@ -568,9 +568,10 @@ Implemented expressions include:
   and every affine field must be moved or registered before exit. A borrowed
   receiver cannot move a field; code 308 names the rejection;
 - `Vec(T)` over a `Cleanup` owner: elements enter by transfer through
-  `push`/`from_array`, element reads and views are rejected, a vector grows
-  only through a plain local binding, and a registration drains every element
-  at scope exit;
+  `push`/`from_array` and leave by transfer through `pop`, element reads and
+  views are rejected, a vector grows or pops only through an owning local or
+  an owning field root (including `mut self`), and a registration drains the
+  remaining elements at scope exit;
 - record field construction privacy: record fields default to module-private
   and a field is constructible from another module only when marked `pub`
   (diagnostic 309). A public record with any non-`pub` field is therefore an

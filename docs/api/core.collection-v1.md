@@ -10,7 +10,7 @@ surface, extended below with the Milestone 8 insertion-ordered `Map(K, V)` and
 
 ## Signatures
 
-The generic `T` in this snapshot must be recursively copyable. `N` is the
+The generic `T` in this snapshot must be recursively copyable, except for the Milestone 7.5 affine `Vec(T)` extension described below. `N` is the
 compile-time length carried by the argument's `Array(T, N)` type; it is inferred
 and is not a new user-defined const-generic facility.
 
@@ -21,6 +21,7 @@ impl Vec(T) {
 
     pub fn len(self) -> U64
     pub fn push(mut self, value: T)
+    pub fn pop(mut self) -> Option(T)
     pub fn get(self, index: U64) -> Option(T)
     pub fn slice(self, start: U64, end: U64) -> [T]
     pub fn slice_mut(mut self, start: U64, end: U64) -> MutSlice(T)
@@ -39,10 +40,12 @@ values[index] = replacement
 ```
 
 Index syntax terminates if `index >= values.len()`. `get` returns `None` for
-that case and `Some(independent_value)` otherwise. Indexed reads, `get`,
-assignment, parameter passing, and return preserve ordinary value semantics;
-nested vectors and vectors inside arrays, options, results, records, or enums
-are copied recursively into independent storage.
+that case and `Some(independent_value)` otherwise. `pop` is total: it returns
+`None` for an empty vector and otherwise returns the last element, shortening
+the vector by one. Indexed reads, `get`, assignment, parameter passing, and
+return preserve ordinary value semantics; nested vectors and vectors inside
+arrays, options, results, records, or enums are copied recursively into
+independent storage.
 
 ## Growth and placement
 
@@ -74,9 +77,12 @@ programs use the parameterless `main` and still receive the hidden MIR root.
 Unhosted generated functions keep the explicit hidden MIR parameter. Source
 signatures, calls, and vector representations do not expose this mechanism.
 
-M7.1 rejects `Vec(T)` deterministically when `T` is affine or scoped, including
-through a nested aggregate. Affine-element cleanup and transfer are owned by
-Milestone 7.5, not this snapshot.
+Milestone 7.5 extends `Vec(T)` to affine `Cleanup` owners. Such elements enter
+by transfer through `push`/`from_array`, leave by transfer through `pop`, and
+are rejected for `get` and views because a read would duplicate an owner. A
+vector over affine elements is itself affine; `using` registration drains its
+remaining elements at scope exit, and a registered vector is immutable, so pop
+must happen before registration. Scoped element types remain rejected.
 
 ## Milestone 8 addition: insertion-ordered `Map` and `Set`
 
@@ -137,7 +143,7 @@ This restriction is a documented temporary boundary of this snapshot, not part
 of the long-term contract; the long-term contract is the full structural
 domain everywhere.
 
-Like `Vec`, the ordered collections reject affine and scoped element types and
+Like `Vec` before its Milestone 7.5 extension, the ordered collections reject affine and scoped element types and
 terminate on checked growth arithmetic through the ordinary invariant-failure
 path. The snapshot example
 [`examples/core.collection-v1.al`](examples/core.collection-v1.al) pins the

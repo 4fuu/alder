@@ -57,7 +57,7 @@ var m75VecRejections = []struct {
 	{
 		"element-access",
 		"type Res { n: U64 }\nimpl Cleanup for Res {\n    fn cleanup(take self) -> Unit { return }\n}\nfn f() -> Unit {\n    let v = Vec.new(Res)\n    let one = v.get(0)\n}\nfn main() -> I32 { return 0 }\n",
-		"a Vec of affine elements supports push and len only",
+		"a Vec of affine elements supports push, pop, and len only",
 	},
 	{
 		"push-after-registration",

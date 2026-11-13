@@ -601,8 +601,8 @@ type EnvironmentRec {
 // are retired with the removed AsyncCleanup trait), 140 a Cleanup
 // implementation without a usable
 // nongeneric `cleanup(take self) -> Unit` method, 141 an element read or
-// view on an affine-element vector, 142 a push into a vector whose binding
-// already carries a using registration, 143 a Table element inside a
+// view on an affine-element vector, 142 a push or pop into a vector whose
+// binding already carries a using registration, 143 a Table element inside a
 // vector whose heap-stored handle awaits MIR storage rules, 148 a match
 // guard that consumes a binding, 149 a match guard on a table-view arm, 150
 // and 151 `break`/`continue` outside a loop, 152 a closure that captures a
