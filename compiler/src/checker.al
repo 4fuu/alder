@@ -6906,7 +6906,10 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
 }
 
 fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, receiver_at: U64, ordinal: U64, count: U64, parameter_start: U64, bindings: __s0_Buffer(InferenceBindingRec), in_loop: Bool) -> Result(CallInferenceOutcome, __s0_Error) {
-    if ordinal == count { return Ok(CallInferenceGood(CallInferenceRec(store: store, bindings: bindings))) }
+    if ordinal == count {
+        let seeded = try infer_call_constraints(d, store, target, bindings, 0)
+        return Ok(CallInferenceGood(CallInferenceRec(store: seeded.store, bindings: seeded.bindings)))
+    }
     var arg_ordinal = runtime_start + ordinal + 1
     if receiver_at != 0 {
         if ordinal == 0 { arg_ordinal = receiver_at } else { arg_ordinal = runtime_start + ordinal }
@@ -14688,6 +14691,11 @@ fn trait_impl_type_matches(store: CheckStore, trait_symbol_id: U64, requirement:
     if requirement == 0 || impl_type == 0 || depth > 16 { return false }
     let req = __s0_buffer_get(CheckedTypeRec, store.types, requirement - 1)
     let got = __s0_buffer_get(CheckedTypeRec, store.types, impl_type - 1)
+    // A builtin requirement's expected type is constructed from the impl's
+    // own trait argument, so a compound argument leaves the resolution's
+    // parameter on both sides. Identical parameters match directly; the
+    // substitution below only speaks for trait parameters.
+    if req.kind == 6 && got.kind == 6 && req.target == got.target { return true }
     if req.kind == 6 {
         if method_count != 0 && req.target >= method_first && req.target < method_first + method_count {
             if got.kind != 6 || impl_symbol == 0 { return false }
@@ -15732,41 +15740,117 @@ fn trait_key_equal_application(store: CheckStore, rec: TraitImplRec, constraint:
     return true
 }
 
-// The accumulated inference bindings of one conditional match, and whether
-// every trait argument of the implementation unified.
+// The accumulated store and inference bindings of one conditional match, and
+// whether every trait argument of the implementation unified. Substituting a
+// compound implementation argument may materialize a new checked type, so the
+// store travels with the bindings.
 type TraitMatchRec {
+    store: CheckStore
     bindings: __s0_Buffer(InferenceBindingRec)
     matched: Bool
+}
+
+// Unify one implementation trait argument with one constraint argument while
+// allowing an unbound constraint parameter to be bound from an implementation
+// argument that is already resolved. This is what makes a compound argument
+// such as Iterator(Indexed(T)) infer T: the applications unify structurally
+// and the leaf binds the caller's parameter to the substituted application.
+fn unify_trait_pattern_children(d: Domain, store: CheckStore, pattern: CheckedTypeRec, concrete: CheckedTypeRec, bindings: __s0_Buffer(InferenceBindingRec), ordinal: U64) -> Result(TraitMatchRec, __s0_Error) {
+    if ordinal == pattern.arg_count { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: true)) }
+    let left = __s0_buffer_get(U64, store.type_args, pattern.first_arg - 1 + ordinal)
+    let right = __s0_buffer_get(U64, store.type_args, concrete.first_arg - 1 + ordinal)
+    let step = try unify_trait_pattern(d, store, left, right, bindings)
+    if !step.matched { return Ok(step) }
+    return unify_trait_pattern_children(d, step.store, pattern, concrete, step.bindings, ordinal + 1)
+}
+
+fn unify_trait_pattern(d: Domain, store: CheckStore, pattern: U64, concrete: U64, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(TraitMatchRec, __s0_Error) {
+    if pattern == 0 || concrete == 0 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    let p = __s0_buffer_get(CheckedTypeRec, store.types, pattern - 1)
+    let c = __s0_buffer_get(CheckedTypeRec, store.types, concrete - 1)
+    if p.kind == 6 {
+        let bound = inference_lookup(bindings, p.target)
+        if bound == 0 {
+            let step = try unify_types(d, store, pattern, concrete, bindings)
+            return Ok(match step {
+                UnifyGood(value) => TraitMatchRec(store: store, bindings: value, matched: true)
+                UnifyConflict => TraitMatchRec(store: store, bindings: bindings, matched: false)
+            })
+        }
+        if c.kind == 6 {
+            let prior = inference_lookup(bindings, c.target)
+            if prior == 0 {
+                let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: c.target, checked_type: bound))
+                return Ok(TraitMatchRec(store: store, bindings: next, matched: true))
+            }
+            if prior == bound { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: true)) }
+            return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false))
+        }
+        let step = try unify_types(d, store, bound, concrete, bindings)
+        return Ok(match step {
+            UnifyGood(value) => TraitMatchRec(store: store, bindings: value, matched: true)
+            UnifyConflict => TraitMatchRec(store: store, bindings: bindings, matched: false)
+        })
+    }
+    if c.kind == 6 {
+        let prior = inference_lookup(bindings, c.target)
+        if prior == 0 {
+            // Substitute the implementation argument through the bindings so
+            // a compound pattern becomes a concrete application before it is
+            // written into the caller's parameter. This may append a type.
+            let resolved = try substitute_type(d, store, bindings, pattern)
+            if !checked_type_concrete(resolved.store, resolved.checked_type) { return Ok(TraitMatchRec(store: resolved.store, bindings: bindings, matched: false)) }
+            let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: c.target, checked_type: resolved.checked_type))
+            return Ok(TraitMatchRec(store: resolved.store, bindings: next, matched: true))
+        }
+        let step = try unify_types(d, store, pattern, prior, bindings)
+        return Ok(match step {
+            UnifyGood(value) => TraitMatchRec(store: store, bindings: value, matched: true)
+            UnifyConflict => TraitMatchRec(store: store, bindings: bindings, matched: false)
+        })
+    }
+    if p.kind != c.kind || p.target != c.target || p.arg_count != c.arg_count { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    if p.arg_count == 0 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: true)) }
+    return unify_trait_pattern_children(d, store, p, c, bindings, 0)
 }
 
 // The implementation's trait arguments are patterns too, so each one unifies
 // against the constraint's concrete argument in order. Recursive so the
 // accumulated inference bindings never cross a loop backedge.
-fn trait_impl_trait_args(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), ordinal: U64) -> Result(TraitMatchRec, __s0_Error) {
-    if ordinal == rec.arg_count { return Ok(TraitMatchRec(bindings: bindings, matched: true)) }
+fn trait_impl_trait_args(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, outer: __s0_Buffer(InferenceBindingRec), bindings: __s0_Buffer(InferenceBindingRec), ordinal: U64) -> Result(TraitMatchRec, __s0_Error) {
+    if ordinal == rec.arg_count { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: true)) }
     let pattern = __s0_buffer_get(U64, store.traits.args, rec.first_arg - 1 + ordinal)
-    let concrete = trait_constraint_binding_arg(store, constraint, ordinal, bindings)
-    if concrete == 0 { return Ok(TraitMatchRec(bindings: bindings, matched: false)) }
-    let next = try unify_types(d, store, pattern, concrete, bindings)
-    let seeded = match next {
-        UnifyGood(value) => value
-        UnifyConflict => bindings
+    let concrete = trait_constraint_binding_arg(store, constraint, ordinal, outer)
+    if concrete == 0 {
+        // The constraint names a parameter that argument inference has not
+        // bound yet. Substitute the implementation's trait argument through
+        // the implementation bindings; a bare parameter or a compound
+        // application both become the caller's concrete argument.
+        let raw = __s0_buffer_get(U64, store.traits.args, constraint.first_arg - 1 + ordinal)
+        let argument = __s0_buffer_get(CheckedTypeRec, store.types, raw - 1)
+        if argument.kind != 6 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+        let resolved = try substitute_type(d, store, bindings, pattern)
+        if !checked_type_concrete(resolved.store, resolved.checked_type) { return Ok(TraitMatchRec(store: resolved.store, bindings: bindings, matched: false)) }
+        let next = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: argument.target, checked_type: resolved.checked_type))
+        return trait_impl_trait_args(d, resolved.store, rec, constraint, outer, next, ordinal + 1)
     }
-    if match next {
-        UnifyGood(value) => false
-        UnifyConflict => true
-    } { return Ok(TraitMatchRec(bindings: seeded, matched: false)) }
-    return trait_impl_trait_args(d, store, rec, constraint, seeded, ordinal + 1)
+    let next = try unify_trait_pattern(d, store, pattern, concrete, bindings)
+    if !next.matched { return Ok(next) }
+    return trait_impl_trait_args(d, next.store, rec, constraint, outer, next.bindings, ordinal + 1)
 }
 
-// An implementation for a generic type is conditional: its head unifies with
-// the receiver and its own constraints then have to hold for the parameters
-// that unification binds. False when the head, trait application, or any of
-// those constraints does not match.
-fn trait_impl_applies(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
-    if rec.trait_builtin != constraint.trait_builtin || rec.trait_symbol != constraint.trait_symbol || rec.arg_count != constraint.arg_count { return Ok(false) }
+// Match one implementation against a constraint and return the store and
+// bindings it adds. An implementation for a generic type is conditional: its
+// head unifies with the receiver and its own constraints then have to hold
+// for the parameters that unification binds.
+fn trait_impl_infer(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(TraitMatchRec, __s0_Error) {
+    if rec.trait_builtin != constraint.trait_builtin || rec.trait_symbol != constraint.trait_symbol || rec.arg_count != constraint.arg_count { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
     let receiver = inference_lookup(bindings, constraint.param)
-    if receiver == 0 { return Ok(false) }
+    if receiver == 0 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    // Matching an implementation extends the caller's bindings instead of a
+    // fresh set, so the constraint's own trait arguments still resolve through
+    // the receiver's traversal (for example T in Iterator(T) after the
+    // receiver bound I = VecIter(U64)).
     let empty = try __s0_buffer_new(InferenceBindingRec, d)
     let unified = try unify_types(d, store, rec.self_type, receiver, empty)
     let seeded = match unified {
@@ -15776,11 +15860,100 @@ fn trait_impl_applies(d: Domain, store: CheckStore, rec: TraitImplRec, constrain
     if match unified {
         UnifyGood(value) => false
         UnifyConflict => true
-    } { return Ok(false) }
-    let args = try trait_impl_trait_args(d, store, rec, constraint, seeded, 0)
-    if !args.matched { return Ok(false) }
-    if rec.synthesized != 0 { return Ok(true) }
-    return trait_impl_constraints_hold(d, store, rec.first_method, args.bindings, depth)
+    } { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    let args = try trait_impl_trait_args(d, store, rec, constraint, bindings, seeded, 0)
+    if !args.matched { return Ok(args) }
+    if rec.synthesized == 0 {
+        if !(try trait_impl_constraints_hold(d, args.store, rec.first_method, args.bindings, depth)) { return Ok(TraitMatchRec(store: args.store, bindings: args.bindings, matched: false)) }
+    }
+    return Ok(TraitMatchRec(store: args.store, bindings: args.bindings, matched: true))
+}
+
+// An implementation for a generic type is conditional: its head unifies with
+// the receiver and its own constraints then have to hold for the parameters
+// that unification binds. False when the head, trait application, or any of
+// those constraints does not match.
+fn trait_impl_applies(d: Domain, store: CheckStore, rec: TraitImplRec, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
+    let inferred = try trait_impl_infer(d, store, rec, constraint, bindings, depth)
+    return Ok(inferred.matched)
+}
+
+// Seed the parameters of one constraint from the unique implementation that
+// matches the receiver. The traversal follows receiver_index, which is the
+// same conditional-implementation window trait_constraint_conditional uses.
+// A parameter receiver keeps its declared constraints and seeds nothing.
+fn trait_constraint_seed(d: Domain, store: CheckStore, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(TraitMatchRec, __s0_Error) {
+    if depth > 8 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    let receiver = inference_lookup(bindings, constraint.param)
+    if receiver == 0 || receiver > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver - 1)
+    if checked.kind != 7 { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    var low: U64 = 0
+    var high = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < checked.target { low = mid + 1 } else { high = mid }
+    }
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > checked.target { return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false)) }
+        if symbol == checked.target {
+            let inferred = try trait_impl_infer(d, store, rec, constraint, bindings, depth)
+            if inferred.matched { return Ok(inferred) }
+        }
+        at = at + 1
+    }
+    return Ok(TraitMatchRec(store: store, bindings: bindings, matched: false))
+}
+
+// The store and bindings an inference pass produced.
+type ConstraintSeedRec {
+    store: CheckStore
+    bindings: __s0_Buffer(InferenceBindingRec)
+}
+
+// Copy the bindings an implementation match added that the caller does not
+// already have. Implementation-local parameters keep their first binding, so
+// a recursive match cannot overwrite the receiver traversal that produced it.
+fn merge_inference_bindings(d: Domain, existing: __s0_Buffer(InferenceBindingRec), additions: __s0_Buffer(InferenceBindingRec), at: U64) -> Result(__s0_Buffer(InferenceBindingRec), __s0_Error) {
+    if at == __s0_buffer_len(InferenceBindingRec, additions) { return Ok(existing) }
+    let item = __s0_buffer_get(InferenceBindingRec, additions, at)
+    var next = existing
+    if inference_lookup(existing, item.param) == 0 {
+        next = try __s0_buffer_append(InferenceBindingRec, d, existing, item)
+    }
+    return merge_inference_bindings(d, next, additions, at + 1)
+}
+
+// One pass over the constraints that apply to a callee declaration. Each
+// satisfied constraint contributes the bindings its implementation head
+// supplied, so a later constraint sees the parameters an earlier one bound.
+fn infer_constraint_pass(d: Domain, store: CheckStore, target: U64, impl_owner: U64, bindings: __s0_Buffer(InferenceBindingRec), at: U64) -> Result(ConstraintSeedRec, __s0_Error) {
+    if at == __s0_buffer_len(TraitConstraintRec, store.traits.constraints) { return Ok(ConstraintSeedRec(store: store, bindings: bindings)) }
+    let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+    var next = bindings
+    var current = store
+    if constraint_applies_to_instance(store, constraint, target, impl_owner) && inference_lookup(bindings, constraint.param) != 0 {
+        let seeded = try trait_constraint_seed(d, store, constraint, bindings, 0)
+        current = seeded.store
+        if seeded.matched { next = try merge_inference_bindings(d, bindings, seeded.bindings, 0) }
+    }
+    return infer_constraint_pass(d, current, target, impl_owner, next, at + 1)
+}
+
+// Repeat constraint seeding until it stops adding bindings. Bindings never
+// shrink, and the depth bound stops a constraint graph with a cycle from
+// recursing forever.
+fn infer_call_constraints(d: Domain, store: CheckStore, target: U64, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(ConstraintSeedRec, __s0_Error) {
+    if depth > 8 { return Ok(ConstraintSeedRec(store: store, bindings: bindings)) }
+    let impl_owner = generic_impl_param_owner(store, target)
+    let next = try infer_constraint_pass(d, store, target, impl_owner, bindings, 0)
+    if __s0_buffer_len(InferenceBindingRec, next.bindings) == __s0_buffer_len(InferenceBindingRec, bindings) { return Ok(next) }
+    return infer_call_constraints(d, next.store, target, next.bindings, depth + 1)
 }
 
 fn trait_impl_constraints_hold(d: Domain, store: CheckStore, head: U64, bindings: __s0_Buffer(InferenceBindingRec), depth: U64) -> Result(Bool, __s0_Error) {
