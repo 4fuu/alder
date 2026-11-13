@@ -742,3 +742,26 @@ void alder_cstring_release(char *buffer);
 #endif
 
 #endif /* ALDER_RUNTIME_H */
+
+/* ------------------------------------------------------------------ */
+/* Structural hashing                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * One SipHash-1-3 accumulator. The layout is part of the generated-code ABI;
+ * fields are internal. The accumulator is caller-owned and never allocates.
+ */
+typedef struct {
+    uint64_t v0;
+    uint64_t v1;
+    uint64_t v2;
+    uint64_t v3;
+    uint64_t total;
+    uint64_t tail;
+} AlderHashState;
+
+void alder_hash_init(AlderHashState *state, uint64_t k0, uint64_t k1);
+void alder_hash_write_uint(AlderHashState *state, uint64_t value, uint64_t width);
+void alder_hash_write_u64(AlderHashState *state, uint64_t value);
+void alder_hash_write_bytes(AlderHashState *state, const uint8_t *data, uint64_t len);
+uint64_t alder_hash_finish(const AlderHashState *state);

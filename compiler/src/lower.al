@@ -4343,6 +4343,29 @@ fn lower_array_view(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     return Ok(LowerStep(state: converted.state, id: view.id))
 }
 
+
+// The private core.hash.hash_structural call is the structural hash
+// intrinsic. Its concrete instance carries the Eq+Hash evidence; lowering
+// replaces the call with one hash.value over the concrete value type.
+fn lower_hash_structural_target(source_state: State, store: CheckStore, target: U64) -> Bool {
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    if !source_path_is(source_state, symbol.source, "core/hash.al") { return false }
+    let source = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
+    return source_word(source_state, source, symbol.name_start, symbol.name_end, "hash_structural")
+}
+
+fn lower_hash_structural_call(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, expression: CheckedExprRec, args: __s0_Buffer(U64), result: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 3 || __s0_buffer_len(U64, args) != 3 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let value_child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + 2).expression
+    if value_child == 0 || value_child > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let value_type = __s0_buffer_get(CheckedExprRec, store.expressions, value_child - 1).checked_type
+    let typed = try lower_type(d, source_state, store, state, value_type)
+    if !typed.state.valid { return Ok(LowerStep(state: typed.state, id: 0)) }
+    let instr = try lower_add_instr_three(d, typed.state, function, block, mir_op_hash_value(), result, typed.id, __s0_buffer_get(U64, args, 0), __s0_buffer_get(U64, args, 1), __s0_buffer_get(U64, args, 2), 0)
+    return Ok(LowerStep(state: instr.state, id: result))
+}
+
 // `core.memory` size and align queries: the checker parked the queried
 // checked type in the builtin expression's operator slot. After
 // monomorphization that type is concrete, so lowering emits one MIR query.
@@ -4355,6 +4378,89 @@ fn lower_memory_query_builtin(d: Domain, source_state: State, store: CheckStore,
     if annotation.builtin == 971 { op = mir_op_type_align() }
     let instr = try lower_add_instr(d, result.state, function, block, op, result.id, 0, queried.id, 0, 0, 0, "")
     return Ok(LowerStep(state: instr.state, id: result.id))
+}
+
+// Vec.pop: read the last live element, shorten the vector header, and return
+// Some(element); an empty vector returns None without touching the receiver.
+// A copyable element is read through the ordinary value-copy path; an affine
+// element transfers out of the vector, and the shortened header keeps the
+// scope drain from cleaning it a second time.
+fn lower_vec_pop(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, vector_checked: U64, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, vector_checked - 1)
+    if checked.kind != 17 || checked.arg_count != 1 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let vector_type = try lower_type(d, source_state, store, state, vector_checked)
+    if !vector_type.state.valid { return Ok(vector_type) }
+    // Read the receiver through its place, not a value copy. A field receiver
+    // in a mut-self method otherwise materializes the vector in the frame
+    // domain; shortening that copy would leave the caller's field pointing at
+    // frame storage that dies at method exit.
+    let read_place = try lower_receiver_place(d, source_state, spans, store, vector_type.state, owner, function, block, annotation.place, environment, panic_block)
+    if read_place.id == 0 { return Ok(LowerStep(state: lower_invalid(read_place.state), id: 0)) }
+    let receiver_loaded = try lower_add_typed_result(d, read_place.state, function, block, vector_type.id)
+    let receiver_load = try lower_add_instr(d, receiver_loaded.state, function, block, mir_op_load(), receiver_loaded.id, read_place.id, 0, 0, 0, 0, "")
+    let receiver = receiver_loaded.id
+    var current = receiver_load.state
+    let element_checked = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+    let element_type = try lower_type(d, source_state, store, current, element_checked)
+    if !element_type.state.valid { return Ok(element_type) }
+    current = element_type.state
+    let option_type = try lower_type(d, source_state, store, current, expression.checked_type)
+    if !option_type.state.valid { return Ok(option_type) }
+    current = option_type.state
+    let empty_block = try lower_add_block(d, current, function, "bb_vec_pop_empty")
+    let some_block = try lower_add_block(d, empty_block.state, function, "bb_vec_pop_some")
+    let join = try lower_add_block(d, some_block.state, function, "bb_vec_pop_join")
+    let result_value = try mir_add_block_param(d, join.state.mir, function, join.id, 0, try lower_decimal_name(d, "__vec_pop_", join.id), option_type.id)
+    current = lower_with_mir(join.state, result_value.store)
+    let length = try lower_add_typed_result(d, current, function, block, mir_type_u64())
+    let length_instr = try lower_add_instr(d, length.state, function, block, mir_op_vec_len(), length.id, 0, 0, receiver, 0, 0, "")
+    current = length_instr.state
+    let zero = try lower_int_value_seq(d, source_state, store, current, function, block, 0)
+    current = zero.state
+    let empty = try lower_add_typed_result(d, current, function, block, mir_type_bool())
+    let empty_cmp = try lower_add_instr(d, empty.state, function, block, mir_op_int_eq(), empty.id, 0, 0, length.id, zero.id, 0, "")
+    current = try lower_branch(d, empty_cmp.state, function, block, empty.id, empty_block.id, some_block.id)
+    // Empty: None.
+    let none = try lower_add_typed_result(d, current, function, empty_block.id, option_type.id)
+    let made_none = try lower_add_instr(d, none.state, function, empty_block.id, mir_op_enum_construct(), none.id, 0, option_type.id, 0, 0, 0, "none")
+    current = try lower_jump_value(d, made_none.state, function, empty_block.id, join.id, none.id)
+    // Nonempty: last = len - 1; load that element, shorten the header.
+    let one = try lower_int_value_seq(d, source_state, store, current, function, some_block.id, 1)
+    current = one.state
+    let last = try lower_add_typed_result(d, current, function, some_block.id, mir_type_u64())
+    let last_instr = try lower_add_instr(d, last.state, function, some_block.id, mir_op_int_sub_checked(), last.id, 0, 0, length.id, one.id, panic_block, "")
+    current = last_instr.state
+    let element = try lower_type(d, source_state, store, current, element_checked)
+    let empty_types = try __s0_buffer_new(U64, d)
+    let storage_type = try mir_intern_type(d, element.state.mir, mir_type_kind_safe_mut(), element.id, 0, 0, empty_types, 0)
+    current = lower_with_mir(element.state, storage_type.store)
+    let storage = try lower_add_typed_result(d, current, function, some_block.id, storage_type.type_id)
+    let storage_instr = try lower_add_instr(d, storage.state, function, some_block.id, mir_op_vec_storage(), storage.id, 0, 0, receiver, 0, 0, "")
+    current = storage_instr.state
+    let ref = try lower_add_typed_result(d, current, function, some_block.id, storage_type.type_id)
+    let indexed = try lower_add_instr(d, ref.state, function, some_block.id, mir_op_slice_index_checked(), ref.id, 0, 0, storage.id, last.id, panic_block, "")
+    current = indexed.state
+    let place = try mir_add_place(d, current.mir, MirPlaceRec(function: function, kind: mir_place_deref(), local: 0, base: 0, field_start: 0, field_end: 0, deref_value: ref.id))
+    current = lower_with_mir(current, place.store)
+    let loaded = try lower_add_typed_result(d, current, function, some_block.id, element.id)
+    let load = try lower_add_instr(d, loaded.state, function, some_block.id, mir_op_load(), loaded.id, place.id, 0, 0, 0, 0, "")
+    current = load.state
+    let copied = try lower_move_or_copy(d, source_state, spans, store, current, owner, function, some_block.id, expression_id, element_checked, loaded.id, expression_id, 0)
+    current = copied.state
+    let some = try lower_add_typed_result(d, current, function, some_block.id, option_type.id)
+    let made_some = try lower_add_instr(d, some.state, function, some_block.id, mir_op_enum_construct(), some.id, 0, option_type.id, copied.id, 0, 0, "some")
+    current = made_some.state
+    let capacity = try lower_add_typed_result(d, current, function, some_block.id, mir_type_u64())
+    let capacity_instr = try lower_add_instr(d, capacity.state, function, some_block.id, mir_op_vec_capacity(), capacity.id, 0, 0, receiver, 0, 0, "")
+    current = capacity_instr.state
+    let shortened = try lower_add_typed_result(d, current, function, some_block.id, vector_type.id)
+    let built = try lower_add_instr_three(d, shortened.state, function, some_block.id, mir_op_vec_construct_checked(), shortened.id, 0, storage.id, last.id, capacity.id, panic_block)
+    current = built.state
+    let write_place = try lower_receiver_place(d, source_state, spans, store, current, owner, function, some_block.id, annotation.place, environment, panic_block)
+    if write_place.id == 0 { return Ok(LowerStep(state: lower_invalid(write_place.state), id: 0)) }
+    let saved = try lower_add_instr(d, lower_with_mir(current, write_place.state.mir), function, some_block.id, mir_op_store(), 0, write_place.id, 0, shortened.id, 0, 0, "")
+    current = try lower_jump_value(d, saved.state, function, some_block.id, join.id, some.id)
+    return Ok(LowerStep(state: current, id: result_value.id))
 }
 
 fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
@@ -4420,9 +4526,25 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
     let receiver_expression = __s0_buffer_get(CheckedExprRec, store.expressions, receiver_id - 1)
     let receiver_checked = __s0_buffer_get(CheckedTypeRec, store.types, receiver_expression.checked_type - 1)
+    // pop reads and writes the receiver place directly; lowering the receiver
+    // as a value would copy a field vector into the method frame domain.
+    if annotation.builtin == 972 {
+        return lower_vec_pop(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, receiver_expression.checked_type, environment, panic_block)
+    }
     var active = block
     var receiver = LowerStep(state: state, id: 0)
-    if receiver_checked.kind == 15 {
+    if annotation.builtin == 21 && annotation.place != 0 && lower_place_root_mut(store, annotation.place) {
+        // Push also mutates the receiver place directly. A value copy of a
+        // field vector would collapse capacity to length, forcing every
+        // mut-self push to reallocate and copy the whole vector.
+        let push_receiver_type = try lower_type(d, source_state, store, state, receiver_expression.checked_type)
+        if !push_receiver_type.state.valid { return Ok(push_receiver_type) }
+        let push_read_place = try lower_receiver_place(d, source_state, spans, store, push_receiver_type.state, owner, function, block, annotation.place, environment, panic_block)
+        if push_read_place.id == 0 { return Ok(LowerStep(state: lower_invalid(push_read_place.state), id: 0)) }
+        let push_loaded = try lower_add_typed_result(d, push_read_place.state, function, block, push_receiver_type.id)
+        let push_load = try lower_add_instr(d, push_loaded.state, function, block, mir_op_load(), push_loaded.id, push_read_place.id, 0, 0, 0, 0, "")
+        receiver = LowerStep(state: push_load.state, id: push_loaded.id)
+    } else if receiver_checked.kind == 15 {
         receiver = try lower_array_view(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block, annotation.builtin == 24)
     } else if annotation.builtin == 24 && (receiver_expression.kind == 21 || receiver_expression.kind == 19) && annotation.place != 0 {
         receiver = try lower_place_view_receiver(d, source_state, spans, store, state, owner, function, active, annotation.place, receiver_expression.checked_type, environment, panic_block)
@@ -5100,6 +5222,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             current = value.state
             result = value.id
         }
+        if annotation.kind == 1 && lower_hash_structural_target(source_state, store, annotation.target) {
+            return lower_hash_structural_call(d, source_state, store, current, function, block, expression, args, result)
+        }
         if annotation.kind == 1 || annotation.kind == 2 {
             var op = mir_op_call()
             var target = lower_owner_lookup(current.owners, annotation.target)
@@ -5171,14 +5296,16 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     if expression.kind == 18 {
         if expression.annotation == 0 || expression.annotation > __s0_buffer_len(CallAnnotationRec, store.call_annotations) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
         let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
-        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1001 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.kind != 5 || annotation.builtin == 0 || annotation.builtin > 1002 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+        if annotation.builtin == 1002 { return lower_into_iterator_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 1000 { return lower_order_less_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
-        if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
+    if annotation.builtin == 1001 { return lower_display_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         // 968 is the sequence-surface [U8].to_bytes, numbered clear of the
         // dense families above; it shares the M7.1 sequence lowering.
         if annotation.builtin == 968 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 969 { return lower_option_take(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin == 970 || annotation.builtin == 971 { return lower_memory_query_builtin(d, source_state, store, state, function, block, expression, annotation) }
+        if annotation.builtin == 972 { return lower_m71_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 65 { return lower_c_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 62 { return lower_int_convert_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
         if annotation.builtin >= 56 { return lower_str_builtin(d, source_state, spans, store, state, owner, function, block, expression_id, expression, annotation, environment, panic_block) }
@@ -5787,6 +5914,19 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     var base_is_local = checked.base == 0
     if checked.base != 0 { base_is_local = __s0_buffer_get(CheckedPlaceRec, store.control.places, checked.base - 1).kind == 1 }
     return lower_index_place(d, source_state, spans, store, current, owner, function, block, base, base_type, checked.index, checked.root, base_is_local, environment, panic_block)
+}
+
+// Whether a receiver place is rooted in a mutable borrowed owner (`mut self`
+// or a `mut` parameter). Reading such a field through the place keeps its
+// storage in the caller's owner domain; ordinary locals and element roots keep
+// the established value-copy path. `mutable` is 1 for the mutable mode and 2
+// for the take mode, whose value is owned by the callee frame.
+fn lower_place_root_mut(store: CheckStore, place: U64) -> Bool {
+    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
+    let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
+    if checked.root == 0 || checked.root > __s0_buffer_len(LocalRec, store.locals) { return false }
+    let binding = __s0_buffer_get(LocalRec, store.locals, checked.root - 1)
+    return binding.kind == 1 && binding.mutable == 1
 }
 
 // The place a mutating collection operation writes its rebuilt header back
@@ -7650,6 +7790,39 @@ fn lower_interpolation_expression(d: Domain, source_state: State, spans: __s0_Bu
 // integers; Bool stays raw) and formats through the checked str.display
 // instruction: domain in slot a, the value in slot b, with the allocation
 // failure edge to the panic block.
+// The builtin IntoIterator surface materializes the core.iter constructor
+// as an ordinary call. The checker records the constructor instance in the
+// annotation target and the receiver as the single child; this helper emits
+// the same call shape the direct-call path uses, including the caller domain
+// operand when the constructor owns storage.
+fn lower_into_iterator_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let receiver_id = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
+    let receiver = try lower_expression(d, source_state, spans, store, state, owner, function, block, receiver_id, environment, panic_block)
+    if !receiver.state.valid { return Ok(receiver) }
+    let result_type = try lower_type(d, source_state, store, receiver.state, expression.checked_type)
+    var current = result_type.state
+    var result: U64 = 0
+    if result_type.id != mir_type_unit() {
+        let value = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
+        current = value.state
+        result = value.id
+    }
+    let target = lower_owner_lookup(current.owners, annotation.target)
+    if target == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+    let instr = try lower_add_instr(d, current, function, block, mir_op_call(), result, 0, 0, 0, 0, target, "")
+    current = instr.state
+    var argument_ordinal: U64 = 0
+    if current.has_storage && !lower_owner_aliases_domain(source_state, store, annotation.target) {
+        let domain = lower_domain_value(current, store, owner)
+        if domain == 0 { return Ok(LowerStep(state: lower_invalid(current), id: 0)) }
+        current = try lower_add_instr_operand(d, current, instr.id, 0, domain, mir_operand_instruction(), "")
+        argument_ordinal = 1
+    }
+    current = try lower_add_instr_operand(d, current, instr.id, argument_ordinal, receiver.id, mir_operand_instruction(), "")
+    return Ok(LowerStep(state: current, id: result))
+}
+
 fn lower_display_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSpanRec), store: CheckStore, state: LowerState, owner: U64, function: U64, block: U64, expression_id: U64, expression: CheckedExprRec, annotation: CallAnnotationRec, environment: U64, panic_block: U64) -> Result(LowerStep, __s0_Error) {
     if expression.child_count != 1 || expression.first_child == 0 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
     let receiver_syntax = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1).expression
@@ -7746,7 +7919,17 @@ fn lower_model_c_convert_ok(store: CheckStore, annotation: CallAnnotationRec, ex
 }
 
 fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, expression: CheckedExprRec) -> Bool {
-    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1001 { return false }
+    if annotation.kind != 5 || annotation.variant_use != 0 || annotation.builtin == 0 || annotation.builtin > 1002 { return false }
+    if annotation.builtin == 972 {
+        if expression.child_count != 1 || annotation.target != 0 { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 { return false }
+        let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if receiver.kind != 17 || receiver.arg_count != 1 { return false }
+        let element = __s0_buffer_get(U64, store.type_args, receiver.first_arg - 1)
+        let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
+        return result.kind == 9 && result.arg_count == 1 && __s0_buffer_get(U64, store.type_args, result.first_arg - 1) == element
+    }
     if annotation.builtin == 1000 {
         // M8 Order surface: a scalar Order receiver, a same-type argument,
         // and a Bool result.
@@ -7760,6 +7943,18 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
             return result.kind == 1 && result.target == 1
         }
         return false
+    }
+    if annotation.builtin == 1002 {
+        // IntoIterator surface: one builtin sequence receiver and the
+        // core.iter constructor instance recorded in the target.
+        if expression.child_count != 1 || annotation.target == 0 || annotation.target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+        let receiver_type = lower_builtin_child_type(store, expression, 0)
+        if receiver_type == 0 { return false }
+        let receiver = __s0_buffer_get(CheckedTypeRec, store.types, receiver_type - 1)
+        if receiver.kind != 8 && receiver.kind != 17 { return false }
+        let constructor = __s0_buffer_get(SymbolRec, store.symbols, annotation.target - 1)
+        if constructor.kind != 13 { return false }
+        return lower_type_concrete(store, annotation.checked_type)
     }
     if annotation.builtin == 1001 {
         // M8 Display surface: a builtin-domain receiver, no argument, and
@@ -7870,7 +8065,8 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     if annotation.builtin == 19 || annotation.builtin == 20 { expected_count = 1 }
     if annotation.builtin == 21 || annotation.builtin == 22 { expected_count = 2 }
     if annotation.builtin >= 23 { expected_count = 3 }
-    if annotation.builtin >= 26 {
+    if annotation.builtin == 972 { expected_count = 1 }
+    if annotation.builtin >= 26 && annotation.builtin <= 46 {
         // M7.5 table builtins: Table.new takes no runtime children; every
         // method takes the receiver read and one runtime argument.
         expected_count = 2
@@ -7879,7 +8075,7 @@ fn lower_builtin_model_valid(store: CheckStore, annotation: CallAnnotationRec, e
     if expression.child_count != expected_count { return false }
     let result = __s0_buffer_get(CheckedTypeRec, store.types, annotation.checked_type - 1)
     if annotation.builtin == 18 { return result.kind == 17 && result.arg_count == 1 }
-    if annotation.builtin >= 26 {
+    if annotation.builtin >= 26 && annotation.builtin <= 46 {
         if annotation.builtin == 26 { return result.kind == 19 && result.arg_count == 1 }
         let first_type = lower_builtin_child_type(store, expression, 0)
         let second_type = lower_builtin_child_type(store, expression, 1)
@@ -8441,7 +8637,7 @@ fn lower_model_valid(d: Domain, source_state: State, store: CheckStore, spans: _
         } else {
         if item.kind == 5 {
             if item.builtin == 43 && item.target != 0 { }
-            else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1001 { return false } }
+            else { if item.builtin == 1002 && item.target != 0 { } else { if item.target != 0 || item.variant_use != 0 || item.builtin == 0 || item.builtin > 1002 { return false } } }
             at = at + 1
         } else {
         if item.kind == 8 {

@@ -353,12 +353,12 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 39 { if !out_string("function ") || !driver_out_message_quote(json) || !driver_out_source_text(state, source, start, end, json) || !driver_out_message_quote(json) { return false }
         return out_string(" must be called") }
     if kind == 331 { return out_string("unit value statement has no effect; only a Unit-result call may stand alone") }
-    if kind == 334 { return out_string("into_iterator requires the core.iter module: add import core.iter") }
-    if kind == 335 { return out_string("into_iterator is available on slices and Vec; convert arrays, Bytes, Map, and Set with slice, keys, values, or items first") }
-    if kind == 336 { return out_string("into_iterator takes no arguments") }
-    if kind == 337 { return out_string("into_iterator could not find the imported core.iter module") }
+    if kind == 337 { return out_string("into_iterator requires the core.iter module: add import core.iter") }
     if kind == 338 { return out_string("into_iterator could not resolve the core.iter constructor") }
     if kind == 339 { return out_string("into_iterator could not read the resolved iterator result type") }
+    if kind == 340 { return out_string("into_iterator could not read the core.iter constructor type parameter") }
+    if kind == 341 { return out_string("into_iterator is available on slices and Vec; convert arrays, Bytes, Map, and Set with slice, keys, values, or items first") }
+    if kind == 342 { return out_string("into_iterator takes no arguments") }
     // 333 retired with borrowed-place owner-domain provenance (D005B).
     if kind == 330 {
         if !out_string("operator ") || !driver_out_node_name(state, parse, source, start, end, json) || !out_string(" requires same-type integer operands: expected ") || !driver_out_diagnostic_type(state, parse, detail_a, detail_b, json) || !out_string(", got ") { return false }
@@ -483,6 +483,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 309 { return out_string("cannot construct this record outside its module: a required field is not pub") }
     if kind == 345 { return out_string("a borrowed parameter cannot be used as an owner; declare the parameter with take to transfer ownership") }
     if kind == 346 { return out_string("size_of and align_of require exactly one concrete type argument: size_of(T) or align_of(T)") }
+    if kind == 347 { return out_string("core.hash requires a structurally hashable type: Bool, signed or unsigned integers, String, Bytes, Option/Result, or records and enums over them; floats, pointers, and collections are excluded") }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }
@@ -506,8 +507,8 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     }
     if kind == 137 { return out_string("the with-cleanup clause is private to the compiler's bootstrap sources; use Cleanup selection") }
     if kind == 140 { return out_string("Cleanup selection requires a nongeneric cleanup(take self) -> Unit method") }
-    if kind == 141 { return out_string("a Vec of affine elements supports push and len only; element access would duplicate an owner") }
-    if kind == 142 { return out_string("a registered vector owner is immutable; grow a plain binding first, then register it with using") }
+    if kind == 141 { return out_string("a Vec of affine elements supports push, pop, and len only; element reads and views would duplicate an owner") }
+    if kind == 142 { return out_string("a registered vector owner is immutable; grow or pop a plain binding first, then register it with using") }
     if kind == 143 { return out_string("a Table cannot be a Vec element yet: heap-storing a table handle awaits storage rules; register the table with using directly") }
     if kind == 148 { return out_string("a match guard only borrows the arm's bindings; it cannot consume an owner") }
     if kind == 149 { return out_string("a table-view match arm cannot carry a guard; the view region is one straight-line fail-free block") }

@@ -9,6 +9,13 @@ implementation commit: the docs example runner resolves sysroot modules, so the
 example file cannot precede the module it imports. The module lives at
 `<sysroot>/std/io.al`.
 
+Slice v1 also adds `wait_signal` for the M8.1 one-shot blocking signal
+surface in `std.signal`. It installs one temporary host disposition, waits for
+the requested signal or timeout, and restores the previous disposition before
+returning; `std.signal` maps portable signal names to the host numbers. This is
+not a subscription and adds no process-wide state after the call returns.
+Persistent subscriptions and evented delivery remain M9 work.
+
 Snapshot v1 covers the blocking half of the frozen contract: the `Io` and
 `BlockingIo` capability traits, the `Blocking` capability, the `Reader`,
 `Writer`, and `Seek` traits, buffered readers and writers, standard input,
@@ -199,6 +206,11 @@ pub trait Io {
     /// negative timeout waits without a deadline.
     fn poll(self, mut first: HostFile, mut second: HostFile, timeout_ms: I32)
         -> Result(PollPair, IoError)
+    /// Waits for one host signal number. A negative timeout waits forever.
+    /// The previous disposition is restored before this returns. `true`
+    /// means the signal arrived; `false` means the timeout expired. Invalid
+    /// or undeliverable signals report `InvalidInput` or `Unsupported`.
+    fn wait_signal(self, signal: I32, timeout_ms: I32) -> Result(Bool, IoError)
     /// Sleeps without observing an earlier wakeup.
     fn sleep(self, seconds: U64, nanos: U32)
     /// Reads the monotonic clock.
@@ -535,6 +547,13 @@ implementations resolve without an explicit import.
   pipe-end `HostFile`s inside `Blocking.spawn`; `std.process` moves them out
   with `Option.take` and never forges a handle. The 0/1 stream modes and the
   exact byte blobs keep the contract free of shell semantics.
+- Signal waiting is the one-shot host operation `wait_signal`. It installs one
+  temporary disposition, polls the host with the requested timeout, restores
+  the previous disposition, and returns whether the signal arrived. It leaves
+  no handler or descriptor registered after the call. Portable signal names
+  and the target-specific `Signal.Target` mapping live in `std.signal`; the
+  capability receives only the host number. M9 replaces this with persistent
+  subscriptions and evented delivery.
 - `BufReader` over a copyable reader is an ordinary copyable value; `BufWriter`
   owns its `Cleanup` sink and is affine. Mutation happens through exclusively
   borrowed method calls and the compiler updates a uniquely owned buffer in

@@ -1225,6 +1225,7 @@ fn mir_instruction_operands_valid(idx: MirPrintIndex, store: MirStore, id: U64, 
     // released buffer for release.
     if rec.op >= mir_op_c_string_make_lit() && rec.op <= mir_op_c_string_release() && !mir_value_valid(idx, store, rec.function, rec.a) { return false }
     if rec.op == mir_op_c_buffer_ptr() && (!mir_value_valid(idx, store, rec.function, rec.a) || !mir_type_valid(store, rec.type_op)) { return false }
+    if rec.op == mir_op_hash_value() && (!mir_value_valid(idx, store, rec.function, rec.a) || !mir_value_valid(idx, store, rec.function, rec.b) || !mir_value_valid(idx, store, rec.function, rec.c) || !mir_type_valid(store, rec.type_op)) { return false }
     if (rec.op == mir_op_c_zero() || rec.op == mir_op_type_size() || rec.op == mir_op_type_align()) && !mir_type_valid(store, rec.type_op) { return false }
     if rec.op == mir_op_c_addr() {
         if !mir_id_valid(rec.place, __s0_buffer_len(MirPlaceRec, store.places)) || __s0_buffer_get(MirPlaceRec, store.places, rec.place - 1).function != rec.function || !mir_type_valid(store, rec.type_op) { return false }
@@ -1963,6 +1964,7 @@ fn mir_out_op(op: U64) -> Bool {
     if op == 113 { return out_string("type.size") }
     if op == 114 { return out_string("c.callback.owner.release") }
     if op == 115 { return out_string("type.align") }
+    if op == 116 { return out_string("hash.value") }
     if op == 52 { return out_string("ffi.call.unsafe") }
     if op == 53 { return out_string("borrow") }
     if op == 54 { return out_string("borrow_mut") }
@@ -2148,6 +2150,9 @@ fn mir_out_instruction(idx: MirPrintIndex, store: MirStore, id: U64, rec: MirIns
     }
     if rec.op == mir_op_c_zero() || rec.op == mir_op_type_size() || rec.op == mir_op_type_align() {
         if !out(32) || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
+    }
+    if rec.op == mir_op_hash_value() {
+        if !out(32) || !mir_out_value(idx, store, rec.function, rec.a) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.b) || !out_string(", ") || !mir_out_value(idx, store, rec.function, rec.c) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }
     }
     if rec.op == mir_op_c_addr() {
         if !out(32) || !mir_out_place(idx, store, rec.function, rec.place) || !out_string(", ") || !mir_out_type(idx, store, rec.type_op, __s0_buffer_len(MirTypeRec, store.types) + 1) { return false }

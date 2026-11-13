@@ -64,9 +64,15 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`std.bytes` public snapshot v1](api/std.bytes-v1.md), covering the
   Milestone 8 byte construction, search, sorted search, endian integer
   coding, and hex and Base64 codec surface;
+- [`std.parse` public snapshot v1](api/std.parse-v1.md), covering the
+  Milestone 8.1 byte cursor, half-open spans, positioned errors, and scalar
+  token parsers;
+- [`std.signal` public snapshot v1](api/std.signal-v1.md), covering the
+  Milestone 8.1 one-shot blocking termination/interrupt wait and the
+  target-specific `Signal.Target` extension;
 - [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
-  the Milestone 8 stable sorting entry point over the Order domain in the
-  installed sysroot.
+  the Milestone 8 stable sorting entry point and the Milestone 8.1 `Deque(T)`
+  and `BinaryHeap(T)` value types in the installed sysroot.
 
 M8 exit-audit status (complete):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
@@ -82,10 +88,11 @@ tooling-milestone work. `core.range` is deferred by
 scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
-modules are post-M8. The `core.iter`, `core.hash`,
-`core.memory`, `std.parse`, `std.signal`, and `Deque`/heap items belong to
+modules are post-M8. The remaining `core.iter`, `core.hash`,
+`std.parse`, and `std.signal` items belong to
 [Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion), the
-immediate follow-on to M8. `std.c` is the verified C-interop surface
+immediate follow-on to M8. `core.memory` and the `Deque`/heap collection
+additions have already landed there. `std.c` is the verified C-interop surface
 rather than a `.al` module; its exit audit is complete.
 
 The M8 exit audit maps every ROADMAP M8 exit criterion and named area to a
@@ -183,6 +190,48 @@ compiler's `sizeof`/`_Alignof` over the lowered representation. `Unit` is fixed
 at size 0 and alignment 1. Calls with a non-type argument, wrong arity, or an
 unresolved type are diagnostic 346. No allocation, pointer, or Alder layout
 engine is added.
+
+Implemented core.hash progress: `sysroot/core/hash.al` provides the stable
+structural `hash`/`hash_with` contract, the SipHash-1-3 `Hasher`, and the
+128-bit `RandomState` key carrier ([snapshot](api/core.hash-v1.md)). The
+structural domain is the same synthesized `Eq`/`Hash` domain used for `==`,
+covering `Bool`, signed and unsigned integers, `String`, `Bytes`,
+`Option`/`Result`, and eligible records and enums; floats, pointers, views,
+and collections are rejected with diagnostic 347. `hash` uses the fixed zero
+key; `hash_with` uses a `RandomState`. `std.random.random_state` fills the
+key from host entropy through `std.io.Io`, keeping `core.hash` below `std`.
+The C backend lowers MIR 116 `hash.value` to the runtime SipHash-1-3 helper
+over the canonical stream, and the Alder `Hasher` implements the same
+primitive for callers that build their own stream. Map and Set remain
+insertion-ordered association lists in M8.1, so `Map.with_hasher` stays
+deferred until hash containers exist.
+
+Implemented std.parse progress: `sysroot/std/parse.al` provides the byte
+cursor, half-open `Span`, on-demand `Position`, generic `Step(T)`, and the
+integer, boolean, and ASCII-word token parsers in
+[`api/std.parse-v1.md`](api/std.parse-v1.md). Integer conversion still goes
+through `core.num.parse_u64`/`parse_i64`; the module adds token boundaries,
+spans, and positioned `ParseError` values without a new checker rule, MIR
+operation, runtime helper, or C binding. `take` is a reserved parameter
+keyword, so the cursor's buffer-consuming method is `take_bytes`. The
+snapshot's explicitly deferred surface is data-format grammars and schemas,
+typed/streaming parsers, quoted or escaped strings, key/value record grammars,
+Unicode whitespace or identifiers, floating-point/date/time/IP parsing, and a
+`Parser` trait or combinator objects.
+
+Implemented std.signal progress: `sysroot/std/signal.al` provides the one-shot
+blocking `wait(io, signal, timeout_ms)` surface in
+[`api/std.signal-v1.md`](api/std.signal-v1.md). `Signal` covers interrupt,
+terminate, hangup, quit, user signals, and the POSIX-only `Target(number)`
+extension; Windows maps only interrupt/terminate to console control events.
+The call installs a temporary host disposition, waits through
+`std.io.Io.wait_signal`, restores the original disposition, and returns
+`Some(signal)` or `None` on timeout. **Between waits the original disposition
+is active, so a signal arriving outside a wait gets the default action.**
+`sysroot/std/c/signal_shim.h` is the header-only POSIX self-pipe and Windows
+console-event implementation. Persistent subscriptions, Evented/task delivery,
+cancellation-safe teardown, realtime signals, and Windows close/logoff/shutdown
+events are M9 work. No checker, MIR, runtime, or cgen case is added.
 
 ## Text and bytes
 
@@ -324,8 +373,9 @@ Required modules:
 - `std.process`: value-semantic `Command`, affine `Child`, pipes, exit status,
   output capture, wait, cancellation-aware termination, and explicit
   environment inheritance;
-- `std.signal`: portable termination/interrupt subscriptions plus
-  target-specific extensions behind capability checks.
+- `std.signal`: one-shot blocking termination/interrupt wait in M8.1, with
+  persistent subscriptions, evented/task delivery, and target-specific
+  extensions in M9 (Windows console events and POSIX realtime signals).
 
 No API invokes a shell unless its name explicitly says `shell`. The default
 process API passes an argument vector directly and never performs hidden

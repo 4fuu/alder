@@ -416,7 +416,7 @@ func checkInstr(m *mir.Module, f *mir.Function, b *mir.Block, bi, ii int, in *mi
 	if in.Op == mir.OpCIsNull && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: "c.is_null requires MIR format version 6"})
 	}
-	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr || in.Op == mir.OpTypeSize || in.Op == mir.OpTypeAlign) && m.FormatVersion < mir.BindingFormatVersion {
+	if (in.Op == mir.OpCZero || in.Op == mir.OpCAddr || in.Op == mir.OpTypeSize || in.Op == mir.OpTypeAlign || in.Op == mir.OpHashValue) && m.FormatVersion < mir.BindingFormatVersion {
 		errs = append(errs, Error{Loc: loc, Msg: in.Op.String() + " requires MIR format version 6"})
 	}
 	if in.Op == mir.OpCleanupPush && (int(in.CleanupFn) >= len(m.Functions) || m.Functions[in.CleanupFn] == nil) {
@@ -594,6 +594,10 @@ func checkRequiredInstrOperands(m *mir.Module, in *mir.Instr, loc string) []Erro
 		require(in.A, "c.field.set value operand")
 	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
 		require(in.A, "c.string operand")
+	case mir.OpHashValue:
+		require(in.A, "hash key word")
+		require(in.B, "hash key word")
+		require(in.HashVal, "hash value")
 	}
 	return errs
 }
@@ -786,6 +790,10 @@ func instrValueOperands(in *mir.Instr) []mir.ValueId {
 		add(in.A)
 	case mir.OpCStringMakeLit, mir.OpCStringMake, mir.OpCStringPtr, mir.OpCStringRelease:
 		add(in.A)
+	case mir.OpHashValue:
+		add(in.A)
+		add(in.B)
+		add(in.HashVal)
 	case mir.OpCall, mir.OpFFICallUnsafe:
 		for _, v := range in.Args {
 			add(v)

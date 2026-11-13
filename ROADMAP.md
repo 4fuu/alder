@@ -2078,7 +2078,7 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory` landed; no further scope gate)**
+Status: **in progress (`core.memory`, `core.hash`, `std.parse`, `std.signal`, and `Deque`/heaps landed; no further scope gate)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
@@ -2086,19 +2086,39 @@ The modules land in dependency order:
 
 1. `core.memory`: size and alignment queries (landed; see below);
 2. `core.hash`: the stable hashing contract and the hash builders that hash
-   containers need;
+   containers need (landed; see below);
 3. `Deque` and heaps: the remaining `core.collection`/`std.collection` value
-   types; heaps use the `Order` domain;
+   types; heaps use the `Order` domain (landed; see below);
 4. `core.iter`: static iterator traits and adapters; it begins with a design
    note on how `for`-in relates to the static iterator traits;
 5. `std.parse`: structured parsing with byte ranges, building on `core.num`
-   parsing;
+   parsing (landed; see below);
 6. `std.signal`: triage first; anything that needs async or cancellation moves
-   to Milestone 9.
+   to Milestone 9 (landed; see below).
 
 Exit requires each listed module's frozen snapshot, installed implementation,
 and production-driver evidence. The `std.signal` triage records exactly which
-pieces stay in 8.1 and which move to Milestone 9.
+pieces stay in 8.1 and which move to Milestone 9; the 8.1 one-shot wait and its
+M9 subscription deferrals are recorded below.
+
+Landed M8.1 progress: `core.hash` provides the SipHash-1-3 structural hash
+over the synthesized Eq/Hash domain ([snapshot](docs/api/core.hash-v1.md)).
+`hash` uses a fixed zero key and `hash_with` uses a `RandomState`;
+`RandomState.seeded`/`from_words` and the copyable `Hasher` primitives expose
+the stable builder, while `std.random.random_state` fills the 128-bit key from
+host entropy without making `core.hash` depend on std. The canonical stream
+covers fixed-width little-endian integers, Bool, length-prefixed String/Bytes,
+Option/Result tags and payloads, declaration-order record fields, and
+enum ordinals; floats, pointers, views, and collections are rejected with
+diagnostic 347. MIR 116 `hash.value` carries the two key words, the value, and
+the concrete structural type; the runtime implements SipHash-1-3. Map and Set
+remain insertion-ordered association lists, so `Map.with_hasher` is deferred
+until hash containers exist. Evidence: the production qualification pins
+independent SipHash-1-3 reference vectors, the manual `Hasher` stream against
+`hash`/`hash_with` for integers, strings, bytes, records, enums, Option, and
+Result, the OS-backed keyed constructor, and rejection 347; MIR verifier and
+cgen tests pin operation 116 and its canonical C emission; the snapshot
+example runs through the production driver.
 
 Landed M8.1 progress: `core.memory` provides `size_of(T)` and `align_of(T)` as
 compile-time layout queries ([snapshot](docs/api/core.memory-v1.md)). The
@@ -2113,6 +2133,75 @@ instances and pins the C `sizeof`/`_Alignof` output plus three rejections;
 `mir/verify/type_query_ops_test.go` pins the MIR spelling, round trip, and
 out-of-range rejection; `cgen/type_query_test.go` pins the C emission; and
 `compiler/docs_api_test.go` runs the snapshot example.
+
+Landed M8.1 progress: `std.parse` provides the byte-oriented parsing
+foundation ([snapshot](docs/api/std.parse-v1.md)): `Cursor` over owned
+`Bytes`, half-open `Span`, on-demand `Position`, generic `Step(T)`, positioned
+`ParseError` categories, and exact `U64`/`I64`/`Bool`/ASCII-word token
+parsers. Integer conversion still goes through
+`core.num.parse_u64`/`parse_i64`; no checker rule, MIR operation, runtime
+helper, or C binding is added. The whole-input helpers reject trailing bytes,
+scalar parsers do not skip whitespace, and positions are computed only when an
+error is reported. `take` is a reserved parameter keyword, so the
+buffer-consuming cursor method is `take_bytes`; the snapshot uses the module
+namespace so the free helper names do not shadow the cursor method names.
+Evidence: `compiler/production_std_parse_test.go` compiles and runs the cursor,
+span, position, integer-boundary, overflow, minus-on-unsigned, trailing,
+boolean, word, and error cases; `compiler/docs_api_test.go` runs
+`docs/api/examples/std.parse-v1.al`.
+
+`std.parse` v1 deferred notes: JSON, YAML, TOML, CSV, and every other
+data-format grammar or schema; typed conversion from a generic value tree;
+streaming parsers, buffering, or `std.io` integration; quoted strings, escape
+sequences, comments, and key/value record grammars; Unicode whitespace,
+Unicode identifiers, normalization, and locale rules; floating-point,
+date/time, IP address, and duration parsing; and a `Parser` trait, closures, or
+combinator objects. These are post-M8 or additive-snapshot work, not gaps in
+the v1 contract.
+
+`Deque(T)` and `BinaryHeap(T)` complete the M8.1 collection item. `Deque`
+stores two `Vec` halves and supports copyable and affine elements; its
+conditional `Cleanup` implementation drains both halves, and `peek_*` remains
+available only for copyable elements. `BinaryHeap(T: Order)` is a min-heap by
+default and a max-heap through `BinaryHeap.max()`, with O(log n) sift-up and
+sift-down and a copyable scalar element domain. The checker now treats a
+nominal application as affine only when a `Cleanup` implementation applies to
+its concrete arguments, so `Deque(U64)` stays copyable while a `Deque` over a
+`Cleanup` owner is an owner. The `Vec.pop` primitive moves affine elements out
+through an owning local or an owning field/`mut self` chain; indexed assignment
+for copyable vectors already uses the mutable-slice path. Evidence:
+`compiler/production_collection_test.go` runs copyable deque and min/max heap
+behavior, affine deque cleanup exactly once under ASan/UBSan, and rejects
+`using` a copyable deque, peeking an affine deque, and a heap without `Order`;
+`compiler/production_vec_pop_test.go` covers copyable and affine pop plus the
+registered-owner rejection; `compiler/docs_api_test.go` runs the amended
+snapshot example with checksum 255.
+
+Landed M8.1 progress: `std.signal` provides the one-shot blocking
+`wait(io, signal, timeout_ms)` surface ([snapshot](docs/api/std.signal-v1.md)).
+`Signal` has interrupt/terminate/hangup/quit/user names plus the POSIX
+`Target(number)` extension; Windows maps interrupt/terminate to console control
+events. `std.io.Io.wait_signal` installs one temporary host disposition, waits
+for the signal or timeout, restores the previous disposition, and returns
+`true`/`false`; `std.signal` maps that to `Some(signal)`/`None` and converts
+host categories to `SignalError`. **Between waits the original disposition is
+active, so a signal arriving outside a wait gets the default action.**
+`sysroot/std/c/signal_shim.h` is the header-only POSIX self-pipe and Windows
+console-event implementation. Evidence: `compiler/production_std_signal_test.go`
+builds a child executable, sends real `SIGTERM`, checks the zero-timeout
+`None` path and a second wait, sends real `SIGUSR1` through `Signal.Target`, and
+verifies default termination after disposition restoration;
+`compiler/docs_api_test.go` runs the snapshot example; `compiler/io_shim_test.go`
+strict-compiles the shim on the host and the Linux AArch64 and Windows LLP64
+cross compilers. No checker, MIR, lowering, verifier, or cgen case is added.
+
+`std.signal` v1 deferred notes: persistent `Subscription(I)` owners, multiple
+signals or signal sets per subscription, repeated `poll`/`wait` without
+reinstalling, `AsyncIo`/`Evented` delivery and task wakeups, cancellation-safe
+teardown, Windows close/logoff/shutdown console events, POSIX realtime signals
+and `sigqueue`, `SIGCHLD` integration with process/task waiting, and
+cancellation-aware process termination built on the same subscription
+machinery. These are M9 work, not gaps in the one-shot v1 contract.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 

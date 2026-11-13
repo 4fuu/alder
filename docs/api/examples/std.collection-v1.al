@@ -1,6 +1,6 @@
 module hello.std_collection_example
 
-import std.collection { sort }
+import std.collection { BinaryHeap, Deque, sort }
 
 // The executable std.collection v1 snapshot example. Fixed inputs only;
 // every stage contributes a deterministic share of the returned checksum.
@@ -90,6 +90,71 @@ pub fn std_collection_example() -> U64 {
     let one: Array(U64, 1) = [42]
     let sorted_one = sort(U64, one.slice(0, 1))
     if sorted_one.len() == 1 { total = total + 32 }
+
+    // Deque preserves queue order while moving values between its two halves.
+    var queue: Deque(U64) = Deque.new()
+    queue.push_back(2)
+    queue.push_back(3)
+    queue.push_front(1)
+    var deque_bad: Bool = false
+    match queue.pop_front() {
+        Some(value) => { if value != 1 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_back() {
+        Some(value) => { if value != 3 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_front() {
+        Some(value) => { if value != 2 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_back() {
+        Some(_) => { deque_bad = true }
+        None => {}
+    }
+    if deque_bad { total = total - 1000000 } else { total = total + 64 }
+
+    // A min-heap yields ascending roots; BinaryHeap.max yields descending
+    // roots. Duplicate values remain valid children.
+    var heap: BinaryHeap(U64) = BinaryHeap.new()
+    heap.push(3)
+    heap.push(1)
+    heap.push(2)
+    var heap_bad: Bool = false
+    match heap.pop() {
+        Some(value) => { if value != 1 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(value) => { if value != 2 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(value) => { if value != 3 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(_) => { heap_bad = true }
+        None => {}
+    }
+    var max_heap: BinaryHeap(U64) = BinaryHeap.max()
+    max_heap.push(1)
+    max_heap.push(3)
+    max_heap.push(2)
+    match max_heap.pop() {
+        Some(value) => { if value != 3 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != 2 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != 1 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    if heap_bad { total = total - 1000000 } else { total = total + 128 }
 
     return total
 }

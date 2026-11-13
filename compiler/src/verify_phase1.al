@@ -42,6 +42,7 @@ fn mir_vop_required_mask(op: U64) -> U64 {
     if op == mir_op_c_buffer_ptr() { return 1 }
     if op == mir_op_slice_to_bytes() { return 3 }
     if op == mir_op_c_zero() || op == mir_op_type_size() || op == mir_op_type_align() { return 16 }
+    if op == mir_op_hash_value() { return 23 }
     if op == mir_op_c_addr() { return 24 }
     if op == mir_op_c_callback_make() { return 48 }
     if op == mir_op_c_callback_owner_register() { return 63 }

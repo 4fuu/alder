@@ -85,3 +85,52 @@ func TestProcessShimCompilesStrict(t *testing.T) {
 		t.Fatalf("process shim strict compile: %v\n%s", err, output)
 	}
 }
+
+// signal_shim.h owns the one-shot temporary disposition, self-pipe, and
+// Windows console-event wait behind std.signal. It is header-only, so the
+// strict compile and the cross-target syntax checks cover the whole C surface.
+const signalShimSource = `#include "std/c/signal_shim.h"
+int main(void) { return 0; }
+`
+
+func checkSignalShimCompile(t *testing.T, cc string, extra ...string) {
+	t.Helper()
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "signal-shim.c")
+	if err := os.WriteFile(source, []byte(signalShimSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-Wshadow",
+		"-Wconversion", "-ffp-contract=off", "-fsyntax-only",
+		"-I", filepath.Join(root, "sysroot")}
+	args = append(args, extra...)
+	args = append(args, source)
+	if output, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Fatalf("signal shim compile with %s: %v\n%s", cc, err, output)
+	}
+}
+
+func TestSignalShimCompilesStrict(t *testing.T) {
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	checkSignalShimCompile(t, cc)
+}
+
+func TestSignalShimCrossCompiles(t *testing.T) {
+	for _, name := range []string{"x86_64-w64-mingw32-gcc", "aarch64-linux-gnu-gcc"} {
+		cc, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		crossCC := cc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			checkSignalShimCompile(t, crossCC)
+		})
+	}
+}

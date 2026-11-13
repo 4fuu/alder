@@ -185,7 +185,10 @@ Milestone 7.5 adds the static trait surface of
   satisfies the constraint when its head unifies with the concrete
   implementing type and its own constraints hold for the arguments that
   unification binds, and a type parameter satisfies the constraints its own
-  declaration lists.
+  declaration lists. Affinity follows the same rule: a nominal application is
+  an owner only when its `Cleanup` implementation applies to the concrete
+  arguments, so a conditional implementation whose constraints fail leaves the
+  application copyable.
 - Every implementation is validated: required methods must be present with
   exactly the trait's receiver mode, runtime arity, and substituted
   parameter/result types, and impl methods that match no requirement are
@@ -208,8 +211,11 @@ Milestone 7.5 adds the static trait surface of
   structural domain. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override
   structural `==` with a surprising user implementation": user `impl Eq`
-  and `impl Hash` blocks are rejected. The synthesized methods are not
-  directly callable yet; they become callable with the ordered collections.
+  and `impl Hash` blocks are rejected. The synthesized method names are not
+  directly callable yet; structural hashing is exposed through
+  `core.hash.hash(T, value)` and `core.hash.hash_with(T, state, value)` over
+  the same domain, while the ordered collections keep their own internal
+  equality and hash path.
 - Structural `Order` implementations are synthesized by the language for
   the closed scalar domain: unsigned integers `U8`, `U16`, `U32`, and
   `U64`, `Bool` (false orders below true), `String`, and `Bytes`
@@ -367,10 +373,16 @@ view results whose scoped leaves are not all immutable slices, infinite value
 recursion, unsupported map keys/values,
 unsupported C signatures, and specialization-expanding polymorphic recursion.
 Ordinary aggregates may declare immutable-view fields and return them: M7.3
-lowering materializes such results into caller-result storage, while local
-bindings, arguments, match scrutinees, and cleanup initializers still reject
-view-holding aggregates. The exact restrictions are pinned by `frontend`
-acceptance/rejection tests and
+lowering materializes such results into caller-result storage. A local may
+bind a returned record, `Option`, or `Result` when every view is rooted in a
+borrowed parameter or a checked call result, and an `Option`/`Result` over
+such a value may be matched through an already-checked local or call result.
+Binding an aggregate whose view is rooted in the callee's locals or `take`
+parameters, mutable views, aggregate arguments, and cleanup initializers still
+reject view-holding aggregates. Returned aggregates and direct immutable slice
+results are materialized into caller-result storage, so a returned local view
+is copied rather than aliased. The exact restrictions are
+pinned by `frontend` acceptance/rejection tests and
 the active Alder checker conformance harness.
 
 ## Statements and expressions
@@ -565,9 +577,10 @@ Implemented expressions include:
   and every affine field must be moved or registered before exit. A borrowed
   receiver cannot move a field; code 308 names the rejection;
 - `Vec(T)` over a `Cleanup` owner: elements enter by transfer through
-  `push`/`from_array`, element reads and views are rejected, a vector grows
-  only through a plain local binding, and a registration drains every element
-  at scope exit;
+  `push`/`from_array` and leave by transfer through `pop`, element reads and
+  views are rejected, a vector grows or pops only through an owning local or
+  an owning field root (including `mut self`), and a registration drains the
+  remaining elements at scope exit;
 - record field construction privacy: record fields default to module-private
   and a field is constructible from another module only when marked `pub`
   (diagnostic 309). A public record with any non-`pub` field is therefore an

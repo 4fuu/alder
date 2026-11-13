@@ -259,6 +259,8 @@ type Instr struct {
 	CBinding  int    // flattened block-major index into Module.Bindings functions
 	CField    string // c.field.get / c.field.set: the Alder field name
 	Args      []ValueId
+	// HashVal is the structural value operand of hash.value.
+	HashVal ValueId
 
 	// Checked operations: the explicit failure edge. Required for checked
 	// operations and forbidden for all others.

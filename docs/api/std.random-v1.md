@@ -22,6 +22,9 @@ module std.random
 import std.io { Io }
 
 impl random {
+    /// One process-randomized 128-bit SipHash key pair from host entropy.
+    /// The key words are assembled least significant byte first.
+    pub fn random_state(I: type(Io), io: I) -> core.hash.RandomState
     /// Fills `buffer` with unpredictable bytes from the operating system
     /// through the capability. Randomness is essential for the security
     /// properties callers rely on, so a host failure terminates through the

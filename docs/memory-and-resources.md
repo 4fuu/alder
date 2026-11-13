@@ -2,7 +2,7 @@
 
 Design status: **Frozen for Alder 1.0**
 
-Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `Vec(T)` over a `Cleanup` owner is affine: elements enter by transfer through `push` or `from_array`, element reads and views are rejected, and a registration drains every element at scope exit. There is no separate `AsyncCleanup` trait: a `Cleanup` hook may suspend when its owner holds a suspending capability once the concurrency runtime arrives in Milestone 9; the callback `with` clause is bootstrap-private. Tables as `Vec` elements are deferred by the phase-6 MIR lifetime rule
+Availability: **Inferred storage is implemented (M7.3). M7.5 implements the `Table(T)`/`T.Id` source surface with generational staleness, scoped `get`/`get_mut` views, overlap rejection, affine aggregate composition, and callback-free `using` cleanup: the builtin Table release or the owner's `Cleanup` implementation, whose types are affine. `Vec(T)` over a `Cleanup` owner is affine: elements enter by transfer through `push` or `from_array`, leave by transfer through `pop`, element reads and views are rejected, and a registration drains the remaining elements at scope exit. There is no separate `AsyncCleanup` trait: a `Cleanup` hook may suspend when its owner holds a suspending capability once the concurrency runtime arrives in Milestone 9; the callback `with` clause is bootstrap-private. Tables as `Vec` elements are deferred by the phase-6 MIR lifetime rule
 (`lifetime_deref_store` rejects storing a table handle through a deref
 place), so heap-stored table elements await a storage decision.**
 
@@ -239,10 +239,17 @@ provenance instead of passing through `copy_to_domain`. M7.3 slice 3
 generalizes direct immutable-view results to ordinary aggregates: a record,
 enum, `Option`, `Result`, or array result whose scoped parts are all
 immutable slices is admitted when every scoped leaf is materializable, and
-its view parts are recursively materialized into caller-result storage.
-Mutable views and view-holding aggregates stay non-escaping at bindings,
-arguments, match scrutinees, and cleanup initializers, so their exclusivity,
-overlap, and invalidation checks are unchanged. Domains remain
+its view parts are recursively materialized into caller-result storage. A
+local may bind a record, `Option`, or `Result` when every view is rooted in a
+borrowed parameter or in a call result whose own return was checked. Binding
+an aggregate whose view is rooted in a local or a `take` parameter stays
+rejected because the binding does not materialize the view; a returned
+aggregate is materialized into caller-result storage and may therefore copy a
+local view's contents. An `Option`/`Result` over such an aggregate may be
+matched when the scrutinee is an already-checked local or a call result.
+Mutable views, aggregate arguments, and cleanup initializers remain
+non-escaping, so their exclusivity, overlap, and invalidation checks are
+unchanged. Domains remain
 absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.
@@ -332,7 +339,11 @@ A conditional implementation — one whose `impl` declares type parameters, such
 as `impl(T: type) Cleanup for Boxed(T)` — registers the concrete instance of
 its `cleanup` hook for the registered owner's type, and that instance must
 satisfy the implementation's own constraints. The hook itself is a nongeneric
-method that takes the owner by value and returns `Unit`.
+method that takes the owner by value and returns `Unit`. Affinity follows the
+same applicability rule: an application is an owner only when a `Cleanup`
+implementation applies to its concrete arguments, so `Deque(U64)` stays
+copyable while a conditional `Cleanup` implementation on `Deque(T: Cleanup)`
+makes a deque over a `Cleanup` owner affine.
 
 Cleanup is guaranteed on:
 

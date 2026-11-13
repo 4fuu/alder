@@ -104,6 +104,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.hash-v1.al": {
+			style:   "project",
+			srcName: "core_hash_example.al",
+			mainText: `module hello.main
+
+import hello.core_hash_example { core_hash_example }
+
+pub fn main() -> I32 {
+    if core_hash_example() == 4516 { return 0 }
+    return 1
+}
+`,
+		},
 		"core.memory-v1.al": {
 			style:   "project",
 			srcName: "core_memory_example.al",
@@ -138,7 +151,7 @@ pub fn main() -> I32 {
 import hello.std_collection_example { std_collection_example }
 
 pub fn main() -> I32 {
-    if std_collection_example() == 63 { return 0 }
+    if std_collection_example() == 255 { return 0 }
     return 1
 }
 `,
@@ -206,6 +219,32 @@ import hello.std_math_example { std_math_example }
 
 pub fn main() -> I32 {
     if std_math_example() == 11128 { return 0 }
+    return 1
+}
+`,
+		},
+		"std.parse-v1.al": {
+			style:   "project",
+			srcName: "std_parse_example.al",
+			mainText: `module hello.main
+
+import hello.std_parse_example { std_parse_example }
+
+pub fn main() -> I32 {
+    if std_parse_example() == 2047 { return 0 }
+    return 1
+}
+`,
+		},
+		"std.signal-v1.al": {
+			style:   "project",
+			srcName: "std_signal_example.al",
+			mainText: `module hello.main
+
+import hello.std_signal_example { std_signal_example }
+
+pub fn main() -> I32 {
+    if std_signal_example() == 1 { return 0 }
     return 1
 }
 `,

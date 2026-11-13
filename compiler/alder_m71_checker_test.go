@@ -91,9 +91,9 @@ func runAlderM71CheckerBehavior(t *testing.T, exe string) {
 		{"mutable-reassign", "fn f() -> Unit { var a: Array(U64, 1) = [1]\n var b: Array(U64, 1) = [2]\n var first = a.slice_mut(0, 1)\n var second = b.slice_mut(0, 1)\n second = first }\n", 104},
 		{"temporary-view-not-final", "fn use(view: MutSlice(U64), value: U64) -> Unit {}\nfn f() -> Unit { var a: Array(U64, 1) = [1]\n use(a.slice_mut(0, 1), a[0]) }\n", 104},
 		{"temporary-borrow-not-final", "fn use(view: [U64], mutation: Unit) -> Unit {}\nfn f() -> Unit { var a = Vec.from_array(U64, [1])\n use(a, a.push(2)) }\n", 104},
-		{"aggregate-scoped", "type Box { view: [U64] }\nfn f(values: [U64]) -> Unit { let box = Box(view: values) }\n", 104},
+		{"aggregate-scoped", "type Box { view: [U64] }\nfn f() -> Unit { let values: Array(U64, 1) = [1]\n let box = Box(view: values.slice(0, 1)) }\n", 104},
 		{"array-scoped", "fn f(values: [U64]) -> Unit { let stored = [values] }\n", 104},
-		{"variant-scoped", "fn f(values: [U64]) -> Unit { let stored: Option([U64]) = Some(values) }\n", 104},
+		{"variant-scoped", "fn f() -> Unit { let values: Array(U64, 1) = [1]\n let stored: Option([U64]) = Some(values.slice(0, 1)) }\n", 104},
 	}
 	for _, tc := range rejections {
 		t.Run(tc.name, func(t *testing.T) {

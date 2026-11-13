@@ -160,8 +160,10 @@ int main(void) {
 // M7.3 slice 3 storage-side checker contract: ordinary aggregates whose
 // scoped parts are all immutable views can be constructed and returned,
 // because lowering materializes their view parts into caller-result storage.
-// Every other escape of a view through an aggregate stays rejected with the
-// stable scoped-view diagnostic.
+// A local may bind a returned record when every view is rooted in a borrowed
+// parameter or a checked call result. Mutable views and views rooted in the
+// callee's locals or take parameters stay rejected with the stable scoped-view
+// diagnostic.
 func runAlderM73CheckerBehavior(t *testing.T, exe string) {
 	t.Helper()
 	accept := map[string]string{
@@ -185,6 +187,17 @@ fn read_window(values: Array(U64, 4)) -> U64 {
     if window(values).prefix[0] != values[0] { return 1 }
     let prefix = window(values).prefix
     return prefix[1]
+}
+type Holder {
+    items: [U64]
+    index: U64
+}
+fn make_holder(items: [U64], index: U64) -> Holder {
+    return Holder(items: items, index: index)
+}
+fn bind_holder(values: [U64]) -> U64 {
+    let holder = make_holder(values, 1)
+    return holder.items[0]
 }
 fn main() -> I32 {
     let values: Array(U64, 4) = [3, 5, 7, 11]
@@ -236,7 +249,7 @@ fn main() -> I32 {
 	}{
 		{"mutable-view-aggregate-return", "type Bad {\n    m: MutSlice(U64)\n}\nfn f() -> Bad {\n    var values: Array(U64, 2) = [1, 2]\n    return Bad(m: values.slice_mut(0, 1))\n}\n", 104},
 		{"mutable-view-variant-return", "fn f(values: Array(U64, 2)) -> Option(MutSlice(U64)) {\n    return Some(values.slice_mut(0, 1))\n}\n", 104},
-		{"view-aggregate-binding", "type Window {\n    prefix: [U64]\n}\nfn f(values: [U64]) -> Unit {\n    let holder = Window(prefix: values)\n}\n", 104},
+		{"local-view-binding", "type Window {\n    prefix: [U64]\n}\nfn f() -> Unit {\n    let local: Array(U64, 2) = [1, 2]\n    let holder = Window(prefix: local.slice(0, 1))\n}\n", 104},
 		{"view-aggregate-argument", "type Window {\n    prefix: [U64]\n}\nfn consume(window: Window) -> U64 {\n    return window.prefix[0]\n}\nfn f(values: [U64]) -> Unit {\n    consume(Window(prefix: values))\n}\n", 104},
 		{"view-aggregate-using", "type Window {\n    prefix: [U64]\n}\nfn close(window: Window) -> Unit { return }\nfn f(values: [U64]) -> Unit {\n    using holder = Window(prefix: values) with close\n}\n", 104},
 		{"view-aggregate-match-scrutinee", "type Window {\n    prefix: [U64]\n}\nenum Pick {\n    Chosen(window: Window)\n    Empty\n}\nfn pick(values: [U64]) -> Pick {\n    return Chosen(Window(prefix: values))\n}\nfn f(values: [U64]) -> U64 {\n    return match pick(values) {\n        Chosen(window) => window.prefix[0]\n        Empty => 0\n    }\n}\n", 104},

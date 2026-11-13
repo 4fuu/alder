@@ -1,5 +1,6 @@
 module std.random
 
+import core.hash { RandomState }
 import core.num { u64_max, u32_max }
 import std.io { Io }
 
@@ -17,6 +18,35 @@ import std.io { Io }
 // inverted range is an invariant violation and terminates through the
 // ordinary checked-integer path: an inverted range fails the checked
 // subtraction and an empty range fails the checked remainder.
+
+/// One process-randomized SipHash key pair from host entropy. This constructor
+/// lives here, not in `core.hash`, so the core module stays below std and
+/// takes no I/O capability. The key words are assembled least significant
+/// byte first, matching the SipHash key order.
+pub fn random_state(I: type(Io), io: I) -> RandomState {
+    var bytes: Array(U8, 16) = [
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0
+    ]
+    io.random_bytes(bytes.slice_mut(0, 16))
+    var k0 = bytes[0].to_u64()
+    k0 = k0 | (bytes[1].to_u64() << 8)
+    k0 = k0 | (bytes[2].to_u64() << 16)
+    k0 = k0 | (bytes[3].to_u64() << 24)
+    k0 = k0 | (bytes[4].to_u64() << 32)
+    k0 = k0 | (bytes[5].to_u64() << 40)
+    k0 = k0 | (bytes[6].to_u64() << 48)
+    k0 = k0 | (bytes[7].to_u64() << 56)
+    var k1 = bytes[8].to_u64()
+    k1 = k1 | (bytes[9].to_u64() << 8)
+    k1 = k1 | (bytes[10].to_u64() << 16)
+    k1 = k1 | (bytes[11].to_u64() << 24)
+    k1 = k1 | (bytes[12].to_u64() << 32)
+    k1 = k1 | (bytes[13].to_u64() << 40)
+    k1 = k1 | (bytes[14].to_u64() << 48)
+    k1 = k1 | (bytes[15].to_u64() << 56)
+    return RandomState.from_words(k0, k1)
+}
 
 /// Fills `buffer` with unpredictable bytes from the operating system through
 /// the capability. Randomness is essential for the security properties

@@ -225,6 +225,9 @@ func checkInstrTypes(m *mir.Module, f *mir.Function, b *mir.Block, i int, in *mi
 	case mir.OpTypeSize, mir.OpTypeAlign:
 		c.errs = append(c.errs, checkTypeQuery(m, in, c.loc)...)
 
+	case mir.OpHashValue:
+		c.errs = append(c.errs, checkHashValue(m, f, in, c.loc)...)
+
 	case mir.OpCZero:
 		c.errs = append(c.errs, checkCZeroType(m, in, c.loc)...)
 
@@ -791,6 +794,66 @@ func checkTypeQuery(m *mir.Module, in *mir.Instr, loc string) []Error {
 		return []Error{{Loc: loc, Msg: in.Op.String() + " type operand is out of range"}}
 	}
 	return nil
+}
+
+// checkHashValue validates one hash.value: two u64 key words, a value of the
+// named structural type, and a result type of u64.
+func checkHashValue(m *mir.Module, f *mir.Function, in *mir.Instr, loc string) []Error {
+	if !m.ValidType(in.TypeOp) {
+		return []Error{{Loc: loc, Msg: "hash.value type operand is out of range"}}
+	}
+	if !hashSupported(m, in.TypeOp, 0) {
+		return []Error{{Loc: loc, Msg: "hash.value type is outside the structural hash domain"}}
+	}
+	if in.A == mir.NoValue || in.B == mir.NoValue || in.HashVal == mir.NoValue {
+		return []Error{{Loc: loc, Msg: "hash.value requires two key words and one value"}}
+	}
+	if t, ok := f.ValueType(in.A); !ok || t != mir.TypeU64 {
+		return []Error{{Loc: loc, Msg: "hash.value first key word is not u64"}}
+	}
+	if t, ok := f.ValueType(in.B); !ok || t != mir.TypeU64 {
+		return []Error{{Loc: loc, Msg: "hash.value second key word is not u64"}}
+	}
+	if t, ok := f.ValueType(in.HashVal); !ok || t != in.TypeOp {
+		return []Error{{Loc: loc, Msg: "hash.value value type does not match the type operand"}}
+	}
+	return nil
+}
+
+func hashSupported(m *mir.Module, t mir.TypeId, depth int) bool {
+	if depth > 16 || !m.ValidType(t) {
+		return false
+	}
+	rec := m.Types[t]
+	if rec.Kind == mir.TypePrimitive {
+		return t >= mir.TypeBool && t <= mir.TypeU64
+	}
+	if rec.Kind == mir.TypeString || rec.Kind == mir.TypeBytes {
+		return true
+	}
+	if rec.Kind == mir.TypeOption {
+		return hashSupported(m, rec.Elem, depth+1)
+	}
+	if rec.Kind == mir.TypeResult {
+		return hashSupported(m, rec.OK, depth+1) && hashSupported(m, rec.Err, depth+1)
+	}
+	if rec.Kind == mir.TypeAggregate {
+		for _, field := range rec.Fields {
+			if !hashSupported(m, field.Type, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if rec.Kind == mir.TypeEnum {
+		for _, variant := range rec.Variants {
+			if variant.Payload != mir.TypeUnit && !hashSupported(m, variant.Payload, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // checkCZeroType validates one c.zero: the type operand names a raw C scalar
