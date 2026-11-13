@@ -6127,6 +6127,20 @@ fn expression_type_head(state: State, parse: ParseStore, store: CheckStore, node
 
 fn expression_type_candidate_57(node: SyntaxRec) -> Bool { return node.kind == 57 }
 
+// `Array(T, N)` in an expression position parses as a call whose second
+// operand is the length literal rather than a type. It is therefore the one
+// applied type the generic candidate and resolution walks cannot handle
+// operand by operand. Both walks share this extraction and accept exactly the
+// length syntax the type-position resolver accepts.
+fn expression_array_length(state: State, parse: ParseStore, node: SyntaxRec) -> ArrayLengthRec {
+    if node.kind != 27 || call_link_count(parse, node) != 3 { return ArrayLengthRec(valid: false, value: 0) }
+    let callee_link = call_link_at(parse, node, 0)
+    let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
+    if callee.kind != 24 || !node_word(state, callee, "Array") { return ArrayLengthRec(valid: false, value: 0) }
+    let length_link = call_link_at(parse, node, 2)
+    return array_type_length(state, __s0_buffer_get(SyntaxRec, parse.nodes, length_link.node - 1))
+}
+
 fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore, owner: U64, node_id: U64) -> Bool {
     let node = __s0_buffer_get(SyntaxRec, parse.nodes, node_id - 1)
     if node.kind == 24 {
@@ -6134,6 +6148,10 @@ fn expression_type_candidate(state: State, parse: ParseStore, store: CheckStore,
         return expression_type_head(state, parse, store, node).kind != 0
     }
     if node.kind != 27 { return false }
+    if expression_array_length(state, parse, node).valid {
+        let element_link = call_link_at(parse, node, 1)
+        return expression_type_candidate(state, parse, store, owner, element_link.node)
+    }
     let callee_link = call_link_at(parse, node, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 { return false }
@@ -6214,6 +6232,26 @@ fn resolve_expression_type(d: Domain, state: State, parse: ParseStore, store: Ch
     let callee_link = call_link_at(parse, node, 0)
     let callee = __s0_buffer_get(SyntaxRec, parse.nodes, callee_link.node - 1)
     if callee.kind != 24 { return check_token_fail(d, state, store, 56, node) }
+    let array_length = expression_array_length(state, parse, node)
+    if array_length.valid {
+        let element_link = call_link_at(parse, node, 1)
+        let resolved = try resolve_expression_type(d, state, parse, store, owner, element_link.node)
+        let current = match resolved {
+            CheckGood(value) => value
+            CheckBad(value) => value
+        }
+        if match resolved {
+            CheckGood(value) => false
+            CheckBad(value) => true
+        } { return Ok(resolved) }
+        let element = checked_type_for_syntax(current, owner, element_link.node)
+        let existing = canonical_single_arg(current, 15, array_length.value, element)
+        if existing != 0 { return Ok(CheckGood(try annotate_checked_type(d, current, owner, node_id, existing))) }
+        let first = __s0_buffer_len(U64, current.type_args) + 1
+        let args = try __s0_buffer_append(U64, d, current.type_args, element)
+        let recorded = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: current.expressions, call_annotations: current.call_annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
+        return Ok(CheckGood(try append_checked_type(d, recorded, owner, 15, node_id, array_length.value, first, 1)))
+    }
     let head = expression_type_head(state, parse, store, callee)
     let count = call_link_count(parse, node) - 1
     if head.kind == 0 || count != head.arg_count { return check_token_fail(d, state, store, 56, node) }

@@ -43,8 +43,13 @@ pub fn align_of(T: type) -> U64
   may write `size_of(T)` or `align_of(T)`; each concrete instance answers for
   its own substituted `T`.
 - Records, enums, arrays, strings, bytes, vectors, builtin `Option`/`Result`,
-  and ordinary scalar types use the lowered representation. The query does not
-  inspect padding bytes, and no Alder layout engine is added.
+  and ordinary scalar types use the lowered representation. A zero-length
+  `Array(T, 0)` lowers to a one-element native C array because portable C11 has
+  no zero-length arrays, so its answer is that wrapper's size and alignment
+  (for example, `Array(U64, 0)` has size 8 and alignment 8), not zero. That is
+  a fact about the target representation, like every other answer here, and
+  not a zero-size Alder rule. The query does not inspect padding bytes, and no
+  Alder layout engine is added.
 - Neither function is an allocation primitive. `core.memory` exposes no raw
   allocation, no pointer arithmetic, and no lifetime operation.
 

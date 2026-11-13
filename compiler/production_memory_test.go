@@ -31,8 +31,16 @@ pub type Triple {
     c: U64
 }
 
+pub type Bucket {
+    values: Array(U64, 3)
+}
+
 pub fn query(T: type) -> U64 {
     return size_of(T) + align_of(T)
+}
+
+pub fn array_query(T: type) -> U64 {
+    return size_of(Array(T, 3)) + align_of(Array(T, 3))
 }
 
 pub fn main() -> I32 {
@@ -54,6 +62,26 @@ pub fn main() -> I32 {
     if size_of(Triple) != 24 { return 18 }
     if query(Pair) != 24 { return 16 }
     if query(Unit) != 1 { return 17 }
+    // The target C compiler answers for the lowered array wrapper. A
+    // zero-length Alder array occupies one element in C because native C
+    // arrays cannot have length zero.
+    if size_of(Array(U64, 3)) != 24 { return 19 }
+    if align_of(Array(U64, 3)) != 8 { return 20 }
+    if size_of(Array(U64, 0)) != 8 { return 21 }
+    if align_of(Array(U64, 0)) != 8 { return 22 }
+    if size_of(Array(Bool, 2)) != 2 { return 23 }
+    if align_of(Array(Bool, 2)) != 1 { return 24 }
+    if size_of(Array(Array(U64, 2), 2)) != 32 { return 25 }
+    if align_of(Array(Array(U64, 2), 2)) != 8 { return 26 }
+    if size_of(Option(Array(U64, 3))) != 32 { return 27 }
+    if align_of(Option(Array(U64, 3))) != 8 { return 28 }
+    if size_of(Result(Array(U64, 2), U8)) != 24 { return 29 }
+    if align_of(Result(Array(U64, 2), U8)) != 8 { return 30 }
+    if query(Array(U64, 3)) != 32 { return 31 }
+    if size_of(Bucket) != 24 { return 32 }
+    if align_of(Bucket) != 8 { return 33 }
+    if array_query(U64) != 32 { return 34 }
+    if array_query(Bool) != 4 { return 35 }
     return 0
 }
 `
@@ -87,6 +115,78 @@ var coreMemoryRejections = []struct {
 		"extra-argument",
 		coreMemoryRejectPrelude + `pub fn main() -> I32 {
     return align_of(U8, U16).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-element-not-type",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(7, 2)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-unresolved-element",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(Missing, 2)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-nested-unresolved-element",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Option(Array(Missing, 2))).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-missing-length",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-extra-operand",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64, 2, 3)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-non-integer-length",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64, U8)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-negative-length",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64, -1)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-overflow-length",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64, 18446744073709551616)).to_i32()
+}
+`,
+		"size_of and align_of require exactly one concrete type argument",
+	},
+	{
+		"array-length-expression",
+		coreMemoryRejectPrelude + `pub fn main() -> I32 {
+    return size_of(Array(U64, 1 + 2)).to_i32()
 }
 `,
 		"size_of and align_of require exactly one concrete type argument",
