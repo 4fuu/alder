@@ -223,6 +223,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"std.parse-v1.al": {
+			style:   "project",
+			srcName: "std_parse_example.al",
+			mainText: `module hello.main
+
+import hello.std_parse_example { std_parse_example }
+
+pub fn main() -> I32 {
+    if std_parse_example() == 2047 { return 0 }
+    return 1
+}
+`,
+		},
 		"std.random-v1.al": {
 			style:   "project",
 			srcName: "std_random_example.al",

@@ -64,6 +64,9 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
 - [`std.bytes` public snapshot v1](api/std.bytes-v1.md), covering the
   Milestone 8 byte construction, search, sorted search, endian integer
   coding, and hex and Base64 codec surface;
+- [`std.parse` public snapshot v1](api/std.parse-v1.md), covering the
+  Milestone 8.1 byte cursor, half-open spans, positioned errors, and scalar
+  token parsers;
 - [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
   the Milestone 8 stable sorting entry point over the Order domain in the
   installed sysroot.
@@ -198,6 +201,19 @@ over the canonical stream, and the Alder `Hasher` implements the same
 primitive for callers that build their own stream. Map and Set remain
 insertion-ordered association lists in M8.1, so `Map.with_hasher` stays
 deferred until hash containers exist.
+
+Implemented std.parse progress: `sysroot/std/parse.al` provides the byte
+cursor, half-open `Span`, on-demand `Position`, generic `Step(T)`, and the
+integer, boolean, and ASCII-word token parsers in
+[`api/std.parse-v1.md`](api/std.parse-v1.md). Integer conversion still goes
+through `core.num.parse_u64`/`parse_i64`; the module adds token boundaries,
+spans, and positioned `ParseError` values without a new checker rule, MIR
+operation, runtime helper, or C binding. `take` is a reserved parameter
+keyword, so the cursor's buffer-consuming method is `take_bytes`. The
+snapshot's explicitly deferred surface is data-format grammars and schemas,
+typed/streaming parsers, quoted or escaped strings, key/value record grammars,
+Unicode whitespace or identifiers, floating-point/date/time/IP parsing, and a
+`Parser` trait or combinator objects.
 
 ## Text and bytes
 

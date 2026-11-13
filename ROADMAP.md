@@ -2078,7 +2078,7 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory` and `core.hash` landed; no further scope gate)**
+Status: **in progress (`core.memory`, `core.hash`, and `std.parse` landed; no further scope gate)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
@@ -2092,7 +2092,7 @@ The modules land in dependency order:
 4. `core.iter`: static iterator traits and adapters; it begins with a design
    note on how `for`-in relates to the static iterator traits;
 5. `std.parse`: structured parsing with byte ranges, building on `core.num`
-   parsing;
+   parsing (landed; see below);
 6. `std.signal`: triage first; anything that needs async or cancellation moves
    to Milestone 9.
 
@@ -2132,6 +2132,31 @@ instances and pins the C `sizeof`/`_Alignof` output plus three rejections;
 `mir/verify/type_query_ops_test.go` pins the MIR spelling, round trip, and
 out-of-range rejection; `cgen/type_query_test.go` pins the C emission; and
 `compiler/docs_api_test.go` runs the snapshot example.
+
+Landed M8.1 progress: `std.parse` provides the byte-oriented parsing
+foundation ([snapshot](docs/api/std.parse-v1.md)): `Cursor` over owned
+`Bytes`, half-open `Span`, on-demand `Position`, generic `Step(T)`, positioned
+`ParseError` categories, and exact `U64`/`I64`/`Bool`/ASCII-word token
+parsers. Integer conversion still goes through
+`core.num.parse_u64`/`parse_i64`; no checker rule, MIR operation, runtime
+helper, or C binding is added. The whole-input helpers reject trailing bytes,
+scalar parsers do not skip whitespace, and positions are computed only when an
+error is reported. `take` is a reserved parameter keyword, so the
+buffer-consuming cursor method is `take_bytes`; the snapshot uses the module
+namespace so the free helper names do not shadow the cursor method names.
+Evidence: `compiler/production_std_parse_test.go` compiles and runs the cursor,
+span, position, integer-boundary, overflow, minus-on-unsigned, trailing,
+boolean, word, and error cases; `compiler/docs_api_test.go` runs
+`docs/api/examples/std.parse-v1.al`.
+
+`std.parse` v1 deferred notes: JSON, YAML, TOML, CSV, and every other
+data-format grammar or schema; typed conversion from a generic value tree;
+streaming parsers, buffering, or `std.io` integration; quoted strings, escape
+sequences, comments, and key/value record grammars; Unicode whitespace,
+Unicode identifiers, normalization, and locale rules; floating-point,
+date/time, IP address, and duration parsing; and a `Parser` trait, closures, or
+combinator objects. These are post-M8 or additive-snapshot work, not gaps in
+the v1 contract.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 
