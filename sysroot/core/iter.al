@@ -129,12 +129,15 @@ pub fn mut_slice_iter(T: type, values: MutSlice(T)) -> VecIter(T) {
     return vec_iter(T, copied)
 }
 
-/// Iterates a Set in insertion order.
+/// Iterates a Set in insertion order. Uses the existing `items()` snapshot,
+/// so storage-backed elements inherit its diagnostic-129 move boundary.
 pub fn set_iter(T: type, value: Set(T)) -> VecIter(T) {
     return vec_iter(T, value.items())
 }
 
-/// Iterates a Map in insertion order as Pair(key, value).
+/// Iterates a Map in insertion order as Pair(key, value). Uses independent
+/// `keys()` and `values()` snapshots, so storage-backed keys or values inherit
+/// their diagnostic-129 move boundary.
 pub fn map_iter(K: type, V: type, value: Map(K, V)) -> ZipIter(VecIter(K), VecIter(V), K, V) {
     let keys = value.keys()
     let values = value.values()

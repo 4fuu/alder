@@ -555,6 +555,10 @@ pub fn main() -> I32 {
 			want: "affine",
 		},
 		{
+			// Map and Set iteration uses the collection snapshot APIs. Their
+			// existing move boundary rejects storage-backed parts with
+			// diagnostic 129; this is the documented collection restriction,
+			// not an unsupported receiver kind.
 			name: "map-storage-key",
 			source: `module hello.main
 
