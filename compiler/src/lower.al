@@ -4533,7 +4533,18 @@ fn lower_m71_builtin(d: Domain, source_state: State, spans: __s0_Buffer(CheckedS
     }
     var active = block
     var receiver = LowerStep(state: state, id: 0)
-    if receiver_checked.kind == 15 {
+    if annotation.builtin == 21 && annotation.place != 0 && lower_place_root_mut_self(store, annotation.place) {
+        // Push also mutates the receiver place directly. A value copy of a
+        // field vector would collapse capacity to length, forcing every
+        // mut-self push to reallocate and copy the whole vector.
+        let push_receiver_type = try lower_type(d, source_state, store, state, receiver_expression.checked_type)
+        if !push_receiver_type.state.valid { return Ok(push_receiver_type) }
+        let push_read_place = try lower_receiver_place(d, source_state, spans, store, push_receiver_type.state, owner, function, block, annotation.place, environment, panic_block)
+        if push_read_place.id == 0 { return Ok(LowerStep(state: lower_invalid(push_read_place.state), id: 0)) }
+        let push_loaded = try lower_add_typed_result(d, push_read_place.state, function, block, push_receiver_type.id)
+        let push_load = try lower_add_instr(d, push_loaded.state, function, block, mir_op_load(), push_loaded.id, push_read_place.id, 0, 0, 0, 0, "")
+        receiver = LowerStep(state: push_load.state, id: push_loaded.id)
+    } else if receiver_checked.kind == 15 {
         receiver = try lower_array_view(d, source_state, spans, store, state, owner, function, active, receiver_id, environment, panic_block, annotation.builtin == 24)
     } else if annotation.builtin == 24 && (receiver_expression.kind == 21 || receiver_expression.kind == 19) && annotation.place != 0 {
         receiver = try lower_place_view_receiver(d, source_state, spans, store, state, owner, function, active, annotation.place, receiver_expression.checked_type, environment, panic_block)
@@ -5902,6 +5913,16 @@ fn lower_checked_place(d: Domain, source_state: State, spans: __s0_Buffer(Checke
     var base_is_local = checked.base == 0
     if checked.base != 0 { base_is_local = __s0_buffer_get(CheckedPlaceRec, store.control.places, checked.base - 1).kind == 1 }
     return lower_index_place(d, source_state, spans, store, current, owner, function, block, base, base_type, checked.index, checked.root, base_is_local, environment, panic_block)
+}
+
+// Whether a receiver place is rooted in a `mut self` receiver. Reading such
+// a field through the place keeps its storage in the caller's owner domain;
+// other field and element roots keep the established value-copy path.
+fn lower_place_root_mut_self(store: CheckStore, place: U64) -> Bool {
+    if place == 0 || place > __s0_buffer_len(CheckedPlaceRec, store.control.places) { return false }
+    let checked = __s0_buffer_get(CheckedPlaceRec, store.control.places, place - 1)
+    if checked.root == 0 || checked.root > __s0_buffer_len(LocalRec, store.locals) { return false }
+    return __s0_buffer_get(LocalRec, store.locals, checked.root - 1).mutable == 2
 }
 
 // The place a mutating collection operation writes its rebuilt header back

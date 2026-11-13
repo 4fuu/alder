@@ -68,8 +68,8 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   Milestone 8.1 byte cursor, half-open spans, positioned errors, and scalar
   token parsers;
 - [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
-  the Milestone 8 stable sorting entry point over the Order domain in the
-  installed sysroot.
+  the Milestone 8 stable sorting entry point and the Milestone 8.1 `Deque(T)`
+  and `BinaryHeap(T)` value types in the installed sysroot.
 
 M8 exit-audit status (complete):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
@@ -85,10 +85,11 @@ tooling-milestone work. `core.range` is deferred by
 scope decision; case mapping and normalization are deferred to a `std.text`
 v2 amendment; async task, channel, sync, and atomic modules are Milestone 9;
 networking, HTTP, TLS, data-format, CLI, log, OS, test-runner, and doc-tool
-modules are post-M8. The `core.iter`, `core.hash`,
-`core.memory`, `std.parse`, `std.signal`, and `Deque`/heap items belong to
+modules are post-M8. The remaining `core.iter`, `core.hash`,
+`std.parse`, and `std.signal` items belong to
 [Milestone 8.1](../ROADMAP.md#milestone-81-standard-library-completion), the
-immediate follow-on to M8. `std.c` is the verified C-interop surface
+immediate follow-on to M8. `core.memory` and the `Deque`/heap collection
+additions have already landed there. `std.c` is the verified C-interop surface
 rather than a `.al` module; its exit audit is complete.
 
 The M8 exit audit maps every ROADMAP M8 exit criterion and named area to a

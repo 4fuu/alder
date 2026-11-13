@@ -332,7 +332,11 @@ A conditional implementation — one whose `impl` declares type parameters, such
 as `impl(T: type) Cleanup for Boxed(T)` — registers the concrete instance of
 its `cleanup` hook for the registered owner's type, and that instance must
 satisfy the implementation's own constraints. The hook itself is a nongeneric
-method that takes the owner by value and returns `Unit`.
+method that takes the owner by value and returns `Unit`. Affinity follows the
+same applicability rule: an application is an owner only when a `Cleanup`
+implementation applies to its concrete arguments, so `Deque(U64)` stays
+copyable while a conditional `Cleanup` implementation on `Deque(T: Cleanup)`
+makes a deque over a `Cleanup` owner affine.
 
 Cleanup is guaranteed on:
 

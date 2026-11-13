@@ -90,3 +90,224 @@ fn merge_sorted_runs(T: type(Order), source: Vec(T), width: U64) -> Vec(T) {
     }
     return out
 }
+
+// M8.1 deque: two Vec halves. The front half stores its elements in reverse
+// order so pop_back/pop_front stay at the live end; elements move between the
+// halves with pop+push, so storage is bounded by the queue's high-water mark.
+// copyable T makes the whole deque copyable; an affine T makes it affine and
+// its conditional Cleanup drains both halves through their Vec drains.
+pub type Deque(T: type) {
+    front: Vec(T)
+    back: Vec(T)
+}
+
+impl(T: type) Deque(T) {
+    /// Creates an empty deque; the element type comes from the binding or
+    /// return type.
+    fn new() -> Deque(T) {
+        return Deque(front: Vec.new(T), back: Vec.new(T))
+    }
+
+    fn len(self) -> U64 {
+        return self.front.len() + self.back.len()
+    }
+
+    fn is_empty(self) -> Bool {
+        return self.len() == 0
+    }
+
+    /// Appends at the front. An affine value transfers into the deque.
+    fn push_front(mut self, take value: T) -> Unit {
+        self.front.push(value)
+        return
+    }
+
+    /// Appends at the back. An affine value transfers into the deque.
+    fn push_back(mut self, take value: T) -> Unit {
+        self.back.push(value)
+        return
+    }
+
+    /// Removes the front element, moving the back half into the front half
+    /// when the front is empty. An affine value transfers to the caller.
+    fn pop_front(mut self) -> Option(T) {
+        if self.front.len() == 0 {
+            if self.back.len() == 0 { return None }
+            while self.back.len() > 0 {
+                match self.back.pop() {
+                    Some(value) => { self.front.push(value) }
+                    None => {}
+                }
+            }
+        }
+        return self.front.pop()
+    }
+
+    /// Removes the back element, moving the front half into the back half
+    /// when the back is empty. An affine value transfers to the caller.
+    fn pop_back(mut self) -> Option(T) {
+        if self.back.len() == 0 {
+            if self.front.len() == 0 { return None }
+            while self.front.len() > 0 {
+                match self.front.pop() {
+                    Some(value) => { self.back.push(value) }
+                    None => {}
+                }
+            }
+        }
+        return self.back.pop()
+    }
+
+    /// Reads the front element when T is copyable. An affine T cannot be read
+    /// by value; use pop_front and transfer the owner out.
+    fn peek_front(self) -> Option(T) {
+        if self.front.len() > 0 { return self.front.get(self.front.len() - 1) }
+        if self.back.len() > 0 { return self.back.get(0) }
+        return None
+    }
+
+    /// Reads the back element when T is copyable. An affine T cannot be read
+    /// by value; use pop_back and transfer the owner out.
+    fn peek_back(self) -> Option(T) {
+        if self.back.len() > 0 { return self.back.get(self.back.len() - 1) }
+        if self.front.len() > 0 { return self.front.get(0) }
+        return None
+    }
+}
+
+impl(T: type(Cleanup)) Cleanup for Deque(T) {
+    fn cleanup(take self) -> Unit {
+        using front = self.front
+        using back = self.back
+        return
+    }
+}
+
+// M8.1 binary heap: a min-heap by default and a max-heap through
+// BinaryHeap.max. The Vec holds the complete tree in index order; sift-up and
+// sift-down use index assignment, so a mutation is O(log n). The element type
+// is copyable in v1 because peek and the returned roots are value reads.
+pub type BinaryHeap(T: type) {
+    items: Vec(T)
+    min_first: Bool
+}
+
+impl(T: type(Order)) BinaryHeap(T) {
+    /// A heap whose root is the smallest value; the element type comes from
+    /// the binding or return type.
+    fn new() -> BinaryHeap(T) {
+        return BinaryHeap(items: Vec.new(T), min_first: true)
+    }
+
+    /// A heap whose root is the largest value; the element type comes from
+    /// the binding or return type.
+    fn max() -> BinaryHeap(T) {
+        return BinaryHeap(items: Vec.new(T), min_first: false)
+    }
+
+    fn len(self) -> U64 {
+        return self.items.len()
+    }
+
+    fn is_empty(self) -> Bool {
+        return self.items.len() == 0
+    }
+
+    /// The root value, or None when empty.
+    fn peek(self) -> Option(T) {
+        return self.items.get(0)
+    }
+
+    /// Inserts a value and restores the heap order.
+    fn push(mut self, value: T) -> Unit {
+        self.items.push(value)
+        let at = self.items.len() - 1
+        self.sift_up(at)
+        return
+    }
+
+    /// Removes and returns the root, or None when empty.
+    fn pop(mut self) -> Option(T) {
+        let count = self.items.len()
+        if count == 0 { return None }
+        let root = match self.items.get(0) {
+            Some(value) => value
+            None => return None
+        }
+        let last = match self.items.get(count - 1) {
+            Some(value) => value
+            None => return None
+        }
+        match self.items.pop() {
+            Some(_) => {}
+            None => {}
+        }
+        if count > 1 {
+            self.items[0] = last
+            self.sift_down(0)
+        }
+        return Some(root)
+    }
+
+    // Whether left belongs above right for this heap's orientation.
+    fn before(self, left: T, right: T) -> Bool {
+        if self.min_first { return left.less(right) }
+        return right.less(left)
+    }
+
+    fn sift_up(mut self, start: U64) -> Unit {
+        var at = start
+        while at > 0 {
+            let parent = (at - 1) / 2
+            let parent_value = match self.items.get(parent) {
+                Some(value) => value
+                None => return
+            }
+            let child_value = match self.items.get(at) {
+                Some(value) => value
+                None => return
+            }
+            if self.before(parent_value, child_value) { return }
+            self.items[parent] = child_value
+            self.items[at] = parent_value
+            at = parent
+        }
+        return
+    }
+
+    fn sift_down(mut self, start: U64) -> Unit {
+        var at = start
+        var walking = true
+        while walking {
+            let count = self.items.len()
+            let left = at * 2 + 1
+            if left >= count { return }
+            var best = left
+            let right = left + 1
+            if right < count {
+                let left_value = match self.items.get(left) {
+                    Some(value) => value
+                    None => return
+                }
+                let right_value = match self.items.get(right) {
+                    Some(value) => value
+                    None => return
+                }
+                if self.before(right_value, left_value) { best = right }
+            }
+            let current = match self.items.get(at) {
+                Some(value) => value
+                None => return
+            }
+            let candidate = match self.items.get(best) {
+                Some(value) => value
+                None => return
+            }
+            if self.before(current, candidate) { return }
+            self.items[at] = candidate
+            self.items[best] = current
+            at = best
+        }
+        return
+    }
+}

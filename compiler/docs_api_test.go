@@ -151,7 +151,7 @@ pub fn main() -> I32 {
 import hello.std_collection_example { std_collection_example }
 
 pub fn main() -> I32 {
-    if std_collection_example() == 63 { return 0 }
+    if std_collection_example() == 255 { return 0 }
     return 1
 }
 `,

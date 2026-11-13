@@ -185,7 +185,10 @@ Milestone 7.5 adds the static trait surface of
   satisfies the constraint when its head unifies with the concrete
   implementing type and its own constraints hold for the arguments that
   unification binds, and a type parameter satisfies the constraints its own
-  declaration lists.
+  declaration lists. Affinity follows the same rule: a nominal application is
+  an owner only when its `Cleanup` implementation applies to the concrete
+  arguments, so a conditional implementation whose constraints fail leaves the
+  application copyable.
 - Every implementation is validated: required methods must be present with
   exactly the trait's receiver mode, runtime arity, and substituted
   parameter/result types, and impl methods that match no requirement are

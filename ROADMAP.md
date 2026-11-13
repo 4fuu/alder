@@ -2078,8 +2078,7 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory`, `core.hash`, and `std.parse` landed; no further scope gate)**
-
+Status: **in progress (`core.memory`, `core.hash`, `std.parse`, and `Deque`/heaps landed; no further scope gate)**
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
 The modules land in dependency order:
@@ -2088,7 +2087,7 @@ The modules land in dependency order:
 2. `core.hash`: the stable hashing contract and the hash builders that hash
    containers need (landed; see below);
 3. `Deque` and heaps: the remaining `core.collection`/`std.collection` value
-   types; heaps use the `Order` domain;
+   types; heaps use the `Order` domain (landed; see below);
 4. `core.iter`: static iterator traits and adapters; it begins with a design
    note on how `for`-in relates to the static iterator traits;
 5. `std.parse`: structured parsing with byte ranges, building on `core.num`
@@ -2157,6 +2156,24 @@ Unicode identifiers, normalization, and locale rules; floating-point,
 date/time, IP address, and duration parsing; and a `Parser` trait, closures, or
 combinator objects. These are post-M8 or additive-snapshot work, not gaps in
 the v1 contract.
+
+`Deque(T)` and `BinaryHeap(T)` complete the M8.1 collection item. `Deque`
+stores two `Vec` halves and supports copyable and affine elements; its
+conditional `Cleanup` implementation drains both halves, and `peek_*` remains
+available only for copyable elements. `BinaryHeap(T: Order)` is a min-heap by
+default and a max-heap through `BinaryHeap.max()`, with O(log n) sift-up and
+sift-down and a copyable scalar element domain. The checker now treats a
+nominal application as affine only when a `Cleanup` implementation applies to
+its concrete arguments, so `Deque(U64)` stays copyable while a `Deque` over a
+`Cleanup` owner is an owner. The `Vec.pop` primitive moves affine elements out
+through an owning local or an owning field/`mut self` chain; indexed assignment
+for copyable vectors already uses the mutable-slice path. Evidence:
+`compiler/production_collection_test.go` runs copyable deque and min/max heap
+behavior, affine deque cleanup exactly once under ASan/UBSan, and rejects
+`using` a copyable deque, peeking an affine deque, and a heap without `Order`;
+`compiler/production_vec_pop_test.go` covers copyable and affine pop plus the
+registered-owner rejection; `compiler/docs_api_test.go` runs the amended
+snapshot example with checksum 255.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 

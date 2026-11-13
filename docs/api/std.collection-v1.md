@@ -1,20 +1,21 @@
 # `std.collection` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8.1 v1 amendment**
 
 This is the versioned public snapshot for stable sorting over the Order
-domain. It is normative together with the executable example
+domain plus the Milestone 8.1 deque and binary-heap additions. It is
+normative together with the executable example
 [`examples/std.collection-v1.al`](examples/std.collection-v1.al), which lands
 in the module's implementation commit: the docs example runner resolves
 sysroot modules, so the example file cannot precede the module it imports.
 The module lives at `<sysroot>/std/collection.al`.
 
-Snapshot v1 covers the stable sorting entry point only. The re-exports of
-the core collections, `Deque(T)`, binary heaps, and the collection builders
-join later amendments as their prerequisites land. The module is pure
-computation: it never observes the host, so no function takes a capability.
-It depends on no other std module, so it sits at the bottom of the std
-module graph.
+Snapshot v1 now covers the stable sorting entry point, `Deque(T)`, and
+`BinaryHeap(T)`. The re-exports of the core collections and the collection
+builders join later amendments as their prerequisites land. The module is
+pure computation: it never observes the host, so no function takes a
+capability. It depends on no other std module, so it sits at the bottom of
+the std module graph.
 
 ## Signatures
 
@@ -25,6 +26,34 @@ module std.collection
 /// new owned vector and leaving the input slice untouched. The sort is
 /// stable: values that compare equal keep their input order.
 pub fn sort(T: type(Order), values: [T]) -> Vec(T)
+
+pub type Deque(T: type)
+
+impl(T: type) Deque(T) {
+    pub fn new() -> Deque(T)
+    pub fn len(self) -> U64
+    pub fn is_empty(self) -> Bool
+    pub fn push_front(mut self, take value: T) -> Unit
+    pub fn push_back(mut self, take value: T) -> Unit
+    pub fn pop_front(mut self) -> Option(T)
+    pub fn pop_back(mut self) -> Option(T)
+    pub fn peek_front(self) -> Option(T)
+    pub fn peek_back(self) -> Option(T)
+}
+
+impl(T: type(Cleanup)) Cleanup for Deque(T)
+
+pub type BinaryHeap(T: type(Order))
+
+impl(T: type(Order)) BinaryHeap(T) {
+    pub fn new() -> BinaryHeap(T)
+    pub fn max() -> BinaryHeap(T)
+    pub fn len(self) -> U64
+    pub fn is_empty(self) -> Bool
+    pub fn peek(self) -> Option(T)
+    pub fn push(mut self, value: T) -> Unit
+    pub fn pop(mut self) -> Option(T)
+}
 ```
 
 ## Contracts
@@ -47,21 +76,41 @@ pub fn sort(T: type(Order), values: [T]) -> Vec(T)
   pass and never mutates the input slice. The per-pass rebuild is a known
   v1 cost, documented until a `Vec` element-assignment surface replaces it;
   the algorithm stays bottom-up merge sort with left-run-first ties.
-- Every function is total against its input: no function panics, terminates,
-  or reads anything but its arguments.
+- `Deque` stores values in two `Vec` halves: the front half keeps its live
+  element at the vector end, and the back half keeps it at index zero of the
+  queue. Moving a half drains it with `pop` and pushes into the other half,
+  so steady queue traffic does not grow storage without bound; capacity is
+  bounded by the queue's high-water mark. Pushes and pops are amortized O(1).
+- `Deque(T)` is copyable when `T` is copyable, and affine when `T` implements
+  `Cleanup`; the conditional `Cleanup` implementation drains both halves.
+  `push_*` and `pop_*` transfer affine elements, while `peek_*` copies and is
+  therefore available only when `T` is copyable. An affine value must be named
+  by an owning local before a push, and a popped affine owner must be
+  registered or transferred before exit. A registered deque is immutable;
+  pop before registering it.
+- `BinaryHeap(T)` is a min-heap by default and a max-heap through
+  `BinaryHeap.max()`. It stores a complete tree over `Vec(T)`, with O(log n)
+  sift-up and sift-down on push and pop and O(1) `peek`. `pop` returns `None`
+  when the heap is empty. `T` is restricted to the scalar `Order` domain in
+  v1, so the element type is copyable by construction. Equal values may be
+  popped in any order; the heap does not promise stable ordering.
+- Every function is total against its input: it rejects no valid value and
+  reads nothing but its arguments. Memory allocation and checked arithmetic
+  follow the ordinary invariant-failure termination path.
 
 ## Example
 
 The example below is the complete content that lands as
 `examples/std.collection-v1.al` with the implementation commit. It sorts
 unsigned integers with ties, strings with prefix ordering and equal
-values, and booleans, checks the empty and single-element cases, and
-returns a deterministic checksum.
+values, and booleans, checks the empty and single-element cases, exercises
+deque order across both halves and min/max heap order, and returns the
+deterministic checksum 255.
 
 ```alder
 module hello.std_collection_example
 
-import std.collection { sort }
+import std.collection { BinaryHeap, Deque, sort }
 
 // The executable std.collection v1 snapshot example. Fixed inputs only;
 // every stage contributes a deterministic share of the returned checksum.
@@ -151,6 +200,71 @@ pub fn std_collection_example() -> U64 {
     let one: Array(U64, 1) = [42]
     let sorted_one = sort(U64, one.slice(0, 1))
     if sorted_one.len() == 1 { total = total + 32 }
+
+    // Deque preserves queue order while moving values between its two halves.
+    var queue: Deque(U64) = Deque.new()
+    queue.push_back(2)
+    queue.push_back(3)
+    queue.push_front(1)
+    var deque_bad: Bool = false
+    match queue.pop_front() {
+        Some(value) => { if value != 1 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_back() {
+        Some(value) => { if value != 3 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_front() {
+        Some(value) => { if value != 2 { deque_bad = true } }
+        None => { deque_bad = true }
+    }
+    match queue.pop_back() {
+        Some(_) => { deque_bad = true }
+        None => {}
+    }
+    if deque_bad { total = total - 1000000 } else { total = total + 64 }
+
+    // A min-heap yields ascending roots; BinaryHeap.max yields descending
+    // roots. Duplicate values remain valid children.
+    var heap: BinaryHeap(U64) = BinaryHeap.new()
+    heap.push(3)
+    heap.push(1)
+    heap.push(2)
+    var heap_bad: Bool = false
+    match heap.pop() {
+        Some(value) => { if value != 1 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(value) => { if value != 2 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(value) => { if value != 3 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match heap.pop() {
+        Some(_) => { heap_bad = true }
+        None => {}
+    }
+    var max_heap: BinaryHeap(U64) = BinaryHeap.max()
+    max_heap.push(1)
+    max_heap.push(3)
+    max_heap.push(2)
+    match max_heap.pop() {
+        Some(value) => { if value != 3 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != 2 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    match max_heap.pop() {
+        Some(value) => { if value != 1 { heap_bad = true } }
+        None => { heap_bad = true }
+    }
+    if heap_bad { total = total - 1000000 } else { total = total + 128 }
 
     return total
 }

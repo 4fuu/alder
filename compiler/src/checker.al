@@ -896,7 +896,7 @@ fn interpreted_type_category(d: Domain, state: State, parse: ParseStore, store: 
             // A nominal type that implements Cleanup is an
             // affine owner: cleanup selection consumes it on every exit. The
             // receiver index answers this in logarithmic time.
-            if checked.kind == 7 && type_cleanup_impls(store, checked.target) != 0 { affine = true }
+            if checked.kind == 7 && (try type_cleanup_applies(d, store, norm.checked_type)) { affine = true }
             if checked.kind == 4 || checked.kind == 8 || checked.kind == 12 || checked.kind == 18 || checked.kind == 21 || checked.kind == 22 { scoped = true }
             if checked.kind == 6 { unresolved = true }
             if checked.kind == 9 || checked.kind == 10 || checked.kind == 11 || checked.kind == 13 || checked.kind == 15 || checked.kind == 17 {
@@ -6558,7 +6558,7 @@ fn check_call_argument_mode(d: Domain, state: State, parse: ParseStore, base: Ch
             if field_root <= __s0_buffer_len(LocalRec, store.locals) {
                 let root_binding = __s0_buffer_get(LocalRec, store.locals, field_root - 1)
                 let concrete = try concrete_field_type(d, store, root_binding.checked_type, expression.parameter_use)
-                let field_category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, concrete.checked_type, 0, 0)
+                let field_category = try interpreted_type_category(d, state, parse, concrete.store, empty, no_ancestry, concrete.checked_type, 0, 0)
                 if field_category.category == 2 {
                     if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return expr_token_fail(d, state, store, 308, arg) }
                     access = true
@@ -6681,7 +6681,7 @@ fn transfer_owned_argument(d: Domain, state: State, parse: ParseStore, store: Ch
             let concrete = try concrete_field_type(d, store, root_binding.checked_type, expression.parameter_use)
             let empty = try __s0_buffer_new(TypeBindingRec, d)
             let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-            let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, concrete.checked_type, 0, 0)
+            let category = try interpreted_type_category(d, state, parse, concrete.store, empty, no_ancestry, concrete.checked_type, 0, 0)
             return Ok(TransferOutcomeRec(store: store, rejected: category.category == 2))
         }
         if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
@@ -6689,7 +6689,7 @@ fn transfer_owned_argument(d: Domain, state: State, parse: ParseStore, store: Ch
         let concrete = try concrete_field_type(d, store, root_binding.checked_type, expression.parameter_use)
         let empty = try __s0_buffer_new(TypeBindingRec, d)
         let no_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-        let category = try interpreted_type_category(d, state, parse, store, empty, no_ancestry, concrete.checked_type, 0, 0)
+        let category = try interpreted_type_category(d, state, parse, concrete.store, empty, no_ancestry, concrete.checked_type, 0, 0)
         if category.category != 2 { return Ok(TransferOutcomeRec(store: store, rejected: false)) }
         __s0_buffer_set(CheckedExprRec, store.expressions, expression_id - 1, CheckedExprRec(owner: expression.owner, owner_previous: expression.owner_previous, syntax: expression.syntax, kind: 21, checked_type: expression.checked_type, parameter_use: expression.parameter_use, bool_value: expression.bool_value, left: expression.left, right: expression.right, annotation: expression.annotation, field_move: root, first_child: expression.first_child, child_count: expression.child_count, operator: expression.operator, site_kind: expression.site_kind, site_syntax: expression.site_syntax))
         return Ok(TransferOutcomeRec(store: store, rejected: false))
@@ -11984,7 +11984,7 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
             if root != 0 && root <= __s0_buffer_len(LocalRec, ostore.locals) {
                 let root_binding = __s0_buffer_get(LocalRec, ostore.locals, root - 1)
                 let concrete = try concrete_field_type(d, ostore, root_binding.checked_type, initializer.parameter_use)
-                let field_category = try interpreted_type_category(d, state, parse, ostore, empty_bindings, empty_ancestry, concrete.checked_type, 0, 0)
+                let field_category = try interpreted_type_category(d, state, parse, concrete.store, empty_bindings, empty_ancestry, concrete.checked_type, 0, 0)
                 if field_category.category == 2 {
                     if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return body_token_fail(d, state, ostore, 308, init) }
                     __s0_buffer_set(CheckedExprRec, ostore.expressions, draft.expression - 1, CheckedExprRec(owner: initializer.owner, owner_previous: initializer.owner_previous, syntax: initializer.syntax, kind: 21, checked_type: initializer.checked_type, parameter_use: initializer.parameter_use, bool_value: initializer.bool_value, left: initializer.left, right: initializer.right, annotation: initializer.annotation, field_move: root, first_child: initializer.first_child, child_count: initializer.child_count, operator: initializer.operator, site_kind: initializer.site_kind, site_syntax: initializer.site_syntax))
@@ -12107,7 +12107,7 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
             if root != 0 && root <= __s0_buffer_len(LocalRec, current.locals) {
                 let root_binding = __s0_buffer_get(LocalRec, current.locals, root - 1)
                 let concrete = try concrete_field_type(d, current, root_binding.checked_type, returned.parameter_use)
-                let field_category = try interpreted_type_category(d, state, parse, current, empty, no_ancestry, concrete.checked_type, 0, 0)
+                let field_category = try interpreted_type_category(d, state, parse, concrete.store, empty, no_ancestry, concrete.checked_type, 0, 0)
                 if field_category.category == 2 {
                     if root_binding.kind != 1 || __s0_buffer_get(SyntaxRec, parse.nodes, root_binding.syntax - 1).kind != 48 { return body_token_fail(d, state, current, 308, syntax) }
                     __s0_buffer_set(CheckedExprRec, current.expressions, expression - 1, CheckedExprRec(owner: returned.owner, owner_previous: returned.owner_previous, syntax: returned.syntax, kind: 21, checked_type: returned.checked_type, parameter_use: returned.parameter_use, bool_value: returned.bool_value, left: returned.left, right: returned.right, annotation: returned.annotation, field_move: root, first_child: returned.first_child, child_count: returned.child_count, operator: returned.operator, site_kind: returned.site_kind, site_syntax: returned.site_syntax))
@@ -12327,6 +12327,42 @@ fn type_cleanup_impls(store: CheckStore, type_symbol: U64) -> U64 {
 // type_cleanup_method_symbol resolves the single `cleanup` method of the
 // Cleanup implementation for a nominal type symbol, or zero when the type has
 // no Cleanup implementation or no such method.
+// type_cleanup_applies decides whether a concrete nominal type has an
+// applicable Cleanup implementation. A generic implementation is conditional:
+// its head must unify with the type and its own constraints must hold for the
+// arguments that unification binds, so a Deque(U64) is not an owner merely
+// because Deque(T: Cleanup) exists for other arguments.
+fn type_cleanup_applies(d: Domain, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 7 { return Ok(false) }
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    if count == 0 { return Ok(false) }
+    var low: U64 = 0
+    var high = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < checked.target { low = mid + 1 } else { high = mid }
+    }
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > checked.target { return Ok(false) }
+        if symbol == checked.target && rec.trait_builtin == 5 {
+            if rec.first_method == 0 { return Ok(false) }
+            if impl_param_count_for(store, rec.first_method) == 0 { return Ok(true) }
+            let bindings = try __s0_buffer_new(InferenceBindingRec, d)
+            let seeded = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: 1, checked_type: checked_type))
+            let constraint = TraitConstraintRec(owner: 0, param: 1, trait_builtin: 5, trait_symbol: 0, first_arg: 0, arg_count: 0, syntax: 0)
+            if try trait_impl_applies(d, store, rec, constraint, seeded, 0) { return Ok(true) }
+        }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
 fn type_cleanup_method_symbol(state: State, store: CheckStore, type_symbol: U64) -> U64 {
     let count = __s0_buffer_len(U64, store.traits.receiver_index)
     if count == 0 { return 0 }
@@ -13137,7 +13173,7 @@ fn check_owner_body(d: Domain, state: State, parse: ParseStore, store: CheckStor
                             let concrete = try concrete_field_type(d, after, local.checked_type, field_use)
                             let field_bindings = try __s0_buffer_new(TypeBindingRec, d)
                             let field_ancestry = try __s0_buffer_new(DeclAncestryRec, d)
-                            let field_category = try interpreted_type_category(d, state, parse, after, field_bindings, field_ancestry, concrete.checked_type, 0, 0)
+                            let field_category = try interpreted_type_category(d, state, parse, concrete.store, field_bindings, field_ancestry, concrete.checked_type, 0, 0)
                             if field_category.category == 2 { affine_mask = affine_mask + owner_flow_field_bit(field_at + 1) }
                         }
                         field_at = field_at + 1
