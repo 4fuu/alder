@@ -1,7 +1,8 @@
-// One lexical name visible to the dotted-callee heuristic. Names are
-// append-only; binding_count restores the visible prefix at block, arm,
-// closure, and function exits, so a shadow in an inner scope never affects a
-// dotted call after that scope. source/start/end are the declared word.
+// One lexical name visible to the dotted-callee heuristic. The binding buffer
+// keeps its history; binding_count restores the visible prefix at block, arm,
+// closure, and function exits, and a later binding reuses the first restored
+// slot so a shadow in an inner scope never affects a dotted call after that
+// scope. source/start/end are the declared word.
 type ParseBindingRec {
     source: U64
     start: U64
@@ -125,7 +126,17 @@ fn add_root(d: Domain, cursor: ParseCursor, node: U64) -> Result(ParseCursor, __
 // The binding is visible until the enclosing block, arm, closure, or function
 // restores binding_count; the visible prefix is scanned for an exact match.
 fn parse_add_binding(d: Domain, cursor: ParseCursor, token: TokenRec) -> Result(ParseCursor, __s0_Error) {
-    let bindings = try __s0_buffer_append(ParseBindingRec, d, cursor.store.bindings, ParseBindingRec(source: token.source, start: token.start, end: token.end))
+    let rec = ParseBindingRec(source: token.source, start: token.start, end: token.end)
+    var bindings = cursor.store.bindings
+    if cursor.store.binding_count < __s0_buffer_len(ParseBindingRec, bindings) {
+        // A function or block exit restores binding_count without truncating
+        // the append-only buffer. Reuse that visible slot so a stale binding
+        // from an earlier scope cannot become visible again when a later local
+        // grows the count past it.
+        __s0_buffer_set(ParseBindingRec, bindings, cursor.store.binding_count, rec)
+    } else {
+        bindings = try __s0_buffer_append(ParseBindingRec, d, bindings, rec)
+    }
     let store = ParseStore(nodes: cursor.store.nodes, links: cursor.store.links, roots: cursor.store.roots, diagnostics: cursor.store.diagnostics, bindings: bindings, binding_count: cursor.store.binding_count + 1)
     return Ok(ParseCursor(token: cursor.token, store: store))
 }

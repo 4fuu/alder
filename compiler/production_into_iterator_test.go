@@ -404,6 +404,13 @@ pub fn main() -> I32 {
     remote_values.push(2)
     var remote = remote_values.into_iterator()
     if iteruser.first_of(remote) != Some(2) { return 2 }
+
+    // A parameter named iter in an earlier function must not remain visible
+    // to a later module-namespace call in the same source.
+    var later_values = Vec.new(U64)
+    later_values.push(3)
+    var mapped = iter.map(fn(x: U64) => x + 1, later_values.into_iterator())
+    if iter.count(mapped) != 1 { return 3 }
     return 0
 }
 `,
