@@ -184,6 +184,21 @@ at size 0 and alignment 1. Calls with a non-type argument, wrong arity, or an
 unresolved type are diagnostic 346. No allocation, pointer, or Alder layout
 engine is added.
 
+Implemented core.hash progress: `sysroot/core/hash.al` provides the stable
+structural `hash`/`hash_with` contract, the SipHash-1-3 `Hasher`, and the
+128-bit `RandomState` key carrier ([snapshot](api/core.hash-v1.md)). The
+structural domain is the same synthesized `Eq`/`Hash` domain used for `==`,
+covering `Bool`, signed and unsigned integers, `String`, `Bytes`,
+`Option`/`Result`, and eligible records and enums; floats, pointers, views,
+and collections are rejected with diagnostic 347. `hash` uses the fixed zero
+key; `hash_with` uses a `RandomState`. `std.random.random_state` fills the
+key from host entropy through `std.io.Io`, keeping `core.hash` below `std`.
+The C backend lowers MIR 116 `hash.value` to the runtime SipHash-1-3 helper
+over the canonical stream, and the Alder `Hasher` implements the same
+primitive for callers that build their own stream. Map and Set remain
+insertion-ordered association lists in M8.1, so `Map.with_hasher` stays
+deferred until hash containers exist.
+
 ## Text and bytes
 
 Required modules:

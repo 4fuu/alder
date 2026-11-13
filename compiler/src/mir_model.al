@@ -229,6 +229,9 @@ fn mir_op_c_callback_owner_register() -> U64 { return 112 }
 // Unit fixed to size 0 and align 1.
 fn mir_op_type_size() -> U64 { return 113 }
 fn mir_op_type_align() -> U64 { return 115 }
+// Structural SipHash-1-3 over one value: a and b are the 128-bit key words,
+// target is the value, and type_op names its concrete structural type.
+fn mir_op_hash_value() -> U64 { return 116 }
 fn mir_op_c_callback_owner_release() -> U64 { return 114 }
 
 fn mir_term_jump() -> U64 { return 0 }

@@ -477,6 +477,7 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
     if kind == 309 { return out_string("cannot construct this record outside its module: a required field is not pub") }
     if kind == 345 { return out_string("a borrowed parameter cannot be used as an owner; declare the parameter with take to transfer ownership") }
     if kind == 346 { return out_string("size_of and align_of require exactly one concrete type argument: size_of(T) or align_of(T)") }
+    if kind == 347 { return out_string("core.hash requires a structurally hashable type: Bool, signed or unsigned integers, String, Bytes, Option/Result, or records and enums over them; floats, pointers, and collections are excluded") }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }

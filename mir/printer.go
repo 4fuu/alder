@@ -364,6 +364,9 @@ func printInstr(b *strings.Builder, m *Module, f *Function, in *Instr) {
 	case OpCZero, OpTypeSize, OpTypeAlign:
 		b.WriteString(" " + m.TypeString(in.TypeOp))
 
+	case OpHashValue:
+		b.WriteString(" " + valueName(f, in.A) + ", " + valueName(f, in.B) + ", " + valueName(f, in.HashVal) + ", " + m.TypeString(in.TypeOp))
+
 	case OpCAddr:
 		b.WriteString(" " + printPlace(m, f, &in.Place) + ", " + m.TypeString(in.TypeOp))
 

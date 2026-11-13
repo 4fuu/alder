@@ -219,6 +219,10 @@ const (
 	// and alignment 1.
 	OpTypeSize  OpKind = 113
 	OpTypeAlign OpKind = 115
+	// OpHashValue computes SipHash-1-3 over one structural value. A and B
+	// are the 128-bit key words, HashVal is the value, TypeOp names the
+	// value's concrete structural type, and the result is u64.
+	OpHashValue OpKind = 116
 	// FnValueDomainMarker is the type_op flag a fn.value carries when its
 	// environment operand supplies the callee's hidden leading domain
 	// parameter. The value sits far outside any real type id range so it can
@@ -455,6 +459,8 @@ func (k OpKind) String() string {
 		return "type.size"
 	case OpTypeAlign:
 		return "type.align"
+	case OpHashValue:
+		return "hash.value"
 	}
 	return "op(" + strconv.Itoa(int(k)) + ")"
 }

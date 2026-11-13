@@ -208,8 +208,11 @@ Milestone 7.5 adds the static trait surface of
   structural domain. Per
   [Traits and Closures](traits-and-closures.md), "A type cannot override
   structural `==` with a surprising user implementation": user `impl Eq`
-  and `impl Hash` blocks are rejected. The synthesized methods are not
-  directly callable yet; they become callable with the ordered collections.
+  and `impl Hash` blocks are rejected. The synthesized method names are not
+  directly callable yet; structural hashing is exposed through
+  `core.hash.hash(T, value)` and `core.hash.hash_with(T, state, value)` over
+  the same domain, while the ordered collections keep their own internal
+  equality and hash path.
 - Structural `Order` implementations are synthesized by the language for
   the closed scalar domain: unsigned integers `U8`, `U16`, `U32`, and
   `U64`, `Bool` (false orders below true), `String`, and `Bytes`

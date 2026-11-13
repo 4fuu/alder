@@ -2346,6 +2346,7 @@ fn cgen_emit_instruction(d: Domain, initial: CgenWriter, store: MirStore, indexe
     if item.op == mir_op_c_buffer_ptr() { return cgen_emit_c_buffer_ptr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_zero() { return cgen_emit_c_zero(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_type_size() || item.op == mir_op_type_align() { return cgen_emit_type_query(d, out, store, item) }
+    if item.op == mir_op_hash_value() { return cgen_emit_hash_value(d, out, store, indexes, item) }
     if item.op == mir_op_c_addr() { return cgen_emit_c_addr(d, out, store, indexes, instruction, item) }
     if item.op == mir_op_c_callback_make() { return cgen_emit_c_callback_make(d, out, store, item) }
     if item.op == mir_op_c_callback_owner_register() { return cgen_emit_callback_owner_register(d, out, store, indexes, item) }
@@ -2412,6 +2413,193 @@ fn cgen_emit_type_query(d: Domain, initial: CgenWriter, store: MirStore, item: M
     if item.op == mir_op_type_size() { out = try cgen_put(d, out, "sizeof(") } else { out = try cgen_put(d, out, "_Alignof(") }
     out = try cgen_put_type(d, out, store, item.type_op)
     return cgen_put(d, out, ");\n")
+}
+
+
+// Structural SipHash-1-3 over one value. The hash state is a C local named
+// after the instruction result; the recursive encoder writes canonical bytes
+// and never exposes a pointer or a descriptor.
+fn cgen_emit_hash_value(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, item: MirInstrRec) -> Result(CgenWriter, __s0_Error) {
+    let state = try lower_decimal_name(d, "alder_h", item.result - 1)
+    let value = try lower_decimal_name(d, "alder_v", item.c - 1)
+    var out = try cgen_put(d, initial, "  AlderHashState ")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, "; alder_hash_init(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.a)
+    out = try cgen_put(d, out, ", ")
+    out = try cgen_put_value_read(d, out, store, indexes, item.function, item.b)
+    out = try cgen_put(d, out, ");\n")
+    out = try cgen_emit_hash_type(d, out, store, indexes, state, value, "", item.type_op, 0)
+    out = try cgen_put(d, out, "  ")
+    out = try cgen_put_value(d, out, item.result)
+    out = try cgen_put(d, out, " = alder_hash_finish(&")
+    out = try cgen_put(d, out, state)
+    return cgen_put(d, out, ");\n")
+}
+
+fn cgen_hash_concat(d: Domain, left: __s0_String, right: __s0_String) -> Result(__s0_String, __s0_Error) {
+    var bytes = try __s0_buffer_new(U8, d)
+    var at: U64 = 0
+    while at < len(left) {
+        bytes = try __s0_buffer_append(U8, d, bytes, left[at])
+        at = at + 1
+    }
+    at = 0
+    while at < len(right) {
+        bytes = try __s0_buffer_append(U8, d, bytes, right[at])
+        at = at + 1
+    }
+    return Ok(__s0_buffer_slice(U8, bytes))
+}
+
+fn cgen_hash_value_expr(d: Domain, value: __s0_String, suffix: __s0_String) -> Result(__s0_String, __s0_Error) {
+    return cgen_hash_concat(d, value, suffix)
+}
+
+fn cgen_emit_hash_type(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, state: __s0_String, value: __s0_String, suffix: __s0_String, type_id: U64, depth: U64) -> Result(CgenWriter, __s0_Error) {
+    if depth > 64 || type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return cgen_emit_hash_unsupported(d, initial) }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if rec.kind == mir_type_kind_primitive() { return cgen_emit_hash_primitive(d, initial, state, value, suffix, type_id) }
+    if rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() { return cgen_emit_hash_bytes(d, initial, state, value, suffix) }
+    if rec.kind == mir_type_kind_option() { return cgen_emit_hash_option(d, initial, store, indexes, state, value, suffix, rec, depth) }
+    if rec.kind == mir_type_kind_result() { return cgen_emit_hash_result(d, initial, store, indexes, state, value, suffix, rec, depth) }
+    if rec.kind == mir_type_kind_aggregate() { return cgen_emit_hash_aggregate(d, initial, store, indexes, state, value, suffix, type_id, depth) }
+    if rec.kind == mir_type_kind_enum() { return cgen_emit_hash_enum(d, initial, store, indexes, state, value, suffix, type_id, rec, depth) }
+    return cgen_emit_hash_unsupported(d, initial)
+}
+
+fn cgen_emit_hash_unsupported(d: Domain, initial: CgenWriter) -> Result(CgenWriter, __s0_Error) {
+    return cgen_put(d, initial, "  alder_runtime_panic(\"unreachable\");\n")
+}
+
+fn cgen_emit_hash_primitive(d: Domain, initial: CgenWriter, state: __s0_String, value: __s0_String, suffix: __s0_String, type_id: U64) -> Result(CgenWriter, __s0_Error) {
+    if type_id == mir_type_unit() { return Ok(initial) }
+    let expr = try cgen_hash_value_expr(d, value, suffix)
+    var width: U64 = 0
+    if type_id == mir_type_bool() {
+        var out = try cgen_put(d, initial, "  alder_hash_write_uint(&")
+        out = try cgen_put(d, out, state)
+        out = try cgen_put(d, out, ", (uint64_t)((")
+        out = try cgen_put(d, out, expr)
+        return cgen_put(d, out, ") != 0), UINT64_C(1));\n")
+    }
+    if type_id == mir_type_i8() || type_id == mir_type_u8() { width = 1 }
+    if type_id == mir_type_i16() || type_id == mir_type_u16() { width = 2 }
+    if type_id == mir_type_i32() || type_id == mir_type_u32() { width = 4 }
+    if type_id == mir_type_i64() || type_id == mir_type_u64() { width = 8 }
+    if width == 0 { return cgen_emit_hash_unsupported(d, initial) }
+    return cgen_hash_write_uint(d, initial, state, expr, width)
+}
+
+fn cgen_emit_hash_bytes(d: Domain, initial: CgenWriter, state: __s0_String, value: __s0_String, suffix: __s0_String) -> Result(CgenWriter, __s0_Error) {
+    let expr = try cgen_hash_value_expr(d, value, suffix)
+    var out = try cgen_put(d, initial, "  alder_hash_write_u64(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").len);\n  alder_hash_write_bytes(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (const uint8_t *)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").data, (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    return cgen_put(d, out, ").len);\n")
+}
+
+fn cgen_hash_suffix(d: Domain, base: __s0_String, prefix: __s0_String, ordinal: U64) -> Result(__s0_String, __s0_Error) {
+    let tail = try lower_decimal_name(d, prefix, ordinal)
+    return cgen_hash_concat(d, base, tail)
+}
+
+fn cgen_emit_hash_option(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, state: __s0_String, value: __s0_String, suffix: __s0_String, rec: MirTypeRec, depth: U64) -> Result(CgenWriter, __s0_Error) {
+    let expr = try cgen_hash_value_expr(d, value, suffix)
+    var out = try cgen_put(d, initial, "  alder_hash_write_uint(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag, UINT64_C(1));\n")
+    if rec.elem == mir_type_unit() { return Ok(out) }
+    let payload_suffix = try cgen_hash_suffix(d, suffix, ".alder_u.alder_p", 1)
+    out = try cgen_put(d, out, "  if ((")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag == 1U) \{\n")
+    out = try cgen_emit_hash_type(d, out, store, indexes, state, value, payload_suffix, rec.elem, depth + 1)
+    return cgen_put(d, out, "  }\n")
+}
+
+fn cgen_emit_hash_result(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, state: __s0_String, value: __s0_String, suffix: __s0_String, rec: MirTypeRec, depth: U64) -> Result(CgenWriter, __s0_Error) {
+    let expr = try cgen_hash_value_expr(d, value, suffix)
+    var out = try cgen_put(d, initial, "  alder_hash_write_uint(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag, UINT64_C(1));\n  if ((")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag == 0U) \{\n")
+    if rec.ok_type != mir_type_unit() {
+        let ok_suffix = try cgen_hash_suffix(d, suffix, ".alder_u.alder_p", 0)
+        out = try cgen_emit_hash_type(d, out, store, indexes, state, value, ok_suffix, rec.ok_type, depth + 1)
+    }
+    out = try cgen_put(d, out, "  } else \{\n")
+    if rec.err_type != mir_type_unit() {
+        let err_suffix = try cgen_hash_suffix(d, suffix, ".alder_u.alder_p", 1)
+        out = try cgen_emit_hash_type(d, out, store, indexes, state, value, err_suffix, rec.err_type, depth + 1)
+    }
+    return cgen_put(d, out, "  }\n")
+}
+
+fn cgen_emit_hash_aggregate(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, state: __s0_String, value: __s0_String, suffix: __s0_String, type_id: U64, depth: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = initial
+    var at: U64 = 0
+    let count = mir_type_part_count(store, type_id, mir_type_part_field())
+    while at < count {
+        let part = cgen_type_part(store, type_id, mir_type_part_field(), at)
+        if part.part_type != mir_type_unit() {
+            let field_suffix = try cgen_hash_suffix(d, suffix, ".alder_f", at)
+            out = try cgen_emit_hash_type(d, out, store, indexes, state, value, field_suffix, part.part_type, depth + 1)
+        }
+        at = at + 1
+    }
+    return Ok(out)
+}
+
+fn cgen_emit_hash_enum(d: Domain, initial: CgenWriter, store: MirStore, indexes: MirVIndexes, state: __s0_String, value: __s0_String, suffix: __s0_String, type_id: U64, rec: MirTypeRec, depth: U64) -> Result(CgenWriter, __s0_Error) {
+    let expr = try cgen_hash_value_expr(d, value, suffix)
+    var out = try cgen_put(d, initial, "  alder_hash_write_u64(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag);\n  switch ((")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, ").alder_tag) \{\n")
+    var at: U64 = 0
+    let count = mir_type_part_count(store, type_id, mir_type_part_variant())
+    while at < count {
+        let part = cgen_type_part(store, type_id, mir_type_part_variant(), at)
+        out = try cgen_put(d, out, "  case ")
+        out = try cgen_put_u64(d, out, at)
+        out = try cgen_put(d, out, "U:\n")
+        if part.part_type != mir_type_unit() {
+            let payload_suffix = try cgen_hash_suffix(d, suffix, ".alder_u.alder_p", at)
+            out = try cgen_emit_hash_type(d, out, store, indexes, state, value, payload_suffix, part.part_type, depth + 1)
+        }
+        out = try cgen_put(d, out, "    break;\n")
+        at = at + 1
+    }
+    out = try cgen_put(d, out, "  default:\n    alder_runtime_panic(\"unreachable\");\n  }\n")
+    return Ok(out)
+}
+
+fn cgen_hash_write_uint(d: Domain, initial: CgenWriter, state: __s0_String, expr: __s0_String, width: U64) -> Result(CgenWriter, __s0_Error) {
+    var out = try cgen_put(d, initial, "  alder_hash_write_uint(&")
+    out = try cgen_put(d, out, state)
+    out = try cgen_put(d, out, ", (uint64_t)(")
+    out = try cgen_put(d, out, expr)
+    out = try cgen_put(d, out, "), UINT64_C(")
+    out = try cgen_put_u64(d, out, width)
+    return cgen_put(d, out, "));\n")
 }
 
 // One local address under the declared C pointer type; the result is a raw

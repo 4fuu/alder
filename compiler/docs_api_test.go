@@ -104,6 +104,19 @@ pub fn main() -> I32 {
 }
 `,
 		},
+		"core.hash-v1.al": {
+			style:   "project",
+			srcName: "core_hash_example.al",
+			mainText: `module hello.main
+
+import hello.core_hash_example { core_hash_example }
+
+pub fn main() -> I32 {
+    if core_hash_example() == 4516 { return 0 }
+    return 1
+}
+`,
+		},
 		"core.memory-v1.al": {
 			style:   "project",
 			srcName: "core_memory_example.al",

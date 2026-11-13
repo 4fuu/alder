@@ -757,3 +757,84 @@ const char *alder_host_arg(int index) {
     }
     return alder_host_argv[index];
 }
+
+/* ------------------------------------------------------------------ */
+/* Structural hashing                                                  */
+/* ------------------------------------------------------------------ */
+
+static uint64_t alder_hash_rotate_left(uint64_t value, uint64_t bits) {
+    return (value << bits) | (value >> (UINT64_C(64) - bits));
+}
+
+static void alder_hash_round(AlderHashState *state) {
+    state->v0 += state->v1;
+    state->v1 = alder_hash_rotate_left(state->v1, UINT64_C(13));
+    state->v1 ^= state->v0;
+    state->v0 = alder_hash_rotate_left(state->v0, UINT64_C(32));
+    state->v2 += state->v3;
+    state->v3 = alder_hash_rotate_left(state->v3, UINT64_C(16));
+    state->v3 ^= state->v2;
+    state->v0 += state->v3;
+    state->v3 = alder_hash_rotate_left(state->v3, UINT64_C(21));
+    state->v3 ^= state->v0;
+    state->v2 += state->v1;
+    state->v1 = alder_hash_rotate_left(state->v1, UINT64_C(17));
+    state->v1 ^= state->v2;
+    state->v2 = alder_hash_rotate_left(state->v2, UINT64_C(32));
+}
+
+static void alder_hash_rounds(AlderHashState *state, unsigned rounds) {
+    unsigned at;
+    for (at = 0; at < rounds; at++) {
+        alder_hash_round(state);
+    }
+}
+
+void alder_hash_init(AlderHashState *state, uint64_t k0, uint64_t k1) {
+    state->v0 = k0 ^ UINT64_C(0x736f6d6570736575);
+    state->v1 = k1 ^ UINT64_C(0x646f72616e646f6d);
+    state->v2 = k0 ^ UINT64_C(0x6c7967656e657261);
+    state->v3 = k1 ^ UINT64_C(0x7465646279746573);
+    state->total = UINT64_C(0);
+    state->tail = UINT64_C(0);
+}
+
+static void alder_hash_compress(AlderHashState *state) {
+    state->v3 ^= state->tail;
+    alder_hash_rounds(state, 1U);
+    state->v0 ^= state->tail;
+    state->tail = UINT64_C(0);
+}
+
+void alder_hash_write_uint(AlderHashState *state, uint64_t value, uint64_t width) {
+    uint64_t at;
+    for (at = UINT64_C(0); at < width; at++) {
+        state->tail |= (value & UINT64_C(0xff)) << ((state->total % UINT64_C(8)) * UINT64_C(8));
+        state->total += UINT64_C(1);
+        if (state->total % UINT64_C(8) == UINT64_C(0)) {
+            alder_hash_compress(state);
+        }
+        value >>= UINT64_C(8);
+    }
+}
+
+void alder_hash_write_u64(AlderHashState *state, uint64_t value) {
+    alder_hash_write_uint(state, value, UINT64_C(8));
+}
+
+void alder_hash_write_bytes(AlderHashState *state, const uint8_t *data, uint64_t len) {
+    uint64_t at;
+    for (at = UINT64_C(0); at < len; at++) {
+        alder_hash_write_uint(state, (uint64_t)data[at], UINT64_C(1));
+    }
+}
+
+uint64_t alder_hash_finish(const AlderHashState *state) {
+    AlderHashState final = *state;
+    final.v3 ^= (final.total << UINT64_C(56)) | final.tail;
+    alder_hash_rounds(&final, 1U);
+    final.v0 ^= (final.total << UINT64_C(56)) | final.tail;
+    final.v2 ^= UINT64_C(0xff);
+    alder_hash_rounds(&final, 3U);
+    return final.v0 ^ final.v1 ^ final.v2 ^ final.v3;
+}

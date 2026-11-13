@@ -1529,6 +1529,31 @@ func (p *parser) parseOp() (Instr, error) {
 		}
 		in.TypeOp, err = p.parseType()
 
+	case "hash.value":
+		if p.m.FormatVersion < BindingFormatVersion {
+			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)
+		}
+		in.Op = OpHashValue
+		if in.A, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.B, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		if in.HashVal, err = p.parseValueRef(); err != nil {
+			return in, err
+		}
+		if err = p.expectComma(); err != nil {
+			return in, err
+		}
+		in.TypeOp, err = p.parseType()
+
 	case "c.addr":
 		if p.m.FormatVersion < BindingFormatVersion {
 			return in, p.errf(t, "%s requires MIR format version %d", t.text, BindingFormatVersion)

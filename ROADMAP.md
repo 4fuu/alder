@@ -2078,7 +2078,7 @@ shim probes are compile-only, and the macOS lane waits for a macOS runner.
 
 ## Milestone 8.1: Standard-library completion
 
-Status: **in progress (`core.memory` landed; no further scope gate)**
+Status: **in progress (`core.memory` and `core.hash` landed; no further scope gate)**
 
 A 2026-11 scope decision moves the modules that Milestone 8 does not name out
 of its exit and into this immediate follow-on. Milestone 8.1 is in progress.
@@ -2086,7 +2086,7 @@ The modules land in dependency order:
 
 1. `core.memory`: size and alignment queries (landed; see below);
 2. `core.hash`: the stable hashing contract and the hash builders that hash
-   containers need;
+   containers need (landed; see below);
 3. `Deque` and heaps: the remaining `core.collection`/`std.collection` value
    types; heaps use the `Order` domain;
 4. `core.iter`: static iterator traits and adapters; it begins with a design
@@ -2099,6 +2099,25 @@ The modules land in dependency order:
 Exit requires each listed module's frozen snapshot, installed implementation,
 and production-driver evidence. The `std.signal` triage records exactly which
 pieces stay in 8.1 and which move to Milestone 9.
+
+Landed M8.1 progress: `core.hash` provides the SipHash-1-3 structural hash
+over the synthesized Eq/Hash domain ([snapshot](docs/api/core.hash-v1.md)).
+`hash` uses a fixed zero key and `hash_with` uses a `RandomState`;
+`RandomState.seeded`/`from_words` and the copyable `Hasher` primitives expose
+the stable builder, while `std.random.random_state` fills the 128-bit key from
+host entropy without making `core.hash` depend on std. The canonical stream
+covers fixed-width little-endian integers, Bool, length-prefixed String/Bytes,
+Option/Result tags and payloads, declaration-order record fields, and
+enum ordinals; floats, pointers, views, and collections are rejected with
+diagnostic 347. MIR 116 `hash.value` carries the two key words, the value, and
+the concrete structural type; the runtime implements SipHash-1-3. Map and Set
+remain insertion-ordered association lists, so `Map.with_hasher` is deferred
+until hash containers exist. Evidence: the production qualification pins
+independent SipHash-1-3 reference vectors, the manual `Hasher` stream against
+`hash`/`hash_with` for integers, strings, bytes, records, enums, Option, and
+Result, the OS-backed keyed constructor, and rejection 347; MIR verifier and
+cgen tests pin operation 116 and its canonical C emission; the snapshot
+example runs through the production driver.
 
 Landed M8.1 progress: `core.memory` provides `size_of(T)` and `align_of(T)` as
 compile-time layout queries ([snapshot](docs/api/core.memory-v1.md)). The

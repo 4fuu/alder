@@ -4343,6 +4343,29 @@ fn lower_array_view(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
     return Ok(LowerStep(state: converted.state, id: view.id))
 }
 
+
+// The private core.hash.hash_structural call is the structural hash
+// intrinsic. Its concrete instance carries the Eq+Hash evidence; lowering
+// replaces the call with one hash.value over the concrete value type.
+fn lower_hash_structural_target(source_state: State, store: CheckStore, target: U64) -> Bool {
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, target - 1)
+    if !source_path_is(source_state, symbol.source, "core/hash.al") { return false }
+    let source = __s0_buffer_get(SourceRec, source_state.sources, symbol.source)
+    return source_word(source_state, source, symbol.name_start, symbol.name_end, "hash_structural")
+}
+
+fn lower_hash_structural_call(d: Domain, source_state: State, store: CheckStore, state: LowerState, function: U64, block: U64, expression: CheckedExprRec, args: __s0_Buffer(U64), result: U64) -> Result(LowerStep, __s0_Error) {
+    if expression.child_count != 3 || __s0_buffer_len(U64, args) != 3 { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let value_child = __s0_buffer_get(CheckedExprChildRec, store.expression_children, expression.first_child - 1 + 2).expression
+    if value_child == 0 || value_child > __s0_buffer_len(CheckedExprRec, store.expressions) { return Ok(LowerStep(state: lower_invalid(state), id: 0)) }
+    let value_type = __s0_buffer_get(CheckedExprRec, store.expressions, value_child - 1).checked_type
+    let typed = try lower_type(d, source_state, store, state, value_type)
+    if !typed.state.valid { return Ok(LowerStep(state: typed.state, id: 0)) }
+    let instr = try lower_add_instr_three(d, typed.state, function, block, mir_op_hash_value(), result, typed.id, __s0_buffer_get(U64, args, 0), __s0_buffer_get(U64, args, 1), __s0_buffer_get(U64, args, 2), 0)
+    return Ok(LowerStep(state: instr.state, id: result))
+}
+
 // `core.memory` size and align queries: the checker parked the queried
 // checked type in the builtin expression's operator slot. After
 // monomorphization that type is concrete, so lowering emits one MIR query.
@@ -5099,6 +5122,9 @@ fn lower_expression(d: Domain, source_state: State, spans: __s0_Buffer(CheckedSp
             let value = try lower_add_result(d, current, function, block, expression.checked_type, source_state, store)
             current = value.state
             result = value.id
+        }
+        if annotation.kind == 1 && lower_hash_structural_target(source_state, store, annotation.target) {
+            return lower_hash_structural_call(d, source_state, store, current, function, block, expression, args, result)
         }
         if annotation.kind == 1 || annotation.kind == 2 {
             var op = mir_op_call()

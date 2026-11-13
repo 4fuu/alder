@@ -4001,7 +4001,9 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
             let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, constraint_at)
             if constraint_applies_to_instance(store, constraint, declaration, constraint_owner) && !(try trait_constraint_satisfied(d, store, constraint, bindings, 0)) {
                 let syntax = __s0_buffer_get(SyntaxRec, parse.nodes, constraint.syntax - 1)
-                let failed = try check_token_related_fail(d, state, store, 111, site, syntax)
+                var failure: U64 = 111
+                if hash_constraint_unsupported(state, store, declaration, constraint) { failure = 347 }
+                let failed = try check_token_related_fail(d, state, store, failure, site, syntax)
                 return Ok(InstanceBad(match failed {
                     CheckGood(value) => value
                     CheckBad(value) => value
@@ -4018,6 +4020,16 @@ fn instantiate_function(d: Domain, state: State, parse: ParseStore, store: Check
     let registered = CheckStore(symbols: symbols, type_params: with_args.type_params, types: with_args.types, type_args: with_args.type_args, type_annotations: with_args.type_annotations, uses: with_args.uses, indexes: with_args.indexes, locals: with_args.locals, environments: with_args.environments, expressions: with_args.expressions, call_annotations: with_args.call_annotations, expression_children: with_args.expression_children, returns: with_args.returns, control: with_args.control, diagnostics: with_args.diagnostics, traits: with_args.traits, closures: with_args.closures, interp: with_args.interp, bindings: with_args.bindings)
     let signed = try append_instance_uses(d, registered, declaration, instance, bindings)
     return Ok(InstanceGood(InstanceValueRec(store: signed, instance: instance)))
+}
+
+// A failed Eq/Hash constraint on the public core.hash entry points is a
+// structural-domain rejection, not a missing user implementation: user Eq and
+// Hash impls are not allowed.
+fn hash_constraint_unsupported(state: State, store: CheckStore, declaration: U64, constraint: TraitConstraintRec) -> Bool {
+    if constraint.trait_builtin != 1 && constraint.trait_builtin != 2 { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
+    if !source_path_is(state, symbol.source, "core/hash.al") { return false }
+    return symbol_name_matches_word(state, symbol, "hash") || symbol_name_matches_word(state, symbol, "hash_with")
 }
 
 // Type children are reverse linked. Resolve every child (including its nested
@@ -15621,7 +15633,20 @@ fn trait_constraint_satisfied(d: Domain, store: CheckStore, constraint: TraitCon
         let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.impl_index, low) - 1)
         if trait_key_equal_binding(store, rec, constraint, bindings) { return Ok(true) }
     }
+    if try trait_constraint_structural_fallback(d, store, constraint, bindings) { return Ok(true) }
     return trait_constraint_conditional(d, store, constraint, bindings, depth)
+}
+
+// Structural Eq/Hash coverage is synthesized once, before body checking. A
+// builtin Option or Result type first named inside a body can therefore miss
+// the prebuilt index even though its components are in the structural
+// domain. This fallback asks the same domain walk directly for those late
+// types; user Eq/Hash implementations stay rejected.
+fn trait_constraint_structural_fallback(d: Domain, store: CheckStore, constraint: TraitConstraintRec, bindings: __s0_Buffer(InferenceBindingRec)) -> Result(Bool, __s0_Error) {
+    if constraint.trait_builtin != 1 && constraint.trait_builtin != 2 { return Ok(false) }
+    let receiver = inference_lookup(bindings, constraint.param)
+    if receiver == 0 { return Ok(false) }
+    return structural_eq_supported(d, store, receiver, 0)
 }
 
 fn trait_constraint_application_satisfied(d: Domain, store: CheckStore, constraint: TraitConstraintRec, declaration: U64, application: CheckedTypeRec) -> Result(Bool, __s0_Error) {

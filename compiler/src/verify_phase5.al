@@ -168,6 +168,48 @@ fn mir_v5_type_query_result(store: MirStore, x: MirInstrRec) -> MirVTypeResult {
     return MirVTypeResult(valid: valid, type_id: mir_type_u64())
 }
 
+// The structural hash domain: Bool, signed and unsigned integers, String,
+// Bytes, Option/Result over supported components, and records/enums over
+// supported fields. It matches the checker's synthesized Eq/Hash domain.
+fn mir_v5_hash_supported(store: MirStore, indexes: MirVIndexes, type_id: U64, depth: U64) -> Bool {
+    if depth > 16 || type_id == 0 || type_id > __s0_buffer_len(MirTypeRec, store.types) { return false }
+    let rec = __s0_buffer_get(MirTypeRec, store.types, type_id - 1)
+    if rec.kind == mir_type_kind_primitive() { return type_id >= mir_type_bool() && type_id <= mir_type_u64() }
+    if rec.kind == mir_type_kind_string() || rec.kind == mir_type_kind_bytes() { return true }
+    if rec.kind == mir_type_kind_option() { return mir_v5_hash_supported(store, indexes, rec.elem, depth + 1) }
+    if rec.kind == mir_type_kind_result() { return mir_v5_hash_supported(store, indexes, rec.ok_type, depth + 1) && mir_v5_hash_supported(store, indexes, rec.err_type, depth + 1) }
+    if rec.kind == mir_type_kind_aggregate() {
+        var at: U64 = 0
+        while at < mir_v5_type_part_count(store, indexes, type_id, mir_type_part_field()) {
+            if !mir_v5_hash_supported(store, indexes, mir_v5_type_part(store, type_id, mir_type_part_field(), at).part_type, depth + 1) { return false }
+            at = at + 1
+        }
+        return true
+    }
+    if rec.kind == mir_type_kind_enum() {
+        var at: U64 = 0
+        while at < mir_v5_type_part_count(store, indexes, type_id, mir_type_part_variant()) {
+            let payload = mir_v5_type_part(store, type_id, mir_type_part_variant(), at).part_type
+            if payload != mir_type_unit() && !mir_v5_hash_supported(store, indexes, payload, depth + 1) { return false }
+            at = at + 1
+        }
+        return true
+    }
+    return false
+}
+
+// hash.value takes two U64 key words and one structural value, and produces
+// U64. The value type must equal the type operand and lie in the structural
+// hash domain.
+fn mir_v5_hash_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec) -> MirVTypeResult {
+    if x.type_op == 0 || x.type_op > __s0_buffer_len(MirTypeRec, store.types) { return MirVTypeResult(valid: false, type_id: 0) }
+    let key0 = mir_v5_value_type(store, indexes, x.function, x.a)
+    let key1 = mir_v5_value_type(store, indexes, x.function, x.b)
+    let value = mir_v5_value_type(store, indexes, x.function, x.c)
+    let valid = key0 == mir_type_u64() && key1 == mir_type_u64() && value == x.type_op && mir_v5_hash_supported(store, indexes, x.type_op, 0)
+    return MirVTypeResult(valid: valid, type_id: mir_type_u64())
+}
+
 // c.addr yields its C pointer type operand when it names c_ptr or c_const_ptr
 // over the place's own type.
 fn mir_v5_c_addr_result(store: MirStore, indexes: MirVIndexes, x: MirInstrRec) -> MirVTypeResult {
@@ -585,6 +627,7 @@ return MirVTypeResult(valid: p.valid, type_id: mir_v5_find_unary(indexes, mir_ty
     if x.op == mir_op_c_buffer_ptr() { return mir_v5_c_buffer_result(store, x, ta) }
     if x.op == mir_op_c_zero() { return mir_v5_c_zero_result(store, x) }
     if x.op == mir_op_type_size() || x.op == mir_op_type_align() { return mir_v5_type_query_result(store, x) }
+    if x.op == mir_op_hash_value() { return mir_v5_hash_result(store, indexes, x) }
     if x.op == mir_op_c_addr() { return mir_v5_c_addr_result(store, indexes, x) }
     if x.op == mir_op_c_callback_make() { return mir_v5_c_callback_result(store, x) }
     if x.op == mir_op_c_callback_owner_register() || x.op == mir_op_c_callback_owner_release() { return mir_v5_callback_owner_result(store, indexes, x, ta) }

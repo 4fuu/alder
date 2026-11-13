@@ -687,6 +687,24 @@ alignment even though its C storage spelling is `uint8_t`. The verifier rejects
 a missing or out-of-range type operand. The operations carry no value operand,
 no failure edge, and no runtime work.
 
+## Structural Hashing
+
+MIR 6 exposes the `core.hash` structural hash as operation 116:
+
+```text
+hash.value key0, key1, value, T
+```
+
+`key0` and `key1` are `u64` SipHash key words, `value` is a value of the
+concrete structural type `T`, and the result is `u64`. The verifier requires
+`T` to lie in the structural hash domain: `Bool`, signed and unsigned
+integers, `String`, `Bytes`, `Option`/`Result` over that domain, and records
+or enums whose components are in it. Floats, pointers, views, collections,
+and identity-bearing resources are rejected. The C backend writes the
+canonical encoding from [the core.hash snapshot](api/core.hash-v1.md)
+through the runtime SipHash-1-3 helpers; no padding or pointer value enters
+the stream.
+
 ## C Callback Values
 
 MIR 6 exposes one nonretained callback construction as operation 111:

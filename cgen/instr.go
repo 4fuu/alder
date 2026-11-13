@@ -608,6 +608,9 @@ func (g *gen) emitInstr(b *strings.Builder, blk *mir.Block, in *mir.Instr) {
 	case mir.OpTypeSize, mir.OpTypeAlign:
 		g.emitTypeQuery(b, in)
 
+	case mir.OpHashValue:
+		g.emitHashValue(b, in)
+
 	case mir.OpCAddr:
 		g.emitCAddr(b, in)
 	}
