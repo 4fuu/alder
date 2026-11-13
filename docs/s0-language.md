@@ -377,10 +377,11 @@ lowering materializes such results into caller-result storage. A local may
 bind a returned record, `Option`, or `Result` when every view is rooted in a
 borrowed parameter or a checked call result, and an `Option`/`Result` over
 such a value may be matched through an already-checked local or call result.
-Aggregate views rooted in the callee's locals or `take` parameters, mutable
-views, aggregate arguments, and cleanup initializers still reject view-holding
-aggregates. A direct immutable slice result is materialized as an independent
-value. The exact restrictions are
+Binding an aggregate whose view is rooted in the callee's locals or `take`
+parameters, mutable views, aggregate arguments, and cleanup initializers still
+reject view-holding aggregates. Returned aggregates and direct immutable slice
+results are materialized into caller-result storage, so a returned local view
+is copied rather than aliased. The exact restrictions are
 pinned by `frontend` acceptance/rejection tests and
 the active Alder checker conformance harness.
 

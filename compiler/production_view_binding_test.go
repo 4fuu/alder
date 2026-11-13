@@ -121,19 +121,6 @@ fn main() -> I32 {
 `,
 		},
 		{
-			"local-view-return",
-			`type Holder {
-    items: [U64]
-    index: U64
-}
-fn make() -> Holder {
-    let local: Array(U64, 2) = [1, 2]
-    return Holder(items: local.slice(0, 1), index: 0)
-}
-fn main() -> I32 { return 0 }
-`,
-		},
-		{
 			"mutable-view-return",
 			`type Holder {
     items: MutSlice(U64)

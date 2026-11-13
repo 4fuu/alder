@@ -241,14 +241,15 @@ enum, `Option`, `Result`, or array result whose scoped parts are all
 immutable slices is admitted when every scoped leaf is materializable, and
 its view parts are recursively materialized into caller-result storage. A
 local may bind a record, `Option`, or `Result` when every view is rooted in a
-borrowed parameter or in a call result whose own return was checked. An
-aggregate view rooted in a local or a `take` parameter stays rejected because
-its storage dies with the callee; a direct immutable slice result remains
-materialized as an independent value. An `Option`/`Result` over such an
-aggregate may be matched when the scrutinee is an already-checked local or a
-call result. Mutable views, aggregate arguments, and cleanup initializers
-remain non-escaping, so their exclusivity, overlap, and invalidation checks
-are unchanged. Domains remain
+borrowed parameter or in a call result whose own return was checked. Binding
+an aggregate whose view is rooted in a local or a `take` parameter stays
+rejected because the binding does not materialize the view; a returned
+aggregate is materialized into caller-result storage and may therefore copy a
+local view's contents. An `Option`/`Result` over such an aggregate may be
+matched when the scrutinee is an already-checked local or a call result.
+Mutable views, aggregate arguments, and cleanup initializers remain
+non-escaping, so their exclusivity, overlap, and invalidation checks are
+unchanged. Domains remain
 absent from source APIs and vector representations, and the hosted entry still
 owns the outer root. This changes storage lifetime and visible copy cost, not
 independent value semantics.

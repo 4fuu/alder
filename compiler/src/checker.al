@@ -12184,10 +12184,6 @@ fn check_return_statement(d: Domain, state: State, parse: ParseStore, store: Che
         // views and aggregates with unprovable capability leaves stay
         // rejected.
         if category.contains_scoped && !(try checked_type_views_materializable(d, state, parse, current, result_use.checked_type)) { return body_token_fail(d, state, current, 104, statement) }
-        // A direct immutable slice result is materialized as a value. The
-        // origin rule applies to views carried inside an aggregate.
-        let result_checked = __s0_buffer_get(CheckedTypeRec, current.types, result_use.checked_type - 1)
-        if category.contains_scoped && result_checked.kind != 8 && !(try checked_aggregate_view_origin_ok(d, state, parse, current, expression, result_use.checked_type, 0)) { return body_token_fail(d, state, current, 104, statement) }
         let returned = __s0_buffer_get(CheckedExprRec, current.expressions, expression - 1)
         if returned.kind == 21 {
             // Returning an affine field of the taken owner is a field move,
