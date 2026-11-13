@@ -10883,35 +10883,33 @@ fn append_display_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, ch
 }
 
 // The core.iter module owns the snapshot iterator types. The builtin
-// IntoIterator surface materializes the matching constructor from that module;
-// the user must import core.iter so its declarations join the module graph.
-fn core_iter_module_source(state: State) -> U64 {
+// IntoIterator surface materializes the matching constructor from that module.
+// The import node is the same route a direct iter.slice_iter call uses: its
+// target source identifies the module, and its public symbols are scanned by
+// name. The user must import core.iter so the module joins the graph.
+fn core_iter_import_target(state: State, parse: ParseStore) -> U64 {
     var at: U64 = 0
-    while at < __s0_buffer_len(SourceRec, state.sources) {
-        if source_path_suffix_is(state, at, "core/iter.al") { return at }
-        at = at + 1
-    }
-    return 0
-}
-
-fn source_find_word(state: State, source: U64, word: __s0_String) -> U64 {
-    let rec = __s0_buffer_get(SourceRec, state.sources, source)
-    let length = rec.text_end - rec.text_start
-    if length < len(word) { return 0 }
-    var at: U64 = 0
-    while at + len(word) <= length {
-        if source_word(state, rec, at, at + len(word), word) { return at }
+    while at < __s0_buffer_len(U64, parse.roots) {
+        let root = __s0_buffer_get(SyntaxRec, parse.nodes, __s0_buffer_get(U64, parse.roots, at) - 1)
+        if root.kind == 41 || root.kind == 42 {
+            let target = import_target_source(state, parse, root)
+            if target != 0 && source_path_suffix_is(state, target - 1, "core/iter.al") { return target }
+        }
         at = at + 1
     }
     return 0
 }
 
 fn core_iter_function_symbol(state: State, parse: ParseStore, store: CheckStore, word: __s0_String) -> U64 {
-    let module_source = core_iter_module_source(state)
-    if module_source == 0 { return 0 }
-    let start = source_find_word(state, module_source, word)
-    if start == 0 { return 0 }
-    return exported_symbol_named(state, parse, store, module_source + 1, module_source, start, start + len(word))
+    let target = core_iter_import_target(state, parse)
+    if target == 0 { return 0 }
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.module_source == target && symbol.public && symbol_name_matches_word(state, symbol, word) { return at + 1 }
+        at = at + 1
+    }
+    return 0
 }
 
 // A builtin IntoIterator call on a slice or Vec. The checker resolves the
@@ -10924,8 +10922,9 @@ fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: 
     if receiver_type.arg_count != 1 { return expr_token_fail(d, state, base, 335, callee) }
     var word: __s0_String = "slice_iter"
     if receiver_type.kind == 17 { word = "vec_iter" }
+    if core_iter_import_target(state, parse) == 0 { return expr_token_fail(d, state, base, 337, callee) }
     let declaration = core_iter_function_symbol(state, parse, store, word)
-    if declaration == 0 { return expr_token_fail(d, state, base, 334, callee) }
+    if declaration == 0 { return expr_token_fail(d, state, base, 338, callee) }
     var param_at: U64 = 0
     var at: U64 = 0
     var scanning_param = true
@@ -10947,11 +10946,21 @@ fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: 
         InstanceBad(value) => InstanceValueRec(store: value, instance: 0)
     }
     if instance.instance == 0 { return Ok(ExprBad(instance.store)) }
-    let result_use = use_by_ordinal(instance.store, instance.instance, 6, 0)
-    if result_use == 0 { return expr_token_fail(d, state, base, 334, callee) }
-    let result_type = __s0_buffer_get(DeclTypeUseRec, instance.store.uses, result_use - 1).checked_type
-    if expected != 0 && !(try expression_type_equal(d, state, parse, instance.store, result_type, expected)) { return expr_token_type_fail(d, state, instance.store, mismatch_kind, mismatch_node, expected, result_type) }
-    return append_into_iterator_call(d, instance.store, owner, call_id, result_type, instance.instance, receiver.expression, site_kind, site_syntax)
+    let modes = try check_existing_call_modes(d, state, parse, base, instance.store, owner, call, instance.instance, 0, 1, 0, 1)
+    let checked_instance = match modes {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match modes {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(checked_instance)) }
+    var result_use = use_by_ordinal(checked_instance, instance.instance, 8, 0)
+    if result_use == 0 { result_use = use_by_ordinal(checked_instance, instance.instance, 6, 0) }
+    if result_use == 0 { return expr_token_fail(d, state, base, 339, callee) }
+    let result_type = __s0_buffer_get(DeclTypeUseRec, checked_instance.uses, result_use - 1).checked_type
+    if expected != 0 && !(try expression_type_equal(d, state, parse, checked_instance, result_type, expected)) { return expr_token_type_fail(d, state, checked_instance, mismatch_kind, mismatch_node, expected, result_type) }
+    return append_into_iterator_call(d, checked_instance, owner, call_id, result_type, instance.instance, receiver.expression, site_kind, site_syntax)
 }
 
 fn append_into_iterator_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {

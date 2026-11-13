@@ -80,7 +80,7 @@ pub fn main() -> I32 {
     return 0
 }
 `,
-			want: "into_iterator requires the core.iter module",
+			want: "into_iterator could not find the imported core.iter module",
 		},
 		{
 			name: "wrong-arity",
