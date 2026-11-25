@@ -312,7 +312,10 @@ work in progress:
   enum, or applied generic containing one. The classification reads declared
   signatures only, so an `Io`-bounded callee stays potentially suspending for
   every concrete instantiation; a concrete `Blocking` receiver or parameter
-  never is. Diagnostic 348 names the call.
+  never is. Diagnostic 348 names the call. Containment is classified to at
+  most 16 levels, the cap that keeps mutually recursive declarations finite;
+  a signature nested deeper is rejected with diagnostic 349 instead of being
+  silently treated as non-suspending.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
   with diagnostic 147; a closure that captures a scoped capability and

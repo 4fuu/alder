@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,24 @@ func suspensionProject(body string) map[string]string {
 		"alder.toml":  suspensionManifest,
 		"src/main.al": "module hello.main\n\n" + body,
 	}
+}
+
+// nestedOptionType and nestedSomeValue build a type and value nested through
+// the given number of applied-generic and constructor levels.
+func nestedOptionType(depth int, inner string) string {
+	value := inner
+	for i := 0; i < depth; i++ {
+		value = "Option(" + value + ")"
+	}
+	return value
+}
+
+func nestedSomeValue(depth int, inner string) string {
+	value := inner
+	for i := 0; i < depth; i++ {
+		value = "Some(" + value + ")"
+	}
+	return value
 }
 
 // The accepted program keeps every non-suspending shape reachable at run
@@ -395,5 +414,52 @@ pub fn main() -> I32 {
 				t.Fatalf("diagnostic = %q, want %q", result.stderr, rejection.want)
 			}
 		})
+	}
+}
+
+// Containment classification stops at 16 levels. A deeper signature is a
+// rejection, not a silent non-suspending answer, so a closure cannot smuggle
+// a deeply nested Io-bounded parameter past the boundary rule.
+func TestSuspensionCheckerRejectsContainmentDepth(t *testing.T) {
+	if os.Getenv("UPDATE_GOLDEN") == "" {
+		t.Parallel()
+	}
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+
+	body := fmt.Sprintf(`import std.io { Blocking, Io }
+
+fn deep(I: type(Io), x: %s) -> U64 {
+    return 1
+}
+
+pub fn main() -> I32 {
+    let cap = Blocking()
+    let g = fn() -> U64 {
+        let x: %s = %s
+        return deep(x)
+    }
+    let n = g()
+    return 0
+}
+`, nestedOptionType(17, "I"), nestedOptionType(17, "Blocking"), nestedSomeValue(17, "cap"))
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, suspensionProject(body), "check")
+	if result.status != 1 || result.stdout != "" {
+		t.Fatalf("expected a containment-depth rejection, got %+v", result)
+	}
+	if strings.Count(result.stderr, "error[") != 1 {
+		t.Fatalf("expected exactly one diagnostic, got %q", result.stderr)
+	}
+	want := "error[SEM0001]: suspension classification exceeded the 16-level containment limit: deep"
+	if !strings.Contains(result.stderr, want) {
+		t.Fatalf("diagnostic = %q, want %q", result.stderr, want)
 	}
 }

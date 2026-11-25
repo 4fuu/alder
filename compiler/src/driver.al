@@ -490,6 +490,10 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         else { if !out_string("function used as a function value contains a potentially suspending call: ") { return false } }
         return driver_out_node_name(state, parse, source, start, end, json)
     }
+    if kind == 349 {
+        if !out_string("suspension classification exceeded the ") || !out_u64(suspension_containment_limit()) || !out_string("-level containment limit: ") { return false }
+        return driver_out_node_name(state, parse, source, start, end, json)
+    }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }

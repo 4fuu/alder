@@ -612,10 +612,11 @@ type EnvironmentRec {
 // guard that consumes a binding, 149 a match guard on a table-view arm, 150
 // and 151 `break`/`continue` outside a loop, 152 a closure that captures a
 // scoped capability and escapes the scope that owns it, 153 a closure
-// that captures a scoped capability created inside a loop body, and 348 a
+// that captures a scoped capability created inside a loop body, 348 a
 // closure body or a function used as a function value that contains a
 // potentially suspending call (detail_a is 1 for a closure body and 2 for a
-// function value).
+// function value), and 349 a suspension containment classification that
+// exceeds the 16-level limit.
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

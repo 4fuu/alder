@@ -6473,7 +6473,11 @@ fn expression_for_syntax(store: CheckStore, owner: U64, syntax: U64) -> U64 {
 
 fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, expression_kind: U64, checked_type: U64, annotation_kind: U64, target: U64, variant_use: U64, child_call: SyntaxRec, child_mode: U64, site_kind: U64, site_syntax: U64, builtin: U64) -> Result(ExprOutcome, __s0_Error) {
     var suspends: U64 = 0
-    if annotation_kind == 1 && try callee_signature_suspends(d, state, store, target) { suspends = 1 }
+    if annotation_kind == 1 {
+        let probe = try callee_signature_suspends(d, state, store, target)
+        if probe.too_deep { return expr_token_fail(d, state, store, 349, call_callee_syntax(parse, syntax)) }
+        if probe.suspends { suspends = 1 }
+    }
     let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: builtin, place: 0, suspends: suspends))
     let annotation = __s0_buffer_len(CallAnnotationRec, annotations)
     var children = store.expression_children
@@ -11039,9 +11043,11 @@ fn append_interpolation_expression(d: Domain, store: CheckStore, owner: U64, syn
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
-fn append_display_call(d: Domain, state: State, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+fn append_display_call(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
     var suspends: U64 = 0
-    if try callee_signature_suspends(d, state, store, target) { suspends = 1 }
+    let probe = try callee_signature_suspends(d, state, store, target)
+    if probe.too_deep { return expr_token_fail(d, state, store, 349, call_callee_syntax(parse, syntax)) }
+    if probe.suspends { suspends = 1 }
     let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0, suspends: suspends))
     let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
     let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
@@ -11242,7 +11248,7 @@ fn check_interpolation_display_part(d: Domain, state: State, parse: ParseStore, 
             InstanceBad(value) => 0
         }
     }
-    return append_display_call(d, state, with_instance, owner, part_id, string_type, instance, draft.expression, 0, 0)
+    return append_display_call(d, state, parse, with_instance, owner, part_id, string_type, instance, draft.expression, 0, 0)
 }
 
 fn check_interpolation_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64, expression: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -14204,6 +14210,20 @@ fn type_implements_async_io(d: Domain, state: State, store: CheckStore, checked_
     return Ok(false)
 }
 
+// Structural containment recursion is bounded the way the parser bounds
+// expression nesting: the cap keeps mutually recursive declarations finite,
+// and reaching it is a diagnostic rather than a silent non-suspending answer.
+fn suspension_containment_limit() -> U64 { return 16 }
+
+type SuspensionProbeRec {
+    suspends: Bool
+    too_deep: Bool
+}
+
+fn suspension_probe_none() -> SuspensionProbeRec { return SuspensionProbeRec(suspends: false, too_deep: false) }
+fn suspension_probe_suspends() -> SuspensionProbeRec { return SuspensionProbeRec(suspends: true, too_deep: false) }
+fn suspension_probe_too_deep() -> SuspensionProbeRec { return SuspensionProbeRec(suspends: false, too_deep: true) }
+
 // The type parameters of one nominal declaration, paired positionally with a
 // concrete application's arguments, so declaration members can be substituted
 // before their containment is classified.
@@ -14226,23 +14246,28 @@ fn nominal_type_bindings(d: Domain, store: CheckStore, target: U64, checked: Che
     return Ok(bindings)
 }
 
-fn type_is_suspending_capability(d: Domain, state: State, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
-    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) || depth > 16 { return Ok(false) }
+fn type_is_suspending_capability(d: Domain, state: State, store: CheckStore, checked_type: U64, depth: U64) -> Result(SuspensionProbeRec, __s0_Error) {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(suspension_probe_none()) }
+    if depth > suspension_containment_limit() { return Ok(suspension_probe_too_deep()) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
-    if checked.kind == 6 { return Ok(type_parameter_is_suspending(state, store, checked.target)) }
+    if checked.kind == 6 {
+        if type_parameter_is_suspending(state, store, checked.target) { return Ok(suspension_probe_suspends()) }
+        return Ok(suspension_probe_none())
+    }
     // Function values never suspend, whatever types their signature names.
-    if checked.kind == 25 { return Ok(false) }
-    if checked.arg_count != 0 && checked.first_arg == 0 { return Ok(false) }
+    if checked.kind == 25 { return Ok(suspension_probe_none()) }
+    if checked.arg_count != 0 && checked.first_arg == 0 { return Ok(suspension_probe_none()) }
     var at: U64 = 0
     while at < checked.arg_count {
-        if checked.first_arg - 1 + at >= __s0_buffer_len(U64, store.type_args) { return Ok(false) }
-        if try type_is_suspending_capability(d, state, store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at), depth + 1) { return Ok(true) }
+        if checked.first_arg - 1 + at >= __s0_buffer_len(U64, store.type_args) { return Ok(suspension_probe_none()) }
+        let probe = try type_is_suspending_capability(d, state, store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at), depth + 1)
+        if probe.suspends || probe.too_deep { return Ok(probe) }
         at = at + 1
     }
-    if checked.kind != 7 { return Ok(false) }
-    if try type_implements_async_io(d, state, store, checked_type) { return Ok(true) }
+    if checked.kind != 7 { return Ok(suspension_probe_none()) }
+    if try type_implements_async_io(d, state, store, checked_type) { return Ok(suspension_probe_suspends()) }
     let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
-    if symbol.kind != 2 && symbol.kind != 3 { return Ok(false) }
+    if symbol.kind != 2 && symbol.kind != 3 { return Ok(suspension_probe_none()) }
     let bindings = try nominal_type_bindings(d, store, checked.target, checked)
     var role: U64 = 1
     if symbol.kind == 3 { role = 2 }
@@ -14254,34 +14279,38 @@ fn type_is_suspending_capability(d: Domain, state: State, store: CheckStore, che
             let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
             if use.checked_type != 0 {
                 let substituted = try substitute_type(d, store, bindings, use.checked_type)
-                if try type_is_suspending_capability(d, state, substituted.store, substituted.checked_type, depth + 1) { return Ok(true) }
+                let probe = try type_is_suspending_capability(d, state, substituted.store, substituted.checked_type, depth + 1)
+                if probe.suspends || probe.too_deep { return Ok(probe) }
             }
         }
         ordinal = ordinal + 1
     }
-    return Ok(false)
+    return Ok(suspension_probe_none())
 }
 
 // A call is potentially suspending when the callee's declared signature,
 // including a method receiver (role-5 ordinal zero), has a parameter of a
 // suspending capability type. Instances resolve to their declaration so the
 // answer never depends on concrete type arguments.
-fn callee_signature_suspends(d: Domain, state: State, store: CheckStore, target: U64) -> Result(Bool, __s0_Error) {
-    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
-    if !io_contract_present(state) { return Ok(false) }
+fn callee_signature_suspends(d: Domain, state: State, store: CheckStore, target: U64) -> Result(SuspensionProbeRec, __s0_Error) {
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(suspension_probe_none()) }
+    if !io_contract_present(state) { return Ok(suspension_probe_none()) }
     let declaration = instance_declaration(store, target)
-    if declaration == 0 || declaration > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
+    if declaration == 0 || declaration > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(suspension_probe_none()) }
     let total = use_count(store, declaration, 5)
     var ordinal: U64 = 0
     while ordinal < total {
         let use_id = use_by_ordinal(store, declaration, 5, ordinal)
         if use_id != 0 {
             let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
-            if use.checked_type != 0 && try type_is_suspending_capability(d, state, store, use.checked_type, 0) { return Ok(true) }
+            if use.checked_type != 0 {
+                let probe = try type_is_suspending_capability(d, state, store, use.checked_type, 0)
+                if probe.suspends || probe.too_deep { return Ok(probe) }
+            }
         }
         ordinal = ordinal + 1
     }
-    return Ok(false)
+    return Ok(suspension_probe_none())
 }
 
 fn owner_is_closure_thunk(store: CheckStore, parse: ParseStore, owner: U64) -> Bool {
