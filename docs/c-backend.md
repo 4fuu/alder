@@ -462,14 +462,18 @@ Failure contracts:
   registers the current task's wakeup token, and returns true; the step must
   then return `park`. The entry holds one retain on the task record and the
   wakeup token until `fn` returns, so cancellation that completes and
-  releases the task first stays safe. Cancellation stops the task's wait but
-  never interrupts `fn`; a queued call still runs, and its later signal is
-  harmless. `context` is borrowed and must stay valid until `fn` returns; the
-  runtime does not retain caller frame storage. A local-lane task may submit
-  an entry; the call itself runs on a blocking worker, so it must not depend
-  on the local lane's thread affinity. It returns false without queueing when
-  no blocking workers are configured. A null `fn` or a call outside a step is
-  a contract violation.
+  releases the task first stays safe. A queued entry whose task is canceled
+  before a blocking worker claims it is withdrawn: the worker skips `fn`,
+  signals the retained wakeup, and drops the retain. An entry a worker has
+  already claimed runs to completion; cancellation never interrupts it. A
+  submission made while the task's shield depth is positive is never
+  withdrawn. At most one entry may be pending for a task at a time.
+  `context` is borrowed and must stay valid until `fn` returns; the runtime
+  does not retain caller frame storage. A local-lane task may submit an
+  entry; the call itself runs on a blocking worker, so it must not depend on
+  the local lane's thread affinity. It returns false without queueing when no
+  blocking workers are configured. A null `fn`, a second pending entry, or a
+  call outside a step is a contract violation.
 - `alder_task_release` requires that the task's activation stack is empty,
   every wakeup/timer registration is already removed or drained, and the
   caller has copied any result it needs; it then unlinks the task from its
@@ -480,8 +484,10 @@ Failure contracts:
   activation domain and destroys it after release, so the result copy must
   happen before that destroy. A wakeup token is never retained past the
   final free.
-- `alder_task_cancel` sets the target's cancel flag and signals its wakeup.
-  It does not run user code on the caller's thread.
+- `alder_task_cancel` sets the target's cancel flag, withdraws its queued
+  blocking entry when one exists and was not submitted under a positive
+  shield, and signals its wakeup. A claimed entry is not interrupted. It does
+  not run user code on the caller's thread.
 - `alder_task_id` returns the current step's generational task id.
   `alder_task_handle` returns the id assigned to a specific task record. The
   spawn lowering and the root program entry use
@@ -704,13 +710,18 @@ generated thunk changes.
   time therefore advances exactly as in the inline loop.
 - **Blocking pool.** `blocking_workers` fixed threads persist across runs.
   A submission queues `fn(context)`, takes a retain on the task record, and
-  the step parks. Cancellation makes the task runnable without interrupting
-  `fn`; a later completion signals the retained wakeup token and drops the
-  retain. The record is freed by whichever holder releases last. A queued
-  call is not withdrawn; `context` must outlive the call.
+  the step parks. Cancellation withdraws a queued entry before a worker
+  claims it; a claimed entry runs to completion without interruption. A
+  withdrawn or completed entry signals the retained wakeup token and drops
+  the retain, so the record is freed by whichever holder releases last.
+  Cancellation therefore stops waiting for a queued operation when it is
+  still possible to do so. `context` must outlive the call.
 - **Thread shim.** The threaded executor uses POSIX threads. The inline
   default performs no thread creation, but `runtime/c/alder.c` is built
   against a POSIX host (it already requires `<execinfo.h>` for panics).
+  Link commands include the host thread library; `-pthread` is required on
+  glibc hosts older than 2.34, while current glibc and macOS link the same
+  symbols without an extra flag.
 - **Determinism.** With one pool worker the threaded executor preserves the
   inline queue and timer order; the runtime fixtures pin the gate 9.2
   ordering scenarios in that mode. With several workers, independent

@@ -747,18 +747,22 @@ bool alder_task_await(uint64_t child);
  * current task's wakeup token; the step must return PARK after a true
  * result. The entry retains the task record and its wakeup token until fn
  * returns, so a cancellation that completes and releases the task first
- * stays safe; cancellation never interrupts fn. context is borrowed and
- * must remain valid until fn returns. Returns false without queueing when
- * no blocking workers are configured. A null fn or a call outside a step is
- * a contract violation.
+ * stays safe; cancellation never interrupts fn. A queued entry whose task
+ * is canceled before a worker claims it is withdrawn without running fn; an
+ * entry a worker has claimed runs to completion. A submission under a
+ * positive shield is never withdrawn. At most one entry may be pending per
+ * task. context is borrowed and must remain valid until fn returns. Returns
+ * false without queueing when no blocking workers are configured. A null
+ * fn or a call outside a step is a contract violation.
  */
 typedef void (*AlderBlockingFn)(void *context);
 
 bool alder_task_blocking(AlderBlockingFn fn, void *context);
 
 /*
- * Set the target's cancel flag and signal its wakeup. Never runs user code on
- * the caller's thread. */
+ * Set the target's cancel flag, withdraw its queued blocking entry when one
+ * exists and was not submitted under a cancellation shield, and signal its
+ * wakeup. Never runs user code on the caller's thread. */
 void alder_task_cancel(uint64_t task);
 
 /*

@@ -1,7 +1,7 @@
 /* Bounded blocking-pool tests: a parked task resumes from C completion, a
- * cancelled task's record is retained until C returns, task and frame
- * storage can be released while C is still running, and repeated cycles are
- * leak-free. */
+ * cancelled queued entry is withdrawn without running, a cancelled running
+ * entry's record is retained until C returns, task and frame storage can be
+ * released while C is still running, and repeated cycles are leak-free. */
 #define _POSIX_C_SOURCE 200809L
 
 #include "alder.h"
@@ -362,6 +362,45 @@ static void test_blocking_fixed_workers(void) {
     CHECK(configure_default());
 }
 
+static void test_blocking_withdraw_queued(void) {
+    CHECK(configure(1, 1));
+    gate_reset();
+    RootTask first;
+    RootTask second;
+    CHECK(root_init(&first, root_step, sizeof(RootFrame), UINT64_C(45)));
+    CHECK(root_init(&second, root_step, sizeof(RootFrame), UINT64_C(46)));
+    AlderExecutorHooks hooks;
+    memset(&hooks, 0, sizeof hooks);
+    CHECK(!alder_executor_run(&hooks));
+    /* One entry is executing and gated; the single worker keeps the other
+     * entry queued behind it. */
+    gate_wait_calls(1);
+    RootFrame *first_frame = (RootFrame *)first.frame;
+    RootFrame *second_frame = (RootFrame *)second.frame;
+    alder_task_cancel(first_frame->child_id);
+    alder_task_cancel(second_frame->child_id);
+    gate_release();
+    CHECK(run_until_done(&hooks));
+    gate_wait_finished();
+    CHECK(first_frame->supported);
+    CHECK(first_frame->cancelled);
+    CHECK(first_frame->out == UINT64_C(999));
+    CHECK(second_frame->supported);
+    CHECK(second_frame->cancelled);
+    CHECK(second_frame->out == UINT64_C(999));
+    root_release(&first);
+    root_release(&second);
+    CHECK(wait_live_zero());
+    CHECK(configure_default());
+    pthread_mutex_lock(&gate_lock);
+    /* The queued entry was withdrawn: the C entry ran exactly once, for the
+     * entry the worker had already claimed. */
+    CHECK(gate_calls == 1u);
+    CHECK(gate_completions == 1u);
+    pthread_mutex_unlock(&gate_lock);
+    CHECK(alder_runtime_live_allocations() == 0u);
+}
+
 /* ------------------------------------------------------------------ */
 /* Cancellation while C is still running                               */
 /* ------------------------------------------------------------------ */
@@ -421,6 +460,7 @@ static void test_blocking_disabled(void) {
 int main(void) {
     test_blocking_success();
     test_blocking_fixed_workers();
+    test_blocking_withdraw_queued();
     test_blocking_cancel_retain();
     test_blocking_disabled();
     if (failures != 0) {

@@ -728,6 +728,8 @@ struct AlderBlockingEntry {
     AlderTask *task;
     AlderBlockingFn fn;
     void *context;
+    bool cancelled;
+    bool shielded;
 };
 
 struct AlderTask {
@@ -758,6 +760,7 @@ struct AlderTask {
     bool pending_call;
     _Atomic(AlderTask *) run_next;
     bool released;
+    AlderBlockingEntry *blocking_entry;
 };
 
 static _Thread_local AlderTask *g_current_task;
@@ -859,6 +862,9 @@ static void task_free(AlderTask *task) {
     }
     if (task->pending_call) {
         alder_runtime_panic("task freed with a published callee");
+    }
+    if (task->blocking_entry != NULL) {
+        alder_runtime_panic("task freed with a pending blocking entry");
     }
     rt_free(task);
 }
@@ -2092,10 +2098,17 @@ static void *blocking_worker_main(void *context) {
         if (g_blocking_head == NULL) {
             g_blocking_tail = NULL;
         }
+        AlderTask *task = entry->task;
+        if (task->blocking_entry == entry) {
+            task->blocking_entry = NULL;
+        }
+        bool cancelled = entry->cancelled;
         pthread_mutex_unlock(&g_blocking_lock);
-        entry->fn(entry->context);
-        alder_wakeup_signal(&entry->task->wakeup);
-        task_unref(entry->task);
+        if (!cancelled) {
+            entry->fn(entry->context);
+        }
+        alder_wakeup_signal(&task->wakeup);
+        task_unref(task);
         rt_free(entry);
         pthread_mutex_lock(&g_blocking_lock);
         if (g_blocking_inflight == 0) {
@@ -2158,6 +2171,10 @@ bool alder_task_blocking(AlderBlockingFn fn, void *context) {
         pthread_mutex_unlock(&g_blocking_lock);
         return false;
     }
+    if (task->blocking_entry != NULL) {
+        pthread_mutex_unlock(&g_blocking_lock);
+        alder_runtime_panic("task.blocking with an entry already pending");
+    }
     AlderBlockingEntry *entry =
         (AlderBlockingEntry *)rt_malloc(sizeof *entry);
     if (entry == NULL) {
@@ -2167,6 +2184,11 @@ bool alder_task_blocking(AlderBlockingFn fn, void *context) {
     entry->task = task;
     entry->fn = fn;
     entry->context = context;
+    entry->shielded = task->shield_depth > 0;
+    entry->cancelled =
+        !entry->shielded &&
+        atomic_load_explicit(&task->cancel_requested, memory_order_seq_cst);
+    task->blocking_entry = entry;
     task_ref(task);
     g_blocking_inflight += 1;
     if (g_blocking_tail == NULL) {
@@ -2480,6 +2502,12 @@ void alder_task_cancel(uint64_t task) {
     pthread_mutex_unlock(&g_registry_lock);
     atomic_store_explicit(&target->cancel_requested, true,
                           memory_order_seq_cst);
+    pthread_mutex_lock(&g_blocking_lock);
+    AlderBlockingEntry *entry = target->blocking_entry;
+    if (entry != NULL && !entry->shielded) {
+        entry->cancelled = true;
+    }
+    pthread_mutex_unlock(&g_blocking_lock);
     alder_wakeup_signal(&target->wakeup);
     task_unref(target);
 }
