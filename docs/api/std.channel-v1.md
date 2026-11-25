@@ -51,25 +51,25 @@ pub type Receiver(T: type) {
 
 impl(T: type) Channel(T) {
     /// A queue holding at most `capacity` values; `capacity` must be at least 1.
-    pub fn bounded(I: type(Io, AsyncIo), group: TaskGroup(I), capacity: U64) -> Result(Channel(T), ChannelError)
+    fn bounded(I: type(Io, AsyncIo), group: TaskGroup(I), capacity: U64) -> Result(Channel(T), ChannelError)
     /// A queue with no limit beyond available memory.
-    pub fn unbounded(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Channel(T)
-    pub fn sender(self) -> Sender(T)
-    pub fn receiver(self) -> Receiver(T)
+    fn unbounded(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Channel(T)
+    fn sender(self) -> Sender(T)
+    fn receiver(self) -> Receiver(T)
     /// Closes both directions; queued values stay receivable.
-    pub fn close(take self) -> Unit
+    fn close(take self) -> Unit
 }
 
 impl(T: type) Cleanup for Channel(T)
 
 impl(T: type) Sender(T) {
     /// Transfers `value` into the queue, waiting for room when full.
-    pub fn send(self, take value: T) -> Result(Unit, ChannelError)
+    fn send(self, take value: T) -> Result(Unit, ChannelError)
 }
 
 impl(T: type) Receiver(T) {
     /// Takes the front value, waiting for one when empty.
-    pub fn receive(self) -> Result(T, ChannelError)
+    fn receive(self) -> Result(T, ChannelError)
 }
 ```
 

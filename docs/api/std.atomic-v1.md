@@ -45,13 +45,13 @@ pub type AtomicU64 {
 }
 
 impl AtomicU64 {
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), value: U64) -> AtomicU64
-    pub fn load(self, order: Ordering) -> U64
-    pub fn store(self, value: U64, order: Ordering) -> Unit
-    pub fn swap(self, value: U64, order: Ordering) -> U64
-    pub fn compare_exchange(self, expected: U64, replacement: U64, success: Ordering, failure: Ordering) -> Result(U64, U64)
-    pub fn fetch_add_wrapping(self, value: U64, order: Ordering) -> U64
-    pub fn fetch_sub_wrapping(self, value: U64, order: Ordering) -> U64
+    fn new(I: type(Io, AsyncIo), group: TaskGroup(I), value: U64) -> AtomicU64
+    fn load(self, order: Ordering) -> U64
+    fn store(self, value: U64, order: Ordering) -> Unit
+    fn swap(self, value: U64, order: Ordering) -> U64
+    fn compare_exchange(self, expected: U64, replacement: U64, success: Ordering, failure: Ordering) -> Result(U64, U64)
+    fn fetch_add_wrapping(self, value: U64, order: Ordering) -> U64
+    fn fetch_sub_wrapping(self, value: U64, order: Ordering) -> U64
 }
 ```
 

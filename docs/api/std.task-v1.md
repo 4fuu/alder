@@ -90,11 +90,11 @@ pub type CancellationToken {
 
 impl(I: type(Io, AsyncIo)) TaskGroup(I) {
     /// Creates a group on the executor carried by `io`.
-    pub fn new(io: I) -> TaskGroup(I)
+    fn new(io: I) -> TaskGroup(I)
     /// Starts the direct call's body as a child and returns its handle.
-    pub fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T)
+    fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T)
     /// Starts a `Unit` child that the group joins without a user handle.
-    pub fn start(mut self, pending: Pending(Unit)) -> Unit
+    fn start(mut self, pending: Pending(Unit)) -> Unit
 }
 
 impl(I: type(Io, AsyncIo)) Cleanup for TaskGroup(I)
@@ -102,15 +102,15 @@ impl(T: type) Cleanup for Task(T)
 impl Cleanup for Cancellation
 
 impl Cancellation {
-    pub fn new() -> Cancellation
-    pub fn token(self) -> CancellationToken
-    pub fn cancel(mut self) -> Unit
-    pub fn is_cancelled(self) -> Bool
+    fn new() -> Cancellation
+    fn token(self) -> CancellationToken
+    fn cancel(mut self) -> Unit
+    fn is_cancelled(self) -> Bool
 }
 
 impl CancellationToken {
-    pub fn is_cancelled(self) -> Bool
-    pub fn check(self) -> Result(Unit, CancellationError)
+    fn is_cancelled(self) -> Bool
+    fn check(self) -> Result(Unit, CancellationError)
 }
 
 pub fn timeout(T: type, I: type(Io, AsyncIo), io: I, duration: Duration, pending: Pending(T)) -> Result(T, Timeout)
@@ -151,10 +151,11 @@ pub fn yield(I: type(Io, AsyncIo), io: I) -> Unit
   every `start` child has been joined.
 - `timeout(io, duration, pending T)` starts one private child group, returns
   `Ok(T)` when the child completes within `duration`, and otherwise cancels,
-  joins, and returns `Err(Timeout.Timeout)` (the error type and its single
-  variant share the name `Timeout`, so the unqualified pattern `Err(Timeout)`
-  also resolves). An operation whose own result is `Result(U, E)` therefore
-  surfaces as `Result(Result(U, E), Timeout)`; no error types are merged.
+  joins, and returns `Err(Timeout)`. The error type and its single variant
+  share the name `Timeout`; match patterns spell the bare variant, and the
+  qualified form `Timeout.Timeout` is valid in expression position. An
+  operation whose own result is `Result(U, E)` therefore surfaces as
+  `Result(Result(U, E), Timeout)`; no error types are merged.
 - `race(io, first, second)` starts both pending calls in one private child
   group, returns the first completed `T`, and cancels and joins the other.
   Scheduling decides the winner and no losing value is exposed; a
@@ -242,7 +243,7 @@ fn under_deadline(I: type(Io, AsyncIo), io: I) -> Result(U64, IoError) {
     let timed = timeout(io, Duration.seconds(5), count_byte(io, "aaaa", 97))
     match timed {
         Ok(count) => { return count }
-        Err(Timeout.Timeout) => { return Err(IoError.Unsupported) }
+        Err(Timeout) => { return Err(IoError.Unsupported) }
     }
 }
 
@@ -268,7 +269,7 @@ pub fn std_task_example(I: type(Io, AsyncIo), io: I) -> U64 {
     if !token.is_cancelled() { total = total + 8 }
     match token.check() {
         Ok(_) => { total = total + 16 }
-        Err(CancellationError.Cancelled) => {}
+        Err(Cancelled) => {}
     }
     return total
 }
@@ -284,8 +285,11 @@ for all six Milestone 9 surfaces.
 - `await` is a prefix operator and has no method form; `try await task`
   composes right-to-left. `Task(T)` exposes no `await` method.
 - `timeout`'s error type is `std.task.Timeout` and its single variant is also
-  `Timeout`, so `Err(Timeout)` and `Err(Timeout.Timeout)` both resolve. The
-  timeout call is a free function taking the capability, as in `async.md`.
+  `Timeout`. Match patterns spell the bare variant (`Err(Timeout)`); the
+  qualified form `Timeout.Timeout` is valid in expression position only,
+  because S0 match patterns take a bare variant name plus an optional payload
+  binding. The timeout call is a free function taking the capability, as in
+  `async.md`.
 - `race` has arity two and is a free function taking the capability. Its
   result is the winner's `T`; errors are never merged.
 - `yield` and `blocking` are free functions taking the capability; `spawn`,

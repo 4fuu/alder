@@ -723,7 +723,7 @@ pub type ExecutorConfig {
 
 impl ExecutorConfig {
     /// Both counts `Automatic`.
-    pub fn automatic() -> ExecutorConfig
+    fn automatic() -> ExecutorConfig
 }
 
 /// The hosted evented executor capability. Copyable, like every `Io`
@@ -734,9 +734,9 @@ pub type Evented {
 
 impl Evented {
     /// The process-wide executor with automatic worker counts.
-    pub fn new() -> Evented
+    fn new() -> Evented
     /// The process-wide executor with an explicit configuration.
-    pub fn configured(config: ExecutorConfig) -> Evented
+    fn configured(config: ExecutorConfig) -> Evented
 }
 
 impl Io for Evented

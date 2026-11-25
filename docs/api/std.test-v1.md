@@ -171,9 +171,9 @@ pub type SimIo {
 
 impl SimIo {
     /// The virtual clock at zero and the fixed seed 0.
-    pub fn new() -> SimIo
+    fn new() -> SimIo
     /// The virtual clock at zero and the given generator seed.
-    pub fn seeded(seed: U64) -> SimIo
+    fn seeded(seed: U64) -> SimIo
 }
 
 impl Io for SimIo
@@ -247,7 +247,7 @@ pub fn std_simio_example() -> U64 {
     let timed = timeout(sim, Duration.millis(10), nap(sim, 1000))
     match timed {
         Ok(value) => { total = total + value }
-        Err(Timeout.Timeout) => { total = total + 2 }
+        Err(Timeout) => { total = total + 2 }
     }
     return total
 }

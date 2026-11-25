@@ -64,42 +64,42 @@ pub type Barrier {
 
 impl(T: type) Shared(T) {
     /// Stores `value` in group-owned storage.
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), take value: T) -> Shared(T)
+    fn new(I: type(Io, AsyncIo), group: TaskGroup(I), take value: T) -> Shared(T)
     /// Exclusive access; excludes every other guard on the same slot.
-    pub fn lock(self) -> LockGuard(T)
+    fn lock(self) -> LockGuard(T)
     /// Shared access; overlaps other read guards and excludes `lock`.
-    pub fn read(self) -> ReadGuard(T)
+    fn read(self) -> ReadGuard(T)
 }
 
 impl(T: type) LockGuard(T) {
     /// A one-element mutable view of the guarded slot, scoped to this guard.
-    pub fn borrow(mut self) -> MutSlice(T)
+    fn borrow(mut self) -> MutSlice(T)
 }
 
 impl(T: type) ReadGuard(T) {
     /// A one-element immutable view of the guarded slot, scoped to this guard.
-    pub fn borrow(self) -> [T]
+    fn borrow(self) -> [T]
 }
 
 impl(T: type) Cleanup for LockGuard(T)
 impl(T: type) Cleanup for ReadGuard(T)
 
 impl(T: type) Once(T) {
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Once(T)
-    pub fn is_initialized(self) -> Bool
+    fn new(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Once(T)
+    fn is_initialized(self) -> Bool
     /// Stores `value` when uninitialized; otherwise releases it and reports
     /// `AlreadyInitialized`.
-    pub fn initialize(self, take value: T) -> Result(Unit, InitError)
+    fn initialize(self, take value: T) -> Result(Unit, InitError)
     /// Copies the initialized value; available only for copyable `T`.
-    pub fn get(self) -> Option(T)
+    fn get(self) -> Option(T)
 }
 
 impl Barrier {
     /// A reusable barrier that releases every waiter each time `parties`
     /// waits have arrived; `parties` must be at least 1.
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), parties: U64) -> Result(Barrier, SyncError)
+    fn new(I: type(Io, AsyncIo), group: TaskGroup(I), parties: U64) -> Result(Barrier, SyncError)
     /// Waits for the current generation's last party.
-    pub fn wait(self) -> Unit
+    fn wait(self) -> Unit
 }
 ```
 
