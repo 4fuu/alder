@@ -6472,7 +6472,9 @@ fn expression_for_syntax(store: CheckStore, owner: U64, syntax: U64) -> U64 {
 }
 
 fn append_call_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, expression_kind: U64, checked_type: U64, annotation_kind: U64, target: U64, variant_use: U64, child_call: SyntaxRec, child_mode: U64, site_kind: U64, site_syntax: U64, builtin: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: builtin, place: 0))
+    var suspends: U64 = 0
+    if annotation_kind == 1 && try callee_signature_suspends(d, state, store, target) { suspends = 1 }
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: annotation_kind, target: target, checked_type: checked_type, variant_use: variant_use, builtin: builtin, place: 0, suspends: suspends))
     let annotation = __s0_buffer_len(CallAnnotationRec, annotations)
     var children = store.expression_children
     var first_child: U64 = 0
@@ -6535,7 +6537,7 @@ fn canonical_leaf(d: Domain, store: CheckStore, kind: U64, target: U64) -> Resul
 // append_builtin_expression records only runtime operands as ordered children;
 // explicit type operands remain canonical type annotations on their syntax.
 fn append_builtin_expression(d: Domain, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, call: SyntaxRec, first_runtime: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0, suspends: 0))
     var children = store.expression_children
     var first_child: U64 = 0
     var child_count: U64 = 0
@@ -6559,7 +6561,7 @@ fn append_builtin_expression(d: Domain, parse: ParseStore, store: CheckStore, ow
 // (OutOfMemory or Limit) as a kind-6 annotation with a kind-10 expression and
 // no children. builtin is 5 for OutOfMemory and 6 for Limit.
 fn append_s0_error_expression(d: Domain, parse: ParseStore, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 6, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 6, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: 0, suspends: 0))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 10, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
     let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: store.expression_children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
@@ -7958,7 +7960,7 @@ fn check_memory_query(d: Domain, state: State, parse: ParseStore, base: CheckSto
     if expected != 0 && !(try expression_type_equal(d, state, parse, current, u64_type, expected)) { return expr_token_type_fail(d, state, current, mismatch_kind, mismatch_node, expected, u64_type) }
     var builtin: U64 = 970
     if align { builtin = 971 }
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, current.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: u64_type, variant_use: 0, builtin: builtin, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, current.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: u64_type, variant_use: 0, builtin: builtin, place: 0, suspends: 0))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, current.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(current, owner), syntax: call_id, kind: 18, checked_type: u64_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: queried, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
     let next = CheckStore(symbols: current.symbols, type_params: current.type_params, types: current.types, type_args: current.type_args, type_annotations: current.type_annotations, uses: current.uses, indexes: current.indexes, locals: current.locals, environments: current.environments, expressions: expressions, call_annotations: annotations, expression_children: current.expression_children, returns: current.returns, control: current.control, diagnostics: current.diagnostics, traits: current.traits, closures: current.closures, interp: current.interp, bindings: current.bindings)
     return expr_draft(next, u64_type, __s0_buffer_len(CheckedExprRec, expressions))
@@ -8392,7 +8394,7 @@ fn check_table_method(d: Domain, state: State, parse: ParseStore, base: CheckSto
 }
 
 fn append_sequence_method(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, builtin: U64, receiver: U64, first_arg: U64, second_arg: U64, place: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: place))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: checked_type, variant_use: 0, builtin: builtin, place: place, suspends: 0))
     var children = store.expression_children
     let first = __s0_buffer_len(CheckedExprChildRec, children) + 1
     children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: receiver))
@@ -10065,7 +10067,7 @@ fn check_callback_owner_register(d: Domain, state: State, parse: ParseStore, bas
         option_checked = __s0_buffer_len(CheckedTypeRec, appended)
     }
     if expected != 0 && expected != option_checked { return expr_token_type_fail(d, state, store_with_option, mismatch_kind, mismatch_node, expected, option_checked) }
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store_with_option.call_annotations, CallAnnotationRec(owner: set_member, kind: 8, target: clear_member, checked_type: context_type, variant_use: wait_member, builtin: set_handler.id, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store_with_option.call_annotations, CallAnnotationRec(owner: set_member, kind: 8, target: clear_member, checked_type: context_type, variant_use: wait_member, builtin: set_handler.id, place: 0, suspends: 0))
     var children = store_with_option.expression_children
     let first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1
     children = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: context_expression))
@@ -10221,7 +10223,7 @@ fn check_c_string_ptr(d: Domain, state: State, parse: ParseStore, base: CheckSto
     if call_link_count(parse, call) != 2 { return expr_token_fail(d, state, base, 164, call) }
     let interned = try binding_intern_const_ptr_char(d, store)
     if expected != 0 && expected != interned.id { return expr_token_type_fail(d, state, interned.store, mismatch_kind, mismatch_node, expected, interned.id) }
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, interned.store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: interned.id, variant_use: 0, builtin: 902, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, interned.store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: 0, checked_type: interned.id, variant_use: 0, builtin: 902, place: 0, suspends: 0))
     var children = interned.store.expression_children
     let first_child = __s0_buffer_len(CheckedExprChildRec, children) + 1
     let children_appended = try __s0_buffer_append(CheckedExprChildRec, d, children, CheckedExprChildRec(expression: receiver_draft.expression))
@@ -11037,8 +11039,10 @@ fn append_interpolation_expression(d: Domain, store: CheckStore, owner: U64, syn
     return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
 }
 
-fn append_display_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0))
+fn append_display_call(d: Domain, state: State, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    var suspends: U64 = 0
+    if try callee_signature_suspends(d, state, store, target) { suspends = 1 }
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: target, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0, suspends: suspends))
     let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
     let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 8, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
@@ -11166,7 +11170,7 @@ fn check_into_iterator_method(d: Domain, state: State, parse: ParseStore, base: 
 }
 
 fn append_into_iterator_builtin(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, target: U64, receiver: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
-    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: checked_type, variant_use: 0, builtin: 1002, place: 0))
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: checked_type, variant_use: 0, builtin: 1002, place: 0, suspends: 0))
     let first_child = __s0_buffer_len(CheckedExprChildRec, store.expression_children) + 1
     let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: receiver))
     let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 18, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: first_child, child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
@@ -11238,7 +11242,7 @@ fn check_interpolation_display_part(d: Domain, state: State, parse: ParseStore, 
             InstanceBad(value) => 0
         }
     }
-    return append_display_call(d, with_instance, owner, part_id, string_type, instance, draft.expression, 0, 0)
+    return append_display_call(d, state, with_instance, owner, part_id, string_type, instance, draft.expression, 0, 0)
 }
 
 fn check_interpolation_expression(d: Domain, state: State, parse: ParseStore, store: CheckStore, owner: U64, expression_id: U64, expression: SyntaxRec, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
@@ -11559,7 +11563,7 @@ fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base
                 let made = try checked_function_value_type(d, store, owner, target)
                 var with_type = made.store
                 if expected != 0 && !(try expression_type_equal(d, state, parse, with_type, made.checked_type, expected)) { return expr_token_type_fail(d, state, with_type, mismatch_kind, mismatch_node, expected, made.checked_type) }
-                let annotations = try __s0_buffer_append(CallAnnotationRec, d, with_type.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: made.checked_type, variant_use: 0, builtin: 43, place: 0))
+                let annotations = try __s0_buffer_append(CallAnnotationRec, d, with_type.call_annotations, CallAnnotationRec(owner: owner, kind: 5, target: target, checked_type: made.checked_type, variant_use: 0, builtin: 43, place: 0, suspends: 0))
                 let expressions = try __s0_buffer_append(CheckedExprRec, d, with_type.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(with_type, owner), syntax: expression_id, kind: 18, checked_type: made.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: 0, child_count: 0, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
                 with_type = CheckStore(symbols: with_type.symbols, type_params: with_type.type_params, types: with_type.types, type_args: with_type.type_args, type_annotations: with_type.type_annotations, uses: with_type.uses, indexes: with_type.indexes, locals: with_type.locals, environments: with_type.environments, expressions: expressions, call_annotations: annotations, expression_children: with_type.expression_children, returns: with_type.returns, control: with_type.control, diagnostics: with_type.diagnostics, traits: with_type.traits, closures: with_type.closures, interp: with_type.interp, bindings: with_type.bindings)
                 return expr_draft(with_type, made.checked_type, __s0_buffer_len(CheckedExprRec, expressions))
@@ -14109,6 +14113,233 @@ fn check_scoped_capture_escapes(d: Domain, state: State, parse: ParseStore, stor
     return Ok(CheckGood(current))
 }
 
+// A suspending capability type is exactly the documented std.io domain: a
+// type parameter bounded by Io without BlockingIo, a concrete type
+// implementing AsyncIo, or a record, enum, or applied generic containing one.
+// The classification reads declared signatures only, so an Io-bounded
+// parameter stays potentially suspending for every concrete instantiation.
+// The std.io source check keeps programs that never import the capability
+// traits on the plain path.
+fn io_contract_present(state: State) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SourceRec, state.sources) {
+        if source_path_is(state, at, "std/io.al") { return true }
+        at = at + 1
+    }
+    return false
+}
+
+fn io_trait_kind_of_symbol(state: State, store: CheckStore, trait_symbol: U64) -> U64 {
+    if trait_symbol == 0 || trait_symbol > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, trait_symbol - 1)
+    if symbol.kind != 50 || !source_path_is(state, symbol.source, "std/io.al") { return 0 }
+    if symbol_name_matches_word(state, symbol, "Io") { return 1 }
+    if symbol_name_matches_word(state, symbol, "BlockingIo") { return 2 }
+    if symbol_name_matches_word(state, symbol, "AsyncIo") { return 3 }
+    return 0
+}
+
+fn io_trait_kind(state: State, store: CheckStore, constraint: TraitConstraintRec) -> U64 {
+    if constraint.trait_builtin != 0 { return 0 }
+    return io_trait_kind_of_symbol(state, store, constraint.trait_symbol)
+}
+
+fn io_trait_symbol_named(state: State, store: CheckStore, word: __s0_String) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if io_trait_kind_of_symbol(state, store, at + 1) != 0 && symbol_name_matches_word(state, symbol, word) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn type_parameter_is_suspending(state: State, store: CheckStore, param: U64) -> Bool {
+    if param == 0 || param > __s0_buffer_len(TypeParamRec, store.type_params) { return false }
+    var io = false
+    var blocking = false
+    var at: U64 = 0
+    while at < __s0_buffer_len(TraitConstraintRec, store.traits.constraints) {
+        let constraint = __s0_buffer_get(TraitConstraintRec, store.traits.constraints, at)
+        if constraint.param == param {
+            let kind = io_trait_kind(state, store, constraint)
+            if kind == 1 { io = true }
+            if kind == 2 { blocking = true }
+        }
+        at = at + 1
+    }
+    return io && !blocking
+}
+
+// A concrete nominal type implements AsyncIo when an applicable implementation
+// declares that standard trait. Generic implementations are conditional, so
+// the same applicability check the constraint solver uses decides their head.
+fn type_implements_async_io(d: Domain, state: State, store: CheckStore, checked_type: U64) -> Result(Bool, __s0_Error) {
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 7 { return Ok(false) }
+    let async_trait = io_trait_symbol_named(state, store, "AsyncIo")
+    if async_trait == 0 { return Ok(false) }
+    let count = __s0_buffer_len(U64, store.traits.receiver_index)
+    if count == 0 { return Ok(false) }
+    var low: U64 = 0
+    var high = count
+    while low < high {
+        let mid = low + (high - low) / 2
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, mid) - 1)
+        if trait_impl_receiver_type_symbol(store, rec) < checked.target { low = mid + 1 } else { high = mid }
+    }
+    var at = low
+    while at < count {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, __s0_buffer_get(U64, store.traits.receiver_index, at) - 1)
+        let symbol = trait_impl_receiver_type_symbol(store, rec)
+        if symbol > checked.target { return Ok(false) }
+        if symbol == checked.target && rec.trait_builtin == 0 && rec.trait_symbol == async_trait {
+            let empty = try __s0_buffer_new(InferenceBindingRec, d)
+            let seeded = try __s0_buffer_append(InferenceBindingRec, d, empty, InferenceBindingRec(param: 1, checked_type: checked_type))
+            let constraint = TraitConstraintRec(owner: 0, param: 1, trait_builtin: 0, trait_symbol: async_trait, first_arg: 0, arg_count: 0, syntax: 0)
+            if try trait_impl_applies(d, store, rec, constraint, seeded, 0) { return Ok(true) }
+        }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+// The type parameters of one nominal declaration, paired positionally with a
+// concrete application's arguments, so declaration members can be substituted
+// before their containment is classified.
+fn nominal_type_bindings(d: Domain, store: CheckStore, target: U64, checked: CheckedTypeRec) -> Result(__s0_Buffer(InferenceBindingRec), __s0_Error) {
+    var bindings = try __s0_buffer_new(InferenceBindingRec, d)
+    if checked.arg_count == 0 || checked.first_arg == 0 { return Ok(bindings) }
+    var ordinal: U64 = 0
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        let param = __s0_buffer_get(TypeParamRec, store.type_params, at)
+        if param.owner == target {
+            if ordinal < checked.arg_count {
+                let argument = __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + ordinal)
+                bindings = try __s0_buffer_append(InferenceBindingRec, d, bindings, InferenceBindingRec(param: at + 1, checked_type: argument))
+            }
+            ordinal = ordinal + 1
+        }
+        at = at + 1
+    }
+    return Ok(bindings)
+}
+
+fn type_is_suspending_capability(d: Domain, state: State, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) || depth > 16 { return Ok(false) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 6 { return Ok(type_parameter_is_suspending(state, store, checked.target)) }
+    // Function values never suspend, whatever types their signature names.
+    if checked.kind == 25 { return Ok(false) }
+    if checked.arg_count != 0 && checked.first_arg == 0 { return Ok(false) }
+    var at: U64 = 0
+    while at < checked.arg_count {
+        if checked.first_arg - 1 + at >= __s0_buffer_len(U64, store.type_args) { return Ok(false) }
+        if try type_is_suspending_capability(d, state, store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at), depth + 1) { return Ok(true) }
+        at = at + 1
+    }
+    if checked.kind != 7 { return Ok(false) }
+    if try type_implements_async_io(d, state, store, checked_type) { return Ok(true) }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, checked.target - 1)
+    if symbol.kind != 2 && symbol.kind != 3 { return Ok(false) }
+    let bindings = try nominal_type_bindings(d, store, checked.target, checked)
+    var role: U64 = 1
+    if symbol.kind == 3 { role = 2 }
+    let total = use_count(store, checked.target, role)
+    var ordinal: U64 = 0
+    while ordinal < total {
+        let use_id = use_by_ordinal(store, checked.target, role, ordinal)
+        if use_id != 0 {
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            if use.checked_type != 0 {
+                let substituted = try substitute_type(d, store, bindings, use.checked_type)
+                if try type_is_suspending_capability(d, state, substituted.store, substituted.checked_type, depth + 1) { return Ok(true) }
+            }
+        }
+        ordinal = ordinal + 1
+    }
+    return Ok(false)
+}
+
+// A call is potentially suspending when the callee's declared signature,
+// including a method receiver (role-5 ordinal zero), has a parameter of a
+// suspending capability type. Instances resolve to their declaration so the
+// answer never depends on concrete type arguments.
+fn callee_signature_suspends(d: Domain, state: State, store: CheckStore, target: U64) -> Result(Bool, __s0_Error) {
+    if target == 0 || target > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
+    if !io_contract_present(state) { return Ok(false) }
+    let declaration = instance_declaration(store, target)
+    if declaration == 0 || declaration > __s0_buffer_len(SymbolRec, store.symbols) { return Ok(false) }
+    let total = use_count(store, declaration, 5)
+    var ordinal: U64 = 0
+    while ordinal < total {
+        let use_id = use_by_ordinal(store, declaration, 5, ordinal)
+        if use_id != 0 {
+            let use = __s0_buffer_get(DeclTypeUseRec, store.uses, use_id - 1)
+            if use.checked_type != 0 && try type_is_suspending_capability(d, state, store, use.checked_type, 0) { return Ok(true) }
+        }
+        ordinal = ordinal + 1
+    }
+    return Ok(false)
+}
+
+fn owner_is_closure_thunk(store: CheckStore, parse: ParseStore, owner: U64) -> Bool {
+    if owner == 0 || owner > __s0_buffer_len(SymbolRec, store.symbols) { return false }
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, owner - 1)
+    if symbol.kind != 12 || symbol.node == 0 || symbol.node > __s0_buffer_len(SyntaxRec, parse.nodes) { return false }
+    return __s0_buffer_get(SyntaxRec, parse.nodes, symbol.node - 1).kind == 58
+}
+
+fn call_callee_syntax(parse: ParseStore, syntax: U64) -> SyntaxRec {
+    let node = __s0_buffer_get(SyntaxRec, parse.nodes, syntax - 1)
+    if node.kind == 27 && node.children != 0 {
+        let link = call_link_at(parse, node, 0)
+        if link.node != 0 && link.node <= __s0_buffer_len(SyntaxRec, parse.nodes) { return __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1) }
+    }
+    return node
+}
+
+fn function_first_suspending_call(store: CheckStore, target: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if expression.owner == target && expression.kind == 8 && expression.annotation != 0 && expression.annotation <= __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
+            let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+            if annotation.kind == 1 && annotation.suspends == 1 { return at + 1 }
+        }
+        at = at + 1
+    }
+    return 0
+}
+
+// Function values never suspend, so a closure body and a named function used
+// as a function value may not contain a potentially suspending call. The
+// checked call annotations carry the per-call fact; this pass reads the
+// finished store and names the offending call at its own source range.
+fn check_suspending_function_boundaries(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    if !io_contract_present(state) { return Ok(CheckGood(store)) }
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedExprRec, store.expressions) {
+        let expression = __s0_buffer_get(CheckedExprRec, store.expressions, at)
+        if expression.annotation != 0 && expression.annotation <= __s0_buffer_len(CallAnnotationRec, store.call_annotations) {
+            let annotation = __s0_buffer_get(CallAnnotationRec, store.call_annotations, expression.annotation - 1)
+            if expression.kind == 8 && annotation.kind == 1 && annotation.suspends == 1 && owner_is_closure_thunk(store, parse, annotation.owner) {
+                return check_token_detail_fail(d, state, store, 348, call_callee_syntax(parse, expression.syntax), 1, 0, 0, 0)
+            }
+            if expression.kind == 18 && annotation.kind == 5 && annotation.builtin == 43 {
+                let call = function_first_suspending_call(store, annotation.target)
+                if call != 0 {
+                    let call_expression = __s0_buffer_get(CheckedExprRec, store.expressions, call - 1)
+                    return check_token_detail_fail(d, state, store, 348, call_callee_syntax(parse, call_expression.syntax), 2, 0, 0, 0)
+                }
+            }
+        }
+        at = at + 1
+    }
+    return Ok(CheckGood(store))
+}
+
 // Closure thunks are materialized by the site check inside the enclosing
 // body. For a generic body that happens when an instance is checked, so the
 // linear body walk skips thunks and this pass checks each one after every
@@ -14130,7 +14361,9 @@ fn check_deferred_bodies(d: Domain, state: State, parse: ParseStore, store: Chec
         }
         at = at + 1
     }
-    return check_scoped_capture_escapes(d, state, parse, current)
+    let escaped = try check_scoped_capture_escapes(d, state, parse, current)
+    if check_result_bad(escaped) { return Ok(escaped) }
+    return check_suspending_function_boundaries(d, state, parse, check_result_store(escaped))
 }
 
 fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {

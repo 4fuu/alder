@@ -320,6 +320,10 @@ type CheckedExprChildRec {
 // back (len, get, lookups, and table handle operations).
 // Kind 7 is a C binding call: target is the one-based BindingMemberRec index
 // of the raw fn member, and the annotation names no symbol.
+// suspends is nonzero when the callee's declared signature, including a
+// method receiver, has a suspending capability type parameter or value; the
+// fact is recorded for later lowering and is not manifest output. It never
+// depends on how a generic callee was instantiated.
 type CallAnnotationRec {
     owner: U64
     kind: U64
@@ -328,6 +332,7 @@ type CallAnnotationRec {
     variant_use: U64
     builtin: U64
     place: U64
+    suspends: U64
 }
 
 type CheckedReturnRec {
@@ -606,8 +611,11 @@ type EnvironmentRec {
 // vector whose heap-stored handle awaits MIR storage rules, 148 a match
 // guard that consumes a binding, 149 a match guard on a table-view arm, 150
 // and 151 `break`/`continue` outside a loop, 152 a closure that captures a
-// scoped capability and escapes the scope that owns it, and 153 a closure
-// that captures a scoped capability created inside a loop body.
+// scoped capability and escapes the scope that owns it, 153 a closure
+// that captures a scoped capability created inside a loop body, and 348 a
+// closure body or a function used as a function value that contains a
+// potentially suspending call (detail_a is 1 for a closure body and 2 for a
+// function value).
 // kind is the
 // stable checker diagnostic code. The primary range is
 // source/start/end; the optional related range is owned by this record and is

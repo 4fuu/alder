@@ -304,6 +304,15 @@ work in progress:
   target slot survives the backedge and the next iteration could read a
   header the loop has since relocated; bind the view where it is created.
   Diagnostic 154 rejects the assignment.
+- A closure body, or a non-generic function used as a function value, may not
+  contain a potentially suspending call: a call whose callee signature,
+  including its receiver, has a parameter of a suspending capability type. A
+  suspending capability type is a type parameter bounded by `std.io` `Io`
+  without `BlockingIo`, a concrete type implementing `AsyncIo`, or a record,
+  enum, or applied generic containing one. The classification reads declared
+  signatures only, so an `Io`-bounded callee stays potentially suspending for
+  every concrete instantiation; a concrete `Blocking` receiver or parameter
+  never is. Diagnostic 348 names the call.
 - Known limits of this slice: parameter type inference from the expected
   function type is not implemented; malformed closure shapes are rejected
   with diagnostic 147; a closure that captures a scoped capability and
