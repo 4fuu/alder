@@ -1545,10 +1545,17 @@ frame type is the element type of `%frame`; `%frame` is the one-element
 `safe_mut` allocated in `%domain`; `%domain` is the activation domain. The
 operation creates a task record, pushes the target as its root activation,
 makes the task runnable, and returns a generational task id. At the C level it
-lowers to `alder_task_create` followed by `alder_task_start` and
-`alder_task_id`; the two-phase form exists so the runtime can keep the task
-unrunnable while the spawner initializes the frame, and `task.spawn` performs
-both phases in one MIR instruction. The task record borrows `%domain` and
+lowers to `alder_task_create`, then `alder_task_start`, then
+`alder_task_handle(task)`; the id comes from
+`uint64_t alder_task_handle(AlderTask *task)`, called on the task record
+returned by create. It is not `alder_task_id`, which observes the current
+step's task and would return the spawner's id instead of the child's. The
+two-phase form exists so the runtime can keep the task unrunnable while the
+spawner initializes the frame, and `task.spawn` performs both phases in one
+MIR instruction. In the gate 9.2 foundation the runtime keeps only an opaque
+group id and a lazily created internal list for release unlinking; it applies
+no group cancellation or join policy. Gate 9.4 owns the group record and its
+create/cancel/join surface. The task record borrows `%domain` and
 `%frame` until `alder_task_release`; the spawner keeps ownership and destroys
 the domain after release. The borrow is a safe-wrapper and lowering contract,
 not a new verifier fact: `release` is an ordinary binding, so the verifier
@@ -1560,8 +1567,8 @@ verified C binding can name. `await`, `release`, `cancel`, `yield`, sleep,
 channel, and shield operations are ordinary bindings over C scalar values and
 task ids and add no MIR operation. `task.spawn` lands through the versioning
 process with the `Pending(T)` typing surface in gate 9.4; gate 9.2 exercises
-the `alder_task_create`/`alder_task_start` C ABI directly. The worked example
-above contains no spawn site and stays `mir 6`.
+the `alder_task_create`/`alder_task_start`/`alder_task_handle` C ABI directly.
+The worked example above contains no spawn site and stays `mir 6`.
 
 ## Textual MIR
 

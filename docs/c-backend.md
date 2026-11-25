@@ -305,9 +305,11 @@ by the backend exactly like `alder_domain_alloc` and `alder_cleanup_run`.
   `alder_scope_<site>`) but move from C locals of the body function into the
   frame struct, after the MIR-visible fields. A `domain.create` site
   initializes its hidden `AlderDomain` in place on first execution; a
-  `cleanup.scope.begin` site calls an adopting begin that returns the existing
-  frame-resident scope on a re-entry and initializes it on the first entry.
-  Both objects are zero-initialized with the frame.
+  `cleanup.scope.begin` site calls
+  [`alder_cleanup_scope_begin_adopting`](#frame-resident-cleanup-cursors),
+  which returns the existing frame-resident scope on a re-entry and
+  initializes it on the first entry. Both objects are zero-initialized with
+  the frame.
 - `field(deref %frame, name)` lowers to a member access on the typed frame
   struct. Field names never become C members: the existing ordinal-based
   member spelling (`alder_f<N>`) applies to frame fields like any other
@@ -325,17 +327,29 @@ by the backend exactly like `alder_domain_alloc` and `alder_cleanup_run`.
   capability wrapper's own lowering, before the return.
 - The program entry for an async instance creates the root activation domain
   (`alder_domain_init(&root, NULL)`), allocates the root frame in it, sets
-  `state` to `entry` and the entry parameters, pushes the root activation,
-  runs the executor, reads the root frame's `out`, destroys the root domain,
-  and returns the program status. A synchronous `main` keeps the existing
-  direct entry.
+  `state` to `entry` and the entry parameters, creates a root task with
+  `alder_task_create(group, root_step, root_frame, &root)` assigned to
+  `task`, records its id with `alder_task_handle(task)` as `task_id`, starts
+  it with `alder_task_start(task)`, and runs
+  [`alder_executor_run`](#executor-entry-and-hooks). A true result
+  means every task completed; the entry then reads the root frame's `out`,
+  calls `alder_task_release(task_id)`, destroys the root domain, and returns
+  the program status. A false result is the blocked-program report and the
+  entry does not read `out`. The root activation is a task like any other;
+  the runtime has no task-less root activation. A synchronous `main` keeps
+  the existing direct entry.
 
 ### Task runtime ABI
 
 The runtime provides these entries to generated code and to the Alder
 standard-library bindings. Unless stated otherwise they observe the current
 task through a thread-local set by the executor around each step call; they
-are contract violations outside a step.
+are contract violations outside a step. `alder_task_create`,
+`alder_task_start`, `alder_task_handle`, `alder_task_wake_id`,
+`alder_wakeup_signal`, `alder_timer_at`, `alder_task_cancel`,
+`alder_task_release`, and `alder_executor_run` (pinned in [Executor entry and
+hooks](#executor-entry-and-hooks)) are callable outside a step. The remaining
+entries observe the current task.
 
 ```c
 typedef struct AlderWakeup AlderWakeup; /* one per task, stable address */
@@ -358,6 +372,7 @@ bool alder_task_await(uint64_t child);
 void alder_task_cancel(uint64_t task);
 void alder_task_release(uint64_t task);
 uint64_t alder_task_id(void);
+uint64_t alder_task_handle(AlderTask *task);
 ```
 
 Failure contracts:
@@ -382,13 +397,19 @@ Failure contracts:
 - `alder_task_yield` makes the current task runnable at the back of the run
   queue; the step still returns `park`, and the already-set latch keeps it
   runnable.
-- `alder_task_wait_reason` records the diagnostic wait category (I/O, timer,
-  task, channel, group, blocking) used by `SimIo`'s blocked-task report. It is
-  metadata only and never affects scheduling.
+- `alder_task_wait_reason` records the diagnostic wait category used by
+  `SimIo`'s blocked-task report: `ALDER_WAIT_NONE` (0), `ALDER_WAIT_IO` (1),
+  `ALDER_WAIT_TIMER` (2), `ALDER_WAIT_TASK` (3), `ALDER_WAIT_CHANNEL` (4),
+  `ALDER_WAIT_GROUP` (5), or `ALDER_WAIT_BLOCKING` (6). It is metadata only
+  and never affects scheduling. The executor clears the field when it
+  dequeues the task.
 - `alder_task_cancelled` reports false while the shield depth is positive.
-- `alder_timer_at` registers an absolute deadline in executor-clock units. A
-  deadline at or before `now` signals immediately. It returns false when the
-  deadline is out of range for the clock.
+- `alder_timer_at` registers an absolute deadline in the monotonically
+  increasing executor clock. A deadline at or before the current clock
+  signals immediately. `UINT64_MAX` is the no-deadline sentinel: it returns
+  false without signalling or registering anything, and every other
+  `uint64_t` deadline is in range. Timers are ordered by `(deadline,
+  task-id)` so equal deadlines are deterministic.
 - `alder_task_await` registers the current task as a waiter on the child and
   returns true when the child is already complete; false means the caller must
   park. A child may be awaited once; a released or foreign task id is a
@@ -401,30 +422,100 @@ Failure contracts:
   that destroy. Releasing with a live registration is a contract violation.
 - `alder_task_cancel` sets the target's cancel flag and signals its wakeup.
   It does not run user code on the caller's thread.
+- `alder_task_id` returns the current step's generational task id.
+  `alder_task_handle` returns the id assigned to a specific task record. The
+  spawn lowering and the root program entry use
+  `alder_task_handle(task)` after create; `alder_task_id` would return the
+  spawner's id instead. The task pointer is valid until `alder_task_release`,
+  and the returned id is the value used by every id-taking entry.
 
 `alder_task_create` plus `alder_task_start` is the two-phase form used by the
 spawn lowering; the `task.spawn` MIR operation of MIR 7 is their typed front
-end. The task record, activation stack, latch, shield, timer links, and cancel
-flag are runtime state; none is visible to MIR as a value.
+end. The lowering obtains the child id with `alder_task_handle(task)`, not
+`alder_task_id`. The task record, activation stack, latch, shield, timer
+links, and cancel flag are runtime state; none is visible to MIR as a value.
+
+The `group` argument is an opaque 64-bit runtime group id supplied by the
+`std.task` group binding. In the gate 9.2 foundation the runtime keeps a
+lazily created internal group list only to unlink a task at
+`alder_task_release`; the record is freed when its last task is released and
+carries no cancellation or join policy. Gate 9.4 owns the group record, its
+lifetime, and the create/cancel/join surface.
+
+### Frame-resident cleanup cursors
 
 The frame-resident cleanup scope adds one resumable path without a new MIR
-operation:
+operation. The scope layout is part of the generated ABI because step frames
+embed it:
 
 ```c
+typedef struct AlderCleanupScope {
+    AlderCleanupEntry *armed_head;
+    AlderCleanupEntry *spent_head;
+    bool ran;
+    bool active;
+    bool cursor;
+} AlderCleanupScope;
+
+bool alder_cleanup_scope_begin_adopting(AlderCleanupScope *scope);
+bool alder_cleanup_push_step(AlderCleanupScope *scope, AlderStepFn driver,
+                             void *context, AlderCleanupId *out_id);
 bool alder_cleanup_scope_next(AlderCleanupScope *scope,
                               AlderCleanupFn *fn, void **context);
 bool alder_cleanup_scope_next_step(AlderCleanupScope *scope,
                                    AlderStepFn *driver, void **context);
 ```
 
-`cleanup.push` records a synchronous hook as today, or a step hook as a
-generated driver thunk plus its context. The splitter uses the matching cursor
-only when a run can suspend; it invokes synchronous entries in place and
-yields to step-hook drivers as call or park activations, in the list's reverse
-order. A run with no suspending entries keeps `alder_cleanup_run`, and
-`alder_cleanup_scope_end` frees either kind of entry. The cursor position is
-stored in the frame-resident `AlderCleanupScope`, so a suspended run resumes
-at the next entry.
+- `alder_cleanup_scope_begin_adopting` is the frame-resident begin. On the
+  first entry it initializes the zero-initialized slot and returns true; on a
+  re-entry after a suspended run it returns true with the active scope and
+  its entries unchanged. A NULL scope returns false.
+  `alder_cleanup_scope_begin` keeps its non-adopting behaviour for ordinary
+  scopes and returns false when the scope is already active.
+- `cleanup.push` records a synchronous hook through `alder_cleanup_push` as
+  today, or a step hook through `alder_cleanup_push_step` as a generated
+  driver thunk plus its context. Both use the same allocation, reverse
+  registration order, disarm, and at-most-once rules. `alder_cleanup_push_step`
+  returns false on an inactive scope, a NULL driver or out_id, or out of
+  memory, like `alder_cleanup_push`. `alder_cleanup_end` frees either kind of
+  entry.
+- `cursor` is zero in a newly begun or adopted scope and is set by any cursor
+  call. It records that the scope is running through the resumable protocol,
+  so a later `alder_cleanup_run` on that scope is a contract violation, and a
+  resumable run never mixes in `alder_cleanup_run`. A run with no suspending
+  entries keeps `alder_cleanup_run`; `alder_cleanup_run` with an armed step
+  entry is a contract violation.
+- Each successful cursor call consumes exactly one armed entry in reverse
+  registration order and returns its hook and context. Disarmed entries are
+  skipped without being returned. If the next armed entry is of the other
+  kind, the cursor returns false without advancing, so the caller tries the
+  matching cursor for that entry. The mixed-run loop is:
+
+```c
+for (;;) {
+    AlderCleanupFn fn;
+    void *context;
+    if (alder_cleanup_scope_next(&scope, &fn, &context)) {
+        fn(context);
+        continue;
+    }
+    AlderStepFn driver;
+    if (alder_cleanup_scope_next_step(&scope, &driver, &context)) {
+        /* publish the driver as a call or park activation, then resume here */
+        break;
+    }
+    break; /* no entries remain */
+}
+```
+
+- A step driver is published as a call or park activation, never called
+  directly by the cursor. When it returns `done`, the splitter re-enters the
+  loop at the next entry; a `cancelled` driver follows its cancellation edge.
+- The cursor position is the scope's armed-list head plus the `cursor`
+  marker, so it is stored in the frame-resident `AlderCleanupScope` and a
+  suspended run resumes at the next entry. When a cursor reports false
+  because no armed entries remain, the scope is marked run and
+  `alder_cleanup_end` accepts it.
 
 ### Executor architecture
 
@@ -441,9 +532,86 @@ The first implementation is one worker in one OS thread:
   activation's thunk, and applies the status: `done` pops an activation and
   resumes the new top (or completes the task), `call` pushes the published
   activation, `park` parks the task unless the latch is set. When no task is
-  runnable and a timer exists, the clock advances to the earliest deadline
-  and the timer signals its token. When no task is runnable, no timer exists,
-  and tasks remain, the executor reports the quiescent set.
+  runnable and a timer exists, the monotonically increasing clock advances
+  to the earliest deadline and the timer signals its token. When no task is
+  runnable, no timer exists, and tasks remain, the executor reports the
+  quiescent set through `on_idle` when present and `alder_executor_run`
+  returns false.
+
+### Executor entry and hooks
+
+The single-worker loop has one entry and one optional hooks record:
+
+```c
+enum {
+    ALDER_WAIT_NONE = 0,
+    ALDER_WAIT_IO = 1,
+    ALDER_WAIT_TIMER = 2,
+    ALDER_WAIT_TASK = 3,
+    ALDER_WAIT_CHANNEL = 4,
+    ALDER_WAIT_GROUP = 5,
+    ALDER_WAIT_BLOCKING = 6
+};
+
+typedef struct AlderBlockedTask {
+    uint64_t task_id;
+    uint32_t wait_reason;
+} AlderBlockedTask;
+
+typedef uint64_t (*AlderExecutorNowFn)(void *context);
+typedef bool (*AlderExecutorStartOpFn)(void *context, uint64_t task_id,
+                                       uint64_t operation);
+typedef void (*AlderExecutorCancelOpFn)(void *context, uint64_t task_id,
+                                        uint64_t operation);
+typedef void (*AlderExecutorIdleFn)(void *context,
+                                    const AlderBlockedTask *blocked,
+                                    size_t count);
+
+typedef struct AlderExecutorHooks {
+    AlderExecutorNowFn now;
+    AlderExecutorStartOpFn start_op;
+    AlderExecutorCancelOpFn cancel_op;
+    AlderExecutorIdleFn on_idle;
+    void *context;
+} AlderExecutorHooks;
+
+bool alder_executor_run(const AlderExecutorHooks *hooks);
+```
+
+- `alder_executor_run` runs the worker until every live task has completed
+  or no task can make progress without an external wakeup. It returns true
+  when no incomplete task remains and false when the program is quiescent with
+  at least one blocked task. In the false case `on_idle`, when present, has
+  already received the blocked set. A true result does not release records:
+  completed tasks remain until their spawners call `alder_task_release`.
+  `hooks` may be NULL, and the record is read only for the duration of the
+  call. Re-entering the executor from a step is a contract violation. A host
+  loop re-runs `alder_executor_run` after an external wakeup that left the
+  program quiescent; a signal delivered while a run is active is serviced by
+  that run, and timers advance inside it.
+- `now` seeds and refreshes the monotonically increasing executor clock: the
+  clock is the greater of its current value and `now(context)`, and the idle
+  loop advances it to the earliest timer deadline. The clock never moves
+  backwards. The executor never writes through `now`, and the single-worker
+  loop has no other clock source; when `now` is NULL the clock advances only
+  to timer deadlines. The 9.2 ABI has no step-visible clock read, so
+  `alder_timer_at` takes only an absolute deadline; gate 9.7 adds the read,
+  or a duration-taking sleep binding, that relative sleeps need.
+- `start_op` and `cancel_op` are the capability-operation hooks. They are
+  stored in the hooks record for the gate 9.7 capability surface; the 9.2
+  foundation has no capability-operation entry and never invokes them.
+  `task_id` is the generational task id and `operation` is an opaque binding
+  handle.
+  `start_op` returns true when the test runtime accepts the operation and
+  false when it refuses it; `cancel_op` asks the runtime to cancel or
+  complete it.
+- `on_idle` receives the blocked task set ordered by ascending task id. The
+  array is runtime-owned and valid only for the duration of the call.
+  `context` is passed to every hook unchanged.
+- Wait reasons are the stable values above. `alder_task_wait_reason` records
+  one of them; the value is metadata only and never affects scheduling.
+
+### Later executor extensions
 
 Later gates extend the same records and ABI, never the MIR representation:
 
@@ -462,13 +630,10 @@ Later gates extend the same records and ABI, never the MIR representation:
 - **Timer and wakeup queues.** The single-worker loop services both. In the
   multithread runtime one timer thread owns the heap and one MPSC drain moves
   signalled tokens to the run queue; workers never touch the heap.
-- **SimIo hooks.** The executor takes an `AlderExecutorHooks` record with
-  `now`, `start_op`, `cancel_op`, and `on_idle` function pointers and an
-  opaque context. `now` supplies the clock for timers and measurements;
-  `start_op`/`cancel_op` let the test runtime complete or refuse capability
-  operations without host I/O; `on_idle` reports quiescence with the blocked
-  task list and the wait reasons recorded through `alder_task_wait_reason`. The single-worker loop has no other clock
-  source, so virtual time and deadlock reporting need no separate scheduler.
+- **SimIo capability operations.** `start_op` and `cancel_op` are stored for
+  the gate 9.7 capability surface, which adds their call sites. `now` supplies
+  the clock for timers and measurements; `on_idle` reports quiescence with the
+  blocked task list and the wait reasons.
 
 ### Handwritten C and Alder sysroot modules
 
@@ -896,6 +1061,14 @@ each exactly once, and `end` frees every entry. `end` returns false (and
 still releases entries) when the scope was not run or still has armed
 entries; the MIR verifier requires run before end on every exit path, so
 that state is a contract violation.
+
+The resumable frame-resident variant also provides
+`alder_cleanup_scope_begin_adopting`, `alder_cleanup_push_step`, and
+`alder_cleanup_scope_next`/`_next_step`; it keeps the same entry list,
+reverse order, and `alder_cleanup_end` rules. A step entry stores a generated
+driver thunk instead of a synchronous function pointer and is run through the
+cursor protocol in
+[Frame-resident cleanup cursors](#frame-resident-cleanup-cursors).
 
 Generated C must guarantee reverse order and at-most-once cleanup. C `goto`
 is a backend mechanism and does not appear in MIR semantics.

@@ -2324,7 +2324,24 @@ earlier gate. The representation family is fixed by
 - **9.2 Task runtime foundation** — C11 per-task storage, a single-worker
   executor, the step trampoline ABI, spawn/join, cancellation with shielded
   teardown, and reverse-order cleanup; strict-C and sanitizer behavior tests.
-  Status: pending.
+  Status: complete. Evidence: [C11
+  Backend](docs/c-backend.md#step-trampolines-and-the-task-runtime) pins the
+  task ABI, [executor entry and
+  hooks](docs/c-backend.md#executor-entry-and-hooks), [cleanup
+  cursors](docs/c-backend.md#frame-resident-cleanup-cursors), the timer
+  sentinel, wait reasons, interim group semantics, and the root-as-task
+  program entry; [MIR](docs/mir.md#operations-and-versioning) pins the
+  `task.spawn` lowering through `alder_task_handle`. `runtime/testdata/task.c`
+  exercises normal park/resume, call handoff and result copy,
+  wake-before-park, deterministic timer ordering, top-down cancellation with
+  reverse-order cleanup and a shielded teardown that parks and resumes, await
+  of a canceled child, release lifetimes, 2500-deep activation stacks with a
+  bounded worker stack, leak-free create/run/release cycles, and quiescence.
+  `TestRuntimeTaskContractPanics` covers eight contract violations.
+  `go test ./runtime -count=1` passes under the strict C11 warning set and the
+  ASan/UBSan lane; the canonical strict
+  `gcc -fsyntax-only runtime/c/alder.c` check passes; `./check --bootstrap`
+  reports `bootstrap: fixed point unchanged`.
 - **9.3 Per-instance state-machine lowering** — the split in the Alder-written
   lowering, unchanged direct lowering for `BlockingIo` instances, frame
   save/restore, recursion under one concrete capability, deterministic
@@ -2347,7 +2364,8 @@ earlier gate. The representation family is fixed by
 - **9.7 Evented host I/O and `SimIo`** — `std.io.Evented` timers, files where
   supported, sockets, DNS, and subprocess waiting behind the existing `Io`
   surface (public `std.net` remains Milestone 10); `std.test.SimIo` virtual
-  time, quiescence, and deadlock reporting; one source instantiated under both
+  time, quiescence, deadlock reporting, and the step-visible executor-clock
+  read required for relative sleeps; one source instantiated under both
   `Blocking` and `Evented` with identical results. Status: pending.
 - **9.8 Exit evidence and audit** — high task counts, deep recursion, bounded
   stack and measured task storage, measured dual-instance code size,
