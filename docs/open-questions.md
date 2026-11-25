@@ -23,12 +23,12 @@ fallback and the in-place-when-unique rule are not open.
 
 Required result: implement [Async and Structured Concurrency](async.md).
 
-Decide whether suspension, cancellation cleanup, and executor wakeups belong in
-a new explicit MIR version or are lowered to existing CFG plus narrowly
-verified runtime operations. The representation must remain backend-neutral
-and iteratively verifiable. Per-instance suspension (D012) is settled: only
-instances with a suspending capability use the representation, and the same
-source must also lower to direct MIR.
+The representation family is decided by
+[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend):
+no suspension terminator; suspending instances split into ordinary CFG step
+functions before backend MIR, and the same source also lowers to direct MIR.
+Milestone 9 gate 9.0 pins the exact operation set, frame layout, and trampoline
+ABI in the owning documents; this item closes when that contract lands.
 
 ### Windows tier-1 C toolchain
 

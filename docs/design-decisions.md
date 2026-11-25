@@ -442,6 +442,43 @@ terminator in a reachable block only when the block calls a `noreturn`
 function. A general `Never` type is deferred; it would be a wider language
 decision than this single terminating surface.
 
+### D029 — Suspension lowers to plain CFG MIR before the C backend
+
+Status: **Milestone 9**
+
+Async suspension gets no MIR terminator and no stackful coroutine. After
+monomorphization, the Alder-written lowering splits each suspending instance
+into an explicit frame record plus ordinary CFG step functions; an instance
+whose concrete capabilities are all `BlockingIo` keeps the existing direct
+lowering. Frames live in a runtime-owned per-task storage domain. The executor
+drives step functions through a pinned C trampoline ABI: suspending is a
+normal return to the executor, and resuming is a normal re-entry dispatched on
+an explicit state tag. Host interaction uses narrowly scoped runtime
+operations with pinned C ABI contracts.
+
+Constraints on the representation:
+
+- step functions are ordinary MIR functions; the C backend gains no new
+  control-flow form, and the representation stays backend-neutral;
+- state tags, frame field order, and generated names are deterministic and
+  inspectable in printed MIR;
+- cancellation cleanup converges through the existing explicit cleanup
+  operations, runs in reverse registration order, and executes in a
+  cancellation-shielded teardown state;
+- one source lowers to direct MIR under `BlockingIo` and to step functions
+  under a suspending capability, with identical results;
+- if frame access or executor interaction proves to need new verified MIR
+  operations, they land as a new MIR version through the existing versioning
+  process (owning document, goldens, verifier tests, backend snapshots, and
+  independent-oracle compatibility); a suspension terminator remains excluded.
+
+Rationale: this keeps the C backend and the Go oracle unchanged for control
+flow, reuses the Milestone 7 storage-domain machinery and the Milestone 8
+callback/binding contracts, and makes every suspension state inspectable as
+ordinary MIR. It selects the representation family for the async-suspension
+open question; Milestone 9 gate 9.0 pins the exact operation set, frame
+layout, and trampoline ABI in the owning documents.
+
 ## Bootstrap decisions
 
 - Go is the temporary Stage 0 implementation language.

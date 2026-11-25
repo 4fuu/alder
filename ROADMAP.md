@@ -2272,7 +2272,7 @@ above.
 
 ## Milestone 9: Async Runtime and Structured Concurrency
 
-Status: **required before Alder 1.0**
+Status: **in progress (dependency-ordered gates below); required before Alder 1.0**
 
 Implement the `Io`/`BlockingIo`/`AsyncIo` capability traits, signature-based
 suspension checking, per-instance direct or state-machine MIR/lowering, affine
@@ -2290,6 +2290,56 @@ backpressure/FIFO tests, task-transfer and thread-affinity checks, high task
 counts with bounded stack/storage, blocking C completion after cancellation,
 and sanitizer/race coverage on supported hosts. No child may outlive its group
 and no detached task surface may be introduced.
+
+### Milestone 9 implementation gates
+
+Gates are dependency-ordered; a later gate's evidence may not stand in for an
+earlier gate. The representation family is fixed by
+[D029](docs/design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend).
+
+- **9.0 Suspension representation and executor architecture** — design note
+  pinning the step trampoline ABI, frame layout and task-storage ownership,
+  state numbering, save/restore rules, the suspend/wakeup/cancel protocol,
+  cleanup and shielded-teardown interaction, recursion, and a worked
+  dual-instance lowering example; resolves the async-suspension open question
+  into the owning documents with prototype evidence. Status: pending.
+- **9.1 Signature-local suspension checking** — suspending-capability type
+  classification, potentially-suspending call facts, rejection of suspending
+  calls in closures and function values, and rejection of guards, raw C
+  borrows, and thread-affine values live across a potentially suspending call
+  as each surface lands; acceptance and rejection tests. Status: pending.
+- **9.2 Task runtime foundation** — C11 per-task storage, a single-worker
+  executor, the step trampoline ABI, spawn/join, cancellation with shielded
+  teardown, and reverse-order cleanup; strict-C and sanitizer behavior tests.
+  Status: pending.
+- **9.3 Per-instance state-machine lowering** — the split in the Alder-written
+  lowering, unchanged direct lowering for `BlockingIo` instances, frame
+  save/restore, recursion under one concrete capability, deterministic
+  inspectable MIR, and dual-instance identical-result fixtures. Status:
+  pending.
+- **9.4 Task groups and `std.task`** — `await` and `Pending(T)` syntax and
+  typing, structural transfer-category derivation with portable-argument
+  checking, `TaskGroup`/`Task(T)`/`start`, group-exit join and cancellation,
+  `timeout`/`race`/`blocking`/`yield`, `check_cancel` and `CancellationToken`;
+  nested-group, early-return, failed-`try`, and cleanup-order evidence.
+  Status: pending.
+- **9.5 Channels, shared state, atomics, and timers** — `std.channel` FIFO,
+  backpressure, close, and cancellation races; `std.sync` `Shared(T)`, guards,
+  once, and barriers; `std.atomic` explicit memory orders; lock exclusion and
+  data-race rejection evidence. Status: pending.
+- **9.6 Multithread and local executors** — the worker pool, the local lane
+  for thread-affine tasks, task-transfer acceptance and rejection, the bounded
+  blocking pool, the thread-safe C callback bridge, and blocking-C completion
+  after parent cancellation without use after free. Status: pending.
+- **9.7 Evented host I/O and `SimIo`** — `std.io.Evented` timers, files where
+  supported, sockets, DNS, and subprocess waiting behind the existing `Io`
+  surface (public `std.net` remains Milestone 10); `std.test.SimIo` virtual
+  time, quiescence, and deadlock reporting; one source instantiated under both
+  `Blocking` and `Evented` with identical results. Status: pending.
+- **9.8 Exit evidence and audit** — high task counts, deep recursion, bounded
+  stack and measured task storage, measured dual-instance code size,
+  sanitizer/race coverage on supported hosts, repeated deterministic
+  compilation, and the full exit checklist above. Status: pending.
 
 ## Milestone 10: Batteries-Included Standard Library Completion
 
