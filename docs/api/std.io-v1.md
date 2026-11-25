@@ -1,6 +1,6 @@
 # `std.io` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot**
+Status: **Milestone 8 frozen snapshot; Milestone 9 additive section recorded**
 
 This is the versioned public snapshot for the hosted I/O capability layer. It
 is normative together with the executable example
@@ -23,8 +23,10 @@ output, and error, the exact/copy helpers, and `IoError`. The child-process
 slice adds `spawn`, `wait`, `kill`, and `poll` to `Io` with `HostChild`,
 `ChildStatus`, and `PollPair`; `std.process` builds its public `Command` and
 `Child` surface on them. The `AsyncIo` trait is
-declared here with no implementation; `Evented`, `SimIo`, and the suspending
-lowering arrive with Milestone 9 as an additive v2 of this snapshot.
+declared here with no implementation; `Evented`, the executor configuration,
+and `Io.check_cancel` arrive with Milestone 9 as the additive section at the
+end of this file, and `SimIo` is recorded in
+[`std.test` v1](std.test-v1.md#milestone-9-addition-simio).
 
 ## Signatures
 
@@ -684,3 +686,127 @@ pub fn std_io_example() -> U64 {
   buffer because `Bytes` has no `[U8]` view yet.
 - The example avoids string building, interpolation, and `while let` so it
   compiles on the current S0 boundary.
+
+## Milestone 9 addition: `Evented` and `check_cancel`
+
+Status: **Milestone 9 additive section; not implemented**
+
+This section is the additive Milestone 9 surface of this snapshot. It records
+the hosted evented capability, its worker-count configuration, and the
+`check_cancel` requirement the `Io` trait gains. It changes no Milestone 8
+declaration. The
+[cross-cutting async rules](std.task-v1.md#cross-cutting-async-rules) and
+[spelling choices](std.task-v1.md#v1-spelling-choices) apply. There is no
+separate example file for this section: the surface is exercised by the
+[`std.task` example](std.task-v1.md#example) and by the Milestone 9
+dual-instance evidence, because neither `Evented` nor `check_cancel` is
+observable without the task runtime.
+
+### Signatures
+
+```alder
+module std.io
+
+/// Worker counts requested from the hosted executor. `Automatic` lets the
+/// runtime choose from host parallelism; `Fixed(count)` requires at least
+/// one worker.
+pub enum WorkerCount {
+    Automatic
+    Fixed(count: U64)
+}
+
+/// Configuration of the process-wide hosted executor.
+pub type ExecutorConfig {
+    pub portable: WorkerCount
+    pub blocking: WorkerCount
+}
+
+impl ExecutorConfig {
+    /// Both counts `Automatic`.
+    pub fn automatic() -> ExecutorConfig
+}
+
+/// The hosted evented executor capability. Copyable, like every `Io`
+/// capability.
+pub type Evented {
+    // private: executor
+}
+
+impl Evented {
+    /// The process-wide executor with automatic worker counts.
+    pub fn new() -> Evented
+    /// The process-wide executor with an explicit configuration.
+    pub fn configured(config: ExecutorConfig) -> Evented
+}
+
+impl Io for Evented
+impl AsyncIo for Evented
+
+/// The `Io` requirement added in Milestone 9. `Blocking` returns at once.
+impl Io for Blocking {
+    // ... the existing Milestone 8 operations unchanged ...
+    fn check_cancel(self) -> Unit {
+        return
+    }
+}
+```
+
+The `Io` trait gains one requirement, which every implementor must provide:
+
+```alder
+pub trait Io {
+    // ... the existing Milestone 8 operations unchanged ...
+
+    /// Structured-cancellation checkpoint for long CPU-bound work. Returns
+    /// normally when no cancellation is pending for the calling task. When
+    /// the calling task's group has begun cancellation, the call ends the
+    /// task's ordinary exit path instead of returning. Always returns
+    /// normally for a caller that is not a group child, so `Blocking`
+    /// implements it as an immediate return.
+    fn check_cancel(self) -> Unit
+}
+```
+
+### Contracts
+
+- **`BlockingIo` and `AsyncIo` must require `Io`, and no type implements
+  both.** Both are empty marker traits in `sysroot/std/io.al` today, and the
+  S0 trait system has no supertrait form: a trait declaration records
+  parameter constraints and method requirements only
+  (`compiler/src/checker.al`, `check_trait_declaration`), and
+  [Traits and Closures](../traits-and-closures.md) states that trait
+  inheritance is not supported. This snapshot therefore records the
+  requirement without inventing syntax: `impl BlockingIo for T` and
+  `impl AsyncIo for T` must be accompanied by `impl Io for T` in the same
+  compilation unit, and Milestone 9 adds that checker invariant together
+  with the exclusion of a type that implements both markers. Milestone 9
+  signatures spell both bounds (`I: type(Io, AsyncIo)`) until a supertrait
+  spelling exists.
+- `check_cancel` is a required `Io` v1 surface addition, not a new trait.
+  `Blocking` implements it as an immediate return; `Evented` and `SimIo`
+  observe the calling task's structured cancellation. Like every capability
+  operation it is a potentially suspending call by signature.
+- `Evented` is the hosted executor. The process-wide executor is created by
+  the first `Evented.new` or `Evented.configured` call; a later call with the
+  same configuration returns another token to that executor, and a different
+  configuration is program misuse that terminates through
+  `core.panic.panic` with a fixed diagnostic. Tokens are copyable and
+  interchangeable. The executor supplies the multithreaded pool for portable
+  tasks, one local lane for thread-affine tasks and platform event sources,
+  timers, cancellation and wakeups, async files where the host supports them,
+  sockets, DNS, subprocess waiting, and the bounded blocking pool. The local
+  lane is not configurable in v1. The executor stops at process exit after
+  every program task has finished; v1 has no explicit shutdown API.
+- `ExecutorConfig` configures worker counts only. `Fixed(0)` is invalid and
+  terminates through `core.panic.panic`; `Automatic` chooses from host
+  parallelism. Worker counts change throughput, never observable results
+  beyond the documented `std.task.race` and channel FIFO rules.
+
+### Dependencies and sequencing
+
+- Milestone 9 gates 9.6 and 9.7 implement this section: the worker pool, the
+  local lane, the bounded blocking pool, and the evented host I/O surface.
+- `check_cancel` depends on the per-task cancellation state from gates 9.2
+  and 9.4.
+- The `BlockingIo`/`AsyncIo` checker invariant is a gate 9.1 deliverable; the
+  installed sysroot keeps both markers empty until then.

@@ -1,6 +1,6 @@
 # `std.test` Public Signature Snapshot v1
 
-Status: **Milestone 8 frozen snapshot; library slice implemented**
+Status: **Milestone 8 frozen snapshot; library slice implemented; Milestone 9 additive section recorded**
 
 This is the versioned public snapshot for the runner-independent testing
 helpers. It is normative together with the executable example
@@ -11,12 +11,14 @@ Snapshot v1 covers the part of `std.test` that needs no test runner:
 assertions, expected-result extraction, temporary-resource constructors, and
 deterministic seeded cases. Top-level `test` declarations, discovery and
 reporting, expected-panic tests, fuzz corpora, subprocess isolation, `SimIo`,
-and source-expression capture are intentionally outside this snapshot. They
+and source-expression capture are intentionally outside this M8 slice. They
 require `alder test` or the async runtime and belong to the tooling milestones
 and Milestone 9. The required list in
 [the standard library](../standard-library.md#testing-and-documentation)
 remains the Alder 1.0 target; this snapshot fixes only the library slice that
-M8 can install.
+M8 can install. The additive
+[Milestone 9 `SimIo` section](#milestone-9-addition-simio) at the end of this
+file records that surface; nothing else in this snapshot changes.
 
 Every failing helper terminates through `core.panic.panic`: the process exits
 with status 101, writes the documented `panic: ` diagnostic to standard error,
@@ -140,3 +142,123 @@ requires the test runner's source map and is deferred.
 The example below is the complete content of
 `examples/std.test-v1.al`. It exercises every passing path; failure paths run
 in subprocess tests that observe status 101 and the documented stderr.
+
+## Milestone 9 addition: `SimIo`
+
+Status: **Milestone 9 additive section; not implemented**
+
+This section is the additive Milestone 9 surface of this snapshot. It records
+`std.test.SimIo`, the deterministic `AsyncIo` used by tests, and changes no
+Milestone 8 declaration. It is normative together with the executable example
+`examples/std.test.simio-v1.al`, which lands in the module's implementation
+commit: the docs example runner resolves installed sysroot modules, so the file
+cannot precede the implementation. The
+[cross-cutting async rules](std.task-v1.md#cross-cutting-async-rules) and
+[spelling choices](std.task-v1.md#v1-spelling-choices) apply.
+
+### Signatures
+
+```alder
+module std.test
+
+import std.io { AsyncIo, Io }
+
+/// Deterministic async capability for tests: one worker, a virtual clock,
+/// and a seeded generator. Copyable like every `Io` capability.
+pub type SimIo {
+    // private: scheduler, clock, generator
+}
+
+impl SimIo {
+    /// The virtual clock at zero and the fixed seed 0.
+    pub fn new() -> SimIo
+    /// The virtual clock at zero and the given generator seed.
+    pub fn seeded(seed: U64) -> SimIo
+}
+
+impl Io for SimIo
+impl AsyncIo for SimIo
+```
+
+### Contracts
+
+- `SimIo` runs every task of a test on one worker. Runnable tasks run one at
+  a time in deterministic readiness order, and `new()` is exactly
+  `seeded(0)`, so a fixed program produces the same results, the same
+  scheduling, and the same random bytes on every run, target, and process.
+- Both clocks are virtual. The monotonic and wall clocks start at zero and at
+  a fixed documented epoch (the Unix epoch), and they advance only when every
+  live task is blocked on time: the clock jumps to the earliest pending
+  deadline. A deadline at the current instant is a time block, so a
+  zero-duration sleep advances nothing.
+- `random_bytes` draws from one SplitMix64 stream seeded by `seeded`, so it is
+  deterministic byte for byte. It never observes host entropy.
+- Every `Io` operation outside the clock, sleep, randomness, scheduler, and
+  standard-stream surface returns `Err(IoError.Unsupported)`: host files,
+  directories, signals, `poll`, and child processes are not simulated in v1.
+  Standard output and error write through to the host streams; capture is
+  runner-level work. `read_stdin` returns `Unsupported`, so a test reads
+  deterministic input from values it constructs. A test that needs a host
+  resource uses `Blocking` or a real `Evented`.
+- Deadlock: when no task is runnable, no timer is pending, and live tasks
+  remain blocked, `SimIo` terminates the test through `core.panic.panic` with
+  the fixed first line `panic: SimIo deadlock` followed by one
+  `  blocked task <index>` line per blocked task, in spawn order with
+  one-based indices. The listing is the failure diagnostic; a program must
+  not depend on it as data.
+- `SimIo` always uses one worker and ignores `std.io.ExecutorConfig`.
+  Production code must not depend on its readiness order; only its own
+  determinism is guaranteed.
+
+### Example
+
+The example below is the complete content that lands as
+`examples/std.test.simio-v1.al` with the implementation commit. Two sleeps
+advance the virtual clock in deadline order, and a timeout observes the same
+clock.
+
+```alder
+module hello.std_simio_example
+
+import std.io { AsyncIo, Io }
+import std.task { TaskGroup, Timeout, timeout }
+import std.test { SimIo }
+import std.time { Duration, Instant, sleep }
+
+// The executable std.test.SimIo v1 snapshot example: two sleeps advance the
+// virtual clock in deadline order and a timeout observes the same clock.
+
+fn nap(I: type(Io), io: I, millis: U64) -> U64 {
+    sleep(io, Duration.millis(millis))
+    return millis
+}
+
+pub fn std_simio_example() -> U64 {
+    let sim = SimIo.seeded(0)
+    let started = Instant.now(sim)
+    using tasks = TaskGroup.new(sim)
+    let short = tasks.spawn(nap(sim, 30))
+    let long = tasks.spawn(nap(sim, 120))
+    let first = await short
+    let second = await long
+    let elapsed = Instant.now(sim).duration_since(started)
+    var total: U64 = first + second
+    if elapsed.as_millis() == 120 { total = total + 1 }
+    let timed = timeout(sim, Duration.millis(10), nap(sim, 1000))
+    match timed {
+        Ok(value) => { total = total + value }
+        Err(Timeout.Timeout) => { total = total + 2 }
+    }
+    return total
+}
+```
+
+### Dependencies and sequencing
+
+- Milestone 9 gate 9.7 implements `SimIo` virtual time, quiescence, and
+  deadlock reporting.
+- `SimIo` is an `AsyncIo`, so it requires the `Io` implementation and the
+  `AsyncIo`/`BlockingIo` checker invariant recorded in
+  [`std.io` v1](std.io-v1.md#milestone-9-addition-evented-and-check_cancel).
+- The deadlock diagnostic uses the existing `core.panic` path; the test
+  runner's capture and reporting are Milestone 11 work.

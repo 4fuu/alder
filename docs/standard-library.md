@@ -80,18 +80,23 @@ can be reviewed without pretending the rest of the 1.0 sysroot is available:
   target-specific `Signal.Target` extension;
 - [`std.collection` public snapshot v1](api/std.collection-v1.md), covering
   the Milestone 8 stable sorting entry point and the Milestone 8.1 `Deque(T)`
-  and `BinaryHeap(T)` value types in the installed sysroot.
+  and `BinaryHeap(T)` value types in the installed sysroot;
+- [`std.task` public snapshot v1](api/std.task-v1.md), covering the Milestone 9
+  task group, `Pending(T)` operations, scoped `Task(T)`, and cooperative
+  cancellation surface, with the canonical cross-cutting async rules and v1
+  spelling choices;
+- [`std.channel` public snapshot v1](api/std.channel-v1.md), covering the
+  Milestone 9 bounded and unbounded group-scoped FIFO channels;
+- [`std.sync` public snapshot v1](api/std.sync-v1.md), covering the Milestone 9
+  `Shared(T)` reader-writer lock, guards, one-time initialization, and
+  barriers;
+- [`std.atomic` public snapshot v1](api/std.atomic-v1.md), covering the
+  Milestone 9 fixed-width atomics with explicit memory orders.
 
-Milestone 9's async snapshots are versioned in this document because their
-owning modules are not installed yet: [`std.task`](#stdtask-public-snapshot-v1),
-[`std.channel`](#stdchannel-public-snapshot-v1),
-[`std.sync`](#stdsync-public-snapshot-v1),
-[`std.atomic`](#stdatomic-public-snapshot-v1),
-[`std.test.SimIo`](#stdtestsimio-public-snapshot-v1), and the
-[`std.io` Milestone 9 addition](#stdio-milestone-9-addition), all in
-[Async public API snapshots](#async-public-api-snapshots-milestone-9). Each
-family moves unchanged into its module's snapshot file when its
-implementation lands.
+`std.io` v1 and `std.test` v1 each gained an additive Milestone 9 section:
+`Evented`, `ExecutorConfig`, and `Io.check_cancel` in
+[`std.io`](api/std.io-v1.md#milestone-9-addition-evented-and-check_cancel), and
+`SimIo` in [`std.test`](api/std.test-v1.md#milestone-9-addition-simio).
 
 M8 exit-audit status (complete):
 `core.option`, `core.result`, `core.num`, `core.panic`, `core.error`,
@@ -99,7 +104,7 @@ M8 exit-audit status (complete):
 `std.random`, `std.math`, `std.text`, `std.bytes`, and `std.collection` are
 implemented with production-driver evidence. `std.io` v1 is complete for
 blocking and host streams; its `AsyncIo`/`Evented` half is Milestone 9 and is
-frozen in [the Milestone 9 snapshots](#stdio-milestone-9-addition).
+frozen in the [`std.io` Milestone 9 section](api/std.io-v1.md#milestone-9-addition-evented-and-check_cancel).
 `std.fs` and `std.process` v1 are implemented on the blocking capability,
 including host files, directory iteration, temporary owners, child spawning,
 pipes, capture, and process termination. `std.test`'s runner-independent
@@ -349,6 +354,16 @@ Required modules:
 - `std.fs`: affine `File`, directory iteration, metadata, permissions,
   canonicalization, copy/rename/remove, and temporary files/directories.
 
+The Milestone 9 half of `std.io` is frozen as an additive section of
+[`std.io` v1](api/std.io-v1.md#milestone-9-addition-evented-and-check_cancel):
+the copyable `Evented` capability, the process-wide executor configuration
+(`ExecutorConfig` with `WorkerCount` for portable and blocking worker counts),
+and the `Io.check_cancel` checkpoint, which every implementor must provide and
+`Blocking` implements as an immediate return. The same section records that
+`BlockingIo` and `AsyncIo` must require `Io` and that no type implements both;
+S0 has no supertrait spelling, so that requirement is a Milestone 9 checker
+invariant and signatures write `I: type(Io, AsyncIo)`.
+
 Implemented std.io progress (slice 1): `sysroot/std/io.al` provides the
 `Reader`, `Writer`, and `Seek` traits with the `copy_to` default body,
 `SeekFrom`, `IoError` with `from_errno`, `Display`, and `Error`, the
@@ -509,7 +524,7 @@ Required modules:
   `start`, scoped `Task(T)`, parent-exit cancellation, cooperative cancellation
   tokens, `check_cancel`, internally joined timeout/race, yield, executor
   configuration, and bounded blocking work; the worker-count configuration type
-  itself lives on the capability in `std.io` ([snapshot](#stdtask-public-snapshot-v1));
+  itself lives on the capability in `std.io`;
 - `std.channel`: bounded/unbounded channels with FIFO and backpressure;
 - `std.sync`: group-scoped `Shared(T)`, mutex/RW-lock guards, one-time
   initialization, and barriers;
@@ -518,941 +533,39 @@ Required modules:
 
 These modules implement [Async and Structured Concurrency](async.md). They do
 not provide an implicit detached task, arbitrary single-handle `Task.cancel`,
-or an unsafe user-asserted transfer trait. Their versioned public surfaces are
-frozen in [Async public API snapshots](#async-public-api-snapshots-milestone-9);
-implementation may not add a name absent from those sections.
-
-## Async public API snapshots (Milestone 9)
-
-Design status: **Frozen v1 snapshots; not implemented**
-
-These sections freeze the Milestone 9 module families before implementation,
-following
-[the snapshot process](open-questions.md#standard-library-final-api-snapshots):
-`std.task`, `std.channel`, `std.sync`, `std.atomic`, `std.test.SimIo`, and the
-Milestone 9 `std.io` capability additions. They are normative for their
-modules: implementation may not add a public name, parameter, result, or error
-variant that is absent here. Pre-1.0 spelling may change only by updating the
-snapshot, its example, and every caller together. Each family is one coherent
-review section with exact signatures, ownership and transfer categories, error
-enums, and an executable-style example.
-
-The examples use the implemented S0 declaration and statement surface
-(`type` parameters, `Name(...)` application, `using`, `take`, `mut self`,
-`match`, `try`, and the builtin numeric and byte methods) plus the two
-Milestone 9 forms already frozen in [Async](async.md): the prefix `await`
-operator and a `Pending(T)` argument. Each section's example is the complete
-content that lands as `docs/api/examples/<module>-v1.al` with that module's
-implementation commit, following the
-[`std.collection` v1 precedent](api/std.collection-v1.md): the docs example
-runner resolves installed sysroot modules, so the file cannot precede the
-module. A family that is implemented moves this section unchanged into its
-module's owned snapshot file: a new `docs/api/<module>-v1.md`, or the existing
-`std.io` and `std.test` files for those two amendments.
-
-Cross-cutting v1 rules:
-
-- **Portable** values may move to another task and worker: copyable values
-  without thread-affine parts, and affine owners transferred through `take`.
-  **Local** values stay on their task: views, mutable capabilities, lock
-  guards, raw C borrows, and C-binding values marked thread-affine.
-- A `Pending(T)` call may carry only portable arguments and must have a
-  portable result. A task containing a thread-affine value runs on the local
-  executor lane.
-- Shared capabilities minted from a task group (senders, receivers, shared
-  slots, one-time slots, barriers, and atomics) are **group-scoped**: they are
-  copyable, may be copied and transferred into any child of that group, and
-  cannot escape the group's scope. The group releases their storage after
-  every child has finished. A `CancellationToken` follows the same rule with
-  its `Cancellation` source as the scope. The affine owners (`TaskGroup`,
-  `Task(T)`, `Channel(T)`, and `Cancellation`) are local instead. S0 has no
-  group-scoped or source-scoped category today; Milestone 9 adds it to the
-  checker and MIR as a recorded requirement, not as source syntax.
-- `I: type(Io, AsyncIo)` is the bound spelling used throughout, because
-  Alder has no supertraits; see
-  [the `std.io` addition](#stdio-milestone-9-addition).
-- Safe task code is data-race-free. Race freedom does not impose a
-  deterministic completion order: only the documented channel FIFO and
-  explicit synchronization results are ordered.
-- There is no detached task, no `Task.cancel`, no stored `Pending(T)` value,
-  and no user-asserted transfer category.
-
-Module graph (acyclic): `std.task` imports `std.io` and `std.time`;
-`std.channel`, `std.sync`, and `std.atomic` import `std.io` and `std.task`;
-`std.test` gains `SimIo` without new imports.
-
-### `std.task` public snapshot v1
-
-```alder
-module std.task
-
-import std.io { AsyncIo, Io, IoError }
-import std.time { Duration }
-
-/// Affine owner of one executor-backed task group.
-pub type TaskGroup(I: type(Io, AsyncIo)) {
-    // private: capability, child registry
-}
-
-/// Affine, group-scoped handle to one spawned child.
-pub type Task(T: type) {
-    // private: group, child
-}
-
-/// Declaration-only parameter type of the five standard task operations.
-pub type Pending(T: type) {
-    // private: never constructed
-}
-
-/// The timeout combinator's error: the child did not finish in time.
-pub enum Timeout {
-    Timeout
-}
-
-/// Cooperative application cancellation, as an ordinary result.
-pub enum CancellationError {
-    Cancelled
-}
-
-/// Affine owner of one cooperative cancellation state.
-pub type Cancellation {
-    // private: state
-}
-
-/// Copyable, portable read capability minted from one `Cancellation`.
-pub type CancellationToken {
-    // private: state
-}
-
-impl(I: type(Io, AsyncIo)) TaskGroup(I) {
-    /// Creates a group on the executor carried by `io`.
-    pub fn new(io: I) -> TaskGroup(I)
-    /// Starts the direct call's body as a child and returns its handle.
-    pub fn spawn(T: type, mut self, pending: Pending(T)) -> Task(T)
-    /// Starts a `Unit` child that the group joins without a user handle.
-    pub fn start(mut self, pending: Pending(Unit)) -> Unit
-}
-
-impl(I: type(Io, AsyncIo)) Cleanup for TaskGroup(I)
-impl(T: type) Cleanup for Task(T)
-impl Cleanup for Cancellation
-
-impl Cancellation {
-    pub fn new() -> Cancellation
-    pub fn token(self) -> CancellationToken
-    pub fn cancel(self) -> Unit
-    pub fn is_cancelled(self) -> Bool
-}
-
-impl CancellationToken {
-    pub fn is_cancelled(self) -> Bool
-    pub fn check(self) -> Result(Unit, CancellationError)
-}
-
-pub fn timeout(T: type, I: type(Io, AsyncIo), io: I, duration: Duration, pending: Pending(T)) -> Result(T, Timeout)
-pub fn race(T: type, I: type(Io, AsyncIo), io: I, first: Pending(T), second: Pending(T)) -> T
-pub fn blocking(T: type, I: type(Io), io: I, pending: Pending(T)) -> T
-pub fn yield(I: type(Io, AsyncIo), io: I) -> Unit
-```
-
-Contracts:
-
-- `TaskGroup.new(io)` creates the group on the executor carried by `io`. The
-  group is affine and its `Cleanup` hook joins children, so its scope exit is
-  potentially suspending and does not hold an executor worker while it waits.
-  Worker counts are configured on the capability through
-  `std.io.ExecutorConfig`, never by a group; the configuration type lives in
-  `std.io` because `std.task` depends on the capability, not the reverse.
-- `spawn` returns an affine `Task(T)`; `start` accepts only a `Pending(Unit)`
-  call and the group joins that child without a handle, so a `start` child
-  cannot report an error of its own. Both take their `Pending(T)` argument as
-  a direct call to a named function or method, never as a value: the parent
-  evaluates the call's arguments in source order, applies the task-transfer
-  rules (copyable arguments copied, affine arguments moved only through the
-  callee's `take` parameters, views, borrowed owners, and mutable
-  capabilities rejected), and starts the body as a child. `Pending(T)`
-  appears only in those parameter lists; it cannot be bound, stored,
-  returned, or passed anywhere else, and a user declaration that mentions it
-  outside a standard task operation is rejected.
-- `await` is the only await form: a prefix operator, never a method.
-  `await task` consumes a `Task(T)` and yields `T`. `await Task(Result(T, E))`
-  yields that same `Result(T, E)` without an added scheduler error, and
-  `try await task` composes right-to-left. A `Task(T)` is affine, local, and
-  group-scoped: it cannot be returned, stored in an escaping aggregate, or
-  awaited outside its group scope, and every normal path consumes it with
-  `await`. Its `Cleanup` hook only returns the child to the group and never
-  waits; on `return`, a failed `try`, or parent cancellation the group
-  cancels outstanding children, joins them, and releases an unclaimed result
-  exactly once. On a normal group exit every handle has been consumed and
-  every `start` child has been joined.
-- `timeout(io, duration, pending T)` starts one private child group, returns
-  `Ok(T)` when the child completes within `duration`, and otherwise cancels,
-  joins, and returns `Err(Timeout.Timeout)` (the error type and its single
-  variant share the name `Timeout`, so the unqualified pattern `Err(Timeout)`
-  also resolves). An operation whose own result is `Result(U, E)` therefore
-  surfaces as `Result(Result(U, E), Timeout)`; no error types are merged.
-- `race(io, first, second)` starts both pending calls in one private child
-  group, returns the first completed `T`, and cancels and joins the other.
-  Scheduling decides the winner and no losing value is exposed; a
-  completed-but-unclaimed sibling result is released by the group teardown
-  exactly once. Two pending arguments is the v1 arity because `Pending(T)`
-  values cannot be stored in a collection.
-- `blocking(io, pending T)` runs the call on the bounded blocking pool under
-  `AsyncIo` and directly under `BlockingIo`. Cancellation stops waiting for a
-  queued operation when possible but cannot interrupt an arbitrary C function
-  already running; the group retains the operation's state until C returns,
-  and wrapper cleanup follows the binding contract.
-- `yield(io)` gives the calling task's worker to other runnable tasks of the
-  same executor. It is a scheduling hint, not a synchronization point, and
-  promises no completion order. `BlockingIo` has no yield.
-- Structured cancellation is a control effect, not an exception and not an
-  ordinary `Err`. It is observed at potentially suspending calls (`await`,
-  capability and channel operations, sleeps) and at `io.check_cancel()`; it
-  unwinds the task's frames along the ordinary exit path, runs `using`
-  cleanup in reverse order, and completes the task without a user result.
-  Parent cancellation begins only on an already-exiting control path, or
-  inside a combinator that owns its private children. There is no
-  `Task.cancel` and no operation that leaves user code holding an awaitable
-  handle with no possible `T`.
-- `Cancellation` and `CancellationToken` are the application-level
-  cooperative channel used where no group is exiting. `Cancellation.new()`
-  takes no capability, so a token works under `BlockingIo` too; `token()`
-  mints copyable tokens, `cancel()` marks the state, and `check()` returns
-  `Err(CancellationError.Cancelled)` once it is marked. A token is scoped to
-  its source: copies may be used and passed into children of a group whose
-  scope the source encloses, so reverse cleanup joins the children before the
-  source is released, and no copy may escape the source's scope. The source
-  is local, so the task that owns it is the one that requests cancellation;
-  every token holder observes the result. A token never erases a task's
-  declared result type and never lets a child outlive its group.
-- `Cancellation` is local; its tokens are portable but source-scoped.
-  `TaskGroup`, `Task(T)`, and `Cancellation` are affine; `Pending(T)` is
-  never a value.
-
-Example: the entry point is generic over the capability and the project
-harness instantiates it with `std.test.SimIo.seeded(0)`, so the checksum is
-deterministic.
-
-```alder
-module hello.std_task_example
-
-import std.io { AsyncIo, Io, IoError }
-import std.task { Cancellation, CancellationError, TaskGroup, Timeout, race, timeout }
-import std.time { Duration }
-
-// The executable std.task v1 snapshot example. Every pending argument is a
-// direct call to a named function.
-
-fn count_byte(I: type(Io), io: I, text: String, needle: U8) -> Result(U64, IoError) {
-    var hits: U64 = 0
-    let data = text.to_bytes()
-    var at: U64 = 0
-    while at < data.len() {
-        if data.byte(at) == needle { hits = hits + 1 }
-        at = at + 1
-    }
-    return Ok(hits)
-}
-
-fn note(I: type(Io), io: I) -> Unit {
-    return
-}
-
-fn count_pair(I: type(Io, AsyncIo), io: I) -> Result(U64, IoError) {
-    using tasks = TaskGroup.new(io)
-    let left = tasks.spawn(count_byte(io, "abracadabra", 97))
-    let right = tasks.spawn(count_byte(io, "banana", 110))
-    tasks.start(note(io))
-    let a = try await left
-    let b = try await right
-    return Ok(a * 100 + b)
-}
-
-fn under_deadline(I: type(Io, AsyncIo), io: I) -> Result(U64, IoError) {
-    let timed = timeout(io, Duration.seconds(5), count_byte(io, "aaaa", 97))
-    match timed {
-        Ok(count) => { return Ok(count) }
-        Err(Timeout.Timeout) => { return Err(IoError.Unsupported) }
-    }
-}
-
-pub fn std_task_example(I: type(Io, AsyncIo), io: I) -> U64 {
-    var total: U64 = 0
-    match count_pair(io) {
-        Ok(value) => { total = total + value }
-        Err(_) => {}
-    }
-    match under_deadline(io) {
-        Ok(value) => { total = total + value }
-        Err(_) => {}
-    }
-    let winner = race(io, count_byte(io, "aa", 97), count_byte(io, "bbb", 98))
-    match winner {
-        Ok(count) => {
-            if count == 2 || count == 3 { total = total + 4 }
-        }
-        Err(_) => {}
-    }
-    using cancel = Cancellation.new()
-    let token = cancel.token()
-    if !token.is_cancelled() { total = total + 8 }
-    match token.check() {
-        Ok(_) => { total = total + 16 }
-        Err(CancellationError.Cancelled) => {}
-    }
-    return total
-}
-```
-
-### `std.channel` public snapshot v1
-
-```alder
-module std.channel
-
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup }
-
-/// The channel's operational result.
-pub enum ChannelError {
-    /// A bounded channel was requested with capacity zero.
-    InvalidCapacity
-    /// The requested direction is closed.
-    Closed
-}
-
-/// Affine, local owner of one group-scoped FIFO queue.
-pub type Channel(T: type) {
-    // private: group, queue
-}
-
-/// Copyable, portable, group-scoped send capability.
-pub type Sender(T: type) {
-    // private: queue
-}
-
-/// Copyable, portable, group-scoped receive capability.
-pub type Receiver(T: type) {
-    // private: queue
-}
-
-impl(T: type) Channel(T) {
-    /// A queue holding at most `capacity` values; `capacity` must be at least 1.
-    pub fn bounded(I: type(Io, AsyncIo), group: TaskGroup(I), capacity: U64) -> Result(Channel(T), ChannelError)
-    /// A queue with no limit beyond available memory.
-    pub fn unbounded(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Channel(T)
-    pub fn sender(self) -> Sender(T)
-    pub fn receiver(self) -> Receiver(T)
-    /// Closes both directions; queued values stay receivable.
-    pub fn close(take self) -> Unit
-}
-
-impl(T: type) Cleanup for Channel(T)
-
-impl(T: type) Sender(T) {
-    /// Transfers `value` into the queue, waiting for room when full.
-    pub fn send(self, take value: T) -> Result(Unit, ChannelError)
-}
-
-impl(T: type) Receiver(T) {
-    /// Takes the front value, waiting for one when empty.
-    pub fn receive(self) -> Result(T, ChannelError)
-}
-```
-
-Contracts:
-
-- `bounded` rejects capacity zero with `InvalidCapacity`; `unbounded` has no
-  capacity limit beyond available memory and is infallible apart from
-  allocation failure, which terminates by the ordinary OOM rule.
-- FIFO: values leave in the order their sends were accepted. Copies of one
-  capability are interchangeable, and the accepted order is the queue's
-  linearization; a program that needs a per-producer order uses one sender
-  per producer.
-- Backpressure: a send on a full bounded queue is a potentially suspending
-  call and resumes when a receive frees a slot or the channel closes; a
-  receive on an empty queue resumes when a value arrives or the channel
-  closes. Neither operation spins and neither has a timeout of its own;
-  timeouts come from `std.task.timeout` around the pending call.
-- Close is explicit and owner-only. `Channel.close` and the channel's
-  cleanup are the only close paths; capability copies never close the queue.
-  After close, sends fail with `Closed`, receives drain the values already
-  queued, and the next receive fails with `Closed`. Queued values are never
-  discarded by close.
-- Cancellation: a blocked send or receive is a potentially suspending call;
-  structured group cancellation unwinds it without a result and releases the
-  capability copy. A closed channel is an ordinary `Err`, never a
-  cancellation.
-- `Channel` is affine and local: only the owning task closes it and it does
-  not enter a child. `Sender(T)` and `Receiver(T)` are copyable, portable,
-  and group-scoped. The capability owns no `T`, so its category does not
-  depend on `T`; `send` transfers with `take` and `receive` returns the owned
-  value. A queued affine value that is never received is released by the
-  group teardown exactly once.
-- `try_send`, `try_receive`, `len`, and `capacity` are not in v1. There is no
-  polling form: a consumer either waits on `receive` or is canceled by its
-  group's exit.
-
-Example:
-
-```alder
-module hello.std_channel_example
-
-import std.channel { Channel, ChannelError, Receiver, Sender }
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup }
-
-// The executable std.channel v1 snapshot example: one bounded queue, one
-// producer, one consumer, backpressure at capacity two, and explicit close.
-
-// The annotated result supplies `T = U64` and the concrete capability type,
-// because an associated constructor on a generic type has no receiver value
-// to infer from.
-fn open_channel(I: type(Io, AsyncIo), tasks: TaskGroup(I)) -> Result(Channel(U64), ChannelError) {
-    return Channel.bounded(tasks, 2)
-}
-
-fn produce(I: type(Io), io: I, out: Sender(U64), count: U64) -> Result(Unit, ChannelError) {
-    var value: U64 = 0
-    while value < count {
-        try out.send(value + 1)
-        value = value + 1
-    }
-    return Ok(())
-}
-
-fn consume(I: type(Io), io: I, source: Receiver(U64), count: U64) -> Result(U64, ChannelError) {
-    var total: U64 = 0
-    var taken: U64 = 0
-    while taken < count {
-        let value = try source.receive()
-        total = total + value
-        taken = taken + 1
-    }
-    return Ok(total)
-}
-
-pub fn std_channel_example(I: type(Io, AsyncIo), io: I) -> Result(U64, ChannelError) {
-    using tasks = TaskGroup.new(io)
-    using channel = try open_channel(io, tasks)
-    let producer = tasks.spawn(produce(io, channel.sender(), 4))
-    let worker = tasks.spawn(consume(io, channel.receiver(), 4))
-    try await producer
-    let total = try await worker
-    channel.close()
-    return Ok(total)
-}
-```
-
-### `std.sync` public snapshot v1
-
-```alder
-module std.sync
-
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup }
-
-/// A synchronization configuration error.
-pub enum SyncError {
-    /// A barrier was requested with zero parties.
-    InvalidParties
-}
-
-/// A one-time-initialization error.
-pub enum InitError {
-    /// Another task initialized the value first.
-    AlreadyInitialized
-}
-
-/// Copyable, portable, group-scoped reader-writer shared slot.
-pub type Shared(T: type) {
-    // private: slot
-}
-
-/// Affine, local exclusive guard over one `Shared(T)` slot.
-pub type LockGuard(T: type) {
-    // private: slot, held
-}
-
-/// Affine, local shared guard over one `Shared(T)` slot.
-pub type ReadGuard(T: type) {
-    // private: slot, held
-}
-
-/// Copyable, portable, group-scoped one-time slot.
-pub type Once(T: type) {
-    // private: slot
-}
-
-/// Copyable, portable, group-scoped reusable barrier.
-pub type Barrier {
-    // private: state
-}
-
-impl(T: type) Shared(T) {
-    /// Stores `value` in group-owned storage.
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), take value: T) -> Shared(T)
-    /// Exclusive access; excludes every other guard on the same slot.
-    pub fn lock(self) -> LockGuard(T)
-    /// Shared access; overlaps other read guards and excludes `lock`.
-    pub fn read(self) -> ReadGuard(T)
-}
-
-impl(T: type) LockGuard(T) {
-    /// A one-element mutable view of the guarded slot, scoped to this guard.
-    pub fn borrow(mut self) -> MutSlice(T)
-}
-
-impl(T: type) ReadGuard(T) {
-    /// A one-element immutable view of the guarded slot, scoped to this guard.
-    pub fn borrow(self) -> [T]
-}
-
-impl(T: type) Cleanup for LockGuard(T)
-impl(T: type) Cleanup for ReadGuard(T)
-
-impl(T: type) Once(T) {
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I)) -> Once(T)
-    pub fn is_initialized(self) -> Bool
-    /// Stores `value` when uninitialized; otherwise releases it and reports
-    /// `AlreadyInitialized`.
-    pub fn initialize(self, take value: T) -> Result(Unit, InitError)
-    /// Copies the initialized value; available only for copyable `T`.
-    pub fn get(self) -> Option(T)
-}
-
-impl Barrier {
-    /// A reusable barrier that releases every waiter each time `parties`
-    /// waits have arrived; `parties` must be at least 1.
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), parties: U64) -> Result(Barrier, SyncError)
-    /// Waits for the current generation's last party.
-    pub fn wait(self) -> Unit
-}
-```
-
-Contracts:
-
-- `Shared(T)` is the reader-writer lock; a plain mutex is the same type with
-  only `lock` calls. `lock` is exclusive, `read` is shared, several read
-  guards may overlap, and both are potentially suspending when contended.
-  Completion order is never made deterministic by lock use.
-- A guard is affine and local: it cannot enter a task, be returned, or be
-  stored in an escaping aggregate. A guard that is live at a potentially
-  suspending call is rejected and the diagnostic names both the guard and
-  the call; under `BlockingIo` no call suspends, so the restriction does not
-  apply. Guards release only through cleanup, so the ordinary form registers
-  one with `using`. `borrow` yields a one-element view of the guarded slot
-  and that view is scoped to the guard binding: it cannot outlive the guard.
-- `Shared` is copyable, portable, and group-scoped; copies share one slot and
-  the group releases it after every child has finished, releasing an affine
-  `T` exactly once.
-- `Once(T)` initializes at most once. The winning call stores the value; a
-  losing call reports `AlreadyInitialized` and releases the discarded value
-  exactly once. `get` copies the value, so it is available only when `T` is
-  copyable; an affine value that must be initialized once is held as
-  `Shared(Option(T))` and taken under `lock`.
-- `Barrier` is reusable and generation-based: every wait blocks until
-  `parties` waits have arrived for the current generation, then all are
-  released. `parties` zero is `InvalidParties`. Fairness and arrival order
-  are not specified. A canceled waiter unwinds with its group and abandons
-  its generation.
-
-Example:
-
-```alder
-module hello.std_sync_example
-
-import std.io { AsyncIo, Io }
-import std.sync { Barrier, Once, Shared, SyncError }
-import std.task { TaskGroup }
-
-// The executable std.sync v1 snapshot example: two workers add to one shared
-// counter under the exclusive guard, one value is initialized once, and two
-// more children meet at a barrier.
-
-fn add_ten(I: type(Io), io: I, counter: Shared(U64)) -> Result(U64, SyncError) {
-    using guard = counter.lock()
-    let cell = guard.borrow()
-    cell[0] = cell[0] + 10
-    return Ok(cell[0])
-}
-
-fn meet(I: type(Io), io: I, gate: Barrier) -> Unit {
-    gate.wait()
-    return
-}
-
-pub fn std_sync_example(I: type(Io, AsyncIo), io: I) -> Result(U64, SyncError) {
-    using tasks = TaskGroup.new(io)
-    let counter: Shared(U64) = Shared.new(tasks, 0)
-    let slot: Once(U64) = Once.new(tasks)
-    let gate = try Barrier.new(tasks, 2)
-    let first = tasks.spawn(add_ten(io, counter))
-    let second = tasks.spawn(add_ten(io, counter))
-    tasks.start(meet(io, gate))
-    tasks.start(meet(io, gate))
-    let a = try await first
-    let b = try await second
-    match slot.initialize(7) {
-        Ok(_) => {}
-        Err(_) => {}
-    }
-    var seeded: U64 = 0
-    match slot.get() {
-        Some(value) => { seeded = value }
-        None => {}
-    }
-    return Ok(a + b + seeded)
-}
-```
-
-### `std.atomic` public snapshot v1
-
-```alder
-module std.atomic
-
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup }
-
-/// The memory order of one atomic operation.
-pub enum Ordering {
-    Relaxed
-    Acquire
-    Release
-    AcqRel
-    SeqCst
-}
-
-// AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicI8,
-// AtomicI16, AtomicI32, and AtomicI64 are copyable, portable,
-// group-scoped slots. Each carries the method set written here for
-// AtomicU64 with `U64` replaced by its value type, plus
-// `fetch_add_wrapping` and `fetch_sub_wrapping` for every integer type
-// (never for AtomicBool).
-pub type AtomicU64 {
-    // private: slot
-}
-
-impl AtomicU64 {
-    pub fn new(I: type(Io, AsyncIo), group: TaskGroup(I), value: U64) -> AtomicU64
-    pub fn load(self, order: Ordering) -> U64
-    pub fn store(self, value: U64, order: Ordering) -> Unit
-    pub fn swap(self, value: U64, order: Ordering) -> U64
-    pub fn compare_exchange(self, expected: U64, replacement: U64, success: Ordering, failure: Ordering) -> Result(U64, U64)
-    pub fn fetch_add_wrapping(self, value: U64, order: Ordering) -> U64
-    pub fn fetch_sub_wrapping(self, value: U64, order: Ordering) -> U64
-}
-```
-
-Contracts:
-
-- Every atomic type is created from a task group, is copyable and portable,
-  and is group-scoped: copies refer to one group-owned slot, the slot is
-  naturally aligned and has the target's width, and the group releases it
-  after every child has finished. There is no standalone or global atomic
-  and no pointer atomic in v1.
-- Each operation's order is explicit and checked:
-  `load` accepts `Relaxed`, `Acquire`, or `SeqCst`; `store` accepts
-  `Relaxed`, `Release`, or `SeqCst`; `swap`, `fetch_add_wrapping`,
-  `fetch_sub_wrapping`, and `compare_exchange`'s `success` accept any of the
-  five; `compare_exchange`'s `failure` accepts `Relaxed`, `Acquire`, or
-  `SeqCst` and may not be stronger than `success`. An invalid combination is
-  a program invariant failure and terminates through `core.panic.panic`.
-- `compare_exchange` compares against `expected` and returns `Ok(previous)`
-  on success or `Err(actual)` on failure; it never retries on its own.
-  `fetch_add_wrapping` and `fetch_sub_wrapping` return the previous value and
-  wrap on the two's-complement pattern, consistent with the named wrapping
-  arithmetic of `core.num`; a checked variant is not in v1.
-- Atomic operations never suspend and never take a capability. They
-  establish ordering only for the slot; they do not make any other shared
-  value safe to access without `std.sync` or a channel.
-- Fences, atomic floats, 128-bit atomics, and bitwise fetch operations are
-  not in v1.
-
-Example:
-
-```alder
-module hello.std_atomic_example
-
-import std.atomic { AtomicU64, Ordering }
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup }
-
-// The executable std.atomic v1 snapshot example: two children add through
-// one group-scoped atomic, and the parent observes the final value after
-// joining both. Each fetch returns the previous value, and every previous
-// value 0..9 is returned exactly once across the two children, so their sum
-// is deterministic regardless of interleaving.
-
-fn add_loop(I: type(Io), io: I, cell: AtomicU64, rounds: U64) -> U64 {
-    var at: U64 = 0
-    var sum: U64 = 0
-    while at < rounds {
-        sum = sum + cell.fetch_add_wrapping(1, Ordering.Relaxed)
-        at = at + 1
-    }
-    return sum
-}
-
-pub fn std_atomic_example(I: type(Io, AsyncIo), io: I) -> U64 {
-    using tasks = TaskGroup.new(io)
-    let cell = AtomicU64.new(tasks, 0)
-    let first = tasks.spawn(add_loop(io, cell, 4))
-    let second = tasks.spawn(add_loop(io, cell, 6))
-    let a = await first
-    let b = await second
-    var total: U64 = a + b
-    cell.store(100, Ordering.Release)
-    match cell.compare_exchange(100, 101, Ordering.AcqRel, Ordering.Acquire) {
-        Ok(previous) => { total = total + previous }
-        Err(actual) => { total = total + actual }
-    }
-    return total + cell.load(Ordering.Acquire)
-}
-```
-
-### `std.test.SimIo` public snapshot v1
-
-This section amends [`std.test` v1](api/std.test-v1.md) with the deterministic
-async capability. Its example lands as
-`docs/api/examples/std.test.simio-v1.al`.
-
-```alder
-module std.test
-
-import std.io { AsyncIo, Io }
-
-// The existing Milestone 8 declarations are unchanged.
-
-/// Deterministic async capability for tests: one worker, a virtual clock,
-/// and a seeded generator. Copyable like every `Io` capability.
-pub type SimIo {
-    // private: scheduler, clock, generator
-}
-
-impl SimIo {
-    /// The virtual clock at zero and the fixed seed 0.
-    pub fn new() -> SimIo
-    /// The virtual clock at zero and the given generator seed.
-    pub fn seeded(seed: U64) -> SimIo
-}
-
-impl Io for SimIo
-impl AsyncIo for SimIo
-```
-
-Contracts:
-
-- `SimIo` runs every task of a test on one worker. Runnable tasks run one at
-  a time in deterministic readiness order, and `new()` is exactly
-  `seeded(0)`, so a fixed program produces the same results, the same
-  scheduling, and the same random bytes on every run, target, and process.
-- Both clocks are virtual. The monotonic and wall clocks start at zero and at
-  a fixed documented epoch (the Unix epoch), and they advance only when every
-  live task is blocked on time: the clock jumps to the earliest pending
-  deadline. A deadline at the current instant is a time block, so a
-  zero-duration sleep advances nothing.
-- `random_bytes` draws from one SplitMix64 stream seeded by `seeded`, so it is
-  deterministic byte for byte. It never observes host entropy.
-- Every `Io` operation outside the clock, sleep, randomness, scheduler, and
-  standard-stream surface returns `Err(IoError.Unsupported)`: host files,
-  directories, signals, `poll`, and child processes are not simulated in v1.
-  Standard output and error write through to the host streams; capture is
-  runner-level work. `read_stdin` returns `Unsupported`, so a test reads
-  deterministic input from values it constructs. A test that needs a host
-  resource uses `Blocking` or a real `Evented`.
-- Deadlock: when no task is runnable, no timer is pending, and live tasks
-  remain blocked, `SimIo` terminates the test through `core.panic.panic` with
-  the fixed first line `panic: SimIo deadlock` followed by one
-  `  blocked task <index>` line per blocked task, in spawn order with
-  one-based indices. The listing is the failure diagnostic; a program must
-  not depend on it as data.
-- `SimIo` always uses one worker and ignores `std.io.ExecutorConfig`.
-  Production code must not depend on its readiness order; only its own
-  determinism is guaranteed.
-
-Example:
-
-```alder
-module hello.std_simio_example
-
-import std.io { AsyncIo, Io }
-import std.task { TaskGroup, Timeout, timeout }
-import std.test { SimIo }
-import std.time { Duration, Instant, sleep }
-
-// The executable std.test.SimIo v1 snapshot example: two sleeps advance the
-// virtual clock in deadline order and a timeout observes the same clock.
-
-fn nap(I: type(Io), io: I, millis: U64) -> U64 {
-    sleep(io, Duration.millis(millis))
-    return millis
-}
-
-pub fn std_simio_example() -> U64 {
-    let sim = SimIo.seeded(0)
-    let started = Instant.now(sim)
-    using tasks = TaskGroup.new(sim)
-    let short = tasks.spawn(nap(sim, 30))
-    let long = tasks.spawn(nap(sim, 120))
-    let first = await short
-    let second = await long
-    let elapsed = Instant.now(sim).duration_since(started)
-    var total: U64 = first + second
-    if elapsed == Duration.millis(120) { total = total + 1 }
-    let timed = timeout(sim, Duration.millis(10), nap(sim, 1000))
-    match timed {
-        Ok(value) => { total = total + value }
-        Err(Timeout.Timeout) => { total = total + 2 }
-    }
-    return total
-}
-```
-
-### `std.io` Milestone 9 addition
-
-This section is the additive Milestone 9 surface of
-[`std.io` v1](api/std.io-v1.md). That file remains the owning snapshot; the
-addition is folded into it unchanged when the module implements it.
-
-```alder
-module std.io
-
-/// Worker counts requested from the hosted executor. `Automatic` lets the
-/// runtime choose from host parallelism; `Fixed(count)` requires at least
-/// one worker.
-pub enum WorkerCount {
-    Automatic
-    Fixed(count: U64)
-}
-
-/// Configuration of the process-wide hosted executor.
-pub type ExecutorConfig {
-    pub portable: WorkerCount
-    pub blocking: WorkerCount
-}
-
-impl ExecutorConfig {
-    /// Both counts `Automatic`.
-    pub fn automatic() -> ExecutorConfig
-}
-
-/// The hosted evented executor capability. Copyable, like every `Io`
-/// capability.
-pub type Evented {
-    // private: executor
-}
-
-impl Evented {
-    /// The process-wide executor with automatic worker counts.
-    pub fn new() -> Evented
-    /// The process-wide executor with an explicit configuration.
-    pub fn configured(config: ExecutorConfig) -> Evented
-}
-
-impl Io for Evented
-impl AsyncIo for Evented
-
-/// Required `Io` v1 surface addition for Milestone 9.
-impl Io for Blocking {
-    // ... the existing Milestone 8 operations unchanged ...
-    fn check_cancel(self) -> Unit {
-        return
-    }
-}
-```
-
-The `Io` trait gains one requirement, which every implementor must provide:
-
-```alder
-pub trait Io {
-    // ... the existing Milestone 8 operations unchanged ...
-
-    /// Structured-cancellation checkpoint for long CPU-bound work. Returns
-    /// normally when no cancellation is pending for the calling task. When
-    /// the calling task's group has begun cancellation, the call ends the
-    /// task's ordinary exit path instead of returning. Always returns
-    /// normally for a caller that is not a group child, so `Blocking`
-    /// implements it as an immediate return.
-    fn check_cancel(self) -> Unit
-}
-```
-
-Contracts:
-
-- **`BlockingIo` and `AsyncIo` must require `Io`, and no type implements
-  both.** Both are empty marker traits in `sysroot/std/io.al` today, and the
-  S0 trait system has no supertrait form: a trait declaration records
-  parameter constraints and method requirements only
-  (`compiler/src/checker.al`, `check_trait_declaration`), and
-  [Traits and Closures](traits-and-closures.md) states that trait
-  inheritance is not supported. This snapshot therefore records the
-  requirement without inventing syntax: `impl BlockingIo for T` and
-  `impl AsyncIo for T` must be accompanied by `impl Io for T` in the same
-  compilation unit, and Milestone 9 adds that checker invariant together
-  with the exclusion of a type that implements both markers. Milestone 9
-  signatures spell both bounds (`I: type(Io, AsyncIo)`) until a supertrait
-  spelling exists.
-- `check_cancel` is a required `Io` v1 surface addition, not a new trait.
-  `Blocking` implements it as an immediate return; `Evented` and `SimIo`
-  observe the calling task's structured cancellation. Like every capability
-  operation it is a potentially suspending call by signature.
-- `Evented` is the hosted executor. The process-wide executor is created by
-  the first `Evented.new` or `Evented.configured` call; a later call with the
-  same configuration returns another token to that executor, and a different
-  configuration is program misuse that terminates through
-  `core.panic.panic` with a fixed diagnostic. Tokens are copyable and
-  interchangeable. The executor supplies the multithreaded pool for portable
-  tasks, one local lane for thread-affine tasks and platform event sources,
-  timers, cancellation and wakeups, async files where the host supports them,
-  sockets, DNS, subprocess waiting, and the bounded blocking pool. The local
-  lane is not configurable in v1. The executor stops at process exit after
-  every program task has finished; v1 has no explicit shutdown API.
-- `ExecutorConfig` configures worker counts only. `Fixed(0)` is invalid and
-  terminates through `core.panic.panic`; `Automatic` chooses from host
-  parallelism. Worker counts change throughput, never observable results
-  beyond the documented `std.task.race` and channel FIFO rules.
-
-### v1 spelling choices
-
-Where [Async](async.md) leaves a narrow spelling open, these snapshots choose
-the following and every module uses it consistently. Changing one is a v1
-amendment, not an implementation detail.
-
-- `await` is a prefix operator and has no method form; `try await task`
-  composes right-to-left. `Task(T)` exposes no `await` method.
-- `timeout`'s error type is `std.task.Timeout` and its single variant is also
-  `Timeout`, so `Err(Timeout)` and `Err(Timeout.Timeout)` both resolve. The
-  timeout call is a free function taking the capability, as in `async.md`.
-- `race` has arity two and is a free function taking the capability. Its
-  result is the winner's `T`; errors are never merged.
-- `yield` and `blocking` are free functions taking the capability; `spawn`,
-  `start`, and the group constructors are group operations.
-- `std.task` owns the cooperative token pair: affine `Cancellation` source,
-  copyable source-scoped `CancellationToken`, error `CancellationError` with
-  the single variant `Cancelled`.
-- Channel and shared-state capabilities are copyable and group-scoped;
-  `Channel` is the only affine channel type and the only close path.
-  `Sender`/`Receiver` copies never close the queue.
-- A copyable group-scoped capability takes `self` for operations that change
-  shared state, because the handle is unchanged; `mut self` stays reserved
-  for affine owners whose own caller-visible state changes.
-- `Shared(T)` is both the mutex and the reader-writer lock: `lock` is
-  exclusive and `read` is shared. Guards expose the slot through `borrow`,
-  which returns a one-element `MutSlice(T)` or `[T]` view.
-- `Once(T)` reads by copy only, so an affine value initialized once is held
-  as `Shared(Option(T))`.
-- `std.atomic.compare_exchange` returns `Result(previous, actual)` rather
-  than a Boolean. Integer fetch operations are named
-  `fetch_add_wrapping`/`fetch_sub_wrapping`.
-- `ExecutorConfig` and `WorkerCount` live in `std.io` beside `Evented`,
-  because the task group depends on the capability and the module graph is
-  acyclic. The evented executor is one process-wide instance created on first
-  use.
-- `SimIo` has `new()` (seed 0) and `seeded(seed)`, always one worker, and its
-  deadlock diagnostic starts with the fixed line `panic: SimIo deadlock`.
-- `Io.check_cancel` returns `Unit` and acts as a cancellation control effect
-  rather than returning an `Err`, so a cancellation cannot be caught and
-  ignored by user code.
+or an unsafe user-asserted transfer trait. Each family is frozen by a versioned
+snapshot; the cross-cutting portable/local rules and the v1 spelling choices
+are canonical in the [`std.task` snapshot](api/std.task-v1.md), and the other
+snapshots link there instead of restating them.
+
+`std.task` v1 freezes `TaskGroup.new(io)`, result-bearing `spawn`,
+unit-returning `start`, the affine group-scoped `Task(T)`, `Pending(T)`
+arguments to `spawn`/`start`/`timeout`/`race`/`blocking`, `yield`, and the
+cooperative `Cancellation`/`CancellationToken` pair
+([snapshot](api/std.task-v1.md)). `await` is the only await form; `timeout`
+keeps nested results explicit; no `Task.cancel` and no detached task exists.
+Worker counts are configured on the `std.io` capability through
+`ExecutorConfig`, never by a group.
+
+`std.channel` v1 freezes the affine local `Channel(T)` owner and the copyable
+group-scoped `Sender(T)`/`Receiver(T)` capabilities: bounded or unbounded,
+FIFO, backpressured, with an owner-only explicit close and ordinary `Closed`
+results ([snapshot](api/std.channel-v1.md)).
+
+`std.sync` v1 freezes the copyable group-scoped `Shared(T)` reader-writer
+lock, its affine local `LockGuard(T)` and `ReadGuard(T)`, the copy-read
+`Once(T)`, and the reusable `Barrier` ([snapshot](api/std.sync-v1.md)). It
+also records the guard-borrow view rule as a Milestone 9 checker and
+view-rule extension scoped to the guard binding.
+
+`std.atomic` v1 freezes `Ordering` and the nine fixed-width Boolean and
+integer slots with `load`/`store`/`swap`/`compare_exchange` and
+`fetch_add_wrapping`/`fetch_sub_wrapping` ([snapshot](api/std.atomic-v1.md)).
+Atomics are group-scoped only; there is no standalone or global atomic.
+
+Each snapshot's example lands as `docs/api/examples/<module>-v1.al` with that
+module's implementation commit. The `std.io` additions these modules rely on
+are recorded in [`std.io` v1](api/std.io-v1.md#milestone-9-addition-evented-and-check_cancel).
 
 ## Networking, HTTP, and TLS
 
@@ -1531,7 +644,7 @@ data directory and reported with the command that replays it.
 `SimIo` is a deterministic `AsyncIo` for tests: one worker, a virtual clock
 that advances only when every task is blocked on time, and a test failure that
 lists each blocked task when the program deadlocks. Its v1 surface is frozen in
-[the Milestone 9 snapshots](#stdtestsimio-public-snapshot-v1).
+[`std.test` v1](api/std.test-v1.md#milestone-9-addition-simio).
 
 Implemented std.test progress: `sysroot/std/test.al` installs the
 runner-independent slice. `fail`, `assert`, `assert_eq`, and `assert_ne` are
@@ -1545,7 +658,7 @@ computed SplitMix64 seeds, every documented failure format at status 101, and
 the non-`Display` rejection; the snapshot example runs with a fixed checksum.
 The remaining runner surface in this section is the M8 tooling target, not
 part of the installed module yet. `SimIo`'s v1 surface is frozen in
-[the Milestone 9 snapshots](#stdtestsimio-public-snapshot-v1) and remains
+[`std.test` v1](api/std.test-v1.md#milestone-9-addition-simio) and remains
 unimplemented.
 
 ## Error taxonomy
