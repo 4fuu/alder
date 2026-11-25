@@ -604,9 +604,9 @@ typedef struct AlderBlockedTask {
 } AlderBlockedTask;
 
 /*
- * Executor hooks. now seeds and refreshes the executor clock; the single
- * worker has no other time source, so virtual time advances to the earliest
- * timer deadline when the queue is idle. start_op and cancel_op are the
+ * Executor hooks. now seeds and refreshes the executor clock; the executor
+ * has no other time source, so virtual time advances to the earliest timer
+ * deadline when every worker is idle. start_op and cancel_op are the
  * capability-operation hooks stored for the evented I/O runtime; the task
  * foundation has no capability-operation surface yet and does not call them.
  * on_idle reports a quiescent program: no task is runnable and no timer is
@@ -632,11 +632,33 @@ typedef struct AlderExecutorHooks {
 } AlderExecutorHooks;
 
 /*
- * Run the single-worker executor until every started task has completed or
- * the program is quiescent. Returns true when no incomplete task remains and
- * false when blocked tasks remain; in the false case on_idle has already
- * received the blocked set. hooks may be NULL. Re-entering the executor from
- * a step is a contract violation.
+ * Threaded executor configuration. A process that never calls this entry
+ * keeps gate 9.2's single-worker inline executor exactly. Any non-NULL
+ * configuration selects the threaded executor for the next run: workers
+ * pool workers sharing one run queue (1 through 64), a persistent local-lane
+ * thread when local_lane is true, and blocking_workers fixed blocking-pool
+ * threads (0 through 32; zero disables blocking submission). Passing NULL
+ * restores the default inline configuration.
+ *
+ * The entry may only change the configuration while no executor run is
+ * active, no task is live, no blocking entry is in flight, and the timer
+ * heap is empty. It returns false and changes nothing otherwise. Thread
+ * creation failure terminates the process.
+ */
+typedef struct AlderExecutorConfig {
+    uint32_t workers;
+    uint32_t blocking_workers;
+    bool local_lane;
+} AlderExecutorConfig;
+
+bool alder_executor_configure(const AlderExecutorConfig *config);
+
+/*
+ * Run the executor until every started task has completed or the program is
+ * quiescent. Returns true when no incomplete task remains and false when
+ * blocked tasks remain; in the false case on_idle has already received the
+ * blocked set. hooks may be NULL. Re-entering the executor from a step is a
+ * contract violation.
  */
 bool alder_executor_run(const AlderExecutorHooks *hooks);
 
@@ -649,6 +671,22 @@ bool alder_executor_run(const AlderExecutorHooks *hooks);
  */
 AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
                              AlderDomain *domain);
+
+/*
+ * Task lanes. A task's lane is fixed at creation. Pool tasks may resume on
+ * any pool worker; local tasks always resume on the single local-lane
+ * thread, including across executor runs. Selecting the local lane while
+ * the active configuration has no local lane is a contract violation.
+ */
+typedef enum AlderTaskLane {
+    ALDER_LANE_POOL = 0,
+    ALDER_LANE_LOCAL = 1
+} AlderTaskLane;
+
+/* alder_task_create with an explicit lane. */
+AlderTask *alder_task_create_on_lane(uint64_t group, AlderTaskLane lane,
+                                     AlderStepFn step, void *frame,
+                                     AlderDomain *domain);
 
 /* Commit a created task to the executor's run queue. */
 void alder_task_start(AlderTask *task);
@@ -704,15 +742,32 @@ bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline);
  */
 bool alder_task_await(uint64_t child);
 
-/* Set the target's cancel flag and signal its wakeup. Never runs user code on
+/*
+ * Submit fn(context) to the configured blocking pool and register the
+ * current task's wakeup token; the step must return PARK after a true
+ * result. The entry retains the task record and its wakeup token until fn
+ * returns, so a cancellation that completes and releases the task first
+ * stays safe; cancellation never interrupts fn. context is borrowed and
+ * must remain valid until fn returns. Returns false without queueing when
+ * no blocking workers are configured. A null fn or a call outside a step is
+ * a contract violation.
+ */
+typedef void (*AlderBlockingFn)(void *context);
+
+bool alder_task_blocking(AlderBlockingFn fn, void *context);
+
+/*
+ * Set the target's cancel flag and signal its wakeup. Never runs user code on
  * the caller's thread. */
 void alder_task_cancel(uint64_t task);
 
 /*
  * Free a completed task record after its activation stack is empty, its
  * timers are drained, and its await registrations are cleared. Releasing a
- * live task, or a released or foreign id, is a contract violation. The
- * caller still owns the root frame and domain.
+ * live task, or a released or foreign id, is a contract violation. An
+ * in-flight blocking entry retains the record; the release then frees the
+ * record when C returns instead of doing so here. The caller still owns the
+ * root frame and domain.
  */
 void alder_task_release(uint64_t task);
 

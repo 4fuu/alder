@@ -22,7 +22,7 @@ var strictFlags = []string{
 
 // testPrograms are the runtime behavior test programs, one per runtime area.
 // Each program is added to this list as its runtime section lands.
-var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash", "task"}
+var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash", "task", "task_pool", "task_lanes", "task_blocking"}
 
 func findCompiler(t *testing.T) string {
 	t.Helper()
@@ -197,6 +197,53 @@ func TestRuntimeSanitizers(t *testing.T) {
 			compileAndRun(t, cc, object, name,
 				"-fsanitize=address,undefined",
 				"-g", "-fno-omit-frame-pointer")
+		})
+	}
+}
+
+// threadSanitizerSupported probes whether the host toolchain can build and run
+// ThreadSanitizer binaries; the probe can fail at run time on hosts whose
+// kernel layout TSan does not support.
+func threadSanitizerSupported(t *testing.T, cc string) bool {
+	t.Helper()
+	dir := t.TempDir()
+	probe := filepath.Join(dir, "tsan_probe.c")
+	source := "#include <pthread.h>\n" +
+		"static void *run(void *p) { return p; }\n" +
+		"int main(void) { pthread_t t; if (pthread_create(&t, 0, run, 0) != 0) return 1; " +
+		"if (pthread_join(t, 0) != 0) return 2; return 0; }\n"
+	if err := os.WriteFile(probe, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, "tsan_probe.exe")
+	args := []string{"-fsanitize=thread", "-g", "-O1", "-fno-omit-frame-pointer",
+		probe, "-pthread", "-o", exe}
+	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
+		t.Logf("ThreadSanitizer build unsupported on this host: %v\n%s", err, out)
+		return false
+	}
+	if out, err := exec.Command(exe).CombinedOutput(); err != nil {
+		t.Logf("ThreadSanitizer run unsupported on this host: %v\n%s", err, out)
+		return false
+	}
+	return true
+}
+
+// TestRuntimeTaskThreadsTSan runs the task fixtures under ThreadSanitizer so
+// the wakeup latch, lane queues, timer handoff, and blocking retain are
+// checked for data races as well as memory errors.
+func TestRuntimeTaskThreadsTSan(t *testing.T) {
+	cc := findCompiler(t)
+	if !threadSanitizerSupported(t, cc) {
+		t.Skip("ThreadSanitizer not supported by this host toolchain")
+	}
+	extra := []string{"-fsanitize=thread", "-g", "-O1", "-fno-omit-frame-pointer"}
+	object := buildRuntimeObject(t, cc, extra...)
+	for _, name := range []string{"task", "task_pool", "task_lanes", "task_blocking"} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			compileAndRun(t, cc, object, name, extra...)
 		})
 	}
 }

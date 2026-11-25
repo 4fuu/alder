@@ -345,17 +345,35 @@ The runtime provides these entries to generated code and to the Alder
 standard-library bindings. Unless stated otherwise they observe the current
 task through a thread-local set by the executor around each step call; they
 are contract violations outside a step. `alder_task_create`,
-`alder_task_start`, `alder_task_handle`, `alder_task_wake_id`,
-`alder_wakeup_signal`, `alder_timer_at`, `alder_task_cancel`,
-`alder_task_release`, and `alder_executor_run` (pinned in [Executor entry and
-hooks](#executor-entry-and-hooks)) are callable outside a step. The remaining
-entries observe the current task.
+`alder_task_create_on_lane`, `alder_task_start`, `alder_task_handle`,
+`alder_task_wake_id`, `alder_wakeup_signal`, `alder_timer_at`,
+`alder_task_cancel`, `alder_task_release`, `alder_executor_configure`, and
+`alder_executor_run` (pinned in [Executor entry and
+hooks](#executor-entry-and-hooks)) are callable outside a step.
+`alder_task_blocking` observes the current task and is callable only inside a
+step. The remaining entries observe the current task.
 
 ```c
 typedef struct AlderWakeup AlderWakeup; /* one per task, stable address */
 
+typedef enum AlderTaskLane {
+    ALDER_LANE_POOL = 0,
+    ALDER_LANE_LOCAL = 1
+} AlderTaskLane;
+
+typedef struct AlderExecutorConfig {
+    uint32_t workers;
+    uint32_t blocking_workers;
+    bool local_lane;
+} AlderExecutorConfig;
+
+typedef void (*AlderBlockingFn)(void *context);
+
 AlderTask *alder_task_create(uint64_t group, AlderStepFn step,
                              void *frame, AlderDomain *domain);
+AlderTask *alder_task_create_on_lane(uint64_t group, AlderTaskLane lane,
+                                     AlderStepFn step, void *frame,
+                                     AlderDomain *domain);
 void alder_task_start(AlderTask *task);
 void alder_task_call(AlderTask *task, AlderStepFn callee,
                      void *frame, AlderDomain *domain);
@@ -369,10 +387,12 @@ void alder_task_shield_push(void);
 void alder_task_shield_pop(void);
 bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline);
 bool alder_task_await(uint64_t child);
+bool alder_task_blocking(AlderBlockingFn fn, void *context);
 void alder_task_cancel(uint64_t task);
 void alder_task_release(uint64_t task);
 uint64_t alder_task_id(void);
 uint64_t alder_task_handle(AlderTask *task);
+bool alder_executor_configure(const AlderExecutorConfig *config);
 ```
 
 Failure contracts:
@@ -380,7 +400,25 @@ Failure contracts:
 - `alder_task_create` allocates the task record, initializes its activation
   stack with one root activation, allocates the wakeup token, and returns a
   task in the `created` state. It fails only through process termination on
-  allocation or identity exhaustion.
+  allocation or identity exhaustion. It creates the task on
+  `ALDER_LANE_POOL`.
+- `alder_task_create_on_lane` is the lane-taking form. The lane is fixed at
+  creation: pool tasks may resume on any pool worker, while local tasks
+  resume only on the single local-lane thread, including across executor
+  runs. A task created on `ALDER_LANE_LOCAL` requires the active
+  configuration to enable the local lane; creating one otherwise is a
+  contract violation. `alder_task_create` is
+  `alder_task_create_on_lane(..., ALDER_LANE_POOL, ...)`.
+- `alder_executor_configure` selects the executor for the next runs. It may
+  only be called while no executor run is active, no task is live, no
+  blocking entry is in flight, and the timer heap is empty; otherwise it
+  returns false and changes nothing. A NULL configuration restores the
+  default single-worker inline executor pinned by gate 9.2. A non-NULL
+  configuration selects the threaded executor: `workers` pool workers
+  (1 through 64), `blocking_workers` blocking-pool threads (0 through 32,
+  zero disabling blocking submission), and the persistent local lane when
+  `local_lane` is true. An out-of-range field returns false. Thread creation
+  failure terminates the process.
 - `alder_task_start` commits a created task to its executor. A task is not
   runnable before start, which is the spawn synchronization point: the
   spawner initializes the frame and its arguments with no concurrent reader.
@@ -388,8 +426,11 @@ Failure contracts:
   `ALDER_STEP_CALL`. Calling it without a following `call` return, or
   returning `call` without it, is a contract violation.
 - `alder_wakeup_signal` is idempotent and thread-safe. It sets the task's
-  latch and, when the task is parked, enqueues it. A signal after the task is
-  runnable only sets the latch.
+  latch and, when the task is parked, makes it runnable through its fixed
+  lane. A signal after the task is runnable only sets the latch. In the
+  threaded executor a winning signal pushes the wakeup token on the MPSC
+  token list; a worker drains the list and enqueues the task on the lane
+  recorded in the task.
 - `alder_task_wake_id` resolves a generational task id and signals that
   task's wakeup. It is the binding-safe form used by channel and
   synchronization wait lists, which store ids rather than wakeup pointers. A
@@ -409,17 +450,36 @@ Failure contracts:
   signals immediately. `UINT64_MAX` is the no-deadline sentinel: it returns
   false without signalling or registering anything, and every other
   `uint64_t` deadline is in range. Timers are ordered by `(deadline,
-  task-id)` so equal deadlines are deterministic.
+  task-id)` so equal deadlines are deterministic. In the threaded executor
+  the calling step posts the registration to the timer thread, which owns
+  the heap; completion removes a task's remaining registrations before the
+  task becomes `done`, so release still observes a drained record.
 - `alder_task_await` registers the current task as a waiter on the child and
   returns true when the child is already complete; false means the caller must
   park. A child may be awaited once; a released or foreign task id is a
   contract violation.
+- `alder_task_blocking` submits `fn(context)` to the configured blocking pool,
+  registers the current task's wakeup token, and returns true; the step must
+  then return `park`. The entry holds one retain on the task record and the
+  wakeup token until `fn` returns, so cancellation that completes and
+  releases the task first stays safe. Cancellation stops the task's wait but
+  never interrupts `fn`; a queued call still runs, and its later signal is
+  harmless. `context` is borrowed and must stay valid until `fn` returns; the
+  runtime does not retain caller frame storage. A local-lane task may submit
+  an entry; the call itself runs on a blocking worker, so it must not depend
+  on the local lane's thread affinity. It returns false without queueing when
+  no blocking workers are configured. A null `fn` or a call outside a step is
+  a contract violation.
 - `alder_task_release` requires that the task's activation stack is empty,
-  every wakeup/timer/blocking registration is already removed or drained, and
-  the caller has copied any result it needs; it then unlinks the task from its
-  group and frees the record. The spawner still owns the root activation
-  domain and destroys it after release, so the result copy must happen before
-  that destroy. Releasing with a live registration is a contract violation.
+  every wakeup/timer registration is already removed or drained, and the
+  caller has copied any result it needs; it then unlinks the task from its
+  group and drops the spawner's reference. The only registration that may
+  still be live is a blocking entry, which holds its own retain: the record
+  is freed when C returns instead of here. Releasing with any other live
+  registration is a contract violation. The spawner still owns the root
+  activation domain and destroys it after release, so the result copy must
+  happen before that destroy. A wakeup token is never retained past the
+  final free.
 - `alder_task_cancel` sets the target's cancel flag and signals its wakeup.
   It does not run user code on the caller's thread.
 - `alder_task_id` returns the current step's generational task id.
@@ -519,13 +579,15 @@ for (;;) {
 
 ### Executor architecture
 
-The first implementation is one worker in one OS thread:
+The default configuration is the gate 9.2 executor: one worker in one OS
+thread, selected when `alder_executor_configure` has not been called or was
+reset with NULL. It provides:
 
 - a FIFO run queue of runnable tasks;
 - a timer min-heap ordered by `(deadline, task-id)` so equal deadlines are
   deterministic;
-- a wakeup latch and a small MPSC queue for signals from foreign threads or
-  host shims;
+- a wakeup latch and a FIFO run queue guarded by an atomic spin lock, so
+  signals from foreign threads or host shims may enter it safely;
 - the activation stack per task, grown on the heap with a stable base pointer
   so a `safe_mut` frame reference is never invalidated;
 - a loop that pops a runnable task, clears its latch, calls its top
@@ -538,9 +600,13 @@ The first implementation is one worker in one OS thread:
   quiescent set through `on_idle` when present and `alder_executor_run`
   returns false.
 
+The threaded executor below is selected for any non-NULL configuration; its
+observable scheduling follows the same rules, with the explicitly documented
+multi-worker ordering freedom.
+
 ### Executor entry and hooks
 
-The single-worker loop has one entry and one optional hooks record:
+The executor has one entry and one optional hooks record:
 
 ```c
 enum {
@@ -578,25 +644,25 @@ typedef struct AlderExecutorHooks {
 bool alder_executor_run(const AlderExecutorHooks *hooks);
 ```
 
-- `alder_executor_run` runs the worker until every live task has completed
-  or no task can make progress without an external wakeup. It returns true
-  when no incomplete task remains and false when the program is quiescent with
-  at least one blocked task. In the false case `on_idle`, when present, has
-  already received the blocked set. A true result does not release records:
-  completed tasks remain until their spawners call `alder_task_release`.
-  `hooks` may be NULL, and the record is read only for the duration of the
-  call. Re-entering the executor from a step is a contract violation. A host
-  loop re-runs `alder_executor_run` after an external wakeup that left the
-  program quiescent; a signal delivered while a run is active is serviced by
-  that run, and timers advance inside it.
+- `alder_executor_run` runs the configured executor until every live task has
+  completed or no task can make progress without an external wakeup. It
+  returns true when no incomplete task remains and false when the program is
+  quiescent with at least one blocked task. In the false case `on_idle`, when
+  present, has already received the blocked set. A true result does not
+  release records: completed tasks remain until their spawners call
+  `alder_task_release`. `hooks` may be NULL, and the record is read only for
+  the duration of the call. Re-entering the executor from a step is a
+  contract violation. A host loop re-runs `alder_executor_run` after an
+  external wakeup that left the program quiescent; a signal delivered while a
+  run is active is serviced by that run, and timers advance inside it.
 - `now` seeds and refreshes the monotonically increasing executor clock: the
   clock is the greater of its current value and `now(context)`, and the idle
   loop advances it to the earliest timer deadline. The clock never moves
-  backwards. The executor never writes through `now`, and the single-worker
-  loop has no other clock source; when `now` is NULL the clock advances only
-  to timer deadlines. The 9.2 ABI has no step-visible clock read, so
-  `alder_timer_at` takes only an absolute deadline; gate 9.7 adds the read,
-  or a duration-taking sleep binding, that relative sleeps need.
+  backwards. The executor never writes through `now`, and has no other clock
+  source; when `now` is NULL the clock advances only to timer deadlines. The
+  9.2 ABI has no step-visible clock read, so `alder_timer_at` takes only an
+  absolute deadline; gate 9.7 adds the read, or a duration-taking sleep
+  binding, that relative sleeps need.
 - `start_op` and `cancel_op` are the capability-operation hooks. They are
   stored in the hooks record for the gate 9.7 capability surface; the 9.2
   foundation has no capability-operation entry and never invokes them.
@@ -611,29 +677,63 @@ bool alder_executor_run(const AlderExecutorHooks *hooks);
 - Wait reasons are the stable values above. `alder_task_wait_reason` records
   one of them; the value is metadata only and never affects scheduling.
 
-### Later executor extensions
+### Threaded executor (gate 9.6 slice A)
 
-Later gates extend the same records and ABI, never the MIR representation:
+`alder_executor_configure` with a non-NULL record selects the threaded
+executor for subsequent runs. It extends the records above; no MIR value or
+generated thunk changes.
 
-- **Multithread pool.** N workers share the run queue and the timer heap;
-  the latch, run-queue links, and timer links become C11 atomics. A task is
-  owned by exactly one worker from dequeue to the next suspension, so its
-  frame and activation stack need no per-access locking.
-- **Local lane.** A second single-thread executor carries thread-affine tasks.
-  A task's lane is fixed at spawn; cross-lane wakeups use the same wakeup
-  token and MPSC queue.
-- **Bounded blocking pool.** A fixed set of workers runs `std.task.blocking`
-  entries. An entry holds a retain on the task record and a wakeup token; the
-  task parks while it runs. Cancellation stops waiting but never interrupts
-  the C call; the retain is released only when C returns, and the group keeps
-  the entry's state alive until then.
-- **Timer and wakeup queues.** The single-worker loop services both. In the
-  multithread runtime one timer thread owns the heap and one MPSC drain moves
-  signalled tokens to the run queue; workers never touch the heap.
+- **Pool.** `workers` pool workers share one FIFO pool lane. The latch, the
+  run-queue and wakeup-token links, and the timer links are C11 atomics; the
+  lane and queue structure are serialized by an executor mutex. A worker
+  dequeues a task, owns its frame and activation stack until the task
+  suspends or completes, and then returns it to the lane through the same
+  state protocol as the inline loop.
+- **Local lane.** A task created on `ALDER_LANE_LOCAL` is enqueued on a
+  separate single-consumer lane. One persistent local thread runs only while
+  `alder_executor_run` is active, so every resumption of a local task uses
+  the same OS thread, including across runs. Pool tasks never enter the
+  local lane. Cross-lane wakeups use the same wakeup token and MPSC token
+  list; the drain routes by the task's fixed lane.
+- **Timer thread.** One timer thread per run owns the heap. Steps post
+  registrations; completion posts a cancellation and waits until the timer
+  thread has removed the task's registrations, so a completed task is
+  drained before it can be released. When all workers are idle the
+  coordinator asks the timer thread to advance the clock to the earliest
+  deadline and fire every due token in `(deadline, task-id)` order. Virtual
+  time therefore advances exactly as in the inline loop.
+- **Blocking pool.** `blocking_workers` fixed threads persist across runs.
+  A submission queues `fn(context)`, takes a retain on the task record, and
+  the step parks. Cancellation makes the task runnable without interrupting
+  `fn`; a later completion signals the retained wakeup token and drops the
+  retain. The record is freed by whichever holder releases last. A queued
+  call is not withdrawn; `context` must outlive the call.
+- **Thread shim.** The threaded executor uses POSIX threads. The inline
+  default performs no thread creation, but `runtime/c/alder.c` is built
+  against a POSIX host (it already requires `<execinfo.h>` for panics).
+- **Determinism.** With one pool worker the threaded executor preserves the
+  inline queue and timer order; the runtime fixtures pin the gate 9.2
+  ordering scenarios in that mode. With several workers, independent
+  results and program-ordered observations remain deterministic, while the
+  completion order of independent tasks is scheduler-dependent, as
+  [Async and Structured Concurrency](async.md#executors) documents for
+  `Evented`.
+
+### Remaining executor extensions
+
+Gate 9.6 slice A implements the worker pool, local lane, bounded blocking
+pool, and the timer/wakeup ownership described above. Later gates extend the
+same records and ABI, never the MIR representation:
+
+- **Thread-safe C callback bridge.** Provider-owned threads and the
+  blocking-bridge completion path beyond `alder_task_blocking` remain a
+  later gate 9.6 slice; the foreign-thread export trampoline of gate 8 is
+  unchanged.
 - **SimIo capability operations.** `start_op` and `cancel_op` are stored for
   the gate 9.7 capability surface, which adds their call sites. `now` supplies
   the clock for timers and measurements; `on_idle` reports quiescence with the
   blocked task list and the wait reasons.
+
 
 ### Handwritten C and Alder sysroot modules
 
@@ -669,11 +769,21 @@ the ordinary lowering of the step body.
 ### Lifetime and determinism rules
 
 - A task record is freed only after its activation stack is empty, every
-  wakeup/timer/blocking registration is removed or drained, and its parent has
-  released it. A wakeup token is never retained past that point. A
-  `cancelled` activation counts as popped: its frame is dead, and any shim it
-  used has already reached a terminal state or the activation parked in
-  shielded teardown until it did.
+  wakeup/timer registration is removed or drained, its parent has released
+  it, and every blocking entry that retains it has returned. A wakeup token
+  is never retained past that point. A `cancelled` activation counts as
+  popped: its frame is dead, and any shim it used has already reached a
+  terminal state or the activation parked in shielded teardown until it did.
+  A blocking entry is the one registration that may outlive release: its
+  retain keeps the record and its wakeup token alive until C returns, and
+  the last reference frees it.
+- A task is owned by exactly one worker from dequeue to its next suspension
+  or completion, so its frame, activation stack, shield depth, and await
+  links need no per-access locking. Creation, release, id resolution, and
+  await registration are serialized by the runtime registry lock; state
+  transitions, the wakeup latch, lane links, and timer links are C11
+  atomics. The local lane's single persistent thread owns every local
+  activation of a local task.
 - A callee activation domain is destroyed by its caller only after the callee
   activation has been popped and its `out` copied. A task's root activation
   domain is borrowed by the task record and destroyed by the spawner after
@@ -687,6 +797,10 @@ the ordinary lowering of the step body.
   depends on map iteration, pointer values, host paths, or thread scheduling.
   Printed MIR is byte-identical across processes for the same input, and the
   generated C differs only where host toolchain data legitimately differs.
+  Runtime results are deterministic whenever the program orders its own
+  observations; with one pool worker, queue and timer order match the inline
+  executor. The completion order of independent tasks on multiple workers is
+  scheduler-dependent and is not program-visible by contract.
 
 ## Milestone 3 Lowering Contract
 

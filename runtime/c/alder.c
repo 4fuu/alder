@@ -19,6 +19,7 @@
 #include "alder.h"
 
 #include <math.h>
+#include <pthread.h>
 
 #if defined(__STDC_NO_ATOMICS__)
 #error "Alder runtime requires C11 <stdatomic.h> for foreign-thread entry"
@@ -614,13 +615,31 @@ bool alder_cleanup_end(AlderCleanupScope *scope) {
 /* ------------------------------------------------------------------ */
 
 /*
- * The first executor is one worker in one OS thread. The run queue is a
- * FIFO guarded by a short C11 atomic spin lock, so wakeups from foreign
- * shims may enter it safely; the timer heap is ordered by (deadline,
- * task-id), and each task's activation stack grows in fixed-size heap
- * blocks whose addresses never move while an activation is live.
+ * Executor architecture.
+ *
+ * The default configuration runs the gate 9.2 single-worker loop inline on
+ * the thread that calls alder_executor_run. A configured executor runs:
+ *
+ *  - N pool workers sharing one FIFO lane; a task is dequeued by exactly one
+ *    worker and owned by it until the task suspends or completes, so frames
+ *    and activation stacks need no per-access locking;
+ *  - one persistent local-lane thread for thread-affine tasks; a task's lane
+ *    is fixed at creation and every local resumption runs on that thread;
+ *  - one timer thread per run that owns the timer heap;
+ *  - a fixed blocking pool whose workers persist across runs, because a
+ *    cancellation may release a task while its C call is still running.
+ *
+ * Wakeups are always delivered through the task's stable latch. In threaded
+ * mode a winning wakeup also pushes the wakeup token on a lock-free MPSC
+ * list; a worker drains that list under the queue lock and routes each token
+ * to the lane recorded in its task. The lane/queue links, latch, and timer
+ * links are C11 atomics. The pool workers may pick up different tasks in a
+ * different order on every run; results are deterministic whenever the
+ * program itself orders its observations.
  */
 #define ALDER_ACTIVATION_BLOCK ((size_t)32)
+#define ALDER_EXECUTOR_MAX_WORKERS ((uint32_t)64)
+#define ALDER_EXECUTOR_MAX_BLOCKING ((uint32_t)32)
 
 typedef enum {
     ALDER_TASK_CREATED = 0,
@@ -642,13 +661,42 @@ typedef struct AlderActivationBlock {
     AlderActivation entries[ALDER_ACTIVATION_BLOCK];
 } AlderActivationBlock;
 
+typedef struct AlderLane {
+    AlderTask *head;
+    AlderTask *tail;
+} AlderLane;
+
+typedef struct AlderPoolWorker {
+    pthread_t thread;
+    bool started;
+    bool idle;
+    AlderLane *lane;
+} AlderPoolWorker;
+
 typedef struct AlderTimer AlderTimer;
+typedef struct AlderBlockingEntry AlderBlockingEntry;
 typedef struct AlderGroup AlderGroup;
 typedef struct AlderTaskSlot AlderTaskSlot;
+
+typedef enum {
+    ALDER_TIMER_INSERT = 0,
+    ALDER_TIMER_CANCEL_TASK = 1,
+    ALDER_TIMER_ADVANCE = 2
+} AlderTimerRequestKind;
+
+typedef struct AlderTimerRequest {
+    struct AlderTimerRequest *next;
+    AlderTimerRequestKind kind;
+    AlderTimer *timer;
+    AlderTask *task;
+    size_t fired;
+    bool done;
+} AlderTimerRequest;
 
 struct AlderWakeup {
     atomic_bool latch;
     AlderTask *task;
+    _Atomic(AlderWakeup *) signal_next;
 };
 
 struct AlderGroup {
@@ -669,9 +717,17 @@ struct AlderTimer {
     AlderWakeup *wakeup;
     AlderTask *task;
     size_t heap_index;
-    AlderTimer *task_prev;
-    AlderTimer *task_next;
-    bool active;
+    _Atomic(AlderTimer *) task_prev;
+    _Atomic(AlderTimer *) task_next;
+    atomic_bool active;
+    AlderTimerRequest request;
+};
+
+struct AlderBlockingEntry {
+    AlderBlockingEntry *next;
+    AlderTask *task;
+    AlderBlockingFn fn;
+    void *context;
 };
 
 struct AlderTask {
@@ -682,13 +738,17 @@ struct AlderTask {
     AlderTask *group_next;
     atomic_int state;
     atomic_bool cancel_requested;
+    atomic_bool queued;
+    atomic_uint refs;
     uint32_t shield_depth;
     uint32_t wait_reason;
     uint32_t slot_index;
+    AlderLane *lane;
     AlderActivationBlock *base;
     AlderActivationBlock *top_block;
     size_t depth;
     AlderTimer *timers_head;
+    atomic_size_t timer_count;
     AlderTask *awaiter;
     bool awaited;
     AlderTask *awaiting;
@@ -696,29 +756,75 @@ struct AlderTask {
     void *pending_frame;
     AlderDomain *pending_domain;
     bool pending_call;
-    AlderTask *run_next;
+    _Atomic(AlderTask *) run_next;
+    bool released;
 };
 
 static _Thread_local AlderTask *g_current_task;
 
+/* Default single-worker run queue. The same run_next link is reused by the
+ * threaded lane queues. */
 static atomic_flag g_run_lock = ATOMIC_FLAG_INIT;
 static AlderTask *g_run_head;
 static AlderTask *g_run_tail;
 
+/* Task registry and groups. All mutations are serialized so pool workers and
+ * the coordinator may create, resolve, and release concurrently. */
+static pthread_mutex_t g_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 static AlderTaskSlot *g_task_slots;
 static size_t g_task_slot_count;
 static size_t g_task_slot_capacity;
 static uint32_t g_task_free_head = UINT32_MAX;
 static size_t g_live_tasks;
 static uint32_t g_next_task_generation = 1;
-
 static AlderGroup *g_groups;
 
+/* Threaded executor state. */
+static pthread_mutex_t g_queue_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_work_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_idle_cond = PTHREAD_COND_INITIALIZER;
+static _Atomic(AlderWakeup *) g_signal_head;
+static AlderLane g_pool_lane;
+static AlderLane g_local_lane;
+static AlderPoolWorker g_pool_workers[ALDER_EXECUTOR_MAX_WORKERS];
+static AlderPoolWorker g_local_worker;
+static uint32_t g_pool_worker_count;
+static bool g_executor_active;
+static bool g_worker_stop;
+static bool g_local_started;
+static bool g_local_stop;
+static pthread_t g_local_thread;
+static bool g_threaded;
+static AlderExecutorConfig g_config;
+
+/* Timer heap. The inline executor owns it on the calling thread; in threaded
+ * mode the timer thread owns it for the duration of a run. */
 static AlderTimer **g_timer_heap;
 static size_t g_timer_count;
 static size_t g_timer_capacity;
-static uint64_t g_clock;
-static bool g_executor_running;
+static atomic_uint_fast64_t g_clock;
+static atomic_bool g_executor_running;
+
+/* Timer thread request channel. */
+static pthread_mutex_t g_timer_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_timer_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_timer_done_cond = PTHREAD_COND_INITIALIZER;
+static AlderTimerRequest *g_timer_requests_head;
+static AlderTimerRequest *g_timer_requests_tail;
+static pthread_t g_timer_thread;
+static bool g_timer_stop;
+static bool g_timer_service_live;
+
+/* Bounded blocking pool. Its workers persist across executor runs. */
+static pthread_mutex_t g_blocking_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_blocking_cond = PTHREAD_COND_INITIALIZER;
+static AlderBlockingEntry *g_blocking_head;
+static AlderBlockingEntry *g_blocking_tail;
+static pthread_t g_blocking_threads[ALDER_EXECUTOR_MAX_BLOCKING];
+static uint32_t g_blocking_thread_count;
+static size_t g_blocking_inflight;
+static bool g_blocking_stop;
+
 
 static AlderTask *current_task_checked(const char *message) {
     if (g_current_task == NULL) {
@@ -727,8 +833,51 @@ static AlderTask *current_task_checked(const char *message) {
     return g_current_task;
 }
 
+static uint64_t clock_load(void) {
+    return (uint64_t)atomic_load_explicit(&g_clock, memory_order_relaxed);
+}
+
+static void clock_raise(uint64_t value) {
+    uint_fast64_t current =
+        atomic_load_explicit(&g_clock, memory_order_relaxed);
+    while ((uint64_t)current < value) {
+        if (atomic_compare_exchange_weak_explicit(
+                &g_clock, &current, (uint_fast64_t)value,
+                memory_order_relaxed, memory_order_relaxed)) {
+            return;
+        }
+    }
+}
+
+static void task_free(AlderTask *task) {
+    if (task->base != NULL || task->top_block != NULL || task->depth != 0) {
+        alder_runtime_panic("task freed with a live activation stack");
+    }
+    if (task->timers_head != NULL ||
+        atomic_load_explicit(&task->timer_count, memory_order_acquire) != 0) {
+        alder_runtime_panic("task freed with a live registration");
+    }
+    if (task->pending_call) {
+        alder_runtime_panic("task freed with a published callee");
+    }
+    rt_free(task);
+}
+
+/* Every owner, timer, in-flight blocking entry, and transient id operation
+ * holds one reference. The spawner's reference is dropped by
+ * alder_task_release; the record is freed by whichever holder drops last. */
+static void task_ref(AlderTask *task) {
+    (void)atomic_fetch_add_explicit(&task->refs, 1, memory_order_relaxed);
+}
+
+static void task_unref(AlderTask *task) {
+    if (atomic_fetch_sub_explicit(&task->refs, 1, memory_order_acq_rel) == 1) {
+        task_free(task);
+    }
+}
+
 static void run_queue_push(AlderTask *task) {
-    task->run_next = NULL;
+    atomic_store_explicit(&task->run_next, NULL, memory_order_relaxed);
     while (atomic_flag_test_and_set_explicit(&g_run_lock, memory_order_acquire)) {
         /* spin */
     }
@@ -736,7 +885,8 @@ static void run_queue_push(AlderTask *task) {
         g_run_head = task;
         g_run_tail = task;
     } else {
-        g_run_tail->run_next = task;
+        atomic_store_explicit(&g_run_tail->run_next, task,
+                              memory_order_release);
         g_run_tail = task;
     }
     atomic_flag_clear_explicit(&g_run_lock, memory_order_release);
@@ -748,15 +898,123 @@ static AlderTask *run_queue_pop(void) {
     }
     AlderTask *task = g_run_head;
     if (task != NULL) {
-        g_run_head = task->run_next;
+        g_run_head = atomic_load_explicit(&task->run_next,
+                                          memory_order_acquire);
         if (g_run_head == NULL) {
             g_run_tail = NULL;
         }
-        task->run_next = NULL;
+        atomic_store_explicit(&task->run_next, NULL, memory_order_relaxed);
     }
     atomic_flag_clear_explicit(&g_run_lock, memory_order_release);
     return task;
 }
+
+/* Lane operations run under g_queue_lock; the links stay atomic so the
+ * wakeup token and timer paths can document their ordering without turning
+ * every traversal into a lock acquisition. */
+static void lane_push_locked(AlderLane *lane, AlderTask *task) {
+    atomic_store_explicit(&task->run_next, NULL, memory_order_relaxed);
+    if (lane->tail == NULL) {
+        lane->head = task;
+        lane->tail = task;
+        return;
+    }
+    atomic_store_explicit(&lane->tail->run_next, task, memory_order_release);
+    lane->tail = task;
+}
+
+static AlderTask *lane_pop_locked(AlderLane *lane) {
+    AlderTask *task = lane->head;
+    if (task == NULL) {
+        return NULL;
+    }
+    AlderTask *next =
+        atomic_load_explicit(&task->run_next, memory_order_acquire);
+    lane->head = next;
+    if (next == NULL) {
+        lane->tail = NULL;
+    }
+    atomic_store_explicit(&task->run_next, NULL, memory_order_relaxed);
+    return task;
+}
+
+static bool lane_empty_locked(const AlderLane *lane) {
+    return lane->head == NULL;
+}
+
+static bool all_workers_idle_locked(void) {
+    for (uint32_t i = 0; i < g_pool_worker_count; i++) {
+        if (!g_pool_workers[i].idle) {
+            return false;
+        }
+    }
+    if (g_local_started && !g_local_worker.idle) {
+        return false;
+    }
+    return true;
+}
+
+/* Drain the MPSC wakeup-token list and route each token to its lane. Called
+ * with g_queue_lock held, which also serializes drainers. */
+static void signal_drain_locked(void) {
+    AlderWakeup *head =
+        atomic_exchange_explicit(&g_signal_head, NULL, memory_order_acquire);
+    if (head == NULL) {
+        return;
+    }
+    AlderWakeup *reversed = NULL;
+    while (head != NULL) {
+        AlderWakeup *next = atomic_load_explicit(&head->signal_next,
+                                                 memory_order_acquire);
+        atomic_store_explicit(&head->signal_next, reversed,
+                              memory_order_relaxed);
+        reversed = head;
+        head = next;
+    }
+    bool pushed = false;
+    AlderWakeup *wakeup = reversed;
+    while (wakeup != NULL) {
+        AlderWakeup *next = atomic_load_explicit(&wakeup->signal_next,
+                                                 memory_order_relaxed);
+        AlderTask *task = wakeup->task;
+        if (task != NULL &&
+            atomic_load_explicit(&task->state, memory_order_acquire) ==
+                ALDER_TASK_RUNNABLE) {
+            bool expected = false;
+            if (atomic_compare_exchange_strong_explicit(
+                    &task->queued, &expected, true, memory_order_seq_cst,
+                    memory_order_seq_cst)) {
+                lane_push_locked(task->lane, task);
+                pushed = true;
+            }
+        }
+        atomic_store_explicit(&wakeup->signal_next, NULL, memory_order_relaxed);
+        wakeup = next;
+    }
+    if (pushed) {
+        pthread_cond_broadcast(&g_work_cond);
+    }
+}
+
+/* Make a task runnable through its fixed lane. Inline mode keeps the gate 9.2
+ * run queue exactly; threaded mode serializes lane insertion on the queue
+ * lock and wakes a worker. */
+static void executor_enqueue(AlderTask *task) {
+    if (!g_threaded) {
+        run_queue_push(task);
+        return;
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    bool expected = false;
+    if (atomic_compare_exchange_strong_explicit(
+            &task->queued, &expected, true, memory_order_seq_cst,
+            memory_order_seq_cst)) {
+        lane_push_locked(task->lane, task);
+        pthread_cond_broadcast(&g_work_cond);
+    }
+    pthread_mutex_unlock(&g_queue_lock);
+}
+
 
 static bool task_transition(AlderTask *task, int from, int to) {
     int expected = from;
@@ -768,7 +1026,7 @@ static void task_enqueue_from(AlderTask *task, int from) {
     if (!task_transition(task, from, ALDER_TASK_RUNNABLE)) {
         alder_runtime_panic("task state transition failed");
     }
-    run_queue_push(task);
+    executor_enqueue(task);
 }
 
 static AlderActivation *task_top(AlderTask *task) {
@@ -896,6 +1154,15 @@ static AlderTask *task_resolve(uint64_t id, const char *message) {
         alder_runtime_panic(message);
     }
     return slot->task;
+}
+
+/* Resolve a generational id for a transient operation and retain the record
+ * across the release of g_registry_lock. The caller drops the reference with
+ * task_unref after it has finished touching the task. */
+static AlderTask *task_resolve_retained(uint64_t id, const char *message) {
+    AlderTask *task = task_resolve(id, message);
+    task_ref(task);
+    return task;
 }
 
 static void task_registry_remove(AlderTask *task) {
@@ -1047,7 +1314,7 @@ static void timer_heap_insert(AlderTimer *timer) {
         g_timer_capacity = next_capacity;
     }
     timer->heap_index = g_timer_count;
-    timer->active = true;
+    atomic_store_explicit(&timer->active, true, memory_order_release);
     g_timer_heap[g_timer_count] = timer;
     g_timer_count += 1;
     timer_sift_up(timer->heap_index);
@@ -1062,7 +1329,7 @@ static AlderTimer *timer_heap_remove_at(size_t index) {
     }
     g_timer_count = last;
     removed->heap_index = SIZE_MAX;
-    removed->active = false;
+    atomic_store_explicit(&removed->active, false, memory_order_release);
     if (index < g_timer_count) {
         timer_sift_down(index);
         timer_sift_up(index);
@@ -1070,37 +1337,227 @@ static AlderTimer *timer_heap_remove_at(size_t index) {
     return removed;
 }
 
+/* Timer-list links are atomic because a timer can be cancelled or fired while
+ * its task runs on another worker. The list itself is serialized by the timer
+ * owner (the inline executor or g_timer_lock). */
 static void task_timer_link(AlderTask *task, AlderTimer *timer) {
     timer->task = task;
-    timer->task_prev = NULL;
-    timer->task_next = task->timers_head;
+    atomic_store_explicit(&timer->task_prev, NULL, memory_order_relaxed);
+    atomic_store_explicit(&timer->task_next, task->timers_head,
+                          memory_order_release);
     if (task->timers_head != NULL) {
-        task->timers_head->task_prev = timer;
+        atomic_store_explicit(&task->timers_head->task_prev, timer,
+                              memory_order_release);
     }
     task->timers_head = timer;
 }
 
 static void task_timer_unlink(AlderTimer *timer) {
     AlderTask *task = timer->task;
-    if (timer->task_prev != NULL) {
-        timer->task_prev->task_next = timer->task_next;
+    AlderTimer *previous =
+        atomic_load_explicit(&timer->task_prev, memory_order_acquire);
+    AlderTimer *next = atomic_load_explicit(&timer->task_next,
+                                            memory_order_acquire);
+    if (previous != NULL) {
+        atomic_store_explicit(&previous->task_next, next,
+                              memory_order_release);
     } else {
-        task->timers_head = timer->task_next;
+        task->timers_head = next;
     }
-    if (timer->task_next != NULL) {
-        timer->task_next->task_prev = timer->task_prev;
+    if (next != NULL) {
+        atomic_store_explicit(&next->task_prev, previous,
+                              memory_order_release);
     }
     timer->task = NULL;
-    timer->task_prev = NULL;
-    timer->task_next = NULL;
+    atomic_store_explicit(&timer->task_prev, NULL, memory_order_relaxed);
+    atomic_store_explicit(&timer->task_next, NULL, memory_order_relaxed);
 }
 
-static void timer_destroy(AlderTimer *timer) {
-    if (timer->active) {
-        (void)timer_heap_remove_at(timer->heap_index);
+/* Unlink a timer from its task list, drop the registration reference, and
+ * free it. The caller has already removed it from the heap when active. */
+static void timer_finish(AlderTimer *timer) {
+    AlderTask *task = timer->task;
+    if (task == NULL) {
+        rt_free(timer);
+        return;
     }
     task_timer_unlink(timer);
     rt_free(timer);
+    (void)atomic_fetch_sub_explicit(&task->timer_count, 1,
+                                    memory_order_acq_rel);
+    task_unref(task);
+}
+
+/* Inline-mode timer teardown: the executing thread owns the heap. */
+static void timer_destroy(AlderTimer *timer) {
+    if (atomic_load_explicit(&timer->active, memory_order_acquire)) {
+        (void)timer_heap_remove_at(timer->heap_index);
+    }
+    timer_finish(timer);
+}
+
+/* Remove every due timer from the heap and signal it. The timer owner (the
+ * inline executor or the timer thread) is the only caller; it raises the
+ * virtual clock to the earliest deadline exactly like the gate 9.2 loop. */
+static size_t timer_fire_due(void) {
+    if (g_timer_count == 0) {
+        return 0;
+    }
+    clock_raise(g_timer_heap[0]->deadline);
+    uint64_t clock = clock_load();
+    size_t fired = 0;
+    while (g_timer_count > 0 && g_timer_heap[0]->deadline <= clock) {
+        AlderTimer *due = timer_heap_remove_at(0);
+        AlderWakeup *wakeup = due->wakeup;
+        AlderTask *task = due->task;
+        task_timer_unlink(due);
+        alder_wakeup_signal(wakeup);
+        rt_free(due);
+        (void)atomic_fetch_sub_explicit(&task->timer_count, 1,
+                                        memory_order_acq_rel);
+        task_unref(task);
+        fired += 1;
+    }
+    return fired;
+}
+
+static void timer_request_push_locked(AlderTimerRequest *request) {
+    request->next = NULL;
+    if (g_timer_requests_tail == NULL) {
+        g_timer_requests_head = request;
+    } else {
+        g_timer_requests_tail->next = request;
+    }
+    g_timer_requests_tail = request;
+    pthread_cond_broadcast(&g_timer_cond);
+}
+
+/* Process one timer request. The timer thread holds g_timer_lock for the
+ * whole call, so the heap and the per-task timer lists have one owner while
+ * a request runs. A completed task waits here until its registrations are
+ * gone, which preserves alder_task_release's drained-registration rule. */
+static void timer_process_request(AlderTimerRequest *request) {
+    switch (request->kind) {
+    case ALDER_TIMER_INSERT:
+        timer_heap_insert(request->timer);
+        break;
+    case ALDER_TIMER_CANCEL_TASK: {
+        AlderTask *task = request->task;
+        while (task->timers_head != NULL) {
+            AlderTimer *timer = task->timers_head;
+            if (atomic_load_explicit(&timer->active, memory_order_acquire)) {
+                (void)timer_heap_remove_at(timer->heap_index);
+            }
+            timer_finish(timer);
+        }
+        break;
+    }
+    case ALDER_TIMER_ADVANCE:
+        request->fired = timer_fire_due();
+        break;
+    default:
+        alder_runtime_panic("timer request with an invalid kind");
+    }
+}
+
+static void *timer_thread_main(void *context) {
+    (void)context;
+    pthread_mutex_lock(&g_timer_lock);
+    for (;;) {
+        while (g_timer_requests_head == NULL && !g_timer_stop) {
+            pthread_cond_wait(&g_timer_cond, &g_timer_lock);
+        }
+        if (g_timer_requests_head == NULL && g_timer_stop) {
+            break;
+        }
+        AlderTimerRequest *request = g_timer_requests_head;
+        g_timer_requests_head = request->next;
+        if (g_timer_requests_head == NULL) {
+            g_timer_requests_tail = NULL;
+        }
+        request->next = NULL;
+        bool synchronous = request->kind != ALDER_TIMER_INSERT;
+        timer_process_request(request);
+        if (synchronous) {
+            request->done = true;
+            pthread_cond_broadcast(&g_timer_done_cond);
+        }
+    }
+    pthread_mutex_unlock(&g_timer_lock);
+    return NULL;
+}
+
+static void timer_service_start(void) {
+    pthread_mutex_lock(&g_timer_lock);
+    g_timer_requests_head = NULL;
+    g_timer_requests_tail = NULL;
+    g_timer_stop = false;
+    g_timer_service_live = true;
+    pthread_mutex_unlock(&g_timer_lock);
+    if (pthread_create(&g_timer_thread, NULL, timer_thread_main, NULL) != 0) {
+        alder_runtime_panic("timer thread creation failure");
+    }
+}
+
+static void timer_service_stop(void) {
+    pthread_mutex_lock(&g_timer_lock);
+    g_timer_stop = true;
+    pthread_cond_broadcast(&g_timer_cond);
+    pthread_mutex_unlock(&g_timer_lock);
+    if (pthread_join(g_timer_thread, NULL) != 0) {
+        alder_runtime_panic("timer thread join failure");
+    }
+    pthread_mutex_lock(&g_timer_lock);
+    g_timer_service_live = false;
+    pthread_mutex_unlock(&g_timer_lock);
+}
+
+static void timer_service_cancel(AlderTask *task) {
+    if (!g_threaded) {
+        while (task->timers_head != NULL) {
+            timer_destroy(task->timers_head);
+        }
+        return;
+    }
+    pthread_mutex_lock(&g_timer_lock);
+    if (!g_timer_service_live) {
+        while (task->timers_head != NULL) {
+            timer_destroy(task->timers_head);
+        }
+        pthread_mutex_unlock(&g_timer_lock);
+        return;
+    }
+    AlderTimerRequest request;
+    memset(&request, 0, sizeof request);
+    request.kind = ALDER_TIMER_CANCEL_TASK;
+    request.task = task;
+    timer_request_push_locked(&request);
+    while (!request.done) {
+        pthread_cond_wait(&g_timer_done_cond, &g_timer_lock);
+    }
+    pthread_mutex_unlock(&g_timer_lock);
+}
+
+static size_t timer_service_advance(void) {
+    if (!g_threaded) {
+        return timer_fire_due();
+    }
+    pthread_mutex_lock(&g_timer_lock);
+    if (!g_timer_service_live) {
+        size_t fired = timer_fire_due();
+        pthread_mutex_unlock(&g_timer_lock);
+        return fired;
+    }
+    AlderTimerRequest request;
+    memset(&request, 0, sizeof request);
+    request.kind = ALDER_TIMER_ADVANCE;
+    timer_request_push_locked(&request);
+    while (!request.done) {
+        pthread_cond_wait(&g_timer_done_cond, &g_timer_lock);
+    }
+    size_t fired = request.fired;
+    pthread_mutex_unlock(&g_timer_lock);
+    return fired;
 }
 
 static void task_park(AlderTask *task) {
@@ -1118,26 +1575,32 @@ static void task_park(AlderTask *task) {
         if (atomic_compare_exchange_strong_explicit(
                 &task->state, &expected, ALDER_TASK_RUNNABLE,
                 memory_order_seq_cst, memory_order_seq_cst)) {
-            run_queue_push(task);
+            executor_enqueue(task);
         }
     }
 }
 
 static void task_complete(AlderTask *task) {
-    while (task->timers_head != NULL) {
-        timer_destroy(task->timers_head);
-    }
+    timer_service_cancel(task);
+    AlderTask *waiter = NULL;
+    pthread_mutex_lock(&g_registry_lock);
     if (task->awaiting != NULL) {
         task->awaiting->awaiter = NULL;
         task->awaiting = NULL;
     }
-    atomic_store_explicit(&task->state, ALDER_TASK_DONE,
-                          memory_order_seq_cst);
     task->wait_reason = ALDER_WAIT_NONE;
     if (task->awaiter != NULL) {
-        AlderTask *waiter = task->awaiter;
+        waiter = task->awaiter;
         task->awaiter = NULL;
         waiter->awaiting = NULL;
+    }
+    /* Publishing DONE last under the registry lock lets a spawner release the
+     * record as soon as it observes completion: no completing worker touches
+     * the record after this store and the unlock. */
+    atomic_store_explicit(&task->state, ALDER_TASK_DONE,
+                          memory_order_release);
+    pthread_mutex_unlock(&g_registry_lock);
+    if (waiter != NULL) {
         alder_wakeup_signal(&waiter->wakeup);
     }
 }
@@ -1201,8 +1664,11 @@ static void executor_run_task(AlderTask *task) {
     }
 }
 
-/* 0 = retry, 1 = all complete, 2 = quiescent. */
-static int executor_idle(size_t *blocked_count) {
+/* 0 = retry, 1 = all complete, 2 = quiescent. The caller holds
+ * g_registry_lock. Threaded callers also hold g_queue_lock and pass
+ * recover=true so a runnable task whose wakeup token is still in flight can
+ * be routed to its lane without waiting for another drain. */
+static int executor_scan_locked(size_t *blocked_count, bool recover) {
     bool retry = false;
     size_t blocked = 0;
     for (size_t i = 0; i < g_task_slot_count; i++) {
@@ -1216,12 +1682,36 @@ static int executor_idle(size_t *blocked_count) {
         }
         if (state == ALDER_TASK_RUNNABLE) {
             retry = true;
+            if (recover) {
+                bool expected = false;
+                if (atomic_compare_exchange_strong_explicit(
+                        &task->queued, &expected, true, memory_order_seq_cst,
+                        memory_order_seq_cst)) {
+                    lane_push_locked(task->lane, task);
+                }
+            }
             continue;
         }
         if (state == ALDER_TASK_PARKED &&
             atomic_load_explicit(&task->wakeup.latch, memory_order_seq_cst)) {
             retry = true;
+            if (recover) {
+                int expected = ALDER_TASK_PARKED;
+                if (atomic_compare_exchange_strong_explicit(
+                        &task->state, &expected, ALDER_TASK_RUNNABLE,
+                        memory_order_seq_cst, memory_order_seq_cst)) {
+                    bool queued = false;
+                    if (atomic_compare_exchange_strong_explicit(
+                            &task->queued, &queued, true, memory_order_seq_cst,
+                            memory_order_seq_cst)) {
+                        lane_push_locked(task->lane, task);
+                    }
+                }
+            }
             continue;
+        }
+        if (recover && state == ALDER_TASK_RUNNING) {
+            alder_runtime_panic("executor task left running");
         }
         blocked += 1;
     }
@@ -1261,6 +1751,7 @@ static void executor_report_idle(const AlderExecutorHooks *hooks,
         alder_runtime_panic("executor idle report allocation failure");
     }
     size_t used = 0;
+    pthread_mutex_lock(&g_registry_lock);
     for (size_t i = 0; i < g_task_slot_count && used < count; i++) {
         AlderTask *task = g_task_slots[i].task;
         if (task == NULL) {
@@ -1268,6 +1759,9 @@ static void executor_report_idle(const AlderExecutorHooks *hooks,
         }
         int state = atomic_load_explicit(&task->state, memory_order_seq_cst);
         if (state == ALDER_TASK_DONE) {
+            continue;
+        }
+        if (state == ALDER_TASK_RUNNABLE) {
             continue;
         }
         if (state == ALDER_TASK_PARKED &&
@@ -1278,6 +1772,7 @@ static void executor_report_idle(const AlderExecutorHooks *hooks,
         blocked[used].wait_reason = task->wait_reason;
         used += 1;
     }
+    pthread_mutex_unlock(&g_registry_lock);
     if (used > 0) {
         qsort(blocked, used, sizeof *blocked, blocked_compare);
         hooks->on_idle(hooks->context, blocked, used);
@@ -1287,18 +1782,38 @@ static void executor_report_idle(const AlderExecutorHooks *hooks,
 
 static void executor_seed_clock(const AlderExecutorHooks *hooks) {
     if (hooks != NULL && hooks->now != NULL) {
-        uint64_t current = hooks->now(hooks->context);
-        if (current > g_clock) {
-            g_clock = current;
-        }
+        clock_raise(hooks->now(hooks->context));
     }
 }
 
-bool alder_executor_run(const AlderExecutorHooks *hooks) {
-    if (g_executor_running) {
+static void executor_enter(void) {
+    bool expected = false;
+    if (!atomic_compare_exchange_strong_explicit(
+            &g_executor_running, &expected, true, memory_order_seq_cst,
+            memory_order_seq_cst)) {
         alder_runtime_panic("executor.run re-entered");
     }
-    g_executor_running = true;
+}
+
+static void executor_leave(void) {
+    atomic_store_explicit(&g_executor_running, false, memory_order_seq_cst);
+}
+
+static void executor_free_empty_timer_heap(void) {
+    if (g_timer_count == 0 && g_timer_heap != NULL) {
+        rt_free(g_timer_heap);
+        g_timer_heap = NULL;
+        g_timer_capacity = 0;
+    }
+}
+
+static bool executor_run_threaded(const AlderExecutorHooks *hooks);
+
+bool alder_executor_run(const AlderExecutorHooks *hooks) {
+    if (g_threaded) {
+        return executor_run_threaded(hooks);
+    }
+    executor_enter();
     executor_seed_clock(hooks);
     bool all_done = false;
     for (;;) {
@@ -1306,22 +1821,13 @@ bool alder_executor_run(const AlderExecutorHooks *hooks) {
         AlderTask *task = run_queue_pop();
         if (task == NULL) {
             if (g_timer_count > 0) {
-                AlderTimer *earliest = g_timer_heap[0];
-                if (earliest->deadline > g_clock) {
-                    g_clock = earliest->deadline;
-                }
-                while (g_timer_count > 0 &&
-                       g_timer_heap[0]->deadline <= g_clock) {
-                    AlderTimer *due = timer_heap_remove_at(0);
-                    AlderWakeup *wakeup = due->wakeup;
-                    task_timer_unlink(due);
-                    rt_free(due);
-                    alder_wakeup_signal(wakeup);
-                }
+                (void)timer_fire_due();
                 continue;
             }
             size_t blocked_count = 0;
-            int idle = executor_idle(&blocked_count);
+            pthread_mutex_lock(&g_registry_lock);
+            int idle = executor_scan_locked(&blocked_count, false);
+            pthread_mutex_unlock(&g_registry_lock);
             if (idle == 0) {
                 continue;
             }
@@ -1343,19 +1849,402 @@ bool alder_executor_run(const AlderExecutorHooks *hooks) {
         executor_run_task(task);
         g_current_task = NULL;
     }
-    if (g_timer_count == 0 && g_timer_heap != NULL) {
-        rt_free(g_timer_heap);
-        g_timer_heap = NULL;
-        g_timer_capacity = 0;
-    }
-    g_executor_running = false;
+    executor_free_empty_timer_heap();
+    executor_leave();
     return all_done;
 }
 
-AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
-                             AlderDomain *domain) {
+/* ------------------------------------------------------------------ */
+/* Threaded pool, local lane, and blocking pool                        */
+/* ------------------------------------------------------------------ */
+
+static AlderTask *executor_pop(AlderPoolWorker *worker) {
+    pthread_mutex_lock(&g_queue_lock);
+    for (;;) {
+        if (g_worker_stop) {
+            worker->idle = false;
+            pthread_mutex_unlock(&g_queue_lock);
+            return NULL;
+        }
+        signal_drain_locked();
+        AlderTask *task = lane_pop_locked(worker->lane);
+        if (task != NULL) {
+            atomic_store_explicit(&task->queued, false, memory_order_seq_cst);
+            worker->idle = false;
+            pthread_mutex_unlock(&g_queue_lock);
+            return task;
+        }
+        worker->idle = true;
+        if (all_workers_idle_locked()) {
+            pthread_cond_broadcast(&g_idle_cond);
+        }
+        pthread_cond_wait(&g_work_cond, &g_queue_lock);
+        worker->idle = false;
+    }
+}
+
+static void *pool_worker_main(void *context) {
+    AlderPoolWorker *worker = (AlderPoolWorker *)context;
+    for (;;) {
+        AlderTask *task = executor_pop(worker);
+        if (task == NULL) {
+            return NULL;
+        }
+        if (!task_transition(task, ALDER_TASK_RUNNABLE, ALDER_TASK_RUNNING)) {
+            alder_runtime_panic("executor dequeued a non-runnable task");
+        }
+        (void)atomic_exchange_explicit(&task->wakeup.latch, false,
+                                       memory_order_seq_cst);
+        task->wait_reason = ALDER_WAIT_NONE;
+        g_current_task = task;
+        executor_run_task(task);
+        g_current_task = NULL;
+    }
+}
+
+/* The local lane is a single persistent thread. It runs only while an
+ * executor run is active, so local tasks keep one OS thread across runs
+ * without executing outside alder_executor_run. */
+static AlderTask *local_lane_pop(AlderPoolWorker *worker) {
+    pthread_mutex_lock(&g_queue_lock);
+    for (;;) {
+        if (g_local_stop) {
+            worker->idle = true;
+            pthread_mutex_unlock(&g_queue_lock);
+            return NULL;
+        }
+        if (g_executor_active) {
+            signal_drain_locked();
+            AlderTask *task = lane_pop_locked(&g_local_lane);
+            if (task != NULL) {
+                atomic_store_explicit(&task->queued, false,
+                                      memory_order_seq_cst);
+                worker->idle = false;
+                pthread_mutex_unlock(&g_queue_lock);
+                return task;
+            }
+        }
+        worker->idle = true;
+        if (all_workers_idle_locked()) {
+            pthread_cond_broadcast(&g_idle_cond);
+        }
+        pthread_cond_wait(&g_work_cond, &g_queue_lock);
+        worker->idle = false;
+    }
+}
+
+static void *local_worker_main(void *context) {
+    AlderPoolWorker *worker = (AlderPoolWorker *)context;
+    for (;;) {
+        AlderTask *task = local_lane_pop(worker);
+        if (task == NULL) {
+            return NULL;
+        }
+        if (!task_transition(task, ALDER_TASK_RUNNABLE, ALDER_TASK_RUNNING)) {
+            alder_runtime_panic("local executor dequeued a non-runnable task");
+        }
+        (void)atomic_exchange_explicit(&task->wakeup.latch, false,
+                                       memory_order_seq_cst);
+        task->wait_reason = ALDER_WAIT_NONE;
+        g_current_task = task;
+        executor_run_task(task);
+        g_current_task = NULL;
+    }
+}
+
+static void local_lane_start(void) {
+    pthread_mutex_lock(&g_queue_lock);
+    g_local_stop = false;
+    g_local_started = true;
+    g_local_worker.idle = false;
+    g_local_worker.lane = &g_local_lane;
+    pthread_mutex_unlock(&g_queue_lock);
+    if (pthread_create(&g_local_thread, NULL, local_worker_main,
+                       &g_local_worker) != 0) {
+        alder_runtime_panic("local lane thread creation failure");
+    }
+}
+
+static void local_lane_stop(void) {
+    pthread_mutex_lock(&g_queue_lock);
+    if (!g_local_started) {
+        pthread_mutex_unlock(&g_queue_lock);
+        return;
+    }
+    g_local_stop = true;
+    pthread_cond_broadcast(&g_work_cond);
+    pthread_mutex_unlock(&g_queue_lock);
+    if (pthread_join(g_local_thread, NULL) != 0) {
+        alder_runtime_panic("local lane thread join failure");
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    g_local_started = false;
+    g_local_worker.idle = true;
+    pthread_mutex_unlock(&g_queue_lock);
+}
+
+static void executor_start_pool_workers(void) {
+    for (uint32_t i = 0; i < g_pool_worker_count; i++) {
+        if (pthread_create(&g_pool_workers[i].thread, NULL, pool_worker_main,
+                           &g_pool_workers[i]) != 0) {
+            alder_runtime_panic("executor worker creation failure");
+        }
+    }
+}
+
+static void executor_join_pool_workers(void) {
+    for (uint32_t i = 0; i < g_pool_worker_count; i++) {
+        if (g_pool_workers[i].started) {
+            if (pthread_join(g_pool_workers[i].thread, NULL) != 0) {
+                alder_runtime_panic("executor worker join failure");
+            }
+        }
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    for (uint32_t i = 0; i < g_pool_worker_count; i++) {
+        g_pool_workers[i].started = false;
+    }
+    g_pool_worker_count = 0;
+    pthread_mutex_unlock(&g_queue_lock);
+}
+
+static bool executor_run_threaded(const AlderExecutorHooks *hooks) {
+    executor_enter();
+    executor_seed_clock(hooks);
+    timer_service_start();
+    pthread_mutex_lock(&g_queue_lock);
+    g_executor_active = true;
+    g_worker_stop = false;
+    g_pool_worker_count = g_config.workers;
+    for (uint32_t i = 0; i < g_pool_worker_count; i++) {
+        g_pool_workers[i].started = true;
+        g_pool_workers[i].idle = false;
+        g_pool_workers[i].lane = &g_pool_lane;
+    }
+    /* The persistent local-lane thread may already be waiting; a run that
+     * starts with local work must wake it. */
+    pthread_cond_broadcast(&g_work_cond);
+    pthread_mutex_unlock(&g_queue_lock);
+    executor_start_pool_workers();
+    bool all_done = false;
+    for (;;) {
+        executor_seed_clock(hooks);
+        pthread_mutex_lock(&g_queue_lock);
+        for (;;) {
+            signal_drain_locked();
+            if (!all_workers_idle_locked() ||
+                !lane_empty_locked(&g_pool_lane) ||
+                !lane_empty_locked(&g_local_lane)) {
+                pthread_cond_wait(&g_idle_cond, &g_queue_lock);
+                continue;
+            }
+            break;
+        }
+        size_t blocked_count = 0;
+        pthread_mutex_lock(&g_registry_lock);
+        int idle = executor_scan_locked(&blocked_count, true);
+        pthread_mutex_unlock(&g_registry_lock);
+        if (idle == 0) {
+            pthread_cond_broadcast(&g_work_cond);
+            pthread_mutex_unlock(&g_queue_lock);
+            continue;
+        }
+        pthread_mutex_unlock(&g_queue_lock);
+        if (idle == 1) {
+            all_done = true;
+            break;
+        }
+        if (timer_service_advance() > 0) {
+            continue;
+        }
+        executor_report_idle(hooks, blocked_count);
+        all_done = false;
+        break;
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    g_worker_stop = true;
+    g_executor_active = false;
+    pthread_cond_broadcast(&g_work_cond);
+    pthread_mutex_unlock(&g_queue_lock);
+    executor_join_pool_workers();
+    timer_service_stop();
+    executor_free_empty_timer_heap();
+    executor_leave();
+    return all_done;
+}
+
+/* ------------------------------------------------------------------ */
+/* Blocking pool                                                       */
+/* ------------------------------------------------------------------ */
+
+static void *blocking_worker_main(void *context) {
+    (void)context;
+    pthread_mutex_lock(&g_blocking_lock);
+    for (;;) {
+        while (g_blocking_head == NULL && !g_blocking_stop) {
+            pthread_cond_wait(&g_blocking_cond, &g_blocking_lock);
+        }
+        if (g_blocking_head == NULL && g_blocking_stop) {
+            break;
+        }
+        AlderBlockingEntry *entry = g_blocking_head;
+        g_blocking_head = entry->next;
+        if (g_blocking_head == NULL) {
+            g_blocking_tail = NULL;
+        }
+        pthread_mutex_unlock(&g_blocking_lock);
+        entry->fn(entry->context);
+        alder_wakeup_signal(&entry->task->wakeup);
+        task_unref(entry->task);
+        rt_free(entry);
+        pthread_mutex_lock(&g_blocking_lock);
+        if (g_blocking_inflight == 0) {
+            alder_runtime_panic("blocking pool completion underflow");
+        }
+        g_blocking_inflight -= 1;
+        pthread_cond_broadcast(&g_blocking_cond);
+    }
+    pthread_mutex_unlock(&g_blocking_lock);
+    return NULL;
+}
+
+static void blocking_pool_start(uint32_t count) {
+    pthread_mutex_lock(&g_blocking_lock);
+    g_blocking_stop = false;
+    g_blocking_thread_count = count;
+    g_blocking_head = NULL;
+    g_blocking_tail = NULL;
+    g_blocking_inflight = 0;
+    pthread_mutex_unlock(&g_blocking_lock);
+    for (uint32_t i = 0; i < count; i++) {
+        if (pthread_create(&g_blocking_threads[i], NULL, blocking_worker_main,
+                           NULL) != 0) {
+            alder_runtime_panic("blocking worker creation failure");
+        }
+    }
+}
+
+static void blocking_pool_stop(void) {
+    pthread_mutex_lock(&g_blocking_lock);
+    uint32_t count = g_blocking_thread_count;
+    if (count == 0) {
+        pthread_mutex_unlock(&g_blocking_lock);
+        return;
+    }
+    if (g_blocking_inflight != 0) {
+        pthread_mutex_unlock(&g_blocking_lock);
+        alder_runtime_panic("blocking pool stopped with a live entry");
+    }
+    g_blocking_stop = true;
+    pthread_cond_broadcast(&g_blocking_cond);
+    pthread_mutex_unlock(&g_blocking_lock);
+    for (uint32_t i = 0; i < count; i++) {
+        if (pthread_join(g_blocking_threads[i], NULL) != 0) {
+            alder_runtime_panic("blocking worker join failure");
+        }
+    }
+    pthread_mutex_lock(&g_blocking_lock);
+    g_blocking_thread_count = 0;
+    pthread_mutex_unlock(&g_blocking_lock);
+}
+
+bool alder_task_blocking(AlderBlockingFn fn, void *context) {
+    AlderTask *task = current_task_checked("task.blocking outside a step");
+    if (fn == NULL) {
+        alder_runtime_panic("task.blocking with a null entry");
+    }
+    pthread_mutex_lock(&g_blocking_lock);
+    if (g_blocking_thread_count == 0) {
+        pthread_mutex_unlock(&g_blocking_lock);
+        return false;
+    }
+    AlderBlockingEntry *entry =
+        (AlderBlockingEntry *)rt_malloc(sizeof *entry);
+    if (entry == NULL) {
+        alder_runtime_panic("task.blocking allocation failure");
+    }
+    entry->next = NULL;
+    entry->task = task;
+    entry->fn = fn;
+    entry->context = context;
+    task_ref(task);
+    g_blocking_inflight += 1;
+    if (g_blocking_tail == NULL) {
+        g_blocking_head = entry;
+    } else {
+        g_blocking_tail->next = entry;
+    }
+    g_blocking_tail = entry;
+    pthread_cond_broadcast(&g_blocking_cond);
+    pthread_mutex_unlock(&g_blocking_lock);
+    return true;
+}
+
+bool alder_executor_configure(const AlderExecutorConfig *config) {
+    if (atomic_load_explicit(&g_executor_running, memory_order_acquire)) {
+        return false;
+    }
+    pthread_mutex_lock(&g_blocking_lock);
+    bool blocking_busy = g_blocking_inflight != 0;
+    pthread_mutex_unlock(&g_blocking_lock);
+    if (blocking_busy) {
+        return false;
+    }
+    pthread_mutex_lock(&g_registry_lock);
+    bool live = g_live_tasks != 0;
+    pthread_mutex_unlock(&g_registry_lock);
+    if (live) {
+        return false;
+    }
+    pthread_mutex_lock(&g_timer_lock);
+    bool timers = g_timer_count != 0;
+    pthread_mutex_unlock(&g_timer_lock);
+    if (timers) {
+        return false;
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    bool queued = !lane_empty_locked(&g_pool_lane) ||
+                  !lane_empty_locked(&g_local_lane);
+    bool active = g_executor_active;
+    pthread_mutex_unlock(&g_queue_lock);
+    if (queued || active) {
+        return false;
+    }
+    if (config != NULL &&
+        (config->workers == 0 ||
+         config->workers > ALDER_EXECUTOR_MAX_WORKERS ||
+         config->blocking_workers > ALDER_EXECUTOR_MAX_BLOCKING)) {
+        return false;
+    }
+    local_lane_stop();
+    blocking_pool_stop();
+    if (config == NULL) {
+        g_config = (AlderExecutorConfig){0};
+        g_threaded = false;
+        return true;
+    }
+    g_config = *config;
+    g_threaded = true;
+    if (g_config.local_lane) {
+        local_lane_start();
+    }
+    if (g_config.blocking_workers != 0) {
+        blocking_pool_start(g_config.blocking_workers);
+    }
+    return true;
+}
+
+AlderTask *alder_task_create_on_lane(uint64_t group, AlderTaskLane lane,
+                                     AlderStepFn step, void *frame,
+                                     AlderDomain *domain) {
     if (step == NULL || frame == NULL || domain == NULL) {
         alder_runtime_panic("task.create with a null activation");
+    }
+    if (lane != ALDER_LANE_POOL && lane != ALDER_LANE_LOCAL) {
+        alder_runtime_panic("task.create with an invalid lane");
+    }
+    if (lane == ALDER_LANE_LOCAL && !(g_threaded && g_config.local_lane)) {
+        alder_runtime_panic("task.create on an unconfigured local lane");
     }
     AlderTask *task = (AlderTask *)rt_malloc(sizeof *task);
     if (task == NULL) {
@@ -1364,15 +2253,29 @@ AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
     memset(task, 0, sizeof *task);
     atomic_init(&task->state, ALDER_TASK_CREATED);
     atomic_init(&task->cancel_requested, false);
+    atomic_init(&task->queued, false);
+    atomic_init(&task->refs, 1);
+    atomic_init(&task->timer_count, 0);
     atomic_init(&task->wakeup.latch, false);
+    atomic_init(&task->wakeup.signal_next, NULL);
+    atomic_init(&task->run_next, NULL);
     task->wakeup.task = task;
     task->wait_reason = ALDER_WAIT_NONE;
     task->slot_index = UINT32_MAX;
+    task->lane = lane == ALDER_LANE_LOCAL ? &g_local_lane : &g_pool_lane;
+    pthread_mutex_lock(&g_registry_lock);
     task_registry_insert(task);
     AlderGroup *task_group = group_get(group);
     group_link(task_group, task);
+    pthread_mutex_unlock(&g_registry_lock);
     task_push(task, step, frame, domain);
     return task;
+}
+
+AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
+                             AlderDomain *domain) {
+    return alder_task_create_on_lane(group, ALDER_LANE_POOL, step, frame,
+                                     domain);
 }
 
 void alder_task_start(AlderTask *task) {
@@ -1382,7 +2285,7 @@ void alder_task_start(AlderTask *task) {
     if (!task_transition(task, ALDER_TASK_CREATED, ALDER_TASK_RUNNABLE)) {
         alder_runtime_panic("task.start of a task that is not created");
     }
-    run_queue_push(task);
+    executor_enqueue(task);
 }
 
 void alder_task_call(AlderTask *task, AlderStepFn callee, void *frame,
@@ -1414,17 +2317,38 @@ void alder_wakeup_signal(AlderWakeup *wakeup) {
     AlderTask *task = wakeup->task;
     atomic_store_explicit(&wakeup->latch, true, memory_order_seq_cst);
     int expected = ALDER_TASK_PARKED;
-    if (atomic_compare_exchange_strong_explicit(
+    if (!atomic_compare_exchange_strong_explicit(
             &task->state, &expected, ALDER_TASK_RUNNABLE,
             memory_order_seq_cst, memory_order_seq_cst)) {
-        run_queue_push(task);
+        return;
     }
+    if (!g_threaded) {
+        run_queue_push(task);
+        return;
+    }
+    AlderWakeup *head =
+        atomic_load_explicit(&g_signal_head, memory_order_relaxed);
+    for (;;) {
+        atomic_store_explicit(&wakeup->signal_next, head,
+                              memory_order_relaxed);
+        if (atomic_compare_exchange_weak_explicit(
+                &g_signal_head, &head, wakeup, memory_order_release,
+                memory_order_relaxed)) {
+            break;
+        }
+    }
+    pthread_mutex_lock(&g_queue_lock);
+    pthread_cond_broadcast(&g_work_cond);
+    pthread_mutex_unlock(&g_queue_lock);
 }
 
 void alder_task_wake_id(uint64_t task) {
-    AlderTask *target =
-        task_resolve(task, "task.wake_id of a released or foreign id");
+    pthread_mutex_lock(&g_registry_lock);
+    AlderTask *target = task_resolve_retained(
+        task, "task.wake_id of a released or foreign id");
+    pthread_mutex_unlock(&g_registry_lock);
     alder_wakeup_signal(&target->wakeup);
+    task_unref(target);
 }
 
 void alder_task_yield(void) {
@@ -1479,7 +2403,7 @@ bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline) {
         ALDER_TASK_DONE) {
         alder_runtime_panic("timer.at for a completed task");
     }
-    if (deadline <= g_clock) {
+    if (deadline <= clock_load()) {
         alder_wakeup_signal(wakeup);
         return true;
     }
@@ -1492,18 +2416,40 @@ bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline) {
     timer->wakeup = wakeup;
     timer->task = NULL;
     timer->heap_index = SIZE_MAX;
-    timer->task_prev = NULL;
-    timer->task_next = NULL;
-    timer->active = false;
+    atomic_init(&timer->task_prev, NULL);
+    atomic_init(&timer->task_next, NULL);
+    atomic_init(&timer->active, false);
+    memset(&timer->request, 0, sizeof timer->request);
+    timer->request.kind = ALDER_TIMER_INSERT;
+    timer->request.timer = timer;
+    timer->request.done = true;
+    if (!g_threaded) {
+        task_timer_link(target, timer);
+        (void)atomic_fetch_add_explicit(&target->timer_count, 1,
+                                        memory_order_acq_rel);
+        task_ref(target);
+        timer_heap_insert(timer);
+        return true;
+    }
+    pthread_mutex_lock(&g_timer_lock);
     task_timer_link(target, timer);
-    timer_heap_insert(timer);
+    (void)atomic_fetch_add_explicit(&target->timer_count, 1,
+                                    memory_order_acq_rel);
+    task_ref(target);
+    if (g_timer_service_live) {
+        timer_request_push_locked(&timer->request);
+    } else {
+        timer_heap_insert(timer);
+    }
+    pthread_mutex_unlock(&g_timer_lock);
     return true;
 }
 
 bool alder_task_await(uint64_t child) {
     AlderTask *parent = current_task_checked("task.await outside a step");
+    pthread_mutex_lock(&g_registry_lock);
     AlderTask *target =
-        task_resolve(child, "task.await of a released or foreign id");
+        task_resolve_retained(child, "task.await of a released or foreign id");
     if (target == parent) {
         alder_runtime_panic("task.await of the current task");
     }
@@ -1516,28 +2462,36 @@ bool alder_task_await(uint64_t child) {
     target->awaited = true;
     if (atomic_load_explicit(&target->state, memory_order_seq_cst) ==
         ALDER_TASK_DONE) {
+        pthread_mutex_unlock(&g_registry_lock);
+        task_unref(target);
         return true;
     }
     target->awaiter = parent;
     parent->awaiting = target;
+    pthread_mutex_unlock(&g_registry_lock);
+    task_unref(target);
     return false;
 }
 
 void alder_task_cancel(uint64_t task) {
-    AlderTask *target =
-        task_resolve(task, "task.cancel of a released or foreign id");
+    pthread_mutex_lock(&g_registry_lock);
+    AlderTask *target = task_resolve_retained(
+        task, "task.cancel of a released or foreign id");
+    pthread_mutex_unlock(&g_registry_lock);
     atomic_store_explicit(&target->cancel_requested, true,
                           memory_order_seq_cst);
     alder_wakeup_signal(&target->wakeup);
+    task_unref(target);
 }
 
 void alder_task_release(uint64_t task) {
+    pthread_mutex_lock(&g_registry_lock);
     AlderTask *target =
         task_resolve(task, "task.release of a released or foreign id");
     if (target == g_current_task) {
         alder_runtime_panic("task.release of the current task");
     }
-    if (target->timers_head != NULL) {
+    if (atomic_load_explicit(&target->timer_count, memory_order_acquire) != 0) {
         alder_runtime_panic("task.release with a live registration");
     }
     if (target->depth != 0 || target->top_block != NULL ||
@@ -1557,9 +2511,11 @@ void alder_task_release(uint64_t task) {
     if (target->awaiter != NULL) {
         alder_runtime_panic("task.release of a task another task awaits");
     }
+    target->released = true;
     group_unlink(target);
     task_registry_remove(target);
-    rt_free(target);
+    pthread_mutex_unlock(&g_registry_lock);
+    task_unref(target);
 }
 
 uint64_t alder_task_id(void) {
