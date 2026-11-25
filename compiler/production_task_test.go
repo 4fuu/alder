@@ -518,6 +518,12 @@ pub fn main() -> I32 {
 			message: "Pending(T) is only a parameter type of the std.task spawn, start, timeout, race, and blocking operations",
 		},
 		{
+			name:    "pending-deep-declaration",
+			body:    "fn rejected(deep: " + nestedOptionType(33, "Pending(U64)") + ") -> Unit {\n    return\n}\n\npub fn main() -> I32 {\n    return 0\n}\n",
+			code:    "SEM0001",
+			message: "Pending(T) is only a parameter type of the std.task spawn, start, timeout, race, and blocking operations",
+		},
+		{
 			name: "pending-not-a-call",
 			body: `fn rejected(I: type(Io, AsyncIo), io: I) -> U64 {
     using tasks = TaskGroup.new(io)
@@ -645,5 +651,29 @@ func TestTaskSysrootSurface(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Errorf("std/task.al is missing %q", want)
 		}
+	}
+}
+
+// TestTaskDeepUnderCapTypeProduction pins the other side of the depth cap: a
+// deeply nested type that stays under the limit and mentions no Pending is an
+// ordinary accepted type, so the conservative cap does not reject deep
+// declarations wholesale.
+func TestTaskDeepUnderCapTypeProduction(t *testing.T) {
+	t.Parallel()
+	cc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("gcc not available")
+	}
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, exe, _ := getSharedProductionBuild(t, cc, root)
+	env := sysrootEnv(filepath.Join(root, "sysroot"))
+	deep := nestedOptionType(16, "U64")
+	body := "fn accepts(deep: " + deep + ") -> U64 {\n    return 0\n}\n\npub fn main() -> I32 {\n    return 0\n}\n"
+	result := runProductionCompilerEnv(t, exe, t.TempDir(), env, taskProject(body), "check")
+	if result.status != 0 || result.stdout != "" || result.stderr != "" {
+		t.Fatalf("deep under-cap type: %+v", result)
 	}
 }

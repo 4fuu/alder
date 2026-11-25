@@ -14504,9 +14504,13 @@ fn task_pending_element(state: State, store: CheckStore, checked_type: U64) -> U
 
 // A type mentions Pending when the nominal application itself or any reachable
 // type argument is std.task Pending. The declaration and binding rules below
-// use this to reject every user value position.
+// use this to reject every user value position. The recursion cap is a
+// rejection rule, so it fails closed: a type nested deeper than the cap is
+// conservatively treated as mentioning Pending and the 353 rule fires, rather
+// than silently accepting a deeply nested declaration.
 fn task_type_mentions_pending(d: Domain, state: State, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
-    if checked_type == 0 || depth > 32 { return Ok(false) }
+    if checked_type == 0 { return Ok(false) }
+    if depth > 32 { return Ok(true) }
     if checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
     let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
     if checked.kind == 7 && task_symbol_kind(state, store, checked.target) == 3 { return Ok(true) }

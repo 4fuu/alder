@@ -19343,9 +19343,9 @@ static ALDER_MAYBE_UNUSED const uint64_t alder_const_14984 = (uint64_t)3;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_14985 = (uint64_t)0;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_14986 = (uint64_t)1;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_14987 = (uint64_t)0;
-static ALDER_MAYBE_UNUSED const uint64_t alder_const_14988 = (uint64_t)32;
-static ALDER_MAYBE_UNUSED const bool alder_const_14989 = true;
-static ALDER_MAYBE_UNUSED const bool alder_const_14990 = false;
+static ALDER_MAYBE_UNUSED const bool alder_const_14988 = false;
+static ALDER_MAYBE_UNUSED const uint64_t alder_const_14989 = (uint64_t)32;
+static ALDER_MAYBE_UNUSED const bool alder_const_14990 = true;
 static ALDER_MAYBE_UNUSED const bool alder_const_14991 = false;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_14992 = (uint64_t)1;
 static ALDER_MAYBE_UNUSED const uint64_t alder_const_14993 = (uint64_t)7;
@@ -315683,8 +315683,8 @@ static ALDER_MAYBE_UNUSED AlderTy424 alder_fn_task_type_mentions_pending_691(Ald
   ALDER_MAYBE_UNUSED uint64_t alder_v5;
   ALDER_MAYBE_UNUSED bool alder_v6;
   ALDER_MAYBE_UNUSED bool alder_v7;
-  ALDER_MAYBE_UNUSED uint64_t alder_v8;
-  ALDER_MAYBE_UNUSED bool alder_v9;
+  ALDER_MAYBE_UNUSED AlderTy424 alder_v8;
+  ALDER_MAYBE_UNUSED uint64_t alder_v9;
   ALDER_MAYBE_UNUSED bool alder_v10;
   ALDER_MAYBE_UNUSED bool alder_v11;
   ALDER_MAYBE_UNUSED AlderTy424 alder_v12;
@@ -315775,18 +315775,20 @@ static ALDER_MAYBE_UNUSED AlderTy424 alder_fn_task_type_mentions_pending_691(Ald
 
   alder_v5 = alder_const_14987;
   alder_v6 = (bool)(alder_v3 == alder_v5);
-  if (alder_v6) { goto alder_b3; } else { goto alder_b2; }
+  if (alder_v6) { goto alder_b2; } else { goto alder_b3; }
 alder_b1: ALDER_MAYBE_UNUSED ;
   alder_runtime_panic("checked operation failed");
 alder_b2: ALDER_MAYBE_UNUSED ;
-  alder_v8 = alder_const_14988;
-  alder_v9 = (bool)(alder_v4 > alder_v8);
-  { bool alder_edge_5_27864_0_0 = alder_v9; alder_v7 = alder_edge_5_27864_0_0; goto alder_b4; }
+  alder_v7 = alder_const_14988;
+  alder_v8.alder_tag = (uint32_t)0;
+  alder_v8.alder_u.alder_p0 = alder_v7;
+  return alder_v8;
 alder_b3: ALDER_MAYBE_UNUSED ;
-  alder_v10 = alder_const_14989;
-  { bool alder_edge_5_27865_0_0 = alder_v10; alder_v7 = alder_edge_5_27865_0_0; goto alder_b4; }
+  { goto alder_b4; }
 alder_b4: ALDER_MAYBE_UNUSED ;
-  if (alder_v7) { goto alder_b5; } else { goto alder_b6; }
+  alder_v9 = alder_const_14989;
+  alder_v10 = (bool)(alder_v4 > alder_v9);
+  if (alder_v10) { goto alder_b5; } else { goto alder_b6; }
 alder_b5: ALDER_MAYBE_UNUSED ;
   alder_v11 = alder_const_14990;
   alder_v12.alder_tag = (uint32_t)0;
@@ -734860,7 +734862,7 @@ alder_b8: ALDER_MAYBE_UNUSED ;
 }
 
 static ALDER_MAYBE_UNUSED bool alder_fn_mir_verify_provenance_1905(AlderDomain * alder_v0, AlderTy60 alder_v1, AlderTy213 alder_v2, AlderTy226 alder_v3, AlderTy410 alder_v4, AlderTy241 alder_v5) {
-  AlderDomain alder_domain_216636 = {0};
+  AlderDomain alder_domain_216637 = {0};
   ALDER_MAYBE_UNUSED AlderDomain * alder_v6;
   ALDER_MAYBE_UNUSED AlderDomain * alder_v7;
   ALDER_MAYBE_UNUSED AlderTy522 alder_v8;
@@ -734882,8 +734884,8 @@ static ALDER_MAYBE_UNUSED bool alder_fn_mir_verify_provenance_1905(AlderDomain *
   (void)alder_v4;
   (void)alder_v5;
 
-  if (!alder_domain_init(&alder_domain_216636, alder_v0)) { alder_runtime_panic("domain.create failed"); }
-  alder_v6 = &alder_domain_216636;
+  if (!alder_domain_init(&alder_domain_216637, alder_v0)) { alder_runtime_panic("domain.create failed"); }
+  alder_v6 = &alder_domain_216637;
   alder_l0 = alder_v6;
   alder_v7 = alder_l0;
   alder_v8 = alder_fn_mir_v6_compute_2039(alder_v7, alder_v1, alder_v2, alder_v5);
