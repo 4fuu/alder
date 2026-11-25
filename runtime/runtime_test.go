@@ -62,7 +62,8 @@ func compileProgram(t *testing.T, cc, object, name string, extra ...string) stri
 	args := []string{}
 	args = append(args, strictFlags...)
 	args = append(args, extra...)
-	args = append(args, "-I", filepath.Join("c"),
+	args = append(args, "-pthread",
+		"-I", filepath.Join("c"),
 		filepath.Join("testdata", name+".c"),
 		object, "-o", exe)
 	out, err := exec.Command(cc, args...).CombinedOutput()
@@ -92,7 +93,8 @@ func TestRuntimePanic(t *testing.T) {
 	exe := filepath.Join(dir, "panic.exe")
 	args := []string{}
 	args = append(args, strictFlags...)
-	args = append(args, "-I", filepath.Join("c"),
+	args = append(args, "-pthread",
+		"-I", filepath.Join("c"),
 		filepath.Join("testdata", "panic.c"),
 		filepath.Join("c", "alder.c"), "-o", exe)
 	if out, err := exec.Command(cc, args...).CombinedOutput(); err != nil {
