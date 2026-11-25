@@ -86,8 +86,9 @@ in task storage. Recursion that changes the capability type is
 specialization-expanding and already rejected.
 
 Lowering does not depend on stackful coroutines, `setjmp`/`longjmp`, or
-platform C evaluation order. The exact MIR representation is an
-[open question](open-questions.md#exact-mir-representation-for-async-suspension).
+platform C evaluation order. The exact MIR representation is pinned by
+[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend)
+in [Alder MIR](mir.md#suspending-instances-and-step-frames).
 
 ## Function values, closures, and C callbacks
 

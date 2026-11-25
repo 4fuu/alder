@@ -1359,8 +1359,9 @@ suspending instance. Every call allocates a fresh activation domain and frame
 in task storage; frames are never shared or reused by an activation. The
 executor's activation stack grows and shrinks on the heap, so worker C stack
 use stays constant with logical depth. The cost of a call is one frame record
-plus one activation domain, and the cost of a resume is one re-entry of each
-activation from the current top down to the suspended leaf.
+plus one activation domain. A wakeup re-enters only the top activation at its
+saved state; completion then propagates up the stack one popped activation
+per executor round.
 
 Recursion that changes the capability type is specialization-expanding and is
 rejected before monomorphization, so it never produces a new step instance.

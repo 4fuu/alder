@@ -90,12 +90,3 @@ These may receive separate design proposals after 1.0:
 When an item is resolved, move the result to its owning contract and summarize
 it in [Design Decisions](design-decisions.md). Do not preserve stale alternatives
 here as if they remain equally valid.
-
-### Exact MIR representation for async suspension
-
-Resolved by
-[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend).
-The exact contract is pinned in
-[MIR](mir.md#suspending-instances-and-step-frames) and
-[C11 Backend](c-backend.md#step-trampolines-and-the-task-runtime); this heading
-remains only so the frozen async contract's link resolves.

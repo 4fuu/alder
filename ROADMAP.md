@@ -981,7 +981,7 @@ Exit-criteria evidence (complete):
   containers;
 - phase 6 exempts loads of provenance-free types from storage-domain
   derivation, implemented in lockstep in the Go verifier and the Alder
-  mirror with the soundness argument in [MIR](mir.md): plain-bit values
+  mirror with the soundness argument in [MIR](docs/mir.md): plain-bit values
   (primitives and options, results, arrays, aggregates, and enums over
   them) loaded from storage carry no domain provenance, so binding Vec
   elements to locals inside source loops verifies, while storage-carrying
