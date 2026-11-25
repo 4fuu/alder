@@ -194,6 +194,335 @@ replacement and are committed only after compiler and flush success. This host
 ABI is distinct from the
 generated entry ABI; `alder_program_entry(NULL)` remains wrapper-owned.
 
+## Step Trampolines and the Task Runtime
+
+This section pins the C side of the suspension representation defined in
+[Alder MIR](mir.md#suspending-instances-and-step-frames). Step functions are
+generated statics; the executor never sees Alder source and never allocates or
+interprets a typed frame. The ABI below is the complete boundary between
+generated code and `runtime/c`.
+
+### Pinned step ABI
+
+```c
+typedef struct AlderTask AlderTask;
+
+typedef enum AlderStepStatus {
+    ALDER_STEP_DONE = 0,      /* finished; result is in frame->out */
+    ALDER_STEP_CALL = 1,      /* published a callee and yielded */
+    ALDER_STEP_PARK = 2,      /* waits for an external wakeup */
+    ALDER_STEP_CANCELLED = 3  /* teardown done; no result */
+} AlderStepStatus;
+
+typedef AlderStepStatus (*AlderStepFn)(AlderTask *task,
+                                       AlderDomain *results,
+                                       void *frame,
+                                       AlderDomain *frame_domain);
+```
+
+- `task` is the opaque task record; it is also available through the
+  thread-local current-task accessor, but it is passed explicitly so the
+  trampoline needs no lookup.
+- `results` and `frame_domain` are the same `AlderDomain *` for a step
+  activation: the activation's own storage domain, which owns the frame.
+- `frame` is the opaque frame record allocated in `frame_domain`.
+- `ALDER_STEP_DONE` requires `frame->out` to be initialized; the executor
+  does not inspect it. `ALDER_STEP_CANCELLED` requires no result and leaves
+  the task's cancel flag set.
+- `ALDER_STEP_CALL` requires that the step call
+  `alder_task_call(task, callee, frame, domain)` before returning. The
+  executor pushes one activation built from that publication.
+- `ALDER_STEP_PARK` parks the task unless its wakeup latch is already set.
+- `ALDER_STEP_CANCELLED` pops the activation; the caller is resumed only on
+  its cancellation edge.
+
+`AlderStepFn` is an internal ABI: no step thunk is exported, no Alder
+function type names it, and no foreign header declares it. It reuses the
+callback trampoline machinery in the narrow sense that generated code passes a
+static function address and an opaque frame/context pointer to a C runtime
+entry with a fixed typedef. It differs from `c.callback.make` and export
+wrappers in one decisive way: a step thunk **does not create a root domain**.
+The activation domain is supplied by the caller or by the task record, so
+frames and their storage survive the return to the executor and are reclaimed
+by the activation that owns them.
+
+### Generated thunk
+
+For each step function `<function-id>` whose MIR body lowers to
+`alder_fn_<name-fragment>_<id>`, the backend emits one static thunk with the
+same name convention and the `alder_step` prefix:
+
+```c
+static AlderStepStatus alder_step_<name-fragment>_<id>(
+    AlderTask *alder_task, AlderDomain *alder_results,
+    void *alder_frame_ptr, AlderDomain *alder_frame_domain) {
+    AlderTy<frame-type> *alder_frame = (AlderTy<frame-type> *)alder_frame_ptr;
+    AlderStepStatus alder_status = alder_map_status(
+        alder_fn_<name-fragment>_<id>(alder_results,
+            (AlderSlice){alder_frame_ptr, UINT64_C(1)},
+            alder_frame_domain));
+    if (alder_status == ALDER_STEP_CALL) {
+        switch (alder_frame->alder_f<state-ordinal>.alder_tag) {
+        case <resume0-ordinal>:
+            alder_task_call(alder_task, alder_step_<callee-fragment>_<callee-id>,
+                            alder_frame->alder_f<x0-ordinal>.data,
+                            alder_frame->alder_f<y0-ordinal>);
+            break;
+        /* one case per call-type resume state, in state order */
+        default:
+            alder_runtime_panic("step.call from a non-call state");
+        }
+    }
+    return alder_status;
+}
+```
+
+Every element is determined by stable MIR data: the body function's ID gives
+the symbol, the frame type gives the C struct, field ordinals come from the
+frame field order, and each `resume<i>` case comes from the `x<i>`/`y<i>`
+fields and the state enum. The callee step FunctionId for each call-type
+resume state is recorded in the step function's lowering metadata, like the
+export intent metadata, so the thunk uses a stable ID rather than re-deriving
+a name; the printed `x<i>` type makes the callee instance inspectable. There
+is no name matching and no dependence on source spelling. The status mapping is a four-way switch on the enum tag;
+`done`/`call`/`park`/`cancelled` map to 0/1/2/3. A frame field of type `safe_mut(T)` lowers
+to `AlderSlice`; the thunk passes its `.data` pointer as the opaque callee
+frame. The frame parameter itself is passed to the body as the one-element
+`AlderSlice`.
+
+The thunk is an address-taken static; the compiler verifies its type by
+initializing a static `AlderStepFn` object with it, so a signature drift is a
+C constraint violation under the strict warning set. The generated file never
+declares the runtime task functions as ordinary C bindings: they are emitted
+by the backend exactly like `alder_domain_alloc` and `alder_cleanup_run`.
+
+### Frame lowering
+
+- `alloc %d, @__alder_step.frame.<instance>, %one` lowers to the ordinary
+  checked size/alignment preparation and `alder_domain_alloc`, then builds
+  the one-element `AlderSlice`. No new allocation path exists.
+- Hidden frame slots keep their existing names (`alder_domain_<site>`,
+  `alder_scope_<site>`) but move from C locals of the body function into the
+  frame struct, after the MIR-visible fields. A `domain.create` site
+  initializes its hidden `AlderDomain` in place on first execution; a
+  `cleanup.scope.begin` site calls an adopting begin that returns the existing
+  frame-resident scope on a re-entry and initializes it on the first entry.
+  Both objects are zero-initialized with the frame.
+- `field(deref %frame, name)` lowers to a member access on the typed frame
+  struct. Field names never become C members: the existing ordinal-based
+  member spelling (`alder_f<N>`) applies to frame fields like any other
+  aggregate.
+- The frame's `state` field is the first MIR-visible field and therefore the
+  first generated member. The thunk reads it for the call table; no other
+  component interprets it.
+- A call-type suspension point lowers to ordinary MIR stores of `state`,
+  `x<i>`, `y<i>`, and the saved fields, then `return <status>`. The body does
+  not emit a C call to the callee; the thunk publishes it from the state
+  table. This is what keeps worker stack depth independent of logical call
+  depth.
+- A park-type point lowers to the same stores without `x<i>`/`y<i>` and
+  `return park`. The operation's wakeup registration is emitted by the
+  capability wrapper's own lowering, before the return.
+- The program entry for an async instance creates the root activation domain
+  (`alder_domain_init(&root, NULL)`), allocates the root frame in it, sets
+  `state` to `entry` and the entry parameters, pushes the root activation,
+  runs the executor, reads the root frame's `out`, destroys the root domain,
+  and returns the program status. A synchronous `main` keeps the existing
+  direct entry.
+
+### Task runtime ABI
+
+The runtime provides these entries to generated code and to the Alder
+standard-library bindings. Unless stated otherwise they observe the current
+task through a thread-local set by the executor around each step call; they
+are contract violations outside a step.
+
+```c
+typedef struct AlderWakeup AlderWakeup; /* one per task, stable address */
+
+AlderTask *alder_task_create(uint64_t group, AlderStepFn step,
+                             void *frame, AlderDomain *domain);
+void alder_task_start(AlderTask *task);
+void alder_task_call(AlderTask *task, AlderStepFn callee,
+                     void *frame, AlderDomain *domain);
+AlderWakeup *alder_task_wakeup(void);
+void alder_wakeup_signal(AlderWakeup *wakeup);
+void alder_task_wake_id(uint64_t task);
+void alder_task_yield(void);
+void alder_task_wait_reason(uint32_t reason);
+bool alder_task_cancelled(void);
+void alder_task_shield_push(void);
+void alder_task_shield_pop(void);
+bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline);
+bool alder_task_await(uint64_t child);
+void alder_task_cancel(uint64_t task);
+void alder_task_release(uint64_t task);
+uint64_t alder_task_id(void);
+```
+
+Failure contracts:
+
+- `alder_task_create` allocates the task record, initializes its activation
+  stack with one root activation, allocates the wakeup token, and returns a
+  task in the `created` state. It fails only through process termination on
+  allocation or identity exhaustion.
+- `alder_task_start` commits a created task to its executor. A task is not
+  runnable before start, which is the spawn synchronization point: the
+  spawner initializes the frame and its arguments with no concurrent reader.
+- `alder_task_call` stores the callee publication used by the next
+  `ALDER_STEP_CALL`. Calling it without a following `call` return, or
+  returning `call` without it, is a contract violation.
+- `alder_wakeup_signal` is idempotent and thread-safe. It sets the task's
+  latch and, when the task is parked, enqueues it. A signal after the task is
+  runnable only sets the latch.
+- `alder_task_wake_id` resolves a generational task id and signals that
+  task's wakeup. It is the binding-safe form used by channel and
+  synchronization wait lists, which store ids rather than wakeup pointers. A
+  released or foreign id is a contract violation.
+- `alder_task_yield` makes the current task runnable at the back of the run
+  queue; the step still returns `park`, and the already-set latch keeps it
+  runnable.
+- `alder_task_wait_reason` records the diagnostic wait category (I/O, timer,
+  task, channel, group, blocking) used by `SimIo`'s blocked-task report. It is
+  metadata only and never affects scheduling.
+- `alder_task_cancelled` reports false while the shield depth is positive.
+- `alder_timer_at` registers an absolute deadline in executor-clock units. A
+  deadline at or before `now` signals immediately. It returns false when the
+  deadline is out of range for the clock.
+- `alder_task_await` registers the current task as a waiter on the child and
+  returns true when the child is already complete; false means the caller must
+  park. A child may be awaited once; a released or foreign task id is a
+  contract violation.
+- `alder_task_release` requires that the task's activation stack is empty,
+  every wakeup/timer/blocking registration is already removed or drained, and
+  the caller has copied any result it needs; it then unlinks the task from its
+  group and frees the record. The spawner still owns the root activation
+  domain and destroys it after release, so the result copy must happen before
+  that destroy. Releasing with a live registration is a contract violation.
+- `alder_task_cancel` sets the target's cancel flag and signals its wakeup.
+  It does not run user code on the caller's thread.
+
+`alder_task_create` plus `alder_task_start` is the two-phase form used by the
+spawn lowering; the `task.spawn` MIR operation of MIR 7 is their typed front
+end. The task record, activation stack, latch, shield, timer links, and cancel
+flag are runtime state; none is visible to MIR as a value.
+
+The frame-resident cleanup scope adds one resumable path without a new MIR
+operation:
+
+```c
+bool alder_cleanup_scope_next(AlderCleanupScope *scope,
+                              AlderCleanupFn *fn, void **context);
+bool alder_cleanup_scope_next_step(AlderCleanupScope *scope,
+                                   AlderStepFn *driver, void **context);
+```
+
+`cleanup.push` records a synchronous hook as today, or a step hook as a
+generated driver thunk plus its context. The splitter uses the matching cursor
+only when a run can suspend; it invokes synchronous entries in place and
+yields to step-hook drivers as call or park activations, in the list's reverse
+order. A run with no suspending entries keeps `alder_cleanup_run`, and
+`alder_cleanup_scope_end` frees either kind of entry. The cursor position is
+stored in the frame-resident `AlderCleanupScope`, so a suspended run resumes
+at the next entry.
+
+### Executor architecture
+
+The first implementation is one worker in one OS thread:
+
+- a FIFO run queue of runnable tasks;
+- a timer min-heap ordered by `(deadline, task-id)` so equal deadlines are
+  deterministic;
+- a wakeup latch and a small MPSC queue for signals from foreign threads or
+  host shims;
+- the activation stack per task, grown on the heap with a stable base pointer
+  so a `safe_mut` frame reference is never invalidated;
+- a loop that pops a runnable task, clears its latch, calls its top
+  activation's thunk, and applies the status: `done` pops an activation and
+  resumes the new top (or completes the task), `call` pushes the published
+  activation, `park` parks the task unless the latch is set. When no task is
+  runnable and a timer exists, the clock advances to the earliest deadline
+  and the timer signals its token. When no task is runnable, no timer exists,
+  and tasks remain, the executor reports the quiescent set.
+
+Later gates extend the same records and ABI, never the MIR representation:
+
+- **Multithread pool.** N workers share the run queue and the timer heap;
+  the latch, run-queue links, and timer links become C11 atomics. A task is
+  owned by exactly one worker from dequeue to the next suspension, so its
+  frame and activation stack need no per-access locking.
+- **Local lane.** A second single-thread executor carries thread-affine tasks.
+  A task's lane is fixed at spawn; cross-lane wakeups use the same wakeup
+  token and MPSC queue.
+- **Bounded blocking pool.** A fixed set of workers runs `std.task.blocking`
+  entries. An entry holds a retain on the task record and a wakeup token; the
+  task parks while it runs. Cancellation stops waiting but never interrupts
+  the C call; the retain is released only when C returns, and the group keeps
+  the entry's state alive until then.
+- **Timer and wakeup queues.** The single-worker loop services both. In the
+  multithread runtime one timer thread owns the heap and one MPSC drain moves
+  signalled tokens to the run queue; workers never touch the heap.
+- **SimIo hooks.** The executor takes an `AlderExecutorHooks` record with
+  `now`, `start_op`, `cancel_op`, and `on_idle` function pointers and an
+  opaque context. `now` supplies the clock for timers and measurements;
+  `start_op`/`cancel_op` let the test runtime complete or refuse capability
+  operations without host I/O; `on_idle` reports quiescence with the blocked
+  task list and the wait reasons recorded through `alder_task_wait_reason`. The single-worker loop has no other clock
+  source, so virtual time and deadlock reporting need no separate scheduler.
+
+### Handwritten C and Alder sysroot modules
+
+Handwritten C in `runtime/c` owns only the mechanism that cannot be expressed
+through verified C bindings or would have to be duplicated per host:
+
+- the `AlderStepFn` typedef, task/activation records, run queue, timer heap,
+  wakeup latch/queue, shield depth, cancellation flags, and executor loop;
+- frame-domain and activation-stack management, task id allocation, and
+  release;
+- the blocking-pool and platform thread/clock shims;
+- the thread-safe wakeup bridge and its atomic state.
+
+Alder sysroot modules over verified C bindings own policy and data
+structures that safe Alder can express:
+
+- `std.task`: `TaskGroup`, `Task(T)`, `start`, await/join policy, timeout and
+  race composition, `CancellationToken`, `check_cancel`, and yield;
+- `std.channel`, `std.sync`, `std.atomic`: channel FIFO, buffering, and
+  waiter nodes holding generational task ids, shared ownership and guards,
+  and explicit memory orders, using `alder_task_wake_id` and the atomic
+  bindings;
+- `std.io` `Evented`: the capability value and the read/write/sleep wrappers
+  that start an operation, park, and finish it;
+- `std.test` `SimIo`: the deterministic `AsyncIo` implementation over the
+  executor hooks.
+
+The step splitter that produces frames and step functions lives in the
+Alder-written lowering (`compiler/src/lower.al`), not in the runtime and not
+in the C backend. The C backend only emits the frame struct, the thunk, and
+the ordinary lowering of the step body.
+
+### Lifetime and determinism rules
+
+- A task record is freed only after its activation stack is empty, every
+  wakeup/timer/blocking registration is removed or drained, and its parent has
+  released it. A wakeup token is never retained past that point. A
+  `cancelled` activation counts as popped: its frame is dead, and any shim it
+  used has already reached a terminal state or the activation parked in
+  shielded teardown until it did.
+- A callee activation domain is destroyed by its caller only after the callee
+  activation has been popped and its `out` copied. A task's root activation
+  domain is borrowed by the task record and destroyed by the spawner after
+  `alder_task_release`; the result copy happens before the destroy.
+- The shield depth is task state, so a teardown that suspends on a group join
+  resumes still shielded. A task that reaches its root `done` with nonzero
+  shield depth is a contract violation.
+- Generation is deterministic: function and type IDs are stable, frame fields
+  follow the pinned order, thunk names use the existing name-fragment plus ID
+  convention, the state table is emitted in state order, and no output
+  depends on map iteration, pointer values, host paths, or thread scheduling.
+  Printed MIR is byte-identical across processes for the same input, and the
+  generated C differs only where host toolchain data legitimately differs.
+
 ## Milestone 3 Lowering Contract
 
 ### Naming and layout

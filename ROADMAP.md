@@ -2302,7 +2302,20 @@ earlier gate. The representation family is fixed by
   state numbering, save/restore rules, the suspend/wakeup/cancel protocol,
   cleanup and shielded-teardown interaction, recursion, and a worked
   dual-instance lowering example; resolves the async-suspension open question
-  into the owning documents with prototype evidence. Status: pending.
+  into the owning documents with prototype evidence. Status: complete.
+  Evidence: [MIR](docs/mir.md#suspending-instances-and-step-frames) pins the
+  step function, frame record, state numbering, frame access and verifier
+  rules, wakeup protocol, cancellation, recursion, and the `mir 6` direct/step
+  worked example; [C11 Backend](docs/c-backend.md#step-trampolines-and-the-task-runtime)
+  pins `AlderStepFn`, the generated thunk, the task runtime ABI, the
+  single-worker executor, later lanes and SimIo hooks, and the
+  handwritten-C/Alder-sysroot split; [D029](docs/design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend)
+  records the result and [Open Questions](docs/open-questions.md) drops the
+  resolved item. The gate prototype (a single-worker executor with two
+  re-entrant step functions over the real `runtime/c` domain allocator)
+  compiles under the canonical strict flag set, passes ASan/UBSan, and prints
+  `summary: tasks=3 completed=42 cancelled=1 live_allocations=0 steps=12`
+  with the normal resume, cancellation-unwind, and wake-before-park cases.
 - **9.1 Signature-local suspension checking** — suspending-capability type
   classification, potentially-suspending call facts, rejection of suspending
   calls in closures and function values, and rejection of guards, raw C

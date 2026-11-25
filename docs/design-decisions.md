@@ -444,7 +444,7 @@ decision than this single terminating surface.
 
 ### D029 — Suspension lowers to plain CFG MIR before the C backend
 
-Status: **Milestone 9**
+Status: **Milestone 9 gate 9.0 — representation and trampoline ABI pinned**
 
 Async suspension gets no MIR terminator and no stackful coroutine. After
 monomorphization, the Alder-written lowering splits each suspending instance
@@ -475,9 +475,14 @@ Constraints on the representation:
 Rationale: this keeps the C backend and the Go oracle unchanged for control
 flow, reuses the Milestone 7 storage-domain machinery and the Milestone 8
 callback/binding contracts, and makes every suspension state inspectable as
-ordinary MIR. It selects the representation family for the async-suspension
-open question; Milestone 9 gate 9.0 pins the exact operation set, frame
-layout, and trampoline ABI in the owning documents.
+ordinary MIR. Gate 9.0 pins the exact contract in
+[MIR](mir.md#suspending-instances-and-step-frames) and
+[C11 Backend](c-backend.md#step-trampolines-and-the-task-runtime): the
+`AlderStepFn` trampoline, the activation-stack model, frame field order and
+state numbering, the `call`/`park` wakeup protocol, shielded teardown, and
+per-call recursion storage. The frame representation needs no new MIR
+operation or version; the task surface adds `task.spawn` in MIR 7 through the
+versioning process.
 
 ## Bootstrap decisions
 

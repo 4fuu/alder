@@ -340,7 +340,10 @@ call @poke(%ref, %value)     ; the hook sees the updated %held
 cleanup.scope.run %scope
 ```
 
-The place must be a local of the registering function and its type must match
+The place must be a local of the registering function, or a frame field of a
+suspending instance whose registration spans a suspension point (see
+[Suspending Instances and Step Frames](#suspending-instances-and-step-frames)),
+and its type must match
 the hook's owner parameter, which is the last argument (a hook emitted for a
 function with storage carries a hidden leading domain parameter). A whole-local
 store to a registered place while the registration is active is rejected: it
@@ -908,12 +911,663 @@ copy of the remaining fields is complete. A function value
 returned without such a copy still shares its environment, so phase 6 rejects
 the exit when the environment's owning domain was destroyed.
 
+## Suspending Instances and Step Frames
+
+A monomorphized function instance whose concrete capability types are all
+`BlockingIo` keeps the direct lowering. Every other instance is a *suspending
+instance* and lowers to one frame record plus one step function before backend
+MIR. The split adds no suspension terminator and no new control-flow form: a
+step function is an ordinary MIR function, suspending is an ordinary `return`,
+and resuming is an ordinary re-entry dispatched on the frame's state tag. The
+representation family is fixed by
+[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend);
+the C side of the contract is in
+[C11 Backend](c-backend.md#step-trampolines-and-the-task-runtime).
+
+### Step function and status type
+
+For a suspending instance `@<instance>` the lowering emits three declarations
+with reserved, collision-free names. The reserved prefix `__alder_step.` is
+compiler-owned and reserved against ordinary source, like `__s0_`:
+
+```text
+enum  @__alder_step.state.<instance>   { entry, resume0, resume1, ... }
+type  @__alder_step.frame.<instance>   { ... }
+fn    @__alder_step.run.<instance>(...) -> @__alder_step.status
+```
+
+One module-level status enum is emitted when a module contains step functions:
+
+```text
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+```
+
+The variant order is fixed as `done`, `call`, `park`, `cancelled`; the C
+status values 0 through 3 use the same order, so the thunk's mapping is a
+direct tag read rather than a name comparison.
+
+The step function has exactly this MIR signature:
+
+```text
+fn @__alder_step.run.<instance>(
+    %d: domain_handle,
+    %frame: safe_mut(@__alder_step.frame.<instance>),
+    %frame_owner: domain_handle,
+) -> @__alder_step.status
+```
+
+- `%d` is the activation's own storage domain. It is the leading hidden
+  domain required by the ordinary storage model, so result copies and fresh
+  allocations use it.
+- `%frame` is the one-element checked reference to the activation's frame
+  record. It follows the ordinary borrowed-place pairing rule: the next
+  parameter is the domain that owns the frame.
+- `%frame_owner` is the activation domain that owns the frame. For a step
+  activation `%d` and `%frame_owner` are the same handle; the lowering passes
+  the same value twice because the storage-model convention and the
+  borrowed-place owner rule are separate contracts.
+
+The result variants are:
+
+- `done`: the activation finished. Its result value is in the frame's `out`
+  field. The executor pops the activation; the caller, if any, reads `out`.
+- `call`: the activation prepared a callee activation and yielded. The frame
+  has stored the callee frame reference and owner domain in the suspension
+  point's `x<i>` and `y<i>` fields, and the frame state is `resume<i>`. The
+  generated trampoline publishes the callee; the executor pushes it and runs
+  it. The caller is not resumed until the callee returns `done`.
+- `park`: the activation is waiting for an external wakeup. The caller has
+  already registered the task's wakeup token with the operation that will
+  signal it. The executor parks the task; a wakeup makes the task runnable
+  again and re-enters the same activation at its saved state.
+- `cancelled`: the activation observed cancellation and completed its teardown
+  without a user result. `out` is not initialized. The executor pops the
+  activation and keeps the task's cancel flag; the caller is resumed at the
+  state's cancellation edge, never on the value path.
+
+A step function never calls another step function. Every potentially
+suspending call is a `call` handoff to the executor's activation stack, so
+logical recursion consumes task storage, not worker C stack. Ordinary
+non-suspending calls remain ordinary `call` instructions inside one
+activation.
+
+The generated C trampoline is one static function per step function with the
+pinned `AlderStepFn` signature and a stable symbol
+`alder_step_<name-fragment>_<function-id>`, matching the ordinary function
+naming convention with a distinct prefix.
+It adapts the opaque frame pointer to the typed frame, calls the internal
+static MIR body, maps the status enum to `AlderStepStatus`, and, for `call`,
+uses the state tag to publish the callee thunk, frame, and domain. The state
+table is derived mechanically from the frame layout and the state enum; it is
+not extra MIR.
+
+### Frame records
+
+`@__alder_step.frame.<instance>` is an ordinary aggregate type with fields in
+this exact order. Omitted groups produce no field:
+
+1. `state`: `@__alder_step.state.<instance>`. Always first.
+2. `p<i>`: one field per source parameter after monomorphization, in
+   declaration order. The hidden leading domain parameter is not a source
+   parameter. A borrowed parameter is followed immediately by
+   `o<i>: domain_handle`, its owner domain.
+3. `x<i>`: for each suspension point `i` whose action is a call handoff, a
+   `safe_mut(@__alder_step.frame.<callee>)` reference to the callee frame.
+4. `y<i>`: for the same points, the callee activation's `domain_handle`.
+   `x<i>` and `y<i>` are adjacent and in suspension-point source order.
+5. `d<i>`: one `domain_handle` for each `domain.create` site whose handle is
+   live across a suspension point, in create-site order.
+6. `l<i>`: one field per MIR local live across a suspension point, in MIR
+   local-ID order.
+7. `v<i>`: one field per SSA temporary live across a suspension point, in
+   MIR value-ID order.
+8. `c<i>`: one `cleanup_id` live across a suspension point, in registration
+   site order.
+9. `out`: the instance's result type. Always last.
+
+`<i>` in a field name is its zero-based decimal index, so the literal names are
+`p0`, `p1`, `o0`, `x0`, `y0`, `d0`, `l0`, `v0`, `c0`, and `out`; state
+variants use the same spelling (`entry`, `resume0`, `resume1`, ...). A
+unit-typed source parameter is omitted from the frame, matching the C ABI rule
+that drops unit parameters. A borrowed parameter's `p<i>`/`o<i>` pair is the
+step's parameter pair: the verifier applies the ordinary borrowed-place and
+owner-domain rules to the pair, including when the step forwards the borrowed
+value to a call.
+
+"Live across a suspension point" means a path from the point's resume block to
+a use exists with no intervening redefinition. Locals and temporaries that are
+not live across any suspension point stay ordinary step-function locals and
+do not appear in the frame.
+
+Suspension point numbering is source order after monomorphization: the
+evaluation order of potentially suspending calls, `await`s, channel
+operations, and suspending cleanup hooks in the function body. A call that can
+never suspend is not a suspension point. Nested blocks and match arms are
+numbered by their source position, not by visit order of the lowering.
+
+Hidden, non-MIR frame slots follow the MIR-visible fields in the generated C
+struct, in this order:
+
+- `alder_domain_<site>`: one inline `AlderDomain` for every frame-resident
+  `domain.create` site, in site order;
+- `alder_scope_<site>`: one inline `AlderCleanupScope` for every
+  frame-resident `cleanup.scope.begin` site, in site order.
+
+These slots are the existing hidden per-site objects relocated from the C
+function frame into the frame record. They are not MIR values: the domain
+handle `d<i>` points at its slot, and the cleanup handle produced by the
+adopting `cleanup.scope.begin` points at its slot. Their names and order are
+deterministic and inspectable in the generated C.
+
+Frame allocation and ownership:
+
+- The caller of a step activation creates the callee activation domain as a
+  child of its own activation domain (`domain.create %frame_owner`), allocates
+  the callee frame in that domain with
+  `alloc %child_domain, @__alder_step.frame.<callee>, %one`, initializes
+  `state` to `entry` and the parameter fields, and stores the frame reference
+  in its own `x<i>` and `y<i>` fields.
+- A spawned task's root frame is allocated the same way by the spawn site in a
+  child domain of the spawning activation domain; the task runtime borrows
+  both until `alder_task_release`.
+- Frames are never embedded by value, never returned, and never stored in
+  another aggregate, vector, or table. One activation owns exactly one frame
+  in exactly one activation domain.
+- When a call activation returns `done`, its caller copies `out` into its own
+  domain with `copy_to_domain`, then destroys the callee activation domain.
+  When the activation is canceled, the caller destroys the callee domain after
+  the callee has finished its own teardown and been popped. The transfer
+  follows the ordinary caller-result rules: relocatable values are
+  materialized in the caller domain, copy-trivial and move-delivered values
+  are bit-copied, and the callee's return path disarms the owner it returns.
+
+An activation domain lives exactly as long as its activation. Nested
+non-suspending calls and loops keep their own hidden domains under the
+existing storage rules, so their transient storage is reclaimed before the
+activation ends. A value that the inference retains in the activation domain
+is reported as retained storage (D004) and is reclaimed when the activation
+ends; a long-lived task therefore measures its retained activation storage
+under gate 9.8 rather than silently accumulating unmeasured memory.
+
+For this purpose the frame record is the only aggregate exempt from the
+ordinary declaration, allocation, and dereference-store restrictions on
+`safe_mut`, `safe_ref`, `slice`, `domain_handle`, `domain_mark`, and
+`cleanup_id` fields, and it may not be used as any other value type. Section
+"Frame access and verification" pins the exact rules.
+
+### State numbering and dispatch
+
+The state enum is numbered in this order:
+
+1. `entry` (ordinal 0);
+2. `resume0`, `resume1`, ... one per suspension point in the source order of
+   the section above;
+3. `cleanup0`, `cleanup1`, ... one per suspension point that occurs inside a
+   cancellation or scope-exit teardown region, ordered by the resuming state
+   they belong to (ascending) and then by reverse registration order within
+   that teardown.
+
+The caller initializes `state` to `entry` before the first step. Every step
+function begins with one dispatch block:
+
+```text
+bb0:
+  %s = load field(deref %frame, state)
+  switch %s {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+    ...
+  }
+```
+
+`bb0` has no other predecessor, so it dominates every branch, and the frame
+parameters `%d`, `%frame`, and `%frame_owner` are available everywhere. A
+resume block has exactly one predecessor, the dispatch case, and no other
+edge may target it.
+
+Each suspension point has a canonical suspend block and a canonical resume
+block. A call handoff stores the state and the saved fields in frame field
+order and returns `call`:
+
+```text
+bb_suspend_<i>:
+  %s = enum.construct @__alder_step.state.<instance>, resume<i>
+  store field(deref %frame, state), %s
+  store field(deref %frame, x<i>), %callee_frame
+  store field(deref %frame, y<i>), %callee_domain
+  ...store d*, l*, v*, c* fields in frame field order...
+  %st = enum.construct @__alder_step.status, call
+  return %st
+```
+
+A park point stores the same kind of state and saved fields and returns
+`park`; it has no `x<i>`/`y<i>` fields. A resume block checks cancellation,
+loads the saved fields its suspend block stored, in the same field order, and
+continues:
+
+```text
+bb_resume_<i>:
+  %c = c.call.unsafe @task_cancelled()
+  branch %c, bb_cancel_<i>, bb_after_<i>
+
+bb_after_<i>:
+  ...load x<i>, y<i>, d*, l*, v*, c* in frame field order...
+```
+
+The verifier checks each state's store list and load list are equal as ordered
+field sets. The lowering has no freedom to store a different set on different
+paths to the same suspension point; a conditional save is represented by two
+suspension points. This makes the cross-state initialization contract
+syntactic rather than a general dataflow problem.
+
+The state also selects the callee in the generated trampoline: state
+`resume<i>` with a call-type point maps to the step thunk whose frame type is
+the element type of `x<i>`, passing `x<i>` and `y<i>`. The lowering records
+that callee FunctionId in the step's metadata, so the mapping is an ID lookup,
+not a name match. A `call` return from any other state is a lowering contract
+violation reported by the trampoline.
+
+### Frame access and verification
+
+The frame record is an aggregate type with one legal use: the trailing
+`safe_mut` parameter of exactly one step function, plus `alloc` inside step
+functions and spawn lowering. The verifier recognizes a step function by the
+reserved name and the pinned three-parameter signature; a
+`@__alder_step.frame.*` type that is not the frame of exactly one such
+function, or a step function with a different signature shape, is rejected.
+The verifier adds these rules; they accept new shapes and do not change the
+meaning of any existing MIR 6 module:
+
+- the frame record may contain slice and checked-reference views, domain
+  handles, domain marks, and cleanup-id fields; the ordinary aggregate
+  declaration restrictions for those kinds do not apply to it. Ephemeral
+  table views remain excluded: they cannot complete a table access region
+  across a suspension;
+- `alloc %d, @__alder_step.frame.<instance>, %n` is accepted with `%n == 1`
+  even though the element type recursively contains view and handle kinds;
+- `load` and `store` through a frame field place are accepted for every field
+  type. A handle-typed load keeps the direct identity anchored to the
+  (activation, field) pair; it is not a new dynamic identity on every entry.
+  A view-typed field keeps the provenance of the value stored into it;
+- a frame field place may not be aliased out into an ordinary local, aggregate,
+  vector, table, or function result, and a frame record may not escape its
+  activation; a value loaded from a frame field follows the ordinary rules for
+  its type;
+- `x<i>`/`y<i>` is a borrowed-place pair whose owner is `y<i>`. The frame
+  itself lives in `%frame_owner`, but the view points into the child
+  activation domain `y<i>`; the verifier tracks the pair separately from the
+  frame's own owner, exactly like a `safe_mut` parameter and its owner;
+- `domain.create` and `cleanup.scope.begin` sites in a step function are
+  frame-resident when their value spans a suspension. `domain.create` is
+  executed once by the state that creates it and its handle is saved in
+  `d<i>`. A frame-resident `cleanup.scope.begin` is emitted at the scope's
+  lexical start and again at the start of every resume block lexically inside
+  that scope, in outer-to-inner scope order. Each emission is the same
+  adopting begin on the same frame slot: it initializes the scope on the
+  first entry and returns the existing frame-resident scope on a resume. The
+  verifier treats those static begins as one dynamic scope anchored to the
+  frame field, so the handle dominates the segment's uses and the lexical
+  `cleanup.scope.run`/`end` still execute at the source scope's exit;
+- the frame is the activation's stable storage across states. A frame field
+  of a capability or handle kind may be carried across a state as a local
+  place, subject to the state-indexed store/load equality above and to the
+  ordinary invalidation rules for a reset or destroy that reaches it. A load
+  from a frame field is accepted when the matching suspend block stores that
+  field in its canonical save list; the verifier seeds the resume state with
+  exactly that list, so no general cross-state dataflow is required;
+- a domain handle stored in `d<i>` is invalid after its domain is destroyed
+  on every path, exactly like any other handle. The verifier's per-state
+  tracking replaces the single-function C-slot assumption: the frame slot is
+  stable storage for the activation, re-initialized in place when the source
+  re-creates it, not a C stack slot whose address changes per call;
+- a cleanup scope spanning a state keeps its registrations in the runtime
+  entry list. The verifier records, per state, the active cleanup-scope
+  fields and registered cleanup ids, and a resume begins in the recorded
+  state. A registration whose owner spans a state names a frame field as its
+  `cleanup.push` place, so the runtime context points into the frame and the
+  hook observes the value the frame holds at scope exit. `cleanup.scope.run`
+  must still precede `cleanup.scope.end` on every exit path, and reverse order
+  and at-most-once are checked against the recorded list;
+- the step function's `return` always returns a status variant. `call`
+  requires the current state to be a call-type `resume<i>` with matching
+  `x<i>` and `y<i`; `park` requires a park-type `resume<i>`; `done` requires
+  `out` to be initialized on every path that reaches it; `cancelled` requires
+  no `out` and is reachable only from a cancellation teardown path;
+- `%frame` is used only as the base of `deref` field places; it may not be
+  returned, stored, or passed as an operand.
+
+These rules make the frame representation independent of C syntax. The
+independent Alder MIR 4 encoding is unchanged: a frame is an ordinary
+aggregate, its fields are ordinary type parts, and the state is an ordinary
+enum value.
+
+### Suspend and wakeup protocol
+
+Every suspension point follows the same sequence:
+
+1. Before starting the operation, the step checks cancellation. A canceled
+   task branches to the state's teardown entry and starts no new operation.
+2. The operation registers the current task's wakeup token with the runtime
+   or the host shim. Registration happens before the operation can complete,
+   so a completion that races the step sets the task's wakeup latch instead
+   of being lost.
+3. The step stores its state and saved fields and returns `park` or `call`.
+4. The executor parks the task, or keeps it runnable when the latch was
+   already set ("wake before park"). A wakeup only makes the task runnable;
+   it never resumes a frame by itself. The top activation is re-entered at
+   its state, and the resume block observes the operation's result or
+   cancellation.
+
+Mechanism-specific rules:
+
+- **Capability operations.** A capability wrapper written against `I: Io`
+  lowers its suspending instance to a step function whose leaf calls the
+  host shim: start the operation and register the token, then `park`; on
+  resume, poll or finish the operation and write its result. The shim owns
+  the host-specific handle and the cancel/join contract. A completion may
+  signal from a foreign thread through the thread-safe wakeup token.
+- **`await Task(T)`.** The parent calls `alder_task_await(task_id)`, which
+  registers the parent as a waiter on the child task record and returns
+  either "already complete" or "pending". Pending returns `park`. The child's
+  completion signals the parent. On resume the parent reads the child root
+  frame's `out` through its saved `x<i>` reference, copies it into its own
+  domain with `copy_to_domain`, calls `alder_task_release`, and destroys the
+  child activation domain. A canceled child delivers no value; the parent
+  takes its cancellation edge instead of loading `out`.
+- **Sleeps and timers.** `alder_timer_at(token, deadline)` registers an
+  absolute deadline in executor-clock units. The timer queue signals the
+  token at the deadline. A sleep that is already due signals immediately,
+  which is the wake-before-park case. Cancellation removes the waiter or
+  leaves an already-fired timer inert; the task record is not freed while a
+  timer entry can still name it.
+- **Channels.** A blocked sender or receiver enqueues a waiter holding its
+  generational task id in the channel's group-owned state, then `park`s. The
+  matching peer dequeues and signals the waiter through its task id after the
+  queue update. A resumed
+  operation retries its state, so a spurious or cancellation wake cannot
+  corrupt the FIFO. Closing a channel signals every waiter; each resumes
+  into its explicit closed result.
+- **Cancellation.** `alder_task_cancelled()` is the only cancellation
+  observation. It is checked at the entry of every resume block, before every
+  call or park handoff, and by the explicit `check_cancel` checkpoint. A
+  canceled task runs its teardown from the state it was in and returns
+  `cancelled`; it never resumes user code after a suspension with the cancel
+  flag set.
+
+A wakeup token is one stable address inside the task record. It is valid from
+task creation until the runtime has removed every registration and the task
+record is released. Signalling is idempotent; a signal after the task is
+already runnable only sets the latch.
+
+### Cancellation, cleanup, and shielded teardown
+
+Cancellation unwinds the activation stack from the top down. The top
+activation observes the flag, runs its teardown, returns `cancelled`, and is
+popped; then its caller observes the cancellation edge, destroys the released
+callee domain, runs its own teardown, and is popped. The shield is task-wide,
+so a `cancelled` return can only be produced while the caller's shield depth
+is also zero; the caller's cancellation check therefore observes the flag and
+cannot fall through to a value path. This is the reverse order of
+activation, and within one frame it is the reverse registration order of the
+cleanup scopes and their entries.
+
+Teardown is entered with the task's shield raised:
+
+- `alder_task_shield_push`/`pop` maintain a depth in the task record, not in a
+  frame. The depth survives `park` and `call`, so a cleanup hook that joins
+  children can suspend and resume while still shielded.
+- While the depth is positive, `alder_task_cancelled()` reports false. The
+  task may still terminate on an invariant failure; the shield suppresses
+  repeated cancellation, not failure.
+- The teardown path releases a completed callee activation domain, runs the
+  frame's cleanup scopes innermost first, and only then pops its own
+  activation. A scope's entries run in reverse registration order and at most
+  once; `cleanup.scope.run` is a suspension point when a hook may suspend, and
+  its cursor lives in the frame-resident scope object, so a suspended run
+  resumes at the next entry rather than restarting. The splitter expands such
+  a run into a cursor loop with one `cleanup<j>` state per suspending entry: a
+  non-suspending entry runs in the current segment, a suspending entry is a
+  call or park activation, and the run resumes at the next entry. A run with
+  no suspending entries keeps the single instruction.
+- A group's cleanup hook cancels its children, joins them, and releases their
+  task records and activation domains. The join is a suspending call inside
+  the shielded teardown. A child whose foreign operation cannot be interrupted
+  keeps its state alive until C returns; the domain and task record are not
+  freed before that.
+- A capability operation's teardown drives its shim to a terminal state
+  (completed, canceled, or joined) before the leaf activation returns `done`.
+  The shim owns its host context and never points into the activation domain;
+  if it needs a copy of a frame value it copies it into group-owned state. An
+  uninterruptible C call therefore parks the shielded teardown until it
+  returns instead of leaving a token that outlives the task.
+
+No path frees a frame, an activation domain, or a task record while an
+activation can still name it: the callee domain is destroyed only after the
+callee activation has been popped and its result copied; the task record is
+released only after its activation stack is empty, all wakeup and timer
+registrations are removed, and any blocking-pool retain is released.
+
+### Recursion
+
+Recursion under one concrete capability is ordinary recursion of the same
+suspending instance. Every call allocates a fresh activation domain and frame
+in task storage; frames are never shared or reused by an activation. The
+executor's activation stack grows and shrinks on the heap, so worker C stack
+use stays constant with logical depth. The cost of a call is one frame record
+plus one activation domain, and the cost of a resume is one re-entry of each
+activation from the current top down to the suspended leaf.
+
+Recursion that changes the capability type is specialization-expanding and is
+rejected before monomorphization, so it never produces a new step instance.
+
+### Worked example
+
+Source, with one potentially suspending call:
+
+```text
+fn size(I: type(Io), io: I, path: Path) -> Result(U64, IoError) {
+    let text = try std.fs.read_text(io, path)
+    return Ok(text.len())
+}
+```
+
+The `Blocking` instance is direct MIR. The callee is the non-suspending
+`read_text.Blocking` instance; the `try` is a switch on its result; `str.len`
+and enum construction follow. Runtime calls and elided callee bodies are
+written as `call @...` in these sketches; the real module reaches runtime
+entries through binding blocks and `c.call.unsafe`. Supporting type,
+constant, binding, and callee declarations are elided; the instruction,
+terminator, place, and type spellings shown are the printed forms, and long
+function headers are wrapped here for readability (the printer emits one
+line).
+
+```text
+mir 6
+
+const @one: u64 = 1
+
+fn @read_text.Blocking(%d: domain_handle, %io: @Blocking, %path: @Path) -> result(string, @IoError) {
+bb0:
+  panic
+}
+
+fn @size.Blocking(%d: domain_handle, %io: @Blocking, %path: @Path) -> result(u64, @IoError) {
+bb0:
+  %r = call @read_text.Blocking(%d, %io, %path)
+  switch %r {
+    err(%e) -> bb_err
+    ok(%text) -> bb_ok
+  }
+
+bb_err:
+  %f = enum.construct result(u64, @IoError), err, %e
+  fail %f
+
+bb_ok:
+  %n = str.len %text
+  %o = enum.construct result(u64, @IoError), ok, %n
+  return %o
+}
+```
+
+The `Evented` instance is a step function. The frame carries the state, the
+two parameters, the callee reference and owner, and `out`:
+
+```text
+enum @__alder_step.status {
+  done
+  call
+  park
+  cancelled
+}
+
+enum @__alder_step.state.size.Evented {
+  entry
+  resume0
+}
+
+enum @__alder_step.state.read_text.Evented {
+  entry
+  resume0
+}
+
+type @__alder_step.frame.read_text.Evented {
+  state: @__alder_step.state.read_text.Evented
+  p0: @Evented
+  p1: @Path
+  out: result(string, @IoError)
+}
+
+type @__alder_step.frame.size.Evented {
+  state: @__alder_step.state.size.Evented
+  p0: @Evented
+  p1: @Path
+  x0: safe_mut(@__alder_step.frame.read_text.Evented)
+  y0: domain_handle
+  out: result(u64, @IoError)
+}
+```
+
+```text
+fn @__alder_step.run.size.Evented(%d: domain_handle,
+    %frame: safe_mut(@__alder_step.frame.size.Evented),
+    %frame_owner: domain_handle) -> @__alder_step.status {
+bb0:
+  %state = load field(deref %frame, state)
+  switch %state {
+    entry -> bb_entry
+    resume0 -> bb_resume0
+  }
+
+bb_entry:
+  %cancelled = call @task_cancelled()
+  branch %cancelled, bb_cancel0, bb_call0
+
+bb_call0:
+  %one = const.get @one
+  %child_domain = domain.create %frame_owner
+  %child = alloc %child_domain, @__alder_step.frame.read_text.Evented, %one
+  %p0 = load field(deref %frame, p0)
+  store field(deref %child, p0), %p0
+  %p1 = load field(deref %frame, p1)
+  store field(deref %child, p1), %p1
+  %entry = enum.construct @__alder_step.state.read_text.Evented, entry
+  store field(deref %child, state), %entry
+  %resume = enum.construct @__alder_step.state.size.Evented, resume0
+  store field(deref %frame, state), %resume
+  store field(deref %frame, x0), %child
+  store field(deref %frame, y0), %child_domain
+  %call = enum.construct @__alder_step.status, call
+  return %call
+
+bb_resume0:
+  %cancelled0 = call @task_cancelled()
+  branch %cancelled0, bb_cancel1, bb_join
+
+bb_join:
+  %child0 = load field(deref %frame, x0)
+  %r = load field(deref %child0, out)
+  %own = copy_to_domain %d, %r
+  %child_domain0 = load field(deref %frame, y0)
+  domain.destroy %child_domain0
+  store field(deref %frame, out), %own
+  %done = enum.construct @__alder_step.status, done
+  return %done
+
+bb_cancel0:
+  %st_cancel0 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel0
+
+bb_cancel1:
+  %child_domain1 = load field(deref %frame, y0)
+  domain.destroy %child_domain1
+  %st_cancel1 = enum.construct @__alder_step.status, cancelled
+  return %st_cancel1
+}
+```
+
+`bb_cancel1` is the teardown from `resume0`: the callee activation has already
+been popped by the executor, so the callee domain can be destroyed. Teardown
+would also run the frame's cleanup scopes in reverse order and raise the task
+shield; the sketch omits those operations because this function has no
+`using` registrations. The leaf `read_text.Evented` step is the park-only
+case: its `bb_entry` starts the shim and returns `park` after storing
+`resume0`, and its `bb_resume0` polls the shim, writes `out`, and returns
+`done`.
+
+### Operations and versioning
+
+The frame and step representation itself needs **no new MIR operation and no
+new format version**. It is written entirely in existing `mir 6` syntax:
+frames are ordinary aggregates, states are ordinary enums, dispatch is
+`switch`, suspension is `return`, and frame access is `load`/`store` through
+`deref` field places. The only additions are verifier acceptance rules for
+the reserved frame shape and the lowering convention for the generated
+trampoline; both preserve the meaning of existing modules. New golden
+fixtures for the direct and step instances are `mir 6` fixtures.
+
+The task surface adds one operation, in `mir 7`:
+
+```text
+task.spawn %group, @__alder_step.run.<instance>, %frame, %domain -> u64
+```
+
+`%group` is a runtime group id (`u64`) produced by the `std.task` group
+binding; the group record owns the child list and cancellation state, and its
+public API lands with gate 9.4. The target is a step function whose
+frame type is the element type of `%frame`; `%frame` is the one-element
+`safe_mut` allocated in `%domain`; `%domain` is the activation domain. The
+operation creates a task record, pushes the target as its root activation,
+makes the task runnable, and returns a generational task id. At the C level it
+lowers to `alder_task_create` followed by `alder_task_start` and
+`alder_task_id`; the two-phase form exists so the runtime can keep the task
+unrunnable while the spawner initializes the frame, and `task.spawn` performs
+both phases in one MIR instruction. The task record borrows `%domain` and
+`%frame` until `alder_task_release`; the spawner keeps ownership and destroys
+the domain after release. The borrow is a safe-wrapper and lowering contract,
+not a new verifier fact: `release` is an ordinary binding, so the verifier
+keeps the values live, and the lowering never allocates, resets, or destroys a
+spawned activation domain from the spawner while the task is live. A
+test-build domain check reports a violation of that contract. `task.spawn` is needed
+because the handoff passes `safe_mut` and `domain_handle` values that no
+verified C binding can name. `await`, `release`, `cancel`, `yield`, sleep,
+channel, and shield operations are ordinary bindings over C scalar values and
+task ids and add no MIR operation. `task.spawn` lands through the versioning
+process with the `Pending(T)` typing surface in gate 9.4; gate 9.2 exercises
+the `alder_task_create`/`alder_task_start` C ABI directly. The worked example
+above contains no spawn site and stays `mir 6`.
+
 ## Textual MIR
 
-The current textual format is `mir 4`; the parser and verifier retain legacy
-`mir 1`, `mir 2`, and `mir 3` support. MIR 2 adds the `panic` terminator, MIR 3
-adds `alloc.checked`, and MIR 4 adds Vec, so use under an older header is rejected
-rather than silently changing the old format. Function headers are predeclared
+The current textual format is `mir 6`; the parser and verifier retain legacy
+`mir 1` through `mir 5` support. Each version admits only its documented
+features, so a module under an older header is rejected rather than silently
+changed. Function headers are predeclared
 in textual order before function bodies are parsed, so calls and cleanup
 callbacks may name the current function or any later function; `FunctionId`
 values remain textual declaration order. Named types, constants, and imports
@@ -1127,7 +1781,11 @@ operations (86-87), the C scalar conversion method operations (88-90), the float
 operations (91-94), the ordering comparison operation (95), the C
 record field operations (96-97), the C-string ownership operations (98-101),
 the display operation (102), the total bitwise operations (103-106), and the
-call-scoped buffer borrow (107).
+call-scoped buffer borrow (107). `mir 7` is reserved for the task surface's
+single new operation, `task.spawn` (108), pinned in
+[Suspending Instances and Step Frames](#suspending-instances-and-step-frames);
+it lands with gate 9.4 and changes nothing else in the format. Step frames,
+state enums, and the direct/step split use only `mir 6` syntax.
 Incompatible changes must use a new version and update:
 
 - this document;

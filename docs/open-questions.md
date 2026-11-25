@@ -19,17 +19,6 @@ updates (D023), and reports retention/copy costs at compiler scale. It must be
 field-precise and judge views by their later uses. The safe outer-domain
 fallback and the in-place-when-unique rule are not open.
 
-### Exact MIR representation for async suspension
-
-Required result: implement [Async and Structured Concurrency](async.md).
-
-The representation family is decided by
-[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend):
-no suspension terminator; suspending instances split into ordinary CFG step
-functions before backend MIR, and the same source also lowers to direct MIR.
-Milestone 9 gate 9.0 pins the exact operation set, frame layout, and trampoline
-ABI in the owning documents; this item closes when that contract lands.
-
 ### Windows tier-1 C toolchain
 
 Required result: qualify Windows x86-64 for Alder 1.0.
@@ -101,3 +90,12 @@ These may receive separate design proposals after 1.0:
 When an item is resolved, move the result to its owning contract and summarize
 it in [Design Decisions](design-decisions.md). Do not preserve stale alternatives
 here as if they remain equally valid.
+
+### Exact MIR representation for async suspension
+
+Resolved by
+[D029](design-decisions.md#d029--suspension-lowers-to-plain-cfg-mir-before-the-c-backend).
+The exact contract is pinned in
+[MIR](mir.md#suspending-instances-and-step-frames) and
+[C11 Backend](c-backend.md#step-trampolines-and-the-task-runtime); this heading
+remains only so the frozen async contract's link resolves.
