@@ -1028,10 +1028,12 @@ this exact order. Omitted groups produce no field:
    MIR value-ID order.
 8. `c<i>`: one `cleanup_id` live across a suspension point, in registration
    site order.
-9. `out`: the instance's result type. Always last.
+9. `s<i>`: one `cleanup_scope` for each frame-resident `cleanup.scope.begin`
+   site whose scope spans a suspension point, in begin-site order.
+10. `out`: the instance's result type. Always last.
 
 `<i>` in a field name is its zero-based decimal index, so the literal names are
-`p0`, `p1`, `o0`, `x0`, `y0`, `d0`, `l0`, `v0`, `c0`, and `out`; state
+`p0`, `p1`, `o0`, `x0`, `y0`, `d0`, `l0`, `v0`, `c0`, `s0`, and `out`; state
 variants use the same spelling (`entry`, `resume0`, `resume1`, ...). A
 unit-typed source parameter is omitted from the frame, matching the C ABI rule
 that drops unit parameters. A borrowed parameter's `p<i>`/`o<i>` pair is the
@@ -1096,9 +1098,9 @@ under gate 9.8 rather than silently accumulating unmeasured memory.
 
 For this purpose the frame record is the only aggregate exempt from the
 ordinary declaration, allocation, and dereference-store restrictions on
-`safe_mut`, `safe_ref`, `slice`, `domain_handle`, `domain_mark`, and
-`cleanup_id` fields, and it may not be used as any other value type. Section
-"Frame access and verification" pins the exact rules.
+`safe_mut`, `safe_ref`, `slice`, `domain_handle`, `domain_mark`,
+`cleanup_id`, and `cleanup_scope` fields, and it may not be used as any other
+value type. Section "Frame access and verification" pins the exact rules.
 
 ### State numbering and dispatch
 
@@ -1209,10 +1211,13 @@ meaning of any existing MIR 6 module:
   lexical start and again at the start of every resume block lexically inside
   that scope, in outer-to-inner scope order. Each emission is the same
   adopting begin on the same frame slot: it initializes the scope on the
-  first entry and returns the existing frame-resident scope on a resume. The
-  verifier treats those static begins as one dynamic scope anchored to the
-  frame field, so the handle dominates the segment's uses and the lexical
-  `cleanup.scope.run`/`end` still execute at the source scope's exit;
+  first entry and returns the existing frame-resident scope on a resume.
+  Every emission stores its result into the scope's `s<i>` field before use,
+  and the verifier anchors all emissions storing the same `s<i>` to one
+  dynamic scope, so the handle dominates the segment's uses and the lexical
+  `cleanup.scope.run`/`end` still execute at the source scope's exit. `s<i>`
+  participates in the state-indexed save/load equality like every other
+  saved field;
 - the frame is the activation's stable storage across states. A frame field
   of a capability or handle kind may be carried across a state as a local
   place, subject to the state-indexed store/load equality above and to the
@@ -1234,10 +1239,17 @@ meaning of any existing MIR 6 module:
   must still precede `cleanup.scope.end` on every exit path, and reverse order
   and at-most-once are checked against the recorded list;
 - the step function's `return` always returns a status variant. `call`
-  requires the current state to be a call-type `resume<i>` with matching
-  `x<i>` and `y<i`; `park` requires a park-type `resume<i>`; `done` requires
-  `out` to be initialized on every path that reaches it; `cancelled` requires
-  no `out` and is reachable only from a cancellation teardown path;
+  requires the current state to be a call-type `resume<i>` or `cleanup<j>`
+  with matching `x<i>` and `y<i>`; `park` requires a park-type `resume<i>` or
+  `cleanup<j>`; `done` requires `out` to be initialized on every path that
+  reaches it; `cancelled` requires no `out` and is reachable only from a
+  cancellation teardown path. A `cleanup<j>` state is the suspension point of
+  a suspending cleanup entry and follows the same dispatch, save/load
+  equality, and cancellation-check rules as a `resume<i>` state;
+- the cancellation check at a resume or cleanup-resume block entry is a
+  binding call resolved to the runtime's `alder_task_cancelled` entry. The
+  verifier recognizes cancellation observation by that resolved binding
+  target, never by user spelling;
 - `%frame` is used only as the base of `deref` field places; it may not be
   returned, stored, or passed as an operand.
 
@@ -1496,9 +1508,23 @@ bb_join:
   %own = copy_to_domain %d, %r
   %child_domain0 = load field(deref %frame, y0)
   domain.destroy %child_domain0
-  store field(deref %frame, out), %own
-  %done = enum.construct @__alder_step.status, done
-  return %done
+  switch %own {
+    err(%e) -> bb_join_err
+    ok(%text) -> bb_join_ok
+  }
+
+bb_join_err:
+  %fe = enum.construct result(u64, @IoError), err, %e
+  store field(deref %frame, out), %fe
+  %done_err = enum.construct @__alder_step.status, done
+  return %done_err
+
+bb_join_ok:
+  %n = str.len %text
+  %fo = enum.construct result(u64, @IoError), ok, %n
+  store field(deref %frame, out), %fo
+  %done_ok = enum.construct @__alder_step.status, done
+  return %done_ok
 
 bb_cancel0:
   %st_cancel0 = enum.construct @__alder_step.status, cancelled
