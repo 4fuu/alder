@@ -22,7 +22,7 @@ var strictFlags = []string{
 
 // testPrograms are the runtime behavior test programs, one per runtime area.
 // Each program is added to this list as its runtime section lands.
-var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash"}
+var testPrograms = []string{"domains", "arithmetic", "bounds", "cleanup", "table", "utf8", "hostargs", "hash", "task"}
 
 func findCompiler(t *testing.T) string {
 	t.Helper()
@@ -54,7 +54,8 @@ func buildRuntimeObject(t *testing.T, cc string, extra ...string) string {
 	return object
 }
 
-func compileAndRun(t *testing.T, cc, object, name string, extra ...string) {
+// compileProgram builds one behavior fixture and returns its executable.
+func compileProgram(t *testing.T, cc, object, name string, extra ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	exe := filepath.Join(dir, name+".exe")
@@ -68,6 +69,12 @@ func compileAndRun(t *testing.T, cc, object, name string, extra ...string) {
 	if err != nil {
 		t.Fatalf("compile %s.c failed: %v\n%s", name, err, out)
 	}
+	return exe
+}
+
+func compileAndRun(t *testing.T, cc, object, name string, extra ...string) {
+	t.Helper()
+	exe := compileProgram(t, cc, object, name, extra...)
 	run, err := exec.Command(exe).CombinedOutput()
 	if err != nil {
 		t.Fatalf("run %s failed: %v\n%s", name, err, run)
@@ -114,6 +121,41 @@ func TestRuntimePrograms(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			compileAndRun(t, cc, object, name)
+		})
+	}
+}
+
+// TestRuntimeTaskContractPanics checks the documented contract-violation
+// terminations of the task runtime. One scenario per process, because the
+// first violation exits with the invariant status.
+func TestRuntimeTaskContractPanics(t *testing.T) {
+	cc := findCompiler(t)
+	object := buildRuntimeObject(t, cc)
+	exe := compileProgram(t, cc, object, "task_panic")
+	scenarios := []struct {
+		name string
+		want string
+	}{
+		{"release-parked", "task.release with a live activation stack"},
+		{"release-timer", "task.release with a live registration"},
+		{"release-foreign", "task.release of a released or foreign id"},
+		{"cancel-released", "task.cancel of a released or foreign id"},
+		{"shield-underflow", "task.shield_pop at depth zero"},
+		{"call-without-publication", "step.call without a task.call publication"},
+		{"invalid-status", "step returned an invalid status"},
+		{"await-self", "task.await of the current task"},
+	}
+	for _, scenario := range scenarios {
+		scenario := scenario
+		t.Run(scenario.name, func(t *testing.T) {
+			out, err := exec.Command(exe, scenario.name).CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 101 {
+				t.Fatalf("scenario %s status = %v, want 101; output=%s", scenario.name, err, out)
+			}
+			if !strings.Contains(string(out), scenario.want) {
+				t.Fatalf("scenario %s output missing %q: %s", scenario.name, scenario.want, out)
+			}
 		})
 	}
 }

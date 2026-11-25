@@ -49,6 +49,7 @@ struct AlderTableSlot {
 struct AlderCleanupEntry {
     AlderCleanupEntry *next;
     AlderCleanupFn fn;
+    AlderStepFn step;
     void *context;
     bool armed;
 };
@@ -426,12 +427,30 @@ bool alder_cleanup_scope_begin(AlderCleanupScope *scope) {
     scope->spent_head = NULL;
     scope->ran = false;
     scope->active = true;
+    scope->cursor = false;
     return true;
 }
 
-bool alder_cleanup_push(AlderCleanupScope *scope, AlderCleanupFn fn,
-                        void *context, AlderCleanupId *out_id) {
-    if (scope == NULL || !scope->active || fn == NULL || out_id == NULL) {
+bool alder_cleanup_scope_begin_adopting(AlderCleanupScope *scope) {
+    if (scope == NULL) {
+        return false;
+    }
+    if (scope->active) {
+        return true;
+    }
+    scope->armed_head = NULL;
+    scope->spent_head = NULL;
+    scope->ran = false;
+    scope->active = true;
+    scope->cursor = false;
+    return true;
+}
+
+static bool cleanup_push_entry(AlderCleanupScope *scope, AlderCleanupFn fn,
+                               AlderStepFn step, void *context,
+                               AlderCleanupId *out_id) {
+    if (scope == NULL || !scope->active || out_id == NULL ||
+        (fn == NULL && step == NULL)) {
         return false;
     }
     AlderCleanupEntry *entry = (AlderCleanupEntry *)rt_malloc(sizeof *entry);
@@ -439,6 +458,7 @@ bool alder_cleanup_push(AlderCleanupScope *scope, AlderCleanupFn fn,
         return false;
     }
     entry->fn = fn;
+    entry->step = step;
     entry->context = context;
     entry->armed = true;
     entry->next = scope->armed_head; /* newest first: reverse registration
@@ -446,6 +466,16 @@ bool alder_cleanup_push(AlderCleanupScope *scope, AlderCleanupFn fn,
     scope->armed_head = entry;
     *out_id = entry;
     return true;
+}
+
+bool alder_cleanup_push(AlderCleanupScope *scope, AlderCleanupFn fn,
+                        void *context, AlderCleanupId *out_id) {
+    return cleanup_push_entry(scope, fn, NULL, context, out_id);
+}
+
+bool alder_cleanup_push_step(AlderCleanupScope *scope, AlderStepFn driver,
+                             void *context, AlderCleanupId *out_id) {
+    return cleanup_push_entry(scope, NULL, driver, context, out_id);
 }
 
 bool alder_cleanup_disarm(AlderCleanupId id) {
@@ -456,22 +486,8 @@ bool alder_cleanup_disarm(AlderCleanupId id) {
     return true;
 }
 
-bool alder_cleanup_run(AlderCleanupScope *scope) {
-    if (scope == NULL || !scope->active) {
-        return false;
-    }
-    AlderCleanupEntry *entry = scope->armed_head;
-    while (entry != NULL) {
-        AlderCleanupEntry *next = entry->next;
-        if (entry->armed) {
-            entry->armed = false;
-            entry->fn(entry->context);
-        }
-        entry = next;
-    }
-    /* Everything executed or skipped becomes spent; a later run has nothing
-     * to execute, so every entry runs at most once. The spent list must be
-     * preserved across runs so entries of earlier runs are still freed. */
+/* Move every remaining armed entry to the spent list. */
+static void cleanup_spend_armed(AlderCleanupScope *scope) {
     if (scope->armed_head != NULL) {
         AlderCleanupEntry *tail = scope->armed_head;
         while (tail->next != NULL) {
@@ -482,7 +498,92 @@ bool alder_cleanup_run(AlderCleanupScope *scope) {
         scope->armed_head = NULL;
     }
     scope->ran = true;
+}
+
+bool alder_cleanup_run(AlderCleanupScope *scope) {
+    if (scope == NULL || !scope->active) {
+        return false;
+    }
+    if (scope->cursor) {
+        alder_runtime_panic("cleanup.run after a cleanup cursor");
+    }
+    AlderCleanupEntry *entry = scope->armed_head;
+    while (entry != NULL) {
+        AlderCleanupEntry *next = entry->next;
+        if (entry->armed) {
+            if (entry->step != NULL) {
+                alder_runtime_panic("cleanup.run with a suspending entry");
+            }
+            entry->armed = false;
+            entry->fn(entry->context);
+        }
+        entry = next;
+    }
+    /* Everything executed or skipped becomes spent; a later run has nothing
+     * to execute, so every entry runs at most once. The spent list must be
+     * preserved across runs so entries of earlier runs are still freed. */
+    cleanup_spend_armed(scope);
     return true;
+}
+
+/* Consume disarmed entries and return the next armed entry, or NULL. */
+static AlderCleanupEntry *cleanup_peek(AlderCleanupScope *scope) {
+    while (scope->armed_head != NULL && !scope->armed_head->armed) {
+        AlderCleanupEntry *skip = scope->armed_head;
+        scope->armed_head = skip->next;
+        skip->next = scope->spent_head;
+        scope->spent_head = skip;
+    }
+    return scope->armed_head;
+}
+
+static bool cleanup_cursor(AlderCleanupScope *scope, AlderCleanupFn *fn,
+                           AlderStepFn *step, void **context) {
+    if (scope == NULL || !scope->active || context == NULL) {
+        return false;
+    }
+    scope->cursor = true;
+    AlderCleanupEntry *entry = cleanup_peek(scope);
+    if (entry == NULL) {
+        scope->ran = true;
+        return false;
+    }
+    if (fn != NULL) {
+        if (entry->step != NULL) {
+            return false;
+        }
+        if (entry->fn == NULL) {
+            alder_runtime_panic("cleanup entry has no hook");
+        }
+        *fn = entry->fn;
+    } else {
+        if (step == NULL || entry->step == NULL) {
+            return false;
+        }
+        *step = entry->step;
+    }
+    *context = entry->context;
+    entry->armed = false;
+    scope->armed_head = entry->next;
+    entry->next = scope->spent_head;
+    scope->spent_head = entry;
+    return true;
+}
+
+bool alder_cleanup_scope_next(AlderCleanupScope *scope, AlderCleanupFn *fn,
+                              void **context) {
+    if (fn == NULL) {
+        return false;
+    }
+    return cleanup_cursor(scope, fn, NULL, context);
+}
+
+bool alder_cleanup_scope_next_step(AlderCleanupScope *scope,
+                                   AlderStepFn *driver, void **context) {
+    if (driver == NULL) {
+        return false;
+    }
+    return cleanup_cursor(scope, NULL, driver, context);
 }
 
 bool alder_cleanup_end(AlderCleanupScope *scope) {
@@ -493,16 +594,7 @@ bool alder_cleanup_end(AlderCleanupScope *scope) {
     if (!ok) {
         /* Contract violation: run must precede end. Move leftovers to spent
          * and free everything so nothing leaks. */
-        AlderCleanupEntry *head = scope->armed_head;
-        if (head != NULL) {
-            AlderCleanupEntry *tail = head;
-            while (tail->next != NULL) {
-                tail = tail->next;
-            }
-            tail->next = scope->spent_head;
-            scope->spent_head = head;
-            scope->armed_head = NULL;
-        }
+        cleanup_spend_armed(scope);
     }
     AlderCleanupEntry *entry = scope->spent_head;
     while (entry != NULL) {
@@ -511,8 +603,974 @@ bool alder_cleanup_end(AlderCleanupScope *scope) {
         entry = next;
     }
     scope->spent_head = NULL;
+    scope->armed_head = NULL;
     scope->active = false;
+    scope->cursor = false;
     return ok;
+}
+
+/* ------------------------------------------------------------------ */
+/* Task runtime                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The first executor is one worker in one OS thread. The run queue is a
+ * FIFO guarded by a short C11 atomic spin lock, so wakeups from foreign
+ * shims may enter it safely; the timer heap is ordered by (deadline,
+ * task-id), and each task's activation stack grows in fixed-size heap
+ * blocks whose addresses never move while an activation is live.
+ */
+#define ALDER_ACTIVATION_BLOCK ((size_t)32)
+
+typedef enum {
+    ALDER_TASK_CREATED = 0,
+    ALDER_TASK_RUNNABLE = 1,
+    ALDER_TASK_RUNNING = 2,
+    ALDER_TASK_PARKED = 3,
+    ALDER_TASK_DONE = 4
+} AlderTaskState;
+
+typedef struct AlderActivation {
+    AlderStepFn step;
+    void *frame;
+    AlderDomain *domain;
+} AlderActivation;
+
+typedef struct AlderActivationBlock {
+    struct AlderActivationBlock *previous;
+    size_t count;
+    AlderActivation entries[ALDER_ACTIVATION_BLOCK];
+} AlderActivationBlock;
+
+typedef struct AlderTimer AlderTimer;
+typedef struct AlderGroup AlderGroup;
+typedef struct AlderTaskSlot AlderTaskSlot;
+
+struct AlderWakeup {
+    atomic_bool latch;
+    AlderTask *task;
+};
+
+struct AlderGroup {
+    AlderGroup *next;
+    AlderTask *head;
+    uint64_t id;
+};
+
+struct AlderTaskSlot {
+    AlderTask *task;
+    uint32_t generation;
+    uint32_t next_free;
+};
+
+struct AlderTimer {
+    uint64_t deadline;
+    uint64_t task_id;
+    AlderWakeup *wakeup;
+    AlderTask *task;
+    size_t heap_index;
+    AlderTimer *task_prev;
+    AlderTimer *task_next;
+    bool active;
+};
+
+struct AlderTask {
+    AlderWakeup wakeup;
+    uint64_t id;
+    AlderGroup *group;
+    AlderTask *group_prev;
+    AlderTask *group_next;
+    atomic_int state;
+    atomic_bool cancel_requested;
+    uint32_t shield_depth;
+    uint32_t wait_reason;
+    uint32_t slot_index;
+    AlderActivationBlock *base;
+    AlderActivationBlock *top_block;
+    size_t depth;
+    AlderTimer *timers_head;
+    AlderTask *awaiter;
+    bool awaited;
+    AlderTask *awaiting;
+    AlderStepFn pending_step;
+    void *pending_frame;
+    AlderDomain *pending_domain;
+    bool pending_call;
+    AlderTask *run_next;
+};
+
+static _Thread_local AlderTask *g_current_task;
+
+static atomic_flag g_run_lock = ATOMIC_FLAG_INIT;
+static AlderTask *g_run_head;
+static AlderTask *g_run_tail;
+
+static AlderTaskSlot *g_task_slots;
+static size_t g_task_slot_count;
+static size_t g_task_slot_capacity;
+static uint32_t g_task_free_head = UINT32_MAX;
+static size_t g_live_tasks;
+static uint32_t g_next_task_generation = 1;
+
+static AlderGroup *g_groups;
+
+static AlderTimer **g_timer_heap;
+static size_t g_timer_count;
+static size_t g_timer_capacity;
+static uint64_t g_clock;
+static bool g_executor_running;
+
+static AlderTask *current_task_checked(const char *message) {
+    if (g_current_task == NULL) {
+        alder_runtime_panic(message);
+    }
+    return g_current_task;
+}
+
+static void run_queue_push(AlderTask *task) {
+    task->run_next = NULL;
+    while (atomic_flag_test_and_set_explicit(&g_run_lock, memory_order_acquire)) {
+        /* spin */
+    }
+    if (g_run_tail == NULL) {
+        g_run_head = task;
+        g_run_tail = task;
+    } else {
+        g_run_tail->run_next = task;
+        g_run_tail = task;
+    }
+    atomic_flag_clear_explicit(&g_run_lock, memory_order_release);
+}
+
+static AlderTask *run_queue_pop(void) {
+    while (atomic_flag_test_and_set_explicit(&g_run_lock, memory_order_acquire)) {
+        /* spin */
+    }
+    AlderTask *task = g_run_head;
+    if (task != NULL) {
+        g_run_head = task->run_next;
+        if (g_run_head == NULL) {
+            g_run_tail = NULL;
+        }
+        task->run_next = NULL;
+    }
+    atomic_flag_clear_explicit(&g_run_lock, memory_order_release);
+    return task;
+}
+
+static bool task_transition(AlderTask *task, int from, int to) {
+    int expected = from;
+    return atomic_compare_exchange_strong_explicit(
+        &task->state, &expected, to, memory_order_seq_cst, memory_order_seq_cst);
+}
+
+static void task_enqueue_from(AlderTask *task, int from) {
+    if (!task_transition(task, from, ALDER_TASK_RUNNABLE)) {
+        alder_runtime_panic("task state transition failed");
+    }
+    run_queue_push(task);
+}
+
+static AlderActivation *task_top(AlderTask *task) {
+    if (task->top_block == NULL || task->top_block->count == 0) {
+        alder_runtime_panic("task activation stack underflow");
+    }
+    return &task->top_block->entries[task->top_block->count - 1];
+}
+
+static void task_push(AlderTask *task, AlderStepFn step, void *frame,
+                      AlderDomain *domain) {
+    if (step == NULL || frame == NULL || domain == NULL) {
+        alder_runtime_panic("task activation with a null field");
+    }
+    if (task->top_block == NULL ||
+        task->top_block->count == ALDER_ACTIVATION_BLOCK) {
+        AlderActivationBlock *block =
+            (AlderActivationBlock *)rt_malloc(sizeof *block);
+        if (block == NULL) {
+            alder_runtime_panic("task activation allocation failure");
+        }
+        block->previous = task->top_block;
+        block->count = 0;
+        task->top_block = block;
+        if (task->base == NULL) {
+            task->base = block;
+        }
+    }
+    AlderActivation *activation =
+        &task->top_block->entries[task->top_block->count];
+    activation->step = step;
+    activation->frame = frame;
+    activation->domain = domain;
+    task->top_block->count += 1;
+    task->depth += 1;
+}
+
+static void task_pop(AlderTask *task) {
+    if (task->top_block == NULL || task->depth == 0) {
+        alder_runtime_panic("task activation stack underflow");
+    }
+    AlderActivationBlock *block = task->top_block;
+    block->count -= 1;
+    task->depth -= 1;
+    if (block->count == 0) {
+        AlderActivationBlock *previous = block->previous;
+        if (task->base == block) {
+            task->base = previous;
+        }
+        task->top_block = previous;
+        rt_free(block);
+    }
+}
+
+static void task_slot_grow(void) {
+    size_t next_capacity = g_task_slot_capacity == 0
+                               ? (size_t)16
+                               : g_task_slot_capacity * (size_t)2;
+    if (next_capacity < g_task_slot_capacity ||
+        next_capacity > SIZE_MAX / sizeof(AlderTaskSlot)) {
+        alder_runtime_panic("task identity space exhausted");
+    }
+    AlderTaskSlot *slots =
+        (AlderTaskSlot *)rt_malloc(next_capacity * sizeof *slots);
+    if (slots == NULL) {
+        alder_runtime_panic("task identity allocation failure");
+    }
+    if (g_task_slot_count > 0) {
+        memcpy(slots, g_task_slots, g_task_slot_count * sizeof *slots);
+    }
+    for (size_t i = g_task_slot_count; i < next_capacity; i++) {
+        slots[i].task = NULL;
+        slots[i].generation = 0;
+        slots[i].next_free = UINT32_MAX;
+    }
+    rt_free(g_task_slots);
+    g_task_slots = slots;
+    g_task_slot_capacity = next_capacity;
+}
+
+static void task_registry_insert(AlderTask *task) {
+    size_t slot_index = 0;
+    if (g_task_free_head != UINT32_MAX) {
+        slot_index = (size_t)g_task_free_head;
+        g_task_free_head = g_task_slots[slot_index].next_free;
+    } else {
+        if (g_task_slot_count == g_task_slot_capacity) {
+            task_slot_grow();
+        }
+        if (g_task_slot_count >= (size_t)UINT32_MAX) {
+            alder_runtime_panic("task identity space exhausted");
+        }
+        slot_index = g_task_slot_count;
+        g_task_slot_count += 1;
+    }
+    AlderTaskSlot *slot = &g_task_slots[slot_index];
+    uint32_t generation = g_next_task_generation;
+    if (generation == 0) {
+        alder_runtime_panic("task identity space exhausted");
+    }
+    g_next_task_generation = (uint32_t)(generation + 1u);
+    slot->generation = generation;
+    slot->task = task;
+    slot->next_free = UINT32_MAX;
+    task->slot_index = (uint32_t)slot_index;
+    task->id = ((uint64_t)generation << 32) | (uint64_t)(slot_index + 1);
+    g_live_tasks += 1;
+}
+
+static AlderTask *task_resolve(uint64_t id, const char *message) {
+    if (id == 0) {
+        alder_runtime_panic(message);
+    }
+    uint32_t index = (uint32_t)(id & UINT64_C(0xffffffff));
+    uint32_t generation = (uint32_t)(id >> 32);
+    if (index == 0) {
+        alder_runtime_panic(message);
+    }
+    size_t slot_index = (size_t)index - 1;
+    if (slot_index >= g_task_slot_count) {
+        alder_runtime_panic(message);
+    }
+    AlderTaskSlot *slot = &g_task_slots[slot_index];
+    if (slot->task == NULL || slot->generation != generation) {
+        alder_runtime_panic(message);
+    }
+    return slot->task;
+}
+
+static void task_registry_remove(AlderTask *task) {
+    AlderTaskSlot *slot = &g_task_slots[task->slot_index];
+    slot->task = NULL;
+    slot->next_free = g_task_free_head;
+    g_task_free_head = task->slot_index;
+    task->slot_index = UINT32_MAX;
+    if (g_live_tasks == 0) {
+        alder_runtime_panic("task registry underflow");
+    }
+    g_live_tasks -= 1;
+    if (g_live_tasks == 0) {
+        rt_free(g_task_slots);
+        g_task_slots = NULL;
+        g_task_slot_count = 0;
+        g_task_slot_capacity = 0;
+        g_task_free_head = UINT32_MAX;
+    }
+}
+
+static AlderGroup *group_get(uint64_t id) {
+    AlderGroup *group = g_groups;
+    while (group != NULL) {
+        if (group->id == id) {
+            return group;
+        }
+        group = group->next;
+    }
+    group = (AlderGroup *)rt_malloc(sizeof *group);
+    if (group == NULL) {
+        alder_runtime_panic("task group allocation failure");
+    }
+    group->id = id;
+    group->head = NULL;
+    group->next = g_groups;
+    g_groups = group;
+    return group;
+}
+
+static void group_remove_if_empty(AlderGroup *group) {
+    if (group->head != NULL) {
+        return;
+    }
+    AlderGroup **link = &g_groups;
+    while (*link != NULL) {
+        if (*link == group) {
+            *link = group->next;
+            rt_free(group);
+            return;
+        }
+        link = &(*link)->next;
+    }
+    alder_runtime_panic("task group link missing");
+}
+
+static void group_link(AlderGroup *group, AlderTask *task) {
+    task->group = group;
+    task->group_prev = NULL;
+    task->group_next = group->head;
+    if (group->head != NULL) {
+        group->head->group_prev = task;
+    }
+    group->head = task;
+}
+
+static void group_unlink(AlderTask *task) {
+    AlderGroup *group = task->group;
+    if (task->group_prev != NULL) {
+        task->group_prev->group_next = task->group_next;
+    } else {
+        group->head = task->group_next;
+    }
+    if (task->group_next != NULL) {
+        task->group_next->group_prev = task->group_prev;
+    }
+    task->group = NULL;
+    task->group_prev = NULL;
+    task->group_next = NULL;
+    group_remove_if_empty(group);
+}
+
+static bool timer_less(const AlderTimer *left, const AlderTimer *right) {
+    if (left->deadline != right->deadline) {
+        return left->deadline < right->deadline;
+    }
+    return left->task_id < right->task_id;
+}
+
+static void timer_swap(size_t left, size_t right) {
+    AlderTimer *temporary = g_timer_heap[left];
+    g_timer_heap[left] = g_timer_heap[right];
+    g_timer_heap[right] = temporary;
+    g_timer_heap[left]->heap_index = left;
+    g_timer_heap[right]->heap_index = right;
+}
+
+static void timer_sift_up(size_t index) {
+    while (index > 0) {
+        size_t parent = (index - 1) / 2;
+        if (!timer_less(g_timer_heap[index], g_timer_heap[parent])) {
+            break;
+        }
+        timer_swap(index, parent);
+        index = parent;
+    }
+}
+
+static void timer_sift_down(size_t index) {
+    for (;;) {
+        size_t left = index * 2 + 1;
+        size_t right = left + 1;
+        size_t best = index;
+        if (left < g_timer_count &&
+            timer_less(g_timer_heap[left], g_timer_heap[best])) {
+            best = left;
+        }
+        if (right < g_timer_count &&
+            timer_less(g_timer_heap[right], g_timer_heap[best])) {
+            best = right;
+        }
+        if (best == index) {
+            break;
+        }
+        timer_swap(index, best);
+        index = best;
+    }
+}
+
+static void timer_heap_insert(AlderTimer *timer) {
+    if (g_timer_count == g_timer_capacity) {
+        size_t next_capacity = g_timer_capacity == 0
+                                   ? (size_t)16
+                                   : g_timer_capacity * (size_t)2;
+        if (next_capacity < g_timer_capacity ||
+            next_capacity > SIZE_MAX / sizeof(AlderTimer *)) {
+            alder_runtime_panic("timer heap capacity exhausted");
+        }
+        AlderTimer **heap =
+            (AlderTimer **)rt_malloc(next_capacity * sizeof *heap);
+        if (heap == NULL) {
+            alder_runtime_panic("timer heap allocation failure");
+        }
+        if (g_timer_count > 0) {
+            memcpy(heap, g_timer_heap, g_timer_count * sizeof *heap);
+        }
+        rt_free(g_timer_heap);
+        g_timer_heap = heap;
+        g_timer_capacity = next_capacity;
+    }
+    timer->heap_index = g_timer_count;
+    timer->active = true;
+    g_timer_heap[g_timer_count] = timer;
+    g_timer_count += 1;
+    timer_sift_up(timer->heap_index);
+}
+
+static AlderTimer *timer_heap_remove_at(size_t index) {
+    AlderTimer *removed = g_timer_heap[index];
+    size_t last = g_timer_count - 1;
+    if (index != last) {
+        g_timer_heap[index] = g_timer_heap[last];
+        g_timer_heap[index]->heap_index = index;
+    }
+    g_timer_count = last;
+    removed->heap_index = SIZE_MAX;
+    removed->active = false;
+    if (index < g_timer_count) {
+        timer_sift_down(index);
+        timer_sift_up(index);
+    }
+    return removed;
+}
+
+static void task_timer_link(AlderTask *task, AlderTimer *timer) {
+    timer->task = task;
+    timer->task_prev = NULL;
+    timer->task_next = task->timers_head;
+    if (task->timers_head != NULL) {
+        task->timers_head->task_prev = timer;
+    }
+    task->timers_head = timer;
+}
+
+static void task_timer_unlink(AlderTimer *timer) {
+    AlderTask *task = timer->task;
+    if (timer->task_prev != NULL) {
+        timer->task_prev->task_next = timer->task_next;
+    } else {
+        task->timers_head = timer->task_next;
+    }
+    if (timer->task_next != NULL) {
+        timer->task_next->task_prev = timer->task_prev;
+    }
+    timer->task = NULL;
+    timer->task_prev = NULL;
+    timer->task_next = NULL;
+}
+
+static void timer_destroy(AlderTimer *timer) {
+    if (timer->active) {
+        (void)timer_heap_remove_at(timer->heap_index);
+    }
+    task_timer_unlink(timer);
+    rt_free(timer);
+}
+
+static void task_park(AlderTask *task) {
+    if (atomic_exchange_explicit(&task->wakeup.latch, false,
+                                 memory_order_seq_cst)) {
+        task_enqueue_from(task, ALDER_TASK_RUNNING);
+        return;
+    }
+    if (!task_transition(task, ALDER_TASK_RUNNING, ALDER_TASK_PARKED)) {
+        return;
+    }
+    if (atomic_exchange_explicit(&task->wakeup.latch, false,
+                                 memory_order_seq_cst)) {
+        int expected = ALDER_TASK_PARKED;
+        if (atomic_compare_exchange_strong_explicit(
+                &task->state, &expected, ALDER_TASK_RUNNABLE,
+                memory_order_seq_cst, memory_order_seq_cst)) {
+            run_queue_push(task);
+        }
+    }
+}
+
+static void task_complete(AlderTask *task) {
+    while (task->timers_head != NULL) {
+        timer_destroy(task->timers_head);
+    }
+    if (task->awaiting != NULL) {
+        task->awaiting->awaiter = NULL;
+        task->awaiting = NULL;
+    }
+    atomic_store_explicit(&task->state, ALDER_TASK_DONE,
+                          memory_order_seq_cst);
+    task->wait_reason = ALDER_WAIT_NONE;
+    if (task->awaiter != NULL) {
+        AlderTask *waiter = task->awaiter;
+        task->awaiter = NULL;
+        waiter->awaiting = NULL;
+        alder_wakeup_signal(&waiter->wakeup);
+    }
+}
+
+static void executor_run_task(AlderTask *task) {
+    for (;;) {
+        AlderActivation *activation = task_top(task);
+        AlderStepStatus status = activation->step(
+            task, activation->domain, activation->frame, activation->domain);
+        switch (status) {
+        case ALDER_STEP_DONE:
+            if (task->pending_call) {
+                alder_runtime_panic("task.call publication without a call status");
+            }
+            if (task->depth == 1) {
+                if (task->shield_depth != 0) {
+                    alder_runtime_panic("task root done with a raised shield");
+                }
+                task_pop(task);
+                task_complete(task);
+            } else {
+                task_pop(task);
+                task_enqueue_from(task, ALDER_TASK_RUNNING);
+            }
+            return;
+        case ALDER_STEP_CALL: {
+            if (!task->pending_call) {
+                alder_runtime_panic("step.call without a task.call publication");
+            }
+            AlderStepFn callee = task->pending_step;
+            void *callee_frame = task->pending_frame;
+            AlderDomain *callee_domain = task->pending_domain;
+            task->pending_step = NULL;
+            task->pending_frame = NULL;
+            task->pending_domain = NULL;
+            task->pending_call = false;
+            task_push(task, callee, callee_frame, callee_domain);
+            continue;
+        }
+        case ALDER_STEP_PARK:
+            if (task->pending_call) {
+                alder_runtime_panic("task.call publication without a call status");
+            }
+            task_park(task);
+            return;
+        case ALDER_STEP_CANCELLED:
+            if (task->pending_call) {
+                alder_runtime_panic("task.call publication without a call status");
+            }
+            if (task->depth == 1) {
+                task_pop(task);
+                task_complete(task);
+            } else {
+                task_pop(task);
+                task_enqueue_from(task, ALDER_TASK_RUNNING);
+            }
+            return;
+        default:
+            alder_runtime_panic("step returned an invalid status");
+        }
+    }
+}
+
+/* 0 = retry, 1 = all complete, 2 = quiescent. */
+static int executor_idle(size_t *blocked_count) {
+    bool retry = false;
+    size_t blocked = 0;
+    for (size_t i = 0; i < g_task_slot_count; i++) {
+        AlderTask *task = g_task_slots[i].task;
+        if (task == NULL) {
+            continue;
+        }
+        int state = atomic_load_explicit(&task->state, memory_order_seq_cst);
+        if (state == ALDER_TASK_DONE) {
+            continue;
+        }
+        if (state == ALDER_TASK_RUNNABLE) {
+            retry = true;
+            continue;
+        }
+        if (state == ALDER_TASK_PARKED &&
+            atomic_load_explicit(&task->wakeup.latch, memory_order_seq_cst)) {
+            retry = true;
+            continue;
+        }
+        blocked += 1;
+    }
+    *blocked_count = blocked;
+    if (retry) {
+        return 0;
+    }
+    if (blocked == 0) {
+        return 1;
+    }
+    return 2;
+}
+
+static int blocked_compare(const void *left, const void *right) {
+    const AlderBlockedTask *a = (const AlderBlockedTask *)left;
+    const AlderBlockedTask *b = (const AlderBlockedTask *)right;
+    if (a->task_id < b->task_id) {
+        return -1;
+    }
+    if (a->task_id > b->task_id) {
+        return 1;
+    }
+    return 0;
+}
+
+static void executor_report_idle(const AlderExecutorHooks *hooks,
+                                 size_t count) {
+    if (hooks == NULL || hooks->on_idle == NULL || count == 0) {
+        return;
+    }
+    if (count > SIZE_MAX / sizeof(AlderBlockedTask)) {
+        alder_runtime_panic("executor idle report is too large");
+    }
+    AlderBlockedTask *blocked =
+        (AlderBlockedTask *)rt_malloc(count * sizeof *blocked);
+    if (blocked == NULL) {
+        alder_runtime_panic("executor idle report allocation failure");
+    }
+    size_t used = 0;
+    for (size_t i = 0; i < g_task_slot_count && used < count; i++) {
+        AlderTask *task = g_task_slots[i].task;
+        if (task == NULL) {
+            continue;
+        }
+        int state = atomic_load_explicit(&task->state, memory_order_seq_cst);
+        if (state == ALDER_TASK_DONE) {
+            continue;
+        }
+        if (state == ALDER_TASK_PARKED &&
+            atomic_load_explicit(&task->wakeup.latch, memory_order_seq_cst)) {
+            continue;
+        }
+        blocked[used].task_id = task->id;
+        blocked[used].wait_reason = task->wait_reason;
+        used += 1;
+    }
+    if (used > 0) {
+        qsort(blocked, used, sizeof *blocked, blocked_compare);
+        hooks->on_idle(hooks->context, blocked, used);
+    }
+    rt_free(blocked);
+}
+
+static void executor_seed_clock(const AlderExecutorHooks *hooks) {
+    if (hooks != NULL && hooks->now != NULL) {
+        uint64_t current = hooks->now(hooks->context);
+        if (current > g_clock) {
+            g_clock = current;
+        }
+    }
+}
+
+bool alder_executor_run(const AlderExecutorHooks *hooks) {
+    if (g_executor_running) {
+        alder_runtime_panic("executor.run re-entered");
+    }
+    g_executor_running = true;
+    executor_seed_clock(hooks);
+    bool all_done = false;
+    for (;;) {
+        executor_seed_clock(hooks);
+        AlderTask *task = run_queue_pop();
+        if (task == NULL) {
+            if (g_timer_count > 0) {
+                AlderTimer *earliest = g_timer_heap[0];
+                if (earliest->deadline > g_clock) {
+                    g_clock = earliest->deadline;
+                }
+                while (g_timer_count > 0 &&
+                       g_timer_heap[0]->deadline <= g_clock) {
+                    AlderTimer *due = timer_heap_remove_at(0);
+                    AlderWakeup *wakeup = due->wakeup;
+                    task_timer_unlink(due);
+                    rt_free(due);
+                    alder_wakeup_signal(wakeup);
+                }
+                continue;
+            }
+            size_t blocked_count = 0;
+            int idle = executor_idle(&blocked_count);
+            if (idle == 0) {
+                continue;
+            }
+            if (idle == 1) {
+                all_done = true;
+                break;
+            }
+            executor_report_idle(hooks, blocked_count);
+            all_done = false;
+            break;
+        }
+        if (!task_transition(task, ALDER_TASK_RUNNABLE, ALDER_TASK_RUNNING)) {
+            alder_runtime_panic("executor dequeued a non-runnable task");
+        }
+        (void)atomic_exchange_explicit(&task->wakeup.latch, false,
+                                       memory_order_seq_cst);
+        task->wait_reason = ALDER_WAIT_NONE;
+        g_current_task = task;
+        executor_run_task(task);
+        g_current_task = NULL;
+    }
+    if (g_timer_count == 0 && g_timer_heap != NULL) {
+        rt_free(g_timer_heap);
+        g_timer_heap = NULL;
+        g_timer_capacity = 0;
+    }
+    g_executor_running = false;
+    return all_done;
+}
+
+AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
+                             AlderDomain *domain) {
+    if (step == NULL || frame == NULL || domain == NULL) {
+        alder_runtime_panic("task.create with a null activation");
+    }
+    AlderTask *task = (AlderTask *)rt_malloc(sizeof *task);
+    if (task == NULL) {
+        alder_runtime_panic("task.create allocation failure");
+    }
+    memset(task, 0, sizeof *task);
+    atomic_init(&task->state, ALDER_TASK_CREATED);
+    atomic_init(&task->cancel_requested, false);
+    atomic_init(&task->wakeup.latch, false);
+    task->wakeup.task = task;
+    task->wait_reason = ALDER_WAIT_NONE;
+    task->slot_index = UINT32_MAX;
+    task_registry_insert(task);
+    AlderGroup *task_group = group_get(group);
+    group_link(task_group, task);
+    task_push(task, step, frame, domain);
+    return task;
+}
+
+void alder_task_start(AlderTask *task) {
+    if (task == NULL) {
+        alder_runtime_panic("task.start of a null task");
+    }
+    if (!task_transition(task, ALDER_TASK_CREATED, ALDER_TASK_RUNNABLE)) {
+        alder_runtime_panic("task.start of a task that is not created");
+    }
+    run_queue_push(task);
+}
+
+void alder_task_call(AlderTask *task, AlderStepFn callee, void *frame,
+                     AlderDomain *domain) {
+    AlderTask *current = current_task_checked("task.call outside a step");
+    if (task != current) {
+        alder_runtime_panic("task.call for another task");
+    }
+    if (callee == NULL || frame == NULL || domain == NULL) {
+        alder_runtime_panic("task.call with a null activation");
+    }
+    if (current->pending_call) {
+        alder_runtime_panic("task.call published twice");
+    }
+    current->pending_step = callee;
+    current->pending_frame = frame;
+    current->pending_domain = domain;
+    current->pending_call = true;
+}
+
+AlderWakeup *alder_task_wakeup(void) {
+    return &current_task_checked("task.wakeup outside a step")->wakeup;
+}
+
+void alder_wakeup_signal(AlderWakeup *wakeup) {
+    if (wakeup == NULL || wakeup->task == NULL) {
+        return;
+    }
+    AlderTask *task = wakeup->task;
+    atomic_store_explicit(&wakeup->latch, true, memory_order_seq_cst);
+    int expected = ALDER_TASK_PARKED;
+    if (atomic_compare_exchange_strong_explicit(
+            &task->state, &expected, ALDER_TASK_RUNNABLE,
+            memory_order_seq_cst, memory_order_seq_cst)) {
+        run_queue_push(task);
+    }
+}
+
+void alder_task_wake_id(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.wake_id of a released or foreign id");
+    alder_wakeup_signal(&target->wakeup);
+}
+
+void alder_task_yield(void) {
+    AlderTask *current = current_task_checked("task.yield outside a step");
+    atomic_store_explicit(&current->wakeup.latch, true,
+                          memory_order_seq_cst);
+}
+
+void alder_task_wait_reason(uint32_t reason) {
+    AlderTask *current =
+        current_task_checked("task.wait_reason outside a step");
+    current->wait_reason = reason;
+}
+
+bool alder_task_cancelled(void) {
+    AlderTask *current =
+        current_task_checked("task.cancelled outside a step");
+    if (current->shield_depth > 0) {
+        return false;
+    }
+    return atomic_load_explicit(&current->cancel_requested,
+                                memory_order_seq_cst);
+}
+
+void alder_task_shield_push(void) {
+    AlderTask *current =
+        current_task_checked("task.shield_push outside a step");
+    if (current->shield_depth == UINT32_MAX) {
+        alder_runtime_panic("task shield depth exhausted");
+    }
+    current->shield_depth += 1;
+}
+
+void alder_task_shield_pop(void) {
+    AlderTask *current =
+        current_task_checked("task.shield_pop outside a step");
+    if (current->shield_depth == 0) {
+        alder_runtime_panic("task.shield_pop at depth zero");
+    }
+    current->shield_depth -= 1;
+}
+
+bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline) {
+    if (wakeup == NULL || wakeup->task == NULL) {
+        alder_runtime_panic("timer.at with a null wakeup");
+    }
+    if (deadline == UINT64_MAX) {
+        return false;
+    }
+    AlderTask *target = wakeup->task;
+    if (atomic_load_explicit(&target->state, memory_order_seq_cst) ==
+        ALDER_TASK_DONE) {
+        alder_runtime_panic("timer.at for a completed task");
+    }
+    if (deadline <= g_clock) {
+        alder_wakeup_signal(wakeup);
+        return true;
+    }
+    AlderTimer *timer = (AlderTimer *)rt_malloc(sizeof *timer);
+    if (timer == NULL) {
+        alder_runtime_panic("timer.at allocation failure");
+    }
+    timer->deadline = deadline;
+    timer->task_id = target->id;
+    timer->wakeup = wakeup;
+    timer->task = NULL;
+    timer->heap_index = SIZE_MAX;
+    timer->task_prev = NULL;
+    timer->task_next = NULL;
+    timer->active = false;
+    task_timer_link(target, timer);
+    timer_heap_insert(timer);
+    return true;
+}
+
+bool alder_task_await(uint64_t child) {
+    AlderTask *parent = current_task_checked("task.await outside a step");
+    AlderTask *target =
+        task_resolve(child, "task.await of a released or foreign id");
+    if (target == parent) {
+        alder_runtime_panic("task.await of the current task");
+    }
+    if (parent->awaiting != NULL) {
+        alder_runtime_panic("task.await while already awaiting");
+    }
+    if (target->awaited) {
+        alder_runtime_panic("task.await of a task awaited twice");
+    }
+    target->awaited = true;
+    if (atomic_load_explicit(&target->state, memory_order_seq_cst) ==
+        ALDER_TASK_DONE) {
+        return true;
+    }
+    target->awaiter = parent;
+    parent->awaiting = target;
+    return false;
+}
+
+void alder_task_cancel(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.cancel of a released or foreign id");
+    atomic_store_explicit(&target->cancel_requested, true,
+                          memory_order_seq_cst);
+    alder_wakeup_signal(&target->wakeup);
+}
+
+void alder_task_release(uint64_t task) {
+    AlderTask *target =
+        task_resolve(task, "task.release of a released or foreign id");
+    if (target == g_current_task) {
+        alder_runtime_panic("task.release of the current task");
+    }
+    if (target->timers_head != NULL) {
+        alder_runtime_panic("task.release with a live registration");
+    }
+    if (target->depth != 0 || target->top_block != NULL ||
+        target->base != NULL) {
+        alder_runtime_panic("task.release with a live activation stack");
+    }
+    if (atomic_load_explicit(&target->state, memory_order_seq_cst) !=
+        ALDER_TASK_DONE) {
+        alder_runtime_panic("task.release of a live task");
+    }
+    if (target->pending_call) {
+        alder_runtime_panic("task.release with a published callee");
+    }
+    if (target->awaiting != NULL) {
+        alder_runtime_panic("task.release while awaiting a child");
+    }
+    if (target->awaiter != NULL) {
+        alder_runtime_panic("task.release of a task another task awaits");
+    }
+    group_unlink(target);
+    task_registry_remove(target);
+    rt_free(target);
+}
+
+uint64_t alder_task_id(void) {
+    return current_task_checked("task.id outside a step")->id;
+}
+
+uint64_t alder_task_handle(AlderTask *task) {
+    if (task == NULL) {
+        alder_runtime_panic("task.handle of a null task");
+    }
+    return task->id;
 }
 
 /* ------------------------------------------------------------------ */

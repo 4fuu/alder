@@ -558,6 +558,175 @@ double alder_f64_div(double a, double b);
 float alder_f32_div(float a, float b);
 
 /* ------------------------------------------------------------------ */
+/* Tasks and step trampolines                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * docs/c-backend.md, "Step Trampolines and the Task Runtime", owns the
+ * detailed contracts. A step thunk is generated code with exactly this
+ * signature: it returns DONE with the result in the frame's out field, CALL
+ * after publishing a callee through alder_task_call, PARK after registering
+ * the task's wakeup with the operation that will signal it, or CANCELLED
+ * after finishing its teardown. results and frame_domain are the same
+ * activation domain.
+ */
+typedef struct AlderTask AlderTask;
+typedef struct AlderWakeup AlderWakeup;
+
+typedef enum AlderStepStatus {
+    ALDER_STEP_DONE = 0,      /* finished; result is in frame->out */
+    ALDER_STEP_CALL = 1,      /* published a callee and yielded */
+    ALDER_STEP_PARK = 2,      /* waits for an external wakeup */
+    ALDER_STEP_CANCELLED = 3  /* teardown done; no result */
+} AlderStepStatus;
+
+typedef AlderStepStatus (*AlderStepFn)(AlderTask *task,
+                                       AlderDomain *results,
+                                       void *frame,
+                                       AlderDomain *frame_domain);
+
+/* Diagnostic wait categories reported by the executor's idle hook. They are
+ * metadata only and never affect scheduling. */
+enum {
+    ALDER_WAIT_NONE = 0,
+    ALDER_WAIT_IO = 1,
+    ALDER_WAIT_TIMER = 2,
+    ALDER_WAIT_TASK = 3,
+    ALDER_WAIT_CHANNEL = 4,
+    ALDER_WAIT_GROUP = 5,
+    ALDER_WAIT_BLOCKING = 6
+};
+
+/* One blocked task in the quiescence report, ordered by task id. */
+typedef struct AlderBlockedTask {
+    uint64_t task_id;
+    uint32_t wait_reason;
+} AlderBlockedTask;
+
+/*
+ * Executor hooks. now seeds and refreshes the executor clock; the single
+ * worker has no other time source, so virtual time advances to the earliest
+ * timer deadline when the queue is idle. start_op and cancel_op are the
+ * capability-operation hooks stored for the evented I/O runtime; the task
+ * foundation has no capability-operation surface yet and does not call them.
+ * on_idle reports a quiescent program: no task is runnable and no timer is
+ * pending, but at least one task is still blocked. The blocked array is
+ * runtime-owned and valid only for the duration of the call. context is
+ * passed to every hook unchanged.
+ */
+typedef uint64_t (*AlderExecutorNowFn)(void *context);
+typedef bool (*AlderExecutorStartOpFn)(void *context, uint64_t task_id,
+                                       uint64_t operation);
+typedef void (*AlderExecutorCancelOpFn)(void *context, uint64_t task_id,
+                                        uint64_t operation);
+typedef void (*AlderExecutorIdleFn)(void *context,
+                                    const AlderBlockedTask *blocked,
+                                    size_t count);
+
+typedef struct AlderExecutorHooks {
+    AlderExecutorNowFn now;
+    AlderExecutorStartOpFn start_op;
+    AlderExecutorCancelOpFn cancel_op;
+    AlderExecutorIdleFn on_idle;
+    void *context;
+} AlderExecutorHooks;
+
+/*
+ * Run the single-worker executor until every started task has completed or
+ * the program is quiescent. Returns true when no incomplete task remains and
+ * false when blocked tasks remain; in the false case on_idle has already
+ * received the blocked set. hooks may be NULL. Re-entering the executor from
+ * a step is a contract violation.
+ */
+bool alder_executor_run(const AlderExecutorHooks *hooks);
+
+/*
+ * Create a task in the created state with one root activation. The caller
+ * owns the root frame and its domain, keeps them valid until release, and
+ * copies any result before destroying the domain. group is an opaque
+ * group id; release unlinks the task from that group. Allocation and
+ * identity exhaustion terminate the process.
+ */
+AlderTask *alder_task_create(uint64_t group, AlderStepFn step, void *frame,
+                             AlderDomain *domain);
+
+/* Commit a created task to the executor's run queue. */
+void alder_task_start(AlderTask *task);
+
+/*
+ * Publish the callee activation for the following ALDER_STEP_CALL return.
+ * Calling it without that return, or returning CALL without it, is a
+ * contract violation.
+ */
+void alder_task_call(AlderTask *task, AlderStepFn callee, void *frame,
+                     AlderDomain *domain);
+
+/* The current task's wakeup token: one stable address per task. */
+AlderWakeup *alder_task_wakeup(void);
+
+/* Set the wakeup latch and enqueue the task when it is parked. Idempotent and
+ * safe from foreign threads. */
+void alder_wakeup_signal(AlderWakeup *wakeup);
+
+/* Resolve a generational task id and signal that task's wakeup. A released or
+ * foreign id is a contract violation. */
+void alder_task_wake_id(uint64_t task);
+
+/* Make the current task runnable at the back of the run queue. The step still
+ * returns PARK; the set latch keeps it runnable. */
+void alder_task_yield(void);
+
+/* Record the diagnostic wait category of the current task. */
+void alder_task_wait_reason(uint32_t reason);
+
+/* Cancellation observation: false while the task's shield depth is positive. */
+bool alder_task_cancelled(void);
+
+/* Raise or lower the task-wide teardown shield. Popping at depth zero is a
+ * contract violation. */
+void alder_task_shield_push(void);
+void alder_task_shield_pop(void);
+
+/*
+ * Register an absolute timer deadline in the monotonically increasing
+ * executor clock. A deadline at or before the current clock signals the
+ * token immediately, which is the wake-before-park case. UINT64_MAX is
+ * reserved as the no-deadline sentinel and returns false; every other
+ * deadline is in range.
+ */
+bool alder_timer_at(AlderWakeup *wakeup, uint64_t deadline);
+
+/*
+ * Register the current task as the waiter on child. Returns true when the
+ * child is already complete; false means the caller must park. A child may
+ * be awaited once, and a released, foreign, or current-task id is a contract
+ * violation.
+ */
+bool alder_task_await(uint64_t child);
+
+/* Set the target's cancel flag and signal its wakeup. Never runs user code on
+ * the caller's thread. */
+void alder_task_cancel(uint64_t task);
+
+/*
+ * Free a completed task record after its activation stack is empty, its
+ * timers are drained, and its await registrations are cleared. Releasing a
+ * live task, or a released or foreign id, is a contract violation. The
+ * caller still owns the root frame and domain.
+ */
+void alder_task_release(uint64_t task);
+
+/* The current task's generational id. */
+uint64_t alder_task_id(void);
+
+/*
+ * The generational id assigned to a task record. This is the companion the
+ * spawn lowering needs to produce task.spawn's u64 result: alder_task_id
+ * observes the current step's task, not a freshly created child.
+ */
+uint64_t alder_task_handle(AlderTask *task);
+
+/* ------------------------------------------------------------------ */
 /* Scoped cleanup                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -574,10 +743,19 @@ typedef struct AlderCleanupScope {
     AlderCleanupEntry *spent_head;
     bool ran;
     bool active;
+    bool cursor;
 } AlderCleanupScope;
 
 /* Activate a scope. Returns false when the scope is already active. */
 bool alder_cleanup_scope_begin(AlderCleanupScope *scope);
+
+/*
+ * Adopt a frame-resident scope. On the first entry it initializes the
+ * zero-initialized slot; on a re-entry after a suspension it returns the
+ * existing active scope unchanged. Generated step code emits this in place
+ * of alder_cleanup_scope_begin.
+ */
+bool alder_cleanup_scope_begin_adopting(AlderCleanupScope *scope);
 
 /*
  * Register a cleanup entry. The context must stay valid until the scope
@@ -586,6 +764,37 @@ bool alder_cleanup_scope_begin(AlderCleanupScope *scope);
  */
 bool alder_cleanup_push(AlderCleanupScope *scope, AlderCleanupFn fn,
                         void *context, AlderCleanupId *out_id);
+
+/*
+ * Register a suspending cleanup entry: a generated step driver thunk plus
+ * its context. The driver is invoked as a call or park activation by the
+ * splitter, never by alder_cleanup_run.
+ */
+bool alder_cleanup_push_step(AlderCleanupScope *scope, AlderStepFn driver,
+                             void *context, AlderCleanupId *out_id);
+
+/*
+ * Resumable cleanup cursor. Both cursors consume the scope's armed list in
+ * reverse registration order, one entry per successful call, and skip
+ * disarmed entries. A cursor returns false without advancing when the next
+ * entry is of the other kind, so a mixed run is:
+ *
+ *   for (;;) {
+ *       if (alder_cleanup_scope_next(&scope, &fn, &ctx)) { fn(ctx); continue; }
+ *       if (alder_cleanup_scope_next_step(&scope, &driver, &ctx)) { ...; }
+ *       break;
+ *   }
+ *
+ * The position is the scope's armed list, so it lives in the frame-resident
+ * scope and survives a suspension. The run is complete when both cursors
+ * report false; at that point every entry is spent and alder_cleanup_end
+ * accepts the scope. Mixing cursors with alder_cleanup_run on one scope is a
+ * contract violation.
+ */
+bool alder_cleanup_scope_next(AlderCleanupScope *scope,
+                              AlderCleanupFn *fn, void **context);
+bool alder_cleanup_scope_next_step(AlderCleanupScope *scope,
+                                   AlderStepFn *driver, void **context);
 
 /*
  * Disarm an armed entry so the next run skips it. Returns false for a NULL
