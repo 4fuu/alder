@@ -252,7 +252,8 @@ fn driver_same_declaration_kind(left: U64, right: U64) -> Bool {
 // values, Map/Set); 130 and above are reserved for the resource half;
 // 155 and above also carry C binding block diagnostics (156-167);
 // 300 through 349 are this thread's checker block (generic implementations
-// and Eq operator dispatch).
+// and Eq operator dispatch); 350 through 359 are the Milestone 9.4 await and
+// Pending frontend block.
 fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: U64, start: U64, end: U64, detail_a: U64, detail_b: U64, detail_c: U64, detail_d: U64, json: Bool) -> Bool {
     if kind == 156 { return out_string("a module binds the same C header twice") }
     if kind == 57 { return out_string("type argument inference failed: every type parameter and implementation parameter of the callee must be known at the call site") }
@@ -494,6 +495,18 @@ fn driver_out_check_message(state: State, parse: ParseStore, kind: U64, source: 
         if !out_string("suspension classification exceeded the ") || !out_u64(suspension_containment_limit()) || !out_string("-level containment limit: ") { return false }
         return driver_out_node_name(state, parse, source, start, end, json)
     }
+    // Diagnostic kinds 350 through 359 are the Milestone 9.4 await and
+    // Pending frontend block.
+    if kind == 350 {
+        if !out_string("await requires a std.task Task(T) handle, not ") { return false }
+        return driver_out_diagnostic_type(state, parse, detail_a, detail_b, json)
+    }
+    if kind == 351 { return out_string("await is only allowed inside the using scope of a std.task TaskGroup") }
+    if kind == 352 { return out_string("await requires a direct Task binding or a fresh std.task operation result") }
+    if kind == 353 { return out_string("Pending(T) is only a parameter type of the std.task spawn, start, timeout, race, and blocking operations") }
+    if kind == 354 { return out_string("a Pending(T) argument must be a direct call to a named function or method") }
+    if kind == 355 { return out_string("a Pending(T) argument must call a named function or method, not a constructor, variant, closure, function value, or C import") }
+    if kind == 356 { return out_string("the Pending(T) arguments do not share one result type") }
     if kind == 310 { return out_string("Option.take requires a mutable place receiver") }
     if kind == 302 { return out_string("implementations must restate every constraint the implementing type declares on the matching type argument") }
     if kind == 144 { if !out_string("ordered collection operation ") || !driver_out_node_name(state, parse, source, start, end, json) { return false }

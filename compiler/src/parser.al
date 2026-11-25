@@ -808,6 +808,20 @@ fn parse_primary(d: Domain, state: State, initial: ParseCursor, depth: U64) -> R
         let node = try add_syntax(d, linked, 31, initial.token + 1, token.source, token.start, child.end, token.start, token.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
         return Ok(Parsed(node))
     }
+    // `await task` is a prefix operator and has no method form. The operand
+    // parses at the unary level, so `await a + b` groups as `(await a) + b`
+    // and `try await task` composes right-to-left as `try (await task)`.
+    if token.keyword == 33 {
+        let cursor = ParseCursor(token: initial.token + 1, store: initial.store)
+        if !expression_line_ok(state, cursor, depth) { return reject_parse(d, state, cursor, 13) }
+        let operand = try parse_unary(d, state, cursor, depth)
+        if parse_step_bad(operand) { return Ok(operand) }
+        let value = parse_step_value(operand)
+        let linked = try add_link(d, value.cursor, value.node, 0)
+        let child = __s0_buffer_get(SyntaxRec, linked.store.nodes, value.node - 1)
+        let node = try add_syntax(d, linked, 69, initial.token + 1, token.source, token.start, child.end, token.start, token.end, __s0_buffer_len(SyntaxLinkRec, linked.store.links))
+        return Ok(Parsed(node))
+    }
     if token_punct(state, initial, "(") {
         let unit_cursor = ParseCursor(token: initial.token + 1, store: initial.store)
         if token_punct(state, unit_cursor, ")") {

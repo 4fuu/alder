@@ -8,8 +8,9 @@ type SourceRec {
 // Token kinds mirror the Go Stage 0 lexer: 0 EOF, 1 identifier/keyword,
 // 2 integer, 3 float, 4 decoded string, and 5 punctuation. Keyword IDs are the
 // IDs 1..19 retain the frozen Go Stage 0 order. Alder-owned keywords use
-// 20 `module`, 21 `pub`, 22 `as`, 23 `mut`, and 24 `take`; zero means not a
-// keyword.
+// 20 `module`, 21 `pub`, 22 `as`, 23 `mut`, 24 `take`, and 25..33 the
+// declaration, layout, and async spellings through 33 `await`; zero means not
+// a keyword.
 type TokenRec {
     source: U64
     kind: U64
@@ -46,10 +47,11 @@ type LexDiagRec {
 // 42 public module import, 43 selected import name, 44 import alias,
 // 45 public declaration wrapper, 46 module path, 47 mut runtime parameter, and
 // 48 take runtime parameter, 49 inherent impl declaration, 50 array
-// literal, 66 unit literal, 67 interpolated string, and 68 interpolation
-// display part. Kind-67 children alternate literal segments and display parts
-// in source order; a display part has the embedded expression as its sole
-// child. An impl's first
+// literal, 66 unit literal, 67 interpolated string, 68 interpolation
+// display part, and 69 await. Kind-67 children alternate literal segments and
+// display parts in source order; a display part has the embedded expression as
+// its sole child. Kind 69 is the prefix await operator with its operand as the
+// sole child; the keyword span is its name. An impl's first
 // child is its owner type and remaining children are function declarations;
 // receiver parameters use kinds 13, 47, and 48 and the name `self`.
 // Array literal children are their elements in source order.

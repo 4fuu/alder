@@ -323,6 +323,49 @@ work in progress:
   body is rejected with diagnostic 153 until the phase-6 loop-store rule
   accepts a view-carrying environment record.
 
+Milestone 9 gate 9.4 slice B adds the async frontend surface and the
+`std.task` type skeleton:
+
+- `Pending(T)` is a declaration-only parameter type of the five standard task
+  operations (`spawn`, `start`, `timeout`, `race`, and `blocking`). An argument
+  written there must be a direct call to a named function or method, never a
+  value; the call's declared result is the operation's `T`. `Pending` values
+  cannot be bound, stored, returned, or passed as an argument anywhere else,
+  and a user declaration that mentions `Pending` outside those parameter lists
+  is rejected with diagnostic 353. Diagnostics 354 (not a direct call), 355
+  (the call is not a named function or method: a constructor, variant,
+  closure, function value, or C import), and 356 (the `Pending` arguments do
+  not share one `T`) cover the argument rules.
+- Lowering represents a `Pending(T)` argument as the declaration-only type's
+  empty value, so the pending call's body is not evaluated and its instances
+  make no runtime claim. Task-transfer checking, which decides whether the
+  pending call's arguments and result are portable and moves affine arguments
+  through `take` parameters, is a later gate 9.4 slice and is not implemented
+  here. Until then the pending call's argument list is checked like an
+  ordinary call; an affine argument passed there still reaches the owner-flow
+  rule, and no transfer-category rejection is emitted.
+- `sysroot/std/task.al` installs `TaskGroup(I)`, `Task(T)`, `Pending(T)`,
+  `Timeout`, `CancellationError`, `Cancellation`, and `CancellationToken` with
+  the v1 snapshot's signatures. `TaskGroup` and `Task` construction, their
+  `Cleanup` hooks, the free combinators (`timeout`, `race`, `blocking`,
+  `yield`), and the token operations are fixed-panic placeholders documented
+  as unimplemented until gate 9.4c; typing tests compile programs that call
+  them and make no runtime claim. Gate 9.4c owns the group record, the join
+  and cancellation policy, and the source-scoped capability category.
+- `Cancellation` is complete for the source side: `new`, `cancel`, and
+  `is_cancelled` run under any capability, including `BlockingIo`, and are
+  covered by an end-to-end behavior test. `CancellationToken` is copyable by
+  contract, but a copyable value cannot observe an affine source without the
+  source-scoped capability category; a view-backed token is rejected by the
+  existing aggregate-capability rules, so `token`, `is_cancelled`, and `check`
+  stay fixed-panic placeholders until that category and the group-owned
+  storage land.
+- The v1 snapshot spells inherent methods `pub fn`; the implemented S0 grammar
+  accepts `fn` in an `impl` block and treats methods of a public type as
+  public, so `std/task.al` uses that spelling. `Task` escape rules beyond the
+  await rejection (returning a handle, storing it in an aggregate) belong to
+  the group-scoped category in gate 9.4c and are not enforced here.
+
 Default-method dispatch and trait-backed collections are not implemented yet
 and remain later Milestone 7.5 work.
 
@@ -521,6 +564,21 @@ Implemented expressions include:
   with the same error type; in a function returning `Option`, the operand is
   `Option` with the same payload type and `none` early-returns from the
   function;
+- prefix `await`: `await task` consumes an affine `std.task` `Task(T)` handle
+  and yields `T`; `try await task` composes right-to-left, so a
+  `Task(Result(T, E))` payload propagates through the ordinary `try` rule.
+  The operand must be a `Task` applied to one type argument, recognized by its
+  declaration in `std/task.al`, and must be a direct owned binding or a fresh
+  task-operation result: a field, element, borrowed parameter, or already
+  consumed handle is rejected. The await must also sit inside the lexical
+  scope of a `using tasks = TaskGroup.new(io)` binding, which is how the
+  group's join and cancellation bound the handle. There is no method form;
+  `task.await()` is a syntax error. Await is a potentially suspending call, so
+  a closure body or function value containing it is rejected like any other
+  suspending call. Diagnostics 350 (non-Task operand), 351 (outside a group
+  scope), and 352 (not a directly owned handle) cover the rejections; a
+  second await of the same binding is the ordinary owner-flow diagnostic 91,
+  and a handle that reaches exit without await is diagnostic 93;
 - inside `unsafe c { ... }`: one direct imported call, one C record field
   read `rec.field`, or one C record field write `rec.field = value` through
   a `var` local holding a verified by-value C record; the field forms are
@@ -618,7 +676,7 @@ bound C ABI signature. Callback values are not first-class Alder values:
 outside that argument, `c.callback` is diagnostic 225, a target mismatch is
 224, and a non-bare target is 227.
 
-Closures, ordered `Map`/`Set`, modules, `pub`, async, and the 1.0 standard
+Closures, ordered `Map`/`Set`, modules, `pub`, the async runtime, and the 1.0 standard
 library are absent.
 
 ## Temporary memory and cleanup bridges

@@ -2352,7 +2352,20 @@ earlier gate. The representation family is fixed by
   checking, `TaskGroup`/`Task(T)`/`start`, group-exit join and cancellation,
   `timeout`/`race`/`blocking`/`yield`, `check_cancel` and `CancellationToken`;
   nested-group, early-return, failed-`try`, and cleanup-order evidence.
-  Status: pending.
+  Status: pending. Slice B landed the frontend surface only: `await` is a
+  prefix operator with no method form, recognized by declaration source, and
+  `try await` composes right-to-left; `Pending(T)` is restricted to the five
+  standard operations' parameter lists with direct-call arguments; and
+  `sysroot/std/task.al` installs the v1 type and signature skeleton. The
+  group and task owners, their cleanup hooks, the free combinators, and the
+  token operations are fixed-panic placeholders recorded as unimplemented
+  until gate 9.4c, so the typing evidence is compile-only. `Cancellation`'s
+  source side (`new`, `cancel`, `is_cancelled`) runs end to end under
+  `BlockingIo`; `CancellationToken` stays a placeholder because a copyable
+  value cannot observe an affine source before the source-scoped capability
+  category and group-owned storage land. Transfer-category and
+  portable-argument checking, lowering the task operations, group-exit
+  join/cancellation, and the token runtime remain gate 9.4 work.
 - **9.5 Channels, shared state, atomics, and timers** — `std.channel` FIFO,
   backpressure, close, and cancellation races; `std.sync` `Shared(T)`, guards,
   once, and barriers; `std.atomic` explicit memory orders; lock exclusion and

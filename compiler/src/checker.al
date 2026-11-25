@@ -6972,6 +6972,15 @@ fn infer_unary_variant_argument(d: Domain, state: State, parse: ParseStore, base
     return Ok(CallInferenceGood(CallInferenceRec(store: final_store, bindings: inferred)))
 }
 
+// Report one inference-stage call diagnostic and return the failed store.
+fn fail_call_inference(d: Domain, state: State, store: CheckStore, kind: U64, node: SyntaxRec) -> Result(CheckStore, __s0_Error) {
+    let failed = try check_token_fail(d, state, store, kind, node)
+    return Ok(match failed {
+        CheckGood(value) => value
+        CheckBad(value) => value
+    })
+}
+
 fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, call: SyntaxRec, target: U64, runtime_start: U64, receiver_at: U64, ordinal: U64, count: U64, parameter_start: U64, bindings: __s0_Buffer(InferenceBindingRec), in_loop: Bool) -> Result(CallInferenceOutcome, __s0_Error) {
     if ordinal == count {
         let seeded = try infer_call_constraints(d, store, target, bindings, 0)
@@ -6992,6 +7001,65 @@ fn infer_call_arguments(d: Domain, state: State, parse: ParseStore, base: CheckS
     }
     let parameter_id = use_by_ordinal(store, target, 5, parameter_start + ordinal)
     let pattern = __s0_buffer_get(DeclTypeUseRec, store.uses, parameter_id - 1).checked_type
+    // A Pending(T) parameter takes a direct call to a named function or method,
+    // never a value: the call's declared result is T. The checker validates
+    // the call, binds T from its result, and records a placeholder Pending
+    // value in its place, so lowering never evaluates the child body. Only the
+    // five std.task operations declare Pending parameters.
+    let pending_element = task_pending_element(state, store, pattern)
+    if pending_element != 0 {
+        if arg.kind != 27 {
+            let failed = try fail_call_inference(d, state, base, 354, arg)
+            return Ok(CallInferenceBad(failed))
+        }
+        let checked = try check_value_expression_inner(d, state, parse, base, store, owner, arg, arg_link.node, 0, 58, arg, 0, 0, in_loop)
+        let after = match checked {
+            ExprGood(value) => value.store
+            ExprBad(value) => value
+        }
+        if match checked {
+            ExprGood(value) => false
+            ExprBad(value) => true
+        } { return Ok(CallInferenceBad(after)) }
+        let draft = match checked {
+            ExprGood(value) => value.draft
+            ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+        }
+        if draft.deferred { return Ok(CallInferenceDefer) }
+        let inner = __s0_buffer_get(CheckedExprRec, after.expressions, draft.expression - 1)
+        var direct = false
+        if inner.kind == 8 && inner.annotation != 0 && inner.annotation <= __s0_buffer_len(CallAnnotationRec, after.call_annotations) {
+            direct = __s0_buffer_get(CallAnnotationRec, after.call_annotations, inner.annotation - 1).kind == 1
+        }
+        if !direct {
+            let failed = try fail_call_inference(d, state, after, 355, arg)
+            return Ok(CallInferenceBad(failed))
+        }
+        let unified = try unify_types(d, after, pending_element, draft.checked_type, bindings)
+        var inferred = bindings
+        if match unified {
+            UnifyGood(value) => false
+            UnifyConflict => true
+        } {
+            let failed = try fail_call_inference(d, state, after, 356, arg)
+            return Ok(CallInferenceBad(failed))
+        }
+        inferred = match unified {
+            UnifyGood(value) => value
+            UnifyConflict => bindings
+        }
+        let concrete = try substitute_type(d, after, inferred, pattern)
+        if !checked_type_concrete(concrete.store, concrete.checked_type) {
+            let failed = try fail_call_inference(d, state, concrete.store, 57, arg)
+            return Ok(CallInferenceBad(failed))
+        }
+        // The argument node now names the placeholder Pending value rather
+        // than the checked child call: lowering constructs the empty
+        // declaration-only type and never evaluates the child body, while the
+        // call's instances and its argument checks stay in the store.
+        __s0_buffer_set(CheckedExprRec, concrete.store.expressions, draft.expression - 1, CheckedExprRec(owner: inner.owner, owner_previous: inner.owner_previous, syntax: inner.syntax, kind: 23, checked_type: concrete.checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: 0, first_child: 0, child_count: 0, operator: 0, site_kind: inner.site_kind, site_syntax: inner.site_syntax, field_move: 0))
+        return infer_call_arguments(d, state, parse, base, concrete.store, owner, call, target, runtime_start, receiver_at, ordinal + 1, count, parameter_start, inferred, in_loop)
+    }
     if !pattern_bound(store, pattern, bindings) {
         let variant = try infer_unary_variant_argument(d, state, parse, base, store, owner, arg, arg_link.node, pattern, bindings, in_loop)
         let variant_store = match variant {
@@ -11291,6 +11359,7 @@ fn check_unit_value_expression(d: Domain, state: State, parse: ParseStore, store
 }
 
 fn check_value_expression_inner(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, expression: SyntaxRec, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if expression.kind == 69 { return check_await_expression(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 67 { return check_interpolation_expression(d, state, parse, store, owner, expression_id, expression, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 58 { return check_closure_expression(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
     if expression.kind == 27 { return check_ordinary_call(d, state, parse, base, store, owner, expression, expression_id, expected, mismatch_kind, mismatch_node, site_kind, site_syntax, in_loop) }
@@ -12251,6 +12320,8 @@ fn check_binding(d: Domain, state: State, parse: ParseStore, store: CheckStore, 
     if draft.deferred && init.kind == 24 && node_word(state, init, "Unit") { return body_token_fail(d, state, ostore, 25, init) }
     if draft.deferred { return body_token_fail(d, state, ostore, 87, init) }
     if annotated == 0 { annotated = draft.checked_type }
+    let pending_annotation = try task_type_mentions_pending(d, state, ostore, annotated, 0)
+    if pending_annotation { return body_token_fail(d, state, ostore, 353, statement) }
     let annotation = __s0_buffer_get(CheckedTypeRec, ostore.types, annotated - 1)
     var diag_node = statement
     if annotation_syntax != 0 { diag_node = __s0_buffer_get(SyntaxRec, parse.nodes, annotation_syntax - 1) }
@@ -14392,7 +14463,224 @@ fn check_deferred_bodies(d: Domain, state: State, parse: ParseStore, store: Chec
     }
     let escaped = try check_scoped_capture_escapes(d, state, parse, current)
     if check_result_bad(escaped) { return Ok(escaped) }
-    return check_suspending_function_boundaries(d, state, parse, check_result_store(escaped))
+    let suspending = try check_suspending_function_boundaries(d, state, parse, check_result_store(escaped))
+    if check_result_bad(suspending) { return Ok(suspending) }
+    return check_task_pending_positions(d, state, parse, check_result_store(suspending))
+}
+
+// std.task nominal kinds, recognized by declaration source and name the same
+// way std.io traits are: 1 Task, 2 TaskGroup, 3 Pending, 4 Cancellation,
+// 5 CancellationToken, 6 Timeout, and 7 CancellationError.
+fn task_symbol_kind(state: State, store: CheckStore, symbol: U64) -> U64 {
+    if symbol == 0 || symbol > __s0_buffer_len(SymbolRec, store.symbols) { return 0 }
+    let rec = __s0_buffer_get(SymbolRec, store.symbols, symbol - 1)
+    if !source_path_suffix_is(state, rec.source, "std/task.al") { return 0 }
+    if rec.kind != 2 && rec.kind != 3 { return 0 }
+    if symbol_name_matches_word(state, rec, "Task") { return 1 }
+    if symbol_name_matches_word(state, rec, "TaskGroup") { return 2 }
+    if symbol_name_matches_word(state, rec, "Pending") { return 3 }
+    if symbol_name_matches_word(state, rec, "Cancellation") { return 4 }
+    if symbol_name_matches_word(state, rec, "CancellationToken") { return 5 }
+    if symbol_name_matches_word(state, rec, "Timeout") { return 6 }
+    if symbol_name_matches_word(state, rec, "CancellationError") { return 7 }
+    return 0
+}
+
+fn task_type_kind(state: State, store: CheckStore, checked_type: U64) -> U64 {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 7 { return 0 }
+    return task_symbol_kind(state, store, checked.target)
+}
+
+// The single type argument of Pending(T); zero for any other type shape.
+fn task_pending_element(state: State, store: CheckStore, checked_type: U64) -> U64 {
+    if checked_type == 0 || checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return 0 }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind != 7 || checked.arg_count != 1 || checked.first_arg == 0 { return 0 }
+    if task_symbol_kind(state, store, checked.target) != 3 { return 0 }
+    return __s0_buffer_get(U64, store.type_args, checked.first_arg - 1)
+}
+
+// A type mentions Pending when the nominal application itself or any reachable
+// type argument is std.task Pending. The declaration and binding rules below
+// use this to reject every user value position.
+fn task_type_mentions_pending(d: Domain, state: State, store: CheckStore, checked_type: U64, depth: U64) -> Result(Bool, __s0_Error) {
+    if checked_type == 0 || depth > 32 { return Ok(false) }
+    if checked_type > __s0_buffer_len(CheckedTypeRec, store.types) { return Ok(false) }
+    let checked = __s0_buffer_get(CheckedTypeRec, store.types, checked_type - 1)
+    if checked.kind == 7 && task_symbol_kind(state, store, checked.target) == 3 { return Ok(true) }
+    var at: U64 = 0
+    while at < checked.arg_count {
+        if checked.first_arg == 0 || checked.first_arg - 1 + at >= __s0_buffer_len(U64, store.type_args) { return Ok(false) }
+        let probe = try task_type_mentions_pending(d, state, store, __s0_buffer_get(U64, store.type_args, checked.first_arg - 1 + at), depth + 1)
+        if probe { return Ok(true) }
+        at = at + 1
+    }
+    return Ok(false)
+}
+
+// A `using tasks = TaskGroup.new(io)` binding establishes the lexical group
+// scope. The cleanup records of the current function instance are appended in
+// source order, so an enclosing group introduced before this expression is
+// visible here. Task handles cannot leave the group's block, so a cleanup of
+// this owner is the group scope `await` is checked against.
+fn task_group_scope_active(state: State, store: CheckStore, owner: U64) -> Bool {
+    var at: U64 = 0
+    while at < __s0_buffer_len(CheckedCleanupRec, store.control.cleanups) {
+        let cleanup = __s0_buffer_get(CheckedCleanupRec, store.control.cleanups, at)
+        if cleanup.owner == owner && cleanup.initializer != 0 && cleanup.initializer <= __s0_buffer_len(CheckedExprRec, store.expressions) {
+            let initializer = __s0_buffer_get(CheckedExprRec, store.expressions, cleanup.initializer - 1)
+            if task_type_kind(state, store, initializer.checked_type) == 2 { return true }
+        }
+        at = at + 1
+    }
+    return false
+}
+
+fn task_declaration_named(state: State, store: CheckStore, word: __s0_String) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(SymbolRec, store.symbols) {
+        let symbol = __s0_buffer_get(SymbolRec, store.symbols, at)
+        if symbol.kind == 12 && source_path_suffix_is(state, symbol.source, "std/task.al") && symbol_name_matches_word(state, symbol, word) { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+fn task_declaration_type_param(store: CheckStore, declaration: U64) -> U64 {
+    var at: U64 = 0
+    while at < __s0_buffer_len(TypeParamRec, store.type_params) {
+        if __s0_buffer_get(TypeParamRec, store.type_params, at).owner == declaration { return at + 1 }
+        at = at + 1
+    }
+    return 0
+}
+
+// The checked await call: a direct call to the module-private await
+// placeholder, consuming the handle and yielding the Task payload. `suspends`
+// is set because await is defined as a potentially suspending call, so the
+// closure and function-value boundary rule rejects it with diagnostic 348.
+fn append_task_await_call(d: Domain, store: CheckStore, owner: U64, syntax: U64, checked_type: U64, instance: U64, operand: U64, site_kind: U64, site_syntax: U64) -> Result(ExprOutcome, __s0_Error) {
+    let annotations = try __s0_buffer_append(CallAnnotationRec, d, store.call_annotations, CallAnnotationRec(owner: owner, kind: 1, target: instance, checked_type: checked_type, variant_use: 0, builtin: 0, place: 0, suspends: 1))
+    let children = try __s0_buffer_append(CheckedExprChildRec, d, store.expression_children, CheckedExprChildRec(expression: operand))
+    let expressions = try __s0_buffer_append(CheckedExprRec, d, store.expressions, CheckedExprRec(owner: owner, owner_previous: previous_expression_for_owner(store, owner), syntax: syntax, kind: 8, checked_type: checked_type, parameter_use: 0, bool_value: 0, left: 0, right: 0, annotation: __s0_buffer_len(CallAnnotationRec, annotations), first_child: __s0_buffer_len(CheckedExprChildRec, children), child_count: 1, operator: 0, site_kind: site_kind, site_syntax: site_syntax, field_move: 0))
+    let next = CheckStore(symbols: store.symbols, type_params: store.type_params, types: store.types, type_args: store.type_args, type_annotations: store.type_annotations, uses: store.uses, indexes: store.indexes, locals: store.locals, environments: store.environments, expressions: expressions, call_annotations: annotations, expression_children: children, returns: store.returns, control: store.control, diagnostics: store.diagnostics, traits: store.traits, closures: store.closures, interp: store.interp, bindings: store.bindings)
+    return expr_draft(next, checked_type, __s0_buffer_len(CheckedExprRec, expressions))
+}
+
+// `await task` consumes an affine, group-scoped std.task Task(T) handle and
+// yields its payload T. The operand must be a direct owned binding or a fresh
+// task-operation result; a field, element, borrowed parameter, or already
+// consumed handle is rejected. The handle read is rewritten to an affine
+// transfer so owner flow sees exactly one consumption per path.
+fn check_await_expression(d: Domain, state: State, parse: ParseStore, base: CheckStore, store: CheckStore, owner: U64, expression: SyntaxRec, expression_id: U64, expected: U64, mismatch_kind: U64, mismatch_node: SyntaxRec, site_kind: U64, site_syntax: U64, in_loop: Bool) -> Result(ExprOutcome, __s0_Error) {
+    if expression.children == 0 { return expr_token_fail(d, state, base, 87, expression) }
+    let link = __s0_buffer_get(SyntaxLinkRec, parse.links, expression.children - 1)
+    let operand = __s0_buffer_get(SyntaxRec, parse.nodes, link.node - 1)
+    let checked = try check_value_expression_inner(d, state, parse, base, store, owner, operand, link.node, 0, 58, operand, 0, 0, in_loop)
+    let current = match checked {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match checked {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(current)) }
+    let draft = match checked {
+        ExprGood(value) => value.draft
+        ExprBad(value) => ExprDraftRec(deferred: true, checked_type: 0, expression: 0)
+    }
+    if draft.deferred { return expr_deferred(base) }
+    if task_type_kind(state, current, draft.checked_type) != 1 { return expr_token_single_type_fail(d, state, current, 350, expression, draft.checked_type) }
+    let handle = __s0_buffer_get(CheckedExprRec, current.expressions, draft.expression - 1)
+    let handle_type = __s0_buffer_get(CheckedTypeRec, current.types, draft.checked_type - 1)
+    if handle_type.arg_count != 1 || handle_type.first_arg == 0 { return expr_token_single_type_fail(d, state, current, 350, expression, draft.checked_type) }
+    if !task_group_scope_active(state, current, owner) { return expr_token_fail(d, state, current, 351, expression) }
+    var transferred = current
+    if handle.kind == 1 || handle.kind == 5 {
+        if handle.parameter_use == 0 || handle.parameter_use > __s0_buffer_len(LocalRec, current.locals) { return expr_token_fail(d, state, current, 352, expression) }
+        let binding = __s0_buffer_get(LocalRec, current.locals, handle.parameter_use - 1)
+        if binding.kind != 2 { return expr_token_fail(d, state, current, 352, expression) }
+        __s0_buffer_set(CheckedExprRec, transferred.expressions, draft.expression - 1, CheckedExprRec(owner: handle.owner, owner_previous: handle.owner_previous, syntax: handle.syntax, kind: 22, checked_type: handle.checked_type, parameter_use: handle.parameter_use, bool_value: handle.bool_value, left: handle.left, right: handle.right, annotation: handle.annotation, first_child: handle.first_child, child_count: handle.child_count, operator: handle.operator, site_kind: handle.site_kind, site_syntax: handle.site_syntax, field_move: 0))
+    } else {
+        var direct = false
+        if handle.kind == 8 && handle.annotation != 0 && handle.annotation <= __s0_buffer_len(CallAnnotationRec, current.call_annotations) {
+            direct = __s0_buffer_get(CallAnnotationRec, current.call_annotations, handle.annotation - 1).kind == 1
+        }
+        if !direct { return expr_token_fail(d, state, current, 352, expression) }
+    }
+    let payload = __s0_buffer_get(U64, current.type_args, handle_type.first_arg - 1)
+    let declaration = task_declaration_named(state, transferred, "await_result")
+    if declaration == 0 { return expr_token_fail(d, state, transferred, 87, expression) }
+    let param = task_declaration_type_param(transferred, declaration)
+    if param == 0 { return expr_token_fail(d, state, transferred, 87, expression) }
+    let empty = try __s0_buffer_new(InferenceBindingRec, d)
+    let seed = try __s0_buffer_append(InferenceBindingRec, d, empty, InferenceBindingRec(param: param, checked_type: payload))
+    let instance = try instantiate_function(d, state, parse, transferred, declaration, seed, owner, expression)
+    let with_instance = match instance {
+        InstanceGood(value) => value.store
+        InstanceBad(value) => value
+    }
+    if match instance {
+        InstanceGood(value) => false
+        InstanceBad(value) => true
+    } { return Ok(ExprBad(with_instance)) }
+    let instance_id = match instance {
+        InstanceGood(value) => value.instance
+        InstanceBad(value) => 0
+    }
+    let call = try append_task_await_call(d, with_instance, owner, expression_id, payload, instance_id, draft.expression, site_kind, site_syntax)
+    let called = match call {
+        ExprGood(value) => value.store
+        ExprBad(value) => value
+    }
+    if match call {
+        ExprGood(value) => false
+        ExprBad(value) => true
+    } { return Ok(ExprBad(called)) }
+    if expected != 0 && !(try expression_type_equal(d, state, parse, called, payload, expected)) { return expr_token_type_fail(d, state, called, mismatch_kind, mismatch_node, expected, payload) }
+    return Ok(call)
+}
+
+// Pending(T) appears only as a parameter type of the five standard task
+// operations, and only a direct call to a named function or method may stand
+// there. A user declaration that mentions Pending anywhere else is rejected;
+// a Pending value can never be bound, stored, returned, or passed as a value.
+fn task_pending_position_allowed(state: State, store: CheckStore, use_owner: U64, use_role: U64) -> Bool {
+    if use_role != 5 && use_role != 7 { return false }
+    let declaration = instance_declaration(store, use_owner)
+    let symbol = __s0_buffer_get(SymbolRec, store.symbols, declaration - 1)
+    if symbol.kind != 12 || !source_path_suffix_is(state, symbol.source, "std/task.al") { return false }
+    return symbol_name_matches_word(state, symbol, "spawn") || symbol_name_matches_word(state, symbol, "start") || symbol_name_matches_word(state, symbol, "timeout") || symbol_name_matches_word(state, symbol, "race") || symbol_name_matches_word(state, symbol, "blocking")
+}
+
+fn check_task_pending_positions(d: Domain, state: State, parse: ParseStore, store: CheckStore) -> Result(CheckResult, __s0_Error) {
+    var at: U64 = 0
+    while at < __s0_buffer_len(DeclTypeUseRec, store.uses) {
+        let use = __s0_buffer_get(DeclTypeUseRec, store.uses, at)
+        if use.checked_type != 0 {
+            let mentions = try task_type_mentions_pending(d, state, store, use.checked_type, 0)
+            if mentions && !task_pending_position_allowed(state, store, use.owner, use.role) {
+                var syntax = use.syntax
+                if syntax == 0 { syntax = use.node }
+                if syntax != 0 && syntax <= __s0_buffer_len(SyntaxRec, parse.nodes) { return check_token_fail(d, state, store, 353, __s0_buffer_get(SyntaxRec, parse.nodes, syntax - 1)) }
+            }
+        }
+        at = at + 1
+    }
+    var impl_at: U64 = 0
+    while impl_at < __s0_buffer_len(TraitImplRec, store.traits.impls) {
+        let rec = __s0_buffer_get(TraitImplRec, store.traits.impls, impl_at)
+        if rec.self_type != 0 {
+            let mentions = try task_type_mentions_pending(d, state, store, rec.self_type, 0)
+            if mentions && rec.owner_node != 0 && rec.owner_node <= __s0_buffer_len(SyntaxRec, parse.nodes) {
+                return check_token_fail(d, state, store, 353, __s0_buffer_get(SyntaxRec, parse.nodes, rec.owner_node - 1))
+            }
+        }
+        impl_at = impl_at + 1
+    }
+    return Ok(CheckGood(store))
 }
 
 fn check_parsed(d: Domain, state: State, parse: ParseStore, initial: CheckStore) -> Result(CheckResult, __s0_Error) {

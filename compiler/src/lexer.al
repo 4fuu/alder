@@ -53,6 +53,7 @@ fn keyword_id(state: State, source: SourceRec, start: U64, end: U64) -> U64 {
     if source_word(state, source, start, end, "break") { return 30 }
     if source_word(state, source, start, end, "continue") { return 31 }
     if source_word(state, source, start, end, "export") { return 32 }
+    if source_word(state, source, start, end, "await") { return 33 }
     return 0
 }
 
